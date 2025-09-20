@@ -90,6 +90,27 @@ detect_gpu_compute_cap() {
     esac
 }
 
+# Check for CUDA toolkit libraries
+check_cuda_libraries() {
+    # Check for essential CUDA libraries that candle-core needs
+    local required_libs=("libcurand.so" "libcublas.so" "libcufft.so" "libcusolver.so")
+    local missing_libs=()
+
+    for lib in "${required_libs[@]}"; do
+        if ! ldconfig -p 2>/dev/null | grep -q "$lib" && \
+           ! find /usr/local/cuda/lib* /usr/lib* /lib* -name "${lib}*" 2>/dev/null | grep -q .; then
+            missing_libs+=("$lib")
+        fi
+    done
+
+    if [ ${#missing_libs[@]} -eq 0 ]; then
+        return 0  # All libraries found
+    else
+        print_warn "Missing CUDA toolkit libraries: ${missing_libs[*]}" >&2
+        return 1  # Some libraries missing
+    fi
+}
+
 # Detect CUDA/cuDNN availability and compute capability
 detect_cuda() {
     if command -v nvidia-smi &> /dev/null; then
@@ -97,6 +118,16 @@ detect_cuda() {
         if nvidia-smi --version &> /dev/null && nvidia-smi | grep -q "CUDA Version"; then
             CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | sed 's/.*CUDA Version: \([0-9.]*\).*/\1/')
             print_info "CUDA runtime $CUDA_VERSION detected" >&2
+
+            # Check if CUDA toolkit libraries are actually available
+            if ! check_cuda_libraries; then
+                print_warn "CUDA runtime detected but CUDA toolkit libraries missing" >&2
+                print_warn "Install CUDA toolkit to use GPU acceleration" >&2
+                echo "cpu"
+                return
+            fi
+
+            print_info "CUDA toolkit libraries found" >&2
 
             # Detect compute capability
             local compute_cap=$(detect_gpu_compute_cap)
@@ -496,9 +527,69 @@ if [ "$INSTALL_OPTION" = "all" ] || [ "$INSTALL_OPTION" = "daemon" ]; then
     fi
 fi
 
+# Check CUDA availability and warn user if needed
+check_cuda_availability() {
+    if [ "$1" = "all" ] || [ "$1" = "daemon" ]; then
+        if command -v nvidia-smi &> /dev/null; then
+            # NVIDIA GPU detected, check if CUDA toolkit is available
+            if nvidia-smi --version &> /dev/null && nvidia-smi | grep -q "CUDA Version"; then
+                local cuda_version=$(nvidia-smi | grep "CUDA Version" | sed 's/.*CUDA Version: \([0-9.]*\).*/\1/')
+
+                # Check for CUDA toolkit libraries
+                if ! check_cuda_libraries; then
+                    print_warn "=========================================="
+                    print_warn "NVIDIA GPU detected but CUDA toolkit missing!"
+                    print_warn "=========================================="
+                    print_warn ""
+                    print_warn "Your system has:"
+                    print_warn "  ✅ NVIDIA GPU with driver"
+                    print_warn "  ✅ CUDA runtime $cuda_version"
+                    print_warn "  ❌ CUDA toolkit libraries (needed for GPU acceleration)"
+                    print_warn ""
+                    print_warn "To enable GPU acceleration, install CUDA toolkit:"
+
+                    # Detect distribution and show appropriate command
+                    if command -v apt-get &> /dev/null; then
+                        print_warn "  Ubuntu/PopOS/Debian:"
+                        print_warn "    sudo apt-get install nvidia-cuda-toolkit nvidia-cuda-toolkit-gcc"
+                    elif command -v dnf &> /dev/null; then
+                        print_warn "  Fedora:"
+                        print_warn "    sudo dnf install cuda cuda-devel"
+                    elif command -v pacman &> /dev/null; then
+                        print_warn "  Arch:"
+                        print_warn "    sudo pacman -S cuda cuda-tools"
+                    else
+                        print_warn "  Install CUDA toolkit for your distribution"
+                    fi
+
+                    print_warn ""
+                    print_warn "Documentation: https://github.com/jorge-menjivar/super-stt#cuda-gpu-acceleration"
+                    print_warn ""
+
+                    if [ "$INTERACTIVE" = true ] && [ -t 2 ]; then
+                        echo -n "Continue with CPU-only installation? [y/N]: "
+                        read -r continue_cpu < /dev/tty
+                        if [[ ! "$continue_cpu" =~ ^[Yy]$ ]]; then
+                            print_info "Installation aborted. Install CUDA toolkit and run installer again for GPU acceleration."
+                            exit 0
+                        fi
+                        print_info "Continuing with CPU-only installation..."
+                    else
+                        print_warn "Non-interactive mode: continuing with CPU-only installation"
+                    fi
+                    print_warn ""
+                fi
+            fi
+        fi
+    fi
+}
+
 # Detect what we need based on install option
 ARCH=$(detect_arch)
 print_info "Detected architecture: $ARCH"
+
+# Check CUDA availability and warn user before proceeding
+check_cuda_availability "$INSTALL_OPTION"
 
 if [ "$INSTALL_OPTION" = "all" ] || [ "$INSTALL_OPTION" = "daemon" ]; then
     # Need optimal daemon variant

@@ -155,6 +155,25 @@ You may need to install the following dependencies:
 
 **If you find any missing make a pull request to update this list. Thanks!**
 
+### CUDA GPU Acceleration
+
+Super STT automatically detects and uses CUDA-enabled GPUs for acceleration. If you have an NVIDIA GPU, but the installation script cannot find the CUDA toolkit, you need to install it manually:
+
+#### Ubuntu/PopOS/Debian
+```bash
+sudo apt-get install nvidia-cuda-toolkit nvidia-cuda-toolkit-gcc
+```
+
+#### Fedora
+See [https://rpmfusion.org/Howto/CUDA](https://rpmfusion.org/Howto/CUDA)
+
+#### Arch Linux
+```bash
+sudo pacman -S cuda cuda-tools
+```
+
+**Note**: If you already have the CUDA toolkit installed, but the installation script still cannot find it, please create a new issue. Thanks!
+
 ## ⌨️ Shortcuts
 Add a shortcut that executes the following command to your desktop environment to start the app.
 ```sh
