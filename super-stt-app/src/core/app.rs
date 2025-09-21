@@ -692,9 +692,11 @@ impl AppModel {
                 let was_disconnected = self.daemon_status != DaemonStatus::Connected;
 
                 self.daemon_status = DaemonStatus::Connected;
-                // Clear potentially stuck switching states on reconnect
-                self.device_state = DeviceState::Ready;
-                self.set_model_ready();
+                // Only clear potentially stuck switching states on actual reconnect, not periodic pings
+                if was_disconnected {
+                    self.device_state = DeviceState::Ready;
+                    self.set_model_ready();
+                }
 
                 // Only restart UDP subscription when actually reconnecting, not on periodic pings
                 if was_disconnected {
@@ -813,49 +815,8 @@ impl AppModel {
                         info!("Received daemon event: {:?}", event.data);
                         if let Some(status) = event.data.get("status").and_then(|s| s.as_str()) {
                             match status {
-                                "device_switched" => {
-                                    if let Some(actual_device) =
-                                        event.data.get("actual_device").and_then(|d| d.as_str())
-                                    {
-                                        info!(
-                                            "Received device_switched event: current_device={} -> {}",
-                                            self.current_device, actual_device
-                                        );
-                                        self.current_device = actual_device.to_string();
-                                        self.device_state = DeviceState::Ready;
-
-                                        // Only update available devices if provided and valid
-                                        if let Some(available) = event
-                                            .data
-                                            .get("available_devices")
-                                            .and_then(|a| a.as_array())
-                                        {
-                                            let new_devices: Vec<String> = available
-                                                .iter()
-                                                .filter_map(|v| {
-                                                    v.as_str().map(std::string::ToString::to_string)
-                                                })
-                                                .collect();
-                                            if new_devices.is_empty() {
-                                                warn!(
-                                                    "Received empty available_devices, keeping current: {:?}",
-                                                    self.available_devices
-                                                );
-                                            } else {
-                                                info!(
-                                                    "Updating available devices: {:?} -> {:?}",
-                                                    self.available_devices, new_devices
-                                                );
-                                                self.available_devices = new_devices;
-                                            }
-                                        } else {
-                                            info!(
-                                                "No available_devices in event, keeping current: {:?}",
-                                                self.available_devices
-                                            );
-                                        }
-                                    }
-                                }
+                                // Note: "device_switched" event handler removed - we now only use "ready" events
+                                // for device switch completion to ensure model is actually loaded
                                 "ready" => {
                                     // Handle device readiness
                                     if let Some(actual_device) =
@@ -866,6 +827,11 @@ impl AppModel {
                                             self.current_device, actual_device
                                         );
                                         self.current_device = actual_device.to_string();
+
+                                        // If we were switching devices, this marks completion
+                                        if self.device_state == DeviceState::Switching {
+                                            info!("Device switch completed to: {}", actual_device);
+                                        }
                                         self.device_state = DeviceState::Ready;
                                     }
 
@@ -890,6 +856,10 @@ impl AppModel {
                                 }
                                 "device_switch_error" | "error" => {
                                     warn!("Received device switch error event: {:?}", event.data);
+                                    // Reset device state from switching to ready
+                                    if self.device_state == DeviceState::Switching {
+                                        info!("Device switch failed, reverting to ready state");
+                                    }
                                     self.device_state = DeviceState::Ready;
                                     if let Some(error_msg) =
                                         event.data.get("error").and_then(|e| e.as_str())
@@ -916,6 +886,15 @@ impl AppModel {
                                         info!(
                                             "Model state updated to Ready after model_switched event"
                                         );
+                                    }
+                                }
+                                "switching_device" => {
+                                    info!("Received switching_device event: {:?}", event.data);
+                                    // Keep device_state as Switching and wait for "ready" event
+                                    // This event just confirms the switch is in progress
+                                    if self.device_state != DeviceState::Switching {
+                                        warn!("Received switching_device event but not in switching state");
+                                        self.device_state = DeviceState::Switching;
                                     }
                                 }
                                 _ => {
@@ -1022,13 +1001,11 @@ impl AppModel {
                             }
                         },
                         |result| match result {
-                            Ok(device) => {
-                                // Simulate DeviceInfoLoaded with the expected device
-                                // Available devices can be updated on next regular LoadModels call
-                                cosmic::Action::App(Message::DeviceInfoLoaded(
-                                    device,
-                                    vec!["cpu".to_string(), "cuda".to_string()],
-                                ))
+                            Ok(_device) => {
+                                // Don't simulate DeviceInfoLoaded - wait for daemon's "ready" event
+                                // to confirm the device switch is actually complete
+                                info!("Device switch command sent successfully, waiting for daemon confirmation");
+                                cosmic::Action::None
                             }
                             Err(e) => cosmic::Action::App(Message::DeviceError(e)),
                         },

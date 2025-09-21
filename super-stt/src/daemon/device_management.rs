@@ -27,6 +27,13 @@ impl SuperSTTDaemon {
             "Starting device switch from {current_preferred} to {device} (will reload model: {model_to_reload})"
         );
 
+        // Update actual_device immediately to match preferred_device during switch
+        // This prevents get_device from returning the old device during the switch
+        {
+            let mut w = self.actual_device.write().await;
+            *w = device.to_string();
+        }
+
         // Broadcast device switching status and unload current model
         self.prepare_device_switch(&current_preferred, &device, &model_to_reload)
             .await;
@@ -227,25 +234,9 @@ impl SuperSTTDaemon {
 
         info!("Device switch completed: {previous_device} -> {device} (actual: {actual_device})");
 
-        // Broadcast device switch success
-        if let Err(e) = self
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "device_switched",
-                    "preferred_device": device,
-                    "actual_device": actual_device,
-                    "model_type": model_name.to_lowercase(),
-                    "model_name": model_to_reload.to_string(),
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
-            .await
-        {
-            warn!("Failed to broadcast device switch success: {e}");
-        }
+        // Note: We don't broadcast "device_switched" here anymore because the app
+        // treats it as completion. Instead, we'll only broadcast "ready" status
+        // which properly indicates that the device switch AND model loading are complete.
 
         // Broadcast ready status with new device
         if let Err(e) = self
@@ -315,6 +306,12 @@ impl SuperSTTDaemon {
                 }
                 .to_string();
 
+                // Extract model type before moving the instance
+                let model_type_name = match &model_instance {
+                    STTModelInstance::Whisper(_) => "whisper",
+                    STTModelInstance::Voxtral(_) => "voxtral",
+                };
+
                 *self.model.write().await = Some(model_instance);
                 {
                     let mut w = self.preferred_device.write().await;
@@ -339,6 +336,27 @@ impl SuperSTTDaemon {
                 warn!(
                     "Recovery successful - reverted to previous device: {previous_device} (actual: {recovery_actual_device})"
                 );
+
+                // Broadcast ready status after successful recovery
+                if let Err(e) = self
+                    .notification_manager
+                    .broadcast_event(
+                        "daemon_status_changed".to_string(),
+                        "daemon".to_string(),
+                        serde_json::json!({
+                            "status": "ready",
+                            "model_loaded": true,
+                            "preferred_device": previous_device,
+                            "actual_device": recovery_actual_device,
+                            "model_type": model_type_name,
+                            "model_name": model_to_reload.to_string(),
+                            "timestamp": Utc::now().to_rfc3339()
+                        }),
+                    )
+                    .await
+                {
+                    warn!("Failed to broadcast ready status after recovery: {e}");
+                }
 
                 DaemonResponse::error(&format!(
                     "Failed to switch to device '{device}': {error}. Reverted to previous device '{recovery_actual_device}'."
