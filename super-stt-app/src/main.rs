@@ -7,6 +7,16 @@ mod state;
 mod ui;
 
 fn main() -> cosmic::iced::Result {
+    // Initialize logging - respect RUST_LOG env var, fallback to verbose flag
+    if std::env::var("RUST_LOG").is_ok() {
+        env_logger::init();
+    } else {
+        let log_level = log::LevelFilter::Info;
+        env_logger::Builder::from_default_env()
+            .filter_level(log_level)
+            .init();
+    }
+
     // Get the system's preferred languages.
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
 

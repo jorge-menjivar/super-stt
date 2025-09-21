@@ -8,6 +8,7 @@ use super_stt_shared::theme::AudioTheme;
 use super_stt_shared::{models::protocol::DownloadProgress, stt_model::STTModel};
 
 use super::common::page_layout;
+use crate::core::app::ModelOperationState;
 use crate::ui::messages::Message;
 
 /// Preview typing settings section using cosmic-settings style
@@ -66,6 +67,7 @@ pub fn audio_theme_selection_widget<'a>(
 
 /// Create the download progress widget using cosmic-settings style
 #[allow(clippy::cast_precision_loss)]
+#[allow(dead_code)]
 fn download_progress_widget(
     download_progress: Option<&DownloadProgress>,
     download_active: bool,
@@ -167,6 +169,8 @@ fn download_progress_widget(
 }
 
 /// Create the model selection widget using cosmic-settings style
+#[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 fn model_selection_settings_widget<'a>(
     available_models: &'a [STTModel],
     current_model: &'a STTModel,
@@ -174,6 +178,7 @@ fn model_selection_settings_widget<'a>(
     current_device: &'a str,
     available_devices: &'a [String],
     device_switching: bool,
+    model_switching: bool,
 ) -> Element<'a, Message> {
     let mut section = settings::section().title("Speech-to-Text Model");
 
@@ -195,6 +200,11 @@ fn model_selection_settings_widget<'a>(
                 "Model",
                 text::caption("Model switching disabled during download"),
             ));
+        } else if model_switching {
+            section = section.add(settings::item(
+                "Model",
+                text::caption("Model switching in progress..."),
+            ));
         } else {
             let available_models_clone = available_models.to_vec();
             section = section.add(settings::item(
@@ -212,7 +222,7 @@ fn model_selection_settings_widget<'a>(
             let device_options: Vec<(&str, &str)> = available_devices
                 .iter()
                 .map(|device| {
-                    if device == "CPU" {
+                    if device == "cpu" {
                         ("cpu", "CPU (slower, always available)")
                     } else {
                         ("cuda", "CUDA GPU (faster if available)")
@@ -247,7 +257,7 @@ fn model_selection_settings_widget<'a>(
             section = section.add(settings::item("Device", device_selection_widget));
 
             // Add warning message based on available devices and current state
-            let warning_message = if available_devices.len() == 1 && available_devices[0] == "CPU" {
+            let warning_message = if available_devices.len() == 1 && available_devices[0] == "cpu" {
                 "Note: This build does not include GPU support"
             } else {
                 "Note: GPU will fallback to CPU if unavailable or insufficient memory"
@@ -260,6 +270,231 @@ fn model_selection_settings_widget<'a>(
     section.into()
 }
 
+/// Unified model management widget that handles downloading, loading, and ready states
+#[allow(clippy::too_many_arguments)]
+fn unified_model_management_widget<'a>(
+    available_models: &'a [STTModel],
+    current_model: &'a STTModel,
+    model_operation_state: &'a ModelOperationState,
+    current_device: &'a str,
+    available_devices: &'a [String],
+    device_switching: bool,
+) -> Element<'a, Message> {
+    let mut section = settings::section().title("Speech-to-Text Model");
+
+    match model_operation_state {
+        ModelOperationState::Ready => {
+            // Show normal model and device selection controls
+            section = add_model_selection_controls(
+                section,
+                available_models,
+                current_model,
+                current_device,
+                available_devices,
+                device_switching,
+            );
+        }
+        ModelOperationState::Downloading {
+            target_model,
+            progress,
+        } => {
+            // Show download progress
+            section = add_download_progress_display(section, *target_model, progress);
+        }
+        ModelOperationState::Loading {
+            target_model,
+            status_message,
+        } => {
+            // Show loading status
+            section = add_loading_status_display(section, *target_model, status_message);
+        }
+    }
+
+    section.into()
+}
+
+/// Add model and device selection controls to the section
+fn add_model_selection_controls<'a>(
+    mut section: settings::Section<'a, Message>,
+    available_models: &'a [STTModel],
+    current_model: &'a STTModel,
+    current_device: &'a str,
+    available_devices: &'a [String],
+    device_switching: bool,
+) -> settings::Section<'a, Message> {
+    // Model selection dropdown
+    if available_models.is_empty() {
+        section = section.add(settings::item("Model", text::caption("Loading models...")));
+    } else {
+        let selected_index = available_models
+            .iter()
+            .position(|model| model == current_model);
+
+        let model_names: Vec<String> = available_models
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
+
+        let available_models_clone = available_models.to_vec();
+        section = section.add(settings::item(
+            "Model",
+            widget::dropdown(model_names, selected_index, move |index| {
+                if let Some(model) = available_models_clone.get(index) {
+                    Message::ModelSelected(*model)
+                } else {
+                    Message::ModelError("Invalid model selection".to_string())
+                }
+            }),
+        ));
+
+        // Device selection dropdown
+        let device_options: Vec<(&str, &str)> = available_devices
+            .iter()
+            .map(|device| {
+                if device == "cpu" {
+                    ("cpu", "CPU (slower, always available)")
+                } else {
+                    ("cuda", "CUDA GPU (faster if available)")
+                }
+            })
+            .collect();
+
+        let device_names: Vec<String> = device_options
+            .iter()
+            .map(|(_, name)| (*name).to_string())
+            .collect();
+
+        let selected_device_index = device_options
+            .iter()
+            .position(|(device_id, _)| device_id == &current_device);
+
+        let device_selection_widget: Element<'a, Message> = if device_switching {
+            text::caption("Device switching disabled during operation").into()
+        } else {
+            let device_options_clone = device_options.clone();
+            widget::dropdown(device_names, selected_device_index, move |index| {
+                if let Some((device_id, _)) = device_options_clone.get(index) {
+                    Message::DeviceSelected((*device_id).to_string())
+                } else {
+                    Message::DeviceError("Invalid device selection".to_string())
+                }
+            })
+            .into()
+        };
+
+        section = section.add(settings::item("Device", device_selection_widget));
+
+        // Add warning message based on available devices and current state
+        let warning_message = if available_devices.len() == 1 && available_devices[0] == "cpu" {
+            "Note: This build does not include GPU support"
+        } else if current_device == "cpu" && available_devices.contains(&"cuda".to_string()) {
+            "Note: GPU acceleration may be unavailable - check CUDA installation"
+        } else {
+            "Note: GPU will fallback to CPU if unavailable or insufficient memory"
+        };
+
+        section = section.add(settings::item("", text::caption(warning_message)));
+    }
+
+    section
+}
+
+/// Add download progress display to the section
+fn add_download_progress_display<'a>(
+    mut section: settings::Section<'a, Message>,
+    target_model: STTModel,
+    progress: &DownloadProgress,
+) -> settings::Section<'a, Message> {
+    // Security: Validate download progress values to prevent UI corruption
+    let progress_fraction = if progress.percentage < 0.0 || progress.percentage > 100.0 {
+        log::warn!(
+            "Invalid progress percentage: {} (must be 0-100)",
+            progress.percentage
+        );
+        0.0
+    } else {
+        (progress.percentage / 100.0).clamp(0.0, 1.0)
+    };
+
+    let progress_text = format!(
+        "Downloading {} ({}/{}): {:.1}%",
+        target_model,
+        progress.file_index + 1,
+        progress.total_files,
+        progress.percentage
+    );
+
+    let eta_text = if let Some(eta_seconds) = progress.eta_seconds {
+        if eta_seconds > 0 {
+            let minutes = eta_seconds / 60;
+            let seconds = eta_seconds % 60;
+            if minutes > 0 {
+                format!("ETA: {minutes}m {seconds}s")
+            } else {
+                format!("ETA: {seconds}s")
+            }
+        } else {
+            "Finishing...".to_string()
+        }
+    } else {
+        String::new()
+    };
+
+    let bytes_text = if progress.total_bytes > 0 {
+        #[allow(clippy::cast_precision_loss)]
+        let mb_downloaded = progress.bytes_downloaded as f64 / (1024.0 * 1024.0);
+        #[allow(clippy::cast_precision_loss)]
+        let mb_total = progress.total_bytes as f64 / (1024.0 * 1024.0);
+        format!("{mb_downloaded:.1} / {mb_total:.1} MB")
+    } else {
+        String::new()
+    };
+
+    let details_widget = column![
+        text::body(progress_text),
+        widget::progress_bar(
+            0.0..=1.0,
+            progress_fraction.max(0.1), // Minimum for visual feedback
+        )
+        .width(Length::Fill),
+        row![
+            text::body(bytes_text).width(Length::Fill),
+            text::body(eta_text).width(Length::Fill),
+        ]
+        .spacing(10),
+    ]
+    .spacing(10);
+
+    section = section.add(settings::flex_item("Status", details_widget));
+
+    // Add cancel button
+    section = section.add(settings::item(
+        "Cancel",
+        button::destructive("Cancel Download").on_press(Message::CancelDownload),
+    ));
+
+    section
+}
+
+/// Add loading status display to the section
+fn add_loading_status_display<'a>(
+    mut section: settings::Section<'a, Message>,
+    target_model: STTModel,
+    status_message: &str,
+) -> settings::Section<'a, Message> {
+    let status_text = format!("Loading {target_model}: {status_message}");
+
+    let details_widget = column![
+        text::body(status_text),
+        widget::progress_bar(0.0..=1.0, 0.5) // Indeterminate progress
+            .width(Length::Fill),
+    ]
+    .spacing(10);
+
+    section = section.add(settings::flex_item("Status", details_widget));
+    section
+}
+
 /// Settings page view using cosmic-settings style
 #[allow(clippy::too_many_arguments)]
 pub fn page<'a>(
@@ -267,37 +502,24 @@ pub fn page<'a>(
     selected_audio_theme: &'a AudioTheme,
     available_models: &'a [STTModel],
     current_model: &'a STTModel,
-    download_progress: Option<&'a DownloadProgress>,
-    download_active: bool,
+    model_operation_state: &'a ModelOperationState,
     current_device: &'a str,
     available_devices: &'a [String],
     device_switching: bool,
     preview_typing_enabled: bool,
 ) -> Element<'a, Message> {
-    let mut sections = Vec::new();
-
-    sections.push(audio_theme_selection_widget(
-        audio_themes,
-        selected_audio_theme,
-    ));
-
-    // Add preview typing section
-    sections.push(preview_typing_settings_widget(preview_typing_enabled));
-
-    // Download Progress Section (only if active)
-    if let Some(progress_widget) = download_progress_widget(download_progress, download_active) {
-        sections.push(progress_widget);
-    } else {
-        // Model Selection Section
-        sections.push(model_selection_settings_widget(
+    let sections = vec![
+        audio_theme_selection_widget(audio_themes, selected_audio_theme),
+        preview_typing_settings_widget(preview_typing_enabled),
+        unified_model_management_widget(
             available_models,
             current_model,
-            download_active,
+            model_operation_state,
             current_device,
             available_devices,
             device_switching,
-        ));
-    }
+        ),
+    ];
     let sections_view = settings::view_column(sections);
     page_layout("Settings", sections_view)
 }

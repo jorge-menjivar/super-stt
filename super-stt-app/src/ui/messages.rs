@@ -31,6 +31,8 @@ pub enum Message {
     UdpDataReceived(Vec<u8>),
     RetryConnection,
     PingTimeout,
+    DaemonEventsReceived(Vec<super_stt_shared::models::protocol::NotificationEvent>), // Received events
+    DaemonEventsError(String), // Error receiving or parsing events
     RecordingStateChanged(crate::state::RecordingStatus),
     AudioLevelUpdate {
         level: f32,
@@ -38,7 +40,7 @@ pub enum Message {
     },
 
     // Model management messages
-    LoadModels,
+    LoadInitialData, // Load models + device info at startup only
     ModelSelected(STTModel),
     ModelsLoaded {
         current: STTModel,
@@ -71,4 +73,7 @@ pub enum Message {
     PreviewTypingToggled(bool),       // User toggled the setting
     PreviewTypingSettingLoaded(bool), // Setting loaded from daemon
     PreviewTypingError(String),       // Error setting or getting preview typing
+
+    // UI refresh message
+    RefreshUI, // Force UI update/redraw
 }

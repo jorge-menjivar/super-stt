@@ -91,7 +91,7 @@ check-json: (check '--message-format=json')
 
 # Run the app for testing purposes
 run-app *args:
-    env RUST_BACKTRACE=full RUST_LOG=debug cargo run --bin {{app_name}} {{args}}
+    env RUST_BACKTRACE=full RUST_LOG=super_stt_app=debug,super_stt_shared=debug cargo run --bin {{app_name}} {{args}}
 
 # Run the daemon for testing purposes
 # Usage: just run-daemon [--model MODEL] [other args]

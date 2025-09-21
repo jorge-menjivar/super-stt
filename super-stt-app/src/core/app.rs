@@ -16,7 +16,7 @@ use cosmic::iced::Subscription;
 use cosmic::prelude::*;
 use cosmic::widget::{icon, menu, nav_bar};
 use futures_util::SinkExt;
-use log::{info, warn};
+use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,13 +25,21 @@ use super_stt_shared::stt_model::STTModel;
 use tokio::net::UdpSocket;
 use tokio::time::Duration;
 
-/// Model loading/switching state with operation locking
-#[derive(Debug, Clone, PartialEq)]
-pub enum ModelState {
+/// Unified model operation state that encompasses downloading, loading, and switching
+#[derive(Debug, Clone)]
+pub enum ModelOperationState {
+    /// Model is ready for use
     Ready,
-    Loading,
-    /// Model is switching - prevent concurrent operations
-    Switching(STTModel), // Target model being switched to
+    /// Downloading model files with progress information
+    Downloading {
+        target_model: STTModel,
+        progress: super_stt_shared::models::protocol::DownloadProgress,
+    },
+    /// Loading model into memory (after download completed)
+    Loading {
+        target_model: STTModel,
+        status_message: String,
+    },
 }
 
 /// Device switching state
@@ -39,13 +47,7 @@ pub enum ModelState {
 pub enum DeviceState {
     Ready,
     Switching,
-}
-
-/// Download state
-#[derive(Debug, Clone, PartialEq)]
-pub enum DownloadState {
-    Idle,
-    Active,
+    Cooldown, // Brief period after switching to avoid premature device requests
 }
 
 /// The application model stores app-specific state used to describe its interface and
@@ -89,8 +91,8 @@ pub struct AppModel {
     pub current_model: STTModel,
     /// The model we had before starting a download (to revert to on cancel)
     pub previous_model: STTModel,
-    /// Model loading state
-    pub model_state: ModelState,
+    /// Model operation state (downloading, loading, or ready)
+    pub model_operation_state: ModelOperationState,
 
     // Device management state
     /// Current device (cpu/cuda) from daemon
@@ -99,12 +101,10 @@ pub struct AppModel {
     pub available_devices: Vec<String>,
     /// Device switching state
     pub device_state: DeviceState,
-
-    // Download progress state
-    /// Current download progress if any download is active
-    pub download_progress: Option<super_stt_shared::models::protocol::DownloadProgress>,
-    /// Download state
-    pub download_state: DownloadState,
+    /// Timestamp of last device switch to avoid polling too soon
+    pub last_device_switch: Option<std::time::Instant>,
+    /// Last event timestamp for polling daemon events
+    pub last_event_timestamp: Option<String>,
 
     // Preview typing state
     /// Whether preview typing is enabled (beta feature)
@@ -179,16 +179,17 @@ impl cosmic::Application for AppModel {
             available_models: Vec::new(),
             current_model: STTModel::default(), // Use default model before loading from daemon
             previous_model: STTModel::default(), // Use default model before loading from daemon
-            model_state: ModelState::Loading,   // We're loading the initial model state
+            model_operation_state: ModelOperationState::Loading {
+                target_model: STTModel::default(),
+                status_message: "Loading initial model state...".to_string(),
+            },
 
             // Initialize device state
             current_device: String::new(), // Empty until loaded from daemon
             available_devices: vec!["cpu".to_string()], // Default until loaded from daemon
             device_state: DeviceState::Ready,
-
-            // Initialize download state
-            download_progress: None,
-            download_state: DownloadState::Idle,
+            last_device_switch: None,
+            last_event_timestamp: None,
 
             // Initialize preview typing state (disabled by default as beta feature)
             preview_typing_enabled: false,
@@ -210,18 +211,18 @@ impl cosmic::Application for AppModel {
             })
         });
 
-        // Load models on startup
-        let load_models = Task::perform(
+        // Load initial data (models + device info) on startup
+        let load_initial_data = Task::perform(
             async move {
                 // Small delay to let daemon connection establish
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             },
-            |()| cosmic::Action::App(Message::LoadModels),
+            |()| cosmic::Action::App(Message::LoadInitialData),
         );
 
         (
             app,
-            Task::batch([title_command, load_themes, initial_ping, load_models]),
+            Task::batch([title_command, load_themes, initial_ping, load_initial_data]),
         )
     }
 
@@ -289,11 +290,11 @@ impl cosmic::Application for AppModel {
                 &self.selected_audio_theme,
                 &self.available_models,
                 &self.current_model,
-                self.download_progress.as_ref(),
-                self.download_state == DownloadState::Active,
+                &self.model_operation_state,
                 &self.current_device,
                 &self.available_devices,
-                self.device_state == DeviceState::Switching,
+                self.device_state == DeviceState::Switching
+                    || self.device_state == DeviceState::Cooldown,
                 self.preview_typing_enabled,
             ),
             Page::Testing => views::testing::page(
@@ -418,9 +419,11 @@ impl cosmic::Application for AppModel {
             // Periodic connection monitoring
             cosmic::iced::time::every(std::time::Duration::from_secs(PING_INTERVAL_SECS))
                 .map(|_| Message::PingTimeout),
-            // Periodic download progress check
-            cosmic::iced::time::every(std::time::Duration::from_secs(2))
-                .map(|_| Message::CheckDownloadStatus),
+            // Event subscription for daemon events (stable subscription that handles reconnection internally)
+            Subscription::run_with_id(
+                "daemon_events",
+                daemon_event_subscription(self.socket_path.clone()),
+            ),
         ])
     }
 
@@ -441,6 +444,8 @@ impl cosmic::Application for AppModel {
                 | Message::RetryConnection
                 | Message::RefreshDaemonStatus
                 | Message::PingTimeout
+                | Message::DaemonEventsReceived(_)
+                | Message::DaemonEventsError(_)
         ) {
             return self.handle_daemon_messages(message);
         }
@@ -448,7 +453,7 @@ impl cosmic::Application for AppModel {
         // Try model-related messages
         if matches!(
             message,
-            Message::LoadModels
+            Message::LoadInitialData
                 | Message::ModelSelected(_)
                 | Message::ModelsLoaded { .. }
                 | Message::AvailableModelsLoaded(_)
@@ -591,6 +596,11 @@ impl cosmic::Application for AppModel {
                 self.recording_status = state;
             }
 
+            // Force UI refresh - used to trigger redraw after state changes
+            Message::RefreshUI => {
+                return self.update_title();
+            }
+
             // Handled by helper methods
             _ => {}
         }
@@ -607,6 +617,53 @@ impl cosmic::Application for AppModel {
 }
 
 impl AppModel {
+    /// Check if model is in downloading state
+    #[allow(dead_code)]
+    pub fn is_model_downloading(&self) -> bool {
+        matches!(
+            self.model_operation_state,
+            ModelOperationState::Downloading { .. }
+        )
+    }
+
+    /// Check if model is in loading state
+    #[allow(dead_code)]
+    pub fn is_model_loading(&self) -> bool {
+        matches!(
+            self.model_operation_state,
+            ModelOperationState::Loading { .. }
+        )
+    }
+
+    /// Check if model is ready
+    pub fn is_model_ready(&self) -> bool {
+        matches!(self.model_operation_state, ModelOperationState::Ready)
+    }
+
+    /// Set model to ready state
+    pub fn set_model_ready(&mut self) {
+        self.model_operation_state = ModelOperationState::Ready;
+    }
+
+    /// Set model to downloading state
+    pub fn set_model_downloading(
+        &mut self,
+        target_model: STTModel,
+        progress: super_stt_shared::models::protocol::DownloadProgress,
+    ) {
+        self.model_operation_state = ModelOperationState::Downloading {
+            target_model,
+            progress,
+        };
+    }
+
+    /// Set model to loading state
+    pub fn set_model_loading(&mut self, target_model: STTModel, status_message: String) {
+        self.model_operation_state = ModelOperationState::Loading {
+            target_model,
+            status_message,
+        };
+    }
     /// Handle daemon connection messages
     #[allow(clippy::too_many_lines)]
     fn handle_daemon_messages(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
@@ -637,13 +694,16 @@ impl AppModel {
                 self.daemon_status = DaemonStatus::Connected;
                 // Clear potentially stuck switching states on reconnect
                 self.device_state = DeviceState::Ready;
-                self.model_state = ModelState::Ready;
-                // Restart UDP subscription when daemon reconnects
-                self.udp_restart_counter += 1;
-                info!(
-                    "Daemon connected, restarting UDP subscription (counter: {})",
-                    self.udp_restart_counter
-                );
+                self.set_model_ready();
+
+                // Only restart UDP subscription when actually reconnecting, not on periodic pings
+                if was_disconnected {
+                    self.udp_restart_counter += 1;
+                    info!(
+                        "Daemon reconnected, restarting UDP subscription (counter: {})",
+                        self.udp_restart_counter
+                    );
+                }
 
                 // Only switch to Settings page on initial connection, not on periodic pings
                 if was_disconnected {
@@ -666,8 +726,8 @@ impl AppModel {
                     Ok(config) => cosmic::Action::App(Message::DaemonConfigReceived(config)),
                     Err(err) => {
                         warn!("Failed to fetch daemon config: {err}");
-                        // Still load models even if config fetch fails
-                        cosmic::Action::App(Message::LoadModels)
+                        // Config fetch failed but continue - model state maintained via events
+                        cosmic::Action::App(Message::RefreshDaemonStatus)
                     }
                 })
             }
@@ -685,15 +745,8 @@ impl AppModel {
                     warn!("No audio theme found in daemon configuration");
                 }
 
-                // Load models and preview typing setting
+                // Load preview typing setting (initial data already loaded once at startup)
                 Task::batch([
-                    Task::perform(
-                        async move {
-                            // Small delay to let daemon fully initialize
-                            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                        },
-                        |()| cosmic::Action::App(Message::LoadModels),
-                    ),
                     // Load preview typing setting from daemon
                     Task::perform(get_preview_typing(self.socket_path.clone()), |result| {
                         match result {
@@ -749,6 +802,197 @@ impl AppModel {
                 }
             }
 
+            Message::DaemonEventsReceived(events) => {
+                info!("Received {} daemon events", events.len());
+                for event in events {
+                    // Update timestamp for next polling
+                    self.last_event_timestamp = Some(event.timestamp.clone());
+
+                    // Process device-related events
+                    if event.event_type == "daemon_status_changed" {
+                        info!("Received daemon event: {:?}", event.data);
+                        if let Some(status) = event.data.get("status").and_then(|s| s.as_str()) {
+                            match status {
+                                "device_switched" => {
+                                    if let Some(actual_device) =
+                                        event.data.get("actual_device").and_then(|d| d.as_str())
+                                    {
+                                        info!(
+                                            "Received device_switched event: current_device={} -> {}",
+                                            self.current_device, actual_device
+                                        );
+                                        self.current_device = actual_device.to_string();
+                                        self.device_state = DeviceState::Ready;
+
+                                        // Only update available devices if provided and valid
+                                        if let Some(available) = event
+                                            .data
+                                            .get("available_devices")
+                                            .and_then(|a| a.as_array())
+                                        {
+                                            let new_devices: Vec<String> = available
+                                                .iter()
+                                                .filter_map(|v| {
+                                                    v.as_str().map(std::string::ToString::to_string)
+                                                })
+                                                .collect();
+                                            if new_devices.is_empty() {
+                                                warn!(
+                                                    "Received empty available_devices, keeping current: {:?}",
+                                                    self.available_devices
+                                                );
+                                            } else {
+                                                info!(
+                                                    "Updating available devices: {:?} -> {:?}",
+                                                    self.available_devices, new_devices
+                                                );
+                                                self.available_devices = new_devices;
+                                            }
+                                        } else {
+                                            info!(
+                                                "No available_devices in event, keeping current: {:?}",
+                                                self.available_devices
+                                            );
+                                        }
+                                    }
+                                }
+                                "ready" => {
+                                    // Handle device readiness
+                                    if let Some(actual_device) =
+                                        event.data.get("actual_device").and_then(|d| d.as_str())
+                                    {
+                                        info!(
+                                            "Received ready event: current_device={} -> {}",
+                                            self.current_device, actual_device
+                                        );
+                                        self.current_device = actual_device.to_string();
+                                        self.device_state = DeviceState::Ready;
+                                    }
+
+                                    // Handle model readiness - clear switching state
+                                    if event
+                                        .data
+                                        .get("model_loaded")
+                                        .and_then(serde_json::Value::as_bool)
+                                        .unwrap_or(false)
+                                    {
+                                        info!("Received ready event: model loading completed");
+                                        info!(
+                                            "Model state before ready event: {:?}",
+                                            self.model_operation_state
+                                        );
+                                        self.set_model_ready();
+                                        info!(
+                                            "Model state after ready event: {:?}",
+                                            self.model_operation_state
+                                        );
+                                    }
+                                }
+                                "device_switch_error" | "error" => {
+                                    warn!("Received device switch error event: {:?}", event.data);
+                                    self.device_state = DeviceState::Ready;
+                                    if let Some(error_msg) =
+                                        event.data.get("error").and_then(|e| e.as_str())
+                                    {
+                                        let error_message = error_msg.to_string();
+                                        // Show error to user
+                                        return Task::perform(
+                                            async move { error_message },
+                                            |msg| cosmic::Action::App(Message::DeviceError(msg)),
+                                        );
+                                    }
+                                }
+                                "model_switched" => {
+                                    if let Some(model_name) =
+                                        event.data.get("model_name").and_then(|m| m.as_str())
+                                        && let Ok(model) = model_name.parse::<STTModel>()
+                                    {
+                                        info!(
+                                            "Received model_switched event: current_model={:?} -> {:?}",
+                                            self.current_model, model
+                                        );
+                                        self.current_model = model;
+                                        self.set_model_ready();
+                                        info!(
+                                            "Model state updated to Ready after model_switched event"
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    info!("Received unhandled daemon status: {status}");
+                                }
+                            }
+                        }
+                    } else if event.event_type == "download_progress" {
+                        // Handle download progress events
+                        if let Ok(progress) = serde_json::from_value::<
+                            super_stt_shared::models::protocol::DownloadProgress,
+                        >(event.data.clone())
+                        {
+                            info!(
+                                "Received download progress event: {}% for {}",
+                                progress.percentage, progress.model_name
+                            );
+                            // Determine target model from progress data
+                            if let Ok(target_model) = progress.model_name.parse::<STTModel>() {
+                                match progress.status.as_str() {
+                                    "loading_model" => {
+                                        self.set_model_loading(
+                                            target_model,
+                                            "Loading model into memory...".to_string(),
+                                        );
+                                    }
+                                    "completed" | "cancelled" | "error" => {
+                                        // State will be updated by subsequent daemon events (model_switched, ready, etc.)
+                                        info!(
+                                            "Download completed with status: {}",
+                                            progress.status
+                                        );
+                                    }
+                                    _ => {
+                                        // "downloading" and other states default to downloading
+                                        self.set_model_downloading(target_model, progress.clone());
+                                    }
+                                }
+                            }
+
+                            // Handle download completion/failure
+                            if progress.status == "completed" {
+                                // Send download completed message and reload models after a brief delay
+                                return Task::batch([
+                                    Task::perform(async move { progress.model_name }, |model| {
+                                        cosmic::Action::App(Message::DownloadCompleted(model))
+                                    }),
+                                    Task::none(), // Model reload not needed - daemon will broadcast model_switched event if needed
+                                ]);
+                            } else if progress.status == "cancelled" {
+                                return Task::perform(
+                                    async move { progress.model_name },
+                                    |model| cosmic::Action::App(Message::DownloadCancelled(model)),
+                                );
+                            } else if progress.status == "error" {
+                                let error_msg =
+                                    format!("Download failed for {}", progress.model_name);
+                                return Task::perform(
+                                    async move { (progress.model_name, error_msg) },
+                                    |(model, error)| {
+                                        cosmic::Action::App(Message::DownloadError { model, error })
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+                // Force UI update after processing events that may change state
+                self.update_title()
+            }
+
+            Message::DaemonEventsError(error) => {
+                warn!("Daemon events error: {error}");
+                // Log the error but continue - subscription will retry automatically
+                Task::none()
+            }
+
             _ => Task::none(),
         }
     }
@@ -759,14 +1003,36 @@ impl AppModel {
             Message::DeviceSelected(device) => {
                 if device != self.current_device && self.device_state == DeviceState::Ready {
                     self.device_state = DeviceState::Switching;
+                    self.last_device_switch = Some(std::time::Instant::now());
 
                     info!("Switching to device: {device}");
-                    Task::perform(set_device(self.socket_path.clone(), device), |result| {
-                        match result {
-                            Ok(()) => cosmic::Action::App(Message::LoadModels), // Reload models after device change
+                    let target_device = device.clone();
+                    let socket_path = self.socket_path.clone();
+                    Task::perform(
+                        async move {
+                            // Send device switch command and trust the daemon's response
+                            match set_device(socket_path, target_device.clone()).await {
+                                Ok(()) => {
+                                    // Device switch command succeeded - assume the target device is now active
+                                    // We don't verify with get_device to avoid premature requests
+                                    info!("Device switch command completed successfully");
+                                    Ok(target_device)
+                                }
+                                Err(e) => Err(e),
+                            }
+                        },
+                        |result| match result {
+                            Ok(device) => {
+                                // Simulate DeviceInfoLoaded with the expected device
+                                // Available devices can be updated on next regular LoadModels call
+                                cosmic::Action::App(Message::DeviceInfoLoaded(
+                                    device,
+                                    vec!["cpu".to_string(), "cuda".to_string()],
+                                ))
+                            }
                             Err(e) => cosmic::Action::App(Message::DeviceError(e)),
-                        }
-                    })
+                        },
+                    )
                 } else if self.device_state == DeviceState::Switching {
                     warn!("Device switch already in progress - ignoring");
                     Task::none()
@@ -782,10 +1048,19 @@ impl AppModel {
             }
 
             Message::DeviceInfoLoaded(device, available_devices) => {
+                info!("DeviceInfoLoaded: device={device}, available_devices={available_devices:?}");
                 self.current_device.clone_from(&device);
                 self.available_devices.clone_from(&available_devices);
-                self.device_state = DeviceState::Ready;
-                Task::none()
+
+                if self.device_state == DeviceState::Switching {
+                    info!("Device switch completed to: {device}");
+                    self.device_state = DeviceState::Cooldown;
+                    // No need to reload models - device switch complete and model state maintained via events
+                    Task::none()
+                } else {
+                    self.device_state = DeviceState::Ready;
+                    Task::none()
+                }
             }
 
             Message::DeviceError(err) => {
@@ -804,30 +1079,26 @@ impl AppModel {
         match message {
             Message::DownloadProgressUpdate(progress) => {
                 // We have an actual download in progress
-                self.download_progress = Some(progress.clone());
-                self.download_state = if progress.status == "downloading" {
-                    DownloadState::Active
-                } else {
-                    DownloadState::Idle
-                };
-
-                // If download is completed, reload models
-                if progress.status == "completed" {
-                    self.download_state = DownloadState::Idle;
-                    self.download_progress = None;
-                    Task::perform(
-                        async move {
-                            // Small delay to let daemon finish processing
-                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                        },
-                        |()| cosmic::Action::App(Message::LoadModels),
-                    )
-                } else if progress.status == "cancelled" || progress.status == "error" {
-                    self.download_state = DownloadState::Idle;
-                    Task::none()
-                } else {
-                    Task::none()
+                if let Ok(target_model) = progress.model_name.parse::<STTModel>() {
+                    match progress.status.as_str() {
+                        "loading_model" => {
+                            self.set_model_loading(
+                                target_model,
+                                "Loading model into memory...".to_string(),
+                            );
+                        }
+                        "completed" | "cancelled" | "error" => {
+                            // State will be updated by subsequent daemon events
+                            info!("Download completed with status: {}", progress.status);
+                        }
+                        _ => {
+                            // "downloading" and other states default to downloading
+                            self.set_model_downloading(target_model, progress);
+                        }
+                    }
                 }
+
+                Task::none()
             }
 
             Message::CancelDownload => Task::perform(
@@ -843,29 +1114,21 @@ impl AppModel {
 
             Message::DownloadCompleted(model_name) => {
                 info!("Model {model_name} finished downloading");
-                self.download_progress = None;
-                self.download_state = DownloadState::Idle;
-                // Reload models to reflect the newly downloaded model
-                Task::perform(
-                    async move {
-                        // Small delay to let daemon finish processing
-                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    },
-                    |()| cosmic::Action::App(Message::LoadModels),
-                )
+                // Model information will be updated via daemon events (model_switched, ready)
+                Task::none()
             }
 
             Message::DownloadCancelled(model_name) => {
                 info!("Model {model_name} download was cancelled");
-                self.download_progress = None;
-                self.download_state = DownloadState::Idle;
+                self.set_model_ready();
 
                 // Revert to previous model
+                let previous_model = self.previous_model;
                 Task::perform(
                     set_model(self.socket_path.clone(), self.previous_model),
-                    |result| {
+                    move |result| {
                         match result {
-                            Ok(_) => cosmic::Action::App(Message::LoadModels), // Reload to get updated current model
+                            Ok(_) => cosmic::Action::App(Message::ModelChanged(previous_model)), // Model change will come via event
                             Err(e) => cosmic::Action::App(Message::ModelError(e)),
                         }
                     },
@@ -874,16 +1137,16 @@ impl AppModel {
 
             Message::DownloadError { model, error } => {
                 warn!("Download error for model {model}: {error}");
-                self.download_progress = None;
-                self.download_state = DownloadState::Idle;
+                self.set_model_ready();
                 self.transcription_text = format!("Download Error: {error}");
 
                 // Revert to previous model
+                let previous_model = self.previous_model;
                 Task::perform(
                     set_model(self.socket_path.clone(), self.previous_model),
-                    |result| {
+                    move |result| {
                         match result {
-                            Ok(_) => cosmic::Action::App(Message::LoadModels), // Reload to get updated current model
+                            Ok(_) => cosmic::Action::App(Message::ModelChanged(previous_model)), // Model change will come via event
                             Err(e) => cosmic::Action::App(Message::ModelError(e)),
                         }
                     },
@@ -891,12 +1154,10 @@ impl AppModel {
             }
 
             Message::CheckDownloadStatus => {
-                // Check download status if model is loading, switching, or we're tracking a download
-                if matches!(
-                    self.model_state,
-                    ModelState::Loading | ModelState::Switching(_)
-                ) || self.download_state == DownloadState::Active
-                {
+                // Check download status if model is not ready
+                if self.is_model_ready() {
+                    Task::none()
+                } else {
                     Task::perform(get_download_status(self.socket_path.clone()), |result| {
                         match result {
                             Ok(Some(progress)) => {
@@ -913,23 +1174,14 @@ impl AppModel {
                             }
                         }
                     })
-                } else {
-                    Task::none()
                 }
             }
 
             Message::NoDownloadInProgress => {
-                // Clear download state since there's no active download
-                self.download_progress = None;
-                self.download_state = DownloadState::Idle;
-                // Reload models to ensure we have the current state
-                Task::perform(
-                    async move {
-                        // Small delay to ensure model is fully loaded
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    },
-                    |()| cosmic::Action::App(Message::LoadModels),
-                )
+                // Clear state since there's no active download - set to ready
+                self.set_model_ready();
+                // Model state is already maintained via events, no reload needed
+                Task::none()
             }
 
             _ => Task::none(),
@@ -940,73 +1192,66 @@ impl AppModel {
     #[allow(clippy::too_many_lines)]
     fn handle_model_messages(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::LoadModels => Task::batch([
-                Task::perform(
-                    list_available_models(self.socket_path.clone()),
-                    |result| match result {
-                        Ok(models) => cosmic::Action::App(Message::AvailableModelsLoaded(models)),
-                        Err(e) => cosmic::Action::App(Message::ModelError(e)),
-                    },
-                ),
-                Task::perform(
-                    get_current_model(self.socket_path.clone()),
-                    |result| match result {
-                        Ok(model) => cosmic::Action::App(Message::CurrentModelLoaded(model)),
-                        Err(e) => cosmic::Action::App(Message::ModelError(e)),
-                    },
-                ),
-                Task::perform(
-                    get_current_device(self.socket_path.clone()),
-                    |result| match result {
-                        Ok((device, available_devices)) => cosmic::Action::App(
-                            Message::DeviceInfoLoaded(device, available_devices),
-                        ),
-                        Err(e) => cosmic::Action::App(Message::DeviceError(e)),
-                    },
-                ),
-            ]),
+            Message::LoadInitialData => {
+                info!("LoadInitialData: Loading models and device info at startup");
+                // One-time startup load: models + device info
+                Task::batch([
+                    Task::perform(list_available_models(self.socket_path.clone()), |result| {
+                        match result {
+                            Ok(models) => {
+                                cosmic::Action::App(Message::AvailableModelsLoaded(models))
+                            }
+                            Err(e) => cosmic::Action::App(Message::ModelError(e)),
+                        }
+                    }),
+                    Task::perform(
+                        get_current_model(self.socket_path.clone()),
+                        |result| match result {
+                            Ok(model) => cosmic::Action::App(Message::CurrentModelLoaded(model)),
+                            Err(e) => cosmic::Action::App(Message::ModelError(e)),
+                        },
+                    ),
+                    Task::perform(get_current_device(self.socket_path.clone()), |result| {
+                        match result {
+                            Ok((device, available_devices)) => {
+                                info!(
+                                    "Initial device load successful: device={device}, available_devices={available_devices:?}"
+                                );
+                                cosmic::Action::App(Message::DeviceInfoLoaded(
+                                    device,
+                                    available_devices,
+                                ))
+                            }
+                            Err(e) => {
+                                warn!("Initial device load failed: {e}");
+                                cosmic::Action::App(Message::DeviceError(e))
+                            }
+                        }
+                    }),
+                ])
+            }
 
             Message::ModelSelected(model) => {
                 if model == self.current_model {
                     Task::none()
                 } else {
                     // Atomic state check and transition to prevent race conditions
-                    match &self.model_state {
-                        ModelState::Switching(_) => {
-                            warn!("Model switch already in progress - ignoring concurrent request");
-                            return Task::none();
-                        }
-                        ModelState::Loading => {
-                            warn!("Model loading in progress - ignoring switch request");
-                            return Task::none();
-                        }
-                        ModelState::Ready => {
-                            // Proceed with state transition
-                        }
-                    }
-
-                    // Prevent model switching if a download is already active
-                    if self.download_state == DownloadState::Active
-                        && self.download_progress.is_some()
-                    {
-                        warn!("Attempted to switch models during active download - ignoring");
+                    if !self.is_model_ready() {
+                        warn!("Model operation already in progress - ignoring concurrent request");
                         return Task::none();
                     }
 
-                    // Atomic state transition: Reserve the operation
-                    self.model_state = ModelState::Switching(model);
+                    // Set loading state for the target model
+                    self.set_model_loading(model, "Initiating model switch...".to_string());
 
                     // Save the current model as previous (to revert to on cancel)
                     self.previous_model = self.current_model;
 
-                    // Don't assume download is needed - let CheckDownloadStatus determine that
-                    self.download_state = DownloadState::Idle;
-                    self.download_progress = None;
-
+                    let selected_model = model;
                     Task::batch([
-                        Task::perform(set_model(self.socket_path.clone(), model), |result| {
+                        Task::perform(set_model(self.socket_path.clone(), model), move |result| {
                             match result {
-                                Ok(_) => cosmic::Action::App(Message::LoadModels), // Reload to get updated current model
+                                Ok(_) => cosmic::Action::App(Message::ModelChanged(selected_model)), // Notify UI of intended change, actual change will come via event
                                 Err(e) => cosmic::Action::App(Message::ModelError(e)),
                             }
                         }),
@@ -1026,31 +1271,10 @@ impl AppModel {
                 self.available_models = available;
                 self.current_model = current;
 
-                // Properly handle state transition from Switching to Ready
-                match &self.model_state {
-                    ModelState::Switching(target_model) => {
-                        if current == *target_model {
-                            info!("Model switch to {target_model} completed successfully");
-                            self.model_state = ModelState::Ready;
-                        } else {
-                            warn!("Model switch failed: expected {target_model}, got {current}");
-                            self.model_state = ModelState::Ready;
-                        }
-                    }
-                    _ => {
-                        self.model_state = ModelState::Ready;
-                    }
-                }
+                // Set model to ready state
+                self.set_model_ready();
 
-                // If we were tracking a download and models loaded successfully, clear download state
-                if self.download_state == DownloadState::Active
-                    && self.download_progress.is_some()
-                    && let Some(progress) = &self.download_progress
-                    && progress.status == "completed"
-                {
-                    self.download_progress = None;
-                    self.download_state = DownloadState::Idle;
-                }
+                // Download state is handled by the unified model operation state
 
                 Task::none()
             }
@@ -1060,34 +1284,16 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::CurrentModelLoaded(model) => {
+            Message::CurrentModelLoaded(model) | Message::ModelChanged(model) => {
                 self.current_model = model;
-                self.model_state = ModelState::Ready;
-                // Clear download state since model is loaded
-                if self.download_state == DownloadState::Idle {
-                    self.download_progress = None;
-                }
-                Task::none()
-            }
-
-            Message::ModelChanged(model) => {
-                self.current_model = model;
-                self.model_state = ModelState::Ready;
+                self.set_model_ready();
                 Task::none()
             }
 
             Message::ModelError(err) => {
-                // Handle error from model switching - reset to Ready and revert if needed
-                match &self.model_state {
-                    ModelState::Switching(target_model) => {
-                        warn!("Model switch to {target_model} failed: {err}");
-                        self.model_state = ModelState::Ready;
-                        // Don't automatically revert - let user try again
-                    }
-                    _ => {
-                        self.model_state = ModelState::Ready;
-                    }
-                }
+                // Handle error from model switching - reset to Ready
+                warn!("Model operation failed: {err}");
+                self.set_model_ready();
 
                 // Display sanitized error message to user
                 let sanitized_error = err
@@ -1151,6 +1357,189 @@ impl AppModel {
             Task::none()
         }
     }
+}
+
+/// Creates a persistent subscription to daemon events
+/// This maintains a persistent connection to receive real-time event notifications
+fn daemon_event_subscription(
+    socket_path: PathBuf,
+) -> impl cosmic::iced::futures::Stream<Item = Message> {
+    cosmic::iced::stream::channel(100, move |mut channel| async move {
+        info!("Starting daemon event subscription loop");
+
+        loop {
+            info!("Attempting to establish persistent event connection");
+
+            // Try to establish persistent connection to daemon for event streaming
+            match create_persistent_event_connection(&socket_path, &mut channel).await {
+                Ok(()) => {
+                    info!("Persistent event connection completed, will restart if needed");
+                }
+                Err(e) => {
+                    warn!("Persistent event connection failed: {e}, retrying in 5 seconds");
+                    let _ = channel.send(Message::DaemonEventsError(e)).await;
+
+                    // Wait before retrying
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            }
+
+            // Brief pause before retrying connection
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    })
+}
+
+/// Creates a persistent connection for receiving real-time events from daemon
+async fn create_persistent_event_connection<T>(
+    socket_path: &PathBuf,
+    channel: &mut T,
+) -> Result<(), String>
+where
+    T: futures_util::SinkExt<Message> + Unpin,
+{
+    use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+
+    // Connect to daemon
+    let mut stream = UnixStream::connect(socket_path)
+        .await
+        .map_err(|e| format!("Failed to connect to daemon: {e}"))?;
+
+    info!("Connected to daemon for persistent event subscription");
+
+    // Create subscription request
+    let request = DaemonRequest {
+        command: "subscribe".to_string(),
+        event_types: Some(vec![
+            "daemon_status_changed".to_string(),
+            "download_progress".to_string(),
+        ]),
+        client_info: Some(std::collections::HashMap::new()),
+        client_id: Some("super-stt-app-events".to_string()),
+        data: None,
+        audio_data: None,
+        sample_rate: None,
+        since_timestamp: None,
+        limit: None,
+        event_type: None,
+        language: None,
+        enabled: None,
+    };
+
+    // Serialize and send subscription request
+    let request_data = serde_json::to_vec(&request)
+        .map_err(|e| format!("Failed to serialize subscription request: {e}"))?;
+
+    // Send size header + request
+    let size = request_data.len() as u64;
+    stream
+        .write_all(&size.to_be_bytes())
+        .await
+        .map_err(|e| format!("Failed to write request size: {e}"))?;
+    stream
+        .write_all(&request_data)
+        .await
+        .map_err(|e| format!("Failed to write subscription request: {e}"))?;
+
+    // Read initial response
+    let mut size_buf = [0u8; 8];
+    stream
+        .read_exact(&mut size_buf)
+        .await
+        .map_err(|e| format!("Failed to read response size: {e}"))?;
+
+    let response_size = u64::from_be_bytes(size_buf);
+    let response_len = usize::try_from(response_size)
+        .map_err(|_| "Response too large for this platform".to_string())?;
+
+    let mut response_buf = vec![0u8; response_len];
+    stream
+        .read_exact(&mut response_buf)
+        .await
+        .map_err(|e| format!("Failed to read response: {e}"))?;
+
+    // Parse initial response
+    let response: DaemonResponse = serde_json::from_slice(&response_buf)
+        .map_err(|e| format!("Failed to parse subscription response: {e}"))?;
+
+    if response.status != "success" {
+        return Err(format!(
+            "Subscription failed: {}",
+            response
+                .message
+                .unwrap_or_else(|| "Unknown error".to_string())
+        ));
+    }
+
+    info!("Successfully subscribed to daemon events, entering streaming mode");
+
+    // Now continuously read streamed events
+    stream_daemon_events(stream, channel).await?;
+
+    Ok(())
+}
+
+/// Continuously read and process streamed events from the daemon
+async fn stream_daemon_events<T>(
+    mut stream: tokio::net::UnixStream,
+    channel: &mut T,
+) -> Result<(), String>
+where
+    T: futures_util::SinkExt<Message> + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+
+    loop {
+        // Read event size
+        let mut size_buf = [0u8; 8];
+        match stream.read_exact(&mut size_buf).await {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("Connection closed or error reading event size: {e}");
+                break;
+            }
+        }
+
+        let event_size = u64::from_be_bytes(size_buf);
+        let Ok(event_len) = usize::try_from(event_size) else {
+            warn!("Event too large, skipping");
+            continue;
+        };
+
+        // Read event data
+        let mut event_buf = vec![0u8; event_len];
+        match stream.read_exact(&mut event_buf).await {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("Error reading event data: {e}");
+                break;
+            }
+        }
+
+        // Parse event
+        match serde_json::from_slice::<super_stt_shared::models::protocol::NotificationEvent>(
+            &event_buf,
+        ) {
+            Ok(event) => {
+                debug!("Received streamed event: {event:?}");
+                if channel
+                    .send(Message::DaemonEventsReceived(vec![event]))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Err(e) => {
+                warn!("Failed to parse streamed event: {e}");
+                // Continue processing other events
+            }
+        }
+    }
+
+    Ok(())
 }
 
 impl menu::action::MenuAction for MenuAction {

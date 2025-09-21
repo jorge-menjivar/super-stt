@@ -127,3 +127,37 @@ pub async fn set_preview_typing(socket_path: PathBuf, enabled: bool) -> Result<(
 pub async fn get_preview_typing(socket_path: PathBuf) -> Result<bool, String> {
     super_stt_shared::daemon::client::get_preview_typing(socket_path, get_client_id()).await
 }
+
+/// Subscribe to daemon events (particularly device switching events)
+#[allow(dead_code)]
+pub async fn subscribe_to_daemon_events(socket_path: PathBuf) -> Result<String, String> {
+    super_stt_shared::daemon::client::send_daemon_command(
+        socket_path,
+        "subscribe",
+        Some(serde_json::json!({
+            "event_types": ["daemon_status_changed"],
+            "client_info": {}
+        })),
+        get_client_id(),
+    )
+    .await
+}
+
+/// Get recent daemon events
+#[allow(dead_code)]
+pub async fn get_daemon_events(
+    socket_path: PathBuf,
+    since_timestamp: Option<String>,
+) -> Result<Vec<super_stt_shared::models::protocol::NotificationEvent>, String> {
+    super_stt_shared::daemon::client::get_daemon_events(
+        socket_path,
+        get_client_id(),
+        since_timestamp,
+        Some(vec![
+            "daemon_status_changed".to_string(),
+            "download_progress".to_string(),
+        ]),
+        Some(50),
+    )
+    .await
+}

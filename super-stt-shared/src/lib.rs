@@ -30,10 +30,10 @@ pub use audio::*;
 #[macro_export]
 macro_rules! device_options {
     () => {{
-        let mut devices = vec!["CPU".to_string()];
+        let mut devices = vec!["cpu".to_string()];
         #[cfg(feature = "cuda")]
         {
-            devices.push("GPU".to_string());
+            devices.push("cuda".to_string());
         }
         devices
     }};

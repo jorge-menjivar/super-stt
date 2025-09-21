@@ -476,3 +476,33 @@ pub async fn get_preview_typing(socket_path: PathBuf, client_id: &str) -> Result
             .unwrap_or_else(|| "Failed to get preview typing setting".to_string()))
     }
 }
+
+/// Get recent daemon events
+///
+/// # Errors
+///
+/// Returns an error if the request fails.
+pub async fn get_daemon_events(
+    socket_path: PathBuf,
+    client_id: &str,
+    since_timestamp: Option<String>,
+    event_types: Option<Vec<String>>,
+    limit: Option<u32>,
+) -> Result<Vec<crate::models::protocol::NotificationEvent>, String> {
+    let mut request = create_daemon_request("get_events", client_id);
+    request.data = Some(serde_json::json!({
+        "since_timestamp": since_timestamp,
+        "event_types": event_types.unwrap_or_else(|| vec!["daemon_status_changed".to_string()]),
+        "limit": limit.unwrap_or(50)
+    }));
+
+    let response = send_daemon_request(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(response.events.unwrap_or_default())
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Failed to get daemon events".to_string()))
+    }
+}

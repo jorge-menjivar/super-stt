@@ -346,7 +346,7 @@ impl SuperSTTDaemon {
                 serde_json::json!({
                     "status": "model_switched",
                     "model_type": model_name.to_lowercase(),
-                    "model_name": model,
+                    "model_name": model.to_string(),
                     "timestamp": Utc::now().to_rfc3339()
                 }),
             )
