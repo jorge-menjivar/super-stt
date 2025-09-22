@@ -15,6 +15,13 @@ impl SuperSTTDaemon {
     async fn handle_set_device_impl(&self, device: String) -> DaemonResponse {
         info!("Device switch requested: {device}");
 
+        // Check if shutdown is in progress before starting device switch
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        if let Ok(()) = shutdown_rx.try_recv() {
+            warn!("Device switch rejected - shutdown in progress");
+            return DaemonResponse::error("Device switch rejected due to shutdown in progress");
+        }
+
         // Perform all validation checks
         if let Some(early_return) = self.validate_device_switch_request(&device).await {
             return early_return;
@@ -38,11 +45,18 @@ impl SuperSTTDaemon {
         self.prepare_device_switch(&current_preferred, &device, &model_to_reload)
             .await;
 
-        // Try to reload model with the requested device
-        match self
-            .load_model_with_target_device(&model_to_reload, &device)
-            .await
-        {
+        // Try to reload model with the requested device, but cancel if shutdown occurs
+        let load_result = tokio::select! {
+            result = self.load_model_with_target_device(&model_to_reload, &device) => {
+                result
+            }
+            _ = shutdown_rx.recv() => {
+                warn!("Device switch cancelled due to shutdown");
+                return DaemonResponse::error("Device switch cancelled due to shutdown");
+            }
+        };
+
+        match load_result {
             Ok(model_instance) => {
                 self.handle_device_switch_success(
                     model_instance,
@@ -289,6 +303,15 @@ impl SuperSTTDaemon {
                 }),
             )
             .await;
+
+        // Check if shutdown is in progress before attempting recovery
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        if let Ok(()) = shutdown_rx.try_recv() {
+            warn!("Shutdown in progress, skipping device switch recovery");
+            return DaemonResponse::error(&format!(
+                "Device switch failed: {error}. Recovery skipped due to shutdown."
+            ));
+        }
 
         // Try to recover by reverting to previous device
         warn!("Attempting to recover by reverting to previous device: {previous_device}");

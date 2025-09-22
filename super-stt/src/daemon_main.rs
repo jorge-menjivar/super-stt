@@ -142,7 +142,11 @@ pub async fn run() -> Result<()> {
 
     info!("Daemon stopped gracefully");
 
-    Ok(())
+    // Give a brief moment for any remaining cleanup, then force exit if needed
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    info!("Exiting daemon process");
+    std::process::exit(0);
 }
 
 /// Handle the record subcommand - direct recording mode

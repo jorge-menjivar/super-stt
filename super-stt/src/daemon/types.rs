@@ -413,9 +413,17 @@ impl SuperSTTDaemon {
                     match result {
                         Ok((stream, _addr)) => {
                             let daemon_clone = self.clone();
+                            let mut client_shutdown_rx = self.shutdown_tx.subscribe();
                             tokio::spawn(async move {
-                                if let Err(e) = daemon_clone.handle_client(stream).await {
-                                    log::warn!("Error handling client: {e}");
+                                tokio::select! {
+                                    result = daemon_clone.handle_client(stream) => {
+                                        if let Err(e) = result {
+                                            log::warn!("Error handling client: {e}");
+                                        }
+                                    }
+                                    _ = client_shutdown_rx.recv() => {
+                                        log::debug!("Client handler cancelled due to shutdown");
+                                    }
                                 }
                             });
                         }
@@ -433,9 +441,16 @@ impl SuperSTTDaemon {
             }
         }
 
-        // Cleanup
-        if self.socket_path.exists() {
-            let _ = tokio::fs::remove_file(&self.socket_path).await;
+        // Cleanup with timeout to prevent hanging
+        let cleanup_result = tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
+            if self.socket_path.exists() {
+                let _ = tokio::fs::remove_file(&self.socket_path).await;
+            }
+        })
+        .await;
+
+        if cleanup_result.is_err() {
+            log::warn!("Socket cleanup timed out, continuing shutdown");
         }
 
         info!("Daemon shutdown complete");

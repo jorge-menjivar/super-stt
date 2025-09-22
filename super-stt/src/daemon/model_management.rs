@@ -29,21 +29,23 @@ impl SuperSTTDaemon {
         info!("Loading model with target device: {target_device}");
 
         // Load model in a single blocking task with cancellation support
-        let load_handle = tokio::task::spawn_blocking(move || {
+        let mut load_handle = tokio::task::spawn_blocking(move || {
             Self::load_model_sync(stt_model_copy, &target_device_copy)
         });
 
         // Wait for either model loading completion, shutdown signal, or timeout (60 seconds)
         let model_result = tokio::select! {
-            result = load_handle => {
+            result = &mut load_handle => {
                 result.map_err(|e| anyhow::anyhow!("Model loading task failed: {}", e))?
             }
             _ = shutdown_rx.recv() => {
-                warn!("Model loading cancelled due to shutdown");
+                warn!("Model loading cancelled due to shutdown - aborting blocking task");
+                load_handle.abort();
                 return Err(anyhow::anyhow!("Model loading cancelled due to shutdown"));
             }
             () = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {
-                error!("Model loading timed out after 60 seconds");
+                error!("Model loading timed out after 60 seconds - aborting blocking task");
+                load_handle.abort();
                 return Err(anyhow::anyhow!("Model loading timed out"));
             }
         }?;

@@ -830,7 +830,7 @@ impl AppModel {
 
                                         // If we were switching devices, this marks completion
                                         if self.device_state == DeviceState::Switching {
-                                            info!("Device switch completed to: {}", actual_device);
+                                            info!("Device switch completed to: {actual_device}");
                                         }
                                         self.device_state = DeviceState::Ready;
                                     }
@@ -893,7 +893,9 @@ impl AppModel {
                                     // Keep device_state as Switching and wait for "ready" event
                                     // This event just confirms the switch is in progress
                                     if self.device_state != DeviceState::Switching {
-                                        warn!("Received switching_device event but not in switching state");
+                                        warn!(
+                                            "Received switching_device event but not in switching state"
+                                        );
                                         self.device_state = DeviceState::Switching;
                                     }
                                 }
@@ -1004,7 +1006,9 @@ impl AppModel {
                             Ok(_device) => {
                                 // Don't simulate DeviceInfoLoaded - wait for daemon's "ready" event
                                 // to confirm the device switch is actually complete
-                                info!("Device switch command sent successfully, waiting for daemon confirmation");
+                                info!(
+                                    "Device switch command sent successfully, waiting for daemon confirmation"
+                                );
                                 cosmic::Action::None
                             }
                             Err(e) => cosmic::Action::App(Message::DeviceError(e)),
