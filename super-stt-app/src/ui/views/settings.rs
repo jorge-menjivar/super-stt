@@ -272,7 +272,7 @@ fn model_selection_settings_widget<'a>(
 
 /// Unified model management widget that handles downloading, loading, and ready states
 #[allow(clippy::too_many_arguments)]
-fn unified_model_management_widget<'a>(
+fn model_management_widget<'a>(
     available_models: &'a [STTModel],
     current_model: &'a STTModel,
     model_operation_state: &'a ModelOperationState,
@@ -553,7 +553,7 @@ pub fn page<'a>(
     let sections = vec![
         audio_theme_selection_widget(audio_themes, selected_audio_theme),
         preview_typing_settings_widget(preview_typing_enabled),
-        unified_model_management_widget(
+        model_management_widget(
             available_models,
             current_model,
             model_operation_state,

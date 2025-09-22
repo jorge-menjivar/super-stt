@@ -40,7 +40,7 @@ pub enum Message {
     },
 
     // Model management messages
-    LoadInitialData, // Load models + device info at startup only
+    LoadInitialData, // Load models + device info at startup
     ModelSelected(STTModel),
     ModelsLoaded {
         current: STTModel,
@@ -73,7 +73,4 @@ pub enum Message {
     PreviewTypingToggled(bool),       // User toggled the setting
     PreviewTypingSettingLoaded(bool), // Setting loaded from daemon
     PreviewTypingError(String),       // Error setting or getting preview typing
-
-    // UI refresh message
-    RefreshUI, // Force UI update/redraw
 }

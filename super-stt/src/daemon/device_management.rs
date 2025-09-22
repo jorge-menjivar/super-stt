@@ -248,10 +248,6 @@ impl SuperSTTDaemon {
 
         info!("Device switch completed: {previous_device} -> {device} (actual: {actual_device})");
 
-        // Note: We don't broadcast "device_switched" here anymore because the app
-        // treats it as completion. Instead, we'll only broadcast "ready" status
-        // which properly indicates that the device switch AND model loading are complete.
-
         // Broadcast ready status with new device
         if let Err(e) = self
             .notification_manager
