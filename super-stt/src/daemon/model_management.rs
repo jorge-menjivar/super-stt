@@ -28,6 +28,10 @@ impl SuperSTTDaemon {
 
         info!("Loading model with target device: {target_device}");
 
+        // Broadcast model loading status for device switch
+        self.broadcast_device_model_loading_status(*stt_model, target_device)
+            .await;
+
         // Load model in a single blocking task with cancellation support
         let mut load_handle = tokio::task::spawn_blocking(move || {
             Self::load_model_sync(stt_model_copy, &target_device_copy)
@@ -184,6 +188,30 @@ impl SuperSTTDaemon {
             .await
         {
             warn!("Failed to broadcast model loading status: {e}");
+        }
+    }
+
+    /// Broadcast model loading status specifically for device switching
+    pub async fn broadcast_device_model_loading_status(
+        &self,
+        model: STTModel,
+        target_device: &str,
+    ) {
+        if let Err(e) = self
+            .notification_manager
+            .broadcast_event(
+                "daemon_status_changed".to_string(),
+                "daemon".to_string(),
+                serde_json::json!({
+                    "status": "loading_model_for_device",
+                    "model": model.to_string(),
+                    "target_device": target_device,
+                    "timestamp": Utc::now().to_rfc3339()
+                }),
+            )
+            .await
+        {
+            warn!("Failed to broadcast device model loading status: {e}");
         }
     }
 

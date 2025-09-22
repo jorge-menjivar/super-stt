@@ -46,7 +46,10 @@ pub enum ModelOperationState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceState {
     Ready,
-    Switching,
+    Switching {
+        target_device: String,
+        status_message: String,
+    },
     Cooldown, // Brief period after switching to avoid premature device requests
 }
 
@@ -293,8 +296,7 @@ impl cosmic::Application for AppModel {
                 &self.model_operation_state,
                 &self.current_device,
                 &self.available_devices,
-                self.device_state == DeviceState::Switching
-                    || self.device_state == DeviceState::Cooldown,
+                &self.device_state,
                 self.preview_typing_enabled,
             ),
             Page::Testing => views::testing::page(
@@ -664,6 +666,20 @@ impl AppModel {
             status_message,
         };
     }
+
+    /// Set device to switching state
+    pub fn set_device_switching(&mut self, target_device: String, status_message: String) {
+        self.device_state = DeviceState::Switching {
+            target_device,
+            status_message,
+        };
+    }
+
+    /// Set device to ready state
+    pub fn set_device_ready(&mut self) {
+        self.device_state = DeviceState::Ready;
+    }
+
     /// Handle daemon connection messages
     #[allow(clippy::too_many_lines)]
     fn handle_daemon_messages(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
@@ -694,7 +710,7 @@ impl AppModel {
                 self.daemon_status = DaemonStatus::Connected;
                 // Only clear potentially stuck switching states on actual reconnect, not periodic pings
                 if was_disconnected {
-                    self.device_state = DeviceState::Ready;
+                    self.set_device_ready();
                     self.set_model_ready();
                 }
 
@@ -829,10 +845,13 @@ impl AppModel {
                                         self.current_device = actual_device.to_string();
 
                                         // If we were switching devices, this marks completion
-                                        if self.device_state == DeviceState::Switching {
+                                        if matches!(
+                                            self.device_state,
+                                            DeviceState::Switching { .. }
+                                        ) {
                                             info!("Device switch completed to: {actual_device}");
                                         }
-                                        self.device_state = DeviceState::Ready;
+                                        self.set_device_ready();
                                     }
 
                                     // Handle model readiness - clear switching state
@@ -857,10 +876,10 @@ impl AppModel {
                                 "device_switch_error" | "error" => {
                                     warn!("Received device switch error event: {:?}", event.data);
                                     // Reset device state from switching to ready
-                                    if self.device_state == DeviceState::Switching {
+                                    if matches!(self.device_state, DeviceState::Switching { .. }) {
                                         info!("Device switch failed, reverting to ready state");
                                     }
-                                    self.device_state = DeviceState::Ready;
+                                    self.set_device_ready();
                                     if let Some(error_msg) =
                                         event.data.get("error").and_then(|e| e.as_str())
                                     {
@@ -892,11 +911,38 @@ impl AppModel {
                                     info!("Received switching_device event: {:?}", event.data);
                                     // Keep device_state as Switching and wait for "ready" event
                                     // This event just confirms the switch is in progress
-                                    if self.device_state != DeviceState::Switching {
+                                    if !matches!(self.device_state, DeviceState::Switching { .. }) {
                                         warn!(
                                             "Received switching_device event but not in switching state"
                                         );
-                                        self.device_state = DeviceState::Switching;
+                                        if let Some(to_device) =
+                                            event.data.get("to_device").and_then(|d| d.as_str())
+                                        {
+                                            self.set_device_switching(
+                                                to_device.to_string(),
+                                                "Switching device...".to_string(),
+                                            );
+                                        }
+                                    }
+                                }
+                                "loading_model_for_device" => {
+                                    info!(
+                                        "Received loading_model_for_device event: {:?}",
+                                        event.data
+                                    );
+                                    if let (Some(target_device), Some(model)) = (
+                                        event.data.get("target_device").and_then(|d| d.as_str()),
+                                        event.data.get("model").and_then(|m| m.as_str()),
+                                    ) {
+                                        let status_message = format!(
+                                            "Loading {} on {}...",
+                                            model,
+                                            if target_device == "cpu" { "CPU" } else { "GPU" }
+                                        );
+                                        self.set_device_switching(
+                                            target_device.to_string(),
+                                            status_message,
+                                        );
                                     }
                                 }
                                 _ => {
@@ -983,7 +1029,7 @@ impl AppModel {
         match message {
             Message::DeviceSelected(device) => {
                 if device != self.current_device && self.device_state == DeviceState::Ready {
-                    self.device_state = DeviceState::Switching;
+                    self.set_device_switching(device.clone(), "Switching device...".to_string());
                     self.last_device_switch = Some(std::time::Instant::now());
 
                     info!("Switching to device: {device}");
@@ -1014,7 +1060,7 @@ impl AppModel {
                             Err(e) => cosmic::Action::App(Message::DeviceError(e)),
                         },
                     )
-                } else if self.device_state == DeviceState::Switching {
+                } else if matches!(self.device_state, DeviceState::Switching { .. }) {
                     warn!("Device switch already in progress - ignoring");
                     Task::none()
                 } else {
@@ -1024,7 +1070,7 @@ impl AppModel {
 
             Message::DeviceLoaded(device) => {
                 self.current_device = device;
-                self.device_state = DeviceState::Ready;
+                self.set_device_ready();
                 Task::none()
             }
 
@@ -1033,19 +1079,19 @@ impl AppModel {
                 self.current_device.clone_from(&device);
                 self.available_devices.clone_from(&available_devices);
 
-                if self.device_state == DeviceState::Switching {
+                if matches!(self.device_state, DeviceState::Switching { .. }) {
                     info!("Device switch completed to: {device}");
                     self.device_state = DeviceState::Cooldown;
                     // No need to reload models - device switch complete and model state maintained via events
                     Task::none()
                 } else {
-                    self.device_state = DeviceState::Ready;
+                    self.set_device_ready();
                     Task::none()
                 }
             }
 
             Message::DeviceError(err) => {
-                self.device_state = DeviceState::Ready;
+                self.set_device_ready();
                 self.transcription_text = format!("Device Error: {err}");
                 Task::none()
             }

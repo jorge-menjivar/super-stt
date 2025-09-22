@@ -278,21 +278,36 @@ fn unified_model_management_widget<'a>(
     model_operation_state: &'a ModelOperationState,
     current_device: &'a str,
     available_devices: &'a [String],
-    device_switching: bool,
+    device_state: &'a crate::core::app::DeviceState,
 ) -> Element<'a, Message> {
     let mut section = settings::section().title("Speech-to-Text Model");
 
     match model_operation_state {
         ModelOperationState::Ready => {
-            // Show normal model and device selection controls
-            section = add_model_selection_controls(
-                section,
-                available_models,
-                current_model,
-                current_device,
-                available_devices,
-                device_switching,
-            );
+            // Check if device is switching and show device loading instead
+            if let crate::core::app::DeviceState::Switching {
+                target_device,
+                status_message,
+            } = device_state
+            {
+                // Show device loading status
+                section = add_device_loading_status_display(section, target_device, status_message);
+            } else {
+                // Show normal model and device selection controls
+                let device_switching = matches!(
+                    device_state,
+                    crate::core::app::DeviceState::Switching { .. }
+                        | crate::core::app::DeviceState::Cooldown
+                );
+                section = add_model_selection_controls(
+                    section,
+                    available_models,
+                    current_model,
+                    current_device,
+                    available_devices,
+                    device_switching,
+                );
+            }
         }
         ModelOperationState::Downloading {
             target_model,
@@ -495,6 +510,33 @@ fn add_loading_status_display<'a>(
     section
 }
 
+/// Add device loading status display to the section
+fn add_device_loading_status_display<'a>(
+    mut section: settings::Section<'a, Message>,
+    target_device: &str,
+    status_message: &str,
+) -> settings::Section<'a, Message> {
+    let device_display = if target_device == "cpu" {
+        "CPU"
+    } else if target_device == "cuda" {
+        "CUDA GPU"
+    } else {
+        target_device
+    };
+
+    let status_text = format!("Switching to {device_display}: {status_message}");
+
+    let details_widget = column![
+        text::body(status_text),
+        widget::progress_bar(0.0..=1.0, 0.5) // Indeterminate progress
+            .width(Length::Fill),
+    ]
+    .spacing(10);
+
+    section = section.add(settings::flex_item("Status", details_widget));
+    section
+}
+
 /// Settings page view using cosmic-settings style
 #[allow(clippy::too_many_arguments)]
 pub fn page<'a>(
@@ -505,7 +547,7 @@ pub fn page<'a>(
     model_operation_state: &'a ModelOperationState,
     current_device: &'a str,
     available_devices: &'a [String],
-    device_switching: bool,
+    device_state: &'a crate::core::app::DeviceState,
     preview_typing_enabled: bool,
 ) -> Element<'a, Message> {
     let sections = vec![
@@ -517,7 +559,7 @@ pub fn page<'a>(
             model_operation_state,
             current_device,
             available_devices,
-            device_switching,
+            device_state,
         ),
     ];
     let sections_view = settings::view_column(sections);
