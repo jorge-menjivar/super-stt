@@ -9,6 +9,10 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BOLD='\033[1m'
+BLINK='\033[5m'
+BG_YELLOW='\033[43m'
+BG_RED='\033[41m'
 NC='\033[0m'
 
 # Default values
@@ -537,16 +541,16 @@ check_cuda_availability() {
 
                 # Check for CUDA toolkit libraries
                 if ! check_cuda_libraries; then
-                    print_warn "=========================================="
-                    print_warn "NVIDIA GPU detected but CUDA toolkit missing!"
-                    print_warn "=========================================="
+                    echo ""
+                    echo -e "${BLINK}${BOLD}${BG_YELLOW}${RED}  ⚠️  WARNING ⚠️  ${NC}"
+                    echo -e "${BOLD}${YELLOW}══════════════════════════════════════════════════════════${NC}"
+                    echo -e "${BOLD}${YELLOW}${NC}  ${BOLD}${RED}🚨🚨🚨 CUDA toolkit missing! 🚨🚨🚨${NC}  ${BOLD}${YELLOW}${NC}"
+                    echo -e "${BOLD}${YELLOW}══════════════════════════════════════════════════════════${NC}"
                     print_warn ""
-                    print_warn "Your system has:"
-                    print_warn "  ✅ NVIDIA GPU with driver"
-                    print_warn "  ✅ CUDA runtime $cuda_version"
-                    print_warn "  ❌ CUDA toolkit libraries (needed for GPU acceleration)"
+                    print_warn "An NVIDIA GPU was detected, but no CUDA toolkit was found!"
+                    print_warn "Please install the CUDA toolkit to enable GPU acceleration:"
                     print_warn ""
-                    print_warn "To enable GPU acceleration, install CUDA toolkit:"
+
 
                     # Detect distribution and show appropriate command
                     if command -v apt-get &> /dev/null; then
@@ -561,7 +565,14 @@ check_cuda_availability() {
                     else
                         print_warn "  Install CUDA toolkit for your distribution"
                     fi
+                    print_warn ""
+                    print_warn "After installing the CUDA toolkit, run this script again to enable GPU acceleration."
 
+                    print_warn ""
+                    print_warn "Your system has:"
+                    print_warn "  ✅ NVIDIA GPU with driver"
+                    print_warn "  ✅ CUDA runtime $cuda_version"
+                    print_warn "  ❌ CUDA toolkit libraries (needed for GPU acceleration)"
                     print_warn ""
                     print_warn "Documentation: https://github.com/jorge-menjivar/super-stt#cuda-gpu-acceleration"
                     print_warn ""
