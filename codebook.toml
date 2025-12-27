@@ -12,6 +12,7 @@ words = [
     "mistralai",
     "openai",
     "safetensors",
+    "serde",
     "stt",
     "sttd",
     "tekken",

@@ -18,13 +18,13 @@
 
     # Shared dependencies with common versions
     # Candle ML framework (for daemon)
-    candle-core         = { git = "https://github.com/huggingface/candle.git", branch = "main" }
-    candle-nn           = { git = "https://github.com/huggingface/candle.git", branch = "main" }
-    candle-transformers = { git = "https://github.com/huggingface/candle.git", branch = "main" }
-    candle-flash-attn   = { git = "https://github.com/huggingface/candle.git", branch = "main" }
+    candle-core         = { git = "https://github.com/jorge-menjivar/candle.git", commit = "8871ff3753ffa5cf2017308bd92c1f0ef8fabeef" }
+    candle-nn           = { git = "https://github.com/jorge-menjivar/candle.git", commit = "8871ff3753ffa5cf2017308bd92c1f0ef8fabeef" }
+    candle-transformers = { git = "https://github.com/jorge-menjivar/candle.git", commit = "8871ff3753ffa5cf2017308bd92c1f0ef8fabeef" }
+    candle-flash-attn   = { git = "https://github.com/jorge-menjivar/candle.git", commit = "8871ff3753ffa5cf2017308bd92c1f0ef8fabeef" }
 
     # Tokenizers (for daemon)
-    tokenizers = "0.21.4"
+    tokenizers = "0.22.2"
     tekken-rs  = "0.1.1"
 
     anyhow = "1.0.98"
@@ -67,7 +67,7 @@
     rustfft           = "6.4.0"
 
     # Input simulation (for client)
-    enigo = { version = "0.5.0", default-features = false, features = [
+    enigo = { version = "0.6.1", default-features = false, features = [
       "wayland",
     ] }
 
