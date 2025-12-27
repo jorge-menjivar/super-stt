@@ -166,7 +166,7 @@ jobs:
           tar -czf super-stt-${{ matrix.target }}-${{ matrix.suffix }}.tar.gz -C dist .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: super-stt-${{ matrix.target }}-${{ matrix.suffix }}
           path: super-stt-${{ matrix.target }}-${{ matrix.suffix }}.tar.gz
