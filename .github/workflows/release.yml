@@ -64,8 +64,7 @@ jobs:
 
           # x86_64 CUDA+cuDNN builds with different compute capabilities
           - target: x86_64-unknown-linux-gnu
-            # TODO: cuDNN support in candle is broken for CUDA cap 75. We build without cuDNN for now. Add the cudnn feature once fixed in candle.
-            features: "cuda"
+            features: "cuda,cudnn"
             suffix: cuda-cudnn-sm75
             runner: ubuntu-latest
             cuda_cap: "75" # RTX 2080, T4, Quadro RTX series
@@ -124,7 +123,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cuda:12.7.0-cudnn-devel-ubuntu22.04-${{ matrix.target }}-${{ matrix.suffix }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: cuda:12.8.0-cudnn-devel-ubuntu22.04-${{ matrix.target }}-${{ matrix.suffix }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install cross (for cross-compilation)
         run: cargo install cross --git https://github.com/cross-rs/cross
