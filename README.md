@@ -169,7 +169,7 @@ See [https://rpmfusion.org/Howto/CUDA](https://rpmfusion.org/Howto/CUDA)
 
 #### Arch Linux
 ```bash
-sudo pacman -S cuda cuda-tools
+sudo pacman -S cuda
 ```
 
 **Note**: If you already have the CUDA toolkit installed, but the installation script still cannot find it, please create a new issue. Thanks!
