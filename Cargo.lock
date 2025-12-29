@@ -662,9 +662,8 @@ dependencies = [
 
 [[package]]
 name = "bindgen_cuda"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f8489af5b7d17a81bffe37e0f4d6e1e4de87c87329d05447f22c35d95a1227d"
+version = "0.1.7"
+source = "git+https://github.com/jorge-menjivar/bindgen_cuda.git?branch=cuda-locations#168db1f397ac0a2f2b7252efbea0cf32446d0f48"
 dependencies = [
  "glob",
  "num_cpus",
@@ -852,21 +851,22 @@ dependencies = [
 [[package]]
 name = "candle-core"
 version = "0.9.2-alpha.1"
-source = "git+https://github.com/huggingface/candle.git?tag=0.9.2-alpha.1#d312da234440ca64fb64c38ba57588a692f58caf"
+source = "git+https://github.com/jorge-menjivar/candle.git?branch=bindgen-2#3ad2a4f4159b2edb9dbf546fdf9c028ccc32a6e1"
 dependencies = [
  "byteorder",
  "candle-kernels",
- "cudarc",
- "float8 0.4.2",
+ "cudarc 0.18.2",
+ "float8 0.5.0",
  "gemm",
  "half",
+ "libm",
  "memmap2 0.9.7",
  "num-traits",
  "num_cpus",
  "rand 0.9.2",
  "rand_distr",
  "rayon",
- "safetensors",
+ "safetensors 0.6.2",
  "thiserror 1.0.69",
  "ug",
  "ug-cuda",
@@ -877,7 +877,7 @@ dependencies = [
 [[package]]
 name = "candle-flash-attn"
 version = "0.9.2-alpha.1"
-source = "git+https://github.com/huggingface/candle.git?tag=0.9.2-alpha.1#d312da234440ca64fb64c38ba57588a692f58caf"
+source = "git+https://github.com/jorge-menjivar/candle.git?branch=bindgen-2#3ad2a4f4159b2edb9dbf546fdf9c028ccc32a6e1"
 dependencies = [
  "anyhow",
  "bindgen_cuda",
@@ -888,7 +888,7 @@ dependencies = [
 [[package]]
 name = "candle-kernels"
 version = "0.9.2-alpha.1"
-source = "git+https://github.com/huggingface/candle.git?tag=0.9.2-alpha.1#d312da234440ca64fb64c38ba57588a692f58caf"
+source = "git+https://github.com/jorge-menjivar/candle.git?branch=bindgen-2#3ad2a4f4159b2edb9dbf546fdf9c028ccc32a6e1"
 dependencies = [
  "bindgen_cuda",
 ]
@@ -896,14 +896,14 @@ dependencies = [
 [[package]]
 name = "candle-nn"
 version = "0.9.2-alpha.1"
-source = "git+https://github.com/huggingface/candle.git?tag=0.9.2-alpha.1#d312da234440ca64fb64c38ba57588a692f58caf"
+source = "git+https://github.com/jorge-menjivar/candle.git?branch=bindgen-2#3ad2a4f4159b2edb9dbf546fdf9c028ccc32a6e1"
 dependencies = [
  "candle-core",
  "half",
  "libc",
  "num-traits",
  "rayon",
- "safetensors",
+ "safetensors 0.6.2",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -911,7 +911,7 @@ dependencies = [
 [[package]]
 name = "candle-transformers"
 version = "0.9.2-alpha.1"
-source = "git+https://github.com/huggingface/candle.git?tag=0.9.2-alpha.1#d312da234440ca64fb64c38ba57588a692f58caf"
+source = "git+https://github.com/jorge-menjivar/candle.git?branch=bindgen-2#3ad2a4f4159b2edb9dbf546fdf9c028ccc32a6e1"
 dependencies = [
  "byteorder",
  "candle-core",
@@ -1535,6 +1535,16 @@ name = "cudarc"
 version = "0.17.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf99ab37ee7072d64d906aa2dada9a3422f1d975cdf8c8055a573bc84897ed8"
+dependencies = [
+ "half",
+ "libloading",
+]
+
+[[package]]
+name = "cudarc"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3aa12038120eb13347a6ae2ffab1d34efe78150125108627fd85044dd4d6ff1e"
 dependencies = [
  "float8 0.3.0",
  "half",
@@ -2170,11 +2180,11 @@ dependencies = [
 
 [[package]]
 name = "float8"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4203231de188ebbdfb85c11f3c20ca2b063945710de04e7b59268731e728b462"
+checksum = "ba2e52f316a4ed4cbceb9b724b138a4ea4051f1737dac516f08ff1b437e3db0c"
 dependencies = [
- "cudarc",
+ "cudarc 0.18.2",
  "half",
  "num-traits",
  "rand 0.9.2",
@@ -5819,6 +5829,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "safetensors"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "172dd94c5a87b5c79f945c863da53b2ebc7ccef4eca24ac63cca66a41aab2178"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7167,7 +7187,7 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "rayon",
- "safetensors",
+ "safetensors 0.4.5",
  "serde",
  "thiserror 1.0.69",
  "tracing",
@@ -7180,7 +7200,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f0a1fa748f26166778c33b8498255ebb7c6bffb472bcc0a72839e07ebb1d9b5"
 dependencies = [
- "cudarc",
+ "cudarc 0.17.8",
  "half",
  "serde",
  "thiserror 1.0.69",
