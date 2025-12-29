@@ -18,10 +18,10 @@
 
     # Shared dependencies with common versions
     # Candle ML framework (for daemon)
-    candle-core         = { git = "https://github.com/jorge-menjivar/candle.git", commit = "8871ff3753ffa5cf2017308bd92c1f0ef8fabeef" }
-    candle-nn           = { git = "https://github.com/jorge-menjivar/candle.git", commit = "8871ff3753ffa5cf2017308bd92c1f0ef8fabeef" }
-    candle-transformers = { git = "https://github.com/jorge-menjivar/candle.git", commit = "8871ff3753ffa5cf2017308bd92c1f0ef8fabeef" }
-    candle-flash-attn   = { git = "https://github.com/jorge-menjivar/candle.git", commit = "8871ff3753ffa5cf2017308bd92c1f0ef8fabeef" }
+    candle-core         = { git = "https://github.com/huggingface/candle.git", tag = "0.9.2-alpha.1" }
+    candle-nn           = { git = "https://github.com/huggingface/candle.git", tag = "0.9.2-alpha.1" }
+    candle-transformers = { git = "https://github.com/huggingface/candle.git", tag = "0.9.2-alpha.1" }
+    candle-flash-attn   = { git = "https://github.com/huggingface/candle.git", tag = "0.9.2-alpha.1" }
 
     # Tokenizers (for daemon)
     tokenizers = "0.22.2"
