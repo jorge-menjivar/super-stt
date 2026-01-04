@@ -198,7 +198,7 @@ async fn download_and_hash_with_cancellation(
             .bytes_downloaded
             .store(downloaded, Ordering::Relaxed);
 
-        if downloaded % (1024 * 1024) == 0 {
+        if downloaded.is_multiple_of(1024 * 1024) {
             let tracker_clone = Arc::clone(&tracker);
             tokio::spawn(async move {
                 tracker_clone.broadcast_progress().await;

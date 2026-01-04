@@ -115,6 +115,44 @@ check_cuda_libraries() {
     fi
 }
 
+# Detect CUDA major version (12 or 13) based on installed libraries
+detect_cuda_major_version() {
+    # Check for CUDA 13 libraries first (newer)
+    if ldconfig -p 2>/dev/null | grep -q "libcublas.so.13" || \
+       find /usr/local/cuda/lib* /usr/lib* /lib* -name "libcublas.so.13*" 2>/dev/null | grep -q .; then
+        echo "13"
+        return
+    fi
+
+    # Check for CUDA 12 libraries
+    if ldconfig -p 2>/dev/null | grep -q "libcublas.so.12" || \
+       find /usr/local/cuda/lib* /usr/lib* /lib* -name "libcublas.so.12*" 2>/dev/null | grep -q .; then
+        echo "12"
+        return
+    fi
+
+    # Fallback: try to detect from nvcc or cuda version file
+    if command -v nvcc &> /dev/null; then
+        local nvcc_version=$(nvcc --version 2>/dev/null | grep "release" | sed 's/.*release \([0-9]*\)\..*/\1/')
+        if [ -n "$nvcc_version" ]; then
+            echo "$nvcc_version"
+            return
+        fi
+    fi
+
+    # Check CUDA version file
+    if [ -f /usr/local/cuda/version.txt ]; then
+        local cuda_ver=$(cat /usr/local/cuda/version.txt | grep -oP 'CUDA Version \K[0-9]+')
+        if [ -n "$cuda_ver" ]; then
+            echo "$cuda_ver"
+            return
+        fi
+    fi
+
+    # Default to CUDA 12 as it's more widely available
+    echo "12"
+}
+
 # Detect CUDA/cuDNN availability and compute capability
 detect_cuda() {
     if command -v nvidia-smi &> /dev/null; then
@@ -133,6 +171,10 @@ detect_cuda() {
 
             print_info "CUDA toolkit libraries found" >&2
 
+            # Detect CUDA major version (12 or 13)
+            local cuda_major=$(detect_cuda_major_version)
+            print_info "CUDA toolkit major version: $cuda_major" >&2
+
             # Detect compute capability
             local compute_cap=$(detect_gpu_compute_cap)
 
@@ -146,20 +188,20 @@ detect_cuda() {
 
             if [ -n "$compute_cap" ]; then
                 if [ "$CUDNN_FOUND" = true ]; then
-                    print_info "cuDNN found - using cuda-cudnn-sm${compute_cap} variant" >&2
-                    echo "cuda-cudnn-sm${compute_cap}"
+                    print_info "cuDNN found - using cuda${cuda_major}-cudnn-sm${compute_cap} variant" >&2
+                    echo "cuda${cuda_major}-cudnn-sm${compute_cap}"
                 else
-                    print_info "cuDNN not found - using cuda-sm${compute_cap} variant" >&2
-                    echo "cuda-sm${compute_cap}"
+                    print_info "cuDNN not found - using cuda${cuda_major}-sm${compute_cap} variant" >&2
+                    echo "cuda${cuda_major}-sm${compute_cap}"
                 fi
             else
                 # Fallback to generic CUDA variants
                 if [ "$CUDNN_FOUND" = true ]; then
-                    print_info "cuDNN found - using generic cuda-cudnn-sm75 variant" >&2
-                    echo "cuda-cudnn-sm75"
+                    print_info "cuDNN found - using generic cuda${cuda_major}-cudnn-sm75 variant" >&2
+                    echo "cuda${cuda_major}-cudnn-sm75"
                 else
-                    print_info "cuDNN not found - using generic cuda-sm75 variant" >&2
-                    echo "cuda-sm75"
+                    print_info "cuDNN not found - using generic cuda${cuda_major}-sm75 variant" >&2
+                    echo "cuda${cuda_major}-sm75"
                 fi
             fi
         else
@@ -642,29 +684,48 @@ download_with_fallback() {
 
     print_info "Trying to download: $tarball_name" >&2
 
-    if curl -L -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
+    if curl -L -f -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
         echo "$tarball_name"
         return 0
     fi
 
     # If specific compute capability failed, try fallbacks
-    if [[ "$variant" =~ cuda.*-sm[0-9]+ ]]; then
-        local base_variant
-        if [[ "$variant" =~ cuda-cudnn ]]; then
-            base_variant="cuda-cudnn-sm75"  # Most compatible cuDNN variant
-        else
-            base_variant="cuda-sm75"        # Most compatible CUDA variant
-        fi
+    # Variant format: cuda{12,13}[-cudnn]-sm{75,80,86,89,90,100,120}
+    if [[ "$variant" =~ ^cuda([0-9]+)(-cudnn)?-sm([0-9]+)$ ]]; then
+        local cuda_ver="${BASH_REMATCH[1]}"
+        local cudnn_part="${BASH_REMATCH[2]}"  # Either "-cudnn" or empty
+        local sm_cap="${BASH_REMATCH[3]}"
 
+        # Try fallback to sm75 with same CUDA version
+        local base_variant="cuda${cuda_ver}${cudnn_part}-sm75"
         if [ "$variant" != "$base_variant" ]; then
             print_warn "Specific compute capability variant not found, trying $base_variant" >&2
             tarball_name="super-stt-${arch}-${base_variant}.tar.gz"
             download_url="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$tarball_name"
 
-            if curl -L -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
+            if curl -L -f -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
                 echo "$tarball_name"
                 return 0
             fi
+        fi
+
+        # Try alternative CUDA version (12 <-> 13)
+        local alt_cuda_ver
+        if [ "$cuda_ver" = "13" ]; then
+            alt_cuda_ver="12"
+        else
+            alt_cuda_ver="13"
+        fi
+
+        local alt_variant="cuda${alt_cuda_ver}${cudnn_part}-sm75"
+        print_warn "CUDA $cuda_ver variants not found, trying CUDA $alt_cuda_ver ($alt_variant)" >&2
+        tarball_name="super-stt-${arch}-${alt_variant}.tar.gz"
+        download_url="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$tarball_name"
+
+        if curl -L -f -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
+            print_warn "Using CUDA $alt_cuda_ver build - may have compatibility issues" >&2
+            echo "$tarball_name"
+            return 0
         fi
 
         # Last resort: try CPU variant
@@ -672,7 +733,7 @@ download_with_fallback() {
         tarball_name="super-stt-${arch}-cpu.tar.gz"
         download_url="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$tarball_name"
 
-        if curl -L -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
+        if curl -L -f -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
             echo "$tarball_name"
             return 0
         fi
@@ -688,12 +749,12 @@ if [ -z "$DOWNLOADED_TARBALL" ]; then
     print_error "Failed to download any compatible variant"
     print_error "Tried URLs:"
     print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-${VARIANT}.tar.gz"
-    if [[ "$VARIANT" =~ cuda.*-sm[0-9]+ ]]; then
-        if [[ "$VARIANT" =~ cuda-cudnn ]]; then
-            print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-cuda-cudnn-sm75.tar.gz"
-        else
-            print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-cuda-sm75.tar.gz"
-        fi
+    if [[ "$VARIANT" =~ ^cuda([0-9]+)(-cudnn)?-sm([0-9]+)$ ]]; then
+        err_cuda_ver="${BASH_REMATCH[1]}"
+        err_cudnn_part="${BASH_REMATCH[2]}"
+        err_alt_cuda_ver=$([[ "$err_cuda_ver" == "13" ]] && echo "12" || echo "13")
+        print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-cuda${err_cuda_ver}${err_cudnn_part}-sm75.tar.gz"
+        print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-cuda${err_alt_cuda_ver}${err_cudnn_part}-sm75.tar.gz"
         print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-cpu.tar.gz"
     fi
     exit 1

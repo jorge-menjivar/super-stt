@@ -25,9 +25,18 @@ pub static DEFAULT_MODEL: LazyLock<STTModel> = LazyLock::new(|| STTModel::Whispe
 pub static DEFAULT_MODEL_STR: LazyLock<&'static str> =
     LazyLock::new(|| Box::leak(DEFAULT_MODEL.to_string().into_boxed_str()));
 
+// Build variant (e.g., "cuda13-cudnn-sm89", "cuda12-sm75", "cpu")
+pub const BUILD_VARIANT: &str = env!("BUILD_VARIANT");
+
+// Version string including build variant
+pub static VERSION_STRING: LazyLock<String> = LazyLock::new(|| {
+    format!("{} ({})", env!("CARGO_PKG_VERSION"), BUILD_VARIANT)
+});
+
 #[must_use]
 pub fn build() -> Command {
     command!()
+    .version(VERSION_STRING.as_str())
     .about("🎙️ Super STT Daemon - Advanced Speech-to-text for Linux")
     .long_about(
         "A high-performance speech-to-text daemon that loads a STT model once and keeps it in memory, serving transcription requests via Unix domain socket."

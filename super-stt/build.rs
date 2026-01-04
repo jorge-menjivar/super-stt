@@ -1,4 +1,29 @@
 fn main() {
+    // Determine build variant
+    let build_variant = if let Ok(variant) = std::env::var("BUILD_VARIANT") {
+        // Use explicit BUILD_VARIANT if provided (from CI)
+        variant
+    } else {
+        // Construct variant from features and CUDA_COMPUTE_CAP
+        let cuda_enabled = std::env::var("CARGO_FEATURE_CUDA").is_ok();
+        let cudnn_enabled = std::env::var("CARGO_FEATURE_CUDNN").is_ok();
+        let cuda_cap = std::env::var("CUDA_COMPUTE_CAP").ok();
+
+        if cuda_enabled {
+            let cudnn_part = if cudnn_enabled { "-cudnn" } else { "" };
+            if let Some(cap) = cuda_cap {
+                format!("cuda{cudnn_part}-sm{cap}")
+            } else {
+                format!("cuda{cudnn_part}")
+            }
+        } else {
+            "cpu".to_string()
+        }
+    };
+
+    println!("cargo:rustc-env=BUILD_VARIANT={build_variant}");
+    println!("cargo:warning=Build variant: {build_variant}");
+
     // Print the CUDA compute capability during build
     if let Ok(cuda_cap) = std::env::var("CUDA_COMPUTE_CAP") {
         println!("cargo:warning=Building with CUDA_COMPUTE_CAP={cuda_cap}");

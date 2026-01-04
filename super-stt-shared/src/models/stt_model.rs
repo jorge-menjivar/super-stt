@@ -10,6 +10,7 @@ use strum_macros::{AsRefStr, EnumCount, EnumIter, VariantArray, VariantNames};
     Clone,
     Copy,
     Debug,
+    Default,
     PartialEq,
     Eq,
     ValueEnum,
@@ -21,6 +22,7 @@ use strum_macros::{AsRefStr, EnumCount, EnumIter, VariantArray, VariantNames};
 )]
 pub enum STTModel {
     #[value(name = "whisper-tiny")]
+    #[default]
     WhisperTiny,
     #[value(name = "whisper-tiny.en")]
     WhisperTinyEn,
@@ -56,12 +58,6 @@ pub enum STTModel {
     VoxtralSmall,
     #[value(name = "voxtral-mini")]
     VoxtralMini,
-}
-
-impl Default for STTModel {
-    fn default() -> Self {
-        Self::WhisperTiny
-    }
 }
 
 impl std::fmt::Display for STTModel {

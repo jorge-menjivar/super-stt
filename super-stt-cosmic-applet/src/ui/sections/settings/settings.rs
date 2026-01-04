@@ -46,7 +46,7 @@ pub fn create_audio_theme_selector<'a>(
     revealer(
         *is_open == IsOpen::AudioTheme,
         "Audio Theme".to_string(),
-        selected_theme.pretty_name().to_string(),
+        selected_theme.pretty_name().clone(),
         &options,
         Message::RevealerToggle(IsOpen::AudioTheme),
         |theme_str| Message::SetAudioTheme(theme_str.parse::<AudioTheme>().unwrap_or_default()),

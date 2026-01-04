@@ -107,7 +107,7 @@ impl RequestHistory {
         self.timestamps.push(now);
 
         // Clean up old entries if needed (every 10 requests or 5 minutes)
-        if self.timestamps.len() % 10 == 0
+        if self.timestamps.len().is_multiple_of(10)
             || now.signed_duration_since(self.last_cleanup) > Duration::minutes(5)
         {
             self.cleanup_old_entries(now, window_seconds * 60); // Keep 60 windows of history

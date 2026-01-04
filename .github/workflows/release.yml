@@ -24,80 +24,159 @@ jobs:
             suffix: cpu
             runner: ubuntu-latest
             cuda_cap: ""
+            cuda_image: ""
 
-          # x86_64 CUDA builds with different compute capabilities
+          # x86_64 CUDA 12 builds with different compute capabilities
           - target: x86_64-unknown-linux-gnu
             features: "cuda"
-            suffix: cuda-sm75
+            suffix: cuda12-sm75
             runner: ubuntu-latest
             cuda_cap: "75" # RTX 2080, T4, Quadro RTX series
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
           - target: x86_64-unknown-linux-gnu
             features: "cuda"
-            suffix: cuda-sm80
+            suffix: cuda12-sm80
             runner: ubuntu-latest
             cuda_cap: "80" # A100, A30
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
           - target: x86_64-unknown-linux-gnu
             features: "cuda"
-            suffix: cuda-sm86
+            suffix: cuda12-sm86
             runner: ubuntu-latest
             cuda_cap: "86" # RTX 3060-3090, A40, RTX A2000-A6000
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
           - target: x86_64-unknown-linux-gnu
             features: "cuda"
-            suffix: cuda-sm89
+            suffix: cuda12-sm89
             runner: ubuntu-latest
             cuda_cap: "89" # RTX 4050-4090, RTX Ada series, L4, L40
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
           - target: x86_64-unknown-linux-gnu
             features: "cuda"
-            suffix: cuda-sm90
+            suffix: cuda12-sm90
             runner: ubuntu-latest
             cuda_cap: "90" # H100, H200, GH200
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda-sm100
-            runner: ubuntu-latest
-            cuda_cap: "100" # B200, GB200
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda-sm120
-            runner: ubuntu-latest
-            cuda_cap: "120" # RTX 5050-5090, RTX PRO Blackwell series
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
 
-          # x86_64 CUDA+cuDNN builds with different compute capabilities
+          # x86_64 CUDA 12 + cuDNN builds with different compute capabilities
           - target: x86_64-unknown-linux-gnu
             features: "cuda,cudnn"
-            suffix: cuda-cudnn-sm75
+            suffix: cuda12-cudnn-sm75
             runner: ubuntu-latest
             cuda_cap: "75" # RTX 2080, T4, Quadro RTX series
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
           - target: x86_64-unknown-linux-gnu
             features: "cuda,cudnn"
-            suffix: cuda-cudnn-sm80
+            suffix: cuda12-cudnn-sm80
             runner: ubuntu-latest
             cuda_cap: "80" # A100, A30
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
           - target: x86_64-unknown-linux-gnu
             features: "cuda,cudnn"
-            suffix: cuda-cudnn-sm86
+            suffix: cuda12-cudnn-sm86
             runner: ubuntu-latest
             cuda_cap: "86" # RTX 3060-3090, A40, RTX A2000-A6000
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
           - target: x86_64-unknown-linux-gnu
             features: "cuda,cudnn"
-            suffix: cuda-cudnn-sm89
+            suffix: cuda12-cudnn-sm89
             runner: ubuntu-latest
             cuda_cap: "89" # RTX 4050-4090, RTX Ada series, L4, L40
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
           - target: x86_64-unknown-linux-gnu
             features: "cuda,cudnn"
-            suffix: cuda-cudnn-sm90
+            suffix: cuda12-cudnn-sm90
             runner: ubuntu-latest
             cuda_cap: "90" # H100, H200, GH200
+            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
+
+          # x86_64 CUDA 13 builds with different compute capabilities
           - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda-cudnn-sm100
+            features: "cuda"
+            suffix: cuda13-sm75
+            runner: ubuntu-latest
+            cuda_cap: "75" # RTX 2080, T4, Quadro RTX series
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda"
+            suffix: cuda13-sm80
+            runner: ubuntu-latest
+            cuda_cap: "80" # A100, A30
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda"
+            suffix: cuda13-sm86
+            runner: ubuntu-latest
+            cuda_cap: "86" # RTX 3060-3090, A40, RTX A2000-A6000
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda"
+            suffix: cuda13-sm89
+            runner: ubuntu-latest
+            cuda_cap: "89" # RTX 4050-4090, RTX Ada series, L4, L40
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda"
+            suffix: cuda13-sm90
+            runner: ubuntu-latest
+            cuda_cap: "90" # H100, H200, GH200
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda"
+            suffix: cuda13-sm100
             runner: ubuntu-latest
             cuda_cap: "100" # B200, GB200
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
           - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda-cudnn-sm120
+            features: "cuda"
+            suffix: cuda13-sm120
             runner: ubuntu-latest
             cuda_cap: "120" # RTX 5050-5090, RTX PRO Blackwell series
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+
+          # x86_64 CUDA 13 + cuDNN builds with different compute capabilities
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda,cudnn"
+            suffix: cuda13-cudnn-sm75
+            runner: ubuntu-latest
+            cuda_cap: "75" # RTX 2080, T4, Quadro RTX series
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda,cudnn"
+            suffix: cuda13-cudnn-sm80
+            runner: ubuntu-latest
+            cuda_cap: "80" # A100, A30
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda,cudnn"
+            suffix: cuda13-cudnn-sm86
+            runner: ubuntu-latest
+            cuda_cap: "86" # RTX 3060-3090, A40, RTX A2000-A6000
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda,cudnn"
+            suffix: cuda13-cudnn-sm89
+            runner: ubuntu-latest
+            cuda_cap: "89" # RTX 4050-4090, RTX Ada series, L4, L40
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda,cudnn"
+            suffix: cuda13-cudnn-sm90
+            runner: ubuntu-latest
+            cuda_cap: "90" # H100, H200, GH200
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda,cudnn"
+            suffix: cuda13-cudnn-sm100
+            runner: ubuntu-latest
+            cuda_cap: "100" # B200, GB200
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
+          - target: x86_64-unknown-linux-gnu
+            features: "cuda,cudnn"
+            suffix: cuda13-cudnn-sm120
+            runner: ubuntu-latest
+            cuda_cap: "120" # RTX 5050-5090, RTX PRO Blackwell series
+            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
 
           # aarch64 builds - CPU only (CUDA not commonly used on ARM)
           - target: aarch64-unknown-linux-gnu
@@ -105,6 +184,7 @@ jobs:
             suffix: cpu
             runner: ubuntu-latest
             cuda_cap: ""
+            cuda_image: ""
 
     runs-on: ${{ matrix.runner }}
 
@@ -123,14 +203,18 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cuda:13.0.2-cudnn-devel-ubuntu22.04-${{ matrix.target }}-${{ matrix.suffix }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.target }}-${{ matrix.suffix }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install cross (for cross-compilation)
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build daemon binary
+        env:
+          BUILD_VARIANT: ${{ matrix.suffix }}
+          CUDA_COMPUTE_CAP: ${{ matrix.cuda_cap }}
+          CROSS_TARGET_X86_64_UNKNOWN_LINUX_GNU_IMAGE: ${{ matrix.cuda_image }}
         run: |
-          CUDA_COMPUTE_CAP=${{ matrix.cuda_cap }} cross build --release --target ${{ matrix.target }} --bin super-stt --features "${{ matrix.features }}"
+          cross build --release --target ${{ matrix.target }} --bin super-stt --features "${{ matrix.features }}"
 
       - name: Build app binary
         run: |

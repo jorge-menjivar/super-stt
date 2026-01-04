@@ -38,7 +38,7 @@ impl SuperSTTDaemon {
         // This prevents get_device from returning the old device during the switch
         {
             let mut w = self.actual_device.write().await;
-            *w = device.to_string();
+            w.clone_from(&device);
         }
 
         // Broadcast device switching status and unload current model
