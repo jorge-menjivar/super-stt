@@ -29,9 +29,8 @@ pub static DEFAULT_MODEL_STR: LazyLock<&'static str> =
 pub const BUILD_VARIANT: &str = env!("BUILD_VARIANT");
 
 // Version string including build variant
-pub static VERSION_STRING: LazyLock<String> = LazyLock::new(|| {
-    format!("{} ({})", env!("CARGO_PKG_VERSION"), BUILD_VARIANT)
-});
+pub static VERSION_STRING: LazyLock<String> =
+    LazyLock::new(|| format!("{} ({})", env!("CARGO_PKG_VERSION"), BUILD_VARIANT));
 
 #[must_use]
 pub fn build() -> Command {
