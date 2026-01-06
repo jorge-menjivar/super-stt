@@ -55,7 +55,7 @@
     strum_macros = "0.27"
 
     # Filesystem utilities
-    toml = "0.9.5"
+    toml = "0.9.6"
     dirs = "6.0.0"
 
     # Audio processing
