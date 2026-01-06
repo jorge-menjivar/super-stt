@@ -75,7 +75,7 @@
 
   # D-Bus integration
   zbus.workspace = true
-  tiktoken-rs    = "0.7.0"
+  tiktoken-rs    = "0.9.1"
 
   # Input simulation
   enigo.workspace = true
