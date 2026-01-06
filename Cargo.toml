@@ -64,7 +64,7 @@
     rubato            = "0.16"
     spectrum-analyzer = "1.7.0"
     symphonia         = { version = "0.5", features = ["all"] }
-    rustfft           = "6.4.0"
+    rustfft           = "6.4.1"
 
     # Input simulation (for client)
     enigo = { version = "0.6.1", default-features = false, features = [
