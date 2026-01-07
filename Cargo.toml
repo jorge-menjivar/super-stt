@@ -60,7 +60,7 @@
 
     # Audio processing
     hound             = "3.5.1"
-    cpal              = "0.16.0"
+    cpal              = "0.17.1"
     rubato            = "0.16"
     spectrum-analyzer = "1.7.0"
     symphonia         = { version = "0.5", features = ["all"] }
