@@ -27,7 +27,7 @@
     tokenizers = "0.22.2"
     tekken-rs  = "0.1.1"
 
-    anyhow = "1.0.98"
+    anyhow = "1.0.100"
     serde = { version = "1.0.219", features = ["derive"] }
     serde_json = "1.0.149"
     thiserror = "2.0"
