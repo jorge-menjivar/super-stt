@@ -9,7 +9,7 @@ use crate::cli;
 use crate::config::DaemonConfig;
 use crate::daemon::types::{DeviceOverride, SuperSTTDaemon};
 use anyhow::{Context, Result};
-use log::{error, info};
+use log::{error, info, warn};
 use std::path::PathBuf;
 use super_stt_shared::stt_model::STTModel;
 use super_stt_shared::theme::AudioTheme;
@@ -220,10 +220,10 @@ async fn handle_status_command(matches: &clap::ArgMatches) -> Result<()> {
     }
 }
 
-/// Send a record request to an existing daemon and exit immediately
+/// Send a record request to an existing daemon and wait for acknowledgment
 async fn send_record_request_to_daemon(socket_path: &PathBuf, write_mode: bool) -> Result<()> {
-    use super_stt_shared::models::protocol::DaemonRequest;
-    use tokio::io::AsyncWriteExt;
+    use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
 
     let mut stream = UnixStream::connect(socket_path)
@@ -255,12 +255,33 @@ async fn send_record_request_to_daemon(socket_path: &PathBuf, write_mode: bool) 
     stream.write_all(&request_size.to_be_bytes()).await?;
     stream.write_all(&request_data).await?;
 
-    // Don't wait for response - just trigger the recording and exit
-    info!("🎤 Recording request sent to daemon");
-    if write_mode {
-        info!("📝 Will type transcription when complete");
+    // Wait for ACK from daemon before exiting
+    let mut size_bytes = [0u8; 8];
+    stream
+        .read_exact(&mut size_bytes)
+        .await
+        .context("Failed to read ACK from daemon")?;
+    let response_size = u64::from_be_bytes(size_bytes);
+    let response_len: usize = usize::try_from(response_size)
+        .context("Response size does not fit into memory on this platform")?;
+    let mut response_data = vec![0u8; response_len];
+    stream
+        .read_exact(&mut response_data)
+        .await
+        .context("Failed to read ACK data from daemon")?;
+    let response: DaemonResponse = serde_json::from_slice(&response_data)?;
+
+    if response.status == "success" {
+        info!("🎤 Recording started by daemon");
+        if write_mode {
+            info!("📝 Will type transcription when complete");
+        }
+    } else {
+        warn!(
+            "Daemon rejected record request: {}",
+            response.message.unwrap_or_default()
+        );
     }
-    info!("💡 Watch the daemon logs for results");
 
     Ok(())
 }

@@ -3,7 +3,7 @@
 use crate::daemon::types::SuperSTTDaemon;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use log::{error, warn};
+use log::{error, info, warn};
 use std::collections::HashMap;
 use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse};
 use super_stt_shared::validation::Validate;
@@ -121,6 +121,28 @@ impl SuperSTTDaemon {
                     error!("Error in persistent client handler: {e}");
                 }
                 return Ok(());
+            }
+
+            // Handle fire-and-forget commands: send ACK immediately, process in background
+            if request.command.as_str() == "record" {
+                let ack = DaemonResponse::success().with_message("Recording started".to_string());
+                if let Err(e) = self.send_response(&mut stream, &ack).await {
+                    warn!("Failed to send record ACK: {e}");
+                    break;
+                }
+
+                let daemon = self.clone();
+                tokio::spawn(async move {
+                    info!("🎤 Background record task started");
+                    let response = daemon.handle_command(request).await;
+                    if response.status != "success" {
+                        warn!(
+                            "Record command failed: {}",
+                            response.message.unwrap_or_default()
+                        );
+                    }
+                });
+                continue;
             }
 
             // Handle regular commands with stream access for authentication
