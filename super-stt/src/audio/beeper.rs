@@ -61,7 +61,7 @@ pub fn play_beep_sequence(
 
     let config = device
         .default_output_config()
-        .map_err(|e| anyhow::anyhow!("Failed to get output config: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to get output config: {e}"))?;
 
     let sample_rate = config.sample_rate().0 as f32;
     let channels = config.channels() as usize;
@@ -248,7 +248,7 @@ pub fn play_beep_sequence(
 
     stream
         .play()
-        .map_err(|e| anyhow::anyhow!("Failed to play beep: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to play beep: {e}"))?;
 
     let beep_start = std::time::Instant::now();
     let beep_timeout = Duration::from_millis((duration_ms * frequencies.len() as u64) + 2000);

@@ -291,8 +291,7 @@ fn transcribe_with_voxtral(
     let audio_dims = audio_features.dims();
     if audio_dims.len() != 3 {
         return Err(anyhow::anyhow!(
-            "Audio features must be 3D tensor (batch, mels, time), got shape: {:?}",
-            audio_dims
+            "Audio features must be 3D tensor (batch, mels, time), got shape: {audio_dims:?}"
         ));
     }
 
@@ -354,7 +353,7 @@ fn transcribe_with_voxtral(
             Some(audio_features), // Audio features will be processed and inserted at audio token position
             config,
         )
-        .map_err(|e| anyhow::anyhow!("Failed to generate tokens: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to generate tokens: {e}"))?;
 
     // Decode only the newly generated tokens (skip input prompt)
     let new_tokens = if generated_tokens.len() > input_len {
@@ -365,7 +364,7 @@ fn transcribe_with_voxtral(
 
     let decoded_text = tokenizer
         .decode(new_tokens, tekken::SpecialTokenPolicy::Ignore)
-        .map_err(|e| anyhow::anyhow!("Failed to decode tokens: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to decode tokens: {e}"))?;
 
     // Post-process the transcription to clean up formatting artifacts
     let transcription = post_process_transcription(&decoded_text)?;

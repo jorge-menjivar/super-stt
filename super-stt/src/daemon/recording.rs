@@ -341,7 +341,7 @@ impl SuperSTTDaemon {
             }
         })
         .await
-        .map_err(|e| anyhow::anyhow!("Preview transcription task failed: {}", e))??;
+        .map_err(|e| anyhow::anyhow!("Preview transcription task failed: {e}"))??;
 
         Ok(result)
     }
@@ -461,7 +461,7 @@ impl SuperSTTDaemon {
                 }
             })
             .await
-            .map_err(|e| anyhow::anyhow!("Transcription task failed: {}", e))?
+            .map_err(|e| anyhow::anyhow!("Transcription task failed: {e}"))?
         };
 
         // Stop spinner if it was started

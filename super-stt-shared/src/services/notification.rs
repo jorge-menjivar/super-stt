@@ -343,7 +343,7 @@ impl NotificationManager {
         let subscriber = self
             .subscribers
             .get(subscriber_id)
-            .ok_or_else(|| anyhow::anyhow!("Subscriber {} not found", subscriber_id))?;
+            .ok_or_else(|| anyhow::anyhow!("Subscriber {subscriber_id} not found"))?;
 
         let sender = subscriber.sender.clone();
         drop(subscriber); // Release the reference early

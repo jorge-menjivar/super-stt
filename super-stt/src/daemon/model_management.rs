@@ -40,7 +40,7 @@ impl SuperSTTDaemon {
         // Wait for either model loading completion, shutdown signal, or timeout (60 seconds)
         let model_result = tokio::select! {
             result = &mut load_handle => {
-                result.map_err(|e| anyhow::anyhow!("Model loading task failed: {}", e))?
+                result.map_err(|e| anyhow::anyhow!("Model loading task failed: {e}"))?
             }
             _ = shutdown_rx.recv() => {
                 warn!("Model loading cancelled due to shutdown - aborting blocking task");

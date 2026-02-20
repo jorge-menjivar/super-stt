@@ -346,7 +346,7 @@ async fn send_status_request_to_daemon(socket_path: &PathBuf) -> Result<()> {
         "error" => {
             let message = response.message.unwrap_or("Unknown error".to_string());
             error!("❌ Error from daemon: {message}");
-            return Err(anyhow::anyhow!("Daemon error: {}", message));
+            return Err(anyhow::anyhow!("Daemon error: {message}"));
         }
         _ => {
             error!("❌ Unexpected response from daemon: {}", response.status);

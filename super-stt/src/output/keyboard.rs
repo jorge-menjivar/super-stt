@@ -42,7 +42,7 @@ impl Simulator {
             let segment: String = chars[i..end].iter().collect();
             self.enigo
                 .text(&segment)
-                .map_err(|e| anyhow::anyhow!("Failed to type segment: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to type segment: {e}"))?;
             i = end;
             std::thread::sleep(std::time::Duration::from_millis(10));
         }

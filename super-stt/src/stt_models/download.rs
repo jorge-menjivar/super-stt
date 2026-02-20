@@ -347,7 +347,7 @@ pub fn get_model_file_paths(model: &STTModel) -> Result<Vec<PathBuf>> {
         if symlink_path.exists() {
             file_paths.push(symlink_path);
         } else {
-            return Err(anyhow::anyhow!("Model file not found: {}", filename));
+            return Err(anyhow::anyhow!("Model file not found: {filename}"));
         }
     }
 

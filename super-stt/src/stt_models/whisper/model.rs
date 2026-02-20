@@ -117,7 +117,7 @@ impl WhisperModel {
 
         // Load tokenizer
         let tokenizer = Tokenizer::from_file(tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {e}"))?;
 
         // Load mel filters (built-in optimized version)
         let mel_bytes = match config.num_mel_bins {
@@ -331,7 +331,7 @@ impl WhisperModel {
         let text = self
             .tokenizer
             .decode(&tokens, true)
-            .map_err(|e| anyhow::anyhow!("Tokenizer decode error: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Tokenizer decode error: {e}"))?;
 
         let text = text.trim_start();
         Ok(text.to_string())

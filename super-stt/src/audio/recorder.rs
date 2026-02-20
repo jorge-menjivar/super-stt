@@ -437,8 +437,7 @@ impl DaemonAudioRecorder {
                 Ok(stream)
             }
             _ => Err(anyhow::anyhow!(
-                "Unsupported sample format: {:?}",
-                sample_format
+                "Unsupported sample format: {sample_format:?}"
             )),
         }
     }

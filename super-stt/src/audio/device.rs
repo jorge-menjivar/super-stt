@@ -133,7 +133,7 @@ pub fn get_or_initialize_audio_device(
 
     let config = device
         .default_output_config()
-        .map_err(|e| anyhow::anyhow!("Failed to get output config: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to get output config: {e}"))?;
 
     log::info!(
         "Audio device initialized: {}Hz, {} channels, {:?}",
@@ -184,8 +184,7 @@ pub fn verify_audio_device_readiness(
         }
     }
     Err(anyhow::anyhow!(
-        "Failed to verify audio device readiness after {} attempts",
-        DEVICE_VERIFICATION_ATTEMPTS
+        "Failed to verify audio device readiness after {DEVICE_VERIFICATION_ATTEMPTS} attempts"
     ))
 }
 

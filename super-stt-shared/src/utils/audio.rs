@@ -35,7 +35,7 @@ pub fn validate_audio(audio_data: &[f32], sample_rate: u32) -> Result<()> {
     }
 
     if sample_rate > 96000 {
-        return Err(anyhow::anyhow!("Sample rate too high: {}Hz", sample_rate));
+        return Err(anyhow::anyhow!("Sample rate too high: {sample_rate}Hz"));
     }
 
     // Check for invalid values
@@ -43,16 +43,14 @@ pub fn validate_audio(audio_data: &[f32], sample_rate: u32) -> Result<()> {
 
     if invalid_samples > 0 {
         return Err(anyhow::anyhow!(
-            "Audio contains {} invalid samples (NaN/Inf)",
-            invalid_samples
+            "Audio contains {invalid_samples} invalid samples (NaN/Inf)"
         ));
     }
 
     let duration_seconds = audio_data.len() as f64 / f64::from(sample_rate);
     if duration_seconds > 300.0 {
         return Err(anyhow::anyhow!(
-            "Audio too long: {:.1}s (max 300s)",
-            duration_seconds
+            "Audio too long: {duration_seconds:.1}s (max 300s)"
         ));
     }
 

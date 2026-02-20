@@ -750,7 +750,7 @@ impl cosmic::Application for SuperSttApplet {
 
         // Get suggested window size from the applet framework
         let (suggested_width, suggested_height) = self.core.applet.suggested_window_size();
-        let (suggested_padding_w, suggested_padding_h) = self.core.applet.suggested_padding(false);
+        let (_, suggested_padding_h) = self.core.applet.suggested_padding(false);
         let suggested_padding = suggested_padding_h as f32;
 
         // Calculate appropriate size based on panel orientation and user configuration
