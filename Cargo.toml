@@ -18,10 +18,10 @@
         byteorder = "1.5"
         # Shared dependencies with common versions
         # Candle ML framework (for daemon)
-        candle-core = { git = "https://github.com/jorge-menjivar/candle.git", branch = "bindgen-2" }
-        candle-flash-attn = { git = "https://github.com/jorge-menjivar/candle.git", branch = "bindgen-2" }
-        candle-nn = { git = "https://github.com/jorge-menjivar/candle.git", branch = "bindgen-2" }
-        candle-transformers = { git = "https://github.com/jorge-menjivar/candle.git", branch = "bindgen-2" }
+        candle-core = { git = "https://github.com/huggingface/candle.git", branch = "main" }
+        candle-flash-attn = { git = "https://github.com/huggingface/candle.git", branch = "main" }
+        candle-nn = { git = "https://github.com/huggingface/candle.git", branch = "main" }
+        candle-transformers = { git = "https://github.com/huggingface/candle.git", branch = "main" }
         chrono = { version = "0.4", features = ["serde"] }
         clap = { version = "4.5.54", features = ["cargo", "derive"] }
         clap_complete = "4.5.56"
