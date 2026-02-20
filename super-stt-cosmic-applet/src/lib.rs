@@ -750,7 +750,8 @@ impl cosmic::Application for SuperSttApplet {
 
         // Get suggested window size from the applet framework
         let (suggested_width, suggested_height) = self.core.applet.suggested_window_size();
-        let suggested_padding = self.core.applet.suggested_padding(false) as f32;
+        let (suggested_padding_w, suggested_padding_h) = self.core.applet.suggested_padding(false);
+        let suggested_padding = suggested_padding_h as f32;
 
         // Calculate appropriate size based on panel orientation and user configuration
         // If visualizations are disabled, use a smaller icon-only size
@@ -811,7 +812,7 @@ impl cosmic::Application for SuperSttApplet {
                 TRANSPARENT_ICON
             };
 
-            let applet_padding = self.core.applet.suggested_padding(false);
+            let (applet_padding, _) = self.core.applet.suggested_padding(false);
 
             let icon_alignment = match self.config.ui.icon_alignment.as_str() {
                 "center" => Alignment::Center,
