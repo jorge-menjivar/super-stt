@@ -1,43 +1,39 @@
 [package]
-name = "super-stt-shared"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-description = "Shared types and utilities for Super STT"
-
-[features]
-default = []
-audio = ["hound", "cpal", "rubato"]
-analysis = ["spectrum-analyzer"]
+    name = "super-stt-shared"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
+    description = "Shared types and utilities for Super STT"
 
 [dependencies]
-# Core shared dependencies
-anyhow.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-tokio = { workspace = true, features = [
-    "macros",
-    "rt-multi-thread",
-    "time",
-    "net",
-] }
-log.workspace = true
-chrono.workspace = true
-uuid.workspace = true
-libc.workspace = true
+    # Core shared dependencies
+    anyhow.workspace = true
+    chrono.workspace = true
+    clap.workspace = true
+    cpal = { workspace = true, optional = true }
+    # Notification service dependencies
+    dashmap.workspace = true
+    # Audio processing (optional feature)
+    hound = { workspace = true, optional = true }
+    libc.workspace = true
+    log.workspace = true
+    rubato = { workspace = true, optional = true }
+    serde.workspace = true
+    serde_json.workspace = true
+    # Audio analysis (optional feature)
+    spectrum-analyzer = { workspace = true, optional = true }
+    strum.workspace = true
+    strum_macros.workspace = true
+    thiserror.workspace = true
+    tokio = { workspace = true, features = [
+        "macros",
+        "net",
+        "rt-multi-thread",
+        "time",
+    ] }
+    uuid.workspace = true
 
-# Audio processing (optional feature)
-hound = { workspace = true, optional = true }
-cpal = { workspace = true, optional = true }
-rubato = { workspace = true, optional = true }
-
-# Audio analysis (optional feature)
-spectrum-analyzer = { workspace = true, optional = true }
-
-# Notification service dependencies
-dashmap.workspace = true
-
-clap.workspace = true
-strum.workspace = true
-strum_macros.workspace = true
+[features]
+    default = []
+    analysis = ["spectrum-analyzer"]
+    audio = ["cpal", "hound", "rubato"]

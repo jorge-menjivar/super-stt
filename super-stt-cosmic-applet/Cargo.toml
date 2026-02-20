@@ -1,29 +1,29 @@
 [package]
-  name        = "super-stt-cosmic-applet"
-  version     = "0.1.0"
-  edition     = "2021"
-  license     = "GPL-3.0-only"
-  description = "Super STT client application"
-  repository  = "https://github.com/jorge-menjivar/super-stt"
+    name = "super-stt-cosmic-applet"
+    version = "0.1.0"
+    edition = "2021"
+    description = "Super STT client application"
+    repository = "https://github.com/jorge-menjivar/super-stt"
+    license = "GPL-3.0-only"
 
 # Single applet binary with command-line arguments
 [[bin]]
-  name = "super-stt-cosmic-applet"
-  path = "src/main.rs"
+    name = "super-stt-cosmic-applet"
+    path = "src/main.rs"
 
 [dependencies]
-  cosmic = { package = "libcosmic", git = "https://github.com/pop-os/libcosmic.git", features = [
-    "applet",
-    "tokio",
-  ] }
-  tokio.workspace = true
-  serde.workspace = true
-  serde_json.workspace = true
-  toml.workspace = true
-  dirs.workspace = true
-  log.workspace = true
-  env_logger.workspace = true
-  super-stt-shared = { path = "../super-stt-shared", features = ["analysis"] }
-  futures-util.workspace = true
-  libc.workspace = true
-  clap = { version = "4.5", features = ["derive"] }
+    clap = { version = "4.5", features = ["derive"] }
+    cosmic = { package = "libcosmic", git = "https://github.com/pop-os/libcosmic.git", features = [
+        "applet",
+        "tokio",
+    ] }
+    dirs.workspace = true
+    env_logger.workspace = true
+    futures-util.workspace = true
+    libc.workspace = true
+    log.workspace = true
+    serde.workspace = true
+    serde_json.workspace = true
+    super-stt-shared = { path = "../super-stt-shared", features = ["analysis"] }
+    tokio.workspace = true
+    toml.workspace = true

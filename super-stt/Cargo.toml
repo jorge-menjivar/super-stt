@@ -1,84 +1,76 @@
 [package]
-  name              = "super-stt"
-  version.workspace = true
-  edition.workspace = true
-  authors.workspace = true
-  license           = "GPL-3.0-only"
-  description       = "Super STT cli and daemon service"
-  repository        = "https://github.com/jorge-menjivar/super-stt"
-
-[features]
-  default    = []
-  cuda       = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
-  cudnn      = ["candle-core/cudnn"]
-  flash-attn = ["candle-transformers/flash-attn"]
+    name = "super-stt"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
+    description = "Super STT cli and daemon service"
+    repository = "https://github.com/jorge-menjivar/super-stt"
+    license = "GPL-3.0-only"
 
 [[bin]]
-  name = "super-stt"
-  path = "src/main.rs"
+    name = "super-stt"
+    path = "src/main.rs"
 
 [dependencies]
-  # Shared crate
-  super-stt-shared = { path = "../super-stt-shared", features = [
-    "audio",
-    "analysis",
-  ] }
+    # Core dependencies
+    anyhow.workspace = true
+    # Daemon-specific utilities
+    byteorder.workspace = true
+    # ML framework
+    candle-core.workspace = true
+    candle-nn.workspace = true
+    candle-transformers.workspace = true
+    chrono.workspace = true
+    # CLI for daemon
+    clap.workspace = true
+    cpal.workspace = true
+    dashmap.workspace = true
+    dirs.workspace = true
+    # Input simulation
+    enigo.workspace = true
+    env_logger.workspace = true
+    futures = "0.3"
+    # Audio processing
+    hound.workspace = true
+    libc.workspace = true
+    log.workspace = true
+    parking_lot.workspace = true
+    reqwest.workspace = true
+    # Hashing for content-addressed blobs
+    ring = "0.17"
+    rubato.workspace = true
+    rustfft.workspace = true
+    serde.workspace = true
+    serde_json.workspace = true
+    spectrum-analyzer.workspace = true
+    strum.workspace = true
+    strum_macros.workspace = true
+    # Shared crate
+    super-stt-shared = { path = "../super-stt-shared", features = [
+        "analysis",
+        "audio",
+    ] }
+    symphonia.workspace = true
+    tekken-rs.workspace = true
+    tiktoken-rs = "0.9.1"
+    tokenizers.workspace = true
+    tokio = { workspace = true, features = [
+        "fs",
+        "io-std",
+        "io-util",
+        "macros",
+        "process",
+        "rt-multi-thread",
+        "signal",
+    ] }
+    tokio-util.workspace = true
+    toml.workspace = true
+    uuid.workspace = true
+    # D-Bus integration
+    zbus.workspace = true
 
-  # Core dependencies
-  anyhow.workspace = true
-  tokio = { workspace = true, features = [
-    "macros",
-    "signal",
-    "fs",
-    "process",
-    "rt-multi-thread",
-    "io-util",
-    "io-std",
-  ] }
-  tokio-util.workspace = true
-  log.workspace = true
-  env_logger.workspace = true
-  serde.workspace = true
-  serde_json.workspace = true
-  chrono.workspace = true
-  uuid.workspace = true
-  strum.workspace = true
-  strum_macros.workspace = true
-  toml.workspace = true
-  dirs.workspace = true
-
-  # ML framework
-  candle-core.workspace         = true
-  candle-nn.workspace           = true
-  candle-transformers.workspace = true
-  tokenizers.workspace          = true
-  reqwest.workspace             = true
-  tekken-rs.workspace           = true
-  futures                       = "0.3"
-
-  # Audio processing
-  hound.workspace             = true
-  cpal.workspace              = true
-  symphonia.workspace         = true
-  rustfft.workspace           = true
-  rubato.workspace            = true
-  spectrum-analyzer.workspace = true
-
-  # Daemon-specific utilities
-  byteorder.workspace   = true
-  dashmap.workspace     = true
-  libc.workspace        = true
-  parking_lot.workspace = true
-
-  # CLI for daemon
-  clap.workspace = true
-
-  # D-Bus integration
-  zbus.workspace = true
-  tiktoken-rs    = "0.9.1"
-
-  # Input simulation
-  enigo.workspace = true
-
-  # Hashing for content-addressed blobs
-  ring = "0.17"
+[features]
+    default = []
+    cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+    cudnn = ["candle-core/cudnn"]
+    flash-attn = ["candle-transformers/flash-attn"]

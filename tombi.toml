@@ -1,0 +1,6 @@
+[format.rules]
+    indent-style = "space"
+    indent-sub-tables = true
+    indent-table-key-value-pairs = true
+    indent-width = 4
+    line-width = 88
