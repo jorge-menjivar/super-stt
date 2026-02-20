@@ -272,6 +272,12 @@ install_applet() {
     print_info "Installing COSMIC applet..."
     mkdir -p "$INSTALL_PREFIX/bin"
 
+    # Check if this is an update (binary already exists)
+    local is_update=false
+    if [ -f "$INSTALL_PREFIX/bin/super-stt-cosmic-applet" ]; then
+        is_update=true
+    fi
+
     # Install binary
     install -m 755 "$TEMP_DIR/super-stt-cosmic-applet" "$INSTALL_PREFIX/bin/"
 
@@ -291,6 +297,12 @@ install_applet() {
     # Update icon cache
     if command -v gtk-update-icon-cache &> /dev/null; then
         gtk-update-icon-cache -f -t "$ICON_DIR" 2>/dev/null || true
+    fi
+
+    # Restart COSMIC panel so the updated applet binary is loaded
+    if [ "$is_update" = true ] && pgrep -f cosmic-panel > /dev/null 2>&1; then
+        print_info "Restarting COSMIC panel to load updated applet..."
+        pkill -f cosmic-panel || true
     fi
 }
 
