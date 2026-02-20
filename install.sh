@@ -307,14 +307,24 @@ install_service() {
     cp "$TEMP_DIR/systemd/super-stt.service" "$USER_SYSTEMD_DIR/"
     systemctl --user daemon-reload
 
-    # Enable and start the service
-    print_info "Enabling and starting Super STT daemon service..."
+    # Enable and start (or restart) the service
     systemctl --user enable super-stt
-    if systemctl --user start super-stt; then
-        print_info "Super STT daemon service started successfully"
+    if systemctl --user is-active --quiet super-stt; then
+        print_info "Restarting Super STT daemon service to apply update..."
+        if systemctl --user restart super-stt; then
+            print_info "Super STT daemon service restarted successfully"
+        else
+            print_warn "Failed to restart Super STT daemon service"
+            print_warn "You can restart it manually with: systemctl --user restart super-stt"
+        fi
     else
-        print_warn "Failed to start Super STT daemon service"
-        print_warn "You can start it manually with: systemctl --user start super-stt"
+        print_info "Starting Super STT daemon service..."
+        if systemctl --user start super-stt; then
+            print_info "Super STT daemon service started successfully"
+        else
+            print_warn "Failed to start Super STT daemon service"
+            print_warn "You can start it manually with: systemctl --user start super-stt"
+        fi
     fi
 }
 
