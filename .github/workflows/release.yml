@@ -54,7 +54,7 @@ jobs:
           cross build --release --target ${{ matrix.target }} --bin super-stt-cosmic-applet
 
       - name: Upload app binaries
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: apps-${{ matrix.target }}
           path: |
@@ -299,7 +299,7 @@ jobs:
           tar -czf super-stt-${{ matrix.target }}-${{ matrix.suffix }}.tar.gz -C dist .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: super-stt-${{ matrix.target }}-${{ matrix.suffix }}
           path: super-stt-${{ matrix.target }}-${{ matrix.suffix }}.tar.gz
