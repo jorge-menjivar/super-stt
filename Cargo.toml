@@ -92,7 +92,7 @@
         # Build dependencies
         vergen = { version = "8.3.1", features = ["git", "gitcl"] }
         # D-Bus integration
-        zbus = "5.13.2"
+        zbus = "5.14.0"
 
     [workspace.metadata.cross.build]
         pre-build = [
