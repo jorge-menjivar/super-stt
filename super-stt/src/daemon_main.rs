@@ -152,7 +152,14 @@ pub async fn run() -> Result<()> {
 /// Handle the record subcommand - direct recording mode
 async fn handle_record_command(matches: &clap::ArgMatches) -> Result<()> {
     let write_mode = matches.get_flag("write");
-    let disable_silence_detection = matches.get_flag("disable-silence-detection");
+    // Resolve stop mode: CLI flag → config file → default (manual-only)
+    let stop_mode = match matches.get_one::<String>("stop-mode") {
+        Some(mode) => mode.clone(),
+        None => {
+            let config = DaemonConfig::load();
+            config.transcription.recording_stop_mode.to_string()
+        }
+    };
     let socket_path = matches
         .get_one::<PathBuf>("socket")
         .unwrap_or(&cli::DEFAULT_SOCKET_PATH);
@@ -171,8 +178,7 @@ async fn handle_record_command(matches: &clap::ArgMatches) -> Result<()> {
     // Try to connect to existing daemon first
     if socket_path.exists() {
         info!("Found existing daemon, sending record request...");
-        return send_record_request_to_daemon(socket_path, write_mode, disable_silence_detection)
-            .await;
+        return send_record_request_to_daemon(socket_path, write_mode, &stop_mode).await;
     }
 
     // If no daemon is running, inform user to start it first
@@ -226,7 +232,7 @@ async fn handle_status_command(matches: &clap::ArgMatches) -> Result<()> {
 async fn send_record_request_to_daemon(
     socket_path: &PathBuf,
     write_mode: bool,
-    disable_silence_detection: bool,
+    stop_mode: &str,
 ) -> Result<()> {
     use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -249,7 +255,7 @@ async fn send_record_request_to_daemon(
         client_id: Some("record_client".to_string()),
         data: Some(serde_json::json!({
             "write_mode": write_mode,
-            "disable_silence_detection": disable_silence_detection,
+            "stop_mode": stop_mode,
         })),
         language: None,
         enabled: None,
@@ -280,15 +286,12 @@ async fn send_record_request_to_daemon(
 
     if response.status == "success" {
         let msg = response.message.as_deref().unwrap_or("");
-        if msg == "Recording stop signal sent" {
-            info!("🛑 Recording stop signal sent to daemon");
+        if msg == DaemonResponse::RECORDING_STOP_SIGNAL_MSG {
+            info!("🛑 Recording stopped successfully");
         } else {
-            info!("🎤 Recording started by daemon");
+            info!("🎤 Recording started (stop mode: {stop_mode})");
             if write_mode {
                 info!("📝 Will type transcription when complete");
-            }
-            if disable_silence_detection {
-                info!("🔴 Silence detection disabled: press the shortcut again to stop");
             }
         }
     } else {

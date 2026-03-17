@@ -63,12 +63,25 @@ impl SuperSTTDaemon {
             }
             Command::Record {
                 write_mode,
-                disable_silence_detection,
+                stop_mode,
             } => {
-                // Toggle behaviour: if already recording, stop it and return immediately;
-                // the first caller will receive the transcription when it finishes.
+                // Resolve effective mode: per-request override or daemon config default
+                let effective_mode = match stop_mode {
+                    Some(mode) => mode,
+                    None => {
+                        let config = self.config.read().await;
+                        config.transcription.recording_stop_mode
+                    }
+                };
+
+                // Toggle behaviour: if already recording, stop it (if mode allows)
                 let is_recording = *self.is_recording.read().await;
                 if is_recording {
+                    if !effective_mode.manual_stop_enabled() {
+                        log::info!("Second press ignored: recording in SilenceOnly mode");
+                        return DaemonResponse::success()
+                            .with_message("Manual stop not enabled in current mode".to_string());
+                    }
                     let guard = self.manual_stop_tx.read().await;
                     if let Some(tx) = guard.as_ref() {
                         let _ = tx.send(());
@@ -79,10 +92,10 @@ impl SuperSTTDaemon {
                         );
                     }
                     return DaemonResponse::success()
-                        .with_message("Recording stop signal sent".to_string());
+                        .with_message(DaemonResponse::RECORDING_STOP_SIGNAL_MSG.to_string());
                 }
                 let mut typer = Typer::default();
-                self.handle_record_internal(&mut typer, write_mode, disable_silence_detection)
+                self.handle_record_internal(&mut typer, write_mode, effective_mode)
                     .await
             }
             Command::SetAudioTheme { theme } => self.handle_set_audio_theme(theme),
@@ -99,6 +112,10 @@ impl SuperSTTDaemon {
             Command::ListAudioThemes => self.handle_list_audio_themes(),
             Command::SetPreviewTyping { enabled } => self.handle_set_preview_typing(enabled).await,
             Command::GetPreviewTyping => self.handle_get_preview_typing(),
+            Command::SetRecordingStopMode { mode } => {
+                self.handle_set_recording_stop_mode(mode).await
+            }
+            Command::GetRecordingStopMode => self.handle_get_recording_stop_mode().await,
         }
     }
 
@@ -210,15 +227,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn stop_signal_sent_on_second_press_even_with_silence_detection_enabled() {
-        let daemon = test_daemon().await;
-        let (tx, mut rx) = tokio::sync::broadcast::channel(1);
-
-        *daemon.is_recording.write().await = true;
-        *daemon.manual_stop_tx.write().await = Some(tx);
-
-        let request = DaemonRequest {
+    fn make_record_request(data: Option<serde_json::Value>) -> DaemonRequest {
+        DaemonRequest {
             command: "record".to_string(),
             audio_data: None,
             sample_rate: None,
@@ -228,22 +238,97 @@ mod tests {
             since_timestamp: None,
             limit: None,
             event_type: None,
-            data: Some(serde_json::json!({
-                "write_mode": false,
-                "disable_silence_detection": false,
-            })),
+            data,
             language: None,
             enabled: None,
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_signal_sent_on_second_press_with_default_mode() {
+        // Default config mode is SilenceAndManual, which allows manual stop
+        let daemon = test_daemon().await;
+        let (tx, mut rx) = tokio::sync::broadcast::channel(1);
+
+        *daemon.is_recording.write().await = true;
+        *daemon.manual_stop_tx.write().await = Some(tx);
+
+        let request = make_record_request(Some(serde_json::json!({
+            "write_mode": false,
+        })));
 
         let response = daemon.handle_command(request).await;
         assert_eq!(response.status, "success");
         assert_eq!(
             response.message.as_deref(),
-            Some("Recording stop signal sent")
+            Some(DaemonResponse::RECORDING_STOP_SIGNAL_MSG)
         );
 
         let recv = timeout(Duration::from_millis(200), rx.recv()).await;
         assert!(recv.is_ok(), "expected stop signal to be sent");
+    }
+
+    #[tokio::test]
+    async fn second_press_ignored_in_silence_only_mode() {
+        let daemon = test_daemon().await;
+        let (tx, mut rx) = tokio::sync::broadcast::channel(1);
+
+        // Set daemon config to SilenceOnly
+        {
+            use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+            let mut config = daemon.config.write().await;
+            config.transcription.recording_stop_mode = RecordingStopMode::SilenceOnly;
+        }
+
+        *daemon.is_recording.write().await = true;
+        *daemon.manual_stop_tx.write().await = Some(tx);
+
+        // No stop_mode in request → uses daemon config (SilenceOnly)
+        let request = make_record_request(Some(serde_json::json!({
+            "write_mode": false,
+        })));
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+        assert_eq!(
+            response.message.as_deref(),
+            Some("Manual stop not enabled in current mode")
+        );
+
+        // Stop signal should NOT have been sent
+        let recv = timeout(Duration::from_millis(100), rx.recv()).await;
+        assert!(recv.is_err(), "stop signal should not be sent in SilenceOnly mode");
+    }
+
+    #[tokio::test]
+    async fn per_request_stop_mode_overrides_config() {
+        let daemon = test_daemon().await;
+        let (tx, mut rx) = tokio::sync::broadcast::channel(1);
+
+        // Daemon config is SilenceOnly (no manual stop)
+        {
+            use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+            let mut config = daemon.config.write().await;
+            config.transcription.recording_stop_mode = RecordingStopMode::SilenceOnly;
+        }
+
+        *daemon.is_recording.write().await = true;
+        *daemon.manual_stop_tx.write().await = Some(tx);
+
+        // But the request explicitly asks for manual-only mode
+        let request = make_record_request(Some(serde_json::json!({
+            "write_mode": false,
+            "stop_mode": "manual-only",
+        })));
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+        assert_eq!(
+            response.message.as_deref(),
+            Some(DaemonResponse::RECORDING_STOP_SIGNAL_MSG)
+        );
+
+        let recv = timeout(Duration::from_millis(200), rx.recv()).await;
+        assert!(recv.is_ok(), "per-request override should allow manual stop");
     }
 }

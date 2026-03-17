@@ -51,11 +51,9 @@ pub fn build() -> Command {
                 .action(ArgAction::SetTrue)
             )
             .arg(
-                arg!(
-                    -d --"disable-silence-detection"
-                    "Disable silence detection; press the shortcut again to stop recording"
-                )
-                .action(ArgAction::SetTrue)
+                arg!(--"stop-mode" <mode> "Recording stop mode: silence, silence-and-manual, manual")
+                    .value_parser(["silence", "silence-and-manual", "manual"])
+                    .required(false)
             )
             .arg(
                 arg!(-s --socket <socket> "The daemon socket path")
@@ -117,19 +115,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn record_disable_silence_detection_flag_parses() {
+    fn record_stop_mode_flag_parses() {
         let matches = build()
-            .try_get_matches_from([
-                "super-stt",
-                "record",
-                "--disable-silence-detection",
-            ])
+            .try_get_matches_from(["super-stt", "record", "--stop-mode", "manual"])
             .expect("command should parse");
 
         let record_matches = matches
             .subcommand_matches("record")
             .expect("record subcommand should be present");
 
-        assert!(record_matches.get_flag("disable-silence-detection"));
+        assert_eq!(
+            record_matches.get_one::<String>("stop-mode").map(String::as_str),
+            Some("manual")
+        );
+    }
+
+    #[test]
+    fn record_without_stop_mode_has_none() {
+        let matches = build()
+            .try_get_matches_from(["super-stt", "record"])
+            .expect("command should parse");
+
+        let record_matches = matches
+            .subcommand_matches("record")
+            .expect("record subcommand should be present");
+
+        assert!(record_matches.get_one::<String>("stop-mode").is_none());
     }
 }

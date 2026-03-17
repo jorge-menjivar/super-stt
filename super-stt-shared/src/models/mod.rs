@@ -2,6 +2,7 @@
 pub mod audio;
 pub mod daemon_state;
 pub mod protocol;
+pub mod recording_stop_mode;
 pub mod stt;
 pub mod stt_model;
 pub mod theme;

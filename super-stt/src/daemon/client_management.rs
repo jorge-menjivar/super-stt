@@ -123,25 +123,39 @@ impl SuperSTTDaemon {
                 return Ok(());
             }
 
-            // Handle fire-and-forget commands: send ACK immediately, process in background
+            // Handle record commands: if already recording, handle synchronously
+            // (toggle stop returns immediately); otherwise ACK and record in background.
             if request.command.as_str() == "record" {
-                let ack = DaemonResponse::success().with_message("Recording started".to_string());
-                if let Err(e) = self.send_response(&mut stream, &ack).await {
-                    warn!("Failed to send record ACK: {e}");
-                    break;
-                }
-
-                let daemon = self.clone();
-                tokio::spawn(async move {
-                    info!("🎤 Background record task started");
-                    let response = daemon.handle_command(request).await;
-                    if response.status != "success" {
-                        warn!(
-                            "Record command failed: {}",
-                            response.message.unwrap_or_default()
-                        );
+                let is_recording = *self.is_recording.read().await;
+                if is_recording {
+                    // Second press: handle synchronously so the stop response
+                    // reaches the client.
+                    let response = self.handle_command(request).await;
+                    if let Err(e) = self.send_response(&mut stream, &response).await {
+                        warn!("Failed to send record stop response: {e}");
+                        break;
                     }
-                });
+                } else {
+                    // First press: ACK immediately, record in background.
+                    let ack =
+                        DaemonResponse::success().with_message("Recording started".to_string());
+                    if let Err(e) = self.send_response(&mut stream, &ack).await {
+                        warn!("Failed to send record ACK: {e}");
+                        break;
+                    }
+
+                    let daemon = self.clone();
+                    tokio::spawn(async move {
+                        info!("🎤 Background record task started");
+                        let response = daemon.handle_command(request).await;
+                        if response.status != "success" {
+                            warn!(
+                                "Record command failed: {}",
+                                response.message.unwrap_or_default()
+                            );
+                        }
+                    });
+                }
                 continue;
             }
 

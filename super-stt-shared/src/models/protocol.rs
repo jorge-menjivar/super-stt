@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, str::FromStr};
 
+use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::theme::AudioTheme;
 use crate::stt_model::STTModel;
 use crate::validation::{self, Validate, ValidationError};
@@ -91,6 +92,10 @@ pub struct DaemonResponse {
     // Preview typing fields
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_typing_enabled: Option<bool>,
+
+    // Recording stop mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recording_stop_mode: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -118,6 +123,9 @@ pub struct NotificationEvent {
 }
 
 impl DaemonResponse {
+    /// Canonical message returned when a running recording is stopped via a second press.
+    pub const RECORDING_STOP_SIGNAL_MSG: &str = "Recording stop signal sent";
+
     #[must_use]
     pub fn success() -> Self {
         Self {
@@ -142,6 +150,7 @@ impl DaemonResponse {
             daemon_config: None,
             connection_active: None,
             preview_typing_enabled: None,
+            recording_stop_mode: None,
         }
     }
 
@@ -190,6 +199,7 @@ impl DaemonResponse {
             daemon_config: None,
             connection_active: None,
             preview_typing_enabled: None,
+            recording_stop_mode: None,
         }
     }
 
@@ -300,6 +310,12 @@ impl DaemonResponse {
         self.preview_typing_enabled = Some(enabled);
         self
     }
+
+    #[must_use]
+    pub fn with_recording_stop_mode(mut self, mode: String) -> Self {
+        self.recording_stop_mode = Some(mode);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -341,7 +357,7 @@ pub enum Command {
     },
     Record {
         write_mode: bool,
-        disable_silence_detection: bool,
+        stop_mode: Option<RecordingStopMode>,
     },
     SetAudioTheme {
         theme: String,
@@ -365,6 +381,10 @@ pub enum Command {
         enabled: bool,
     },
     GetPreviewTyping,
+    SetRecordingStopMode {
+        mode: RecordingStopMode,
+    },
+    GetRecordingStopMode,
 }
 
 impl Validate for DaemonRequest {
@@ -435,10 +455,9 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn record_command_parses_disable_silence_detection() {
-        let request = DaemonRequest {
-            command: "record".to_string(),
+    fn make_request(command: &str, data: Option<Value>) -> DaemonRequest {
+        DaemonRequest {
+            command: command.to_string(),
             audio_data: None,
             sample_rate: None,
             client_id: None,
@@ -447,24 +466,80 @@ mod tests {
             since_timestamp: None,
             limit: None,
             event_type: None,
-            data: Some(json!({
-                "write_mode": false,
-                "disable_silence_detection": true,
-            })),
+            data,
             language: None,
             enabled: None,
-        };
+        }
+    }
 
+    #[test]
+    fn record_command_parses_stop_mode() {
+        let request = make_request(
+            "record",
+            Some(json!({
+                "write_mode": false,
+                "stop_mode": "manual-only",
+            })),
+        );
         let command = Command::try_from(request).expect("record command should parse");
         match command {
             Command::Record {
                 write_mode,
-                disable_silence_detection,
+                stop_mode,
             } => {
                 assert!(!write_mode);
-                assert!(disable_silence_detection);
+                assert_eq!(stop_mode, Some(RecordingStopMode::ManualOnly));
             }
             _ => panic!("expected Command::Record"),
+        }
+    }
+
+    #[test]
+    fn record_command_without_stop_mode_defaults_to_none() {
+        let request = make_request(
+            "record",
+            Some(json!({ "write_mode": true })),
+        );
+        let command = Command::try_from(request).expect("record command should parse");
+        match command {
+            Command::Record { write_mode, stop_mode } => {
+                assert!(write_mode);
+                assert_eq!(stop_mode, None);
+            }
+            _ => panic!("expected Command::Record"),
+        }
+    }
+
+    #[test]
+    fn record_command_backward_compat_disable_silence_detection() {
+        let request = make_request(
+            "record",
+            Some(json!({
+                "write_mode": false,
+                "disable_silence_detection": true,
+            })),
+        );
+        let command = Command::try_from(request).expect("record command should parse");
+        match command {
+            Command::Record { stop_mode, .. } => {
+                assert_eq!(stop_mode, Some(RecordingStopMode::ManualOnly));
+            }
+            _ => panic!("expected Command::Record"),
+        }
+    }
+
+    #[test]
+    fn set_recording_stop_mode_parses() {
+        let request = make_request(
+            "set_recording_stop_mode",
+            Some(json!({ "mode": "silence-only" })),
+        );
+        let command = Command::try_from(request).expect("command should parse");
+        match command {
+            Command::SetRecordingStopMode { mode } => {
+                assert_eq!(mode, RecordingStopMode::SilenceOnly);
+            }
+            _ => panic!("expected Command::SetRecordingStopMode"),
         }
     }
 }
@@ -505,6 +580,8 @@ impl TryFrom<DaemonRequest> for Command {
             "list_audio_themes" => Ok(Command::ListAudioThemes),
             "set_preview_typing" => cmd_set_preview_typing(&request),
             "get_preview_typing" => Ok(Command::GetPreviewTyping),
+            "set_recording_stop_mode" => cmd_set_recording_stop_mode(&request),
+            "get_recording_stop_mode" => Ok(Command::GetRecordingStopMode),
             _ => Err(format!("Unknown command: {}", request.command)),
         }
     }
@@ -607,15 +684,30 @@ fn cmd_record(request: &DaemonRequest) -> Command {
         .and_then(|data| data.get("write_mode"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    let disable_silence_detection = request
+    // Parse stop_mode string if present
+    let stop_mode = request
         .data
         .as_ref()
-        .and_then(|data| data.get("disable_silence_detection"))
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+        .and_then(|data| data.get("stop_mode"))
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<RecordingStopMode>().ok())
+        // Backward compat: if stop_mode absent, check legacy disable_silence_detection
+        .or_else(|| {
+            let disabled = request
+                .data
+                .as_ref()
+                .and_then(|data| data.get("disable_silence_detection"))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            if disabled {
+                Some(RecordingStopMode::ManualOnly)
+            } else {
+                None
+            }
+        });
     Command::Record {
         write_mode,
-        disable_silence_detection,
+        stop_mode,
     }
 }
 
@@ -674,4 +766,17 @@ fn cmd_set_preview_typing(request: &DaemonRequest) -> Result<Command, String> {
         .ok_or("Missing enabled field for set_preview_typing command")?;
 
     Ok(Command::SetPreviewTyping { enabled })
+}
+
+fn cmd_set_recording_stop_mode(request: &DaemonRequest) -> Result<Command, String> {
+    let mode_str = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("mode"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing mode for set_recording_stop_mode command")?;
+    let mode = mode_str
+        .parse::<RecordingStopMode>()
+        .map_err(|e| format!("Invalid recording stop mode: {e}"))?;
+    Ok(Command::SetRecordingStopMode { mode })
 }

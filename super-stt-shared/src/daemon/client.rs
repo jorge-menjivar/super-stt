@@ -477,6 +477,53 @@ pub async fn get_preview_typing(socket_path: PathBuf, client_id: &str) -> Result
     }
 }
 
+/// Set recording stop mode on daemon
+///
+/// # Errors
+///
+/// Returns an error if the request fails.
+pub async fn set_recording_stop_mode(
+    socket_path: PathBuf,
+    mode: &str,
+    client_id: &str,
+) -> Result<(), String> {
+    let mut request = create_daemon_request("set_recording_stop_mode", client_id);
+    request.data = Some(serde_json::json!({ "mode": mode }));
+
+    let response = send_daemon_request(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(())
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Failed to set recording stop mode".to_string()))
+    }
+}
+
+/// Get current recording stop mode from daemon
+///
+/// # Errors
+///
+/// Returns an error if the request fails.
+pub async fn get_recording_stop_mode(
+    socket_path: PathBuf,
+    client_id: &str,
+) -> Result<String, String> {
+    let request = create_daemon_request("get_recording_stop_mode", client_id);
+    let response = send_daemon_request(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(response
+            .recording_stop_mode
+            .unwrap_or_else(|| "silence-and-manual".to_string()))
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Failed to get recording stop mode".to_string()))
+    }
+}
+
 /// Get recent daemon events
 ///
 /// # Errors
