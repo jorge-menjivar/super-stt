@@ -2,6 +2,7 @@
 
 //! Message types for the Super STT application.
 
+use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::stt_model::STTModel;
 
 use crate::state::{AudioTheme, ContextPage};
@@ -73,4 +74,9 @@ pub enum Message {
     PreviewTypingToggled(bool),       // User toggled the setting
     PreviewTypingSettingLoaded(bool), // Setting loaded from daemon
     PreviewTypingError(String),       // Error setting or getting preview typing
+
+    // Recording stop mode messages
+    RecordingStopModeChanged(RecordingStopMode),
+    RecordingStopModeLoaded(RecordingStopMode),
+    RecordingStopModeError(String),
 }

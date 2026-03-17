@@ -127,3 +127,14 @@ pub async fn set_preview_typing(socket_path: PathBuf, enabled: bool) -> Result<(
 pub async fn get_preview_typing(socket_path: PathBuf) -> Result<bool, String> {
     super_stt_shared::daemon::client::get_preview_typing(socket_path, get_client_id()).await
 }
+
+/// Set recording stop mode on daemon
+pub async fn set_recording_stop_mode(socket_path: PathBuf, mode: String) -> Result<(), String> {
+    super_stt_shared::daemon::client::set_recording_stop_mode(socket_path, &mode, get_client_id())
+        .await
+}
+
+/// Get current recording stop mode from daemon
+pub async fn get_recording_stop_mode(socket_path: PathBuf) -> Result<String, String> {
+    super_stt_shared::daemon::client::get_recording_stop_mode(socket_path, get_client_id()).await
+}

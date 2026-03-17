@@ -4,9 +4,9 @@ use crate::audio::{parse_audio_level_from_udp, parse_recording_state_from_udp};
 
 use crate::daemon::client::{
     cancel_download, fetch_daemon_config, get_current_device, get_current_model,
-    get_download_status, get_preview_typing, list_available_models, load_audio_themes, ping_daemon,
-    send_record_command, set_and_test_audio_theme, set_device, set_model, set_preview_typing,
-    test_daemon_connection,
+    get_download_status, get_preview_typing, get_recording_stop_mode, list_available_models,
+    load_audio_themes, ping_daemon, send_record_command, set_and_test_audio_theme, set_device,
+    set_model, set_preview_typing, set_recording_stop_mode, test_daemon_connection,
 };
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};
 use crate::ui::messages::Message;
@@ -112,6 +112,9 @@ pub struct AppModel {
     // Preview typing state
     /// Whether preview typing is enabled (beta feature)
     pub preview_typing_enabled: bool,
+
+    // Recording stop mode
+    pub recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
 }
 
 /// Create a COSMIC application from the app model
@@ -196,6 +199,7 @@ impl cosmic::Application for AppModel {
 
             // Initialize preview typing state (disabled by default as beta feature)
             preview_typing_enabled: false,
+            recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
         };
 
         // Create startup commands
@@ -298,6 +302,7 @@ impl cosmic::Application for AppModel {
                 &self.available_devices,
                 &self.device_state,
                 self.preview_typing_enabled,
+                self.recording_stop_mode,
             ),
             Page::Testing => views::testing::page(
                 &self.recording_status,
@@ -499,6 +504,15 @@ impl cosmic::Application for AppModel {
                 | Message::PreviewTypingError(_)
         ) {
             return self.handle_preview_typing_messages(message);
+        }
+
+        if matches!(
+            message,
+            Message::RecordingStopModeChanged(_)
+                | Message::RecordingStopModeLoaded(_)
+                | Message::RecordingStopModeError(_)
+        ) {
+            return self.handle_recording_stop_mode_messages(message);
         }
 
         match message {
@@ -730,7 +744,7 @@ impl AppModel {
                     warn!("No audio theme found in daemon configuration");
                 }
 
-                // Load preview typing setting (initial data already loaded once at startup)
+                // Load settings from daemon
                 Task::batch([
                     // Load preview typing setting from daemon
                     Task::perform(get_preview_typing(self.socket_path.clone()), |result| {
@@ -740,8 +754,21 @@ impl AppModel {
                             }
                             Err(e) => {
                                 log::warn!("Failed to load preview typing setting: {e}");
-                                // Continue with default (false) - don't show error to user on startup
                                 cosmic::Action::App(Message::PreviewTypingSettingLoaded(false))
+                            }
+                        }
+                    }),
+                    // Load recording stop mode from daemon
+                    Task::perform(get_recording_stop_mode(self.socket_path.clone()), |result| {
+                        use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+                        match result {
+                            Ok(mode_str) => {
+                                let mode = mode_str.parse::<RecordingStopMode>().unwrap_or_default();
+                                cosmic::Action::App(Message::RecordingStopModeLoaded(mode))
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to load recording stop mode: {e}");
+                                cosmic::Action::App(Message::RecordingStopModeLoaded(RecordingStopMode::default()))
                             }
                         }
                     }),
@@ -1329,6 +1356,38 @@ impl AppModel {
                 // Log error and show it to user in transcription text
                 log::warn!("Preview typing error: {err}");
                 self.transcription_text = format!("Preview Typing Error: {err}");
+                Task::none()
+            }
+
+            _ => Task::none(),
+        }
+    }
+
+    /// Handle recording stop mode messages
+    fn handle_recording_stop_mode_messages(
+        &mut self,
+        message: Message,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
+            Message::RecordingStopModeChanged(mode) => {
+                self.recording_stop_mode = mode;
+                let mode_str = mode.to_string();
+                Task::perform(
+                    set_recording_stop_mode(self.socket_path.clone(), mode_str),
+                    move |result| match result {
+                        Ok(()) => cosmic::Action::App(Message::RecordingStopModeLoaded(mode)),
+                        Err(e) => cosmic::Action::App(Message::RecordingStopModeError(e)),
+                    },
+                )
+            }
+
+            Message::RecordingStopModeLoaded(mode) => {
+                self.recording_stop_mode = mode;
+                Task::none()
+            }
+
+            Message::RecordingStopModeError(err) => {
+                log::warn!("Recording stop mode error: {err}");
                 Task::none()
             }
 

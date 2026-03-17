@@ -3,6 +3,7 @@ use cosmic::Element;
 use cosmic::iced::Length;
 use cosmic::iced_widget::{column, row};
 use cosmic::widget::{self, button, settings, text};
+use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::theme::AudioTheme;
 // Reuse shared models
 use super_stt_shared::{models::protocol::DownloadProgress, stt_model::STTModel};
@@ -25,6 +26,37 @@ pub fn preview_typing_settings_widget(preview_typing_enabled: bool) -> Element<'
     section = section.add(settings::item(
         "Enable Preview Typing",
         cosmic::widget::toggler(preview_typing_enabled).on_toggle(Message::PreviewTypingToggled),
+    ));
+
+    section.into()
+}
+
+/// Recording stop mode settings section
+pub fn recording_stop_mode_settings_widget(
+    recording_stop_mode: RecordingStopMode,
+) -> Element<'static, Message> {
+    let mut section = settings::section().title("Recording Stop Mode");
+
+    section = section.add(settings::item(
+        "",
+        text::caption(
+            "Controls how recordings stop: silence detection, manual shortcut press, or both.",
+        ),
+    ));
+
+    let modes = [
+        RecordingStopMode::SilenceOnly,
+        RecordingStopMode::SilenceAndManual,
+        RecordingStopMode::ManualOnly,
+    ];
+    let mode_names: Vec<String> = modes.iter().map(|m| m.pretty_name().to_string()).collect();
+    let selected_index = modes.iter().position(|m| *m == recording_stop_mode);
+
+    section = section.add(settings::item(
+        "Stop Mode",
+        widget::dropdown(mode_names, selected_index, move |index| {
+            Message::RecordingStopModeChanged(modes[index])
+        }),
     ));
 
     section.into()
@@ -549,9 +581,11 @@ pub fn page<'a>(
     available_devices: &'a [String],
     device_state: &'a crate::core::app::DeviceState,
     preview_typing_enabled: bool,
+    recording_stop_mode: RecordingStopMode,
 ) -> Element<'a, Message> {
     let sections = vec![
         audio_theme_selection_widget(audio_themes, selected_audio_theme),
+        recording_stop_mode_settings_widget(recording_stop_mode),
         preview_typing_settings_widget(preview_typing_enabled),
         model_management_widget(
             available_models,
