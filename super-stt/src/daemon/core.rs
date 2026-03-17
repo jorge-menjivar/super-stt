@@ -77,19 +77,21 @@ impl SuperSTTDaemon {
                 // Toggle behaviour: if already recording, stop it (if mode allows)
                 let is_recording = *self.is_recording.read().await;
                 if is_recording {
+                    let guard = self.manual_stop_tx.read().await;
+                    if guard.is_none() {
+                        // Stop channel cleared = audio capture is done, transcription in progress
+                        log::info!("Transcription in progress, please wait");
+                        return DaemonResponse::success()
+                            .with_message("Transcription in progress, please wait".to_string());
+                    }
                     if !effective_mode.manual_stop_enabled() {
                         log::info!("Second press ignored: recording in SilenceOnly mode");
                         return DaemonResponse::success()
                             .with_message("Manual stop not enabled in current mode".to_string());
                     }
-                    let guard = self.manual_stop_tx.read().await;
                     if let Some(tx) = guard.as_ref() {
                         let _ = tx.send(());
                         log::info!("🛑 Stop triggered via shortcut while recording");
-                    } else {
-                        log::warn!(
-                            "Stop requested but no stop channel found (recording not ready or already finishing)"
-                        );
                     }
                     return DaemonResponse::success()
                         .with_message(DaemonResponse::RECORDING_STOP_SIGNAL_MSG.to_string());
@@ -330,5 +332,97 @@ mod tests {
 
         let recv = timeout(Duration::from_millis(200), rx.recv()).await;
         assert!(recv.is_ok(), "per-request override should allow manual stop");
+    }
+
+    #[tokio::test]
+    async fn second_press_during_transcription_returns_wait_message() {
+        let daemon = test_daemon().await;
+
+        // Transcribing state: is_recording=true, manual_stop_tx=None
+        *daemon.is_recording.write().await = true;
+        // manual_stop_tx is already None by default
+
+        let request = make_record_request(Some(serde_json::json!({
+            "write_mode": false,
+        })));
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+        assert_eq!(
+            response.message.as_deref(),
+            Some("Transcription in progress, please wait")
+        );
+    }
+
+    #[tokio::test]
+    async fn per_request_silence_only_overrides_manual_config() {
+        let daemon = test_daemon().await;
+        let (tx, mut rx) = tokio::sync::broadcast::channel(1);
+
+        // Config allows manual stop (default SilenceAndManual)
+        *daemon.is_recording.write().await = true;
+        *daemon.manual_stop_tx.write().await = Some(tx);
+
+        // But request forces SilenceOnly
+        let request = make_record_request(Some(serde_json::json!({
+            "write_mode": false,
+            "stop_mode": "silence-only",
+        })));
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+        assert_eq!(
+            response.message.as_deref(),
+            Some("Manual stop not enabled in current mode")
+        );
+
+        let recv = timeout(Duration::from_millis(100), rx.recv()).await;
+        assert!(recv.is_err(), "stop signal should not be sent in SilenceOnly mode");
+    }
+
+    #[tokio::test]
+    async fn stop_signal_succeeds_even_with_no_receivers() {
+        let daemon = test_daemon().await;
+        let (tx, _rx) = tokio::sync::broadcast::channel::<()>(1);
+        // Drop _rx so there are no receivers
+
+        *daemon.is_recording.write().await = true;
+        *daemon.manual_stop_tx.write().await = Some(tx);
+
+        let request = make_record_request(Some(serde_json::json!({
+            "write_mode": false,
+        })));
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+        assert_eq!(
+            response.message.as_deref(),
+            Some(DaemonResponse::RECORDING_STOP_SIGNAL_MSG)
+        );
+    }
+
+    #[tokio::test]
+    async fn is_recording_reset_on_record_failure() {
+        // No model loaded → record_and_transcribe will fail during transcription
+        // but first it needs to get past setup_recording_session which requires
+        // audio hardware. Instead we test handle_record_internal indirectly:
+        // the daemon has no model, so recording will eventually fail.
+        // What we CAN test: after handle_command returns an error, is_recording is false.
+        let daemon = test_daemon().await;
+
+        // Verify is_recording starts false
+        assert!(!*daemon.is_recording.read().await);
+
+        let request = make_record_request(Some(serde_json::json!({
+            "write_mode": false,
+        })));
+
+        let response = daemon.handle_command(request).await;
+
+        // Recording will fail (no audio device in test), but is_recording must be reset
+        assert!(
+            !*daemon.is_recording.read().await,
+            "is_recording must be false after a failed recording attempt"
+        );
     }
 }

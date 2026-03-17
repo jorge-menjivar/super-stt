@@ -53,6 +53,12 @@ impl SuperSTTDaemon {
             }
             Err(e) => {
                 error!("🎤 Recording failed: {e}");
+                // Reset recording state on failure to prevent permanent lockout
+                {
+                    let mut guard = self.is_recording.write().await;
+                    *guard = false;
+                }
+                self.broadcast_recording_state_change(false).await;
                 DaemonResponse::error(&format!("Recording failed: {e}"))
             }
         }
@@ -265,7 +271,9 @@ impl SuperSTTDaemon {
             }
         };
 
-        // Clear stop channel now that recording is done
+        // Audio capture is done — clear stop channel.
+        // is_recording stays true until finalize_recording_session so the daemon
+        // rejects new recordings while transcription is in progress.
         *self.manual_stop_tx.write().await = None;
 
         // Clear preview after recording is done (only if preview typing was enabled)
