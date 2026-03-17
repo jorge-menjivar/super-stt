@@ -496,13 +496,13 @@ mod tests {
 
     #[test]
     fn record_command_without_stop_mode_defaults_to_none() {
-        let request = make_request(
-            "record",
-            Some(json!({ "write_mode": true })),
-        );
+        let request = make_request("record", Some(json!({ "write_mode": true })));
         let command = Command::try_from(request).expect("record command should parse");
         match command {
-            Command::Record { write_mode, stop_mode } => {
+            Command::Record {
+                write_mode,
+                stop_mode,
+            } => {
                 assert!(write_mode);
                 assert_eq!(stop_mode, None);
             }

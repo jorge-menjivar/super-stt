@@ -66,7 +66,10 @@ mod tests {
 
     #[test]
     fn default_is_silence_and_manual() {
-        assert_eq!(RecordingStopMode::default(), RecordingStopMode::SilenceAndManual);
+        assert_eq!(
+            RecordingStopMode::default(),
+            RecordingStopMode::SilenceAndManual
+        );
     }
 
     #[test]
@@ -84,9 +87,18 @@ mod tests {
 
     #[test]
     fn from_str_short_aliases() {
-        assert_eq!("silence".parse::<RecordingStopMode>().unwrap(), RecordingStopMode::SilenceOnly);
-        assert_eq!("both".parse::<RecordingStopMode>().unwrap(), RecordingStopMode::SilenceAndManual);
-        assert_eq!("manual".parse::<RecordingStopMode>().unwrap(), RecordingStopMode::ManualOnly);
+        assert_eq!(
+            "silence".parse::<RecordingStopMode>().unwrap(),
+            RecordingStopMode::SilenceOnly
+        );
+        assert_eq!(
+            "both".parse::<RecordingStopMode>().unwrap(),
+            RecordingStopMode::SilenceAndManual
+        );
+        assert_eq!(
+            "manual".parse::<RecordingStopMode>().unwrap(),
+            RecordingStopMode::ManualOnly
+        );
     }
 
     #[test]

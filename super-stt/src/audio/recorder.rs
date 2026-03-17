@@ -233,7 +233,7 @@ impl DaemonAudioRecorder {
             // When a stop signal is present, race between the periodic check and the stop signal
             if let Some(ref mut stop_rx) = stop_rx {
                 tokio::select! {
-                    _ = time::sleep(AUDIO_LOOP_INTERVAL) => {}
+                    () = time::sleep(AUDIO_LOOP_INTERVAL) => {}
                     _ = stop_rx.recv() => {
                         info!("🛑 Stop signal received, ending recording");
                         break;

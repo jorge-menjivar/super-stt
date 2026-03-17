@@ -125,7 +125,9 @@ mod tests {
             .expect("record subcommand should be present");
 
         assert_eq!(
-            record_matches.get_one::<String>("stop-mode").map(String::as_str),
+            record_matches
+                .get_one::<String>("stop-mode")
+                .map(String::as_str),
             Some("manual")
         );
     }

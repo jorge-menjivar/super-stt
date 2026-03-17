@@ -199,7 +199,8 @@ impl cosmic::Application for AppModel {
 
             // Initialize preview typing state (disabled by default as beta feature)
             preview_typing_enabled: false,
-            recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
+            recording_stop_mode:
+                super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
         };
 
         // Create startup commands
@@ -759,19 +760,25 @@ impl AppModel {
                         }
                     }),
                     // Load recording stop mode from daemon
-                    Task::perform(get_recording_stop_mode(self.socket_path.clone()), |result| {
-                        use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-                        match result {
-                            Ok(mode_str) => {
-                                let mode = mode_str.parse::<RecordingStopMode>().unwrap_or_default();
-                                cosmic::Action::App(Message::RecordingStopModeLoaded(mode))
+                    Task::perform(
+                        get_recording_stop_mode(self.socket_path.clone()),
+                        |result| {
+                            use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+                            match result {
+                                Ok(mode_str) => {
+                                    let mode =
+                                        mode_str.parse::<RecordingStopMode>().unwrap_or_default();
+                                    cosmic::Action::App(Message::RecordingStopModeLoaded(mode))
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to load recording stop mode: {e}");
+                                    cosmic::Action::App(Message::RecordingStopModeLoaded(
+                                        RecordingStopMode::default(),
+                                    ))
+                                }
                             }
-                            Err(e) => {
-                                log::warn!("Failed to load recording stop mode: {e}");
-                                cosmic::Action::App(Message::RecordingStopModeLoaded(RecordingStopMode::default()))
-                            }
-                        }
-                    }),
+                        },
+                    ),
                 ])
             }
 

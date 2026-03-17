@@ -153,12 +153,11 @@ pub async fn run() -> Result<()> {
 async fn handle_record_command(matches: &clap::ArgMatches) -> Result<()> {
     let write_mode = matches.get_flag("write");
     // Resolve stop mode: CLI flag → config file → default (manual-only)
-    let stop_mode = match matches.get_one::<String>("stop-mode") {
-        Some(mode) => mode.clone(),
-        None => {
-            let config = DaemonConfig::load();
-            config.transcription.recording_stop_mode.to_string()
-        }
+    let stop_mode = if let Some(mode) = matches.get_one::<String>("stop-mode") {
+        mode.clone()
+    } else {
+        let config = DaemonConfig::load();
+        config.transcription.recording_stop_mode.to_string()
     };
     let socket_path = matches
         .get_one::<PathBuf>("socket")

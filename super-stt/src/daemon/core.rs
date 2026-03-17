@@ -64,42 +64,7 @@ impl SuperSTTDaemon {
             Command::Record {
                 write_mode,
                 stop_mode,
-            } => {
-                // Resolve effective mode: per-request override or daemon config default
-                let effective_mode = match stop_mode {
-                    Some(mode) => mode,
-                    None => {
-                        let config = self.config.read().await;
-                        config.transcription.recording_stop_mode
-                    }
-                };
-
-                // Toggle behaviour: if already recording, stop it (if mode allows)
-                let is_recording = *self.is_recording.read().await;
-                if is_recording {
-                    let guard = self.manual_stop_tx.read().await;
-                    if guard.is_none() {
-                        // Stop channel cleared = audio capture is done, transcription in progress
-                        log::info!("Transcription in progress, please wait");
-                        return DaemonResponse::success()
-                            .with_message("Transcription in progress, please wait".to_string());
-                    }
-                    if !effective_mode.manual_stop_enabled() {
-                        log::info!("Second press ignored: recording in SilenceOnly mode");
-                        return DaemonResponse::success()
-                            .with_message("Manual stop not enabled in current mode".to_string());
-                    }
-                    if let Some(tx) = guard.as_ref() {
-                        let _ = tx.send(());
-                        log::info!("🛑 Stop triggered via shortcut while recording");
-                    }
-                    return DaemonResponse::success()
-                        .with_message(DaemonResponse::RECORDING_STOP_SIGNAL_MSG.to_string());
-                }
-                let mut typer = Typer::default();
-                self.handle_record_internal(&mut typer, write_mode, effective_mode)
-                    .await
-            }
+            } => self.handle_record_command(write_mode, stop_mode).await,
             Command::SetAudioTheme { theme } => self.handle_set_audio_theme(theme),
             Command::GetAudioTheme => self.handle_get_audio_theme(),
             Command::TestAudioTheme => self.handle_test_audio_theme().await,
@@ -119,6 +84,46 @@ impl SuperSTTDaemon {
             }
             Command::GetRecordingStopMode => self.handle_get_recording_stop_mode().await,
         }
+    }
+
+    /// Handle a record command — resolve mode, toggle stop, or start recording.
+    async fn handle_record_command(
+        &self,
+        write_mode: bool,
+        stop_mode: Option<super_stt_shared::models::recording_stop_mode::RecordingStopMode>,
+    ) -> DaemonResponse {
+        // Resolve effective mode: per-request override or daemon config default
+        let effective_mode = if let Some(mode) = stop_mode {
+            mode
+        } else {
+            let config = self.config.read().await;
+            config.transcription.recording_stop_mode
+        };
+
+        // Toggle behaviour: if already recording, stop it (if mode allows)
+        let is_recording = *self.is_recording.read().await;
+        if is_recording {
+            let guard = self.manual_stop_tx.read().await;
+            if guard.is_none() {
+                log::info!("Transcription in progress, please wait");
+                return DaemonResponse::success()
+                    .with_message("Transcription in progress, please wait".to_string());
+            }
+            if !effective_mode.manual_stop_enabled() {
+                log::info!("Second press ignored: recording in SilenceOnly mode");
+                return DaemonResponse::success()
+                    .with_message("Manual stop not enabled in current mode".to_string());
+            }
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(());
+                log::info!("🛑 Stop triggered via shortcut while recording");
+            }
+            return DaemonResponse::success()
+                .with_message(DaemonResponse::RECORDING_STOP_SIGNAL_MSG.to_string());
+        }
+        let mut typer = Typer::default();
+        self.handle_record_internal(&mut typer, write_mode, effective_mode)
+            .await
     }
 
     /// Placeholder for real-time handlers - these need to be implemented
@@ -175,15 +180,15 @@ mod tests {
     use crate::download_progress::DownloadStateManager;
     use crate::input::audio::AudioProcessor;
     use crate::services::transcription::RealTimeTranscriptionManager;
-    use super_stt_shared::NotificationManager;
-    use super_stt_shared::resource_management::ResourceManager;
-    use super_stt_shared::theme::AudioTheme;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, RwLock};
+    use super_stt_shared::NotificationManager;
+    use super_stt_shared::resource_management::ResourceManager;
+    use super_stt_shared::theme::AudioTheme;
     use tokio::sync::broadcast;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     async fn test_daemon() -> SuperSTTDaemon {
         let socket_path = PathBuf::from("/tmp/super-stt-test.sock");
@@ -299,7 +304,10 @@ mod tests {
 
         // Stop signal should NOT have been sent
         let recv = timeout(Duration::from_millis(100), rx.recv()).await;
-        assert!(recv.is_err(), "stop signal should not be sent in SilenceOnly mode");
+        assert!(
+            recv.is_err(),
+            "stop signal should not be sent in SilenceOnly mode"
+        );
     }
 
     #[tokio::test]
@@ -331,7 +339,10 @@ mod tests {
         );
 
         let recv = timeout(Duration::from_millis(200), rx.recv()).await;
-        assert!(recv.is_ok(), "per-request override should allow manual stop");
+        assert!(
+            recv.is_ok(),
+            "per-request override should allow manual stop"
+        );
     }
 
     #[tokio::test]
@@ -377,7 +388,10 @@ mod tests {
         );
 
         let recv = timeout(Duration::from_millis(100), rx.recv()).await;
-        assert!(recv.is_err(), "stop signal should not be sent in SilenceOnly mode");
+        assert!(
+            recv.is_err(),
+            "stop signal should not be sent in SilenceOnly mode"
+        );
     }
 
     #[tokio::test]

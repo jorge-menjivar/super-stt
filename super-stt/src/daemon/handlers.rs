@@ -3,11 +3,11 @@
 use crate::daemon::types::SuperSTTDaemon;
 use chrono::Utc;
 use log::{error, info, warn};
-use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use serde_json::Value;
 use std::collections::HashMap;
 use strum::VariantArray;
 use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::stt_model::STTModel;
 use super_stt_shared::theme::AudioTheme;
 
@@ -317,10 +317,7 @@ impl SuperSTTDaemon {
     }
 
     /// Handle set recording stop mode command
-    pub async fn handle_set_recording_stop_mode(
-        &self,
-        mode: RecordingStopMode,
-    ) -> DaemonResponse {
+    pub async fn handle_set_recording_stop_mode(&self, mode: RecordingStopMode) -> DaemonResponse {
         {
             let mut config_guard = self.config.write().await;
             config_guard.transcription.recording_stop_mode = mode;
@@ -339,7 +336,9 @@ impl SuperSTTDaemon {
                 warn!("Recording stop mode changed but failed to save: {e}");
                 DaemonResponse::success()
                     .with_recording_stop_mode(mode.to_string())
-                    .with_message(format!("Recording stop mode set to {mode} (save failed: {e})"))
+                    .with_message(format!(
+                        "Recording stop mode set to {mode} (save failed: {e})"
+                    ))
             }
         }
     }
@@ -348,8 +347,7 @@ impl SuperSTTDaemon {
     pub async fn handle_get_recording_stop_mode(&self) -> DaemonResponse {
         let config = self.config.read().await;
         let mode = config.transcription.recording_stop_mode;
-        DaemonResponse::success()
-            .with_recording_stop_mode(mode.to_string())
+        DaemonResponse::success().with_recording_stop_mode(mode.to_string())
     }
 
     /// Handle cancel download command
