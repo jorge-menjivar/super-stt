@@ -56,6 +56,11 @@ pub fn build() -> Command {
                     .required(false)
             )
             .arg(
+                arg!(--"write-method" <method> "Keyboard write method: auto, xdg-desktop-portal, ydotool, wayland-protocol")
+                    .value_parser(["auto", "xdg-desktop-portal", "ydotool", "wayland-protocol"])
+                    .required(false)
+            )
+            .arg(
                 arg!(-s --socket <socket> "The daemon socket path")
                 .default_value(*DEFAULT_SOCKET_PATH_STR)
                 .value_parser(value_parser!(PathBuf))

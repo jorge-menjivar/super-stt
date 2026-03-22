@@ -86,6 +86,8 @@ pub struct SuperSTTDaemon {
     pub preview_typing_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // Sender used to signal a running recording to stop early (shortcut or external stop)
     pub manual_stop_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::broadcast::Sender<()>>>>,
+    // Cached keyboard simulator (session persists across recordings)
+    pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
 }
 
 impl SuperSTTDaemon {
@@ -95,6 +97,7 @@ impl SuperSTTDaemon {
     ///
     /// Returns an error if initializing subsystems (like UDP streamer) fails
     /// or if model loading fails.
+    #[allow(clippy::too_many_lines)]
     pub async fn new(
         socket_path: PathBuf,
         stt_model_override: Option<STTModel>,
@@ -203,6 +206,7 @@ impl SuperSTTDaemon {
                 preview_typing_enabled,
             )),
             manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
+            simulator: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         // Apply temporary device override for current session (not saved to config)

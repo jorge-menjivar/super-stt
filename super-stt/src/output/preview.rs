@@ -31,10 +31,30 @@ impl Default for State {
 }
 
 /// Unified, simplified preview typer that combines the best of both approaches
-#[derive(Default)]
 pub struct Typer {
     keyboard_simulator: Simulator,
     state: State,
+}
+
+impl Typer {
+    #[must_use]
+    pub fn new(keyboard_simulator: Simulator) -> Self {
+        Self {
+            keyboard_simulator,
+            state: State::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn write_method_name(&self) -> &'static str {
+        self.keyboard_simulator.name()
+    }
+
+    /// Extract the simulator so it can be cached for reuse.
+    #[must_use]
+    pub fn take_simulator(self) -> Simulator {
+        self.keyboard_simulator
+    }
 }
 
 impl Typer {

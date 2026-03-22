@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{daemon::types::SuperSTTDaemon, output::preview::Typer};
+use crate::{daemon::types::SuperSTTDaemon, output::keyboard::Simulator, output::preview::Typer};
 use super_stt_shared::models::protocol::{Command, DaemonRequest, DaemonResponse};
 
 impl SuperSTTDaemon {
@@ -83,6 +83,8 @@ impl SuperSTTDaemon {
                 self.handle_set_recording_stop_mode(mode).await
             }
             Command::GetRecordingStopMode => self.handle_get_recording_stop_mode().await,
+            Command::SetWriteMethod { method } => self.handle_set_write_method(method).await,
+            Command::GetWriteMethod => self.handle_get_write_method().await,
         }
     }
 
@@ -121,9 +123,33 @@ impl SuperSTTDaemon {
             return DaemonResponse::success()
                 .with_message(DaemonResponse::RECORDING_STOP_SIGNAL_MSG.to_string());
         }
-        let mut typer = Typer::default();
-        self.handle_record_internal(&mut typer, write_mode, effective_mode)
-            .await
+        // Take the cached simulator, or create a new one.
+        let simulator = {
+            let mut guard = self.simulator.write().await;
+            guard.take()
+        };
+        let simulator = if let Some(s) = simulator {
+            s
+        } else {
+            let write_method = {
+                let config = self.config.read().await;
+                config.transcription.write_method
+            };
+            match Simulator::new(write_method).await {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("Failed to create keyboard simulator: {e}");
+                    return DaemonResponse::error(&format!("Keyboard simulator failed: {e}"));
+                }
+            }
+        };
+        let mut typer = Typer::new(simulator);
+        let response = self
+            .handle_record_internal(&mut typer, write_mode, effective_mode)
+            .await;
+        // Return the simulator to the cache for reuse.
+        *self.simulator.write().await = Some(typer.take_simulator());
+        response
     }
 
     /// Placeholder for real-time handlers - these need to be implemented
@@ -231,6 +257,7 @@ mod tests {
             resource_manager: Arc::new(ResourceManager::development()),
             preview_typing_enabled: Arc::new(AtomicBool::new(false)),
             manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
+            simulator: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 

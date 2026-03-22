@@ -7,3 +7,4 @@ pub mod stt;
 pub mod stt_model;
 pub mod theme;
 pub mod udp;
+pub mod write_method;

@@ -524,6 +524,48 @@ pub async fn get_recording_stop_mode(
     }
 }
 
+/// Set write method on daemon
+///
+/// # Errors
+///
+/// Returns an error if the request fails.
+pub async fn set_write_method(
+    socket_path: PathBuf,
+    method: &str,
+    client_id: &str,
+) -> Result<(), String> {
+    let mut request = create_daemon_request("set_write_method", client_id);
+    request.data = Some(serde_json::json!({ "method": method }));
+
+    let response = send_daemon_request(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(())
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Failed to set write method".to_string()))
+    }
+}
+
+/// Get current write method from daemon
+///
+/// # Errors
+///
+/// Returns an error if the request fails.
+pub async fn get_write_method(socket_path: PathBuf, client_id: &str) -> Result<String, String> {
+    let request = create_daemon_request("get_write_method", client_id);
+    let response = send_daemon_request(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(response.write_method.unwrap_or_else(|| "auto".to_string()))
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Failed to get write method".to_string()))
+    }
+}
+
 /// Get recent daemon events
 ///
 /// # Errors

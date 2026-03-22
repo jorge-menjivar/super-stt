@@ -138,3 +138,13 @@ pub async fn set_recording_stop_mode(socket_path: PathBuf, mode: String) -> Resu
 pub async fn get_recording_stop_mode(socket_path: PathBuf) -> Result<String, String> {
     super_stt_shared::daemon::client::get_recording_stop_mode(socket_path, get_client_id()).await
 }
+
+/// Set write method on daemon
+pub async fn set_write_method(socket_path: PathBuf, method: String) -> Result<(), String> {
+    super_stt_shared::daemon::client::set_write_method(socket_path, &method, get_client_id()).await
+}
+
+/// Get current write method from daemon
+pub async fn get_write_method(socket_path: PathBuf) -> Result<String, String> {
+    super_stt_shared::daemon::client::get_write_method(socket_path, get_client_id()).await
+}

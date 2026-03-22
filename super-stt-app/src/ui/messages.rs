@@ -3,6 +3,7 @@
 //! Message types for the Super STT application.
 
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::stt_model::STTModel;
 
 use crate::state::{AudioTheme, ContextPage};
@@ -79,4 +80,9 @@ pub enum Message {
     RecordingStopModeChanged(RecordingStopMode),
     RecordingStopModeLoaded(RecordingStopMode),
     RecordingStopModeError(String),
+
+    // Write method messages
+    WriteMethodChanged(WriteMethod),
+    WriteMethodLoaded(WriteMethod),
+    WriteMethodError(String),
 }

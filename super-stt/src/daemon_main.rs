@@ -152,12 +152,18 @@ pub async fn run() -> Result<()> {
 /// Handle the record subcommand - direct recording mode
 async fn handle_record_command(matches: &clap::ArgMatches) -> Result<()> {
     let write_mode = matches.get_flag("write");
-    // Resolve stop mode: CLI flag → config file → default (manual-only)
+    let config = DaemonConfig::load();
+    // Resolve stop mode: CLI flag → config file → default
     let stop_mode = if let Some(mode) = matches.get_one::<String>("stop-mode") {
         mode.clone()
     } else {
-        let config = DaemonConfig::load();
         config.transcription.recording_stop_mode.to_string()
+    };
+    // Resolve write method: CLI flag → config file → default (auto)
+    let write_method = if let Some(method) = matches.get_one::<String>("write-method") {
+        method.clone()
+    } else {
+        config.transcription.write_method.to_string()
     };
     let socket_path = matches
         .get_one::<PathBuf>("socket")
@@ -177,7 +183,8 @@ async fn handle_record_command(matches: &clap::ArgMatches) -> Result<()> {
     // Try to connect to existing daemon first
     if socket_path.exists() {
         info!("Found existing daemon, sending record request...");
-        return send_record_request_to_daemon(socket_path, write_mode, &stop_mode).await;
+        return send_record_request_to_daemon(socket_path, write_mode, &stop_mode, &write_method)
+            .await;
     }
 
     // If no daemon is running, inform user to start it first
@@ -232,6 +239,7 @@ async fn send_record_request_to_daemon(
     socket_path: &PathBuf,
     write_mode: bool,
     stop_mode: &str,
+    write_method: &str,
 ) -> Result<()> {
     use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -255,6 +263,7 @@ async fn send_record_request_to_daemon(
         data: Some(serde_json::json!({
             "write_mode": write_mode,
             "stop_mode": stop_mode,
+            "write_method": write_method,
         })),
         language: None,
         enabled: None,

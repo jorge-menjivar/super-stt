@@ -4,6 +4,7 @@ use cosmic::iced::Length;
 use cosmic::iced_widget::{column, row};
 use cosmic::widget::{self, button, settings, text};
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
 // Reuse shared models
 use super_stt_shared::{models::protocol::DownloadProgress, stt_model::STTModel};
@@ -56,6 +57,39 @@ pub fn recording_stop_mode_settings_widget(
         "Stop Mode",
         widget::dropdown(mode_names, selected_index, move |index| {
             Message::RecordingStopModeChanged(modes[index])
+        }),
+    ));
+
+    section.into()
+}
+
+/// Write method settings section
+pub fn write_method_settings_widget(write_method: WriteMethod) -> Element<'static, Message> {
+    let mut section = settings::section().title("Write Method");
+
+    section = section.add(settings::item(
+        "",
+        text::caption(
+            "Controls how transcribed text is typed: XDG Desktop Portal, ydotool, or Wayland protocol. Auto tries each in order.",
+        ),
+    ));
+
+    let methods = [
+        WriteMethod::Auto,
+        WriteMethod::XdgDesktopPortal,
+        WriteMethod::Ydotool,
+        WriteMethod::WaylandProtocol,
+    ];
+    let method_names: Vec<String> = methods
+        .iter()
+        .map(|m| m.pretty_name().to_string())
+        .collect();
+    let selected_index = methods.iter().position(|m| *m == write_method);
+
+    section = section.add(settings::item(
+        "Method",
+        widget::dropdown(method_names, selected_index, move |index| {
+            Message::WriteMethodChanged(methods[index])
         }),
     ));
 
@@ -582,10 +616,12 @@ pub fn page<'a>(
     device_state: &'a crate::core::app::DeviceState,
     preview_typing_enabled: bool,
     recording_stop_mode: RecordingStopMode,
+    write_method: WriteMethod,
 ) -> Element<'a, Message> {
     let sections = vec![
         audio_theme_selection_widget(audio_themes, selected_audio_theme),
         recording_stop_mode_settings_widget(recording_stop_mode),
+        write_method_settings_widget(write_method),
         preview_typing_settings_widget(preview_typing_enabled),
         model_management_widget(
             available_models,

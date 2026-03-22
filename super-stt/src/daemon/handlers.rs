@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use strum::VariantArray;
 use super_stt_shared::models::protocol::DaemonResponse;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::stt_model::STTModel;
 use super_stt_shared::theme::AudioTheme;
 
@@ -348,6 +349,40 @@ impl SuperSTTDaemon {
         let config = self.config.read().await;
         let mode = config.transcription.recording_stop_mode;
         DaemonResponse::success().with_recording_stop_mode(mode.to_string())
+    }
+
+    /// Handle set write method command
+    pub async fn handle_set_write_method(&self, method: WriteMethod) -> DaemonResponse {
+        {
+            let mut config_guard = self.config.write().await;
+            config_guard.transcription.write_method = method;
+        }
+        // Invalidate the cached simulator so the next recording creates a fresh one.
+        *self.simulator.write().await = None;
+
+        let broadcast_result = self.broadcast_config_change().await;
+
+        match broadcast_result {
+            Ok(()) => {
+                info!("Write method set to {method} and saved to config");
+                DaemonResponse::success()
+                    .with_write_method(method.to_string())
+                    .with_message(format!("Write method set to {method}"))
+            }
+            Err(e) => {
+                warn!("Write method changed but failed to save: {e}");
+                DaemonResponse::success()
+                    .with_write_method(method.to_string())
+                    .with_message(format!("Write method set to {method} (save failed: {e})"))
+            }
+        }
+    }
+
+    /// Handle get write method command
+    pub async fn handle_get_write_method(&self) -> DaemonResponse {
+        let config = self.config.read().await;
+        let method = config.transcription.write_method;
+        DaemonResponse::success().with_write_method(method.to_string())
     }
 
     /// Handle cancel download command

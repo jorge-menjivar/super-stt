@@ -307,6 +307,7 @@ impl SuperSTTDaemon {
 
         // STEP 6: Type final transcript
         if write_mode {
+            info!("Writing transcription via {}", typer.write_method_name());
             typer.process_final_text(&transcription_result);
         }
         info!("Step 6 complete: Final transcription typed successfully");

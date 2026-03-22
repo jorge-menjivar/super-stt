@@ -4,9 +4,10 @@ use crate::audio::{parse_audio_level_from_udp, parse_recording_state_from_udp};
 
 use crate::daemon::client::{
     cancel_download, fetch_daemon_config, get_current_device, get_current_model,
-    get_download_status, get_preview_typing, get_recording_stop_mode, list_available_models,
-    load_audio_themes, ping_daemon, send_record_command, set_and_test_audio_theme, set_device,
-    set_model, set_preview_typing, set_recording_stop_mode, test_daemon_connection,
+    get_download_status, get_preview_typing, get_recording_stop_mode, get_write_method,
+    list_available_models, load_audio_themes, ping_daemon, send_record_command,
+    set_and_test_audio_theme, set_device, set_model, set_preview_typing, set_recording_stop_mode,
+    set_write_method, test_daemon_connection,
 };
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};
 use crate::ui::messages::Message;
@@ -115,6 +116,9 @@ pub struct AppModel {
 
     // Recording stop mode
     pub recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
+
+    // Write method
+    pub write_method: super_stt_shared::models::write_method::WriteMethod,
 }
 
 /// Create a COSMIC application from the app model
@@ -201,6 +205,7 @@ impl cosmic::Application for AppModel {
             preview_typing_enabled: false,
             recording_stop_mode:
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
+            write_method: super_stt_shared::models::write_method::WriteMethod::default(),
         };
 
         // Create startup commands
@@ -304,6 +309,7 @@ impl cosmic::Application for AppModel {
                 &self.device_state,
                 self.preview_typing_enabled,
                 self.recording_stop_mode,
+                self.write_method,
             ),
             Page::Testing => views::testing::page(
                 &self.recording_status,
@@ -514,6 +520,15 @@ impl cosmic::Application for AppModel {
                 | Message::RecordingStopModeError(_)
         ) {
             return self.handle_recording_stop_mode_messages(message);
+        }
+
+        if matches!(
+            message,
+            Message::WriteMethodChanged(_)
+                | Message::WriteMethodLoaded(_)
+                | Message::WriteMethodError(_)
+        ) {
+            return self.handle_write_method_messages(message);
         }
 
         match message {
@@ -779,6 +794,22 @@ impl AppModel {
                             }
                         },
                     ),
+                    // Load write method from daemon
+                    Task::perform(get_write_method(self.socket_path.clone()), |result| {
+                        use super_stt_shared::models::write_method::WriteMethod;
+                        match result {
+                            Ok(method_str) => {
+                                let method = method_str.parse::<WriteMethod>().unwrap_or_default();
+                                cosmic::Action::App(Message::WriteMethodLoaded(method))
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to load write method: {e}");
+                                cosmic::Action::App(Message::WriteMethodLoaded(
+                                    WriteMethod::default(),
+                                ))
+                            }
+                        }
+                    }),
                 ])
             }
 
@@ -1395,6 +1426,35 @@ impl AppModel {
 
             Message::RecordingStopModeError(err) => {
                 log::warn!("Recording stop mode error: {err}");
+                Task::none()
+            }
+
+            _ => Task::none(),
+        }
+    }
+
+    /// Handle write method messages
+    fn handle_write_method_messages(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+        match message {
+            Message::WriteMethodChanged(method) => {
+                self.write_method = method;
+                let method_str = method.to_string();
+                Task::perform(
+                    set_write_method(self.socket_path.clone(), method_str),
+                    move |result| match result {
+                        Ok(()) => cosmic::Action::App(Message::WriteMethodLoaded(method)),
+                        Err(e) => cosmic::Action::App(Message::WriteMethodError(e)),
+                    },
+                )
+            }
+
+            Message::WriteMethodLoaded(method) => {
+                self.write_method = method;
+                Task::none()
+            }
+
+            Message::WriteMethodError(err) => {
+                log::warn!("Write method error: {err}");
                 Task::none()
             }
 

@@ -5,6 +5,7 @@ use std::{collections::HashMap, str::FromStr};
 
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::theme::AudioTheme;
+use crate::models::write_method::WriteMethod;
 use crate::stt_model::STTModel;
 use crate::validation::{self, Validate, ValidationError};
 
@@ -96,6 +97,10 @@ pub struct DaemonResponse {
     // Recording stop mode
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recording_stop_mode: Option<String>,
+
+    // Input method
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write_method: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -151,6 +156,7 @@ impl DaemonResponse {
             connection_active: None,
             preview_typing_enabled: None,
             recording_stop_mode: None,
+            write_method: None,
         }
     }
 
@@ -200,6 +206,7 @@ impl DaemonResponse {
             connection_active: None,
             preview_typing_enabled: None,
             recording_stop_mode: None,
+            write_method: None,
         }
     }
 
@@ -316,6 +323,12 @@ impl DaemonResponse {
         self.recording_stop_mode = Some(mode);
         self
     }
+
+    #[must_use]
+    pub fn with_write_method(mut self, method: String) -> Self {
+        self.write_method = Some(method);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -385,6 +398,10 @@ pub enum Command {
         mode: RecordingStopMode,
     },
     GetRecordingStopMode,
+    SetWriteMethod {
+        method: WriteMethod,
+    },
+    GetWriteMethod,
 }
 
 impl Validate for DaemonRequest {
@@ -582,6 +599,8 @@ impl TryFrom<DaemonRequest> for Command {
             "get_preview_typing" => Ok(Command::GetPreviewTyping),
             "set_recording_stop_mode" => cmd_set_recording_stop_mode(&request),
             "get_recording_stop_mode" => Ok(Command::GetRecordingStopMode),
+            "set_write_method" => cmd_set_write_method(&request),
+            "get_write_method" => Ok(Command::GetWriteMethod),
             _ => Err(format!("Unknown command: {}", request.command)),
         }
     }
@@ -779,4 +798,17 @@ fn cmd_set_recording_stop_mode(request: &DaemonRequest) -> Result<Command, Strin
         .parse::<RecordingStopMode>()
         .map_err(|e| format!("Invalid recording stop mode: {e}"))?;
     Ok(Command::SetRecordingStopMode { mode })
+}
+
+fn cmd_set_write_method(request: &DaemonRequest) -> Result<Command, String> {
+    let method_str = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("method"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing method for set_write_method command")?;
+    let method = method_str
+        .parse::<WriteMethod>()
+        .map_err(|e| format!("Invalid input method: {e}"))?;
+    Ok(Command::SetWriteMethod { method })
 }

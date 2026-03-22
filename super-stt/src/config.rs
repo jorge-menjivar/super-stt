@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::stt_model::STTModel;
 use super_stt_shared::theme::AudioTheme;
 
@@ -32,6 +33,8 @@ pub struct TranscriptionConfig {
     pub preview_typing_enabled: bool, // Beta feature: show preview while typing
     #[serde(default)]
     pub recording_stop_mode: RecordingStopMode,
+    #[serde(default)]
+    pub write_method: WriteMethod,
 }
 
 impl Default for DaemonConfig {
@@ -48,6 +51,7 @@ impl Default for DaemonConfig {
                 write_mode: false,             // Default to not auto-typing
                 preview_typing_enabled: false, // Default to disabled (beta feature)
                 recording_stop_mode: RecordingStopMode::default(),
+                write_method: WriteMethod::default(),
             },
         }
     }
@@ -144,6 +148,14 @@ impl DaemonConfig {
         self.transcription.recording_stop_mode = mode;
         if let Err(e) = self.save() {
             error!("Failed to save config after recording stop mode update: {e}");
+        }
+    }
+
+    /// Update write method and save to disk
+    pub fn update_write_method(&mut self, method: WriteMethod) {
+        self.transcription.write_method = method;
+        if let Err(e) = self.save() {
+            error!("Failed to save config after write method update: {e}");
         }
     }
 }
