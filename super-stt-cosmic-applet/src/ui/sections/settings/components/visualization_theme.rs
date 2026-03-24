@@ -108,7 +108,7 @@ fn create_colors_row<'a>(
             current_selected_color == color,
         ));
         if index != colors.len() - 1 {
-            light_colors_row = light_colors_row.push(Space::new(Length::Fill, Length::Shrink));
+            light_colors_row = light_colors_row.push(Space::new().width(Length::Fill));
         }
     }
     light_colors_row

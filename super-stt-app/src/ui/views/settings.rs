@@ -206,8 +206,7 @@ fn download_progress_widget(
                 0.0..=1.0,
                 // Audio level can be a minimum of 0.1 when recording because lower than that and it can overflow when theme is fully rounded.
                 progress_fraction.max(if progress.total_bytes > 0 { 0.1 } else { 0.0 }),
-            )
-            .width(Length::Fill),
+            ),
             row![
                 text::body(bytes_text).width(Length::Fill),
                 text::body(eta_text).width(Length::Fill),
@@ -536,8 +535,7 @@ fn add_download_progress_display<'a>(
         widget::progress_bar(
             0.0..=1.0,
             progress_fraction.max(0.1), // Minimum for visual feedback
-        )
-        .width(Length::Fill),
+        ),
         row![
             text::body(bytes_text).width(Length::Fill),
             text::body(eta_text).width(Length::Fill),
@@ -567,8 +565,7 @@ fn add_loading_status_display<'a>(
 
     let details_widget = column![
         text::body(status_text),
-        widget::progress_bar(0.0..=1.0, 0.5) // Indeterminate progress
-            .width(Length::Fill),
+        widget::progress_bar(0.0..=1.0, 0.5), // Indeterminate progress
     ]
     .spacing(10);
 
@@ -594,8 +591,7 @@ fn add_device_loading_status_display<'a>(
 
     let details_widget = column![
         text::body(status_text),
-        widget::progress_bar(0.0..=1.0, 0.5) // Indeterminate progress
-            .width(Length::Fill),
+        widget::progress_bar(0.0..=1.0, 0.5), // Indeterminate progress
     ]
     .spacing(10);
 

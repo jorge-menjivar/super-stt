@@ -53,6 +53,10 @@ use super_stt_shared::{
 const PING_INTERVAL_SECS: u64 = 5; // Ping every 5 seconds to check daemon health
 const VISUALIZATION_HEIGHT: f32 = 100.0; // Visualization height in pixels
 
+/// Wrapper for `Subscription::run_with` so the subscription restarts when the counter changes.
+#[derive(Hash)]
+struct UdpSubscriptionId(u64);
+
 use cosmic::iced::{Length, Size};
 
 // Export types needed by the binary files
@@ -208,101 +212,16 @@ impl cosmic::Application for SuperSttApplet {
         &mut self.core
     }
 
-    fn style(&self) -> Option<cosmic::iced_runtime::Appearance> {
+    fn style(&self) -> Option<cosmic::iced::theme::Style> {
         Some(cosmic::applet::style())
     }
 
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
             // UDP subscription for audio level monitoring that restarts when daemon reconnects
-            Subscription::run_with_id(
-                self.udp_restart_counter,
-                cosmic::iced::stream::channel(100, |mut channel| async move {
-                    let socket = match UdpSocket::bind("127.0.0.1:0").await {
-                        Ok(socket) => socket,
-                        Err(e) => {
-                            warn!("Failed to bind UDP socket: {e}");
-                            futures_util::future::pending().await
-                        }
-                    };
-
-                    // Register with daemon using authentication
-                    let auth = match UdpAuth::new() {
-                        Ok(auth) => auth,
-                        Err(e) => {
-                            warn!("Failed to initialize UDP authentication: {e}");
-                            return;
-                        }
-                    };
-
-                    let registration_msg = match auth.create_auth_message("applet") {
-                        Ok(msg) => msg,
-                        Err(e) => {
-                            warn!("Failed to create authenticated registration message: {e}");
-                            return;
-                        }
-                    };
-
-                    if let Err(e) = socket
-                        .send_to(registration_msg.as_bytes(), "127.0.0.1:8765")
-                        .await
-                    {
-                        warn!("Failed to register with daemon: {e}");
-                        return;
-                    }
-
-                    // Test if registration was successful by sending a test message
-                    if let Err(e) = socket.send_to(b"PING", "127.0.0.1:8765").await {
-                        warn!("Failed to send ping to daemon: {e}");
-                    }
-
-                    let mut buffer = [0u8; 1024];
-                    let mut rate_limiter = TokenBucketRateLimiter::for_audio_processing();
-                    let mut keepalive_interval =
-                        tokio::time::interval(tokio::time::Duration::from_secs(60));
-
-                    loop {
-                        tokio::select! {
-                            // Handle incoming UDP data
-                            recv_result = socket.recv_from(&mut buffer) => {
-                                match recv_result {
-                                    Ok((len, _addr)) => {
-                                        // Apply rate limiting to prevent UDP flooding DoS attacks
-                                        if !rate_limiter.try_consume() {
-                                            // Rate limited - drop packet and log warning
-                                            warn!("UDP packet rate limit exceeded, dropping packet");
-
-                                            // Optional: Add a small delay to further throttle rapid senders
-                                            if let Some(delay) = rate_limiter.time_until_next_token() {
-                                                tokio::time::sleep(
-                                                    delay.min(std::time::Duration::from_millis(10)),
-                                                )
-                                                .await;
-                                            }
-                                            continue;
-                                        }
-
-                                        let data = buffer[..len].to_vec();
-                                        if channel.send(Message::UdpData(data)).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        warn!("UDP receive error: {e}");
-                                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                                    }
-                                }
-                            }
-                            // Send periodic keep-alive pings
-                            _ = keepalive_interval.tick() => {
-                                // Send keep-alive ping to maintain connection
-                                if let Err(e) = socket.send_to(b"PING", "127.0.0.1:8765").await {
-                                    warn!("Failed to send UDP keep-alive: {e}");
-                                }
-                            }
-                        }
-                    }
-                }),
+            Subscription::run_with(
+                UdpSubscriptionId(self.udp_restart_counter),
+                applet_udp_subscription,
             ),
             // Periodic connection monitoring
             cosmic::iced::time::every(std::time::Duration::from_secs(PING_INTERVAL_SECS))
@@ -884,4 +803,95 @@ fn transparent_icon_button<'a>(
     ))
     .class(Button::AppletIcon)
     .on_press_down(Message::TogglePopup)
+}
+
+/// Creates a UDP audio level streaming subscription for the applet
+fn applet_udp_subscription(
+    _id: &UdpSubscriptionId,
+) -> std::pin::Pin<Box<dyn cosmic::iced::futures::Stream<Item = Message> + Send>> {
+    Box::pin(cosmic::iced::stream::channel(100, async |mut channel| {
+        let socket = match UdpSocket::bind("127.0.0.1:0").await {
+            Ok(socket) => socket,
+            Err(e) => {
+                warn!("Failed to bind UDP socket: {e}");
+                futures_util::future::pending().await
+            }
+        };
+
+        // Register with daemon using authentication
+        let auth = match UdpAuth::new() {
+            Ok(auth) => auth,
+            Err(e) => {
+                warn!("Failed to initialize UDP authentication: {e}");
+                return;
+            }
+        };
+
+        let registration_msg = match auth.create_auth_message("applet") {
+            Ok(msg) => msg,
+            Err(e) => {
+                warn!("Failed to create authenticated registration message: {e}");
+                return;
+            }
+        };
+
+        if let Err(e) = socket
+            .send_to(registration_msg.as_bytes(), "127.0.0.1:8765")
+            .await
+        {
+            warn!("Failed to register with daemon: {e}");
+            return;
+        }
+
+        // Test if registration was successful by sending a test message
+        if let Err(e) = socket.send_to(b"PING", "127.0.0.1:8765").await {
+            warn!("Failed to send ping to daemon: {e}");
+        }
+
+        let mut buffer = [0u8; 1024];
+        let mut rate_limiter = TokenBucketRateLimiter::for_audio_processing();
+        let mut keepalive_interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+
+        loop {
+            tokio::select! {
+                // Handle incoming UDP data
+                recv_result = socket.recv_from(&mut buffer) => {
+                    match recv_result {
+                        Ok((len, _addr)) => {
+                            // Apply rate limiting to prevent UDP flooding DoS attacks
+                            if !rate_limiter.try_consume() {
+                                // Rate limited - drop packet and log warning
+                                warn!("UDP packet rate limit exceeded, dropping packet");
+
+                                // Optional: Add a small delay to further throttle rapid senders
+                                if let Some(delay) = rate_limiter.time_until_next_token() {
+                                    tokio::time::sleep(
+                                        delay.min(std::time::Duration::from_millis(10)),
+                                    )
+                                    .await;
+                                }
+                                continue;
+                            }
+
+                            let data = buffer[..len].to_vec();
+                            if channel.send(Message::UdpData(data)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            warn!("UDP receive error: {e}");
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
+                    }
+                }
+                // Send periodic keep-alive pings
+                _ = keepalive_interval.tick() => {
+                    // Send keep-alive ping to maintain connection
+                    if let Err(e) = socket.send_to(b"PING", "127.0.0.1:8765").await {
+                        warn!("Failed to send UDP keep-alive: {e}");
+                    }
+                }
+            }
+        }
+    }))
 }

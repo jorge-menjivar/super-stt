@@ -74,7 +74,7 @@ pub fn create_applet_settings_section<'a>(
         padded_control(
             row![
                 text::body("Show Visualization"),
-                Space::new(Length::Fill, Length::Shrink),
+                Space::new().width(Length::Fill),
                 toggler(config.ui.show_visualization).on_toggle(Message::SetShowVisualizations)
             ]
             .spacing(spacing.space_xs)
@@ -127,7 +127,7 @@ pub fn create_applet_settings_section<'a>(
         padded_control(
             row![
                 text::body("Show Icon"),
-                Space::new(Length::Fill, Length::Shrink),
+                Space::new().width(Length::Fill),
                 toggler(config.ui.show_icon).on_toggle(Message::SetShowIcon)
             ]
             .spacing(spacing.space_xs)

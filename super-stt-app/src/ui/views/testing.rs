@@ -40,8 +40,7 @@ pub fn page<'a>(
             0.0..=1.0,
             // Audio level can be a minimum of 0.1 when recording because lower than that and it can overflow when theme is fully rounded.
             audio_level.max(if audio_level > 0.0 { 0.1 } else { 0.0 })
-        )
-        .width(Length::Fill),
+        ),
     ]
     .align_y(Alignment::Center)
     .spacing(10);

@@ -44,7 +44,7 @@ pub fn create_system_accent_button<'a>(
                     // System Accent label with description
                     text::body("System accent color").size(11),
                     // Spacer to push content to the left
-                    Space::new(Length::Fill, Length::Shrink),
+                    Space::new().width(Length::Fill),
                 ]
                 .spacing(spacing.space_xs)
                 .align_y(Alignment::Center),

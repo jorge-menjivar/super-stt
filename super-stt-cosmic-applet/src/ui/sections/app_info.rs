@@ -36,7 +36,7 @@ pub fn create_app_info_section() -> Element<'static, Message> {
         .spacing(spacing.space_xs)
         .align_y(Alignment::Center),
         // Spacer to push GitHub button to the right
-        Space::new(Length::Fill, Length::Shrink),
+        Space::new().width(Length::Fill),
         // Right side: GitHub button
         cosmic::widget::tooltip(
             button::icon(icon::from_svg_bytes(github_icon))

@@ -336,107 +336,17 @@ impl cosmic::Application for AppModel {
 
         Subscription::batch(vec![
             // UDP audio level streaming subscription with restart capability
-            Subscription::run_with_id(
-                self.udp_restart_counter,
-                cosmic::iced::stream::channel(100, |mut channel| async move {
-                    let socket = match UdpSocket::bind("127.0.0.1:0").await {
-                        Ok(socket) => Arc::new(socket),
-                        Err(e) => {
-                            warn!("Failed to bind UDP socket: {e}");
-                            futures_util::future::pending().await
-                        }
-                    };
-
-                    // Register with daemon using authentication (use 'applet' to get continuous audio data like the applet)
-                    let auth = match UdpAuth::new() {
-                        Ok(auth) => auth,
-                        Err(e) => {
-                            warn!("Failed to initialize UDP authentication: {e}");
-                            return;
-                        }
-                    };
-
-                    let registration_msg = match auth.create_auth_message("applet") {
-                        Ok(msg) => msg,
-                        Err(e) => {
-                            warn!("Failed to create authenticated registration message: {e}");
-                            return;
-                        }
-                    };
-
-                    if let Err(e) = socket
-                        .send_to(registration_msg.as_bytes(), "127.0.0.1:8765")
-                        .await
-                    {
-                        warn!("Failed to register with daemon: {e}");
-                        return;
-                    }
-
-                    // Wait for registration confirmation
-                    let mut reg_buffer = [0u8; 1024];
-                    match tokio::time::timeout(
-                        Duration::from_secs(5),
-                        socket.recv_from(&mut reg_buffer),
-                    )
-                    .await
-                    {
-                        Ok(Ok((len, addr))) => {
-                            let response = String::from_utf8_lossy(&reg_buffer[0..len]);
-                            if response.starts_with("REGISTERED:") {
-                                info!(
-                                    "Successfully registered with daemon: {response} from {addr}"
-                                );
-                            } else {
-                                warn!("Unexpected registration response: {response} from {addr}");
-                            }
-                        }
-                        Ok(Err(e)) => {
-                            warn!("Failed to receive registration response: {e}");
-                        }
-                        Err(_) => {
-                            warn!("Registration response timeout");
-                        }
-                    }
-
-                    // Periodic pings are handled by the existing PingTimeout subscription
-
-                    let mut buffer = [0u8; 1024];
-                    loop {
-                        match socket.recv_from(&mut buffer).await {
-                            Ok((len, addr)) => {
-                                // Validate source address - only accept from localhost
-                                if addr.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
-                                {
-                                    warn!("Rejected UDP packet from unauthorized source: {addr}");
-                                    continue;
-                                }
-
-                                // Validate packet size
-                                if !(1..=1024).contains(&len) {
-                                    warn!("Rejected UDP packet with invalid size: {len}");
-                                    continue;
-                                }
-
-                                let data = buffer[..len].to_vec();
-                                if channel.send(Message::UdpDataReceived(data)).await.is_err() {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                warn!("UDP receive error: {e}");
-                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                            }
-                        }
-                    }
-                }),
+            Subscription::run_with(
+                UdpSubscriptionId(self.udp_restart_counter),
+                udp_audio_subscription,
             ),
             // Periodic connection monitoring
             cosmic::iced::time::every(std::time::Duration::from_secs(PING_INTERVAL_SECS))
                 .map(|_| Message::PingTimeout),
             // Event subscription for daemon events (stable subscription that handles reconnection internally)
-            Subscription::run_with_id(
-                "daemon_events",
-                daemon_event_subscription(self.socket_path.clone()),
+            Subscription::run_with(
+                DaemonSocketPath(self.socket_path.clone()),
+                daemon_event_subscription,
             ),
         ])
     }
@@ -1479,35 +1389,135 @@ impl AppModel {
     }
 }
 
+/// Wrapper for `Subscription::run_with` so the subscription restarts when the counter changes.
+#[derive(Hash)]
+struct UdpSubscriptionId(u64);
+
+/// Creates a UDP audio level streaming subscription
+fn udp_audio_subscription(
+    _id: &UdpSubscriptionId,
+) -> std::pin::Pin<Box<dyn cosmic::iced::futures::Stream<Item = Message> + Send>> {
+    Box::pin(cosmic::iced::stream::channel(100, async |mut channel| {
+        let socket = match UdpSocket::bind("127.0.0.1:0").await {
+            Ok(socket) => Arc::new(socket),
+            Err(e) => {
+                warn!("Failed to bind UDP socket: {e}");
+                futures_util::future::pending().await
+            }
+        };
+
+        // Register with daemon using authentication (use 'applet' to get continuous audio data like the applet)
+        let auth = match UdpAuth::new() {
+            Ok(auth) => auth,
+            Err(e) => {
+                warn!("Failed to initialize UDP authentication: {e}");
+                return;
+            }
+        };
+
+        let registration_msg = match auth.create_auth_message("applet") {
+            Ok(msg) => msg,
+            Err(e) => {
+                warn!("Failed to create authenticated registration message: {e}");
+                return;
+            }
+        };
+
+        if let Err(e) = socket
+            .send_to(registration_msg.as_bytes(), "127.0.0.1:8765")
+            .await
+        {
+            warn!("Failed to register with daemon: {e}");
+            return;
+        }
+
+        // Wait for registration confirmation
+        let mut reg_buffer = [0u8; 1024];
+        match tokio::time::timeout(Duration::from_secs(5), socket.recv_from(&mut reg_buffer)).await
+        {
+            Ok(Ok((len, addr))) => {
+                let response = String::from_utf8_lossy(&reg_buffer[0..len]);
+                if response.starts_with("REGISTERED:") {
+                    info!("Successfully registered with daemon: {response} from {addr}");
+                } else {
+                    warn!("Unexpected registration response: {response} from {addr}");
+                }
+            }
+            Ok(Err(e)) => {
+                warn!("Failed to receive registration response: {e}");
+            }
+            Err(_) => {
+                warn!("Registration response timeout");
+            }
+        }
+
+        let mut buffer = [0u8; 1024];
+        loop {
+            match socket.recv_from(&mut buffer).await {
+                Ok((len, addr)) => {
+                    // Validate source address - only accept from localhost
+                    if addr.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
+                        warn!("Rejected UDP packet from unauthorized source: {addr}");
+                        continue;
+                    }
+
+                    // Validate packet size
+                    if !(1..=1024).contains(&len) {
+                        warn!("Rejected UDP packet with invalid size: {len}");
+                        continue;
+                    }
+
+                    let data = buffer[..len].to_vec();
+                    if channel.send(Message::UdpDataReceived(data)).await.is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    warn!("UDP receive error: {e}");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+            }
+        }
+    }))
+}
+
+/// Wrapper for `Subscription::run_with` to avoid passing `&PathBuf` directly.
+#[derive(Hash)]
+struct DaemonSocketPath(PathBuf);
+
 /// Creates a persistent subscription to daemon events
 /// This maintains a persistent connection to receive real-time event notifications
 fn daemon_event_subscription(
-    socket_path: PathBuf,
-) -> impl cosmic::iced::futures::Stream<Item = Message> {
-    cosmic::iced::stream::channel(100, move |mut channel| async move {
-        info!("Starting daemon event subscription loop");
+    config: &DaemonSocketPath,
+) -> std::pin::Pin<Box<dyn cosmic::iced::futures::Stream<Item = Message> + Send>> {
+    let socket_path = config.0.clone();
+    Box::pin(cosmic::iced::stream::channel(
+        100,
+        async move |mut channel| {
+            info!("Starting daemon event subscription loop");
 
-        loop {
-            info!("Attempting to establish persistent event connection");
+            loop {
+                info!("Attempting to establish persistent event connection");
 
-            // Try to establish persistent connection to daemon for event streaming
-            match create_persistent_event_connection(&socket_path, &mut channel).await {
-                Ok(()) => {
-                    info!("Persistent event connection completed, will restart if needed");
+                // Try to establish persistent connection to daemon for event streaming
+                match create_persistent_event_connection(&socket_path, &mut channel).await {
+                    Ok(()) => {
+                        info!("Persistent event connection completed, will restart if needed");
+                    }
+                    Err(e) => {
+                        warn!("Persistent event connection failed: {e}, retrying in 5 seconds");
+                        let _ = channel.send(Message::DaemonEventsError(e)).await;
+
+                        // Wait before retrying
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
                 }
-                Err(e) => {
-                    warn!("Persistent event connection failed: {e}, retrying in 5 seconds");
-                    let _ = channel.send(Message::DaemonEventsError(e)).await;
 
-                    // Wait before retrying
-                    tokio::time::sleep(Duration::from_secs(5)).await;
-                }
+                // Brief pause before retrying connection
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
-
-            // Brief pause before retrying connection
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    })
+        },
+    ))
 }
 
 /// Creates a persistent connection for receiving real-time events from daemon
