@@ -13,16 +13,55 @@ fn get_client_id() -> &'static str {
         .get_or_init(|| super_stt_shared::validation::generate_secure_client_id("super-stt-app"))
 }
 
-/// Send a record command to the daemon and get transcription result
+/// Send a record command to the daemon and get transcription result.
+/// Uses manual-only stop mode so the app controls when to stop.
 pub async fn send_record_command(socket_path: PathBuf) -> Result<String, String> {
-    let result =
-        super_stt_shared::daemon::client::send_record_command(socket_path, get_client_id()).await?;
+    let mut request =
+        super_stt_shared::daemon::client::create_daemon_request("record", get_client_id());
+    request.data = Some(serde_json::json!({
+        "write_mode": false,
+        "stop_mode": "manual-only",
+    }));
 
-    // Handle the specific formatting the app expects
-    if result.trim().is_empty() {
-        Ok("No speech detected".to_string())
+    let response =
+        super_stt_shared::daemon::client::send_daemon_request_pub(&socket_path, request).await?;
+
+    if response.status == "success" {
+        let text = response
+            .transcription
+            .or(response.message)
+            .unwrap_or_else(|| "No transcription received".to_string());
+        if text.trim().is_empty() {
+            Ok("No speech detected".to_string())
+        } else {
+            Ok(text)
+        }
     } else {
-        Ok(result)
+        Err(response
+            .message
+            .unwrap_or_else(|| "Recording failed".to_string()))
+    }
+}
+
+/// Send a stop signal to a running recording.
+pub async fn stop_record_command(socket_path: PathBuf) -> Result<(), String> {
+    // Sending another record command while recording triggers the manual stop.
+    let mut request =
+        super_stt_shared::daemon::client::create_daemon_request("record", get_client_id());
+    request.data = Some(serde_json::json!({
+        "write_mode": false,
+        "stop_mode": "manual-only",
+    }));
+
+    let response =
+        super_stt_shared::daemon::client::send_daemon_request_pub(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(())
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Stop failed".to_string()))
     }
 }
 

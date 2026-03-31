@@ -71,6 +71,18 @@ async fn send_daemon_request(
     serde_json::from_slice(&response_buf).map_err(|e| format!("Failed to parse response: {e}"))
 }
 
+/// Send a request to the daemon and return the response.
+///
+/// # Errors
+///
+/// Returns an error when connecting, serializing, writing, reading, or parsing fails.
+pub async fn send_daemon_request_pub(
+    socket_path: &PathBuf,
+    request: DaemonRequest,
+) -> Result<DaemonResponse, String> {
+    send_daemon_request(socket_path, request).await
+}
+
 /// Create a basic daemon request with client identification
 #[must_use]
 pub fn create_daemon_request(command: &str, client_id: &str) -> DaemonRequest {

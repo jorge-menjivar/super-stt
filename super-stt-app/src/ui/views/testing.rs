@@ -28,9 +28,11 @@ pub fn page<'a>(
 
     // Audio level display widget
     let record_button = match recording_status {
-        RecordingStatus::Recording => button::standard("Recording"), // Disabled button when recording
+        RecordingStatus::Recording => {
+            button::destructive("Stop Recording").on_press(Message::StopRecording)
+        }
         RecordingStatus::Idle => {
-            button::standard("Test Recording").on_press(Message::StartRecording)
+            button::suggested("Test Recording").on_press(Message::StartRecording)
         }
     };
 

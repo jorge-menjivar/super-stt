@@ -7,7 +7,7 @@ use crate::daemon::client::{
     get_download_status, get_preview_typing, get_recording_stop_mode, get_write_method,
     list_available_models, load_audio_themes, ping_daemon, send_record_command,
     set_and_test_audio_theme, set_device, set_model, set_preview_typing, set_recording_stop_mode,
-    set_write_method, test_daemon_connection,
+    set_write_method, stop_record_command, test_daemon_connection,
 };
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};
 use crate::ui::messages::Message;
@@ -484,11 +484,24 @@ impl cosmic::Application for AppModel {
             }
 
             Message::StopRecording => {
-                self.recording_status = RecordingStatus::Idle;
-                self.audio_level = 0.0;
+                // Send a second record command to trigger the manual stop.
+                // The transcription result arrives via the pending
+                // StartRecording task as TranscriptionReceived.
+                let socket = self.socket_path.clone();
+                return Task::perform(stop_record_command(socket), |result| {
+                    if let Err(e) = result {
+                        log::warn!("Stop recording failed: {e}");
+                    }
+                    // No state change here — TranscriptionReceived handles it.
+                    cosmic::Action::None
+                });
             }
 
             Message::TranscriptionReceived(text) => {
+                log::info!(
+                    "TranscriptionReceived: '{}'",
+                    text.chars().take(50).collect::<String>()
+                );
                 self.transcription_text = text;
                 self.recording_status = RecordingStatus::Idle;
                 self.audio_level = 0.0;

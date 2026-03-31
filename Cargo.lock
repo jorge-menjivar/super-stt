@@ -7950,7 +7950,7 @@ dependencies = [
  "windows-interface 0.59.3",
  "windows-link 0.1.3",
  "windows-result 0.3.4",
- "windows-strings",
+ "windows-strings 0.4.2",
 ]
 
 [[package]]

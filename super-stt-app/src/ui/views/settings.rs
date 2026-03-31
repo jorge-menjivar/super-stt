@@ -17,17 +17,15 @@ use crate::ui::messages::Message;
 pub fn preview_typing_settings_widget(preview_typing_enabled: bool) -> Element<'static, Message> {
     let mut section = settings::section().title("Preview Typing (Beta)");
 
-    // Add description text as a separate item
-    section = section.add(settings::item(
-        "",
-        text::caption("Preview typing shows transcription results as you speak. This is an experimental feature and may affect performance.")
-    ));
-
-    // Add the toggler control
-    section = section.add(settings::item(
-        "Enable Preview Typing",
-        cosmic::widget::toggler(preview_typing_enabled).on_toggle(Message::PreviewTypingToggled),
-    ));
+    section = section.add(
+        row![
+            column![
+                text::body("Enable Preview Typing"),
+                text::caption("Shows transcription results as you speak. Experimental and may affect performance.")
+            ].spacing(2).width(Length::Fill),
+            cosmic::widget::toggler(preview_typing_enabled).on_toggle(Message::PreviewTypingToggled),
+        ].align_y(cosmic::iced::Alignment::Center).spacing(16)
+    );
 
     section.into()
 }
@@ -38,13 +36,6 @@ pub fn recording_stop_mode_settings_widget(
 ) -> Element<'static, Message> {
     let mut section = settings::section().title("Recording Stop Mode");
 
-    section = section.add(settings::item(
-        "",
-        text::caption(
-            "Controls how recordings stop: silence detection, manual shortcut press, or both.",
-        ),
-    ));
-
     let modes = [
         RecordingStopMode::SilenceOnly,
         RecordingStopMode::SilenceAndManual,
@@ -53,12 +44,21 @@ pub fn recording_stop_mode_settings_widget(
     let mode_names: Vec<String> = modes.iter().map(|m| m.pretty_name().to_string()).collect();
     let selected_index = modes.iter().position(|m| *m == recording_stop_mode);
 
-    section = section.add(settings::item(
-        "Stop Mode",
-        widget::dropdown(mode_names, selected_index, move |index| {
-            Message::RecordingStopModeChanged(modes[index])
-        }),
-    ));
+    section = section.add(
+        row![
+            column![
+                text::body("Stop Mode"),
+                text::caption("Controls how to stop transcribing.")
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            widget::dropdown(mode_names, selected_index, move |index| {
+                Message::RecordingStopModeChanged(modes[index])
+            }),
+        ]
+        .align_y(cosmic::iced::Alignment::Center)
+        .spacing(16),
+    );
 
     section.into()
 }
@@ -66,13 +66,6 @@ pub fn recording_stop_mode_settings_widget(
 /// Write method settings section
 pub fn write_method_settings_widget(write_method: WriteMethod) -> Element<'static, Message> {
     let mut section = settings::section().title("Write Method");
-
-    section = section.add(settings::item(
-        "",
-        text::caption(
-            "Controls how transcribed text is typed: XDG Desktop Portal, ydotool, or Wayland protocol. Auto tries each in order.",
-        ),
-    ));
 
     let methods = [
         WriteMethod::Auto,
@@ -86,12 +79,21 @@ pub fn write_method_settings_widget(write_method: WriteMethod) -> Element<'stati
         .collect();
     let selected_index = methods.iter().position(|m| *m == write_method);
 
-    section = section.add(settings::item(
-        "Method",
-        widget::dropdown(method_names, selected_index, move |index| {
-            Message::WriteMethodChanged(methods[index])
-        }),
-    ));
+    section = section.add(
+        row![
+            column![
+                text::body("Input Simulation Method"),
+                text::caption("Controls how transcribed text is typed.")
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            widget::dropdown(method_names, selected_index, move |index| {
+                Message::WriteMethodChanged(methods[index])
+            }),
+        ]
+        .align_y(cosmic::iced::Alignment::Center)
+        .spacing(16),
+    );
 
     section.into()
 }
@@ -323,7 +325,8 @@ fn model_selection_settings_widget<'a>(
 
             // Add warning message based on available devices and current state
             let warning_message = if available_devices.len() == 1 && available_devices[0] == "cpu" {
-                "Note: This build does not include GPU support"
+                "Note: The installed SuperSTT daemon does not include GPU support. \
+Try running the installation script again if this was not intended."
             } else {
                 "Note: GPU will fallback to CPU if unavailable or insufficient memory"
             };
@@ -466,7 +469,8 @@ fn add_model_selection_controls<'a>(
 
         // Add warning message based on available devices and current state
         let warning_message = if available_devices.len() == 1 && available_devices[0] == "cpu" {
-            "Note: This build does not include GPU support"
+            "Note: The installed SuperSTT daemon does not include GPU support. \
+Try running the installation script again if this was not intended."
         } else if current_device == "cpu" && available_devices.contains(&"cuda".to_string()) {
             "Note: GPU acceleration may be unavailable - check CUDA installation"
         } else {
