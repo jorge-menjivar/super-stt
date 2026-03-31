@@ -150,14 +150,32 @@ impl SuperSTTDaemon {
     }
 
     /// Handle a record request: if already recording, respond synchronously
-    /// (stop/transcribing); otherwise ACK immediately and record in background.
+    /// (stop/transcribing); otherwise start recording.
+    ///
+    /// When the parsed command has `wait == true` the connection stays open
+    /// and the full transcription result is sent back after recording completes.
+    /// Otherwise an immediate ACK is sent and recording runs in the background.
     async fn handle_record_request(
         &self,
         stream: &mut UnixStream,
         request: DaemonRequest,
     ) -> Result<()> {
+        use super_stt_shared::models::protocol::Command;
+
         let is_recording = *self.is_recording.read().await;
         if is_recording {
+            let response = self.handle_command(request).await;
+            self.send_response(stream, &response).await?;
+            return Ok(());
+        }
+
+        // Parse the command to read the `wait` flag from the protocol.
+        let wait = match Command::try_from(request.clone()) {
+            Ok(Command::Record { wait, .. }) => wait,
+            _ => false,
+        };
+
+        if wait {
             let response = self.handle_command(request).await;
             self.send_response(stream, &response).await?;
         } else {

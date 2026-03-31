@@ -64,6 +64,7 @@ impl SuperSTTDaemon {
             Command::Record {
                 write_mode,
                 stop_mode,
+                ..
             } => self.handle_record_command(write_mode, stop_mode).await,
             Command::SetAudioTheme { theme } => self.handle_set_audio_theme(theme),
             Command::GetAudioTheme => self.handle_get_audio_theme(),

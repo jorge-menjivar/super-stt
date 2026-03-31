@@ -15,12 +15,14 @@ fn get_client_id() -> &'static str {
 
 /// Send a record command to the daemon and get transcription result.
 /// Uses manual-only stop mode so the app controls when to stop.
+/// Sets `wait: true` so the daemon blocks until transcription is ready.
 pub async fn send_record_command(socket_path: PathBuf) -> Result<String, String> {
     let mut request =
         super_stt_shared::daemon::client::create_daemon_request("record", get_client_id());
     request.data = Some(serde_json::json!({
         "write_mode": false,
         "stop_mode": "manual-only",
+        "wait": true,
     }));
 
     let response =
@@ -45,7 +47,6 @@ pub async fn send_record_command(socket_path: PathBuf) -> Result<String, String>
 
 /// Send a stop signal to a running recording.
 pub async fn stop_record_command(socket_path: PathBuf) -> Result<(), String> {
-    // Sending another record command while recording triggers the manual stop.
     let mut request =
         super_stt_shared::daemon::client::create_daemon_request("record", get_client_id());
     request.data = Some(serde_json::json!({

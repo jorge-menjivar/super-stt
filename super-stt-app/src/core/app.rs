@@ -492,7 +492,6 @@ impl cosmic::Application for AppModel {
                     if let Err(e) = result {
                         log::warn!("Stop recording failed: {e}");
                     }
-                    // No state change here — TranscriptionReceived handles it.
                     cosmic::Action::None
                 });
             }
@@ -632,6 +631,7 @@ impl AppModel {
                 if was_disconnected {
                     self.device_state = DeviceState::Ready;
                     self.model_operation_state = ModelOperationState::Ready;
+                    self.transcription_text.clear();
                 }
 
                 // Only restart UDP subscription when actually reconnecting, not on periodic pings

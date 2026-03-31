@@ -371,6 +371,7 @@ pub enum Command {
     Record {
         write_mode: bool,
         stop_mode: Option<RecordingStopMode>,
+        wait: bool,
     },
     SetAudioTheme {
         theme: String,
@@ -503,6 +504,7 @@ mod tests {
             Command::Record {
                 write_mode,
                 stop_mode,
+                ..
             } => {
                 assert!(!write_mode);
                 assert_eq!(stop_mode, Some(RecordingStopMode::ManualOnly));
@@ -519,10 +521,38 @@ mod tests {
             Command::Record {
                 write_mode,
                 stop_mode,
+                ..
             } => {
                 assert!(write_mode);
                 assert_eq!(stop_mode, None);
             }
+            _ => panic!("expected Command::Record"),
+        }
+    }
+
+    #[test]
+    fn record_command_wait_true() {
+        let request = make_request(
+            "record",
+            Some(json!({
+                "write_mode": false,
+                "stop_mode": "manual-only",
+                "wait": true,
+            })),
+        );
+        let command = Command::try_from(request).expect("record command should parse");
+        match command {
+            Command::Record { wait, .. } => assert!(wait),
+            _ => panic!("expected Command::Record"),
+        }
+    }
+
+    #[test]
+    fn record_command_wait_defaults_to_false() {
+        let request = make_request("record", Some(json!({ "write_mode": false })));
+        let command = Command::try_from(request).expect("record command should parse");
+        match command {
+            Command::Record { wait, .. } => assert!(!wait),
             _ => panic!("expected Command::Record"),
         }
     }
@@ -724,9 +754,16 @@ fn cmd_record(request: &DaemonRequest) -> Command {
                 None
             }
         });
+    let wait = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("wait"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
     Command::Record {
         write_mode,
         stop_mode,
+        wait,
     }
 }
 
