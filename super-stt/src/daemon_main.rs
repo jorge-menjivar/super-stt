@@ -152,6 +152,7 @@ pub async fn run() -> Result<()> {
 /// Handle the record subcommand - direct recording mode
 async fn handle_record_command(matches: &clap::ArgMatches) -> Result<()> {
     let write_mode = matches.get_flag("write");
+    let wait = matches.get_flag("wait");
     let config = DaemonConfig::load();
     // Resolve stop mode: CLI flag → config file → default
     let stop_mode = if let Some(mode) = matches.get_one::<String>("stop-mode") {
@@ -183,8 +184,14 @@ async fn handle_record_command(matches: &clap::ArgMatches) -> Result<()> {
     // Try to connect to existing daemon first
     if socket_path.exists() {
         info!("Found existing daemon, sending record request...");
-        return send_record_request_to_daemon(socket_path, write_mode, &stop_mode, &write_method)
-            .await;
+        return send_record_request_to_daemon(
+            socket_path,
+            write_mode,
+            &stop_mode,
+            &write_method,
+            wait,
+        )
+        .await;
     }
 
     // If no daemon is running, inform user to start it first
@@ -240,6 +247,7 @@ async fn send_record_request_to_daemon(
     write_mode: bool,
     stop_mode: &str,
     write_method: &str,
+    wait: bool,
 ) -> Result<()> {
     use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -264,6 +272,7 @@ async fn send_record_request_to_daemon(
             "write_mode": write_mode,
             "stop_mode": stop_mode,
             "write_method": write_method,
+            "wait": wait,
         })),
         language: None,
         enabled: None,
@@ -296,6 +305,17 @@ async fn send_record_request_to_daemon(
         let msg = response.message.as_deref().unwrap_or("");
         if msg == DaemonResponse::RECORDING_STOP_SIGNAL_MSG {
             info!("🛑 Recording stopped successfully");
+        } else if wait {
+            // --wait: daemon blocked until transcription was ready
+            if let Some(transcription) = &response.transcription {
+                if transcription.is_empty() {
+                    info!("🎤 No speech detected");
+                } else {
+                    info!("🎤 Transcription: {transcription}");
+                }
+            } else {
+                info!("🎤 {msg}");
+            }
         } else {
             info!("🎤 Recording started (stop mode: {stop_mode})");
             if write_mode {

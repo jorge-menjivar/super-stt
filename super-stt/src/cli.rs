@@ -61,6 +61,10 @@ pub fn build() -> Command {
                     .required(false)
             )
             .arg(
+                arg!(--wait "Wait for transcription result before exiting")
+                .action(ArgAction::SetTrue)
+            )
+            .arg(
                 arg!(-s --socket <socket> "The daemon socket path")
                 .default_value(*DEFAULT_SOCKET_PATH_STR)
                 .value_parser(value_parser!(PathBuf))
