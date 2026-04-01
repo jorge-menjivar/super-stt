@@ -13,31 +13,13 @@
 https://github.com/user-attachments/assets/bbbe20c3-6802-4797-afc8-aa81d1b48415
 
 
-## ✨ Features
-
-- **✅ Easy installation** with automated installer
-- **⚡ Real-time transcription** built to be executed with a shortcut
-- **⌨️ Auto-typing** transcribed text
-- **🎯 Automatic GPU acceleration** when CUDA is present. Supports cuDNN for optimal performance as well
-- **⭐ State-of-the-art Voxtral models support** for optimal performance
-- **🔄 Model switching** on the fly from the app
-- **🎵 Real-time audio visualization** for COSMIC Desktop with the COSMIC Desktop applet
-- **🔠 Live preview** of audio input (beta, experimental)
-
-## 🤖 Supported Models
-- voxtral-mini (SOTA) **Recommended with GPU**
-- voxtral-small (SOTA)
-- whisper-tiny **Default**
-- whisper-base **Recommended with CPU**
-- whisper-small
-- whisper-medium
-- whisper-large-v3
-
 ## 🚀 Installation
 
 ### Quick Install (Recommended)
 
 Install with our automated installer that detects your system and downloads pre-built binaries:
+
+> Note: You may need to log out and back in after installation.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh | bash
@@ -57,6 +39,45 @@ The installer automatically:
 - **Daemon**: Sets up systemd user service
 - **Daemon**: Creates required directories for logs and sockets
 - **COSMIC Desktop**: Offers to configure Super+Space keyboard shortcut automatically
+
+
+## Recording Modes
+
+### Stop Mode
+
+Controls how a recording session ends. Configurable via the app, CLI (`--stop-mode`), or daemon config. Assuming you have a shortcut mapped to execute `stt record --write`:
+
+| Mode                           | Behavior                                              |
+|--------------------------------|-------------------------------------------------------|
+| **Silence + Manual** (default) | Stops on silence detection or a second shortcut press |
+| **Silence Only**               | Stops only when silence is detected                   |
+| **Manual Only**                | Stops only on a second shortcut press                 |
+
+### Write Method
+
+Controls how transcribed text is typed into the focused application. Auto-detection tries each method in order.
+
+| Method                         | Description                                                               |
+|--------------------------------|---------------------------------------------------------------------------|
+| **Auto** (default)             | Tries XDG Desktop Portal, then ydotool, then Wayland protocol             |
+| **XDG Desktop Portal**         | Uses the desktop's RemoteDesktop portal (requires one-time authorization) |
+| **ydotool**                    | Uses ydotool virtual input (requires ydotoold running)                    |
+| **Wayland Protocol**           | Direct Wayland input simulation via the compositor                        |
+
+Both settings can be changed in the desktop app under Settings, or per-recording via CLI flags:
+
+```bash
+stt record --write --stop-mode manual --write-method ydotool
+```
+
+## 🤖 Supported Models
+- voxtral-mini (SOTA) **Recommended with GPU**
+- voxtral-small (SOTA)
+- whisper-tiny **Default**
+- whisper-base **Recommended with CPU**
+- whisper-small
+- whisper-medium
+- whisper-large-v3
 
 ## Screenshots
 ### Multiple Visualization Styles
@@ -253,26 +274,6 @@ Open the Super STT app → Settings → Select model
 - **`super-stt-app`** - Desktop configuration app
 - **`super-stt-cosmic-applet`** - Panel applet with visualizations
 - **`super-stt-shared`** - Common protocols
-
-## 🔒 Security
-
-Super STT implements comprehensive security controls:
-
-- **Group-based Access**: The `stt` group restricts who can connect to the daemon socket
-- **Process Authentication**: Keyboard injection requires verification that the client is the legitimate `stt` binary
-
-For detailed security information, see [`docs/SECURITY.md`](docs/SECURITY.md).
-
-### Security Model
-
-**Production Mode** (default):
-- Socket permissions: `0660` (owner + stt group only)
-- Resource limits and rate limiting active
-
-**Development Mode**:
-- Debug builds automatically enable development mode with relaxed permissions
-- Use only in secure development environments
-- For production security, always use release builds
 
 ## 🔧 Development
 
