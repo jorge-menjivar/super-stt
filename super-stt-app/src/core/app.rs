@@ -3,9 +3,9 @@
 use crate::audio::{parse_audio_level_from_udp, parse_recording_state_from_udp};
 
 use crate::daemon::client::{
-    cancel_download, fetch_daemon_config, get_current_device, get_current_model,
+    RecordEvent, cancel_download, fetch_daemon_config, get_current_device, get_current_model,
     get_download_status, get_preview_typing, get_recording_stop_mode, get_write_method,
-    list_available_models, load_audio_themes, ping_daemon, send_record_command,
+    list_available_models, load_audio_themes, ping_daemon, record_command_stream,
     set_and_test_audio_theme, set_device, set_model, set_preview_typing, set_recording_stop_mode,
     set_write_method, stop_record_command, test_daemon_connection,
 };
@@ -16,7 +16,7 @@ use cosmic::app::context_drawer;
 use cosmic::iced::Subscription;
 use cosmic::prelude::*;
 use cosmic::widget::{icon, menu, nav_bar};
-use futures_util::SinkExt;
+use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -465,22 +465,25 @@ impl cosmic::Application for AppModel {
 
             // Super STT specific messages
             Message::StartRecording => {
-                // Prevent starting recording if already recording
                 if matches!(self.recording_status, RecordingStatus::Recording) {
                     return Task::none();
                 }
 
                 self.recording_status = RecordingStatus::Recording;
-                return Task::perform(send_record_command(self.socket_path.clone()), |result| {
-                    match result {
-                        Ok(transcription) => {
-                            cosmic::Action::App(Message::TranscriptionReceived(transcription))
-                        }
-                        Err(e) => cosmic::Action::App(Message::TranscriptionReceived(format!(
-                            "Error: {e}"
-                        ))),
+                self.transcription_text.clear();
+
+                let stream = record_command_stream(self.socket_path.clone());
+                return cosmic::task::stream(stream.map(|event| match event {
+                    RecordEvent::Preview(text) => {
+                        cosmic::Action::App(Message::PreviewTextReceived(text))
                     }
-                });
+                    RecordEvent::Final(Ok(text)) => {
+                        cosmic::Action::App(Message::TranscriptionReceived(text))
+                    }
+                    RecordEvent::Final(Err(e)) => {
+                        cosmic::Action::App(Message::TranscriptionReceived(format!("Error: {e}")))
+                    }
+                }));
             }
 
             Message::StopRecording => {
@@ -494,6 +497,10 @@ impl cosmic::Application for AppModel {
                     }
                     cosmic::Action::None
                 });
+            }
+
+            Message::PreviewTextReceived(text) => {
+                self.transcription_text = text;
             }
 
             Message::TranscriptionReceived(text) => {

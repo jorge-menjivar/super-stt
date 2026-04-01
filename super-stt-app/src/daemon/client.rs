@@ -13,36 +13,104 @@ fn get_client_id() -> &'static str {
         .get_or_init(|| super_stt_shared::validation::generate_secure_client_id("super-stt-app"))
 }
 
-/// Send a record command to the daemon and get transcription result.
-/// Uses manual-only stop mode so the app controls when to stop.
-/// Sets `wait: true` so the daemon blocks until transcription is ready.
-pub async fn send_record_command(socket_path: PathBuf) -> Result<String, String> {
-    let mut request =
-        super_stt_shared::daemon::client::create_daemon_request("record", get_client_id());
-    request.data = Some(serde_json::json!({
-        "write_mode": false,
-        "stop_mode": "manual-only",
-        "wait": true,
-    }));
+/// Result type for streaming record responses.
+pub enum RecordEvent {
+    /// Intermediate preview text during recording.
+    Preview(String),
+    /// Final transcription result.
+    Final(Result<String, String>),
+}
 
-    let response =
-        super_stt_shared::daemon::client::send_daemon_request_pub(&socket_path, request).await?;
+/// Send a record command to the daemon and stream results.
+/// Yields `RecordEvent::Preview` for intermediate previews and
+/// `RecordEvent::Final` when the transcription is complete.
+pub fn record_command_stream(
+    socket_path: PathBuf,
+) -> impl futures_util::Stream<Item = RecordEvent> + Send + 'static {
+    cosmic::iced::stream::channel(
+        32,
+        move |mut channel: cosmic::iced::futures::channel::mpsc::Sender<RecordEvent>| async move {
+            use futures_util::SinkExt;
+            use super_stt_shared::models::protocol::DaemonResponse;
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    if response.status == "success" {
-        let text = response
-            .transcription
-            .or(response.message)
-            .unwrap_or_else(|| "No transcription received".to_string());
-        if text.trim().is_empty() {
-            Ok("No speech detected".to_string())
-        } else {
-            Ok(text)
-        }
-    } else {
-        Err(response
-            .message
-            .unwrap_or_else(|| "Recording failed".to_string()))
-    }
+            let result: Result<(), String> = async {
+                let mut stream = tokio::net::UnixStream::connect(&socket_path)
+                    .await
+                    .map_err(|e| format!("Failed to connect: {e}"))?;
+
+                let mut request = super_stt_shared::daemon::client::create_daemon_request(
+                    "record",
+                    get_client_id(),
+                );
+                request.data = Some(serde_json::json!({
+                    "write_mode": false,
+                    "stop_mode": "manual-only",
+                    "wait": true,
+                }));
+
+                let data =
+                    serde_json::to_vec(&request).map_err(|e| format!("Serialize failed: {e}"))?;
+                let size = data.len() as u64;
+                stream
+                    .write_all(&size.to_be_bytes())
+                    .await
+                    .map_err(|e| format!("Write failed: {e}"))?;
+                stream
+                    .write_all(&data)
+                    .await
+                    .map_err(|e| format!("Write failed: {e}"))?;
+
+                loop {
+                    let mut size_buf = [0u8; 8];
+                    if stream.read_exact(&mut size_buf).await.is_err() {
+                        break;
+                    }
+                    let resp_size = u64::from_be_bytes(size_buf);
+                    let resp_len =
+                        usize::try_from(resp_size).map_err(|_| "Response too large".to_string())?;
+                    let mut resp_buf = vec![0u8; resp_len];
+                    stream
+                        .read_exact(&mut resp_buf)
+                        .await
+                        .map_err(|e| format!("Read failed: {e}"))?;
+                    let response: DaemonResponse = serde_json::from_slice(&resp_buf)
+                        .map_err(|e| format!("Parse failed: {e}"))?;
+
+                    if let Some(preview) = response.preview_text {
+                        let _ = channel.send(RecordEvent::Preview(preview)).await;
+                        continue;
+                    }
+
+                    // Final response
+                    if response.status == "success" {
+                        let text = response
+                            .transcription
+                            .or(response.message)
+                            .unwrap_or_default();
+                        let result = if text.trim().is_empty() {
+                            "No speech detected".to_string()
+                        } else {
+                            text
+                        };
+                        let _ = channel.send(RecordEvent::Final(Ok(result))).await;
+                    } else {
+                        let err = response
+                            .message
+                            .unwrap_or_else(|| "Recording failed".to_string());
+                        let _ = channel.send(RecordEvent::Final(Err(err))).await;
+                    }
+                    break;
+                }
+                Ok(())
+            }
+            .await;
+
+            if let Err(e) = result {
+                let _ = channel.send(RecordEvent::Final(Err(e))).await;
+            }
+        },
+    )
 }
 
 /// Send a stop signal to a running recording.

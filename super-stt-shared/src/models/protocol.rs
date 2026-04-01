@@ -101,6 +101,10 @@ pub struct DaemonResponse {
     // Input method
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write_method: Option<String>,
+
+    // Streaming preview text (intermediate transcription during recording)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_text: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -157,6 +161,7 @@ impl DaemonResponse {
             preview_typing_enabled: None,
             recording_stop_mode: None,
             write_method: None,
+            preview_text: None,
         }
     }
 
@@ -207,6 +212,7 @@ impl DaemonResponse {
             preview_typing_enabled: None,
             recording_stop_mode: None,
             write_method: None,
+            preview_text: None,
         }
     }
 
@@ -329,6 +335,12 @@ impl DaemonResponse {
         self.write_method = Some(method);
         self
     }
+
+    #[must_use]
+    pub fn with_preview_text(mut self, text: String) -> Self {
+        self.preview_text = Some(text);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -372,6 +384,7 @@ pub enum Command {
         write_mode: bool,
         stop_mode: Option<RecordingStopMode>,
         wait: bool,
+        preview: Option<bool>,
     },
     SetAudioTheme {
         theme: String,
@@ -760,10 +773,16 @@ fn cmd_record(request: &DaemonRequest) -> Command {
         .and_then(|data| data.get("wait"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
+    let preview = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("preview"))
+        .and_then(serde_json::Value::as_bool);
     Command::Record {
         write_mode,
         stop_mode,
         wait,
+        preview,
     }
 }
 

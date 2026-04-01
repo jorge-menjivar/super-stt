@@ -64,8 +64,12 @@ impl SuperSTTDaemon {
             Command::Record {
                 write_mode,
                 stop_mode,
+                preview,
                 ..
-            } => self.handle_record_command(write_mode, stop_mode).await,
+            } => {
+                self.handle_record_command(write_mode, stop_mode, preview)
+                    .await
+            }
             Command::SetAudioTheme { theme } => self.handle_set_audio_theme(theme),
             Command::GetAudioTheme => self.handle_get_audio_theme(),
             Command::TestAudioTheme => self.handle_test_audio_theme().await,
@@ -94,6 +98,7 @@ impl SuperSTTDaemon {
         &self,
         write_mode: bool,
         stop_mode: Option<super_stt_shared::models::recording_stop_mode::RecordingStopMode>,
+        preview: Option<bool>,
     ) -> DaemonResponse {
         // Resolve effective mode: per-request override or daemon config default
         let effective_mode = if let Some(mode) = stop_mode {
@@ -144,10 +149,25 @@ impl SuperSTTDaemon {
                 }
             }
         };
+        // Temporarily override preview setting for this recording, restore after.
+        let original_preview = self
+            .preview_typing_enabled
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if let Some(override_val) = preview {
+            self.preview_typing_enabled
+                .store(override_val, std::sync::atomic::Ordering::Relaxed);
+        }
+
         let mut typer = Typer::new(simulator);
         let response = self
             .handle_record_internal(&mut typer, write_mode, effective_mode)
             .await;
+
+        // Restore original preview setting.
+        if preview.is_some() {
+            self.preview_typing_enabled
+                .store(original_preview, std::sync::atomic::Ordering::Relaxed);
+        }
         // Return the simulator to the cache for reuse.
         *self.simulator.write().await = Some(typer.take_simulator());
         response
@@ -259,6 +279,7 @@ mod tests {
             preview_typing_enabled: Arc::new(AtomicBool::new(false)),
             manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
             simulator: Arc::new(tokio::sync::RwLock::new(None)),
+            preview_text: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 

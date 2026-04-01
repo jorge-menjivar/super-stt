@@ -20,6 +20,7 @@ pub enum Message {
     // Super STT specific messages
     StartRecording,
     StopRecording,
+    PreviewTextReceived(String),
     ConnectToDaemon,
     DaemonConnectionResult(Result<(), String>),
     DaemonConnected,

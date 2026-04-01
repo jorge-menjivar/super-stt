@@ -199,7 +199,7 @@ impl SuperSTTDaemon {
                 .preview_typing_enabled
                 .load(std::sync::atomic::Ordering::Relaxed);
 
-            if !audio_data.is_empty() && write_mode && preview_enabled {
+            if !audio_data.is_empty() && preview_enabled {
                 // Resample to 16kHz if needed (same as final recording does)
                 let resampled_audio = if device_sample_rate == 16000 {
                     debug!("No resampling needed, device already at 16kHz");
@@ -235,11 +235,20 @@ impl SuperSTTDaemon {
                 if let Ok(text) = self.transcribe_audio_chunk(&resampled_audio).await
                     && !text.trim().is_empty()
                 {
+                    let processed = crate::output::preview::Typer::preprocess_text(&text, true);
+
                     info!(
-                        "Updating preview with text: '{}'",
-                        text.chars().take(30).collect::<String>()
+                        "Preview: '{}'",
+                        processed.chars().take(30).collect::<String>()
                     );
-                    if let Ok(mut actually_typed_guard) = actually_typed.lock() {
+
+                    // Stream to waiting client
+                    if let Some(ref tx) = *self.preview_text.read().await {
+                        let _ = tx.send(processed);
+                    }
+
+                    // Type on screen if in write mode
+                    if write_mode && let Ok(mut actually_typed_guard) = actually_typed.lock() {
                         typer.update_preview(&text, &mut actually_typed_guard);
                     }
                 }

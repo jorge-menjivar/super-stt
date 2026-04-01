@@ -88,6 +88,8 @@ pub struct SuperSTTDaemon {
     pub manual_stop_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::broadcast::Sender<()>>>>,
     // Cached keyboard simulator (session persists across recordings)
     pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
+    // Channel for streaming preview text to a waiting client (set by client_management)
+    pub preview_text: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
 }
 
 impl SuperSTTDaemon {
@@ -207,6 +209,7 @@ impl SuperSTTDaemon {
             )),
             manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
             simulator: Arc::new(tokio::sync::RwLock::new(None)),
+            preview_text: Arc::new(tokio::sync::RwLock::new(None)),
         };
 
         // Apply temporary device override for current session (not saved to config)

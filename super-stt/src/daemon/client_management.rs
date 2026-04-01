@@ -126,7 +126,7 @@ impl SuperSTTDaemon {
             // Handle record commands: if already recording, handle synchronously
             // (toggle stop returns immediately); otherwise ACK and record in background.
             if request.command.as_str() == "record" {
-                if let Err(e) = self.handle_record_request(&mut stream, request).await {
+                if let Err(e) = Box::pin(self.handle_record_request(&mut stream, request)).await {
                     warn!("Record request handling failed: {e}");
                     break;
                 }
@@ -176,8 +176,45 @@ impl SuperSTTDaemon {
         };
 
         if wait {
-            let response = self.handle_command(request).await;
-            self.send_response(stream, &response).await?;
+            // Create a channel for streaming preview text to this client.
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            *self.preview_text.write().await = Some(tx);
+
+            // Run handle_command and drain preview channel concurrently.
+            // Both use the same task so only one writes to `stream` at a time.
+            let daemon = self.clone();
+            let mut command_fut = std::pin::pin!(daemon.handle_command(request));
+            let mut done = false;
+            let mut final_response = None;
+
+            loop {
+                tokio::select! {
+                    // Drive the recording to completion.
+                    response = &mut command_fut, if !done => {
+                        done = true;
+                        final_response = Some(response);
+                        // Drop the sender so the channel closes.
+                        *self.preview_text.write().await = None;
+                    }
+                    // Drain preview text and write to the client stream.
+                    preview = rx.recv() => {
+                        if let Some(text) = preview {
+                            let resp = DaemonResponse::success().with_preview_text(text);
+                            if self.send_response(stream, &resp).await.is_err() {
+                                break;
+                            }
+                        } else {
+                            // Channel closed — recording is done and all previews drained.
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Send the final transcription response.
+            if let Some(response) = final_response {
+                self.send_response(stream, &response).await?;
+            }
         } else {
             let ack = DaemonResponse::success().with_message("Recording started".to_string());
             self.send_response(stream, &ack).await?;
