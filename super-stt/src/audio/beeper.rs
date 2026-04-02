@@ -21,7 +21,7 @@ pub fn play_warmup_tone() -> Result<()> {
     debug!("Playing warm-up tone to initialize audio drivers");
     let warmup_frequencies = [WARMUP_TONE_FREQUENCY];
     let warmup_duration = WARMUP_TONE_DURATION_MS;
-    if let Err(e) = play_beep_sequence(&warmup_frequencies, warmup_duration, 5, 5) {
+    if let Err(e) = play_beep_sequence(&warmup_frequencies, warmup_duration, 5, 5, 1.0) {
         debug!("Warm-up tone failed (usually fine): {e}");
     }
     std::thread::sleep(Duration::from_millis(WARMUP_DELAY_AFTER_TONE_MS));
@@ -45,6 +45,7 @@ pub fn play_beep_sequence(
     duration_ms: u64,
     fade_in_ms: u64,
     fade_out_ms: u64,
+    volume: f32,
 ) -> Result<()> {
     if frequencies.is_empty() {
         return Ok(());
@@ -140,7 +141,8 @@ pub fn play_beep_sequence(
                     };
 
                     // Generate sine wave with continuous phase and both fades
-                    let value = phase.sin() * 0.3 * fade_in_multiplier * fade_out_multiplier;
+                    let value =
+                        phase.sin() * 0.3 * volume * fade_in_multiplier * fade_out_multiplier;
 
                     // Update phase for next sample
                     phase += frequency * 2.0 * std::f32::consts::PI / sample_rate;
@@ -219,7 +221,8 @@ pub fn play_beep_sequence(
                         };
 
                         // Generate sine wave with continuous phase and both fades
-                        let value = phase.sin() * 0.3 * fade_in_multiplier * fade_out_multiplier;
+                        let value =
+                            phase.sin() * 0.3 * volume * fade_in_multiplier * fade_out_multiplier;
                         let sample_value = (value * f32::from(i16::MAX)) as i16;
 
                         // Update phase for next sample
@@ -386,7 +389,7 @@ mod tests {
     #[test]
     fn test_empty_frequencies() {
         // This should return Ok(()) without panicking
-        let result = play_beep_sequence(&[], 100, 10, 10);
+        let result = play_beep_sequence(&[], 100, 10, 10, 1.0);
         assert!(
             result.is_ok(),
             "Empty frequency array should not cause error"

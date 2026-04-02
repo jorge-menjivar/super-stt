@@ -47,6 +47,36 @@ impl SuperSTTDaemon {
             .with_message(format!("Current theme: {current_theme}",))
     }
 
+    /// Handle set volume command
+    #[must_use]
+    pub fn handle_set_volume(&self, volume: u8) -> DaemonResponse {
+        self.set_volume(volume);
+
+        let config_clone = Arc::clone(&self.config);
+        let notification_manager = Arc::clone(&self.notification_manager);
+        tokio::spawn(async move {
+            let mut config_guard = config_clone.write().await;
+            config_guard.update_volume(volume);
+            drop(config_guard);
+
+            if let Err(e) =
+                SuperSTTDaemon::broadcast_config_change_static(&notification_manager, &config_clone)
+                    .await
+            {
+                log::warn!("Failed to broadcast config change after volume change: {e}");
+            }
+        });
+
+        DaemonResponse::success().with_message(format!("Volume set to: {volume}"))
+    }
+
+    /// Handle get volume command
+    #[must_use]
+    pub fn handle_get_volume(&self) -> DaemonResponse {
+        let volume = self.get_volume();
+        DaemonResponse::success().with_message(format!("{volume}"))
+    }
+
     /// Handle test audio theme command
     pub async fn handle_test_audio_theme(&self) -> DaemonResponse {
         let current_theme = self.get_audio_theme();
@@ -65,7 +95,11 @@ impl SuperSTTDaemon {
             current_theme.start_sound();
         let (end_frequencies, end_duration, end_fade_in, end_fade_out) = current_theme.end_sound();
 
-        info!("Testing audio theme: {theme_name}");
+        let volume = self.get_volume_f32();
+        info!(
+            "Testing audio theme: {theme_name} (volume: {}%)",
+            self.get_volume()
+        );
         info!("Start frequencies: {start_frequencies:?}, duration: {start_duration}ms");
         info!("End frequencies: {end_frequencies:?}, duration: {end_duration}ms");
 
@@ -76,6 +110,7 @@ impl SuperSTTDaemon {
             start_duration,
             start_fade_in,
             start_fade_out,
+            volume,
         ) {
             Ok(()) => {
                 info!("Start sound completed successfully");
@@ -83,8 +118,13 @@ impl SuperSTTDaemon {
                 // Test end sound as well
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 info!("Playing end sound...");
-                match play_beep_sequence(&end_frequencies, end_duration, end_fade_in, end_fade_out)
-                {
+                match play_beep_sequence(
+                    &end_frequencies,
+                    end_duration,
+                    end_fade_in,
+                    end_fade_out,
+                    volume,
+                ) {
                     Ok(()) => {
                         info!("End sound completed successfully");
                         DaemonResponse::success()

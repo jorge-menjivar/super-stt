@@ -415,9 +415,10 @@ impl SuperSTTDaemon {
         // Emit D-Bus listening started event
         self.emit_listening_started_dbus(write_mode).await;
 
-        // Create audio recorder with current theme
+        // Create audio recorder with current theme and volume
         let current_theme = self.get_audio_theme();
-        let mut recorder = DaemonAudioRecorder::new_with_theme(current_theme)
+        let current_volume = self.get_volume_f32();
+        let mut recorder = DaemonAudioRecorder::new_with_theme(current_theme, current_volume)
             .context("Failed to create audio recorder")?;
 
         // Initialize the recorder for threaded operation

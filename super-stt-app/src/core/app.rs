@@ -6,8 +6,9 @@ use crate::daemon::client::{
     RecordEvent, cancel_download, fetch_daemon_config, get_current_device, get_current_model,
     get_download_status, get_preview_typing, get_recording_stop_mode, get_write_method,
     list_available_models, load_audio_themes, ping_daemon, record_command_stream,
-    set_and_test_audio_theme, set_device, set_model, set_preview_typing, set_recording_stop_mode,
-    set_write_method, stop_record_command, test_daemon_connection,
+    set_and_test_audio_theme, set_audio_theme, set_device, set_model, set_preview_typing,
+    set_recording_stop_mode, set_volume, set_write_method, stop_record_command,
+    test_daemon_connection,
 };
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};
 use crate::ui::messages::Message;
@@ -83,6 +84,8 @@ pub struct AppModel {
     pub audio_themes: Vec<AudioTheme>,
     /// Currently selected audio theme
     pub selected_audio_theme: AudioTheme,
+    /// Last non-silent theme (to restore when toggling audio feedback back on)
+    pub last_non_silent_theme: AudioTheme,
     /// UDP restart counter for subscriptions
     pub udp_restart_counter: u64,
     /// Last UDP data timestamp
@@ -121,6 +124,9 @@ pub struct AppModel {
 
     // Write method
     pub write_method: super_stt_shared::models::write_method::WriteMethod,
+
+    // Master volume (0-100)
+    pub volume: u8,
 }
 
 /// Create a COSMIC application from the app model
@@ -156,7 +162,7 @@ impl cosmic::Application for AppModel {
         nav.insert()
             .text("Customization")
             .data::<Page>(Page::Customization)
-            .icon(icon::from_name("preferences-desktop-appearance-symbolic"))
+            .icon(icon::from_name("preferences-desktop-symbolic"))
             .activate();
 
         nav.insert()
@@ -194,6 +200,7 @@ impl cosmic::Application for AppModel {
             is_speech_detected: false,
             audio_themes: Vec::new(),
             selected_audio_theme: AudioTheme::default(),
+            last_non_silent_theme: AudioTheme::default(),
             udp_restart_counter: 0,
             last_udp_data: std::time::Instant::now(),
 
@@ -219,6 +226,7 @@ impl cosmic::Application for AppModel {
             recording_stop_mode:
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),
+            volume: 100,
         };
 
         // Create startup commands
@@ -333,9 +341,11 @@ impl cosmic::Application for AppModel {
             .unwrap_or(&Page::Customization);
 
         match active_page {
-            Page::Customization => {
-                views::customization::page(&self.audio_themes, &self.selected_audio_theme)
-            }
+            Page::Customization => views::customization::page(
+                &self.audio_themes,
+                &self.selected_audio_theme,
+                self.volume,
+            ),
             Page::Recording => views::recording::page(
                 self.recording_stop_mode,
                 self.preview_typing_enabled,
@@ -557,9 +567,26 @@ impl cosmic::Application for AppModel {
                 self.is_speech_detected = is_speech;
             }
 
+            Message::AudioFeedbackToggled(enabled) => {
+                let theme = if enabled {
+                    self.last_non_silent_theme
+                } else {
+                    AudioTheme::Silent
+                };
+                self.selected_audio_theme = theme;
+                return Task::perform(set_audio_theme(self.socket_path.clone(), theme), |result| {
+                    match result {
+                        Ok(_) => cosmic::Action::App(Message::DaemonConnected),
+                        Err(e) => cosmic::Action::App(Message::DaemonError(e)),
+                    }
+                });
+            }
+
             Message::AudioThemeSelected(theme) => {
                 self.selected_audio_theme = theme;
-                // Audio theme preference is now saved by the daemon automatically
+                if theme != AudioTheme::Silent {
+                    self.last_non_silent_theme = theme;
+                }
                 return Task::perform(
                     set_and_test_audio_theme(self.socket_path.clone(), theme),
                     |result| match result {
@@ -576,6 +603,16 @@ impl cosmic::Application for AppModel {
 
             Message::AudioThemesLoaded(themes) => {
                 self.audio_themes = themes;
+            }
+
+            Message::VolumeChanged(vol) => {
+                self.volume = vol;
+                return Task::perform(set_volume(self.socket_path.clone(), vol), |result| {
+                    match result {
+                        Ok(()) => cosmic::Action::None,
+                        Err(e) => cosmic::Action::App(Message::DaemonError(e)),
+                    }
+                });
             }
 
             Message::UdpDataReceived(data) => {
@@ -724,8 +761,20 @@ impl AppModel {
                 {
                     let daemon_audio_theme = audio_config.parse::<AudioTheme>().unwrap_or_default();
                     self.selected_audio_theme = daemon_audio_theme;
+                    if daemon_audio_theme != AudioTheme::Silent {
+                        self.last_non_silent_theme = daemon_audio_theme;
+                    }
                 } else {
                     warn!("No audio theme found in daemon configuration");
+                }
+
+                // Sync volume from daemon config
+                if let Some(vol) = config
+                    .get("audio")
+                    .and_then(|audio| audio.get("volume"))
+                    .and_then(serde_json::Value::as_u64)
+                {
+                    self.volume = u8::try_from(vol).unwrap_or(100);
                 }
 
                 // Load settings from daemon

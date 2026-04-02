@@ -416,6 +416,10 @@ pub enum Command {
         method: WriteMethod,
     },
     GetWriteMethod,
+    SetVolume {
+        volume: u8,
+    },
+    GetVolume,
 }
 
 impl Validate for DaemonRequest {
@@ -644,6 +648,8 @@ impl TryFrom<DaemonRequest> for Command {
             "get_recording_stop_mode" => Ok(Command::GetRecordingStopMode),
             "set_write_method" => cmd_set_write_method(&request),
             "get_write_method" => Ok(Command::GetWriteMethod),
+            "set_volume" => cmd_set_volume(&request),
+            "get_volume" => Ok(Command::GetVolume),
             _ => Err(format!("Unknown command: {}", request.command)),
         }
     }
@@ -867,4 +873,19 @@ fn cmd_set_write_method(request: &DaemonRequest) -> Result<Command, String> {
         .parse::<WriteMethod>()
         .map_err(|e| format!("Invalid input method: {e}"))?;
     Ok(Command::SetWriteMethod { method })
+}
+
+fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {
+    let volume = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("volume"))
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("Missing volume for set_volume command")?;
+    let volume =
+        u8::try_from(volume).map_err(|_| "Volume must be between 0 and 100".to_string())?;
+    if volume > 100 {
+        return Err("Volume must be between 0 and 100".to_string());
+    }
+    Ok(Command::SetVolume { volume })
 }

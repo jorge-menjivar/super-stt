@@ -165,6 +165,16 @@ pub async fn list_available_audio_themes(socket_path: PathBuf) -> Result<Vec<Aud
     Ok(themes)
 }
 
+/// Set audio theme without playing a test sound
+pub async fn set_audio_theme(socket_path: PathBuf, theme: AudioTheme) -> Result<String, String> {
+    super_stt_shared::daemon::client::set_audio_theme(
+        socket_path,
+        &theme.to_string().to_lowercase(),
+        get_client_id(),
+    )
+    .await
+}
+
 /// Set and test audio theme - convenience function
 pub async fn set_and_test_audio_theme(
     socket_path: PathBuf,
@@ -255,4 +265,9 @@ pub async fn set_write_method(socket_path: PathBuf, method: String) -> Result<()
 /// Get current write method from daemon
 pub async fn get_write_method(socket_path: PathBuf) -> Result<String, String> {
     super_stt_shared::daemon::client::get_write_method(socket_path, get_client_id()).await
+}
+
+/// Set master volume on daemon
+pub async fn set_volume(socket_path: PathBuf, volume: u8) -> Result<(), String> {
+    super_stt_shared::daemon::client::set_volume(socket_path, volume, get_client_id()).await
 }

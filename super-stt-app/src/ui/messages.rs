@@ -27,6 +27,7 @@ pub enum Message {
     DaemonConfigReceived(serde_json::Value),
     DaemonError(String),
     TranscriptionReceived(String),
+    AudioFeedbackToggled(bool),
     AudioThemeSelected(AudioTheme),
     SetAudioTheme(AudioTheme),
     AudioThemesLoaded(Vec<AudioTheme>),
@@ -87,4 +88,7 @@ pub enum Message {
     WriteMethodChanged(WriteMethod),
     WriteMethodLoaded(WriteMethod),
     WriteMethodError(String),
+
+    // Volume messages
+    VolumeChanged(u8),
 }

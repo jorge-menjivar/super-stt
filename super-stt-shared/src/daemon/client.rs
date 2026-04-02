@@ -578,6 +578,26 @@ pub async fn get_write_method(socket_path: PathBuf, client_id: &str) -> Result<S
     }
 }
 
+/// Set master volume on daemon (0-100)
+///
+/// # Errors
+///
+/// Returns an error if the request fails.
+pub async fn set_volume(socket_path: PathBuf, volume: u8, client_id: &str) -> Result<(), String> {
+    let mut request = create_daemon_request("set_volume", client_id);
+    request.data = Some(serde_json::json!({ "volume": volume }));
+
+    let response = send_daemon_request(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(())
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Failed to set volume".to_string()))
+    }
+}
+
 /// Get recent daemon events
 ///
 /// # Errors

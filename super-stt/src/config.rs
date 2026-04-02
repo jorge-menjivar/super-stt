@@ -23,6 +23,12 @@ pub struct DeviceConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioConfig {
     pub theme: AudioTheme,
+    #[serde(default = "default_volume")]
+    pub volume: u8,
+}
+
+fn default_volume() -> u8 {
+    100
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +51,7 @@ impl Default for DaemonConfig {
             },
             audio: AudioConfig {
                 theme: AudioTheme::default(),
+                volume: default_volume(),
             },
             transcription: TranscriptionConfig {
                 preferred_model: STTModel::default(),
@@ -148,6 +155,14 @@ impl DaemonConfig {
         self.transcription.recording_stop_mode = mode;
         if let Err(e) = self.save() {
             error!("Failed to save config after recording stop mode update: {e}");
+        }
+    }
+
+    /// Update master volume and save to disk
+    pub fn update_volume(&mut self, volume: u8) {
+        self.audio.volume = volume;
+        if let Err(e) = self.save() {
+            error!("Failed to save config after volume update: {e}");
         }
     }
 

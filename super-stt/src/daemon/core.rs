@@ -90,6 +90,8 @@ impl SuperSTTDaemon {
             Command::GetRecordingStopMode => self.handle_get_recording_stop_mode().await,
             Command::SetWriteMethod { method } => self.handle_set_write_method(method).await,
             Command::GetWriteMethod => self.handle_get_write_method().await,
+            Command::SetVolume { volume } => self.handle_set_volume(volume),
+            Command::GetVolume => self.handle_get_volume(),
         }
     }
 
@@ -267,6 +269,7 @@ mod tests {
             realtime_manager,
             udp_streamer,
             audio_theme: Arc::new(RwLock::new(AudioTheme::default())),
+            volume: Arc::new(RwLock::new(100)),
             is_recording: Arc::new(tokio::sync::RwLock::new(false)),
             audio_monitoring_handle: Arc::new(tokio::sync::RwLock::new(None)),
             download_manager: Arc::new(DownloadStateManager::new()),

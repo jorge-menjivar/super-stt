@@ -34,6 +34,7 @@ pub struct DaemonAudioRecorder {
     recording_state: Arc<Mutex<RecordingState>>,
     pub audio_level_tx: broadcast::Sender<AudioLevel>,
     audio_theme: AudioTheme,
+    volume: f32,
     // Audio device initialization state
     audio_device_cache: Arc<Mutex<Option<AudioDeviceCache>>>,
 }
@@ -45,15 +46,15 @@ impl DaemonAudioRecorder {
     ///
     /// Returns an error if warm-up steps fail in a fatal way.
     pub fn new() -> Result<Self> {
-        Self::new_with_theme(AudioTheme::default())
+        Self::new_with_theme(AudioTheme::default(), 1.0)
     }
 
-    /// Create a new recorder with a specific theme
+    /// Create a new recorder with a specific theme and volume
     ///
     /// # Errors
     ///
     /// Returns an error if initialization of audio resources fails.
-    pub fn new_with_theme(theme: AudioTheme) -> Result<Self> {
+    pub fn new_with_theme(theme: AudioTheme, volume: f32) -> Result<Self> {
         let (audio_level_tx, _) = broadcast::channel(1000);
 
         let recorder = Self {
@@ -62,6 +63,7 @@ impl DaemonAudioRecorder {
             recording_state: Arc::new(Mutex::new(RecordingState::new())),
             audio_level_tx,
             audio_theme: theme,
+            volume,
             audio_device_cache: Arc::new(Mutex::new(None)),
         };
 
@@ -387,7 +389,9 @@ impl DaemonAudioRecorder {
             return;
         }
         let (frequencies, duration, fade_in, fade_out) = self.audio_theme.start_sound();
-        if let Err(e) = beeper::play_beep_sequence(&frequencies, duration, fade_in, fade_out) {
+        if let Err(e) =
+            beeper::play_beep_sequence(&frequencies, duration, fade_in, fade_out, self.volume)
+        {
             log::warn!("Failed to play start sound (audio permissions may be missing): {e}");
         }
     }
@@ -398,8 +402,11 @@ impl DaemonAudioRecorder {
             return;
         }
         let (frequencies, duration, fade_in, fade_out) = self.audio_theme.end_sound();
+        let volume = self.volume;
         std::thread::spawn(move || {
-            if let Err(e) = beeper::play_beep_sequence(&frequencies, duration, fade_in, fade_out) {
+            if let Err(e) =
+                beeper::play_beep_sequence(&frequencies, duration, fade_in, fade_out, volume)
+            {
                 log::warn!("Failed to play end sound (audio permissions may be missing): {e}");
             }
         });

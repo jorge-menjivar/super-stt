@@ -68,6 +68,7 @@ pub struct SuperSTTDaemon {
     pub realtime_manager: Arc<RealTimeTranscriptionManager>,
     pub udp_streamer: Arc<UdpAudioStreamer>,
     pub audio_theme: Arc<RwLock<AudioTheme>>,
+    pub volume: Arc<RwLock<u8>>,
     pub is_recording: Arc<tokio::sync::RwLock<bool>>,
     pub audio_monitoring_handle: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
     pub download_manager: Arc<DownloadStateManager>,
@@ -195,6 +196,7 @@ impl SuperSTTDaemon {
             realtime_manager,
             udp_streamer,
             audio_theme: Arc::new(RwLock::new(config.audio.theme)),
+            volume: Arc::new(RwLock::new(config.audio.volume)),
             is_recording: Arc::new(tokio::sync::RwLock::new(false)),
             audio_monitoring_handle: Arc::new(tokio::sync::RwLock::new(None)),
             download_manager,
@@ -496,6 +498,40 @@ impl SuperSTTDaemon {
                 *poisoned.into_inner()
             }
         }
+    }
+
+    /// Set the master volume (0-100)
+    pub fn set_volume(&self, volume: u8) {
+        match self.volume.write() {
+            Ok(mut guard) => {
+                *guard = volume;
+                log::info!("Volume changed to: {volume}");
+            }
+            Err(poisoned) => {
+                log::warn!("Volume lock was poisoned, attempting recovery");
+                let mut guard = poisoned.into_inner();
+                *guard = volume;
+                log::info!("Volume changed to: {volume} (after lock recovery)");
+            }
+        }
+    }
+
+    /// Get the current master volume (0-100)
+    #[must_use]
+    pub fn get_volume(&self) -> u8 {
+        match self.volume.read() {
+            Ok(guard) => *guard,
+            Err(poisoned) => {
+                log::warn!("Volume lock was poisoned, returning current value");
+                *poisoned.into_inner()
+            }
+        }
+    }
+
+    /// Get the current volume as a f32 multiplier (0.0-1.0)
+    #[must_use]
+    pub fn get_volume_f32(&self) -> f32 {
+        f32::from(self.get_volume()) / 100.0
     }
 
     /// Broadcast config change event to all connected clients
