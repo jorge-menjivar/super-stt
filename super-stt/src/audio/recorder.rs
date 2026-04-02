@@ -177,7 +177,7 @@ impl DaemonAudioRecorder {
 
         // Start frequency analysis and broadcasting task (only when clients are listening)
         let udp_streamer_clone = Arc::clone(&udp_streamer);
-        let device_sample_rate_u32 = stream_config.sample_rate.0;
+        let device_sample_rate_u32 = stream_config.sample_rate;
         let device_sample_rate = device_sample_rate_u32 as f32;
         let analysis_task = tokio::spawn(async move {
             let frequency_analyzer = AudioAnalyzer::new(device_sample_rate, 1024);
@@ -321,7 +321,7 @@ impl DaemonAudioRecorder {
         }
 
         // Resample if needed
-        let device_sample_rate = stream_config.sample_rate.0;
+        let device_sample_rate = stream_config.sample_rate;
         let final_audio = if device_sample_rate == self.sample_rate {
             audio_data
         } else {
@@ -358,8 +358,8 @@ impl DaemonAudioRecorder {
         let optimal_config = supported_configs
             .iter()
             .find(|config| {
-                let max_rate = config.max_sample_rate().0;
-                let min_rate = config.min_sample_rate().0;
+                let max_rate = config.max_sample_rate();
+                let min_rate = config.min_sample_rate();
                 // Look for configs that support common sample rates
                 min_rate <= 48000 && max_rate >= 16000
             })
@@ -368,12 +368,12 @@ impl DaemonAudioRecorder {
             .context("No supported input config")?;
 
         // Use a reasonable sample rate instead of max
-        let target_rate = if optimal_config.max_sample_rate().0 >= 48000 {
-            cpal::SampleRate(48000)
-        } else if optimal_config.max_sample_rate().0 >= 44100 {
-            cpal::SampleRate(44100)
-        } else if optimal_config.max_sample_rate().0 >= 16000 {
-            cpal::SampleRate(16000)
+        let target_rate = if optimal_config.max_sample_rate() >= 48000 {
+            48000
+        } else if optimal_config.max_sample_rate() >= 44100 {
+            44100
+        } else if optimal_config.max_sample_rate() >= 16000 {
+            16000
         } else {
             optimal_config.max_sample_rate()
         };
@@ -474,7 +474,7 @@ impl DaemonAudioRecorder {
             .default_input_device()
             .context("No input device available")?;
         let config = self.get_optimal_config(&device)?;
-        Ok(config.config().sample_rate.0)
+        Ok(config.config().sample_rate)
     }
 
     /// Prepare recorder for threaded operation - initializes any threaded state

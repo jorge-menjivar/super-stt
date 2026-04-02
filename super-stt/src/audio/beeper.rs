@@ -63,7 +63,7 @@ pub fn play_beep_sequence(
         .default_output_config()
         .map_err(|e| anyhow::anyhow!("Failed to get output config: {e}"))?;
 
-    let sample_rate = config.sample_rate().0 as f32;
+    let sample_rate = config.sample_rate() as f32;
     let channels = config.channels() as usize;
 
     // Calculate total duration for all beeps to play continuously
@@ -428,7 +428,7 @@ mod tests {
     clippy::cast_sign_loss
 )]
 pub fn verify_fresh_device(device: &Device, config: &cpal::SupportedStreamConfig) -> Result<()> {
-    let sample_rate = config.sample_rate().0 as f32;
+    let sample_rate = config.sample_rate() as f32;
     let channels = config.channels() as usize;
     let verification_samples = (sample_rate * 0.05) as usize; // 50ms of silence
     let mut sample_count = 0usize;

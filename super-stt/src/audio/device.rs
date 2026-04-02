@@ -24,8 +24,8 @@ impl std::fmt::Debug for AudioDeviceCache {
                 "device_name",
                 &self
                     .output_device
-                    .name()
-                    .unwrap_or_else(|_| "Unknown".to_string()),
+                    .description()
+                    .map_or_else(|_| "Unknown".to_string(), |d| d.name().to_string()),
             )
             .finish()
     }
@@ -137,7 +137,7 @@ pub fn get_or_initialize_audio_device(
 
     log::info!(
         "Audio device initialized: {}Hz, {} channels, {:?}",
-        config.sample_rate().0,
+        config.sample_rate(),
         config.channels(),
         config.sample_format()
     );
@@ -194,7 +194,7 @@ pub fn verify_audio_device_readiness(
     clippy::cast_sign_loss
 )]
 fn attempt_device_verification(device_cache: &AudioDeviceCache, _attempt: usize) -> Result<()> {
-    let sample_rate = device_cache.output_config.sample_rate().0 as f32;
+    let sample_rate = device_cache.output_config.sample_rate() as f32;
     let channels = device_cache.output_config.channels() as usize;
     let verification_duration_ms = 50u64;
     let samples_needed = (sample_rate * verification_duration_ms as f32 / 1000.0) as usize;
@@ -314,9 +314,9 @@ pub fn check_output_device_health(
 
     Ok(AudioDeviceInfo {
         name: device
-            .name()
-            .unwrap_or_else(|_| "Unknown Device".to_string()),
-        sample_rate: config.sample_rate().0,
+            .description()
+            .map_or_else(|_| "Unknown Device".to_string(), |d| d.name().to_string()),
+        sample_rate: config.sample_rate(),
         channels: config.channels(),
         sample_format: format!("{:?}", config.sample_format()),
         buffer_size: format!("{:?}", config.buffer_size()),
@@ -353,9 +353,9 @@ pub fn check_input_device_health() -> Result<AudioDeviceInfo> {
 
     Ok(AudioDeviceInfo {
         name: device
-            .name()
-            .unwrap_or_else(|_| "Unknown Device".to_string()),
-        sample_rate: config.sample_rate().0,
+            .description()
+            .map_or_else(|_| "Unknown Device".to_string(), |d| d.name().to_string()),
+        sample_rate: config.sample_rate(),
         channels: config.channels(),
         sample_format: format!("{:?}", config.sample_format()),
         buffer_size: format!("{:?}", config.buffer_size()),
