@@ -89,6 +89,8 @@ pub struct AppModel {
     pub last_udp_data: std::time::Instant,
 
     // Model management state
+    /// Search input for model selection context drawer
+    pub model_search: String,
     /// Available models from daemon
     pub available_models: Vec<STTModel>,
     /// Currently loaded model
@@ -152,15 +154,25 @@ impl cosmic::Application for AppModel {
         let mut nav = nav_bar::Model::default();
 
         nav.insert()
-            .text("Settings")
-            .data::<Page>(Page::Settings)
-            .icon(icon::from_name("preferences-system-symbolic"))
+            .text("Customization")
+            .data::<Page>(Page::Customization)
+            .icon(icon::from_name("preferences-desktop-appearance-symbolic"))
             .activate();
 
         nav.insert()
-            .text("Testing")
-            .data::<Page>(Page::Testing)
-            .icon(icon::from_name("view-grid-symbolic"));
+            .text("Recording")
+            .data::<Page>(Page::Recording)
+            .icon(icon::from_name("audio-input-microphone-symbolic"));
+
+        nav.insert()
+            .text("Input Simulation")
+            .data::<Page>(Page::InputSimulation)
+            .icon(icon::from_name("input-keyboard-symbolic"));
+
+        nav.insert()
+            .text("Models")
+            .data::<Page>(Page::Models)
+            .icon(icon::from_name("applications-science-symbolic"));
 
         nav.insert()
             .text("Connection")
@@ -186,6 +198,7 @@ impl cosmic::Application for AppModel {
             last_udp_data: std::time::Instant::now(),
 
             // Initialize model state
+            model_search: String::new(),
             available_models: Vec::new(),
             current_model: STTModel::default(), // Use default model before loading from daemon
             previous_model: STTModel::default(), // Use default model before loading from daemon
@@ -274,6 +287,28 @@ impl cosmic::Application for AppModel {
                 Message::ToggleContextPage(ContextPage::About),
             )
             .title("About"),
+
+            ContextPage::ModelSelection => {
+                let device_switching = matches!(
+                    self.device_state,
+                    DeviceState::Switching { .. } | DeviceState::Cooldown
+                );
+                context_drawer::context_drawer(
+                    views::models::model_selection_list(
+                        &self.available_models,
+                        &self.current_model,
+                        &self.model_search,
+                    ),
+                    Message::ToggleContextPage(ContextPage::ModelSelection),
+                )
+                .title("Select Model")
+                .header(views::models::model_drawer_header(
+                    &self.model_search,
+                    &self.current_device,
+                    &self.available_devices,
+                    device_switching,
+                ))
+            }
         })
     }
 
@@ -295,27 +330,25 @@ impl cosmic::Application for AppModel {
         let active_page = self
             .nav
             .data::<Page>(self.nav.active())
-            .unwrap_or(&Page::Settings);
+            .unwrap_or(&Page::Customization);
 
         match active_page {
-            Page::Settings => views::settings::page(
-                &self.audio_themes,
-                &self.selected_audio_theme,
-                &self.available_models,
-                &self.current_model,
-                &self.model_operation_state,
-                &self.current_device,
-                &self.available_devices,
-                &self.device_state,
-                self.preview_typing_enabled,
+            Page::Customization => {
+                views::customization::page(&self.audio_themes, &self.selected_audio_theme)
+            }
+            Page::Recording => views::recording::page(
                 self.recording_stop_mode,
-                self.write_method,
-            ),
-            Page::Testing => views::testing::page(
+                self.preview_typing_enabled,
                 &self.recording_status,
                 &self.transcription_text,
                 self.audio_level,
                 self.is_speech_detected,
+            ),
+            Page::InputSimulation => views::input_simulation::page(self.write_method),
+            Page::Models => views::models::page(
+                &self.current_model,
+                &self.model_operation_state,
+                &self.device_state,
             ),
             Page::Connection => views::connection::page(
                 &self.daemon_status,
@@ -372,6 +405,12 @@ impl cosmic::Application for AppModel {
                 | Message::DaemonEventsError(_)
         ) {
             return self.handle_daemon_messages(message);
+        }
+
+        // Model search in context drawer
+        if let Message::ModelSearchChanged(ref search) = message {
+            self.model_search = search.clone();
+            return Task::none();
         }
 
         // Try model-related messages
@@ -650,17 +689,16 @@ impl AppModel {
                     );
                 }
 
-                // Only switch to Settings page on initial connection, not on periodic pings
+                // Only switch to first page on initial connection, not on periodic pings
                 if was_disconnected {
-                    // Find the Settings page ID and activate it
-                    let mut settings_entity = None;
+                    let mut first_entity = None;
                     for entity in self.nav.iter() {
-                        if matches!(self.nav.data::<Page>(entity), Some(Page::Settings)) {
-                            settings_entity = Some(entity);
+                        if matches!(self.nav.data::<Page>(entity), Some(Page::Customization)) {
+                            first_entity = Some(entity);
                             break;
                         }
                     }
-                    if let Some(entity) = settings_entity {
+                    if let Some(entity) = first_entity {
                         self.nav.activate(entity);
                     }
                 }
@@ -1221,6 +1259,10 @@ impl AppModel {
             }
 
             Message::ModelSelected(model) => {
+                // Close the model selection drawer and clear search
+                self.core.window.show_context = false;
+                self.model_search.clear();
+
                 if model == self.current_model {
                     Task::none()
                 } else {

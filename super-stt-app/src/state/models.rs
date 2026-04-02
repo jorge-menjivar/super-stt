@@ -27,8 +27,10 @@ pub enum RecordingStatus {
 #[derive(Debug, Clone)]
 pub enum Page {
     Connection,
-    Settings,
-    Testing,
+    Customization,
+    Recording,
+    InputSimulation,
+    Models,
 }
 
 /// The context page to display in the context drawer
@@ -36,6 +38,7 @@ pub enum Page {
 pub enum ContextPage {
     #[default]
     About,
+    ModelSelection,
 }
 
 /// Menu actions

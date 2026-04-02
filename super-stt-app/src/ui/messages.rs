@@ -44,6 +44,7 @@ pub enum Message {
 
     // Model management messages
     LoadInitialData, // Load models + device info at startup
+    ModelSearchChanged(String),
     ModelSelected(STTModel),
     ModelsLoaded {
         current: STTModel,
