@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::{
+    IsOpen,
     app::Message,
     models::theme::{VisualizationColor, VisualizationColorConfig, VisualizationTheme},
     ui::components::{
         color_buttons::{create_color_button, create_system_accent_button},
         common::{revealer, revealer_head},
     },
-    IsOpen,
 };
 use cosmic::{
+    Apply, Element, Theme,
     applet::padded_control,
     iced::{
-        widget::{column, row},
         Length,
+        widget::{column, row},
     },
     iced_widget::Row,
     theme,
-    widget::{segmented_button::SingleSelectModel, segmented_control, text, Space},
-    Apply, Element, Theme,
+    widget::{Space, segmented_button::SingleSelectModel, segmented_control, text},
 };
 
 pub fn create_visualization_theme_selector<'a>(

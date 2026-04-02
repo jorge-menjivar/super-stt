@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::models::theme::{VisualizationColorConfig, VisualizationTheme};
 use crate::VisualizationSide;
+use crate::models::theme::{VisualizationColorConfig, VisualizationTheme};
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use super_stt_shared::models::theme::AudioTheme;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppletConfig {
     pub visualization: VisualizationConfig,
-    pub audio: AudioConfig,
     pub ui: UiConfig,
 }
 
@@ -19,11 +16,6 @@ pub struct VisualizationConfig {
     pub theme: VisualizationTheme,
     pub side: VisualizationSide, // This will be fixed per binary but stored for completeness
     pub colors: VisualizationColorConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AudioConfig {
-    pub theme: AudioTheme,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,9 +34,6 @@ impl Default for AppletConfig {
                 theme: VisualizationTheme::CenteredEqualizer,
                 side: VisualizationSide::Full,
                 colors: VisualizationColorConfig::default(),
-            },
-            audio: AudioConfig {
-                theme: AudioTheme::default(),
             },
             ui: UiConfig {
                 last_popup_state: "None".to_string(),
@@ -128,14 +117,6 @@ impl AppletConfig {
         self.visualization.theme = theme;
         if let Err(e) = self.save(variant) {
             error!("Failed to save config after visualization theme update: {e}");
-        }
-    }
-
-    /// Update audio theme and save to disk
-    pub fn update_audio_theme(&mut self, theme: AudioTheme, variant: &str) {
-        self.audio.theme = theme;
-        if let Err(e) = self.save(variant) {
-            error!("Failed to save config after audio theme update: {e}");
         }
     }
 

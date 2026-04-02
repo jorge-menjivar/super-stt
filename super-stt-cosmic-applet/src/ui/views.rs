@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::{
+    IsOpen,
     app::Message,
     config::AppletConfig,
     models::{state::DaemonConnectionState, theme::ThemeConfig},
@@ -7,16 +8,14 @@ use crate::{
         app_info::create_app_info_section, launch::create_launch_section,
         settings::settings::create_applet_settings_section, status::create_status_section,
     },
-    IsOpen,
 };
 use cosmic::{
+    Apply, Element,
     applet::{menu_control_padding, padded_control},
     iced::widget::column,
     theme,
     widget::{divider, segmented_button::SingleSelectModel},
-    Apply, Element,
 };
-use super_stt_shared::theme::AudioTheme;
 
 /// Parameters for creating popup content to avoid too many function arguments
 pub struct PopupContentParams<'a> {
@@ -27,7 +26,6 @@ pub struct PopupContentParams<'a> {
     pub icon_alignment_model: &'a SingleSelectModel,
     pub theme_selector_model: &'a SingleSelectModel,
     pub selected_theme_for_config: bool,
-    pub available_audio_themes: &'a [AudioTheme],
 }
 
 pub fn create_popup_content<'a>(params: &PopupContentParams<'a>) -> Element<'a, Message> {
@@ -49,7 +47,6 @@ pub fn create_popup_content<'a>(params: &PopupContentParams<'a>) -> Element<'a, 
                 params.icon_alignment_model,
                 params.theme_selector_model,
                 params.selected_theme_for_config,
-                params.available_audio_themes,
             )
         } else {
             padded_control(create_status_section(params.daemon_state))

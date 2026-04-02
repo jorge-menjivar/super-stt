@@ -16,7 +16,6 @@ pub enum DaemonConnectionState {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum IsOpen {
     None,
-    AudioTheme,
     VisualizationTheme,
     VisualizationColors,
     AppletSettings,

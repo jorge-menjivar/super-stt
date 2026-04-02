@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use clap::{Arg, Command, ValueEnum};
-use super_stt_cosmic_applet::{VisualizationSide, VERSION};
+use super_stt_cosmic_applet::{VERSION, VisualizationSide};
 
 #[derive(ValueEnum, Clone, Debug)]
 enum Side {

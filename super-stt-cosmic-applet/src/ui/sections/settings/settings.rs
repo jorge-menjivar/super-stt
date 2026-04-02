@@ -1,58 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::{
+    Apply, Element,
     applet::padded_control,
     iced::{
-        widget::{column, row, slider},
         Alignment, Length,
+        widget::{column, row, slider},
     },
     theme,
     widget::{
-        divider, segmented_button::SingleSelectModel, segmented_control, text, toggler, Space,
+        Space, divider, segmented_button::SingleSelectModel, segmented_control, text, toggler,
     },
-    Apply, Element,
 };
-use super_stt_shared::theme::AudioTheme;
 
 use crate::{
+    IsOpen,
     app::Message,
     config::AppletConfig,
     models::theme::ThemeConfig,
-    ui::{
-        components::common::revealer,
-        sections::settings::components::visualization_theme::{
-            create_visualization_color_selector, create_visualization_theme_selector,
-        },
+    ui::sections::settings::components::visualization_theme::{
+        create_visualization_color_selector, create_visualization_theme_selector,
     },
-    IsOpen,
 };
-
-pub fn create_audio_theme_selector<'a>(
-    selected_theme: AudioTheme,
-    is_open: &IsOpen,
-    available_themes: &[AudioTheme],
-) -> Element<'a, Message> {
-    // Use provided themes if available, otherwise fallback to all themes
-    let audio_themes = if available_themes.is_empty() {
-        AudioTheme::all_themes()
-    } else {
-        available_themes.to_vec()
-    };
-
-    let options: Vec<(String, String)> = audio_themes
-        .into_iter()
-        .map(|theme| (theme.to_string(), theme.pretty_name()))
-        .collect();
-
-    revealer(
-        *is_open == IsOpen::AudioTheme,
-        "Audio Theme".to_string(),
-        selected_theme.pretty_name().clone(),
-        &options,
-        Message::RevealerToggle(IsOpen::AudioTheme),
-        |theme_str| Message::SetAudioTheme(theme_str.parse::<AudioTheme>().unwrap_or_default()),
-    )
-    .apply(Element::from)
-}
 
 pub fn create_applet_settings_section<'a>(
     config: &AppletConfig,
@@ -61,15 +29,10 @@ pub fn create_applet_settings_section<'a>(
     icon_alignment_model: &'a SingleSelectModel,
     theme_selector_model: &'a SingleSelectModel,
     selected_theme_for_config: bool,
-    available_audio_themes: &[AudioTheme],
 ) -> Element<'a, Message> {
     let spacing = theme::active().cosmic().spacing;
 
     let mut settings_column = column![
-        create_audio_theme_selector(theme_config.audio_theme, is_open, available_audio_themes),
-        padded_control(divider::horizontal::default())
-            .padding([0, spacing.space_s])
-            .apply(Element::from),
         // Show visualizations toggle
         padded_control(
             row![

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::{
+    Element, Renderer, Theme,
     iced::{
-        core::{mouse, Rectangle},
+        core::{Rectangle, mouse},
         widget::{
-            canvas::{Frame, Geometry, Program},
             Canvas,
+            canvas::{Frame, Geometry, Program},
         },
     },
-    Element, Renderer, Theme,
 };
 
 use crate::{

@@ -1,7 +1,8 @@
 [package]
     name = "super-stt-cosmic-applet"
-    version = "0.1.0"
-    edition = "2021"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
     description = "Super STT client application"
     repository = "https://github.com/jorge-menjivar/super-stt"
     license = "GPL-3.0-only"

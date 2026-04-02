@@ -6,10 +6,11 @@ mod models;
 mod ui;
 
 use cosmic::{
-    app as cosmic_app,
+    Element, app as cosmic_app,
     iced::{
+        Alignment, Subscription,
         platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup},
-        window, Alignment, Subscription,
+        window,
     },
     iced_widget,
     theme::{self, Button},
@@ -17,7 +18,6 @@ use cosmic::{
         self, button, container, layer_container, mouse_area,
         segmented_button::{Entity, SingleSelectModel},
     },
-    Element,
 };
 
 use futures_util::SinkExt;
@@ -35,18 +35,18 @@ use crate::ui::components::sound_visualization::VisualizationComponent;
 use crate::{app::Message, models::state::IsOpen};
 use crate::{
     config::AppletConfig,
-    ui::views::{create_popup_content, PopupContentParams},
+    ui::views::{PopupContentParams, create_popup_content},
 };
 use crate::{
     daemon::{
-        client::load_audio_themes, fetch_daemon_config, ping_daemon, ping_daemon_with_status,
-        set_and_test_audio_theme, RetryStrategy, TokenBucketRateLimiter,
+        RetryStrategy, TokenBucketRateLimiter, fetch_daemon_config, ping_daemon,
+        ping_daemon_with_status,
     },
     models::theme::ThemeConfig,
 };
 use super_stt_shared::{
-    parse_audio_samples_from_udp, parse_frequency_bands_from_udp, parse_recording_state_from_udp,
-    theme::AudioTheme, UdpAuth,
+    UdpAuth, parse_audio_samples_from_udp, parse_frequency_bands_from_udp,
+    parse_recording_state_from_udp,
 };
 
 // Connection monitoring constants
@@ -100,7 +100,6 @@ pub struct SuperSttApplet {
     theme_selector_dark: Entity,
     selected_theme_for_config: bool, // false = light, true = dark
     retry_strategy: RetryStrategy,
-    available_audio_themes: Vec<AudioTheme>,
 }
 
 impl cosmic::Application for SuperSttApplet {
@@ -120,7 +119,6 @@ impl cosmic::Application for SuperSttApplet {
         // Create theme config from loaded configuration
         let theme_config = ThemeConfig {
             visualization_theme: config.visualization.theme.clone(),
-            audio_theme: config.audio.theme,
             visualization_color_config: config.visualization.colors.clone(),
         };
 
@@ -185,7 +183,6 @@ impl cosmic::Application for SuperSttApplet {
             theme_selector_dark,
             selected_theme_for_config,
             retry_strategy: RetryStrategy::for_initial_connection(),
-            available_audio_themes: Vec::new(), // Will be loaded when daemon connects
         };
 
         // Try to ping the daemon on startup
@@ -269,28 +266,20 @@ impl cosmic::Application for SuperSttApplet {
                     self.udp_restart_counter
                 );
 
-                // Fetch daemon configuration and load available themes in parallel
+                // Fetch daemon configuration
                 let socket_path = self.socket_path.clone();
-                let socket_path_themes = self.socket_path.clone();
 
-                return cosmic_app::Task::batch([
-                    cosmic_app::Task::perform(fetch_daemon_config(socket_path), |result| {
-                        match result {
-                            Ok(config) => {
-                                cosmic::Action::App(Message::DaemonConfigReceived(config))
-                            }
-                            Err(err) => {
-                                warn!("Failed to fetch daemon config: {err}");
-                                cosmic::Action::App(Message::DaemonError(format!(
-                                    "Failed to fetch config: {err}"
-                                )))
-                            }
+                return cosmic_app::Task::perform(fetch_daemon_config(socket_path), |result| {
+                    match result {
+                        Ok(config) => cosmic::Action::App(Message::DaemonConfigReceived(config)),
+                        Err(err) => {
+                            warn!("Failed to fetch daemon config: {err}");
+                            cosmic::Action::App(Message::DaemonError(format!(
+                                "Failed to fetch config: {err}"
+                            )))
                         }
-                    }),
-                    cosmic_app::Task::perform(load_audio_themes(socket_path_themes), |themes| {
-                        cosmic::Action::App(Message::AudioThemesLoaded(themes))
-                    }),
-                ]);
+                    }
+                });
             }
             Message::PingResponse {
                 message: _,
@@ -315,25 +304,8 @@ impl cosmic::Application for SuperSttApplet {
                     });
                 }
             }
-            Message::DaemonConfigReceived(config) => {
-                // Parse daemon configuration and sync theme settings
-                if let Some(audio_config) = config
-                    .get("audio")
-                    .and_then(|audio| audio.get("theme"))
-                    .and_then(|theme| theme.as_str())
-                {
-                    let daemon_audio_theme = audio_config.parse::<AudioTheme>().unwrap_or_default();
-                    info!("Received daemon config, syncing audio theme: {daemon_audio_theme:?}");
-
-                    // Update local theme config with daemon's audio theme
-                    self.theme_config.audio_theme = daemon_audio_theme;
-
-                    // Save the updated theme config
-                    self.config
-                        .update_audio_theme(daemon_audio_theme, &self.variant_name);
-                } else {
-                    warn!("No audio theme found in daemon configuration");
-                }
+            Message::DaemonConfigReceived(_config) => {
+                // Config received from daemon — audio settings are managed by the desktop app
             }
             Message::DaemonError(err) => {
                 warn!("Daemon error: {err}");
@@ -393,23 +365,6 @@ impl cosmic::Application for SuperSttApplet {
                 } else {
                     is_open_src
                 }
-            }
-            Message::SetAudioTheme(theme) => {
-                self.theme_config.audio_theme = theme;
-                // Update and save configuration
-                self.config.update_audio_theme(theme, &self.variant_name);
-                return cosmic_app::Task::perform(
-                    set_and_test_audio_theme(self.socket_path.clone(), theme.to_string()),
-                    |result| {
-                        cosmic::Action::App(match result {
-                            Ok(_) => Message::DaemonConnected,
-                            Err(e) => Message::DaemonError(e),
-                        })
-                    },
-                );
-            }
-            Message::AudioThemesLoaded(themes) => {
-                self.available_audio_themes = themes;
             }
             Message::AudioLevelUpdate { level, is_speech } => {
                 self.audio_level = level;
@@ -572,15 +527,13 @@ impl cosmic::Application for SuperSttApplet {
                 if let Ok(output) = std::process::Command::new("which")
                     .arg("super-stt-app")
                     .output()
+                    && output.status.success()
+                    && let Ok(path) = std::str::from_utf8(&output.stdout)
                 {
-                    if output.status.success() {
-                        if let Ok(path) = std::str::from_utf8(&output.stdout) {
-                            let path = path.trim();
-                            if std::process::Command::new(path).spawn().is_ok() {
-                                info!("Successfully launched Super STT app from PATH: {path}");
-                                launched = true;
-                            }
-                        }
+                    let path = path.trim();
+                    if std::process::Command::new(path).spawn().is_ok() {
+                        info!("Successfully launched Super STT app from PATH: {path}");
+                        launched = true;
                     }
                 }
 
@@ -760,7 +713,6 @@ impl cosmic::Application for SuperSttApplet {
             icon_alignment_model: &self.icon_alignment_model,
             theme_selector_model: &self.theme_selector_model,
             selected_theme_for_config: self.selected_theme_for_config,
-            available_audio_themes: &self.available_audio_themes,
         });
 
         self.core.applet.popup_container(content).into()

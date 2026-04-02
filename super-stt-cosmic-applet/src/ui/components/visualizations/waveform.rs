@@ -6,9 +6,9 @@ use super_stt_shared::FrequencyData;
 
 use crate::models::theme::{VisualizationColorConfig, VisualizationSide};
 use cosmic::iced::{
-    core::Rectangle,
-    widget::canvas::{path, stroke, Fill, Frame},
     Point,
+    core::Rectangle,
+    widget::canvas::{Fill, Frame, path, stroke},
 };
 
 /// Bottom-aligned frequency waveform rendering

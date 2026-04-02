@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::app::Message;
 use cosmic::{
-    iced::{widget::row, Alignment, Length},
-    theme,
-    widget::{button, icon, text, Space},
     Element,
+    iced::{Alignment, Length, widget::row},
+    theme,
+    widget::{Space, button, icon, text},
 };
 
 // Cache GitHub icon bytes to avoid allocation on every render

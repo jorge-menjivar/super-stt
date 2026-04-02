@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::iced::Color;
 use serde::{Deserialize, Serialize};
-use super_stt_shared::theme::AudioTheme;
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum VisualizationTheme {
     Pulse,
@@ -297,7 +295,6 @@ impl VisualizationColorConfig {
 
 #[derive(Debug, Clone, Default)]
 pub struct ThemeConfig {
-    pub audio_theme: AudioTheme,
     pub visualization_theme: VisualizationTheme,
     pub visualization_color_config: VisualizationColorConfig,
 }

@@ -2,12 +2,12 @@
 use crate::config::FREQUENCY_NORMALIZATION_MAX;
 use crate::models::theme::{VisualizationColorConfig, VisualizationSide};
 use crate::ui::components::visualizations::{VisualizationConfig, VisualizationRenderer};
-use cosmic::iced::{
-    core::Rectangle,
-    widget::canvas::{path, stroke, Fill, Frame},
-    Point,
-};
 use cosmic::iced::{Padding, Radius};
+use cosmic::iced::{
+    Point,
+    core::Rectangle,
+    widget::canvas::{Fill, Frame, path, stroke},
+};
 use super_stt_shared::FrequencyData;
 
 /// A horizontal line pulse that grows in height/thickness with audio intensity

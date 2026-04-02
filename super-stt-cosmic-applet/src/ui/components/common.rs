@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::app::Message;
 use cosmic::{
+    Renderer, Theme,
     applet::menu_button,
     iced::{
-        widget::{self, column},
         Length,
+        widget::{self, column},
     },
     widget::text,
-    Renderer, Theme,
 };
 
 pub fn revealer_head(

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::{iced::window, widget::segmented_button::Entity};
-use super_stt_shared::theme::AudioTheme;
 
 use crate::models::{
     state::{IsOpen, RecordingState},
@@ -30,8 +29,6 @@ pub enum Message {
     OpenGitHub,
     LaunchApp,
     RevealerToggle(IsOpen),
-    SetAudioTheme(AudioTheme),
-    AudioThemesLoaded(Vec<AudioTheme>),
     SetVisualizationTheme(VisualizationTheme),
     SetAppletWidth(u32),
     SetShowIcon(bool),

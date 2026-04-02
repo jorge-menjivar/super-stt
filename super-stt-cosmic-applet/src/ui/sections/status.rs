@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::{app::Message, models::state::DaemonConnectionState};
-use cosmic::{iced::widget::column, widget::text, Element};
+use cosmic::{Element, iced::widget::column, widget::text};
 
 pub fn create_status_section(daemon_state: &DaemonConnectionState) -> Element<'static, Message> {
     // Create status section with optional retry button

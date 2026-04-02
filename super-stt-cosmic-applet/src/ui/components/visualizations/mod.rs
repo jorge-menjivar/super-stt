@@ -10,8 +10,8 @@ pub use pulse::PulseVisualization;
 pub use waveform::WaveformVisualization;
 
 use cosmic::{
-    iced::{border, core::Rectangle, widget::canvas::Frame, Padding},
     Renderer,
+    iced::{Padding, border, core::Rectangle, widget::canvas::Frame},
 };
 
 use crate::models::theme::{VisualizationColorConfig, VisualizationSide};

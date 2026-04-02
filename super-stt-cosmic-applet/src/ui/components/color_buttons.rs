@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::{
-    iced::{widget::row, Alignment, Color, Length},
-    theme,
-    widget::{container, mouse_area, text, Space},
     Apply, Element,
+    iced::{Alignment, Color, Length, widget::row},
+    theme,
+    widget::{Space, container, mouse_area, text},
 };
 
 use crate::{app::Message, models::theme::VisualizationColor};
