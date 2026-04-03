@@ -204,6 +204,9 @@ impl SuperSTTDaemon {
         let model_name = match &model_instance {
             STTModelInstance::Whisper(_) => "Whisper",
             STTModelInstance::Voxtral(_) => "Voxtral",
+            STTModelInstance::OpenAI(_) => "OpenAI",
+            STTModelInstance::Mistral(_) => "Mistral",
+            STTModelInstance::Deepgram(_) => "Deepgram",
         };
 
         let actual_device = {
@@ -329,6 +332,9 @@ impl SuperSTTDaemon {
                 let model_type_name = match &model_instance {
                     STTModelInstance::Whisper(_) => "whisper",
                     STTModelInstance::Voxtral(_) => "voxtral",
+                    STTModelInstance::OpenAI(_) => "openai",
+                    STTModelInstance::Mistral(_) => "mistral",
+                    STTModelInstance::Deepgram(_) => "deepgram",
                 };
 
                 *self.model.write().await = Some(model_instance);

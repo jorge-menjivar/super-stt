@@ -6,7 +6,10 @@ use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::services::dbus::DBusManager;
 use crate::services::transcription::RealTimeTranscriptionManager;
-use crate::stt_models::{voxtral::VoxtralModel, whisper::WhisperModel};
+use crate::stt_models::local::{voxtral::VoxtralModel, whisper::WhisperModel};
+use crate::stt_models::third_party::{
+    deepgram::DeepgramModel, mistralai::MistralModel, openai::OpenAIModel,
+};
 use anyhow::{Context, Result};
 use log::{info, warn};
 use std::collections::HashMap;
@@ -31,27 +34,77 @@ pub enum DeviceOverride {
 pub enum STTModelInstance {
     Whisper(Box<WhisperModel>),
     Voxtral(Box<VoxtralModel>),
+    OpenAI(Box<OpenAIModel>),
+    Mistral(Box<MistralModel>),
+    Deepgram(Box<DeepgramModel>),
 }
 
 impl STTModelInstance {
-    /// Transcribe audio using the loaded model
+    /// Transcribe audio using a local model (sync).
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying model fails to transcribe.
+    /// Returns an error if the underlying model fails to transcribe,
+    /// or if called on an online model (use `transcribe_audio_online` instead).
     pub fn transcribe_audio(&mut self, audio_data: &[f32], sample_rate: u32) -> Result<String> {
         match self {
             STTModelInstance::Whisper(model) => model.transcribe_audio(audio_data, sample_rate),
             STTModelInstance::Voxtral(model) => model.transcribe_audio(audio_data, sample_rate),
+            STTModelInstance::OpenAI(_)
+            | STTModelInstance::Mistral(_)
+            | STTModelInstance::Deepgram(_) => Err(anyhow::anyhow!(
+                "Use transcribe_audio_online for online models"
+            )),
         }
     }
 
-    /// Get the device used by the model
+    /// Transcribe audio using an online model (async).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API call fails or if called on a local model.
+    pub async fn transcribe_audio_online(
+        &self,
+        audio_data: &[f32],
+        sample_rate: u32,
+    ) -> Result<String> {
+        match self {
+            STTModelInstance::OpenAI(model) => {
+                model.transcribe_audio(audio_data, sample_rate).await
+            }
+            STTModelInstance::Mistral(model) => {
+                model.transcribe_audio(audio_data, sample_rate).await
+            }
+            STTModelInstance::Deepgram(model) => {
+                model.transcribe_audio(audio_data, sample_rate).await
+            }
+            _ => Err(anyhow::anyhow!(
+                "transcribe_audio_online called on local model"
+            )),
+        }
+    }
+
+    /// Returns true if this is an online model that sends audio to an external API.
+    #[must_use]
+    pub fn is_online(&self) -> bool {
+        matches!(
+            self,
+            STTModelInstance::OpenAI(_)
+                | STTModelInstance::Mistral(_)
+                | STTModelInstance::Deepgram(_)
+        )
+    }
+
+    /// Get the device used by the model.
+    /// Returns `Device::Cpu` as a placeholder for online models.
     #[must_use]
     pub fn device(&self) -> &candle_core::Device {
         match self {
             STTModelInstance::Whisper(model) => model.device(),
             STTModelInstance::Voxtral(model) => model.device(),
+            STTModelInstance::OpenAI(_)
+            | STTModelInstance::Mistral(_)
+            | STTModelInstance::Deepgram(_) => &candle_core::Device::Cpu,
         }
     }
 }
@@ -230,9 +283,24 @@ impl SuperSTTDaemon {
         Self::broadcast_loading_status(&daemon.notification_manager).await;
 
         // Load the appropriate STT model based on config preferences
+        // If the preferred model is online but the toggle is off or no key, fall back to default
         let model_to_load = {
             let config_guard = daemon.config.read().await;
-            config_guard.transcription.preferred_model
+            let preferred = config_guard.transcription.preferred_model;
+            if preferred.is_online() {
+                if config_guard.online.allow_online_models
+                    && crate::keyring::has_api_key(preferred.api_provider()).unwrap_or(false)
+                {
+                    preferred
+                } else {
+                    warn!(
+                        "Preferred model is online but online models are disabled or no API key; falling back to default"
+                    );
+                    STTModel::default()
+                }
+            } else {
+                preferred
+            }
         };
         Self::load_initial_model_and_broadcast(&daemon, model_to_load).await?;
 
@@ -305,12 +373,44 @@ impl SuperSTTDaemon {
         daemon: &SuperSTTDaemon,
         model_to_load: STTModel,
     ) -> Result<()> {
-        // Mirror the model switch path: broadcast loading, download if needed, then load
         daemon.broadcast_model_loading_status(model_to_load).await;
+
+        // Online models don't need downloading — create instance directly
+        if model_to_load.is_online() {
+            let provider = model_to_load.api_provider();
+            let api_key = crate::keyring::get_api_key(provider)
+                .map_err(|e| anyhow::anyhow!(e))?
+                .ok_or_else(|| anyhow::anyhow!("{provider} API key not configured"))?;
+
+            let model_id = model_to_load.api_model_id().to_string();
+            let instance = Self::create_online_instance(provider, api_key, model_id);
+            info!("{provider} model {model_to_load} loaded successfully");
+            *daemon.model.write().await = Some(instance);
+            *daemon.model_type.write().await = Some(model_to_load);
+
+            if let Err(e) = daemon
+                .notification_manager
+                .broadcast_event(
+                    "daemon_status_changed".to_string(),
+                    "daemon".to_string(),
+                    serde_json::json!({
+                        "status": "ready",
+                        "model_loaded": true,
+                        "model_type": provider,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    }),
+                )
+                .await
+            {
+                warn!("Failed to broadcast model ready status: {e}");
+            }
+            return Ok(());
+        }
+
+        // Local model path: download if needed, then load
         let tracker = daemon.create_progress_tracker(model_to_load);
         if let Err(resp) = daemon.register_download(&tracker) {
             tracker.cancel();
-            // Surface the error so startup fails clearly
             anyhow::bail!(
                 resp.message
                     .unwrap_or_else(|| "Failed to register download".to_string())
@@ -332,6 +432,9 @@ impl SuperSTTDaemon {
         let model_name = match &instance {
             STTModelInstance::Whisper(_) => "Whisper",
             STTModelInstance::Voxtral(_) => "Voxtral",
+            STTModelInstance::OpenAI(_) => "OpenAI",
+            STTModelInstance::Mistral(_) => "Mistral",
+            STTModelInstance::Deepgram(_) => "Deepgram",
         };
         info!("{model_name} model loaded successfully");
         *daemon.model.write().await = Some(instance);
@@ -355,6 +458,27 @@ impl SuperSTTDaemon {
             warn!("Failed to broadcast model ready status: {e}");
         }
         Ok(())
+    }
+
+    /// Create the appropriate online model instance based on provider.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the provider string is not a recognized online provider.
+    #[must_use]
+    pub fn create_online_instance(
+        provider: &str,
+        api_key: String,
+        model_id: String,
+    ) -> STTModelInstance {
+        match provider {
+            "openai" => STTModelInstance::OpenAI(Box::new(OpenAIModel::new(api_key, model_id))),
+            "mistral" => STTModelInstance::Mistral(Box::new(MistralModel::new(api_key, model_id))),
+            "deepgram" => {
+                STTModelInstance::Deepgram(Box::new(DeepgramModel::new(api_key, model_id)))
+            }
+            _ => panic!("Unknown online provider: {provider}"),
+        }
     }
 
     /// Start the daemon and listen for connections
@@ -581,5 +705,80 @@ impl SuperSTTDaemon {
             "Saved config to disk and broadcasted config change event to all connected clients"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_online_instance_openai() {
+        let instance = SuperSTTDaemon::create_online_instance(
+            "openai",
+            "test-key".to_string(),
+            "whisper-1".to_string(),
+        );
+        assert!(instance.is_online());
+        assert!(matches!(instance, STTModelInstance::OpenAI(_)));
+    }
+
+    #[test]
+    fn create_online_instance_mistral() {
+        let instance = SuperSTTDaemon::create_online_instance(
+            "mistral",
+            "test-key".to_string(),
+            "voxtral-mini-latest".to_string(),
+        );
+        assert!(instance.is_online());
+        assert!(matches!(instance, STTModelInstance::Mistral(_)));
+    }
+
+    #[test]
+    fn create_online_instance_deepgram() {
+        let instance = SuperSTTDaemon::create_online_instance(
+            "deepgram",
+            "test-key".to_string(),
+            "nova-3".to_string(),
+        );
+        assert!(instance.is_online());
+        assert!(matches!(instance, STTModelInstance::Deepgram(_)));
+    }
+
+    #[test]
+    #[should_panic(expected = "Unknown online provider")]
+    fn create_online_instance_unknown_panics() {
+        SuperSTTDaemon::create_online_instance(
+            "unknown",
+            "test-key".to_string(),
+            "model".to_string(),
+        );
+    }
+
+    #[test]
+    fn online_instance_transcribe_sync_returns_error() {
+        let mut instance = SuperSTTDaemon::create_online_instance(
+            "openai",
+            "key".to_string(),
+            "whisper-1".to_string(),
+        );
+        let result = instance.transcribe_audio(&[0.0; 16000], 16000);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("transcribe_audio_online")
+        );
+    }
+
+    #[test]
+    fn online_instance_device_returns_cpu() {
+        let instance = SuperSTTDaemon::create_online_instance(
+            "openai",
+            "key".to_string(),
+            "whisper-1".to_string(),
+        );
+        assert!(matches!(instance.device(), candle_core::Device::Cpu));
     }
 }

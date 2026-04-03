@@ -271,3 +271,14 @@ pub async fn get_write_method(socket_path: PathBuf) -> Result<String, String> {
 pub async fn set_volume(socket_path: PathBuf, volume: u8) -> Result<(), String> {
     super_stt_shared::daemon::client::set_volume(socket_path, volume, get_client_id()).await
 }
+
+/// Set allow online models on daemon
+pub async fn set_allow_online_models(socket_path: PathBuf, enabled: bool) -> Result<(), String> {
+    super_stt_shared::daemon::client::set_allow_online_models(socket_path, enabled, get_client_id())
+        .await
+}
+
+/// Get current allow online models setting from daemon
+pub async fn get_allow_online_models(socket_path: PathBuf) -> Result<bool, String> {
+    super_stt_shared::daemon::client::get_allow_online_models(socket_path, get_client_id()).await
+}

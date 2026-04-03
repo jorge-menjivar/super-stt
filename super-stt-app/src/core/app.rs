@@ -3,11 +3,11 @@
 use crate::audio::{parse_audio_level_from_udp, parse_recording_state_from_udp};
 
 use crate::daemon::client::{
-    RecordEvent, cancel_download, fetch_daemon_config, get_current_device, get_current_model,
-    get_download_status, get_preview_typing, get_recording_stop_mode, get_write_method,
-    list_available_models, load_audio_themes, ping_daemon, record_command_stream,
-    set_and_test_audio_theme, set_audio_theme, set_device, set_model, set_preview_typing,
-    set_recording_stop_mode, set_volume, set_write_method, stop_record_command,
+    RecordEvent, cancel_download, fetch_daemon_config, get_allow_online_models, get_current_device,
+    get_current_model, get_download_status, get_preview_typing, get_recording_stop_mode,
+    get_write_method, list_available_models, load_audio_themes, ping_daemon, record_command_stream,
+    set_allow_online_models, set_and_test_audio_theme, set_audio_theme, set_device, set_model,
+    set_preview_typing, set_recording_stop_mode, set_volume, set_write_method, stop_record_command,
     test_daemon_connection,
 };
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};
@@ -57,6 +57,7 @@ pub enum DeviceState {
 
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
+#[allow(clippy::struct_excessive_bools)]
 pub struct AppModel {
     /// Application state which is managed by the COSMIC runtime.
     core: cosmic::Core,
@@ -127,6 +128,15 @@ pub struct AppModel {
 
     // Master volume (0-100)
     pub volume: u8,
+
+    // Online models state
+    pub allow_online_models: bool,
+    pub openai_api_key_input: String,
+    pub has_openai_api_key: bool,
+    pub mistral_api_key_input: String,
+    pub has_mistral_api_key: bool,
+    pub deepgram_api_key_input: String,
+    pub has_deepgram_api_key: bool,
 }
 
 /// Create a COSMIC application from the app model
@@ -181,6 +191,11 @@ impl cosmic::Application for AppModel {
             .icon(icon::from_name("applications-science-symbolic"));
 
         nav.insert()
+            .text("Online Models")
+            .data::<Page>(Page::OnlineModels)
+            .icon(icon::from_name("network-wireless-symbolic"));
+
+        nav.insert()
             .text("Connection")
             .data::<Page>(Page::Connection)
             .icon(icon::from_name("help-about-symbolic"));
@@ -227,6 +242,15 @@ impl cosmic::Application for AppModel {
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),
             volume: 100,
+
+            // Online models state
+            allow_online_models: false,
+            openai_api_key_input: String::new(),
+            has_openai_api_key: false,
+            mistral_api_key_input: String::new(),
+            has_mistral_api_key: false,
+            deepgram_api_key_input: String::new(),
+            has_deepgram_api_key: false,
         };
 
         // Create startup commands
@@ -301,10 +325,17 @@ impl cosmic::Application for AppModel {
                     self.device_state,
                     DeviceState::Switching { .. } | DeviceState::Cooldown
                 );
+                // Filter online models out when the toggle is off
+                let filtered_models: Vec<STTModel> = self
+                    .available_models
+                    .iter()
+                    .filter(|m| self.allow_online_models || !m.is_online())
+                    .copied()
+                    .collect();
                 context_drawer::context_drawer(
                     views::models::model_selection_list(
-                        &self.available_models,
-                        &self.current_model,
+                        filtered_models,
+                        self.current_model,
                         &self.model_search,
                     ),
                     Message::ToggleContextPage(ContextPage::ModelSelection),
@@ -359,6 +390,15 @@ impl cosmic::Application for AppModel {
                 &self.current_model,
                 &self.model_operation_state,
                 &self.device_state,
+            ),
+            Page::OnlineModels => views::online_models::page(
+                self.allow_online_models,
+                self.has_openai_api_key,
+                &self.openai_api_key_input,
+                self.has_mistral_api_key,
+                &self.mistral_api_key_input,
+                self.has_deepgram_api_key,
+                &self.deepgram_api_key_input,
             ),
             Page::Connection => views::connection::page(
                 &self.daemon_status,
@@ -488,6 +528,30 @@ impl cosmic::Application for AppModel {
                 | Message::WriteMethodError(_)
         ) {
             return self.handle_write_method_messages(message);
+        }
+
+        if matches!(
+            message,
+            Message::AllowOnlineModelsToggled(_)
+                | Message::AllowOnlineModelsLoaded(_)
+                | Message::AllowOnlineModelsError(_)
+                | Message::OpenAIApiKeyChanged(_)
+                | Message::OpenAIApiKeySaved
+                | Message::OpenAIApiKeyRemoved
+                | Message::OpenAIApiKeyError(_)
+                | Message::OpenAIApiKeyStatusLoaded(_)
+                | Message::MistralApiKeyChanged(_)
+                | Message::MistralApiKeySaved
+                | Message::MistralApiKeyRemoved
+                | Message::MistralApiKeyError(_)
+                | Message::MistralApiKeyStatusLoaded(_)
+                | Message::DeepgramApiKeyChanged(_)
+                | Message::DeepgramApiKeySaved
+                | Message::DeepgramApiKeyRemoved
+                | Message::DeepgramApiKeyError(_)
+                | Message::DeepgramApiKeyStatusLoaded(_)
+        ) {
+            return self.handle_online_models_messages(message);
         }
 
         match message {
@@ -1304,6 +1368,27 @@ impl AppModel {
                             }
                         }
                     }),
+                    Task::perform(
+                        get_allow_online_models(self.socket_path.clone()),
+                        |result| match result {
+                            Ok(enabled) => {
+                                cosmic::Action::App(Message::AllowOnlineModelsLoaded(enabled))
+                            }
+                            Err(e) => cosmic::Action::App(Message::AllowOnlineModelsError(e)),
+                        },
+                    ),
+                    Task::perform(
+                        async { crate::keyring::has_api_key("openai").unwrap_or(false) },
+                        |has_key| cosmic::Action::App(Message::OpenAIApiKeyStatusLoaded(has_key)),
+                    ),
+                    Task::perform(
+                        async { crate::keyring::has_api_key("mistral").unwrap_or(false) },
+                        |has_key| cosmic::Action::App(Message::MistralApiKeyStatusLoaded(has_key)),
+                    ),
+                    Task::perform(
+                        async { crate::keyring::has_api_key("deepgram").unwrap_or(false) },
+                        |has_key| cosmic::Action::App(Message::DeepgramApiKeyStatusLoaded(has_key)),
+                    ),
                 ])
             }
 
@@ -1476,6 +1561,155 @@ impl AppModel {
 
             Message::WriteMethodError(err) => {
                 log::warn!("Write method error: {err}");
+                Task::none()
+            }
+
+            _ => Task::none(),
+        }
+    }
+
+    /// Handle online models messages
+    #[allow(clippy::too_many_lines)]
+    fn handle_online_models_messages(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+        match message {
+            Message::AllowOnlineModelsToggled(enabled) => {
+                self.allow_online_models = enabled;
+                Task::perform(
+                    set_allow_online_models(self.socket_path.clone(), enabled),
+                    move |result| match result {
+                        Ok(()) => cosmic::Action::App(Message::AllowOnlineModelsLoaded(enabled)),
+                        Err(e) => cosmic::Action::App(Message::AllowOnlineModelsError(e)),
+                    },
+                )
+            }
+
+            Message::AllowOnlineModelsLoaded(enabled) => {
+                self.allow_online_models = enabled;
+                Task::none()
+            }
+
+            Message::AllowOnlineModelsError(err) => {
+                log::warn!("Allow online models error: {err}");
+                Task::none()
+            }
+
+            Message::OpenAIApiKeyChanged(key) => {
+                self.openai_api_key_input = key;
+                Task::none()
+            }
+
+            Message::OpenAIApiKeySaved => {
+                let key = self.openai_api_key_input.clone();
+                if key.is_empty() {
+                    return Task::none();
+                }
+                Task::perform(
+                    async move { crate::keyring::set_api_key("openai", &key) },
+                    |result| match result {
+                        Ok(()) => cosmic::Action::App(Message::OpenAIApiKeyStatusLoaded(true)),
+                        Err(e) => cosmic::Action::App(Message::OpenAIApiKeyError(e)),
+                    },
+                )
+            }
+
+            Message::OpenAIApiKeyRemoved => Task::perform(
+                async { crate::keyring::delete_api_key("openai") },
+                |result| match result {
+                    Ok(()) => cosmic::Action::App(Message::OpenAIApiKeyStatusLoaded(false)),
+                    Err(e) => cosmic::Action::App(Message::OpenAIApiKeyError(e)),
+                },
+            ),
+
+            Message::OpenAIApiKeyError(err) => {
+                log::warn!("OpenAI API key error: {err}");
+                Task::none()
+            }
+
+            Message::OpenAIApiKeyStatusLoaded(has_key) => {
+                self.has_openai_api_key = has_key;
+                if has_key {
+                    self.openai_api_key_input.clear();
+                }
+                Task::none()
+            }
+
+            Message::MistralApiKeyChanged(key) => {
+                self.mistral_api_key_input = key;
+                Task::none()
+            }
+
+            Message::MistralApiKeySaved => {
+                let key = self.mistral_api_key_input.clone();
+                if key.is_empty() {
+                    return Task::none();
+                }
+                Task::perform(
+                    async move { crate::keyring::set_api_key("mistral", &key) },
+                    |result| match result {
+                        Ok(()) => cosmic::Action::App(Message::MistralApiKeyStatusLoaded(true)),
+                        Err(e) => cosmic::Action::App(Message::MistralApiKeyError(e)),
+                    },
+                )
+            }
+
+            Message::MistralApiKeyRemoved => Task::perform(
+                async { crate::keyring::delete_api_key("mistral") },
+                |result| match result {
+                    Ok(()) => cosmic::Action::App(Message::MistralApiKeyStatusLoaded(false)),
+                    Err(e) => cosmic::Action::App(Message::MistralApiKeyError(e)),
+                },
+            ),
+
+            Message::MistralApiKeyError(err) => {
+                log::warn!("Mistral API key error: {err}");
+                Task::none()
+            }
+
+            Message::MistralApiKeyStatusLoaded(has_key) => {
+                self.has_mistral_api_key = has_key;
+                if has_key {
+                    self.mistral_api_key_input.clear();
+                }
+                Task::none()
+            }
+
+            Message::DeepgramApiKeyChanged(key) => {
+                self.deepgram_api_key_input = key;
+                Task::none()
+            }
+
+            Message::DeepgramApiKeySaved => {
+                let key = self.deepgram_api_key_input.clone();
+                if key.is_empty() {
+                    return Task::none();
+                }
+                Task::perform(
+                    async move { crate::keyring::set_api_key("deepgram", &key) },
+                    |result| match result {
+                        Ok(()) => cosmic::Action::App(Message::DeepgramApiKeyStatusLoaded(true)),
+                        Err(e) => cosmic::Action::App(Message::DeepgramApiKeyError(e)),
+                    },
+                )
+            }
+
+            Message::DeepgramApiKeyRemoved => Task::perform(
+                async { crate::keyring::delete_api_key("deepgram") },
+                |result| match result {
+                    Ok(()) => cosmic::Action::App(Message::DeepgramApiKeyStatusLoaded(false)),
+                    Err(e) => cosmic::Action::App(Message::DeepgramApiKeyError(e)),
+                },
+            ),
+
+            Message::DeepgramApiKeyError(err) => {
+                log::warn!("Deepgram API key error: {err}");
+                Task::none()
+            }
+
+            Message::DeepgramApiKeyStatusLoaded(has_key) => {
+                self.has_deepgram_api_key = has_key;
+                if has_key {
+                    self.deepgram_api_key_input.clear();
+                }
                 Task::none()
             }
 

@@ -14,6 +14,7 @@
     futures-util.workspace = true
     i18n-embed.workspace = true
     i18n-embed-fl.workspace = true
+    keyring.workspace = true
     libc.workspace = true
     # COSMIC dependencies
     libcosmic.workspace = true

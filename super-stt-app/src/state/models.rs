@@ -31,6 +31,7 @@ pub enum Page {
     Recording,
     InputSimulation,
     Models,
+    OnlineModels,
 }
 
 /// The context page to display in the context drawer

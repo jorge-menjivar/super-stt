@@ -383,23 +383,38 @@ impl RealTimeTranscriptionManager {
         sessions: &Arc<RwLock<HashMap<String, RealTimeSession>>>,
         notification_manager: &Arc<NotificationManager>,
     ) -> Result<()> {
-        // Prepare and submit audio to model (works for Whisper and Voxtral)
+        // Prepare and submit audio to model
         let resampled_len = audio_data.len();
         let processed = audio_processor.process_audio(&audio_data, 16000)?;
 
-        let transcription_result = tokio::task::spawn_blocking({
-            let model_clone = Arc::clone(model);
-            let audio = processed; // move into closure
-            move || {
-                let mut model_guard = model_clone.blocking_write();
-                if let Some(model) = model_guard.as_mut() {
-                    model.transcribe_audio(&audio, 16000)
-                } else {
-                    Err(anyhow::anyhow!("Model not loaded"))
-                }
+        // Check if online model to choose async vs blocking path
+        let is_online = {
+            let guard = model.read().await;
+            guard.as_ref().is_some_and(STTModelInstance::is_online)
+        };
+
+        let transcription_result = if is_online {
+            let model_guard = model.read().await;
+            if let Some(m) = model_guard.as_ref() {
+                Ok(m.transcribe_audio_online(&processed, 16000).await)
+            } else {
+                Ok(Err(anyhow::anyhow!("Model not loaded")))
             }
-        })
-        .await;
+        } else {
+            tokio::task::spawn_blocking({
+                let model_clone = Arc::clone(model);
+                let audio = processed;
+                move || {
+                    let mut model_guard = model_clone.blocking_write();
+                    if let Some(model) = model_guard.as_mut() {
+                        model.transcribe_audio(&audio, 16000)
+                    } else {
+                        Err(anyhow::anyhow!("Model not loaded"))
+                    }
+                }
+            })
+            .await
+        };
 
         match transcription_result {
             Ok(Ok(transcription)) => {

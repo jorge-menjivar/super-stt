@@ -5,6 +5,7 @@ pub mod config;
 pub mod daemon;
 pub mod download_progress;
 pub mod input;
+pub mod keyring;
 pub mod output;
 pub mod services;
 pub mod stt_models;

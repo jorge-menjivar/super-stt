@@ -5,4 +5,5 @@ pub mod connection;
 pub mod customization;
 pub mod input_simulation;
 pub mod models;
+pub mod online_models;
 pub mod recording;

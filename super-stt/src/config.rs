@@ -13,6 +13,8 @@ pub struct DaemonConfig {
     pub device: DeviceConfig,
     pub audio: AudioConfig,
     pub transcription: TranscriptionConfig,
+    #[serde(default)]
+    pub online: OnlineConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +31,14 @@ pub struct AudioConfig {
 
 fn default_volume() -> u8 {
     100
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OnlineConfig {
+    /// Whether online models (that send audio to external APIs) are allowed.
+    /// Defaults to false for privacy.
+    #[serde(default)]
+    pub allow_online_models: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +70,7 @@ impl Default for DaemonConfig {
                 recording_stop_mode: RecordingStopMode::default(),
                 write_method: WriteMethod::default(),
             },
+            online: OnlineConfig::default(),
         }
     }
 }
@@ -166,11 +177,101 @@ impl DaemonConfig {
         }
     }
 
+    /// Update allow online models setting and save to disk
+    pub fn update_allow_online_models(&mut self, enabled: bool) {
+        self.online.allow_online_models = enabled;
+        if let Err(e) = self.save() {
+            error!("Failed to save config after online models update: {e}");
+        }
+    }
+
     /// Update write method and save to disk
     pub fn update_write_method(&mut self, method: WriteMethod) {
         self.transcription.write_method = method;
         if let Err(e) = self.save() {
             error!("Failed to save config after write method update: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_has_online_models_disabled() {
+        let config = DaemonConfig::default();
+        assert!(!config.online.allow_online_models);
+    }
+
+    #[test]
+    fn config_without_online_section_deserializes() {
+        // Use Rust variant names (serde default serialization for enums)
+        let toml_str = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "Classic"
+volume = 100
+
+[transcription]
+preferred_model = "WhisperTiny"
+write_mode = false
+preview_typing_enabled = false
+recording_stop_mode = "SilenceAndManual"
+write_method = "Auto"
+"#;
+        let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+        assert!(!config.online.allow_online_models);
+    }
+
+    #[test]
+    fn config_with_online_section_round_trips() {
+        let mut config = DaemonConfig::default();
+        config.online.allow_online_models = true;
+
+        let toml_str = toml::to_string_pretty(&config).expect("should serialize");
+        let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+        assert!(parsed.online.allow_online_models);
+    }
+
+    #[test]
+    fn config_with_online_model_preferred_round_trips() {
+        let mut config = DaemonConfig::default();
+        config.online.allow_online_models = true;
+        config.transcription.preferred_model = STTModel::OpenAIWhisper1;
+
+        let toml_str = toml::to_string_pretty(&config).expect("should serialize");
+        let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+        assert!(parsed.online.allow_online_models);
+        assert_eq!(
+            parsed.transcription.preferred_model,
+            STTModel::OpenAIWhisper1
+        );
+    }
+
+    #[test]
+    fn config_preserves_all_online_model_variants() {
+        for model in [
+            STTModel::OpenAIWhisper1,
+            STTModel::OpenAIGpt4oTranscribe,
+            STTModel::OpenAIGpt4oMiniTranscribe,
+            STTModel::MistralVoxtralMiniTranscribeV2,
+            STTModel::DeepgramNova3,
+        ] {
+            let mut config = DaemonConfig::default();
+            config.transcription.preferred_model = model;
+
+            let toml_str = toml::to_string_pretty(&config).expect("should serialize");
+            let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+            assert_eq!(parsed.transcription.preferred_model, model);
+        }
+    }
+
+    #[test]
+    fn online_config_default_is_disabled() {
+        let online = OnlineConfig::default();
+        assert!(!online.allow_online_models);
     }
 }

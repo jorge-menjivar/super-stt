@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::daemon::types::SuperSTTDaemon;
+use crate::daemon::types::{STTModelInstance, SuperSTTDaemon};
 use chrono::Utc;
 use log::{debug, error, info, warn};
 use std::sync::Arc;
@@ -117,37 +117,62 @@ impl SuperSTTDaemon {
             }
         };
 
-        // Clone the model Arc for the blocking task
+        // Clone the model Arc for the transcription task
         let model_clone = Arc::clone(&self.model);
 
-        // Run transcription in a blocking task to avoid blocking the async runtime
-        let transcription_result = tokio::task::spawn_blocking(move || {
+        // Check if the model is online to choose async vs blocking path
+        let is_online = {
+            let guard = model_clone.read().await;
+            guard.as_ref().is_some_and(STTModelInstance::is_online)
+        };
+
+        let transcription_result = if is_online {
+            // Async path for online models (API call)
             let start_time = std::time::Instant::now();
-
-            // Get exclusive write access to the model
-            let mut model_guard = model_clone.blocking_write();
-
-            if let Some(model) = model_guard.as_mut() {
-                match model.transcribe_audio(&processed_audio, 16000) {
+            let model_guard = model_clone.read().await;
+            if let Some(model) = model_guard.as_ref() {
+                match model.transcribe_audio_online(&processed_audio, 16000).await {
                     Ok(text) => {
                         let duration = start_time.elapsed();
-                        info!("Transcription completed in {duration:?}: '{text}'");
-                        Ok((text, duration))
+                        info!("Online transcription completed in {duration:?}: '{text}'");
+                        Ok(Ok((text, duration)))
                     }
                     Err(e) => {
-                        // For transcription errors (like Voxtral mel generation issues),
-                        // return empty string instead of failing the entire request
-                        warn!("Transcription failed, returning empty result: {e}");
+                        warn!("Online transcription failed, returning empty result: {e}");
                         let duration = start_time.elapsed();
-                        Ok((String::new(), duration))
+                        Ok(Ok((String::new(), duration)))
                     }
                 }
             } else {
                 error!("Model not loaded");
-                Err(anyhow::anyhow!("Model not loaded"))
+                Ok(Err(anyhow::anyhow!("Model not loaded")))
             }
-        })
-        .await;
+        } else {
+            // Blocking path for local models
+            tokio::task::spawn_blocking(move || {
+                let start_time = std::time::Instant::now();
+                let mut model_guard = model_clone.blocking_write();
+
+                if let Some(model) = model_guard.as_mut() {
+                    match model.transcribe_audio(&processed_audio, 16000) {
+                        Ok(text) => {
+                            let duration = start_time.elapsed();
+                            info!("Transcription completed in {duration:?}: '{text}'");
+                            Ok((text, duration))
+                        }
+                        Err(e) => {
+                            warn!("Transcription failed, returning empty result: {e}");
+                            let duration = start_time.elapsed();
+                            Ok((String::new(), duration))
+                        }
+                    }
+                } else {
+                    error!("Model not loaded");
+                    Err(anyhow::anyhow!("Model not loaded"))
+                }
+            })
+            .await
+        };
 
         // Handle the result of the blocking task
         match transcription_result {

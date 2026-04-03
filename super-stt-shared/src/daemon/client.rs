@@ -598,6 +598,51 @@ pub async fn set_volume(socket_path: PathBuf, volume: u8, client_id: &str) -> Re
     }
 }
 
+/// Set allow online models on daemon
+///
+/// # Errors
+///
+/// Returns an error if the request fails.
+pub async fn set_allow_online_models(
+    socket_path: PathBuf,
+    enabled: bool,
+    client_id: &str,
+) -> Result<(), String> {
+    let mut request = create_daemon_request("set_allow_online_models", client_id);
+    request.enabled = Some(enabled);
+
+    let response = send_daemon_request(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(())
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Failed to set allow online models".to_string()))
+    }
+}
+
+/// Get current allow online models setting from daemon
+///
+/// # Errors
+///
+/// Returns an error if the request fails.
+pub async fn get_allow_online_models(
+    socket_path: PathBuf,
+    client_id: &str,
+) -> Result<bool, String> {
+    let request = create_daemon_request("get_allow_online_models", client_id);
+    let response = send_daemon_request(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(response.allow_online_models.unwrap_or(false))
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Failed to get allow online models setting".to_string()))
+    }
+}
+
 /// Get recent daemon events
 ///
 /// # Errors

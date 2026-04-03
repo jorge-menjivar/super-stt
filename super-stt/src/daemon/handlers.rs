@@ -385,6 +385,65 @@ impl SuperSTTDaemon {
         DaemonResponse::success().with_write_method(method.to_string())
     }
 
+    /// Handle set allow online models command
+    pub async fn handle_set_allow_online_models(&self, enabled: bool) -> DaemonResponse {
+        {
+            let mut config_guard = self.config.write().await;
+            config_guard.online.allow_online_models = enabled;
+        }
+
+        // If disabling online models and current model is online, revert to default
+        if !enabled {
+            let current_is_online = {
+                let model_type = self.model_type.read().await;
+                model_type.as_ref().is_some_and(STTModel::is_online)
+            };
+            if current_is_online {
+                info!("Online models disabled; reverting to default local model");
+                let _ = self.handle_set_model(STTModel::default()).await;
+            }
+        }
+
+        let broadcast_result = self.broadcast_config_change().await;
+
+        match broadcast_result {
+            Ok(()) => {
+                info!(
+                    "Online models {}",
+                    if enabled { "enabled" } else { "disabled" }
+                );
+                DaemonResponse::success()
+                    .with_allow_online_models(enabled)
+                    .with_message(format!(
+                        "Online models {}",
+                        if enabled {
+                            "enabled — audio may be sent to external APIs"
+                        } else {
+                            "disabled — all transcription is local"
+                        }
+                    ))
+            }
+            Err(e) => {
+                warn!("Online models setting changed but config save failed: {e}");
+                DaemonResponse::success()
+                    .with_allow_online_models(enabled)
+                    .with_message(format!(
+                        "Online models {} (config save failed: {e})",
+                        if enabled { "enabled" } else { "disabled" }
+                    ))
+            }
+        }
+    }
+
+    /// Handle get allow online models command
+    pub async fn handle_get_allow_online_models(&self) -> DaemonResponse {
+        let config = self.config.read().await;
+        let enabled = config.online.allow_online_models;
+        DaemonResponse::success()
+            .with_allow_online_models(enabled)
+            .with_message("Allow online models setting retrieved".to_string())
+    }
+
     /// Handle cancel download command
     #[must_use]
     pub fn handle_cancel_download(&self) -> DaemonResponse {

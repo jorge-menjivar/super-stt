@@ -105,6 +105,10 @@ pub struct DaemonResponse {
     // Streaming preview text (intermediate transcription during recording)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_text: Option<String>,
+
+    // Online models
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_online_models: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -162,6 +166,7 @@ impl DaemonResponse {
             recording_stop_mode: None,
             write_method: None,
             preview_text: None,
+            allow_online_models: None,
         }
     }
 
@@ -213,6 +218,7 @@ impl DaemonResponse {
             recording_stop_mode: None,
             write_method: None,
             preview_text: None,
+            allow_online_models: None,
         }
     }
 
@@ -341,6 +347,12 @@ impl DaemonResponse {
         self.preview_text = Some(text);
         self
     }
+
+    #[must_use]
+    pub fn with_allow_online_models(mut self, allowed: bool) -> Self {
+        self.allow_online_models = Some(allowed);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -420,6 +432,10 @@ pub enum Command {
         volume: u8,
     },
     GetVolume,
+    SetAllowOnlineModels {
+        enabled: bool,
+    },
+    GetAllowOnlineModels,
 }
 
 impl Validate for DaemonRequest {
@@ -593,6 +609,91 @@ mod tests {
     }
 
     #[test]
+    fn set_allow_online_models_parses() {
+        let mut request = make_request("set_allow_online_models", None);
+        request.enabled = Some(true);
+        let command = Command::try_from(request).expect("command should parse");
+        match command {
+            Command::SetAllowOnlineModels { enabled } => assert!(enabled),
+            _ => panic!("expected Command::SetAllowOnlineModels"),
+        }
+    }
+
+    #[test]
+    fn set_allow_online_models_missing_enabled_fails() {
+        let request = make_request("set_allow_online_models", None);
+        let result = Command::try_from(request);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_allow_online_models_parses() {
+        let request = make_request("get_allow_online_models", None);
+        let command = Command::try_from(request).expect("command should parse");
+        assert!(matches!(command, Command::GetAllowOnlineModels));
+    }
+
+    #[test]
+    fn response_with_allow_online_models() {
+        let response = DaemonResponse::success().with_allow_online_models(true);
+        assert_eq!(response.allow_online_models, Some(true));
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["allow_online_models"], true);
+    }
+
+    #[test]
+    fn set_allow_online_models_false() {
+        let mut request = make_request("set_allow_online_models", None);
+        request.enabled = Some(false);
+        let command = Command::try_from(request).expect("command should parse");
+        match command {
+            Command::SetAllowOnlineModels { enabled } => assert!(!enabled),
+            _ => panic!("expected Command::SetAllowOnlineModels"),
+        }
+    }
+
+    #[test]
+    fn response_allow_online_models_false_serializes() {
+        let response = DaemonResponse::success().with_allow_online_models(false);
+        assert_eq!(response.allow_online_models, Some(false));
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["allow_online_models"], false);
+    }
+
+    #[test]
+    fn response_allow_online_models_skipped_when_none() {
+        let response = DaemonResponse::success();
+        assert_eq!(response.allow_online_models, None);
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(json.get("allow_online_models").is_none());
+    }
+
+    #[test]
+    fn set_model_parses_online_models() {
+        for model_name in [
+            "openai-whisper-1",
+            "openai-gpt-4o-transcribe",
+            "openai-gpt-4o-mini-transcribe",
+            "mistral-voxtral-mini-transcribe-v2",
+            "deepgram-nova-3",
+        ] {
+            let request = make_request("set_model", Some(json!({ "model": model_name })));
+            let command = Command::try_from(request)
+                .unwrap_or_else(|e| panic!("set_model should parse {model_name}: {e}"));
+            match command {
+                Command::SetModel { model } => {
+                    assert_eq!(model.to_string(), model_name);
+                    assert!(model.is_online());
+                }
+                _ => panic!("expected Command::SetModel for {model_name}"),
+            }
+        }
+    }
+
+    #[test]
     fn set_recording_stop_mode_parses() {
         let request = make_request(
             "set_recording_stop_mode",
@@ -650,6 +751,8 @@ impl TryFrom<DaemonRequest> for Command {
             "get_write_method" => Ok(Command::GetWriteMethod),
             "set_volume" => cmd_set_volume(&request),
             "get_volume" => Ok(Command::GetVolume),
+            "set_allow_online_models" => cmd_set_allow_online_models(&request),
+            "get_allow_online_models" => Ok(Command::GetAllowOnlineModels),
             _ => Err(format!("Unknown command: {}", request.command)),
         }
     }
@@ -873,6 +976,13 @@ fn cmd_set_write_method(request: &DaemonRequest) -> Result<Command, String> {
         .parse::<WriteMethod>()
         .map_err(|e| format!("Invalid input method: {e}"))?;
     Ok(Command::SetWriteMethod { method })
+}
+
+fn cmd_set_allow_online_models(request: &DaemonRequest) -> Result<Command, String> {
+    let enabled = request
+        .enabled
+        .ok_or("Missing enabled field for set_allow_online_models command")?;
+    Ok(Command::SetAllowOnlineModels { enabled })
 }
 
 fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {

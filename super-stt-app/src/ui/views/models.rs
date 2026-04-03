@@ -135,21 +135,9 @@ fn model_device_switching_section<'a>(
         .into()
 }
 
-/// Build the model selection list for the context drawer (font-picker pattern)
-pub fn model_selection_list<'a>(
-    available_models: &'a [STTModel],
-    current_model: &'a STTModel,
-    search: &'a str,
-) -> Element<'a, Message> {
-    let search_lower = search.to_lowercase();
-    let models: Vec<&STTModel> = if search.is_empty() {
-        available_models.iter().collect()
-    } else {
-        available_models
-            .iter()
-            .filter(|m| m.to_string().to_lowercase().contains(&search_lower))
-            .collect()
-    };
+/// Build a model row for the selection list
+fn model_row(model: STTModel, current_model: STTModel) -> Element<'static, Message> {
+    let selected = model == current_model;
 
     let svg_accent = |theme: &cosmic::theme::Theme| {
         let accent = theme.cosmic().accent_color();
@@ -158,42 +146,127 @@ pub fn model_selection_list<'a>(
         }
     };
 
-    let list = models
-        .into_iter()
-        .fold(widget::list_column(), |list, model| {
-            let selected = model == current_model;
+    settings::item_row(vec![
+        text::body(model.to_string())
+            .class(if selected {
+                cosmic::theme::Text::Accent
+            } else {
+                cosmic::theme::Text::Default
+            })
+            .width(Length::Fill)
+            .into(),
+        if selected {
+            cosmic::widget::icon::from_name("object-select-symbolic")
+                .size(16)
+                .icon()
+                .class(cosmic::theme::Svg::Custom(std::rc::Rc::new(Box::new(
+                    svg_accent,
+                ))))
+                .into()
+        } else {
+            horizontal_space().width(16.).into()
+        },
+    ])
+    .apply(widget::container)
+    .class(cosmic::theme::Container::List)
+    .apply(widget::button::custom)
+    .class(cosmic::theme::Button::Transparent)
+    .on_press(Message::ModelSelected(model))
+    .into()
+}
 
-            list.add(
-                settings::item_row(vec![
-                    text::body(model.to_string())
-                        .class(if selected {
-                            cosmic::theme::Text::Accent
-                        } else {
-                            cosmic::theme::Text::Default
-                        })
-                        .width(Length::Fill)
-                        .into(),
-                    if selected {
-                        cosmic::widget::icon::from_name("object-select-symbolic")
-                            .size(16)
-                            .icon()
-                            .class(cosmic::theme::Svg::Custom(std::rc::Rc::new(Box::new(
-                                svg_accent,
-                            ))))
-                            .into()
-                    } else {
-                        horizontal_space().width(16.).into()
-                    },
-                ])
-                .apply(widget::container)
-                .class(cosmic::theme::Container::List)
-                .apply(widget::button::custom)
-                .class(cosmic::theme::Button::Transparent)
-                .on_press(Message::ModelSelected(*model)),
-            )
-        });
+/// Build the model selection list for the context drawer (font-picker pattern)
+pub fn model_selection_list(
+    available_models: Vec<STTModel>,
+    current_model: STTModel,
+    search: &str,
+) -> Element<'static, Message> {
+    let search_lower = search.to_lowercase();
+    let models: Vec<STTModel> = if search.is_empty() {
+        available_models
+    } else {
+        available_models
+            .into_iter()
+            .filter(|m| m.to_string().to_lowercase().contains(&search_lower))
+            .collect()
+    };
 
-    list.into()
+    let local: Vec<STTModel> = models.iter().filter(|m| !m.is_online()).copied().collect();
+
+    // Group online models by provider
+    let openai: Vec<STTModel> = models
+        .iter()
+        .filter(|m| m.is_online() && m.api_provider() == "openai")
+        .copied()
+        .collect();
+    let mistral: Vec<STTModel> = models
+        .iter()
+        .filter(|m| m.is_online() && m.api_provider() == "mistral")
+        .copied()
+        .collect();
+    let deepgram: Vec<STTModel> = models
+        .iter()
+        .filter(|m| m.is_online() && m.api_provider() == "deepgram")
+        .copied()
+        .collect();
+
+    let mut sections: Vec<Element<'static, Message>> = Vec::new();
+
+    if !local.is_empty() {
+        let list = local
+            .into_iter()
+            .fold(widget::list_column(), |list, model| {
+                list.add(model_row(model, current_model))
+            });
+        sections.push(
+            column![text::title4("Local"), list]
+                .spacing(cosmic::theme::spacing().space_xxs)
+                .into(),
+        );
+    }
+
+    if !openai.is_empty() {
+        let list = openai
+            .into_iter()
+            .fold(widget::list_column(), |list, model| {
+                list.add(model_row(model, current_model))
+            });
+        sections.push(
+            column![text::title4("OpenAI (online)"), list]
+                .spacing(cosmic::theme::spacing().space_xxs)
+                .into(),
+        );
+    }
+
+    if !mistral.is_empty() {
+        let list = mistral
+            .into_iter()
+            .fold(widget::list_column(), |list, model| {
+                list.add(model_row(model, current_model))
+            });
+        sections.push(
+            column![text::title4("Mistral (online)"), list]
+                .spacing(cosmic::theme::spacing().space_xxs)
+                .into(),
+        );
+    }
+
+    if !deepgram.is_empty() {
+        let list = deepgram
+            .into_iter()
+            .fold(widget::list_column(), |list, model| {
+                list.add(model_row(model, current_model))
+            });
+        sections.push(
+            column![text::title4("Deepgram (online)"), list]
+                .spacing(cosmic::theme::spacing().space_xxs)
+                .into(),
+        );
+    }
+
+    column(sections)
+        .spacing(cosmic::theme::spacing().space_m)
+        .into()
 }
 
 /// Context drawer header: device toggle + search input

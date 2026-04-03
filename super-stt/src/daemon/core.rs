@@ -92,6 +92,10 @@ impl SuperSTTDaemon {
             Command::GetWriteMethod => self.handle_get_write_method().await,
             Command::SetVolume { volume } => self.handle_set_volume(volume),
             Command::GetVolume => self.handle_get_volume(),
+            Command::SetAllowOnlineModels { enabled } => {
+                self.handle_set_allow_online_models(enabled).await
+            }
+            Command::GetAllowOnlineModels => self.handle_get_allow_online_models().await,
         }
     }
 
@@ -283,6 +287,23 @@ mod tests {
             manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
             simulator: Arc::new(tokio::sync::RwLock::new(None)),
             preview_text: Arc::new(tokio::sync::RwLock::new(None)),
+        }
+    }
+
+    fn make_request(command: &str) -> DaemonRequest {
+        DaemonRequest {
+            command: command.to_string(),
+            audio_data: None,
+            sample_rate: None,
+            client_id: None,
+            event_types: None,
+            client_info: None,
+            since_timestamp: None,
+            limit: None,
+            event_type: None,
+            data: None,
+            language: None,
+            enabled: None,
         }
     }
 
@@ -500,5 +521,206 @@ mod tests {
         // We can't fully test starting a recording here, but we verify the
         // state allows it by checking the guard is clear.
         assert!(daemon.manual_stop_tx.read().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn set_allow_online_models_updates_config() {
+        let daemon = test_daemon().await;
+
+        let request = DaemonRequest {
+            command: "set_allow_online_models".to_string(),
+            audio_data: None,
+            sample_rate: None,
+            client_id: None,
+            event_types: None,
+            client_info: None,
+            since_timestamp: None,
+            limit: None,
+            event_type: None,
+            data: None,
+            language: None,
+            enabled: Some(true),
+        };
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+        assert_eq!(response.allow_online_models, Some(true));
+
+        let config = daemon.config.read().await;
+        assert!(config.online.allow_online_models);
+    }
+
+    #[tokio::test]
+    async fn get_allow_online_models_returns_config_value() {
+        let daemon = test_daemon().await;
+
+        // Set it to true first
+        {
+            let mut config = daemon.config.write().await;
+            config.online.allow_online_models = true;
+        }
+
+        let request = DaemonRequest {
+            command: "get_allow_online_models".to_string(),
+            audio_data: None,
+            sample_rate: None,
+            client_id: None,
+            event_types: None,
+            client_info: None,
+            since_timestamp: None,
+            limit: None,
+            event_type: None,
+            data: None,
+            language: None,
+            enabled: None,
+        };
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+        assert_eq!(response.allow_online_models, Some(true));
+    }
+
+    #[tokio::test]
+    async fn set_model_online_rejected_when_disabled() {
+        let daemon = test_daemon().await;
+
+        // Ensure online models are disabled (default)
+        {
+            let config = daemon.config.read().await;
+            assert!(!config.online.allow_online_models);
+        }
+
+        let request = DaemonRequest {
+            command: "set_model".to_string(),
+            audio_data: None,
+            sample_rate: None,
+            client_id: None,
+            event_types: None,
+            client_info: None,
+            since_timestamp: None,
+            limit: None,
+            event_type: None,
+            data: Some(serde_json::json!({ "model": "openai-whisper-1" })),
+            language: None,
+            enabled: None,
+        };
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "error");
+        assert!(
+            response
+                .message
+                .as_deref()
+                .unwrap_or("")
+                .contains("disabled")
+                || response
+                    .message
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("Online models are disabled"),
+            "expected error about online models being disabled, got: {:?}",
+            response.message
+        );
+    }
+
+    #[tokio::test]
+    async fn set_model_mistral_rejected_when_disabled() {
+        let daemon = test_daemon().await;
+
+        let mut request = make_request("set_model");
+        request.data = Some(serde_json::json!({ "model": "mistral-voxtral-mini-transcribe-v2" }));
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "error");
+    }
+
+    #[tokio::test]
+    async fn set_model_deepgram_rejected_when_disabled() {
+        let daemon = test_daemon().await;
+
+        let mut request = make_request("set_model");
+        request.data = Some(serde_json::json!({ "model": "deepgram-nova-3" }));
+
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "error");
+    }
+
+    #[tokio::test]
+    async fn toggle_online_models_off_defaults_to_false() {
+        let daemon = test_daemon().await;
+        let config = daemon.config.read().await;
+        assert!(
+            !config.online.allow_online_models,
+            "online models should be disabled by default"
+        );
+    }
+
+    #[tokio::test]
+    async fn toggle_online_models_on_then_off() {
+        let daemon = test_daemon().await;
+
+        // Enable
+        let mut request = make_request("set_allow_online_models");
+        request.enabled = Some(true);
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+        assert_eq!(response.allow_online_models, Some(true));
+
+        // Disable
+        let mut request = make_request("set_allow_online_models");
+        request.enabled = Some(false);
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+        assert_eq!(response.allow_online_models, Some(false));
+
+        let config = daemon.config.read().await;
+        assert!(!config.online.allow_online_models);
+    }
+
+    #[tokio::test]
+    async fn list_models_includes_online_models() {
+        let daemon = test_daemon().await;
+
+        let request = make_request("list_models");
+        let response = daemon.handle_command(request).await;
+        assert_eq!(response.status, "success");
+
+        let models = response.available_models.expect("should have models");
+        // Should include online models in the list
+        assert!(
+            models.iter().any(|m| m.to_string() == "openai-whisper-1"),
+            "list should include OpenAI models"
+        );
+        assert!(
+            models
+                .iter()
+                .any(|m| m.to_string() == "mistral-voxtral-mini-transcribe-v2"),
+            "list should include Mistral models"
+        );
+        assert!(
+            models.iter().any(|m| m.to_string() == "deepgram-nova-3"),
+            "list should include Deepgram models"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_model_local_works_without_online_toggle() {
+        let daemon = test_daemon().await;
+
+        // Local models should not be blocked by the online toggle
+        // (they will fail because no model files exist, but the error
+        // should NOT be about online models being disabled)
+        let mut request = make_request("set_model");
+        request.data = Some(serde_json::json!({ "model": "whisper-tiny" }));
+
+        let response = daemon.handle_command(request).await;
+        // Should either succeed (already loaded) or fail for non-online reasons
+        if response.status == "error" {
+            let msg = response.message.as_deref().unwrap_or("");
+            assert!(
+                !msg.contains("Online models are disabled"),
+                "local model should not be blocked by online toggle"
+            );
+        }
     }
 }

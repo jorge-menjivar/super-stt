@@ -91,4 +91,24 @@ pub enum Message {
 
     // Volume messages
     VolumeChanged(u8),
+
+    // Online models messages
+    AllowOnlineModelsToggled(bool),
+    AllowOnlineModelsLoaded(bool),
+    AllowOnlineModelsError(String),
+    OpenAIApiKeyChanged(String),
+    OpenAIApiKeySaved,
+    OpenAIApiKeyRemoved,
+    OpenAIApiKeyError(String),
+    OpenAIApiKeyStatusLoaded(bool),
+    MistralApiKeyChanged(String),
+    MistralApiKeySaved,
+    MistralApiKeyRemoved,
+    MistralApiKeyError(String),
+    MistralApiKeyStatusLoaded(bool),
+    DeepgramApiKeyChanged(String),
+    DeepgramApiKeySaved,
+    DeepgramApiKeyRemoved,
+    DeepgramApiKeyError(String),
+    DeepgramApiKeyStatusLoaded(bool),
 }

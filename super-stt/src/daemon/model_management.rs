@@ -2,7 +2,7 @@
 
 use crate::daemon::types::{STTModelInstance, SuperSTTDaemon};
 use crate::download_progress::DownloadProgressTracker;
-use crate::stt_models::{voxtral::VoxtralModel, whisper::WhisperModel};
+use crate::stt_models::local::{voxtral::VoxtralModel, whisper::WhisperModel};
 use anyhow::Result;
 use chrono::Utc;
 use log::{error, info, warn};
@@ -114,6 +114,12 @@ impl SuperSTTDaemon {
         if let Some(resp) = self.preflight_model_switch(model).await {
             return resp;
         }
+
+        // Online models have a separate fast path (no download needed)
+        if model.is_online() {
+            return self.handle_set_online_model(model).await;
+        }
+
         self.broadcast_model_loading_status(model).await;
         let tracker = self.create_progress_tracker(model);
         if let Err(resp) = self.register_download(&tracker) {
@@ -140,6 +146,68 @@ impl SuperSTTDaemon {
 }
 
 impl SuperSTTDaemon {
+    /// Handle switching to an online model (no download, instant creation).
+    async fn handle_set_online_model(&self, model: STTModel) -> DaemonResponse {
+        // Guard: online models must be explicitly enabled
+        let config = self.config.read().await;
+        if !config.online.allow_online_models {
+            return DaemonResponse::error(
+                "Online models are disabled. Enable 'Allow Online Models' in settings first.",
+            );
+        }
+        drop(config);
+
+        // Guard: API key must be configured in the system keyring
+        let provider = model.api_provider();
+        let api_key = match crate::keyring::get_api_key(provider) {
+            Ok(Some(key)) if !key.is_empty() => key,
+            Ok(_) => {
+                return DaemonResponse::error(&format!(
+                    "{provider} API key is not configured. Add your API key in the Online Models settings."
+                ));
+            }
+            Err(e) => {
+                return DaemonResponse::error(&format!("Failed to read API key from keyring: {e}"));
+            }
+        };
+
+        self.broadcast_model_loading_status(model).await;
+        self.unload_current_model().await;
+
+        let instance =
+            Self::create_online_instance(provider, api_key, model.api_model_id().to_string());
+
+        // Store and broadcast
+        *self.model.write().await = Some(instance);
+        *self.model_type.write().await = Some(model);
+        {
+            let mut config_guard = self.config.write().await;
+            config_guard.update_preferred_model(model);
+        }
+        if let Err(e) = self.broadcast_config_change().await {
+            warn!("Failed to broadcast config change after online model switch: {e}");
+        }
+        let _ = self
+            .notification_manager
+            .broadcast_event(
+                "daemon_status_changed".to_string(),
+                "daemon".to_string(),
+                serde_json::json!({
+                    "status": "ready",
+                    "model_loaded": true,
+                    "model_type": provider,
+                    "model_name": model.to_string(),
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }),
+            )
+            .await;
+
+        info!("Switched to online model: {model}");
+        DaemonResponse::success()
+            .with_current_model(model)
+            .with_message(format!("Successfully switched to online model: {model}"))
+    }
+
     async fn preflight_model_switch(&self, model: STTModel) -> Option<DaemonResponse> {
         if *self.is_recording.read().await {
             warn!("Model switch rejected - recording in progress");
@@ -303,7 +371,7 @@ impl SuperSTTDaemon {
         tracker: Arc<DownloadProgressTracker>,
         start_time: std::time::Instant,
     ) -> anyhow::Result<STTModelInstance> {
-        crate::stt_models::download::with_progress(&model, Arc::clone(&tracker)).await?;
+        crate::stt_models::local::download::with_progress(&model, Arc::clone(&tracker)).await?;
         if tracker.is_cancelled() {
             anyhow::bail!("Model loading was cancelled");
         }
@@ -348,6 +416,9 @@ impl SuperSTTDaemon {
         let model_name = match &instance {
             STTModelInstance::Whisper(_) => "Whisper",
             STTModelInstance::Voxtral(_) => "Voxtral",
+            STTModelInstance::OpenAI(_) => "OpenAI",
+            STTModelInstance::Mistral(_) => "Mistral",
+            STTModelInstance::Deepgram(_) => "Deepgram",
         };
         tracker.mark_completed();
         *tracker.current_file.write() = "Model loaded successfully".to_string();

@@ -62,7 +62,7 @@ impl VoxtralModel {
         };
 
         // Get file paths from the unified download system
-        let file_paths = crate::stt_models::download::get_model_file_paths(stt_model)?;
+        let file_paths = crate::stt_models::local::download::get_model_file_paths(stt_model)?;
 
         // Extract the specific files we need
         let config_path = file_paths
