@@ -748,7 +748,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Unknown online provider")]
     fn create_online_instance_unknown_panics() {
-        SuperSTTDaemon::create_online_instance(
+        let _ = SuperSTTDaemon::create_online_instance(
             "unknown",
             "test-key".to_string(),
             "model".to_string(),

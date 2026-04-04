@@ -446,19 +446,19 @@ mod tests {
     #[test]
     #[should_panic(expected = "api_model_id called on non-online model")]
     fn api_model_id_panics_for_local_model() {
-        STTModel::WhisperTiny.api_model_id();
+        let _ = STTModel::WhisperTiny.api_model_id();
     }
 
     #[test]
     #[should_panic(expected = "api_provider called on non-online model")]
     fn api_provider_panics_for_local_model() {
-        STTModel::WhisperTiny.api_provider();
+        let _ = STTModel::WhisperTiny.api_provider();
     }
 
     #[test]
     #[should_panic(expected = "api_base_url called on non-online model")]
     fn api_base_url_panics_for_local_model() {
-        STTModel::WhisperTiny.api_base_url();
+        let _ = STTModel::WhisperTiny.api_base_url();
     }
 
     #[test]
