@@ -643,6 +643,32 @@ pub async fn get_allow_online_models(
     }
 }
 
+/// Set model override path on daemon
+///
+/// Pass `None` to reset to the default `HuggingFace` cache path.
+///
+/// # Errors
+///
+/// Returns an error if the request fails.
+pub async fn set_model_override_path(
+    socket_path: PathBuf,
+    path: Option<&str>,
+    client_id: &str,
+) -> Result<(), String> {
+    let mut request = create_daemon_request("set_model_override_path", client_id);
+    request.data = Some(serde_json::json!({ "path": path }));
+
+    let response = send_daemon_request(&socket_path, request).await?;
+
+    if response.status == "success" {
+        Ok(())
+    } else {
+        Err(response
+            .message
+            .unwrap_or_else(|| "Failed to set model override path".to_string()))
+    }
+}
+
 /// Get recent daemon events
 ///
 /// # Errors

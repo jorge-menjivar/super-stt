@@ -11,6 +11,77 @@ use crate::core::app::ModelOperationState;
 use crate::state::ContextPage;
 use crate::ui::messages::Message;
 
+/// Model storage section: model override path
+fn model_storage_section<'a>(
+    model_override_path: Option<&'a str>,
+    model_override_path_input: &'a str,
+    editing: bool,
+) -> Element<'a, Message> {
+    let display_value = if editing {
+        model_override_path_input
+    } else {
+        model_override_path.unwrap_or("")
+    };
+
+    let mut input = widget::text_input("Path to model files...", display_value);
+    if editing {
+        input = input.on_input(Message::ModelOverridePathInput);
+    }
+
+    let mut buttons: Vec<Element<'_, Message>> = Vec::new();
+
+    if editing {
+        buttons.push(
+            button::standard("Apply")
+                .on_press(Message::ModelOverridePathSet(
+                    if model_override_path_input.trim().is_empty() {
+                        None
+                    } else {
+                        Some(model_override_path_input.trim().to_string())
+                    },
+                ))
+                .into(),
+        );
+        buttons.push(
+            button::text("Cancel")
+                .on_press(Message::ModelOverridePathEdit(false))
+                .into(),
+        );
+    } else {
+        buttons.push(
+            button::standard("Edit")
+                .on_press(Message::ModelOverridePathEdit(true))
+                .into(),
+        );
+        if model_override_path.is_some() {
+            buttons.push(
+                button::destructive("Reset")
+                    .on_press(Message::ModelOverridePathSet(None))
+                    .into(),
+            );
+        }
+    }
+
+    let controls = row![
+        widget::container(input).width(Length::Fill),
+        row(buttons).spacing(8),
+    ]
+    .spacing(8);
+
+    settings::section()
+        .title("Model Storage")
+        .add(
+            settings::item::builder("Model Override Path")
+                .description(
+                    "Models here override the default cache. \
+                     Copy a HuggingFace model dir renamed to its model name \
+                     (e.g. whisper-small/snapshots/main/).",
+                )
+                .flex_control(controls),
+        )
+        .into()
+}
+
 /// Model section when ready: shows model picker (context drawer)
 fn model_ready_section(current_model: &STTModel) -> Element<'_, Message> {
     settings::section()
@@ -310,8 +381,11 @@ pub fn page<'a>(
     current_model: &'a STTModel,
     model_operation_state: &'a ModelOperationState,
     device_state: &'a crate::core::app::DeviceState,
+    model_override_path: Option<&'a str>,
+    model_override_path_input: &'a str,
+    model_override_path_editing: bool,
 ) -> Element<'a, Message> {
-    let section = match model_operation_state {
+    let model_section = match model_operation_state {
         ModelOperationState::Ready => {
             if let crate::core::app::DeviceState::Switching {
                 target_device,
@@ -333,5 +407,14 @@ pub fn page<'a>(
         } => model_loading_section(*target_model, status_message),
     };
 
-    page_layout("Models", settings::view_column(vec![section]))
+    let storage_section = model_storage_section(
+        model_override_path,
+        model_override_path_input,
+        model_override_path_editing,
+    );
+
+    page_layout(
+        "Models",
+        settings::view_column(vec![model_section, storage_section]),
+    )
 }

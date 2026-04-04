@@ -75,7 +75,7 @@ impl WhisperModel {
     /// Panics if file paths from the model cache cannot be converted to valid UTF-8
     /// or if a required path component is unexpectedly missing when extracting
     /// `config.json`, `tokenizer.json`, or `model.safetensors`.
-    pub fn new(stt_model: &STTModel, force_cpu: bool) -> Result<Self> {
+    pub fn new(stt_model: &STTModel, force_cpu: bool, override_path: Option<&str>) -> Result<Self> {
         info!("Loading Whisper {stt_model:?} model...");
 
         // Determine device
@@ -92,7 +92,8 @@ impl WhisperModel {
         };
 
         // Get file paths from the unified download system
-        let file_paths = crate::stt_models::local::download::get_model_file_paths(stt_model)?;
+        let file_paths =
+            crate::stt_models::local::download::get_model_file_paths(stt_model, override_path)?;
 
         // Extract the specific files we need
         let config_path = file_paths

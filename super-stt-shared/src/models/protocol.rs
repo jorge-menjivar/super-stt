@@ -436,6 +436,9 @@ pub enum Command {
         enabled: bool,
     },
     GetAllowOnlineModels,
+    SetModelOverridePath {
+        path: Option<String>,
+    },
 }
 
 impl Validate for DaemonRequest {
@@ -707,6 +710,45 @@ mod tests {
             _ => panic!("expected Command::SetRecordingStopMode"),
         }
     }
+
+    #[test]
+    fn set_model_override_path_parses_with_path() {
+        let request = make_request(
+            "set_model_override_path",
+            Some(json!({ "path": "/tmp/models" })),
+        );
+        let command = Command::try_from(request).expect("command should parse");
+        match command {
+            Command::SetModelOverridePath { path } => {
+                assert_eq!(path.as_deref(), Some("/tmp/models"));
+            }
+            _ => panic!("expected Command::SetModelOverridePath"),
+        }
+    }
+
+    #[test]
+    fn set_model_override_path_parses_with_null() {
+        let request = make_request("set_model_override_path", Some(json!({ "path": null })));
+        let command = Command::try_from(request).expect("command should parse");
+        match command {
+            Command::SetModelOverridePath { path } => {
+                assert!(path.is_none());
+            }
+            _ => panic!("expected Command::SetModelOverridePath"),
+        }
+    }
+
+    #[test]
+    fn set_model_override_path_parses_without_data() {
+        let request = make_request("set_model_override_path", None);
+        let command = Command::try_from(request).expect("command should parse");
+        match command {
+            Command::SetModelOverridePath { path } => {
+                assert!(path.is_none());
+            }
+            _ => panic!("expected Command::SetModelOverridePath"),
+        }
+    }
 }
 
 impl TryFrom<DaemonRequest> for Command {
@@ -753,6 +795,7 @@ impl TryFrom<DaemonRequest> for Command {
             "get_volume" => Ok(Command::GetVolume),
             "set_allow_online_models" => cmd_set_allow_online_models(&request),
             "get_allow_online_models" => Ok(Command::GetAllowOnlineModels),
+            "set_model_override_path" => Ok(cmd_set_model_override_path(&request)),
             _ => Err(format!("Unknown command: {}", request.command)),
         }
     }
@@ -998,4 +1041,14 @@ fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {
         return Err("Volume must be between 0 and 100".to_string());
     }
     Ok(Command::SetVolume { volume })
+}
+
+fn cmd_set_model_override_path(request: &DaemonRequest) -> Command {
+    let path = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("path"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    Command::SetModelOverridePath { path }
 }

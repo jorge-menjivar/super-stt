@@ -299,23 +299,14 @@ pub async fn with_progress(model: &STTModel, tracker: Arc<DownloadProgressTracke
     Ok(())
 }
 
-/// Get the file paths for an already downloaded model
-///
-/// # Errors
-///
-/// Returns an error if any expected model file is missing or if
-/// cache path calculation fails.
-pub fn get_model_file_paths(model: &STTModel) -> Result<Vec<PathBuf>> {
-    let (model_id, revision) = model.model_and_revision();
-
-    // Build the file list based on the specific model
+/// Get the expected filenames for a model
+fn model_filenames(model: STTModel) -> Vec<&'static str> {
     let mut files = if model.is_voxtral() {
         vec!["config.json", "tekken.json"]
     } else {
         vec!["config.json", "tokenizer.json"]
     };
 
-    // Add model-specific safetensors files
     let safetensors_files = match model {
         STTModel::VoxtralMini => vec![
             "model-00001-of-00002.safetensors",
@@ -334,16 +325,59 @@ pub fn get_model_file_paths(model: &STTModel) -> Result<Vec<PathBuf>> {
             "model-00010-of-00011.safetensors",
             "model-00011-of-00011.safetensors",
         ],
-        _ => vec!["model.safetensors"], // Any whisper model
+        _ => vec!["model.safetensors"],
     };
 
     files.extend(safetensors_files);
+    files
+}
 
-    // Get the cache paths for all files
-    let mut file_paths = Vec::new();
+/// Check if all model files exist under the given directory.
+/// Returns `Some(paths)` if all files are present, `None` otherwise.
+fn try_resolve_files(dir: &Path, files: &[&str]) -> Option<Vec<PathBuf>> {
+    let mut paths = Vec::with_capacity(files.len());
     for filename in files {
+        let path = dir.join(filename);
+        if path.exists() {
+            paths.push(path);
+        } else {
+            info!("Missing file in override: {}/{filename}", dir.display());
+            return None;
+        }
+    }
+    Some(paths)
+}
+
+/// Get the file paths for a model, checking the override path first.
+///
+/// When `override_path` is set, looks for model files under
+/// `{override_path}/{model}/snapshots/main/` (standard `HuggingFace` cache
+/// layout without the `models--` prefix).
+/// If not found there, falls back to the default `HuggingFace` cache.
+///
+/// # Errors
+///
+/// Returns an error if the model files cannot be found in any location.
+pub fn get_model_file_paths(model: &STTModel, override_path: Option<&str>) -> Result<Vec<PathBuf>> {
+    let files = model_filenames(*model);
+    let (model_id, revision) = model.model_and_revision();
+
+    // Check override path first: {override}/{model}/snapshots/{revision}/
+    if let Some(dir) = override_path {
+        let snapshot_dir = Path::new(dir)
+            .join(model.to_string())
+            .join("snapshots")
+            .join(revision);
+        if let Some(paths) = try_resolve_files(&snapshot_dir, &files) {
+            info!("Using model override: {}", snapshot_dir.display());
+            return Ok(paths);
+        }
+    }
+
+    // Fall back to default HuggingFace cache
+    let mut file_paths = Vec::new();
+    for filename in &files {
         let (symlink_path, _blob_path) = get_cache_paths(model_id, revision, filename)?;
-        // Use symlink path if it exists, otherwise check blob path
         if symlink_path.exists() {
             file_paths.push(symlink_path);
         } else {
@@ -351,5 +385,92 @@ pub fn get_model_file_paths(model: &STTModel) -> Result<Vec<PathBuf>> {
         }
     }
 
+    if let Some(first) = file_paths.first().and_then(|p| p.parent()) {
+        info!("Using model from cache: {}", first.display());
+    }
+
     Ok(file_paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("super-stt-tests").join(name);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn create_model_files(dir: &Path, model: &STTModel) {
+        let (_, revision) = model.model_and_revision();
+        let snapshot_dir = dir.join(model.to_string()).join("snapshots").join(revision);
+        fs::create_dir_all(&snapshot_dir).unwrap();
+        for filename in model_filenames(*model) {
+            fs::write(snapshot_dir.join(filename), b"test").unwrap();
+        }
+    }
+
+    #[test]
+    fn override_path_found() {
+        let tmp = test_dir("override_found");
+        let model = STTModel::WhisperTiny;
+        create_model_files(&tmp, &model);
+
+        let paths =
+            get_model_file_paths(&model, Some(tmp.to_str().unwrap())).expect("should find files");
+
+        assert_eq!(paths.len(), model_filenames(model).len());
+        for path in &paths {
+            assert!(path.starts_with(&tmp));
+        }
+    }
+
+    #[test]
+    fn override_path_missing_model_falls_back_to_cache() {
+        let tmp = test_dir("override_missing");
+        let model = STTModel::WhisperTiny;
+
+        let result = get_model_file_paths(&model, Some(tmp.to_str().unwrap()));
+        // Falls through to HF cache — may succeed or fail depending on local cache
+        if let Ok(paths) = &result {
+            // If it succeeded, files should NOT be in the override dir
+            for path in paths {
+                assert!(!path.starts_with(&tmp));
+            }
+        }
+    }
+
+    #[test]
+    fn override_partial_files_falls_back_to_cache() {
+        let tmp = test_dir("override_partial");
+        let model = STTModel::WhisperTiny;
+        let (_, revision) = model.model_and_revision();
+        let snapshot_dir = tmp.join(model.to_string()).join("snapshots").join(revision);
+        fs::create_dir_all(&snapshot_dir).unwrap();
+        fs::write(snapshot_dir.join("config.json"), b"test").unwrap();
+
+        let result = get_model_file_paths(&model, Some(tmp.to_str().unwrap()));
+        // Partial override — falls through to HF cache
+        if let Ok(paths) = &result {
+            for path in paths {
+                assert!(!path.starts_with(&tmp));
+            }
+        }
+    }
+
+    #[test]
+    fn override_uses_model_display_name() {
+        let tmp = test_dir("override_display_name");
+        let model = STTModel::WhisperTinyEn;
+        create_model_files(&tmp, &model);
+
+        let paths =
+            get_model_file_paths(&model, Some(tmp.to_str().unwrap())).expect("should find files");
+
+        let first = paths[0].to_str().unwrap();
+        assert!(first.contains("whisper-tiny.en"));
+    }
 }

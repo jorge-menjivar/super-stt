@@ -96,6 +96,9 @@ impl SuperSTTDaemon {
                 self.handle_set_allow_online_models(enabled).await
             }
             Command::GetAllowOnlineModels => self.handle_get_allow_online_models().await,
+            Command::SetModelOverridePath { path } => {
+                self.handle_set_model_override_path(path).await
+            }
         }
     }
 

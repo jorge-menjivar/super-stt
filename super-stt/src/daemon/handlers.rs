@@ -444,6 +444,32 @@ impl SuperSTTDaemon {
             .with_message("Allow online models setting retrieved".to_string())
     }
 
+    /// Handle set custom model path command
+    pub async fn handle_set_model_override_path(&self, path: Option<String>) -> DaemonResponse {
+        let path_display = path.as_deref().unwrap_or("default").to_string();
+
+        {
+            let mut config_guard = self.config.write().await;
+            config_guard.transcription.model_override_path = path;
+        }
+
+        let broadcast_result = self.broadcast_config_change().await;
+
+        match broadcast_result {
+            Ok(()) => {
+                info!("Model override path set to {path_display} and saved to config");
+                DaemonResponse::success()
+                    .with_message(format!("Model override path set to {path_display}"))
+            }
+            Err(e) => {
+                warn!("Model override path changed but failed to save: {e}");
+                DaemonResponse::success().with_message(format!(
+                    "Model override path set to {path_display} (save failed: {e})"
+                ))
+            }
+        }
+    }
+
     /// Handle cancel download command
     #[must_use]
     pub fn handle_cancel_download(&self) -> DaemonResponse {

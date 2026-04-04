@@ -51,6 +51,8 @@ pub struct TranscriptionConfig {
     pub recording_stop_mode: RecordingStopMode,
     #[serde(default)]
     pub write_method: WriteMethod,
+    #[serde(default)]
+    pub model_override_path: Option<String>,
 }
 
 impl Default for DaemonConfig {
@@ -69,6 +71,7 @@ impl Default for DaemonConfig {
                 preview_typing_enabled: false, // Default to disabled (beta feature)
                 recording_stop_mode: RecordingStopMode::default(),
                 write_method: WriteMethod::default(),
+                model_override_path: None,
             },
             online: OnlineConfig::default(),
         }
@@ -192,6 +195,14 @@ impl DaemonConfig {
             error!("Failed to save config after write method update: {e}");
         }
     }
+
+    /// Update model override path and save to disk
+    pub fn update_model_override_path(&mut self, path: Option<String>) {
+        self.transcription.model_override_path = path;
+        if let Err(e) = self.save() {
+            error!("Failed to save config after model override path update: {e}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -273,5 +284,54 @@ write_method = "Auto"
     fn online_config_default_is_disabled() {
         let online = OnlineConfig::default();
         assert!(!online.allow_online_models);
+    }
+
+    #[test]
+    fn default_config_has_no_model_override_path() {
+        let config = DaemonConfig::default();
+        assert!(config.transcription.model_override_path.is_none());
+    }
+
+    #[test]
+    fn config_without_model_override_path_deserializes() {
+        let toml_str = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "Classic"
+volume = 100
+
+[transcription]
+preferred_model = "WhisperTiny"
+write_mode = false
+preview_typing_enabled = false
+recording_stop_mode = "SilenceAndManual"
+write_method = "Auto"
+"#;
+        let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+        assert!(config.transcription.model_override_path.is_none());
+    }
+
+    #[test]
+    fn config_with_model_override_path_round_trips() {
+        let mut config = DaemonConfig::default();
+        config.transcription.model_override_path = Some("/tmp/models".to_string());
+
+        let toml_str = toml::to_string_pretty(&config).expect("should serialize");
+        let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+        assert_eq!(
+            parsed.transcription.model_override_path.as_deref(),
+            Some("/tmp/models")
+        );
+    }
+
+    #[test]
+    fn config_with_none_model_override_path_round_trips() {
+        let config = DaemonConfig::default();
+
+        let toml_str = toml::to_string_pretty(&config).expect("should serialize");
+        let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+        assert!(parsed.transcription.model_override_path.is_none());
     }
 }

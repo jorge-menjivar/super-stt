@@ -92,6 +92,12 @@ pub enum Message {
     // Volume messages
     VolumeChanged(u8),
 
+    // Model override path messages
+    ModelOverridePathInput(String),
+    ModelOverridePathSet(Option<String>),
+    ModelOverridePathEdit(bool),
+    ModelOverridePathError(String),
+
     // Online models messages
     AllowOnlineModelsToggled(bool),
     AllowOnlineModelsLoaded(bool),

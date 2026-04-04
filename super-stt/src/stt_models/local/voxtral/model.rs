@@ -45,7 +45,7 @@ impl VoxtralModel {
     ///
     /// Panics if expected file names are not valid UTF-8 or missing
     /// when inspecting cached paths (due to `unwrap()` on file names).
-    pub fn new(stt_model: &STTModel, force_cpu: bool) -> Result<Self> {
+    pub fn new(stt_model: &STTModel, force_cpu: bool, override_path: Option<&str>) -> Result<Self> {
         info!("Loading Voxtral {stt_model:?} model...");
 
         // Determine device
@@ -62,7 +62,8 @@ impl VoxtralModel {
         };
 
         // Get file paths from the unified download system
-        let file_paths = crate::stt_models::local::download::get_model_file_paths(stt_model)?;
+        let file_paths =
+            crate::stt_models::local::download::get_model_file_paths(stt_model, override_path)?;
 
         // Extract the specific files we need
         let config_path = file_paths

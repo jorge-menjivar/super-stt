@@ -282,3 +282,16 @@ pub async fn set_allow_online_models(socket_path: PathBuf, enabled: bool) -> Res
 pub async fn get_allow_online_models(socket_path: PathBuf) -> Result<bool, String> {
     super_stt_shared::daemon::client::get_allow_online_models(socket_path, get_client_id()).await
 }
+
+/// Set model override path on daemon
+pub async fn set_model_override_path(
+    socket_path: PathBuf,
+    path: Option<String>,
+) -> Result<(), String> {
+    super_stt_shared::daemon::client::set_model_override_path(
+        socket_path,
+        path.as_deref(),
+        get_client_id(),
+    )
+    .await
+}

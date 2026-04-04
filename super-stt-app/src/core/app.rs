@@ -7,8 +7,8 @@ use crate::daemon::client::{
     get_current_model, get_download_status, get_preview_typing, get_recording_stop_mode,
     get_write_method, list_available_models, load_audio_themes, ping_daemon, record_command_stream,
     set_allow_online_models, set_and_test_audio_theme, set_audio_theme, set_device, set_model,
-    set_preview_typing, set_recording_stop_mode, set_volume, set_write_method, stop_record_command,
-    test_daemon_connection,
+    set_model_override_path, set_preview_typing, set_recording_stop_mode, set_volume,
+    set_write_method, stop_record_command, test_daemon_connection,
 };
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};
 use crate::ui::messages::Message;
@@ -129,6 +129,11 @@ pub struct AppModel {
     // Master volume (0-100)
     pub volume: u8,
 
+    // Model override path
+    pub model_override_path: Option<String>,
+    pub model_override_path_input: String,
+    pub model_override_path_editing: bool,
+
     // Online models state
     pub allow_online_models: bool,
     pub openai_api_key_input: String,
@@ -242,6 +247,11 @@ impl cosmic::Application for AppModel {
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),
             volume: 100,
+
+            // Model override path
+            model_override_path: None,
+            model_override_path_input: String::new(),
+            model_override_path_editing: false,
 
             // Online models state
             allow_online_models: false,
@@ -390,6 +400,9 @@ impl cosmic::Application for AppModel {
                 &self.current_model,
                 &self.model_operation_state,
                 &self.device_state,
+                self.model_override_path.as_deref(),
+                &self.model_override_path_input,
+                self.model_override_path_editing,
             ),
             Page::OnlineModels => views::online_models::page(
                 self.allow_online_models,
@@ -528,6 +541,39 @@ impl cosmic::Application for AppModel {
                 | Message::WriteMethodError(_)
         ) {
             return self.handle_write_method_messages(message);
+        }
+
+        match &message {
+            Message::ModelOverridePathInput(input) => {
+                self.model_override_path_input = input.clone();
+                return Task::none();
+            }
+            Message::ModelOverridePathEdit(editing) => {
+                self.model_override_path_editing = *editing;
+                if *editing {
+                    self.model_override_path_input =
+                        self.model_override_path.clone().unwrap_or_default();
+                }
+                return Task::none();
+            }
+            Message::ModelOverridePathSet(path) => {
+                let path = path.clone();
+                self.model_override_path_input = path.as_deref().unwrap_or_default().to_string();
+                self.model_override_path_editing = false;
+                self.model_override_path.clone_from(&path);
+                return Task::perform(
+                    set_model_override_path(self.socket_path.clone(), path),
+                    |result| match result {
+                        Ok(()) => cosmic::Action::None,
+                        Err(e) => cosmic::Action::App(Message::ModelOverridePathError(e)),
+                    },
+                );
+            }
+            Message::ModelOverridePathError(err) => {
+                log::warn!("Model override path error: {err}");
+                return Task::none();
+            }
+            _ => {}
         }
 
         if matches!(
@@ -831,6 +877,20 @@ impl AppModel {
                 } else {
                     warn!("No audio theme found in daemon configuration");
                 }
+
+                // Sync custom model path from daemon config
+                let custom_path = config
+                    .get("transcription")
+                    .and_then(|t| t.get("model_override_path"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                // Only update the input if the user hasn't edited it
+                let old_committed = self.model_override_path.as_deref().unwrap_or_default();
+                if self.model_override_path_input == old_committed {
+                    self.model_override_path_input =
+                        custom_path.as_deref().unwrap_or_default().to_string();
+                }
+                self.model_override_path = custom_path;
 
                 // Sync volume from daemon config
                 if let Some(vol) = config

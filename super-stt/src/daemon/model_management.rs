@@ -24,6 +24,13 @@ impl SuperSTTDaemon {
     ) -> Result<STTModelInstance> {
         let stt_model_copy = *stt_model;
         let target_device_copy = target_device.to_string();
+        let override_path = self
+            .config
+            .read()
+            .await
+            .transcription
+            .model_override_path
+            .clone();
         let mut shutdown_rx = self.shutdown_tx.subscribe();
 
         info!("Loading model with target device: {target_device}");
@@ -34,7 +41,11 @@ impl SuperSTTDaemon {
 
         // Load model in a single blocking task with cancellation support
         let mut load_handle = tokio::task::spawn_blocking(move || {
-            Self::load_model_sync(stt_model_copy, &target_device_copy)
+            Self::load_model_sync(
+                stt_model_copy,
+                &target_device_copy,
+                override_path.as_deref(),
+            )
         });
 
         // Wait for either model loading completion, shutdown signal, or timeout (60 seconds)
@@ -318,19 +329,27 @@ impl SuperSTTDaemon {
 
     /// Synchronous model loading function that handles device preference and fallback
     /// This is the core blocking operation that should be run in `spawn_blocking`
-    fn load_model_sync(model: STTModel, preferred_device: &str) -> Result<STTModelInstance> {
+    fn load_model_sync(
+        model: STTModel,
+        preferred_device: &str,
+        override_path: Option<&str>,
+    ) -> Result<STTModelInstance> {
         let force_cpu = preferred_device == "cpu";
+        let override_ref = override_path;
+        info!("Override path for model loading: {override_ref:?}");
         info!("Loading model with device preference: {preferred_device} (force_cpu={force_cpu})");
 
         // Attempt to load model with preferred device
         let initial_result = match model {
             STTModel::VoxtralSmall | STTModel::VoxtralMini => {
                 info!("Loading Voxtral model...");
-                VoxtralModel::new(&model, force_cpu).map(|m| STTModelInstance::Voxtral(Box::new(m)))
+                VoxtralModel::new(&model, force_cpu, override_ref)
+                    .map(|m| STTModelInstance::Voxtral(Box::new(m)))
             }
             _ => {
                 info!("Loading Whisper model...");
-                WhisperModel::new(&model, force_cpu).map(|m| STTModelInstance::Whisper(Box::new(m)))
+                WhisperModel::new(&model, force_cpu, override_ref)
+                    .map(|m| STTModelInstance::Whisper(Box::new(m)))
             }
         };
 
@@ -343,10 +362,10 @@ impl SuperSTTDaemon {
 
                 match model {
                     STTModel::VoxtralSmall | STTModel::VoxtralMini => {
-                        VoxtralModel::new(&model, true)
+                        VoxtralModel::new(&model, true, override_ref)
                             .map(|m| STTModelInstance::Voxtral(Box::new(m)))
                     }
-                    _ => WhisperModel::new(&model, true)
+                    _ => WhisperModel::new(&model, true, override_ref)
                         .map(|m| STTModelInstance::Whisper(Box::new(m))),
                 }
                 .map_err(|cpu_e| {
@@ -371,7 +390,25 @@ impl SuperSTTDaemon {
         tracker: Arc<DownloadProgressTracker>,
         start_time: std::time::Instant,
     ) -> anyhow::Result<STTModelInstance> {
-        crate::stt_models::local::download::with_progress(&model, Arc::clone(&tracker)).await?;
+        let override_path = self
+            .config
+            .read()
+            .await
+            .transcription
+            .model_override_path
+            .clone();
+
+        // Check if model files exist in the override path; if so skip download
+        let found_in_override = override_path.as_ref().is_some_and(|p| {
+            crate::stt_models::local::download::get_model_file_paths(&model, Some(p.as_str()))
+                .is_ok()
+        });
+
+        if found_in_override {
+            info!("Model found in override path, skipping download");
+        } else {
+            crate::stt_models::local::download::with_progress(&model, Arc::clone(&tracker)).await?;
+        }
         if tracker.is_cancelled() {
             anyhow::bail!("Model loading was cancelled");
         }
@@ -381,8 +418,10 @@ impl SuperSTTDaemon {
 
         let preferred_device = self.preferred_device.read().await.clone();
         let preferred_device_clone = preferred_device.clone();
+        let custom_path_clone = override_path;
         let instance = tokio::task::spawn_blocking(move || {
-            let result = Self::load_model_sync(model, &preferred_device_clone);
+            let result =
+                Self::load_model_sync(model, &preferred_device_clone, custom_path_clone.as_deref());
             let duration = start_time.elapsed();
             info!("Model loading completed in {duration:?}");
             result
