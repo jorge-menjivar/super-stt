@@ -152,6 +152,7 @@ async fn download_and_hash_with_cancellation(
         blobs_dir.display()
     );
 
+    crate::install_crypto_provider();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
         .connect_timeout(std::time::Duration::from_secs(30))
