@@ -65,7 +65,7 @@
             "rustls-no-provider",
             "stream",
         ] }
-        rubato = "0.16"
+        rubato = "2.0"
         rust-embed = "8.11.0"
         rustfft = "6.4.1"
         serde = { version = "1.0.219", features = ["derive"] }
