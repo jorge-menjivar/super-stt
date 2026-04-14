@@ -180,6 +180,27 @@ fn model_loading_section(target_model: STTModel, status_message: &str) -> Elemen
         .into()
 }
 
+/// Model section when an error occurred
+fn model_error_section(error_message: &str) -> Element<'_, Message> {
+    let error_widget = column![
+        row![
+            cosmic::widget::icon::from_name("dialog-warning-symbolic")
+                .size(20)
+                .icon(),
+            text::body(error_message),
+        ]
+        .spacing(cosmic::theme::spacing().space_xs)
+        .align_y(cosmic::iced::Alignment::Center),
+        widget::button::standard("Dismiss").on_press(Message::ModelChanged(STTModel::default())),
+    ]
+    .spacing(cosmic::theme::spacing().space_s);
+
+    settings::section()
+        .title("Speech-to-Text Model")
+        .add(settings::flex_item("Error", error_widget))
+        .into()
+}
+
 /// Model section when device is switching
 fn model_device_switching_section<'a>(
     target_device: &'a str,
@@ -488,6 +509,7 @@ pub fn page<'a>(
             target_model,
             status_message,
         } => model_loading_section(*target_model, status_message),
+        ModelOperationState::Error { message } => model_error_section(message),
     };
 
     let storage_section = model_storage_section(

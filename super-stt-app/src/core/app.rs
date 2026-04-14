@@ -43,6 +43,8 @@ pub enum ModelOperationState {
         target_model: STTModel,
         status_message: String,
     },
+    /// Model operation failed
+    Error { message: String },
 }
 
 /// Device switching state
@@ -1568,17 +1570,13 @@ impl AppModel {
             }
 
             Message::ModelError(err) => {
-                // Handle error from model switching - reset to Ready
                 warn!("Model operation failed: {err}");
-                self.model_operation_state = ModelOperationState::Ready;
-
-                // Display sanitized error message to user
-                let sanitized_error = err
+                let sanitized = err
                     .replace(&std::env::var("HOME").unwrap_or_default(), "$HOME")
                     .chars()
                     .take(200)
                     .collect::<String>();
-                self.transcription_text = format!("Model Error: {sanitized_error}");
+                self.model_operation_state = ModelOperationState::Error { message: sanitized };
                 Task::none()
             }
 
