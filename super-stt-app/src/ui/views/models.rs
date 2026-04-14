@@ -4,6 +4,7 @@ use cosmic::iced_widget::{column, row};
 use cosmic::widget::{self, button, settings, space::horizontal as horizontal_space, text};
 use cosmic::{Apply, Element};
 use super_stt_shared::models::protocol::DownloadProgress;
+use super_stt_shared::models::provider::{OnlineProvider, Provider};
 use super_stt_shared::stt_model::STTModel;
 
 use super::common::{go_next_with_item, page_layout};
@@ -206,8 +207,29 @@ fn model_device_switching_section<'a>(
         .into()
 }
 
-/// Build a model row for the selection list
-fn model_row(model: STTModel, current_model: STTModel) -> Element<'static, Message> {
+/// Format bytes as a human-readable size string (always in GB)
+#[allow(clippy::cast_precision_loss)]
+fn format_size(bytes: u64) -> String {
+    const GB: f64 = 1_073_741_824.0;
+    if bytes == 0 {
+        return String::new();
+    }
+    let gb = bytes as f64 / GB;
+    if gb >= 10.0 {
+        format!("{gb:.0} GB")
+    } else {
+        format!("{gb:.1} GB")
+    }
+}
+
+/// Build a model row for the selection list.
+/// `effective_free_vram` is the GPU memory that would be available after unloading
+/// the current model (None if GPU is off or unknown).
+fn model_row(
+    model: STTModel,
+    current_model: STTModel,
+    effective_free_vram: Option<u64>,
+) -> Element<'static, Message> {
     let selected = model == current_model;
 
     let svg_accent = |theme: &cosmic::theme::Theme| {
@@ -217,7 +239,12 @@ fn model_row(model: STTModel, current_model: STTModel) -> Element<'static, Messa
         }
     };
 
-    settings::item_row(vec![
+    let vram_required = model.estimated_vram_bytes();
+    let size_label = format_size(vram_required);
+    let wont_fit =
+        vram_required > 0 && effective_free_vram.is_some_and(|free| vram_required > free);
+
+    let mut items: Vec<Element<'static, Message>> = vec![
         text::body(model.to_string())
             .class(if selected {
                 cosmic::theme::Text::Accent
@@ -226,32 +253,59 @@ fn model_row(model: STTModel, current_model: STTModel) -> Element<'static, Messa
             })
             .width(Length::Fill)
             .into(),
-        if selected {
-            cosmic::widget::icon::from_name("object-select-symbolic")
+    ];
+
+    if wont_fit {
+        items.push(
+            cosmic::widget::icon::from_name("dialog-warning-symbolic")
                 .size(16)
                 .icon()
-                .class(cosmic::theme::Svg::Custom(std::rc::Rc::new(Box::new(
-                    svg_accent,
-                ))))
-                .into()
-        } else {
-            horizontal_space().width(16.).into()
-        },
-    ])
-    .apply(widget::container)
-    .class(cosmic::theme::Container::List)
-    .apply(widget::button::custom)
-    .class(cosmic::theme::Button::Transparent)
-    .on_press(Message::ModelSelected(model))
-    .into()
+                .into(),
+        );
+    }
+
+    if !size_label.is_empty() {
+        items.push(text::caption(size_label).into());
+    }
+
+    items.push(if selected {
+        cosmic::widget::icon::from_name("object-select-symbolic")
+            .size(16)
+            .icon()
+            .class(cosmic::theme::Svg::Custom(std::rc::Rc::new(Box::new(
+                svg_accent,
+            ))))
+            .into()
+    } else {
+        horizontal_space().width(16.).into()
+    });
+
+    settings::item_row(items)
+        .apply(widget::container)
+        .width(Length::Fill)
+        .class(cosmic::theme::Container::List)
+        .apply(widget::button::custom)
+        .width(Length::Fill)
+        .class(cosmic::theme::Button::Transparent)
+        .on_press(Message::ModelSelected(model))
+        .into()
 }
 
-/// Build the model selection list for the context drawer (font-picker pattern)
+/// Build the model selection list for the context drawer (font-picker pattern).
+/// `gpu_memory` is `Some((free, total))` when GPU is enabled, used to warn about models that won't fit.
 pub fn model_selection_list(
     available_models: Vec<STTModel>,
     current_model: STTModel,
     search: &str,
+    gpu_enabled: bool,
+    gpu_memory: super_stt_shared::daemon::client::GpuMemoryInfo,
 ) -> Element<'static, Message> {
+    // Effective free VRAM = current free + what the current model uses (it gets unloaded on switch)
+    let effective_free_vram = if gpu_enabled {
+        gpu_memory.map(|(free, _total)| free + current_model.estimated_vram_bytes())
+    } else {
+        None
+    };
     let search_lower = search.to_lowercase();
     let models: Vec<STTModel> = if search.is_empty() {
         available_models
@@ -262,22 +316,36 @@ pub fn model_selection_list(
             .collect()
     };
 
-    let local: Vec<STTModel> = models.iter().filter(|m| !m.is_online()).copied().collect();
+    let local: Vec<STTModel> = models
+        .iter()
+        .filter(|m| m.providers().contains(&Provider::Local))
+        .copied()
+        .collect();
 
     // Group online models by provider
     let openai: Vec<STTModel> = models
         .iter()
-        .filter(|m| m.is_online() && m.api_provider() == "openai")
+        .filter(|m| {
+            m.providers()
+                .contains(&Provider::Online(OnlineProvider::OpenAI))
+        })
         .copied()
         .collect();
     let mistral: Vec<STTModel> = models
         .iter()
-        .filter(|m| m.is_online() && m.api_provider() == "mistral")
+        .filter(|m| {
+            m.providers()
+                .contains(&Provider::Online(OnlineProvider::Mistral))
+                && !m.providers().contains(&Provider::Local)
+        })
         .copied()
         .collect();
     let deepgram: Vec<STTModel> = models
         .iter()
-        .filter(|m| m.is_online() && m.api_provider() == "deepgram")
+        .filter(|m| {
+            m.providers()
+                .contains(&Provider::Online(OnlineProvider::Deepgram))
+        })
         .copied()
         .collect();
 
@@ -287,7 +355,7 @@ pub fn model_selection_list(
         let list = local
             .into_iter()
             .fold(widget::list_column(), |list, model| {
-                list.add(model_row(model, current_model))
+                list.add(model_row(model, current_model, effective_free_vram))
             });
         sections.push(
             column![text::title4("Local"), list]
@@ -300,7 +368,7 @@ pub fn model_selection_list(
         let list = openai
             .into_iter()
             .fold(widget::list_column(), |list, model| {
-                list.add(model_row(model, current_model))
+                list.add(model_row(model, current_model, effective_free_vram))
             });
         sections.push(
             column![text::title4("OpenAI (online)"), list]
@@ -313,7 +381,7 @@ pub fn model_selection_list(
         let list = mistral
             .into_iter()
             .fold(widget::list_column(), |list, model| {
-                list.add(model_row(model, current_model))
+                list.add(model_row(model, current_model, effective_free_vram))
             });
         sections.push(
             column![text::title4("Mistral (online)"), list]
@@ -326,7 +394,7 @@ pub fn model_selection_list(
         let list = deepgram
             .into_iter()
             .fold(widget::list_column(), |list, model| {
-                list.add(model_row(model, current_model))
+                list.add(model_row(model, current_model, effective_free_vram))
             });
         sections.push(
             column![text::title4("Deepgram (online)"), list]
@@ -337,6 +405,7 @@ pub fn model_selection_list(
 
     column(sections)
         .spacing(cosmic::theme::spacing().space_m)
+        .width(Length::Fill)
         .into()
 }
 
@@ -346,6 +415,7 @@ pub fn model_drawer_header<'a>(
     current_device: &'a str,
     available_devices: &'a [String],
     device_switching: bool,
+    gpu_memory: super_stt_shared::daemon::client::GpuMemoryInfo,
 ) -> Element<'a, Message> {
     let has_gpu = available_devices.contains(&"cuda".to_string());
     let gpu_enabled = current_device == "cuda";
@@ -366,14 +436,27 @@ pub fn model_drawer_header<'a>(
         });
     }
 
-    column![
+    let mut items = column![].spacing(cosmic::theme::spacing().space_s);
+
+    items = items.push(
         settings::item::builder("GPU Acceleration")
-            .description("Use CUDA GPU for faster transcription")
+            .description("Enable to use more powerful models and faster transcriptions")
             .control(toggler),
-        search_input,
-    ]
-    .spacing(cosmic::theme::spacing().space_s)
-    .into()
+    );
+
+    if let Some((free, total)) = gpu_memory.filter(|_| gpu_enabled) {
+        let used = total.saturating_sub(free);
+        let mem_text = format!(
+            "GPU Memory: {} / {} used",
+            format_size(used),
+            format_size(total)
+        );
+        items = items.push(text::caption(mem_text));
+    }
+
+    items = items.push(search_input);
+
+    items.into()
 }
 
 /// Models page view

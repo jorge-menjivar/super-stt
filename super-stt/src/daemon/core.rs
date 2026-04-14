@@ -73,7 +73,7 @@ impl SuperSTTDaemon {
             Command::SetAudioTheme { theme } => self.handle_set_audio_theme(theme),
             Command::GetAudioTheme => self.handle_get_audio_theme(),
             Command::TestAudioTheme => self.handle_test_audio_theme().await,
-            Command::SetModel { model } => self.handle_set_model(model).await,
+            Command::SetModel { model, provider } => self.handle_set_model(model, provider).await,
             Command::GetModel => self.handle_get_model().await,
             Command::ListModels => self.handle_list_models(),
             Command::SetDevice { device } => self.handle_set_device(device).await,
@@ -269,6 +269,7 @@ mod tests {
             socket_path,
             model,
             model_type,
+            model_provider: Arc::new(tokio::sync::RwLock::new(None)),
             notification_manager,
             audio_processor,
             shutdown_tx,
@@ -603,7 +604,7 @@ mod tests {
             since_timestamp: None,
             limit: None,
             event_type: None,
-            data: Some(serde_json::json!({ "model": "openai-whisper-1" })),
+            data: Some(serde_json::json!({ "model": "whisper-1" })),
             language: None,
             enabled: None,
         };
@@ -631,7 +632,7 @@ mod tests {
         let daemon = test_daemon().await;
 
         let mut request = make_request("set_model");
-        request.data = Some(serde_json::json!({ "model": "mistral-voxtral-mini-transcribe-v2" }));
+        request.data = Some(serde_json::json!({ "model": "voxtral-mini-transcribe-v2" }));
 
         let response = daemon.handle_command(request).await;
         assert_eq!(response.status, "error");
@@ -642,7 +643,7 @@ mod tests {
         let daemon = test_daemon().await;
 
         let mut request = make_request("set_model");
-        request.data = Some(serde_json::json!({ "model": "deepgram-nova-3" }));
+        request.data = Some(serde_json::json!({ "model": "nova-3" }));
 
         let response = daemon.handle_command(request).await;
         assert_eq!(response.status, "error");
@@ -691,17 +692,17 @@ mod tests {
         let models = response.available_models.expect("should have models");
         // Should include online models in the list
         assert!(
-            models.iter().any(|m| m.to_string() == "openai-whisper-1"),
+            models.iter().any(|m| m.to_string() == "whisper-1"),
             "list should include OpenAI models"
         );
         assert!(
             models
                 .iter()
-                .any(|m| m.to_string() == "mistral-voxtral-mini-transcribe-v2"),
+                .any(|m| m.to_string() == "voxtral-mini-transcribe-v2"),
             "list should include Mistral models"
         );
         assert!(
-            models.iter().any(|m| m.to_string() == "deepgram-nova-3"),
+            models.iter().any(|m| m.to_string() == "nova-3"),
             "list should include Deepgram models"
         );
     }

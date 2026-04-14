@@ -395,12 +395,15 @@ impl SuperSTTDaemon {
         // If disabling online models and current model is online, revert to default
         if !enabled {
             let current_is_online = {
-                let model_type = self.model_type.read().await;
-                model_type.as_ref().is_some_and(STTModel::is_online)
+                let provider = self.model_provider.read().await;
+                provider.is_some_and(|p| p.is_online())
             };
             if current_is_online {
                 info!("Online models disabled; reverting to default local model");
-                let _ = self.handle_set_model(STTModel::default()).await;
+                let default_model = STTModel::default();
+                let _ = self
+                    .handle_set_model(default_model, default_model.default_provider())
+                    .await;
             }
         }
 

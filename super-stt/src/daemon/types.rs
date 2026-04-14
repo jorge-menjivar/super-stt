@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use super_stt_shared::NotificationManager;
+use super_stt_shared::models::provider::{OnlineProvider, Provider};
 use super_stt_shared::resource_management::ResourceManager;
 use super_stt_shared::stt_model::STTModel;
 use super_stt_shared::theme::AudioTheme;
@@ -114,6 +115,7 @@ pub struct SuperSTTDaemon {
     pub socket_path: PathBuf,
     pub model: Arc<tokio::sync::RwLock<Option<STTModelInstance>>>,
     pub model_type: Arc<tokio::sync::RwLock<Option<super_stt_shared::stt_model::STTModel>>>,
+    pub model_provider: Arc<tokio::sync::RwLock<Option<Provider>>>,
     pub notification_manager: Arc<NotificationManager>,
     pub audio_processor: Arc<AudioProcessor>,
     pub shutdown_tx: broadcast::Sender<()>,
@@ -242,6 +244,9 @@ impl SuperSTTDaemon {
             model_type: Arc::new(tokio::sync::RwLock::new(Some(
                 config.transcription.preferred_model,
             ))),
+            model_provider: Arc::new(tokio::sync::RwLock::new(Some(
+                config.transcription.preferred_provider,
+            ))),
             notification_manager,
             audio_processor,
             shutdown_tx,
@@ -283,26 +288,28 @@ impl SuperSTTDaemon {
         Self::broadcast_loading_status(&daemon.notification_manager).await;
 
         // Load the appropriate STT model based on config preferences
-        // If the preferred model is online but the toggle is off or no key, fall back to default
-        let model_to_load = {
+        // If the preferred provider is online but the toggle is off or no key, fall back to default
+        let (model_to_load, provider_to_load) = {
             let config_guard = daemon.config.read().await;
             let preferred = config_guard.transcription.preferred_model;
-            if preferred.is_online() {
+            let preferred_provider = config_guard.transcription.preferred_provider;
+            if let Provider::Online(online) = preferred_provider {
                 if config_guard.online.allow_online_models
-                    && crate::keyring::has_api_key(preferred.api_provider()).unwrap_or(false)
+                    && crate::keyring::has_api_key(online.api_key_name()).unwrap_or(false)
                 {
-                    preferred
+                    (preferred, preferred_provider)
                 } else {
                     warn!(
-                        "Preferred model is online but online models are disabled or no API key; falling back to default"
+                        "Preferred provider is online but online models are disabled or no API key; falling back to default"
                     );
-                    STTModel::default()
+                    let default = STTModel::default();
+                    (default, default.default_provider())
                 }
             } else {
-                preferred
+                (preferred, preferred_provider)
             }
         };
-        Self::load_initial_model_and_broadcast(&daemon, model_to_load).await?;
+        Self::load_initial_model_and_broadcast(&daemon, model_to_load, provider_to_load).await?;
 
         Ok(daemon)
     }
@@ -372,21 +379,26 @@ impl SuperSTTDaemon {
     async fn load_initial_model_and_broadcast(
         daemon: &SuperSTTDaemon,
         model_to_load: STTModel,
+        provider: Provider,
     ) -> Result<()> {
         daemon.broadcast_model_loading_status(model_to_load).await;
 
-        // Online models don't need downloading — create instance directly
-        if model_to_load.is_online() {
-            let provider = model_to_load.api_provider();
-            let api_key = crate::keyring::get_api_key(provider)
+        // Online providers don't need downloading — create instance directly
+        if let Provider::Online(online) = provider {
+            let key_name = online.api_key_name();
+            let api_key = crate::keyring::get_api_key(key_name)
                 .map_err(|e| anyhow::anyhow!(e))?
-                .ok_or_else(|| anyhow::anyhow!("{provider} API key not configured"))?;
+                .ok_or_else(|| anyhow::anyhow!("{key_name} API key not configured"))?;
 
-            let model_id = model_to_load.api_model_id().to_string();
-            let instance = Self::create_online_instance(provider, api_key, model_id);
+            let model_id = model_to_load
+                .api_model_id(online)
+                .ok_or_else(|| anyhow::anyhow!("{model_to_load} not available via {provider}"))?
+                .to_string();
+            let instance = Self::create_online_instance(online, api_key, model_id);
             info!("{provider} model {model_to_load} loaded successfully");
             *daemon.model.write().await = Some(instance);
             *daemon.model_type.write().await = Some(model_to_load);
+            *daemon.model_provider.write().await = Some(provider);
 
             if let Err(e) = daemon
                 .notification_manager
@@ -396,7 +408,7 @@ impl SuperSTTDaemon {
                     serde_json::json!({
                         "status": "ready",
                         "model_loaded": true,
-                        "model_type": provider,
+                        "provider": provider.to_string(),
                         "timestamp": chrono::Utc::now().to_rfc3339()
                     }),
                 )
@@ -461,23 +473,22 @@ impl SuperSTTDaemon {
     }
 
     /// Create the appropriate online model instance based on provider.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the provider string is not a recognized online provider.
     #[must_use]
     pub fn create_online_instance(
-        provider: &str,
+        provider: OnlineProvider,
         api_key: String,
         model_id: String,
     ) -> STTModelInstance {
         match provider {
-            "openai" => STTModelInstance::OpenAI(Box::new(OpenAIModel::new(api_key, model_id))),
-            "mistral" => STTModelInstance::Mistral(Box::new(MistralModel::new(api_key, model_id))),
-            "deepgram" => {
+            OnlineProvider::OpenAI => {
+                STTModelInstance::OpenAI(Box::new(OpenAIModel::new(api_key, model_id)))
+            }
+            OnlineProvider::Mistral => {
+                STTModelInstance::Mistral(Box::new(MistralModel::new(api_key, model_id)))
+            }
+            OnlineProvider::Deepgram => {
                 STTModelInstance::Deepgram(Box::new(DeepgramModel::new(api_key, model_id)))
             }
-            _ => panic!("Unknown online provider: {provider}"),
         }
     }
 
@@ -715,7 +726,7 @@ mod tests {
     #[test]
     fn create_online_instance_openai() {
         let instance = SuperSTTDaemon::create_online_instance(
-            "openai",
+            OnlineProvider::OpenAI,
             "test-key".to_string(),
             "whisper-1".to_string(),
         );
@@ -726,7 +737,7 @@ mod tests {
     #[test]
     fn create_online_instance_mistral() {
         let instance = SuperSTTDaemon::create_online_instance(
-            "mistral",
+            OnlineProvider::Mistral,
             "test-key".to_string(),
             "voxtral-mini-latest".to_string(),
         );
@@ -737,7 +748,7 @@ mod tests {
     #[test]
     fn create_online_instance_deepgram() {
         let instance = SuperSTTDaemon::create_online_instance(
-            "deepgram",
+            OnlineProvider::Deepgram,
             "test-key".to_string(),
             "nova-3".to_string(),
         );
@@ -746,19 +757,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Unknown online provider")]
-    fn create_online_instance_unknown_panics() {
-        let _ = SuperSTTDaemon::create_online_instance(
-            "unknown",
-            "test-key".to_string(),
-            "model".to_string(),
-        );
-    }
-
-    #[test]
     fn online_instance_transcribe_sync_returns_error() {
         let mut instance = SuperSTTDaemon::create_online_instance(
-            "openai",
+            OnlineProvider::OpenAI,
             "key".to_string(),
             "whisper-1".to_string(),
         );
@@ -775,7 +776,7 @@ mod tests {
     #[test]
     fn online_instance_device_returns_cpu() {
         let instance = SuperSTTDaemon::create_online_instance(
-            "openai",
+            OnlineProvider::OpenAI,
             "key".to_string(),
             "whisper-1".to_string(),
         );

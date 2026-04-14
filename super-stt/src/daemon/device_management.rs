@@ -30,6 +30,23 @@ impl SuperSTTDaemon {
         // Get context for the device switch
         let (current_preferred, model_to_reload) = self.get_device_switch_context(&device).await;
 
+        // Online models don't use local GPU — just update the preference
+        let current_provider = self.model_provider.read().await;
+        if current_provider.is_some_and(|p| p.is_online()) {
+            drop(current_provider);
+            info!("Current model uses online provider, updating device preference only");
+            *self.preferred_device.write().await = device.clone();
+            {
+                let mut config = self.config.write().await;
+                config.update_preferred_device(device.clone());
+            }
+            let _ = self.broadcast_config_change().await;
+            return DaemonResponse::success()
+                .with_device(device)
+                .with_message("Device preference updated (online model unaffected)".to_string());
+        }
+        drop(current_provider);
+
         info!(
             "Starting device switch from {current_preferred} to {device} (will reload model: {model_to_reload})"
         );
@@ -414,9 +431,38 @@ impl SuperSTTDaemon {
             format!("Device: {actual_device} (preferred and actual match)")
         };
 
-        DaemonResponse::success()
+        let mut response = DaemonResponse::success()
             .with_device(actual_device)
             .with_available_devices(available_devices)
-            .with_message(message)
+            .with_message(message);
+
+        // Include GPU memory info when CUDA is available
+        match Self::get_gpu_memory_info() {
+            Ok((free, total)) => {
+                response = response
+                    .with_gpu_free_memory(free)
+                    .with_gpu_total_memory(total);
+            }
+            Err(e) => {
+                info!("GPU memory query unavailable: {e}");
+            }
+        }
+
+        response
+    }
+
+    #[cfg(feature = "cuda")]
+    fn get_gpu_memory_info() -> Result<(u64, u64), anyhow::Error> {
+        use candle_core::cuda_backend::cudarc::driver::{result, safe::CudaContext};
+        let _ctx =
+            CudaContext::new(0).map_err(|e| anyhow::anyhow!("CUDA context init failed: {e}"))?;
+        let (free, total) =
+            result::mem_get_info().map_err(|e| anyhow::anyhow!("CUDA mem_get_info: {e}"))?;
+        Ok((free as u64, total as u64))
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    fn get_gpu_memory_info() -> Result<(u64, u64), anyhow::Error> {
+        Err(anyhow::anyhow!("CUDA not available"))
     }
 }

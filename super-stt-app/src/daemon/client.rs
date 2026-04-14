@@ -220,8 +220,17 @@ pub async fn get_download_status(
     super_stt_shared::daemon::client::get_download_status(socket_path, get_client_id()).await
 }
 
-/// Get current device and available devices from daemon
-pub async fn get_current_device(socket_path: PathBuf) -> Result<(String, Vec<String>), String> {
+/// Get current device, available devices, and GPU memory info from daemon
+pub async fn get_current_device(
+    socket_path: PathBuf,
+) -> Result<
+    (
+        String,
+        Vec<String>,
+        super_stt_shared::daemon::client::GpuMemoryInfo,
+    ),
+    String,
+> {
     super_stt_shared::daemon::client::get_current_device(socket_path, get_client_id()).await
 }
 

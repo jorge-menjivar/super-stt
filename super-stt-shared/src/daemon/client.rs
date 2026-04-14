@@ -380,13 +380,18 @@ pub async fn get_download_status(
 
 /// Get current device and available devices from daemon
 ///
+/// GPU memory info returned from the daemon (free, total) in bytes.
+pub type GpuMemoryInfo = Option<(u64, u64)>;
+
+/// Get current device and available devices from daemon
+///
 /// # Errors
 ///
 /// Returns an error if the request fails.
 pub async fn get_current_device(
     socket_path: PathBuf,
     client_id: &str,
-) -> Result<(String, Vec<String>), String> {
+) -> Result<(String, Vec<String>, GpuMemoryInfo), String> {
     let request = create_daemon_request("get_device", client_id);
     let response = send_daemon_request(&socket_path, request).await?;
 
@@ -395,7 +400,11 @@ pub async fn get_current_device(
         let available_devices = response
             .available_devices
             .unwrap_or_else(|| vec!["cpu".to_string()]);
-        Ok((device, available_devices))
+        let gpu_memory = match (response.gpu_free_memory, response.gpu_total_memory) {
+            (Some(free), Some(total)) => Some((free, total)),
+            _ => None,
+        };
+        Ok((device, available_devices, gpu_memory))
     } else {
         Err(response
             .message

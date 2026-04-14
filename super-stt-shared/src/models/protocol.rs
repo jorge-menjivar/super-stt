@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, str::FromStr};
 
+use crate::models::provider::Provider;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::theme::AudioTheme;
 use crate::models::write_method::WriteMethod;
@@ -52,9 +53,19 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_model: Option<STTModel>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_provider: Option<Provider>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub available_models: Option<Vec<STTModel>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_devices: Option<Vec<String>>,
+
+    /// Free GPU memory in bytes (only set when CUDA is available)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_free_memory: Option<u64>,
+
+    /// Total GPU memory in bytes (only set when CUDA is available)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_total_memory: Option<u64>,
 
     // Notification system fields
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,8 +159,11 @@ impl DaemonResponse {
             device: None,
             model_loaded: None,
             current_model: None,
+            current_provider: None,
             available_models: None,
             available_devices: None,
+            gpu_free_memory: None,
+            gpu_total_memory: None,
             subscribed_to: None,
             total_subscribers: None,
             events: None,
@@ -200,8 +214,11 @@ impl DaemonResponse {
             device: None,
             model_loaded: None,
             current_model: None,
+            current_provider: None,
             available_models: None,
             available_devices: None,
+            gpu_free_memory: None,
+            gpu_total_memory: None,
             subscribed_to: None,
             total_subscribers: None,
             events: None,
@@ -243,6 +260,12 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_current_model(mut self, model: STTModel) -> Self {
         self.current_model = Some(model);
+        self
+    }
+
+    #[must_use]
+    pub fn with_current_provider(mut self, provider: Provider) -> Self {
+        self.current_provider = Some(provider);
         self
     }
 
@@ -309,6 +332,18 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_available_devices(mut self, devices: Vec<String>) -> Self {
         self.available_devices = Some(devices);
+        self
+    }
+
+    #[must_use]
+    pub fn with_gpu_free_memory(mut self, bytes: u64) -> Self {
+        self.gpu_free_memory = Some(bytes);
+        self
+    }
+
+    #[must_use]
+    pub fn with_gpu_total_memory(mut self, bytes: u64) -> Self {
+        self.gpu_total_memory = Some(bytes);
         self
     }
 
@@ -405,6 +440,7 @@ pub enum Command {
     TestAudioTheme,
     SetModel {
         model: STTModel,
+        provider: Provider,
     },
     GetModel,
     ListModels,
@@ -677,22 +713,54 @@ mod tests {
     #[test]
     fn set_model_parses_online_models() {
         for model_name in [
-            "openai-whisper-1",
-            "openai-gpt-4o-transcribe",
-            "openai-gpt-4o-mini-transcribe",
-            "mistral-voxtral-mini-transcribe-v2",
-            "deepgram-nova-3",
+            "whisper-1",
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "voxtral-mini-transcribe-v2",
+            "nova-3",
         ] {
             let request = make_request("set_model", Some(json!({ "model": model_name })));
             let command = Command::try_from(request)
                 .unwrap_or_else(|e| panic!("set_model should parse {model_name}: {e}"));
             match command {
-                Command::SetModel { model } => {
+                Command::SetModel { model, provider } => {
                     assert_eq!(model.to_string(), model_name);
-                    assert!(model.is_online());
+                    assert!(provider.is_online());
                 }
                 _ => panic!("expected Command::SetModel for {model_name}"),
             }
+        }
+    }
+
+    #[test]
+    fn set_model_with_explicit_provider() {
+        let request = make_request(
+            "set_model",
+            Some(json!({ "model": "voxtral-mini", "provider": "mistral" })),
+        );
+        let command = Command::try_from(request).expect("should parse");
+        match command {
+            Command::SetModel { model, provider } => {
+                assert_eq!(model, STTModel::VoxtralMini);
+                assert_eq!(
+                    provider,
+                    Provider::Online(crate::models::provider::OnlineProvider::Mistral)
+                );
+            }
+            _ => panic!("expected Command::SetModel"),
+        }
+    }
+
+    #[test]
+    fn set_model_defaults_provider_for_local() {
+        let request = make_request("set_model", Some(json!({ "model": "whisper-tiny" })));
+        let command = Command::try_from(request).expect("should parse");
+        match command {
+            Command::SetModel { model, provider } => {
+                assert_eq!(model, STTModel::WhisperTiny);
+                assert_eq!(provider, Provider::Local);
+            }
+            _ => panic!("expected Command::SetModel"),
         }
     }
 
@@ -960,10 +1028,17 @@ fn cmd_set_model(request: &DaemonRequest) -> Result<Command, String> {
     let model_value = request.data.as_ref().and_then(|data| data.get("model"));
     let model_str = model_value.and_then(|v| v.as_str());
     if let Some(model_str) = model_str {
-        match STTModel::from_str(model_str) {
-            Ok(model) => Ok(Command::SetModel { model }),
-            Err(err) => Err(format!("Failed to parse model: {err}")),
-        }
+        let model =
+            STTModel::from_str(model_str).map_err(|err| format!("Failed to parse model: {err}"))?;
+        let provider = request
+            .data
+            .as_ref()
+            .and_then(|data| data.get("provider"))
+            .and_then(|v| v.as_str())
+            .map(|s| Provider::from_str(s).map_err(|e| format!("Failed to parse provider: {e}")))
+            .transpose()?
+            .unwrap_or_else(|| model.default_provider());
+        Ok(Command::SetModel { model, provider })
     } else {
         Err("Model string is empty".to_string())
     }

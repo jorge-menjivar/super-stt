@@ -3,6 +3,7 @@ use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::stt_model::STTModel;
@@ -44,6 +45,8 @@ pub struct OnlineConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionConfig {
     pub preferred_model: STTModel,
+    #[serde(default)]
+    pub preferred_provider: Provider,
     pub write_mode: bool, // Auto-type transcriptions
     #[serde(default)] // For backwards compatibility with existing configs
     pub preview_typing_enabled: bool, // Beta feature: show preview while typing
@@ -67,6 +70,7 @@ impl Default for DaemonConfig {
             },
             transcription: TranscriptionConfig {
                 preferred_model: STTModel::default(),
+                preferred_provider: Provider::default(),
                 write_mode: false,             // Default to not auto-typing
                 preview_typing_enabled: false, // Default to disabled (beta feature)
                 recording_stop_mode: RecordingStopMode::default(),
@@ -148,9 +152,10 @@ impl DaemonConfig {
         }
     }
 
-    /// Update preferred model and save to disk
-    pub fn update_preferred_model(&mut self, model: STTModel) {
+    /// Update preferred model and provider, and save to disk
+    pub fn update_preferred_model(&mut self, model: STTModel, provider: Provider) {
         self.transcription.preferred_model = model;
+        self.transcription.preferred_provider = provider;
         if let Err(e) = self.save() {
             error!("Failed to save config after model update: {e}");
         }
@@ -251,25 +256,22 @@ write_method = "Auto"
     fn config_with_online_model_preferred_round_trips() {
         let mut config = DaemonConfig::default();
         config.online.allow_online_models = true;
-        config.transcription.preferred_model = STTModel::OpenAIWhisper1;
+        config.transcription.preferred_model = STTModel::Whisper1;
 
         let toml_str = toml::to_string_pretty(&config).expect("should serialize");
         let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
         assert!(parsed.online.allow_online_models);
-        assert_eq!(
-            parsed.transcription.preferred_model,
-            STTModel::OpenAIWhisper1
-        );
+        assert_eq!(parsed.transcription.preferred_model, STTModel::Whisper1);
     }
 
     #[test]
     fn config_preserves_all_online_model_variants() {
         for model in [
-            STTModel::OpenAIWhisper1,
-            STTModel::OpenAIGpt4oTranscribe,
-            STTModel::OpenAIGpt4oMiniTranscribe,
-            STTModel::MistralVoxtralMiniTranscribeV2,
-            STTModel::DeepgramNova3,
+            STTModel::Whisper1,
+            STTModel::Gpt4oTranscribe,
+            STTModel::Gpt4oMiniTranscribe,
+            STTModel::VoxtralMiniTranscribeV2,
+            STTModel::Nova3,
         ] {
             let mut config = DaemonConfig::default();
             config.transcription.preferred_model = model;

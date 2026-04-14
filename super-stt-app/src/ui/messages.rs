@@ -57,10 +57,14 @@ pub enum Message {
     ModelError(String),
 
     // Device management messages
-    DeviceSelected(String),                // "cpu" or "cuda"
-    DeviceLoaded(String),                  // Current device from daemon
-    DeviceInfoLoaded(String, Vec<String>), // Current device and available devices from daemon
-    DeviceError(String),                   // Device switching error
+    DeviceSelected(String), // "cpu" or "cuda"
+    DeviceLoaded(String),   // Current device from daemon
+    DeviceInfoLoaded(
+        String,
+        Vec<String>,
+        super_stt_shared::daemon::client::GpuMemoryInfo,
+    ), // Current device, available devices, GPU memory (free, total)
+    DeviceError(String),    // Device switching error
 
     // Download progress messages
     DownloadProgressUpdate(super_stt_shared::models::protocol::DownloadProgress),

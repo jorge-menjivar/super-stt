@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use super_stt_shared::UdpAuth;
+use super_stt_shared::models::provider::{OnlineProvider, Provider};
 use super_stt_shared::stt_model::STTModel;
 use tokio::net::UdpSocket;
 use tokio::time::Duration;
@@ -109,6 +110,8 @@ pub struct AppModel {
     pub current_device: String,
     /// Available devices from daemon
     pub available_devices: Vec<String>,
+    /// GPU memory info: (free, total) in bytes. None if CUDA unavailable.
+    pub gpu_memory: super_stt_shared::daemon::client::GpuMemoryInfo,
     /// Device switching state
     pub device_state: DeviceState,
     /// Timestamp of last device switch to avoid polling too soon
@@ -237,6 +240,7 @@ impl cosmic::Application for AppModel {
             // Initialize device state
             current_device: String::new(), // Empty until loaded from daemon
             available_devices: vec!["cpu".to_string()], // Default until loaded from daemon
+            gpu_memory: None,
             device_state: DeviceState::Ready,
             last_device_switch: None,
             last_event_timestamp: None,
@@ -335,11 +339,33 @@ impl cosmic::Application for AppModel {
                     self.device_state,
                     DeviceState::Switching { .. } | DeviceState::Cooldown
                 );
-                // Filter online models out when the toggle is off
+                let gpu_enabled = self.current_device == "cuda";
+                let has_openai = self.has_openai_api_key;
+                let has_mistral = self.has_mistral_api_key;
+                let has_deepgram = self.has_deepgram_api_key;
+
                 let filtered_models: Vec<STTModel> = self
                     .available_models
                     .iter()
-                    .filter(|m| self.allow_online_models || !m.is_online())
+                    .filter(|m| {
+                        // Hide models that require GPU when GPU is off
+                        if m.requires_gpu() && !gpu_enabled {
+                            return false;
+                        }
+                        // For each model, at least one of its providers must be usable
+                        m.providers().iter().any(|p| match p {
+                            Provider::Local => true,
+                            Provider::Online(OnlineProvider::OpenAI) => {
+                                self.allow_online_models && has_openai
+                            }
+                            Provider::Online(OnlineProvider::Mistral) => {
+                                self.allow_online_models && has_mistral
+                            }
+                            Provider::Online(OnlineProvider::Deepgram) => {
+                                self.allow_online_models && has_deepgram
+                            }
+                        })
+                    })
                     .copied()
                     .collect();
                 context_drawer::context_drawer(
@@ -347,6 +373,8 @@ impl cosmic::Application for AppModel {
                         filtered_models,
                         self.current_model,
                         &self.model_search,
+                        gpu_enabled,
+                        self.gpu_memory,
                     ),
                     Message::ToggleContextPage(ContextPage::ModelSelection),
                 )
@@ -356,6 +384,7 @@ impl cosmic::Application for AppModel {
                     &self.current_device,
                     &self.available_devices,
                     device_switching,
+                    self.gpu_memory,
                 ))
             }
         })
@@ -495,7 +524,7 @@ impl cosmic::Application for AppModel {
             message,
             Message::DeviceSelected(_)
                 | Message::DeviceLoaded(_)
-                | Message::DeviceInfoLoaded(_, _)
+                | Message::DeviceInfoLoaded(_, _, _)
                 | Message::DeviceError(_)
         ) {
             return self.handle_device_messages(message);
@@ -612,6 +641,18 @@ impl cosmic::Application for AppModel {
                 } else {
                     self.context_page = context_page;
                     self.core.window.show_context = true;
+                }
+
+                // Refresh device info (including GPU free memory) when opening model drawer
+                if context_page == ContextPage::ModelSelection && self.core.window.show_context {
+                    return Task::perform(get_current_device(self.socket_path.clone()), |result| {
+                        match result {
+                            Ok((device, available_devices, gpu_memory)) => cosmic::Action::App(
+                                Message::DeviceInfoLoaded(device, available_devices, gpu_memory),
+                            ),
+                            Err(e) => cosmic::Action::App(Message::DeviceError(e)),
+                        }
+                    });
                 }
             }
 
@@ -850,16 +891,25 @@ impl AppModel {
                     }
                 }
 
-                // Fetch daemon configuration to sync settings
+                // Reload models, device info, and daemon config on reconnect
                 let socket_path = self.socket_path.clone();
-                Task::perform(fetch_daemon_config(socket_path), |result| match result {
-                    Ok(config) => cosmic::Action::App(Message::DaemonConfigReceived(config)),
-                    Err(err) => {
-                        warn!("Failed to fetch daemon config: {err}");
-                        // Config fetch failed but continue - model state maintained via events
-                        cosmic::Action::App(Message::RefreshDaemonStatus)
-                    }
-                })
+                let config_task =
+                    Task::perform(fetch_daemon_config(socket_path), |result| match result {
+                        Ok(config) => cosmic::Action::App(Message::DaemonConfigReceived(config)),
+                        Err(err) => {
+                            warn!("Failed to fetch daemon config: {err}");
+                            cosmic::Action::App(Message::RefreshDaemonStatus)
+                        }
+                    });
+
+                if was_disconnected {
+                    Task::batch([
+                        self.handle_model_messages(Message::LoadInitialData),
+                        config_task,
+                    ])
+                } else {
+                    config_task
+                }
             }
 
             Message::DaemonConfigReceived(config) => {
@@ -1247,10 +1297,11 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::DeviceInfoLoaded(device, available_devices) => {
+            Message::DeviceInfoLoaded(device, available_devices, gpu_memory) => {
                 info!("DeviceInfoLoaded: device={device}, available_devices={available_devices:?}");
                 self.current_device.clone_from(&device);
                 self.available_devices.clone_from(&available_devices);
+                self.gpu_memory = gpu_memory;
 
                 if matches!(self.device_state, DeviceState::Switching { .. }) {
                     info!("Device switch completed to: {device}");
@@ -1413,13 +1464,14 @@ impl AppModel {
                     ),
                     Task::perform(get_current_device(self.socket_path.clone()), |result| {
                         match result {
-                            Ok((device, available_devices)) => {
+                            Ok((device, available_devices, gpu_memory)) => {
                                 info!(
                                     "Initial device load successful: device={device}, available_devices={available_devices:?}"
                                 );
                                 cosmic::Action::App(Message::DeviceInfoLoaded(
                                     device,
                                     available_devices,
+                                    gpu_memory,
                                 ))
                             }
                             Err(e) => {
