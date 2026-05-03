@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Error, Result};
+use async_trait::async_trait;
 use candle_core::{DType, Device, Tensor, utils};
 use candle_nn::VarBuilder;
 use candle_transformers::models::voxtral::{
@@ -15,23 +16,20 @@ use tekken::Tekkenizer;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
 use super_stt_shared::{
-    stt_model::STTModel,
+    models::provider::Provider,
     utils::audio::{ResampleQuality, resample},
 };
 
-const SAMPLE_RATE: u32 = 16000;
+use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
 
-#[derive(Debug, serde::Serialize)]
-pub struct TranscriptionResult {
-    pub text: String,
-    pub tokens: Vec<u32>,
-}
+const SAMPLE_RATE: u32 = 16000;
 
 pub struct VoxtralModel {
     model: VoxtralForConditionalGeneration,
     tokenizer: Tekkenizer,
     device: Device,
     config: VoxtralConfig,
+    info: ModelInfoData,
     audio_token_id: usize,
     cache: VoxtralCache,
 }
@@ -45,9 +43,47 @@ impl VoxtralModel {
     ///
     /// Panics if expected file names are not valid UTF-8 or missing
     /// when inspecting cached paths (due to `unwrap()` on file names).
-    pub fn new(stt_model: &STTModel, force_cpu: bool, override_path: Option<&str>) -> Result<Self> {
-        info!("Loading Voxtral {stt_model:?} model...");
+    /// Load a Voxtral model.
+    ///
+    /// - `name`: model name. Used for identity and (when `custom_path` is `None`)
+    ///   to look up the `HuggingFace` repo in the registry.
+    /// - `custom_path`: if `Some`, files are loaded from this directory and the
+    ///   model is treated as custom. If `None`, `name` must match a registry entry.
+    pub fn new(name: &str, custom_path: Option<&Path>, force_cpu: bool) -> Result<Self> {
+        info!(
+            "Loading Voxtral {name} model (custom={})",
+            custom_path.is_some()
+        );
 
+        let (file_paths, info) = if let Some(path) = custom_path {
+            let files = crate::stt_models::local::download::get_custom_model_file_paths(path)?;
+            (
+                files,
+                ModelInfoData::custom(
+                    name.to_string(),
+                    super_stt_shared::models::provider::Provider::LocalVoxtral,
+                ),
+            )
+        } else {
+            let info = ModelInfoData::standard(name, Provider::LocalVoxtral)
+                .ok_or_else(|| anyhow::anyhow!("Unknown built-in model: {name}"))?;
+            let def = info
+                .definition
+                .expect("standard() returned Some so definition must be set");
+            let files = crate::stt_models::local::download::get_model_file_paths(def)?;
+            (files, info)
+        };
+
+        Self::load_from_paths(&file_paths, force_cpu, info)
+    }
+
+    /// Internal helper that builds a `VoxtralModel` from concrete file paths +
+    /// pre-built `ModelInfoData`. All public constructors funnel through here.
+    fn load_from_paths(
+        file_paths: &[PathBuf],
+        force_cpu: bool,
+        info: ModelInfoData,
+    ) -> Result<Self> {
         // Determine device
         let device = if !force_cpu && utils::cuda_is_available() {
             info!("Using CUDA device");
@@ -60,10 +96,6 @@ impl VoxtralModel {
             }
             Device::Cpu
         };
-
-        // Get file paths from the unified download system
-        let file_paths =
-            crate::stt_models::local::download::get_model_file_paths(stt_model, override_path)?;
 
         // Extract the specific files we need
         let config_path = file_paths
@@ -119,38 +151,13 @@ impl VoxtralModel {
             tokenizer,
             device,
             config,
+            info,
             audio_token_id,
             cache,
         })
     }
 
-    /// Transcribe audio and return both text and tokens
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the audio data cannot be transcribed.
-    pub fn transcribe_audio_with_tokens(
-        &mut self,
-        audio_data: &[f32],
-        sample_rate: u32,
-    ) -> Result<TranscriptionResult> {
-        let (transcription, tokens) = self.transcribe_audio_internal(audio_data, sample_rate)?;
-
-        Ok(TranscriptionResult {
-            text: transcription,
-            tokens,
-        })
-    }
-
-    /// # Errors
-    ///
-    /// Returns an error if the audio data cannot be transcribed.
-    pub fn transcribe_audio(&mut self, audio_data: &[f32], sample_rate: u32) -> Result<String> {
-        let (transcription, _) = self.transcribe_audio_internal(audio_data, sample_rate)?;
-        Ok(transcription)
-    }
-
-    /// Internal transcribe method that returns both text and tokens
+    /// Internal transcribe method.
     ///
     /// # Errors
     ///
@@ -159,7 +166,7 @@ impl VoxtralModel {
         &mut self,
         audio_data: &[f32],
         sample_rate: u32,
-    ) -> Result<(String, Vec<u32>)> {
+    ) -> Result<String> {
         // Resample to 16kHz if needed
         let audio = if sample_rate == SAMPLE_RATE {
             audio_data.to_vec()
@@ -190,7 +197,7 @@ impl VoxtralModel {
 
         let audio_features = audio::extract_features(&padded_audio, &mel_filters, &self.device)?;
 
-        let (result, tokens) = transcribe_with_voxtral(
+        let (result, _tokens) = transcribe_with_voxtral(
             &self.model,
             &self.tokenizer,
             &audio_features,
@@ -199,17 +206,31 @@ impl VoxtralModel {
             &self.cache.clone(),
         )?;
 
-        Ok((result, tokens))
-    }
-
-    #[must_use]
-    pub fn device(&self) -> &Device {
-        &self.device
+        Ok(result)
     }
 
     #[must_use]
     pub fn config(&self) -> &VoxtralConfig {
         &self.config
+    }
+}
+
+impl ModelInfo for VoxtralModel {
+    fn info(&self) -> &ModelInfoData {
+        &self.info
+    }
+}
+
+impl ModelState for VoxtralModel {
+    fn device(&self) -> &Device {
+        &self.device
+    }
+}
+
+#[async_trait]
+impl Transcribe for VoxtralModel {
+    async fn transcribe_audio(&mut self, audio: &[f32], sample_rate: u32) -> Result<String> {
+        self.transcribe_audio_internal(audio, sample_rate)
     }
 }
 

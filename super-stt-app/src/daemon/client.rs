@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use super_stt_shared::stt_model::STTModel;
 
 use crate::state::AudioTheme;
 
@@ -193,18 +192,48 @@ pub async fn ping_daemon(socket_path: PathBuf) -> Result<String, String> {
     super_stt_shared::daemon::client::ping_daemon(socket_path, get_client_id()).await
 }
 
-/// Get current loaded model from daemon
-pub async fn get_current_model(socket_path: PathBuf) -> Result<STTModel, String> {
+/// Get current loaded model from daemon as `(name, provider, source)`.
+pub async fn get_current_model(
+    socket_path: PathBuf,
+) -> Result<
+    (
+        String,
+        super_stt_shared::models::provider::Provider,
+        super_stt_shared::models::registry::SourceKind,
+    ),
+    String,
+> {
     super_stt_shared::daemon::client::get_current_model(socket_path, get_client_id()).await
 }
 
-/// Set/switch to a different model
-pub async fn set_model(socket_path: PathBuf, model: STTModel) -> Result<String, String> {
-    super_stt_shared::daemon::client::set_model(socket_path, model, get_client_id()).await
+/// Set/switch to a different model identified by `(name, provider, source)`.
+pub async fn set_model(
+    socket_path: PathBuf,
+    model: String,
+    provider: super_stt_shared::models::provider::Provider,
+    source: super_stt_shared::models::registry::SourceKind,
+) -> Result<String, String> {
+    super_stt_shared::daemon::client::set_model(
+        socket_path,
+        &model,
+        provider,
+        source,
+        get_client_id(),
+    )
+    .await
 }
 
 /// List all available models from daemon
-pub async fn list_available_models(socket_path: PathBuf) -> Result<Vec<STTModel>, String> {
+pub async fn list_available_models(
+    socket_path: PathBuf,
+) -> Result<
+    Vec<(
+        String,
+        super_stt_shared::models::provider::Provider,
+        super_stt_shared::models::registry::SourceKind,
+    )>,
+    String,
+> {
     super_stt_shared::daemon::client::list_available_models(socket_path, get_client_id()).await
 }
 
@@ -292,12 +321,12 @@ pub async fn get_allow_online_models(socket_path: PathBuf) -> Result<bool, Strin
     super_stt_shared::daemon::client::get_allow_online_models(socket_path, get_client_id()).await
 }
 
-/// Set model override path on daemon
-pub async fn set_model_override_path(
+/// Set custom models directory on daemon
+pub async fn set_custom_models_dir(
     socket_path: PathBuf,
     path: Option<String>,
 ) -> Result<(), String> {
-    super_stt_shared::daemon::client::set_model_override_path(
+    super_stt_shared::daemon::client::set_custom_models_dir(
         socket_path,
         path.as_deref(),
         get_client_id(),

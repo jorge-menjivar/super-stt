@@ -5,28 +5,28 @@ use cosmic::widget::{self, button, settings, space::horizontal as horizontal_spa
 use cosmic::{Apply, Element};
 use super_stt_shared::models::protocol::DownloadProgress;
 use super_stt_shared::models::provider::{OnlineProvider, Provider};
-use super_stt_shared::stt_model::STTModel;
+use super_stt_shared::models::registry::{self, SourceKind};
 
 use super::common::{go_next_with_item, page_layout};
 use crate::core::app::ModelOperationState;
 use crate::state::ContextPage;
 use crate::ui::messages::Message;
 
-/// Model storage section: model override path
-fn model_storage_section<'a>(
-    model_override_path: Option<&'a str>,
-    model_override_path_input: &'a str,
+/// Custom models directory section
+fn custom_models_section<'a>(
+    custom_models_dir: Option<&'a str>,
+    custom_models_dir_input: &'a str,
     editing: bool,
 ) -> Element<'a, Message> {
     let display_value = if editing {
-        model_override_path_input
+        custom_models_dir_input
     } else {
-        model_override_path.unwrap_or("")
+        custom_models_dir.unwrap_or("")
     };
 
-    let mut input = widget::text_input("Path to model files...", display_value);
+    let mut input = widget::text_input("Path to custom models directory...", display_value);
     if editing {
-        input = input.on_input(Message::ModelOverridePathInput);
+        input = input.on_input(Message::CustomModelsDirInput);
     }
 
     let mut buttons: Vec<Element<'_, Message>> = Vec::new();
@@ -34,30 +34,30 @@ fn model_storage_section<'a>(
     if editing {
         buttons.push(
             button::standard("Apply")
-                .on_press(Message::ModelOverridePathSet(
-                    if model_override_path_input.trim().is_empty() {
+                .on_press(Message::CustomModelsDirSet(
+                    if custom_models_dir_input.trim().is_empty() {
                         None
                     } else {
-                        Some(model_override_path_input.trim().to_string())
+                        Some(custom_models_dir_input.trim().to_string())
                     },
                 ))
                 .into(),
         );
         buttons.push(
             button::text("Cancel")
-                .on_press(Message::ModelOverridePathEdit(false))
+                .on_press(Message::CustomModelsDirEdit(false))
                 .into(),
         );
     } else {
         buttons.push(
             button::standard("Edit")
-                .on_press(Message::ModelOverridePathEdit(true))
+                .on_press(Message::CustomModelsDirEdit(true))
                 .into(),
         );
-        if model_override_path.is_some() {
+        if custom_models_dir.is_some() {
             buttons.push(
                 button::destructive("Reset")
-                    .on_press(Message::ModelOverridePathSet(None))
+                    .on_press(Message::CustomModelsDirSet(None))
                     .into(),
             );
         }
@@ -70,13 +70,13 @@ fn model_storage_section<'a>(
     .spacing(8);
 
     settings::section()
-        .title("Model Storage")
+        .title("Custom Models Location")
         .add(
-            settings::item::builder("Model Override Path")
+            settings::item::builder("Custom Models Directory")
                 .description(
-                    "Models here override the default cache. \
-                     Copy a HuggingFace model dir renamed to its model name \
-                     (e.g. whisper-small/snapshots/main/).",
+                    "Add custom or fine-tuned models by placing them in this directory. \
+                     Each subdirectory with a config.json is detected as a model \
+                     (e.g. hf download my-org/whisper-medical --local-dir ./custom-models/whisper-medical).",
                 )
                 .flex_control(controls),
         )
@@ -84,7 +84,7 @@ fn model_storage_section<'a>(
 }
 
 /// Model section when ready: shows model picker (context drawer)
-fn model_ready_section(current_model: &STTModel) -> Element<'_, Message> {
+fn model_ready_section(current_model: &str) -> Element<'_, Message> {
     settings::section()
         .title("Speech-to-Text Model")
         .add(go_next_with_item(
@@ -97,10 +97,10 @@ fn model_ready_section(current_model: &STTModel) -> Element<'_, Message> {
 
 /// Model section when downloading
 #[allow(clippy::cast_precision_loss)]
-fn model_downloading_section(
-    target_model: STTModel,
-    progress: &DownloadProgress,
-) -> Element<'_, Message> {
+fn model_downloading_section<'a>(
+    target_model: &'a String,
+    progress: &'a DownloadProgress,
+) -> Element<'a, Message> {
     let progress_fraction = if progress.percentage < 0.0 || progress.percentage > 100.0 {
         log::warn!(
             "Invalid progress percentage: {} (must be 0-100)",
@@ -165,7 +165,10 @@ fn model_downloading_section(
 }
 
 /// Model section when loading
-fn model_loading_section(target_model: STTModel, status_message: &str) -> Element<'_, Message> {
+fn model_loading_section<'a>(
+    target_model: &'a String,
+    status_message: &'a str,
+) -> Element<'a, Message> {
     let status_text = format!("Loading {target_model}: {status_message}");
 
     let details_widget = column![
@@ -191,7 +194,11 @@ fn model_error_section(error_message: &str) -> Element<'_, Message> {
         ]
         .spacing(cosmic::theme::spacing().space_xs)
         .align_y(cosmic::iced::Alignment::Center),
-        widget::button::standard("Dismiss").on_press(Message::ModelChanged(STTModel::default())),
+        widget::button::standard("Dismiss").on_press(Message::ModelChanged {
+            model: registry::default_definition().name.to_string(),
+            provider: registry::default_definition().provider,
+            source: registry::default_definition().source.kind(),
+        }),
     ]
     .spacing(cosmic::theme::spacing().space_s);
 
@@ -247,11 +254,16 @@ fn format_size(bytes: u64) -> String {
 /// `effective_free_vram` is the GPU memory that would be available after unloading
 /// the current model (None if GPU is off or unknown).
 fn model_row(
-    model: STTModel,
-    current_model: STTModel,
+    model: &str,
+    provider: Provider,
+    source: SourceKind,
+    current_model: &str,
+    current_provider: Provider,
+    current_source: SourceKind,
     effective_free_vram: Option<u64>,
 ) -> Element<'static, Message> {
-    let selected = model == current_model;
+    let selected =
+        model == current_model && provider == current_provider && source == current_source;
 
     let svg_accent = |theme: &cosmic::theme::Theme| {
         let accent = theme.cosmic().accent_color();
@@ -260,7 +272,8 @@ fn model_row(
         }
     };
 
-    let vram_required = model.estimated_vram_bytes();
+    // VRAM info is only available for standard models
+    let vram_required = registry::find_by(model, provider).map_or(0, |d| d.estimated_vram_bytes);
     let size_label = format_size(vram_required);
     let wont_fit =
         vram_required > 0 && effective_free_vram.is_some_and(|free| vram_required > free);
@@ -301,6 +314,7 @@ fn model_row(
         horizontal_space().width(16.).into()
     });
 
+    let model_owned = model.to_string();
     settings::item_row(items)
         .apply(widget::container)
         .width(Length::Fill)
@@ -308,120 +322,98 @@ fn model_row(
         .apply(widget::button::custom)
         .width(Length::Fill)
         .class(cosmic::theme::Button::Transparent)
-        .on_press(Message::ModelSelected(model))
+        .on_press(Message::ModelSelected {
+            model: model_owned,
+            provider,
+            source,
+        })
         .into()
 }
 
 /// Build the model selection list for the context drawer (font-picker pattern).
 /// `gpu_memory` is `Some((free, total))` when GPU is enabled, used to warn about models that won't fit.
 pub fn model_selection_list(
-    available_models: Vec<STTModel>,
-    current_model: STTModel,
+    available_models: &[(String, Provider, SourceKind)],
+    current_model: &str,
+    current_provider: Provider,
+    current_source: SourceKind,
     search: &str,
     gpu_enabled: bool,
     gpu_memory: super_stt_shared::daemon::client::GpuMemoryInfo,
 ) -> Element<'static, Message> {
     // Effective free VRAM = current free + what the current model uses (it gets unloaded on switch)
+    let current_vram =
+        registry::find_by(current_model, current_provider).map_or(0, |d| d.estimated_vram_bytes);
     let effective_free_vram = if gpu_enabled {
-        gpu_memory.map(|(free, _total)| free + current_model.estimated_vram_bytes())
+        gpu_memory.map(|(free, _total)| free + current_vram)
     } else {
         None
     };
+
     let search_lower = search.to_lowercase();
-    let models: Vec<STTModel> = if search.is_empty() {
-        available_models
+    let models: Vec<&(String, Provider, SourceKind)> = if search.is_empty() {
+        available_models.iter().collect()
     } else {
         available_models
-            .into_iter()
-            .filter(|m| m.to_string().to_lowercase().contains(&search_lower))
+            .iter()
+            .filter(|(name, _, _)| name.to_lowercase().contains(&search_lower))
             .collect()
     };
 
-    let local: Vec<STTModel> = models
-        .iter()
-        .filter(|m| m.providers().contains(&Provider::Local))
-        .copied()
-        .collect();
+    // Partition by (provider, source). Customs go to their own section
+    // regardless of underlying engine.
+    let mut local: Vec<&(String, Provider, SourceKind)> = Vec::new();
+    let mut openai: Vec<&(String, Provider, SourceKind)> = Vec::new();
+    let mut mistral: Vec<&(String, Provider, SourceKind)> = Vec::new();
+    let mut deepgram: Vec<&(String, Provider, SourceKind)> = Vec::new();
+    let mut custom: Vec<&(String, Provider, SourceKind)> = Vec::new();
 
-    // Group online models by provider
-    let openai: Vec<STTModel> = models
-        .iter()
-        .filter(|m| {
-            m.providers()
-                .contains(&Provider::Online(OnlineProvider::OpenAI))
-        })
-        .copied()
-        .collect();
-    let mistral: Vec<STTModel> = models
-        .iter()
-        .filter(|m| {
-            m.providers()
-                .contains(&Provider::Online(OnlineProvider::Mistral))
-                && !m.providers().contains(&Provider::Local)
-        })
-        .copied()
-        .collect();
-    let deepgram: Vec<STTModel> = models
-        .iter()
-        .filter(|m| {
-            m.providers()
-                .contains(&Provider::Online(OnlineProvider::Deepgram))
-        })
-        .copied()
-        .collect();
+    for entry in &models {
+        if matches!(entry.2, SourceKind::Custom) {
+            custom.push(entry);
+            continue;
+        }
+        match entry.1 {
+            Provider::LocalWhisper | Provider::LocalVoxtral => local.push(entry),
+            Provider::Online(OnlineProvider::OpenAI) => openai.push(entry),
+            Provider::Online(OnlineProvider::Mistral) => mistral.push(entry),
+            Provider::Online(OnlineProvider::Deepgram) => deepgram.push(entry),
+        }
+    }
+
+    let render_section = |title: &str, entries: Vec<&(String, Provider, SourceKind)>| {
+        let list =
+            entries
+                .into_iter()
+                .fold(widget::list_column(), |list, (name, provider, source)| {
+                    list.add(model_row(
+                        name,
+                        *provider,
+                        *source,
+                        current_model,
+                        current_provider,
+                        current_source,
+                        effective_free_vram,
+                    ))
+                });
+        column![text::title4(title.to_string()), list].spacing(cosmic::theme::spacing().space_xxs)
+    };
 
     let mut sections: Vec<Element<'static, Message>> = Vec::new();
-
+    if !custom.is_empty() {
+        sections.push(render_section("Custom", custom).into());
+    }
     if !local.is_empty() {
-        let list = local
-            .into_iter()
-            .fold(widget::list_column(), |list, model| {
-                list.add(model_row(model, current_model, effective_free_vram))
-            });
-        sections.push(
-            column![text::title4("Local"), list]
-                .spacing(cosmic::theme::spacing().space_xxs)
-                .into(),
-        );
+        sections.push(render_section("Local", local).into());
     }
-
     if !openai.is_empty() {
-        let list = openai
-            .into_iter()
-            .fold(widget::list_column(), |list, model| {
-                list.add(model_row(model, current_model, effective_free_vram))
-            });
-        sections.push(
-            column![text::title4("OpenAI (online)"), list]
-                .spacing(cosmic::theme::spacing().space_xxs)
-                .into(),
-        );
+        sections.push(render_section("OpenAI (online)", openai).into());
     }
-
     if !mistral.is_empty() {
-        let list = mistral
-            .into_iter()
-            .fold(widget::list_column(), |list, model| {
-                list.add(model_row(model, current_model, effective_free_vram))
-            });
-        sections.push(
-            column![text::title4("Mistral (online)"), list]
-                .spacing(cosmic::theme::spacing().space_xxs)
-                .into(),
-        );
+        sections.push(render_section("Mistral (online)", mistral).into());
     }
-
     if !deepgram.is_empty() {
-        let list = deepgram
-            .into_iter()
-            .fold(widget::list_column(), |list, model| {
-                list.add(model_row(model, current_model, effective_free_vram))
-            });
-        sections.push(
-            column![text::title4("Deepgram (online)"), list]
-                .spacing(cosmic::theme::spacing().space_xxs)
-                .into(),
-        );
+        sections.push(render_section("Deepgram (online)", deepgram).into());
     }
 
     column(sections)
@@ -482,12 +474,12 @@ pub fn model_drawer_header<'a>(
 
 /// Models page view
 pub fn page<'a>(
-    current_model: &'a STTModel,
+    current_model: &'a str,
     model_operation_state: &'a ModelOperationState,
     device_state: &'a crate::core::app::DeviceState,
-    model_override_path: Option<&'a str>,
-    model_override_path_input: &'a str,
-    model_override_path_editing: bool,
+    custom_models_dir: Option<&'a str>,
+    custom_models_dir_input: &'a str,
+    custom_models_dir_editing: bool,
 ) -> Element<'a, Message> {
     let model_section = match model_operation_state {
         ModelOperationState::Ready => {
@@ -504,18 +496,18 @@ pub fn page<'a>(
         ModelOperationState::Downloading {
             target_model,
             progress,
-        } => model_downloading_section(*target_model, progress),
+        } => model_downloading_section(target_model, progress),
         ModelOperationState::Loading {
             target_model,
             status_message,
-        } => model_loading_section(*target_model, status_message),
+        } => model_loading_section(target_model, status_message),
         ModelOperationState::Error { message } => model_error_section(message),
     };
 
-    let storage_section = model_storage_section(
-        model_override_path,
-        model_override_path_input,
-        model_override_path_editing,
+    let storage_section = custom_models_section(
+        custom_models_dir,
+        custom_models_dir_input,
+        custom_models_dir_editing,
     );
 
     page_layout(

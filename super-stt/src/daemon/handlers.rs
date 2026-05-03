@@ -5,11 +5,11 @@ use chrono::Utc;
 use log::{error, info, warn};
 use serde_json::Value;
 use std::collections::HashMap;
-use strum::VariantArray;
 use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::models::registry;
 use super_stt_shared::models::write_method::WriteMethod;
-use super_stt_shared::stt_model::STTModel;
 use super_stt_shared::theme::AudioTheme;
 
 impl SuperSTTDaemon {
@@ -31,21 +31,18 @@ impl SuperSTTDaemon {
     /// Handle status command - return daemon and model status
     pub async fn handle_status(&self) -> DaemonResponse {
         let model_guard = self.model.read().await;
-        let model_type_guard = self.model_type.read().await;
 
-        let (device, model_loaded) = match model_guard.as_ref() {
-            Some(model) => {
-                let device_str = match model.device() {
+        let (device, model_loaded, current_model) = match model_guard.as_ref() {
+            Some(loaded) => {
+                let device_str = match loaded.instance.device() {
                     candle_core::Device::Cpu => "cpu".to_string(),
                     candle_core::Device::Cuda(_) => "cuda".to_string(),
                     candle_core::Device::Metal(_) => "metal".to_string(),
                 };
-                (device_str, true)
+                (device_str, true, Some(loaded.definition.name.to_string()))
             }
-            None => ("unknown".to_string(), false),
+            None => ("unknown".to_string(), false, None),
         };
-
-        let model = model_type_guard.as_ref();
 
         let notification_info = self.notification_manager.get_subscriber_info();
 
@@ -54,8 +51,8 @@ impl SuperSTTDaemon {
             .with_model_loaded(model_loaded)
             .with_notification_info(notification_info);
 
-        if let Some(model) = model {
-            response = response.with_current_model(*model);
+        if let Some(model) = current_model {
+            response = response.with_current_model(model);
         }
 
         response
@@ -236,18 +233,58 @@ impl SuperSTTDaemon {
             .with_message("Daemon configuration retrieved successfully".to_string())
     }
 
-    /// Handle list all available models command
-    #[must_use]
-    pub fn handle_list_models(&self) -> DaemonResponse {
-        let available_models = STTModel::VARIANTS.to_vec();
+    /// Handle list all available models command (built-in + custom)
+    pub async fn handle_list_models(&self) -> DaemonResponse {
+        let mut available_models: Vec<(
+            String,
+            super_stt_shared::models::provider::Provider,
+            super_stt_shared::models::registry::SourceKind,
+        )> = registry::ALL
+            .iter()
+            .map(|d| (d.name.to_string(), d.provider, d.source.kind()))
+            .collect();
+
+        // Append custom models
+        let custom = self.custom_models.read().await;
+        for cm in custom.iter() {
+            available_models.push((
+                cm.name.clone(),
+                cm.provider,
+                super_stt_shared::models::registry::SourceKind::Custom,
+            ));
+        }
+
         info!(
-            "Available models requested, returning {} models",
-            available_models.len()
+            "Available models requested, returning {} models ({} custom)",
+            available_models.len(),
+            custom.len()
         );
 
         DaemonResponse::success()
             .with_available_models(available_models)
             .with_message("Available models listed successfully".to_string())
+    }
+
+    /// Re-scan `custom_models_dir` and update the registry.
+    pub async fn refresh_custom_models(&self) {
+        let dir = self
+            .config
+            .read()
+            .await
+            .transcription
+            .custom_models_dir
+            .clone();
+
+        let models = if let Some(dir) = dir {
+            crate::stt_models::local::download::discover_custom_models(&std::path::PathBuf::from(
+                dir,
+            ))
+        } else {
+            Vec::new()
+        };
+
+        info!("Custom models registry: {} model(s)", models.len());
+        *self.custom_models.write().await = models;
     }
 
     /// Handle list audio themes command - return all available audio themes
@@ -395,14 +432,20 @@ impl SuperSTTDaemon {
         // If disabling online models and current model is online, revert to default
         if !enabled {
             let current_is_online = {
-                let provider = self.model_provider.read().await;
-                provider.is_some_and(|p| p.is_online())
+                let guard = self.model.read().await;
+                guard
+                    .as_ref()
+                    .is_some_and(|loaded| matches!(loaded.definition.provider, Provider::Online(_)))
             };
             if current_is_online {
                 info!("Online models disabled; reverting to default local model");
-                let default_model = STTModel::default();
+                let default = registry::default_definition();
                 let _ = self
-                    .handle_set_model(default_model, default_model.default_provider())
+                    .handle_set_model(
+                        default.name.to_string(),
+                        default.provider,
+                        default.source.kind(),
+                    )
                     .await;
             }
         }
@@ -447,27 +490,30 @@ impl SuperSTTDaemon {
             .with_message("Allow online models setting retrieved".to_string())
     }
 
-    /// Handle set custom model path command
-    pub async fn handle_set_model_override_path(&self, path: Option<String>) -> DaemonResponse {
-        let path_display = path.as_deref().unwrap_or("default").to_string();
+    /// Handle set custom models directory command
+    pub async fn handle_set_custom_models_dir(&self, path: Option<String>) -> DaemonResponse {
+        let path_display = path.as_deref().unwrap_or("none").to_string();
 
         {
             let mut config_guard = self.config.write().await;
-            config_guard.transcription.model_override_path = path;
+            config_guard.transcription.custom_models_dir = path;
         }
+
+        // Re-scan the new directory
+        self.refresh_custom_models().await;
 
         let broadcast_result = self.broadcast_config_change().await;
 
         match broadcast_result {
             Ok(()) => {
-                info!("Model override path set to {path_display} and saved to config");
+                info!("Custom models directory set to {path_display} and saved to config");
                 DaemonResponse::success()
-                    .with_message(format!("Model override path set to {path_display}"))
+                    .with_message(format!("Custom models directory set to {path_display}"))
             }
             Err(e) => {
-                warn!("Model override path changed but failed to save: {e}");
+                warn!("Custom models directory changed but failed to save: {e}");
                 DaemonResponse::success().with_message(format!(
-                    "Model override path set to {path_display} (save failed: {e})"
+                    "Custom models directory set to {path_display} (save failed: {e})"
                 ))
             }
         }

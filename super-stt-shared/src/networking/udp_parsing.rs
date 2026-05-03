@@ -36,7 +36,7 @@ pub fn parse_audio_samples_from_udp(data: &[u8]) -> Result<AudioSamplesData, Str
     let audio_data = &data[11..];
     let audio_len = audio_data.len();
     if audio_len < 10 {
-        error!("Audio data too short: {audio_len} bytes (need at least 10)",);
+        error!("Audio data too short: {audio_len} bytes (need at least 10)");
         return Err("Audio samples data too short".to_string());
     }
 

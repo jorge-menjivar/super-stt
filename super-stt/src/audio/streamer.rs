@@ -296,7 +296,7 @@ impl UdpAudioStreamer {
                     _ = interval.tick() => {
                         let mut clients_guard = clients.write().await;
                         let now = Instant::now();
-                        let stale_timeout = Duration::from_secs(300); // 5 minutes
+                        let stale_timeout = Duration::from_mins(5);
 
                         let stale_clients: Vec<String> = clients_guard
                             .iter()

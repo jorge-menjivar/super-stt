@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::daemon::types::{STTModelInstance, SuperSTTDaemon};
+use crate::daemon::types::SuperSTTDaemon;
 use chrono::Utc;
 use log::{debug, error, info, warn};
 use std::sync::Arc;
@@ -123,15 +123,21 @@ impl SuperSTTDaemon {
         // Check if the model is online to choose async vs blocking path
         let is_online = {
             let guard = model_clone.read().await;
-            guard.as_ref().is_some_and(STTModelInstance::is_online)
+            guard
+                .as_ref()
+                .is_some_and(|loaded| loaded.instance.is_online())
         };
 
         let transcription_result = if is_online {
             // Async path for online models (API call)
             let start_time = std::time::Instant::now();
-            let model_guard = model_clone.read().await;
-            if let Some(model) = model_guard.as_ref() {
-                match model.transcribe_audio_online(&processed_audio, 16000).await {
+            let mut model_guard = model_clone.write().await;
+            if let Some(loaded) = model_guard.as_mut() {
+                match loaded
+                    .instance
+                    .transcribe_audio(&processed_audio, 16000)
+                    .await
+                {
                     Ok(text) => {
                         let duration = start_time.elapsed();
                         info!("Online transcription completed in {duration:?}: '{text}'");
@@ -150,11 +156,13 @@ impl SuperSTTDaemon {
         } else {
             // Blocking path for local models
             tokio::task::spawn_blocking(move || {
+                let handle = tokio::runtime::Handle::current();
                 let start_time = std::time::Instant::now();
                 let mut model_guard = model_clone.blocking_write();
 
-                if let Some(model) = model_guard.as_mut() {
-                    match model.transcribe_audio(&processed_audio, 16000) {
+                if let Some(loaded) = model_guard.as_mut() {
+                    match handle.block_on(loaded.instance.transcribe_audio(&processed_audio, 16000))
+                    {
                         Ok(text) => {
                             let duration = start_time.elapsed();
                             info!("Transcription completed in {duration:?}: '{text}'");

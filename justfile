@@ -84,7 +84,7 @@ build-vendored *args: vendor-extract
 
 # Runs a clippy check
 check *args:
-    cargo clippy --all-features --workspace {{args}} -- -W clippy::pedantic -D warnings
+    cargo clippy --all-features --workspace {{args}} -- -W clippy::pedantic -D warnings -D unused_must_use
 
 # Runs a clippy check with JSON message format
 check-json: (check '--message-format=json')

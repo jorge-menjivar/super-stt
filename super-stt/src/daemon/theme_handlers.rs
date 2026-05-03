@@ -34,7 +34,7 @@ impl SuperSTTDaemon {
         });
 
         DaemonResponse::success()
-            .with_message(format!("Audio theme set to: {theme}",))
+            .with_message(format!("Audio theme set to: {theme}"))
             .with_audio_theme(theme_str)
     }
 
@@ -44,7 +44,7 @@ impl SuperSTTDaemon {
         let current_theme = self.get_audio_theme();
         DaemonResponse::success()
             .with_audio_theme(current_theme.to_string())
-            .with_message(format!("Current theme: {current_theme}",))
+            .with_message(format!("Current theme: {current_theme}"))
     }
 
     /// Handle set volume command

@@ -5,8 +5,8 @@ use std::fs;
 use std::path::PathBuf;
 use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::models::registry::{self, SourceKind};
 use super_stt_shared::models::write_method::WriteMethod;
-use super_stt_shared::stt_model::STTModel;
 use super_stt_shared::theme::AudioTheme;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,9 +44,11 @@ pub struct OnlineConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionConfig {
-    pub preferred_model: STTModel,
+    pub preferred_model: String,
     #[serde(default)]
     pub preferred_provider: Provider,
+    #[serde(default)]
+    pub preferred_source: SourceKind,
     pub write_mode: bool, // Auto-type transcriptions
     #[serde(default)] // For backwards compatibility with existing configs
     pub preview_typing_enabled: bool, // Beta feature: show preview while typing
@@ -55,7 +57,7 @@ pub struct TranscriptionConfig {
     #[serde(default)]
     pub write_method: WriteMethod,
     #[serde(default)]
-    pub model_override_path: Option<String>,
+    pub custom_models_dir: Option<String>,
 }
 
 impl Default for DaemonConfig {
@@ -69,13 +71,14 @@ impl Default for DaemonConfig {
                 volume: default_volume(),
             },
             transcription: TranscriptionConfig {
-                preferred_model: STTModel::default(),
-                preferred_provider: Provider::default(),
+                preferred_model: registry::default_definition().name.to_string(),
+                preferred_provider: registry::default_definition().provider,
+                preferred_source: registry::default_definition().source.kind(),
                 write_mode: false,             // Default to not auto-typing
                 preview_typing_enabled: false, // Default to disabled (beta feature)
                 recording_stop_mode: RecordingStopMode::default(),
                 write_method: WriteMethod::default(),
-                model_override_path: None,
+                custom_models_dir: None,
             },
             online: OnlineConfig::default(),
         }
@@ -95,7 +98,11 @@ impl DaemonConfig {
         config_dir.join("daemon.toml")
     }
 
-    /// Load configuration from disk
+    /// Load configuration from disk.
+    ///
+    /// Falls back to defaults when the file is missing or cannot be parsed
+    /// (e.g. after a format change). When falling back, the default config is
+    /// saved to disk so subsequent loads succeed cleanly.
     #[must_use]
     pub fn load() -> Self {
         let config_path = Self::get_config_path();
@@ -105,10 +112,14 @@ impl DaemonConfig {
                 Ok(config) => config,
                 Err(e) => {
                     warn!(
-                        "Failed to parse config file {}: {e}. Using defaults.",
+                        "Failed to parse config file {}: {e}. Resetting to defaults.",
                         config_path.display()
                     );
-                    Self::default()
+                    let config = Self::default();
+                    if let Err(save_err) = config.save() {
+                        error!("Failed to save default config after parse error: {save_err}");
+                    }
+                    config
                 }
             },
             Err(_) => Self::default(),
@@ -152,10 +163,16 @@ impl DaemonConfig {
         }
     }
 
-    /// Update preferred model and provider, and save to disk
-    pub fn update_preferred_model(&mut self, model: STTModel, provider: Provider) {
+    /// Update preferred model + provider + source and save to disk.
+    pub fn update_preferred_model(
+        &mut self,
+        model: String,
+        provider: Provider,
+        source: SourceKind,
+    ) {
         self.transcription.preferred_model = model;
         self.transcription.preferred_provider = provider;
+        self.transcription.preferred_source = source;
         if let Err(e) = self.save() {
             error!("Failed to save config after model update: {e}");
         }
@@ -201,11 +218,11 @@ impl DaemonConfig {
         }
     }
 
-    /// Update model override path and save to disk
-    pub fn update_model_override_path(&mut self, path: Option<String>) {
-        self.transcription.model_override_path = path;
+    /// Update custom models directory and save to disk
+    pub fn update_custom_models_dir(&mut self, path: Option<String>) {
+        self.transcription.custom_models_dir = path;
         if let Err(e) = self.save() {
-            error!("Failed to save config after model override path update: {e}");
+            error!("Failed to save config after custom models dir update: {e}");
         }
     }
 }
@@ -222,7 +239,6 @@ mod tests {
 
     #[test]
     fn config_without_online_section_deserializes() {
-        // Use Rust variant names (serde default serialization for enums)
         let toml_str = r#"
 [device]
 preferred_device = "cpu"
@@ -232,7 +248,7 @@ theme = "Classic"
 volume = 100
 
 [transcription]
-preferred_model = "WhisperTiny"
+preferred_model = "whisper-tiny"
 write_mode = false
 preview_typing_enabled = false
 recording_stop_mode = "SilenceAndManual"
@@ -256,25 +272,26 @@ write_method = "Auto"
     fn config_with_online_model_preferred_round_trips() {
         let mut config = DaemonConfig::default();
         config.online.allow_online_models = true;
-        config.transcription.preferred_model = STTModel::Whisper1;
+        config.transcription.preferred_model = "whisper-1".to_string();
 
         let toml_str = toml::to_string_pretty(&config).expect("should serialize");
         let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
         assert!(parsed.online.allow_online_models);
-        assert_eq!(parsed.transcription.preferred_model, STTModel::Whisper1);
+        assert_eq!(parsed.transcription.preferred_model, "whisper-1");
     }
 
     #[test]
     fn config_preserves_all_online_model_variants() {
-        for model in [
-            STTModel::Whisper1,
-            STTModel::Gpt4oTranscribe,
-            STTModel::Gpt4oMiniTranscribe,
-            STTModel::VoxtralMiniTranscribeV2,
-            STTModel::Nova3,
+        for name in [
+            "whisper-1",
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "voxtral-mini-transcribe-v2",
+            "nova-3",
         ] {
+            let model = name.to_string();
             let mut config = DaemonConfig::default();
-            config.transcription.preferred_model = model;
+            config.transcription.preferred_model = model.clone();
 
             let toml_str = toml::to_string_pretty(&config).expect("should serialize");
             let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
@@ -289,13 +306,13 @@ write_method = "Auto"
     }
 
     #[test]
-    fn default_config_has_no_model_override_path() {
+    fn default_config_has_no_custom_models_dir() {
         let config = DaemonConfig::default();
-        assert!(config.transcription.model_override_path.is_none());
+        assert!(config.transcription.custom_models_dir.is_none());
     }
 
     #[test]
-    fn config_without_model_override_path_deserializes() {
+    fn config_without_custom_models_dir_deserializes() {
         let toml_str = r#"
 [device]
 preferred_device = "cpu"
@@ -305,35 +322,35 @@ theme = "Classic"
 volume = 100
 
 [transcription]
-preferred_model = "WhisperTiny"
+preferred_model = "whisper-tiny"
 write_mode = false
 preview_typing_enabled = false
 recording_stop_mode = "SilenceAndManual"
 write_method = "Auto"
 "#;
         let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
-        assert!(config.transcription.model_override_path.is_none());
+        assert!(config.transcription.custom_models_dir.is_none());
     }
 
     #[test]
-    fn config_with_model_override_path_round_trips() {
+    fn config_with_custom_models_dir_round_trips() {
         let mut config = DaemonConfig::default();
-        config.transcription.model_override_path = Some("/tmp/models".to_string());
+        config.transcription.custom_models_dir = Some("/tmp/models".to_string());
 
         let toml_str = toml::to_string_pretty(&config).expect("should serialize");
         let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
         assert_eq!(
-            parsed.transcription.model_override_path.as_deref(),
+            parsed.transcription.custom_models_dir.as_deref(),
             Some("/tmp/models")
         );
     }
 
     #[test]
-    fn config_with_none_model_override_path_round_trips() {
+    fn config_with_none_custom_models_dir_round_trips() {
         let config = DaemonConfig::default();
 
         let toml_str = toml::to_string_pretty(&config).expect("should serialize");
         let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
-        assert!(parsed.transcription.model_override_path.is_none());
+        assert!(parsed.transcription.custom_models_dir.is_none());
     }
 }

@@ -333,7 +333,7 @@ pub fn get_secure_socket_path() -> std::path::PathBuf {
 
     // Ensure the path starts with expected prefixes
     if !runtime_dir.starts_with("/run/user/") && !runtime_dir.starts_with("/tmp/") {
-        log::warn!("XDG_RUNTIME_DIR outside allowed directories: {runtime_dir}, using fallback",);
+        log::warn!("XDG_RUNTIME_DIR outside allowed directories: {runtime_dir}, using fallback");
         return std::path::PathBuf::from("/tmp/stt/super-stt.sock");
     }
 

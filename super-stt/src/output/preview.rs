@@ -450,8 +450,7 @@ impl Typer {
             let net_change = self.apply_simple_diff(actually_typed, new_text);
 
             // Calculate actual characters on screen based on the net change
-            let new_count = old_char_count + net_change;
-            actual_chars_on_screen = new_count.max(0);
+            actual_chars_on_screen = old_char_count + net_change;
 
             info!(
                 "Replaced: {}{} chars (screen total: {})",

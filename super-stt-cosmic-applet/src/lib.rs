@@ -802,7 +802,7 @@ fn applet_udp_subscription(
 
         let mut buffer = [0u8; 1024];
         let mut rate_limiter = TokenBucketRateLimiter::for_audio_processing();
-        let mut keepalive_interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        let mut keepalive_interval = tokio::time::interval(tokio::time::Duration::from_mins(1));
 
         loop {
             tokio::select! {

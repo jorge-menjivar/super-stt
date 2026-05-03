@@ -2,9 +2,10 @@
 use std::path::PathBuf;
 
 use clap::ValueHint;
+use clap::builder::PossibleValuesParser;
 use clap::{ArgAction, Command, arg, command, value_parser};
 use std::sync::LazyLock;
-use super_stt_shared::stt_model::STTModel;
+use super_stt_shared::models::registry;
 
 // Use LazyLock to avoid leaking string in an uncontrolled way
 pub static DEFAULT_SOCKET_PATH: LazyLock<PathBuf> =
@@ -21,9 +22,11 @@ pub static DEFAULT_SOCKET_PATH_STR: LazyLock<&'static str> = LazyLock::new(|| {
 pub static DEFAULT_TIMEOUT: LazyLock<u64> = LazyLock::new(|| 10);
 pub static DEFAULT_TIMEOUT_STR: LazyLock<&'static str> =
     LazyLock::new(|| Box::leak(DEFAULT_TIMEOUT.to_string().into_boxed_str()));
-pub static DEFAULT_MODEL: LazyLock<STTModel> = LazyLock::new(|| STTModel::WhisperTiny);
-pub static DEFAULT_MODEL_STR: LazyLock<&'static str> =
-    LazyLock::new(|| Box::leak(DEFAULT_MODEL.to_string().into_boxed_str()));
+
+/// Set of valid built-in model names for `--model`. Custom models can also be
+/// passed by name from a configured `custom_models_dir`.
+pub static MODEL_NAMES: LazyLock<Vec<&'static str>> =
+    LazyLock::new(|| registry::ALL.iter().map(|d| d.name.as_ref()).collect());
 
 // Build variant (e.g., "cuda13-cudnn-sm89", "cuda12-sm75", "cpu")
 pub const BUILD_VARIANT: &str = env!("BUILD_VARIANT");
@@ -82,11 +85,10 @@ pub fn build() -> Command {
             .long_about("Get detailed status information from the daemon including model and device information.")
     )
     .arg(
-        arg!(-m --model <model> "The model to use for transcription")
-        .default_value(*DEFAULT_MODEL_STR)
+        arg!(-m --model <model> "Override the saved preferred model for this session")
         .required(false)
         .action(ArgAction::Set)
-        .value_parser(value_parser!(STTModel))
+        .value_parser(PossibleValuesParser::new(MODEL_NAMES.iter().copied()))
     )
     .arg(
         arg!(-s --socket <socket> "The socket to connect to")

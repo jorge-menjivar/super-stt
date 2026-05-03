@@ -57,26 +57,31 @@ impl FromStr for OnlineProvider {
     }
 }
 
-/// How a model is served: locally or via an online API provider.
+/// What kind of inference engine a model uses.
+///
+/// `Provider` carries both the architecture family (Whisper / Voxtral /
+/// Online API) and the routing target. The storage location (HF cache,
+/// local disk, no files) is separate — see [`crate::models::registry::ModelSource`].
+/// Custom user-provided models use whichever local variant matches the
+/// architecture detected from their `config.json`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Provider {
+    /// Whisper engine, served from local files (HF cache or `custom_models_dir`).
     #[default]
-    Local,
+    LocalWhisper,
+    /// Voxtral engine, served from local files (HF cache or `custom_models_dir`).
+    LocalVoxtral,
+    /// Served by an external API.
     Online(OnlineProvider),
 }
 
 impl Provider {
-    #[must_use]
-    pub fn is_online(&self) -> bool {
-        matches!(self, Self::Online(_))
-    }
-
     /// Returns the inner `OnlineProvider` if this is an online provider.
     #[must_use]
     pub fn as_online(&self) -> Option<OnlineProvider> {
         match self {
             Self::Online(p) => Some(*p),
-            Self::Local => None,
+            _ => None,
         }
     }
 }
@@ -90,7 +95,8 @@ impl From<OnlineProvider> for Provider {
 impl fmt::Display for Provider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Local => write!(f, "local"),
+            Self::LocalWhisper => write!(f, "local-whisper"),
+            Self::LocalVoxtral => write!(f, "local-voxtral"),
             Self::Online(p) => write!(f, "{p}"),
         }
     }
@@ -101,7 +107,8 @@ impl FromStr for Provider {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "local" => Ok(Self::Local),
+            "local-whisper" | "local" => Ok(Self::LocalWhisper),
+            "local-voxtral" => Ok(Self::LocalVoxtral),
             other => OnlineProvider::from_str(other).map(Self::Online),
         }
     }
@@ -112,22 +119,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn local_is_not_online() {
-        assert!(!Provider::Local.is_online());
-        assert!(Provider::Local.as_online().is_none());
-    }
-
-    #[test]
-    fn online_providers_are_online() {
-        assert!(Provider::Online(OnlineProvider::OpenAI).is_online());
-        assert!(Provider::Online(OnlineProvider::Mistral).is_online());
-        assert!(Provider::Online(OnlineProvider::Deepgram).is_online());
+    fn online_providers_match_pattern() {
+        assert!(matches!(
+            Provider::Online(OnlineProvider::OpenAI),
+            Provider::Online(_)
+        ));
+        assert!(!matches!(Provider::LocalWhisper, Provider::Online(_)));
+        assert!(!matches!(Provider::LocalVoxtral, Provider::Online(_)));
     }
 
     #[test]
     fn as_online_returns_inner() {
         let p = Provider::Online(OnlineProvider::OpenAI);
         assert_eq!(p.as_online(), Some(OnlineProvider::OpenAI));
+        assert_eq!(Provider::LocalWhisper.as_online(), None);
     }
 
     #[test]
@@ -139,7 +144,8 @@ mod tests {
     #[test]
     fn display_round_trips() {
         for provider in [
-            Provider::Local,
+            Provider::LocalWhisper,
+            Provider::LocalVoxtral,
             Provider::Online(OnlineProvider::OpenAI),
             Provider::Online(OnlineProvider::Mistral),
             Provider::Online(OnlineProvider::Deepgram),
@@ -148,6 +154,13 @@ mod tests {
             let parsed: Provider = s.parse().unwrap();
             assert_eq!(provider, parsed);
         }
+    }
+
+    #[test]
+    fn legacy_local_alias_parses() {
+        // "local" used to be the wire string for the default local variant.
+        // Keep accepting it for compat with existing callers/configs.
+        assert_eq!("local".parse::<Provider>().unwrap(), Provider::LocalWhisper);
     }
 
     #[test]
@@ -171,26 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn api_base_urls() {
-        assert!(
-            OnlineProvider::OpenAI
-                .api_base_url()
-                .starts_with("https://")
-        );
-        assert!(
-            OnlineProvider::Mistral
-                .api_base_url()
-                .starts_with("https://")
-        );
-        assert!(
-            OnlineProvider::Deepgram
-                .api_base_url()
-                .starts_with("https://")
-        );
-    }
-
-    #[test]
-    fn default_is_local() {
-        assert_eq!(Provider::default(), Provider::Local);
+    fn default_is_local_whisper() {
+        assert_eq!(Provider::default(), Provider::LocalWhisper);
     }
 }

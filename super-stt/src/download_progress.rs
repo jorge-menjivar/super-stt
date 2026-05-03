@@ -87,11 +87,7 @@ impl DownloadProgressTracker {
         let eta_seconds = if bytes_downloaded > 0 && total_bytes > bytes_downloaded {
             let remaining_bytes = total_bytes - bytes_downloaded;
             let bytes_per_second = bytes_downloaded / elapsed.max(1);
-            if bytes_per_second > 0 {
-                Some(remaining_bytes / bytes_per_second)
-            } else {
-                None
-            }
+            remaining_bytes.checked_div(bytes_per_second)
         } else {
             None
         };

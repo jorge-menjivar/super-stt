@@ -281,7 +281,7 @@ impl DaemonAudioRecorder {
 
                 // If speech has been detected, rely on silence detection instead of timeout
                 // Only timeout if no speech has been detected at all
-                if !has_detected_speech && elapsed >= Duration::from_secs(60) {
+                if !has_detected_speech && elapsed >= Duration::from_mins(1) {
                     log::warn!("⚠️ Recording timeout: No speech detected within 60 seconds");
                     timeout_occurred = true;
                     break;

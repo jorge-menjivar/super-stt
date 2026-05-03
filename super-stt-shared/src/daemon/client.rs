@@ -6,7 +6,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 use crate::models::protocol::{DaemonRequest, DaemonResponse, DownloadProgress};
-use crate::stt_model::STTModel;
 
 /// Basic daemon connection utility with improved error handling
 async fn connect_to_daemon(socket_path: &PathBuf) -> Result<UnixStream, String> {
@@ -295,17 +294,30 @@ pub async fn test_daemon_connection(socket_path: PathBuf, client_id: &str) -> Re
     ping_daemon(socket_path, client_id).await.map(|_| ())
 }
 
-/// Get current loaded model from daemon
+/// Get current loaded model from daemon as `(name, provider, source)`.
 ///
 /// # Errors
 ///
 /// Returns an error if the request fails or the daemon doesn't return model info.
-pub async fn get_current_model(socket_path: PathBuf, client_id: &str) -> Result<STTModel, String> {
+pub async fn get_current_model(
+    socket_path: PathBuf,
+    client_id: &str,
+) -> Result<
+    (
+        String,
+        crate::models::provider::Provider,
+        crate::models::registry::SourceKind,
+    ),
+    String,
+> {
     let request = create_daemon_request("get_model", client_id);
     let response = send_daemon_request(&socket_path, request).await?;
 
     if response.status == "success" {
-        Ok(response.current_model.unwrap_or_default())
+        let name = response.current_model.unwrap_or_default();
+        let provider = response.current_provider.unwrap_or_default();
+        let source = response.current_source.unwrap_or_default();
+        Ok((name, provider, source))
     } else {
         Err(response
             .message
@@ -313,17 +325,26 @@ pub async fn get_current_model(socket_path: PathBuf, client_id: &str) -> Result<
     }
 }
 
-/// Set/switch to a different model
+/// Set/switch to a different model identified by `(name, provider)`.
+///
+/// The same name can be served by multiple providers (e.g. a local model
+/// also offered by an online API), so both fields are required.
 ///
 /// # Errors
 ///
 /// Returns an error if the model switch request fails.
 pub async fn set_model(
     socket_path: PathBuf,
-    model: STTModel,
+    model: &str,
+    provider: crate::models::provider::Provider,
+    source: crate::models::registry::SourceKind,
     client_id: &str,
 ) -> Result<String, String> {
-    let data = serde_json::json!({ "model": model.to_string() });
+    let data = serde_json::json!({
+        "model": model,
+        "provider": provider.to_string(),
+        "source": source.to_string(),
+    });
     send_daemon_command(socket_path, "set_model", Some(data), client_id).await
 }
 
@@ -335,7 +356,14 @@ pub async fn set_model(
 pub async fn list_available_models(
     socket_path: PathBuf,
     client_id: &str,
-) -> Result<Vec<STTModel>, String> {
+) -> Result<
+    Vec<(
+        String,
+        crate::models::provider::Provider,
+        crate::models::registry::SourceKind,
+    )>,
+    String,
+> {
     let request = create_daemon_request("list_models", client_id);
     let response = send_daemon_request(&socket_path, request).await?;
 
@@ -652,19 +680,19 @@ pub async fn get_allow_online_models(
     }
 }
 
-/// Set model override path on daemon
+/// Set custom models directory on daemon
 ///
 /// Pass `None` to reset to the default `HuggingFace` cache path.
 ///
 /// # Errors
 ///
 /// Returns an error if the request fails.
-pub async fn set_model_override_path(
+pub async fn set_custom_models_dir(
     socket_path: PathBuf,
     path: Option<&str>,
     client_id: &str,
 ) -> Result<(), String> {
-    let mut request = create_daemon_request("set_model_override_path", client_id);
+    let mut request = create_daemon_request("set_custom_models_dir", client_id);
     request.data = Some(serde_json::json!({ "path": path }));
 
     let response = send_daemon_request(&socket_path, request).await?;
@@ -674,7 +702,7 @@ pub async fn set_model_override_path(
     } else {
         Err(response
             .message
-            .unwrap_or_else(|| "Failed to set model override path".to_string()))
+            .unwrap_or_else(|| "Failed to set custom models directory".to_string()))
     }
 }
 

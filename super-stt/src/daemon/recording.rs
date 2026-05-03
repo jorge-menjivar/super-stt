@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::daemon::types::{STTModelInstance, SuperSTTDaemon};
+use crate::daemon::types::SuperSTTDaemon;
 use crate::services::dbus::ListeningEvent;
 use crate::{audio::recorder::DaemonAudioRecorder, output::preview::Typer};
 use anyhow::{Context, Result};
@@ -99,15 +99,14 @@ impl SuperSTTDaemon {
             }
         };
 
-        // Get model processing interval from current model type
+        // Get model processing interval from current model
         let model_processing_interval = {
-            let model_type_guard = self.model_type.read().await;
-            if let Some(model_type) = model_type_guard.as_ref() {
-                model_type.get_processing_interval()
-            } else {
-                // Default interval if no model loaded
-                std::time::Duration::from_millis(2000)
-            }
+            let guard = self.model.read().await;
+            guard
+                .as_ref()
+                .map_or(std::time::Duration::from_secs(2), |loaded| {
+                    loaded.definition.processing_interval
+                })
         };
 
         let actually_typed = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
@@ -259,7 +258,7 @@ impl SuperSTTDaemon {
             }
 
             // Prevent infinite loops with a reasonable timeout
-            if start_time.elapsed() > std::time::Duration::from_secs(60) {
+            if start_time.elapsed() > std::time::Duration::from_mins(1) {
                 warn!("Recording timeout reached, stopping preview loop");
                 break;
             }
@@ -373,13 +372,19 @@ impl SuperSTTDaemon {
         // Check if online to choose async vs blocking path
         let is_online = {
             let guard = model_clone.read().await;
-            guard.as_ref().is_some_and(STTModelInstance::is_online)
+            guard
+                .as_ref()
+                .is_some_and(|loaded| loaded.instance.is_online())
         };
 
         if is_online {
-            let model_guard = model_clone.read().await;
-            if let Some(model) = model_guard.as_ref() {
-                match model.transcribe_audio_online(&processed_audio, 16000).await {
+            let mut model_guard = model_clone.write().await;
+            if let Some(loaded) = model_guard.as_mut() {
+                match loaded
+                    .instance
+                    .transcribe_audio(&processed_audio, 16000)
+                    .await
+                {
                     Ok(text) => Ok(text),
                     Err(e) => {
                         warn!("Online preview transcription failed, continuing: {e}");
@@ -392,9 +397,11 @@ impl SuperSTTDaemon {
             }
         } else {
             let result = tokio::task::spawn_blocking(move || {
+                let handle = tokio::runtime::Handle::current();
                 let mut model_guard = model_clone.blocking_write();
-                if let Some(model) = model_guard.as_mut() {
-                    match model.transcribe_audio(&processed_audio, 16000) {
+                if let Some(loaded) = model_guard.as_mut() {
+                    match handle.block_on(loaded.instance.transcribe_audio(&processed_audio, 16000))
+                    {
                         Ok(text) => text,
                         Err(e) => {
                             warn!("Preview transcription failed, continuing: {e}");
@@ -487,14 +494,20 @@ impl SuperSTTDaemon {
         let model_clone = Arc::clone(&self.model);
         let is_online = {
             let guard = model_clone.read().await;
-            guard.as_ref().is_some_and(STTModelInstance::is_online)
+            guard
+                .as_ref()
+                .is_some_and(|loaded| loaded.instance.is_online())
         };
 
         let transcription_result = if is_online {
             let start_time = std::time::Instant::now();
-            let model_guard = model_clone.read().await;
-            if let Some(model) = model_guard.as_ref() {
-                match model.transcribe_audio_online(&processed_audio, 16000).await {
+            let mut model_guard = model_clone.write().await;
+            if let Some(loaded) = model_guard.as_mut() {
+                match loaded
+                    .instance
+                    .transcribe_audio(&processed_audio, 16000)
+                    .await
+                {
                     Ok(text) => {
                         let duration = start_time.elapsed();
                         info!("Online transcription completed in {duration:?}: '{text}'");
@@ -511,10 +524,12 @@ impl SuperSTTDaemon {
             }
         } else {
             tokio::task::spawn_blocking(move || {
+                let handle = tokio::runtime::Handle::current();
                 let start_time = std::time::Instant::now();
                 let mut model_guard = model_clone.blocking_write();
-                if let Some(model) = model_guard.as_mut() {
-                    match model.transcribe_audio(&processed_audio, 16000) {
+                if let Some(loaded) = model_guard.as_mut() {
+                    match handle.block_on(loaded.instance.transcribe_audio(&processed_audio, 16000))
+                    {
                         Ok(text) => {
                             let duration = start_time.elapsed();
                             info!("Transcription completed in {duration:?}: '{text}'");

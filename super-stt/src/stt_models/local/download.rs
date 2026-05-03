@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::download_progress::DownloadProgressTracker;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use futures::StreamExt;
 use log::{debug, info, warn};
 use ring::digest::{Context, SHA256};
@@ -8,7 +8,8 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use super_stt_shared::stt_model::STTModel;
+use super_stt_shared::models::provider::Provider;
+use super_stt_shared::models::registry::ModelDefinition;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
@@ -154,7 +155,7 @@ async fn download_and_hash_with_cancellation(
 
     crate::install_crypto_provider();
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+        .timeout(std::time::Duration::from_mins(5))
         .connect_timeout(std::time::Duration::from_secs(30))
         .build()?;
 
@@ -237,83 +238,54 @@ async fn download_and_hash_with_cancellation(
     Ok(final_path)
 }
 
-/// Download model files with progress tracking
+/// Download model files with progress tracking.
 ///
 /// # Errors
 ///
-/// Returns an error if any file download, file system operation,
-/// or progress update fails.
-pub async fn with_progress(model: &STTModel, tracker: Arc<DownloadProgressTracker>) -> Result<()> {
-    // Build the file list based on the specific model
-    let mut files = if model.is_voxtral() {
-        vec!["config.json", "tekken.json"]
-    } else {
-        vec!["config.json", "tokenizer.json"]
+/// Returns an error if any file download, file system operation, or progress
+/// update fails.
+pub async fn with_progress(
+    def: &ModelDefinition,
+    tracker: Arc<DownloadProgressTracker>,
+) -> Result<()> {
+    let super_stt_shared::models::registry::ModelSource::HuggingFace { repo, revision, .. } =
+        &def.source
+    else {
+        anyhow::bail!("{}: not a downloadable HuggingFace model", def.name);
     };
 
-    // Add model-specific safetensors files
-    let safetensors_files = match model {
-        STTModel::VoxtralMini => vec![
-            "model-00001-of-00002.safetensors",
-            "model-00002-of-00002.safetensors",
-        ],
-        STTModel::VoxtralSmall => vec![
-            "model-00001-of-00011.safetensors",
-            "model-00002-of-00011.safetensors",
-            "model-00003-of-00011.safetensors",
-            "model-00004-of-00011.safetensors",
-            "model-00005-of-00011.safetensors",
-            "model-00006-of-00011.safetensors",
-            "model-00007-of-00011.safetensors",
-            "model-00008-of-00011.safetensors",
-            "model-00009-of-00011.safetensors",
-            "model-00010-of-00011.safetensors",
-            "model-00011-of-00011.safetensors",
-        ],
-        _ => vec!["model.safetensors"], // Any whisper model
-    };
+    let files = model_filenames(def);
 
-    files.extend(safetensors_files);
-
-    // Set total file count
     tracker.total_files.store(files.len(), Ordering::Relaxed);
-
-    // Broadcast initial progress
     tracker.broadcast_progress().await;
 
-    // Use the model's own method to get the correct model ID and revision
-    let (model_id, revision) = model.model_and_revision();
-
-    // Download each file
     for (index, filename) in files.iter().enumerate() {
         if tracker.is_cancelled() {
             return Err(anyhow::anyhow!("Download was cancelled"));
         }
-
-        cancellable_download(model_id, revision, filename, Arc::clone(&tracker), index).await?;
+        cancellable_download(repo, revision, filename, Arc::clone(&tracker), index).await?;
     }
 
-    // Mark download as complete
     tracker.mark_completed();
     tracker.broadcast_progress().await;
-
     Ok(())
 }
 
-/// Get the expected filenames for a model
-fn model_filenames(model: STTModel) -> Vec<&'static str> {
-    let mut files = if model.is_voxtral() {
+/// File list for a built-in model. Voxtral families ship multi-shard
+/// safetensors; everything else uses a single `model.safetensors`.
+fn model_filenames(def: &ModelDefinition) -> Vec<&'static str> {
+    let mut files = if def.provider == Provider::LocalVoxtral {
         vec!["config.json", "tekken.json"]
     } else {
         vec!["config.json", "tokenizer.json"]
     };
 
-    let safetensors_files = match model {
-        STTModel::VoxtralMini => vec![
+    let safetensors_files: Vec<&'static str> = match def.name.as_ref() {
+        "voxtral-mini" => vec![
             "model-00001-of-00002.safetensors",
             "model-00002-of-00002.safetensors",
         ],
-        STTModel::VoxtralSmall => vec![
+        "voxtral-small" => vec![
             "model-00001-of-00011.safetensors",
             "model-00002-of-00011.safetensors",
             "model-00003-of-00011.safetensors",
@@ -333,52 +305,22 @@ fn model_filenames(model: STTModel) -> Vec<&'static str> {
     files
 }
 
-/// Check if all model files exist under the given directory.
-/// Returns `Some(paths)` if all files are present, `None` otherwise.
-fn try_resolve_files(dir: &Path, files: &[&str]) -> Option<Vec<PathBuf>> {
-    let mut paths = Vec::with_capacity(files.len());
-    for filename in files {
-        let path = dir.join(filename);
-        if path.exists() {
-            paths.push(path);
-        } else {
-            info!("Missing file in override: {}/{filename}", dir.display());
-            return None;
-        }
-    }
-    Some(paths)
-}
-
-/// Get the file paths for a model, checking the override path first.
-///
-/// When `override_path` is set, looks for model files under
-/// `{override_path}/{model}/snapshots/main/` (standard `HuggingFace` cache
-/// layout without the `models--` prefix).
-/// If not found there, falls back to the default `HuggingFace` cache.
+/// Get file paths for a built-in model from the `HuggingFace` cache.
 ///
 /// # Errors
 ///
-/// Returns an error if the model files cannot be found in any location.
-pub fn get_model_file_paths(model: &STTModel, override_path: Option<&str>) -> Result<Vec<PathBuf>> {
-    let files = model_filenames(*model);
-    let (model_id, revision) = model.model_and_revision();
+/// Returns an error if any expected file is not found in the cache.
+pub fn get_model_file_paths(def: &ModelDefinition) -> Result<Vec<PathBuf>> {
+    let files = model_filenames(def);
+    let super_stt_shared::models::registry::ModelSource::HuggingFace { repo, revision, .. } =
+        &def.source
+    else {
+        anyhow::bail!("{}: not a local HuggingFace model", def.name);
+    };
 
-    // Check override path first: {override}/{model}/snapshots/{revision}/
-    if let Some(dir) = override_path {
-        let snapshot_dir = Path::new(dir)
-            .join(model.to_string())
-            .join("snapshots")
-            .join(revision);
-        if let Some(paths) = try_resolve_files(&snapshot_dir, &files) {
-            info!("Using model override: {}", snapshot_dir.display());
-            return Ok(paths);
-        }
-    }
-
-    // Fall back to default HuggingFace cache
     let mut file_paths = Vec::new();
     for filename in &files {
-        let (symlink_path, _blob_path) = get_cache_paths(model_id, revision, filename)?;
+        let (symlink_path, _blob_path) = get_cache_paths(repo, revision, filename)?;
         if symlink_path.exists() {
             file_paths.push(symlink_path);
         } else {
@@ -393,6 +335,129 @@ pub fn get_model_file_paths(model: &STTModel, override_path: Option<&str>) -> Re
     Ok(file_paths)
 }
 
+// ── Custom model support ────────────────────────────────────────────
+
+/// Re-exports of types that moved to `super-stt-shared` so existing call
+/// sites keep working without import churn.
+pub use super_stt_shared::models::registry::CustomModelInfo;
+
+/// Detect the architecture of a model from its `config.json`.
+///
+/// Reads the standard `HuggingFace` `architectures` field and matches each entry
+/// against the class names declared by every entry in
+/// [`registry::ALL`](super_stt_shared::models::registry::ALL).
+/// Adding a new `ModelDefinition` is enough — this function does not need updating.
+///
+/// # Errors
+///
+/// Returns an error if `config.json` cannot be read, cannot be parsed, or
+/// declares no architecture matching a supported family.
+pub fn detect_provider(model_dir: &Path) -> Result<Provider> {
+    let config_path = model_dir.join("config.json");
+    let content = std::fs::read_to_string(&config_path)
+        .with_context(|| format!("Cannot read {}", config_path.display()))?;
+    let json: serde_json::Value = serde_json::from_str(&content).context("Invalid config.json")?;
+
+    let architectures = json
+        .get("architectures")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            anyhow::anyhow!("config.json has no `architectures` field; not a model config")
+        })?;
+
+    for arch in architectures.iter().filter_map(|v| v.as_str()) {
+        if let Some(provider) = super_stt_shared::models::registry::provider_from_hf_class(arch) {
+            return Ok(provider);
+        }
+    }
+
+    anyhow::bail!("config.json declares no supported architecture")
+}
+
+/// Collect all file paths inside a custom model directory.
+///
+/// Returns every file that the model loaders need: `config.json`, the
+/// tokenizer file, and all `.safetensors` weight files.
+///
+/// # Errors
+///
+/// Returns an error if `config.json` is missing or the directory cannot be read.
+pub fn get_custom_model_file_paths(model_dir: &Path) -> Result<Vec<PathBuf>> {
+    let config = model_dir.join("config.json");
+    if !config.exists() {
+        anyhow::bail!("config.json not found in {}", model_dir.display());
+    }
+
+    let mut paths = vec![config];
+
+    // Tokenizer: tekken.json for Voxtral, tokenizer.json for Whisper
+    let tekken = model_dir.join("tekken.json");
+    let tokenizer = model_dir.join("tokenizer.json");
+    if tekken.exists() {
+        paths.push(tekken);
+    } else if tokenizer.exists() {
+        paths.push(tokenizer);
+    }
+
+    // Safetensors weight files
+    for entry in std::fs::read_dir(model_dir)? {
+        let entry = entry?;
+        let p = entry.path();
+        if p.extension().and_then(|e| e.to_str()) == Some("safetensors") {
+            paths.push(p);
+        }
+    }
+
+    Ok(paths)
+}
+
+/// Scan `custom_models_dir` for model subdirectories and return their metadata.
+///
+/// A subdirectory is recognised as a model when it contains `config.json`.
+#[must_use]
+pub fn discover_custom_models(custom_models_dir: &Path) -> Vec<CustomModelInfo> {
+    let entries = match std::fs::read_dir(custom_models_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            warn!(
+                "Cannot read custom models directory {}: {e}",
+                custom_models_dir.display()
+            );
+            return Vec::new();
+        }
+    };
+
+    let mut models = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if !path.join("config.json").exists() {
+            continue;
+        }
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        match detect_provider(&path) {
+            Ok(provider) => {
+                info!("Discovered custom model: {name} ({provider})");
+                models.push(CustomModelInfo {
+                    name,
+                    path,
+                    provider,
+                });
+            }
+            Err(e) => {
+                debug!("Skipping {}: {e}", path.display());
+            }
+        }
+    }
+
+    models
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,73 +470,160 @@ mod tests {
         dir
     }
 
-    fn create_model_files(dir: &Path, model: &STTModel) {
-        let (_, revision) = model.model_and_revision();
-        let snapshot_dir = dir.join(model.to_string()).join("snapshots").join(revision);
-        fs::create_dir_all(&snapshot_dir).unwrap();
-        for filename in model_filenames(*model) {
-            fs::write(snapshot_dir.join(filename), b"test").unwrap();
-        }
+    // ── Architecture detection ──────────────────────────────────────
+
+    #[test]
+    fn detect_whisper_architecture() {
+        let tmp = test_dir("detect_whisper");
+        fs::write(
+            tmp.join("config.json"),
+            r#"{"architectures": ["WhisperForConditionalGeneration"]}"#,
+        )
+        .unwrap();
+        assert_eq!(detect_provider(&tmp).unwrap(), Provider::LocalWhisper);
     }
 
     #[test]
-    fn override_path_found() {
-        let tmp = test_dir("override_found");
-        let model = STTModel::WhisperTiny;
-        create_model_files(&tmp, &model);
-
-        let paths =
-            get_model_file_paths(&model, Some(tmp.to_str().unwrap())).expect("should find files");
-
-        assert_eq!(paths.len(), model_filenames(model).len());
-        for path in &paths {
-            assert!(path.starts_with(&tmp));
-        }
+    fn detect_voxtral_architecture() {
+        let tmp = test_dir("detect_voxtral");
+        fs::write(
+            tmp.join("config.json"),
+            r#"{"architectures": ["VoxtralForConditionalGeneration"]}"#,
+        )
+        .unwrap();
+        assert_eq!(detect_provider(&tmp).unwrap(), Provider::LocalVoxtral);
     }
 
     #[test]
-    fn override_path_missing_model_falls_back_to_cache() {
-        let tmp = test_dir("override_missing");
-        let model = STTModel::WhisperTiny;
-
-        let result = get_model_file_paths(&model, Some(tmp.to_str().unwrap()));
-        // Falls through to HF cache — may succeed or fail depending on local cache
-        if let Ok(paths) = &result {
-            // If it succeeded, files should NOT be in the override dir
-            for path in paths {
-                assert!(!path.starts_with(&tmp));
-            }
-        }
+    fn detect_architecture_missing_config_fails() {
+        let tmp = test_dir("detect_missing");
+        assert!(detect_provider(&tmp).is_err());
     }
 
     #[test]
-    fn override_partial_files_falls_back_to_cache() {
-        let tmp = test_dir("override_partial");
-        let model = STTModel::WhisperTiny;
-        let (_, revision) = model.model_and_revision();
-        let snapshot_dir = tmp.join(model.to_string()).join("snapshots").join(revision);
-        fs::create_dir_all(&snapshot_dir).unwrap();
-        fs::write(snapshot_dir.join("config.json"), b"test").unwrap();
-
-        let result = get_model_file_paths(&model, Some(tmp.to_str().unwrap()));
-        // Partial override — falls through to HF cache
-        if let Ok(paths) = &result {
-            for path in paths {
-                assert!(!path.starts_with(&tmp));
-            }
-        }
+    fn detect_unrelated_config_fails() {
+        // e.g. ~/.docker/config.json — has config.json but no `architectures`
+        let tmp = test_dir("detect_unrelated");
+        fs::write(tmp.join("config.json"), r#"{"auths": {}}"#).unwrap();
+        assert!(detect_provider(&tmp).is_err());
     }
 
     #[test]
-    fn override_uses_model_display_name() {
-        let tmp = test_dir("override_display_name");
-        let model = STTModel::WhisperTinyEn;
-        create_model_files(&tmp, &model);
+    fn detect_unsupported_architecture_fails() {
+        let tmp = test_dir("detect_unsupported");
+        fs::write(
+            tmp.join("config.json"),
+            r#"{"architectures": ["LlamaForCausalLM"]}"#,
+        )
+        .unwrap();
+        assert!(detect_provider(&tmp).is_err());
+    }
 
-        let paths =
-            get_model_file_paths(&model, Some(tmp.to_str().unwrap())).expect("should find files");
+    // ── Custom model file resolution ────────────────────────────────
 
-        let first = paths[0].to_str().unwrap();
-        assert!(first.contains("whisper-tiny.en"));
+    #[test]
+    fn custom_model_file_paths_whisper() {
+        let tmp = test_dir("custom_whisper");
+        fs::write(tmp.join("config.json"), r#"{}"#).unwrap();
+        fs::write(tmp.join("tokenizer.json"), r#"{}"#).unwrap();
+        fs::write(tmp.join("model.safetensors"), b"weights").unwrap();
+
+        let paths = get_custom_model_file_paths(&tmp).unwrap();
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.file_name().unwrap() == "config.json")
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.file_name().unwrap() == "tokenizer.json")
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.file_name().unwrap() == "model.safetensors")
+        );
+    }
+
+    #[test]
+    fn custom_model_file_paths_voxtral() {
+        let tmp = test_dir("custom_voxtral");
+        fs::write(tmp.join("config.json"), r#"{}"#).unwrap();
+        fs::write(tmp.join("tekken.json"), r#"{}"#).unwrap();
+        fs::write(tmp.join("model-00001-of-00002.safetensors"), b"w1").unwrap();
+        fs::write(tmp.join("model-00002-of-00002.safetensors"), b"w2").unwrap();
+
+        let paths = get_custom_model_file_paths(&tmp).unwrap();
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|p| { p.extension().and_then(|e| e.to_str()) == Some("safetensors") })
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn custom_model_file_paths_missing_config_fails() {
+        let tmp = test_dir("custom_no_config");
+        fs::write(tmp.join("model.safetensors"), b"weights").unwrap();
+        assert!(get_custom_model_file_paths(&tmp).is_err());
+    }
+
+    // ── Custom model discovery ──────────────────────────────────────
+
+    #[test]
+    fn discover_finds_valid_models() {
+        let tmp = test_dir("discover");
+
+        // A valid whisper model
+        let whisper_dir = tmp.join("my-whisper");
+        fs::create_dir_all(&whisper_dir).unwrap();
+        fs::write(
+            whisper_dir.join("config.json"),
+            r#"{"architectures": ["WhisperForConditionalGeneration"]}"#,
+        )
+        .unwrap();
+
+        // A valid voxtral model
+        let voxtral_dir = tmp.join("my-voxtral");
+        fs::create_dir_all(&voxtral_dir).unwrap();
+        fs::write(
+            voxtral_dir.join("config.json"),
+            r#"{"architectures": ["VoxtralForConditionalGeneration"]}"#,
+        )
+        .unwrap();
+
+        // Not a model (no config.json at all)
+        let junk_dir = tmp.join("not-a-model");
+        fs::create_dir_all(&junk_dir).unwrap();
+        fs::write(junk_dir.join("readme.txt"), "hi").unwrap();
+
+        // Has config.json but it's not a model config (e.g. ~/.docker)
+        let docker_dir = tmp.join(".docker");
+        fs::create_dir_all(&docker_dir).unwrap();
+        fs::write(docker_dir.join("config.json"), r#"{"auths": {}}"#).unwrap();
+
+        let models = discover_custom_models(&tmp);
+        assert_eq!(models.len(), 2);
+
+        let whisper = models.iter().find(|m| m.name == "my-whisper").unwrap();
+        assert_eq!(whisper.provider, Provider::LocalWhisper);
+
+        let voxtral = models.iter().find(|m| m.name == "my-voxtral").unwrap();
+        assert_eq!(voxtral.provider, Provider::LocalVoxtral);
+    }
+
+    #[test]
+    fn discover_empty_dir_returns_empty() {
+        let tmp = test_dir("discover_empty");
+        assert!(discover_custom_models(&tmp).is_empty());
+    }
+
+    #[test]
+    fn discover_nonexistent_dir_returns_empty() {
+        let path = PathBuf::from("/tmp/super-stt-tests/nonexistent-dir");
+        assert!(discover_custom_models(&path).is_empty());
     }
 }

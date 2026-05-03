@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::daemon::types::{STTModelInstance, SuperSTTDaemon};
+use crate::daemon::types::SuperSTTDaemon;
 use crate::download_progress::DownloadProgressTracker;
 use crate::stt_models::local::{voxtral::VoxtralModel, whisper::WhisperModel};
+use crate::stt_models::transcribe::Transcribe;
 use anyhow::Result;
 use chrono::Utc;
 use log::{error, info, warn};
 use std::sync::Arc;
 use super_stt_shared::models::protocol::DaemonResponse;
 use super_stt_shared::models::provider::{OnlineProvider, Provider};
-use super_stt_shared::stt_model::STTModel;
+use super_stt_shared::models::registry::{self, SourceKind};
 
 impl SuperSTTDaemon {
     /// Load model with explicit target device (used during device switching)
@@ -20,33 +21,36 @@ impl SuperSTTDaemon {
     /// and any attempted fallback.
     pub async fn load_model_with_target_device(
         &self,
-        stt_model: &STTModel,
+        name: &str,
+        provider: Provider,
+        source: SourceKind,
         target_device: &str,
-    ) -> Result<STTModelInstance> {
-        let stt_model_copy = *stt_model;
+    ) -> Result<Box<dyn Transcribe>> {
+        let name_owned = name.to_string();
         let target_device_copy = target_device.to_string();
-        let override_path = self
-            .config
-            .read()
-            .await
-            .transcription
-            .model_override_path
-            .clone();
         let mut shutdown_rx = self.shutdown_tx.subscribe();
 
         info!("Loading model with target device: {target_device}");
 
         // Broadcast model loading status for device switch
-        self.broadcast_device_model_loading_status(*stt_model, target_device)
+        self.broadcast_device_model_loading_status(name_owned.clone(), target_device)
             .await;
+
+        // Customs carry their disk path; built-ins load via the HF cache.
+        let custom_path = if matches!(source, SourceKind::Custom) {
+            self.custom_models
+                .read()
+                .await
+                .iter()
+                .find(|m| m.name == name && m.provider == provider)
+                .map(|m| m.path.clone())
+        } else {
+            None
+        };
 
         // Load model in a single blocking task with cancellation support
         let mut load_handle = tokio::task::spawn_blocking(move || {
-            Self::load_model_sync(
-                stt_model_copy,
-                &target_device_copy,
-                override_path.as_deref(),
-            )
+            Self::load_model_sync(name_owned, provider, custom_path, &target_device_copy)
         });
 
         // Wait for either model loading completion, shutdown signal, or timeout (60 seconds)
@@ -59,7 +63,7 @@ impl SuperSTTDaemon {
                 load_handle.abort();
                 return Err(anyhow::anyhow!("Model loading cancelled due to shutdown"));
             }
-            () = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {
+            () = tokio::time::sleep(tokio::time::Duration::from_mins(1)) => {
                 error!("Model loading timed out after 60 seconds - aborting blocking task");
                 load_handle.abort();
                 return Err(anyhow::anyhow!("Model loading timed out"));
@@ -93,56 +97,91 @@ impl SuperSTTDaemon {
     /// and the CPU fallback (if attempted).
     pub async fn load_model_with_device_preference(
         &self,
-        stt_model: &STTModel,
-    ) -> Result<STTModelInstance> {
+        name: &str,
+        provider: Provider,
+        source: SourceKind,
+    ) -> Result<Box<dyn Transcribe>> {
         let preferred_device = self.preferred_device.read().await.clone();
-        self.load_model_with_target_device(stt_model, &preferred_device)
+        self.load_model_with_target_device(name, provider, source, &preferred_device)
             .await
     }
 
     /// Handle get current model command
     pub async fn handle_get_model(&self) -> DaemonResponse {
-        let model_type_guard = self.model_type.read().await;
+        let guard = self.model.read().await;
 
-        if let Some(model) = model_type_guard.as_ref() {
-            let provider = self
-                .model_provider
-                .read()
-                .await
-                .unwrap_or(model.default_provider());
-            info!("Current model requested: {model}");
+        if let Some(loaded) = guard.as_ref() {
+            let name = loaded.definition.name.to_string();
+            info!("Current model requested: {name}");
             DaemonResponse::success()
-                .with_current_model(*model)
-                .with_current_provider(provider)
-                .with_message(format!("Current model: {model}"))
+                .with_current_model(name.clone())
+                .with_current_provider(loaded.definition.provider)
+                .with_current_source(loaded.definition.source.kind())
+                .with_message(format!("Current model: {name}"))
         } else {
             warn!("No model is currently loaded");
             DaemonResponse::error("No model is currently loaded")
         }
     }
 
-    /// Handle set model command - switch to a different model
-    pub async fn handle_set_model(&self, model: STTModel, provider: Provider) -> DaemonResponse {
-        self.handle_set_model_impl(model, provider).await
+    /// Handle set model command - switch to a different model identified by
+    /// `(name, provider, source)`.
+    pub async fn handle_set_model(
+        &self,
+        model: String,
+        provider: Provider,
+        source: SourceKind,
+    ) -> DaemonResponse {
+        self.handle_set_model_impl(model, provider, source).await
     }
 
     /// Internal implementation for model switching (split to reduce public fn size)
-    async fn handle_set_model_impl(&self, model: STTModel, provider: Provider) -> DaemonResponse {
-        info!("Model switch requested: {model} via {provider}");
-        if let Some(resp) = self.preflight_model_switch(model).await {
+    async fn handle_set_model_impl(
+        &self,
+        model: String,
+        provider: Provider,
+        source: SourceKind,
+    ) -> DaemonResponse {
+        info!("Model switch requested: {model} via {provider} ({source})");
+        if let Some(resp) = self
+            .preflight_model_switch(model.clone(), provider, source)
+            .await
+        {
             return resp;
         }
+
+        // Resolve via (name, provider, source): registry or custom_models hit → ok;
+        // miss → error.
+        let Some(_definition) = self.resolve_definition(&model, provider, source).await else {
+            return DaemonResponse::error(&format!(
+                "Unknown model: {model} via {provider} ({source}). Not in registry or custom_models_dir."
+            ));
+        };
 
         // Online providers have a separate fast path (no download needed)
         if let Provider::Online(online) = provider {
             return self.handle_set_online_model(model, online).await;
         }
 
-        // Remember previous model so we can restore it on failure
-        let previous_model = *self.model_type.read().await;
+        // Custom models: load directly from disk (no download)
+        if matches!(source, SourceKind::Custom) {
+            let name = model.clone();
+            return self.handle_set_custom_model(&name, model, provider).await;
+        }
 
-        self.broadcast_model_loading_status(model).await;
-        let tracker = self.create_progress_tracker(model);
+        // Standard local models: download then load
+        let previous_model = {
+            let guard = self.model.read().await;
+            guard.as_ref().map(|loaded| {
+                (
+                    loaded.definition.name.to_string(),
+                    loaded.definition.provider,
+                )
+            })
+        };
+
+        self.broadcast_model_loading_status(model.clone()).await;
+        let tracker = self.create_progress_tracker(&model);
         if let Err(resp) = self.register_download(&tracker) {
             tracker.cancel();
             return *resp;
@@ -150,7 +189,7 @@ impl SuperSTTDaemon {
         self.unload_current_model().await;
         let start_time = std::time::Instant::now();
         match self
-            .download_and_load_model(model, Arc::clone(&tracker), start_time)
+            .download_and_load_model(model.clone(), provider, Arc::clone(&tracker), start_time)
             .await
         {
             Ok(instance) => {
@@ -160,12 +199,106 @@ impl SuperSTTDaemon {
             Err(e) => {
                 error!("Model switch failed: {e}");
                 self.download_manager.clear_download();
-                // Restore previous model so the daemon isn't left without one
-                if let Some(prev) = previous_model {
-                    warn!("Restoring previous model: {prev}");
-                    self.restore_model(prev).await;
+                if let Some((prev, prev_provider)) = previous_model {
+                    warn!("Restoring previous model: {prev} via {prev_provider}");
+                    self.restore_model(prev, prev_provider).await;
                 }
                 DaemonResponse::error(&format!("Model switch failed: {e}"))
+            }
+        }
+    }
+
+    /// Handle switching to a custom local model (no download, load from disk).
+    async fn handle_set_custom_model(
+        &self,
+        name: &str,
+        model: String,
+        provider: Provider,
+    ) -> DaemonResponse {
+        // Look up the custom model by (name, provider).
+        let custom_models = self.custom_models.read().await;
+        let info = match custom_models
+            .iter()
+            .find(|m| m.name == name && m.provider == provider)
+        {
+            Some(info) => info.clone(),
+            None => {
+                return DaemonResponse::error(&format!(
+                    "Custom model '{name}' via {provider} not found. Check custom_models_dir."
+                ));
+            }
+        };
+        drop(custom_models);
+
+        let previous_model = {
+            let guard = self.model.read().await;
+            guard.as_ref().map(|loaded| {
+                (
+                    loaded.definition.name.to_string(),
+                    loaded.definition.provider,
+                )
+            })
+        };
+        self.broadcast_model_loading_status(model.clone()).await;
+        self.unload_current_model().await;
+
+        let preferred_device = self.preferred_device.read().await.clone();
+        let custom_path = info.path.clone();
+        let name_owned = name.to_string();
+        let start_time = std::time::Instant::now();
+
+        let result = tokio::task::spawn_blocking(move || {
+            let result =
+                Self::load_model_sync(name_owned, provider, Some(custom_path), &preferred_device);
+            let duration = start_time.elapsed();
+            info!("Custom model loading completed in {duration:?}");
+            result
+        })
+        .await;
+
+        match result {
+            Ok(Ok(instance)) => {
+                // Update actual device
+                let actual_device_str = match instance.device() {
+                    candle_core::Device::Cpu => "cpu",
+                    candle_core::Device::Cuda(_) => "cuda",
+                    candle_core::Device::Metal(_) => "metal",
+                };
+                *self.actual_device.write().await = actual_device_str.to_string();
+
+                let definition = super_stt_shared::models::registry::ModelDefinition::custom(
+                    name,
+                    info.path.clone(),
+                    provider,
+                );
+                *self.model.write().await = Some(crate::daemon::types::LoadedModel {
+                    definition,
+                    instance,
+                });
+
+                info!("Custom model '{name}' loaded on {actual_device_str}");
+                DaemonResponse::success()
+                    .with_current_model(model)
+                    .with_current_provider(provider)
+                    .with_message(format!("Successfully loaded custom model: {name}"))
+            }
+            Ok(Err(e)) => {
+                let err_msg = format!("Failed to load custom model '{name}': {e}");
+                error!("{err_msg}");
+                if let Some((prev, prev_provider)) = previous_model {
+                    warn!("Restoring previous model: {prev} via {prev_provider}");
+                    self.restore_model(prev, prev_provider).await;
+                }
+                DaemonResponse::error(&err_msg)
+            }
+            Err(e) => {
+                let err_msg = format!("Failed to load custom model '{name}': {e}");
+                error!("{err_msg}");
+                if let Some((prev, prev_provider)) = previous_model {
+                    warn!("Restoring previous model: {prev} via {prev_provider}");
+                    self.restore_model(prev, prev_provider).await;
+                }
+                DaemonResponse::error(&err_msg)
             }
         }
     }
@@ -175,7 +308,7 @@ impl SuperSTTDaemon {
     /// Handle switching to an online model (no download, instant creation).
     async fn handle_set_online_model(
         &self,
-        model: STTModel,
+        model: String,
         online: OnlineProvider,
     ) -> DaemonResponse {
         // Guard: online models must be explicitly enabled
@@ -201,28 +334,30 @@ impl SuperSTTDaemon {
             }
         };
 
-        let api_model_id = match model.api_model_id(online) {
-            Some(id) => id.to_string(),
-            None => {
-                return DaemonResponse::error(&format!(
-                    "Model {model} is not available via {online}"
-                ));
+        let provider = Provider::Online(online);
+        let Some(definition) = registry::find_by(&model, provider).cloned() else {
+            return DaemonResponse::error(&format!(
+                "Model {model} is not available via {provider}"
+            ));
+        };
+
+        self.broadcast_model_loading_status(model.clone()).await;
+        self.unload_current_model().await;
+
+        let instance = match Self::create_online_instance(online, api_key, &model) {
+            Ok(inst) => inst,
+            Err(e) => {
+                return DaemonResponse::error(&format!("Failed to create online model: {e}"));
             }
         };
 
-        let provider = Provider::Online(online);
-        self.broadcast_model_loading_status(model).await;
-        self.unload_current_model().await;
-
-        let instance = Self::create_online_instance(online, api_key, api_model_id);
-
-        // Store and broadcast
-        *self.model.write().await = Some(instance);
-        *self.model_type.write().await = Some(model);
-        *self.model_provider.write().await = Some(provider);
+        *self.model.write().await = Some(crate::daemon::types::LoadedModel {
+            definition,
+            instance,
+        });
         {
             let mut config_guard = self.config.write().await;
-            config_guard.update_preferred_model(model, provider);
+            config_guard.update_preferred_model(model.clone(), provider, SourceKind::Online);
         }
         if let Err(e) = self.broadcast_config_change().await {
             warn!("Failed to broadcast config change after online model switch: {e}");
@@ -236,7 +371,7 @@ impl SuperSTTDaemon {
                     "status": "ready",
                     "model_loaded": true,
                     "provider": provider.to_string(),
-                    "model_name": model.to_string(),
+                    "model_name": model.clone(),
                     "timestamp": chrono::Utc::now().to_rfc3339()
                 }),
             )
@@ -244,12 +379,17 @@ impl SuperSTTDaemon {
 
         info!("Switched to online model: {model} via {provider}");
         DaemonResponse::success()
-            .with_current_model(model)
+            .with_current_model(model.clone())
             .with_current_provider(provider)
             .with_message(format!("Successfully switched to online model: {model}"))
     }
 
-    async fn preflight_model_switch(&self, model: STTModel) -> Option<DaemonResponse> {
+    async fn preflight_model_switch(
+        &self,
+        model: String,
+        provider: Provider,
+        source: SourceKind,
+    ) -> Option<DaemonResponse> {
         if *self.is_recording.read().await {
             warn!("Model switch rejected - recording in progress");
             return Some(DaemonResponse::error(
@@ -268,21 +408,24 @@ impl SuperSTTDaemon {
                 active_sessions.join(", ")
             )));
         }
-        if let Some(current_model) = *self.model_type.read().await
-            && current_model == model
+        if let Some(loaded) = self.model.read().await.as_ref()
+            && loaded.definition.name == model
+            && loaded.definition.provider == provider
+            && loaded.definition.source.kind() == source
         {
-            info!("Model switch skipped - already using {model}");
+            info!("Model switch skipped - already using {model} via {provider} ({source})");
             return Some(
                 DaemonResponse::success()
                     .with_message(format!("Already using model: {model}"))
-                    .with_current_model(current_model),
+                    .with_current_model(loaded.definition.name.to_string())
+                    .with_current_provider(loaded.definition.provider),
             );
         }
 
         None
     }
 
-    pub async fn broadcast_model_loading_status(&self, model: STTModel) {
+    pub async fn broadcast_model_loading_status(&self, model: String) {
         if let Err(e) = self
             .notification_manager
             .broadcast_event(
@@ -290,7 +433,7 @@ impl SuperSTTDaemon {
                 "daemon".to_string(),
                 serde_json::json!({
                     "status": "loading_model",
-                    "new_model": model.to_string(),
+                    "new_model": model.clone(),
                     "timestamp": Utc::now().to_rfc3339()
                 }),
             )
@@ -301,11 +444,7 @@ impl SuperSTTDaemon {
     }
 
     /// Broadcast model loading status specifically for device switching
-    pub async fn broadcast_device_model_loading_status(
-        &self,
-        model: STTModel,
-        target_device: &str,
-    ) {
+    pub async fn broadcast_device_model_loading_status(&self, model: String, target_device: &str) {
         if let Err(e) = self
             .notification_manager
             .broadcast_event(
@@ -313,7 +452,7 @@ impl SuperSTTDaemon {
                 "daemon".to_string(),
                 serde_json::json!({
                     "status": "loading_model_for_device",
-                    "model": model.to_string(),
+                    "model": model.clone(),
                     "target_device": target_device,
                     "timestamp": Utc::now().to_rfc3339()
                 }),
@@ -325,7 +464,7 @@ impl SuperSTTDaemon {
     }
 
     #[must_use]
-    pub fn create_progress_tracker(&self, model: STTModel) -> Arc<DownloadProgressTracker> {
+    pub fn create_progress_tracker(&self, model: &str) -> Arc<DownloadProgressTracker> {
         let flag = self.download_manager.get_cancellation_flag();
         Arc::new(
             DownloadProgressTracker::new(model.to_string(), 0, Arc::clone(&flag))
@@ -338,25 +477,29 @@ impl SuperSTTDaemon {
     /// # Errors
     /// Restore a previously loaded model after a failed switch.
     /// Best-effort: if this also fails, the daemon remains without a model.
-    async fn restore_model(&self, model: STTModel) {
-        let tracker = self.create_progress_tracker(model);
+    async fn restore_model(&self, model: String, provider: Provider) {
+        let tracker = self.create_progress_tracker(&model);
         if self.register_download(&tracker).is_err() {
             error!("Cannot restore model: another download in progress");
             return;
         }
         let start_time = std::time::Instant::now();
         match self
-            .download_and_load_model(model, Arc::clone(&tracker), start_time)
+            .download_and_load_model(model.clone(), provider, Arc::clone(&tracker), start_time)
             .await
         {
             Ok(instance) => {
-                let provider = model.default_provider();
                 tracker.mark_completed();
                 self.download_manager.clear_download();
-                *self.model.write().await = Some(instance);
-                *self.model_type.write().await = Some(model);
-                *self.model_provider.write().await = Some(provider);
-                info!("Previous model {model} restored successfully");
+                let Some(definition) = registry::find_by(&model, provider).cloned() else {
+                    error!("Cannot restore model {model} via {provider}: not in registry");
+                    return;
+                };
+                *self.model.write().await = Some(crate::daemon::types::LoadedModel {
+                    definition,
+                    instance,
+                });
+                info!("Previous model {model} via {provider} restored successfully");
             }
             Err(e) => {
                 self.download_manager.clear_download();
@@ -388,80 +531,61 @@ impl SuperSTTDaemon {
         info!("Current model unloaded");
     }
 
-    /// Synchronous model loading function that handles device preference and fallback
-    /// This is the core blocking operation that should be run in `spawn_blocking`
+    /// Synchronous model loader. Handles device preference, VRAM preflight, and
+    /// CUDA→CPU fallback. Routes to either Whisper or Voxtral based on the
+    /// resolved family (registry definition for built-ins, detected
+    /// architecture for custom models). Designed to run inside `spawn_blocking`.
     fn load_model_sync(
-        model: STTModel,
+        name: String,
+        provider: Provider,
+        custom_path: Option<std::path::PathBuf>,
         preferred_device: &str,
-        override_path: Option<&str>,
-    ) -> Result<STTModelInstance> {
+    ) -> Result<Box<dyn Transcribe>> {
         let force_cpu = preferred_device == "cpu";
-        let override_ref = override_path;
-        info!("Override path for model loading: {override_ref:?}");
-        info!("Loading model with device preference: {preferred_device} (force_cpu={force_cpu})");
+        info!(
+            "Loading model '{name}' via {provider} (custom={}) on {preferred_device}",
+            custom_path.is_some()
+        );
 
-        // Pre-flight VRAM check: if CUDA is requested, verify sufficient free memory
-        // before attempting to load. This prevents candle from panicking on OOM.
-        if !force_cpu {
-            let required = model.estimated_vram_bytes();
-            if required > 0 {
-                match Self::get_cuda_free_memory() {
-                    Ok(free) => {
-                        if free < required {
-                            #[allow(clippy::cast_precision_loss)]
-                            let free_gb = free as f64 / 1_073_741_824.0;
-                            #[allow(clippy::cast_precision_loss)]
-                            let required_gb = required as f64 / 1_073_741_824.0;
-                            error!(
-                                "Insufficient GPU memory for {model}: {free_gb:.1} GB free, \
-                                 {required_gb:.1} GB required"
-                            );
-                            anyhow::bail!(
-                                "Not enough GPU memory to load {model}. \
-                                 {free_gb:.1} GB free, {required_gb:.1} GB required. \
-                                 Try a smaller model or switch to CPU."
-                            );
-                        }
-                        let free_mb = free / (1024 * 1024);
-                        info!("GPU memory check passed: {free_mb} MB free");
-                    }
-                    Err(e) => {
-                        info!("Could not query GPU memory ({e}), proceeding with CUDA attempt");
-                    }
-                }
-            }
+        // VRAM preflight only applies to built-ins (we know their estimated size).
+        if custom_path.is_none()
+            && let Some(def) = registry::find_by(&name, provider)
+        {
+            Self::preflight_vram_check(def, force_cpu)?;
         }
 
-        // Attempt to load model with preferred device
-        let initial_result = match model {
-            STTModel::VoxtralSmall | STTModel::VoxtralMini => {
-                info!("Loading Voxtral model...");
-                VoxtralModel::new(&model, force_cpu, override_ref)
-                    .map(|m| STTModelInstance::Voxtral(Box::new(m)))
-            }
-            _ => {
-                info!("Loading Whisper model...");
-                WhisperModel::new(&model, force_cpu, override_ref)
-                    .map(|m| STTModelInstance::Whisper(Box::new(m)))
+        let load = move |cpu: bool| -> Result<Box<dyn Transcribe>> {
+            let path_ref = custom_path.as_deref();
+            match provider {
+                Provider::LocalVoxtral => {
+                    info!("Loading Voxtral model...");
+                    VoxtralModel::new(&name, path_ref, cpu)
+                        .map(|m| Box::new(m) as Box<dyn Transcribe>)
+                }
+                Provider::LocalWhisper => {
+                    info!("Loading Whisper model...");
+                    WhisperModel::new(&name, path_ref, cpu)
+                        .map(|m| Box::new(m) as Box<dyn Transcribe>)
+                }
+                Provider::Online(_) => {
+                    anyhow::bail!("load_model_sync called with online provider {provider}")
+                }
             }
         };
 
-        // Handle CUDA fallback if needed
-        match initial_result {
-            Ok(model_instance) => Ok(model_instance),
-            Err(e) if !force_cpu => {
-                // If CUDA failed, try CPU fallback
-                warn!("Failed to load model on CUDA: {e}. Attempting CPU fallback...");
+        Self::load_with_fallback(load, force_cpu)
+    }
 
-                match model {
-                    STTModel::VoxtralSmall | STTModel::VoxtralMini => {
-                        VoxtralModel::new(&model, true, override_ref)
-                            .map(|m| STTModelInstance::Voxtral(Box::new(m)))
-                    }
-                    _ => WhisperModel::new(&model, true, override_ref)
-                        .map(|m| STTModelInstance::Whisper(Box::new(m))),
-                }
-                .map_err(|cpu_e| {
+    /// Try `load(force_cpu)`, and if CUDA fails, retry on CPU.
+    fn load_with_fallback<F>(load: F, force_cpu: bool) -> Result<Box<dyn Transcribe>>
+    where
+        F: Fn(bool) -> Result<Box<dyn Transcribe>>,
+    {
+        match load(force_cpu) {
+            Ok(instance) => Ok(instance),
+            Err(e) if !force_cpu => {
+                warn!("Failed to load model on CUDA: {e}. Attempting CPU fallback...");
+                load(true).map_err(|cpu_e| {
                     error!("Both CUDA and CPU loading failed. CUDA error: {e}, CPU error: {cpu_e}");
                     cpu_e
                 })
@@ -471,6 +595,47 @@ impl SuperSTTDaemon {
                 Err(e)
             }
         }
+    }
+
+    /// Pre-flight VRAM check for built-in models.
+    fn preflight_vram_check(
+        def: &super_stt_shared::models::registry::ModelDefinition,
+        force_cpu: bool,
+    ) -> Result<()> {
+        if force_cpu {
+            return Ok(());
+        }
+        let required = def.estimated_vram_bytes;
+        if required == 0 {
+            return Ok(());
+        }
+        match Self::get_cuda_free_memory() {
+            Ok(free) => {
+                if free < required {
+                    #[allow(clippy::cast_precision_loss)]
+                    let free_gb = free as f64 / 1_073_741_824.0;
+                    #[allow(clippy::cast_precision_loss)]
+                    let required_gb = required as f64 / 1_073_741_824.0;
+                    error!(
+                        "Insufficient GPU memory for {}: {free_gb:.1} GB free, \
+                         {required_gb:.1} GB required",
+                        def.name
+                    );
+                    anyhow::bail!(
+                        "Not enough GPU memory to load {}. \
+                         {free_gb:.1} GB free, {required_gb:.1} GB required. \
+                         Try a smaller model or switch to CPU.",
+                        def.name
+                    );
+                }
+                let free_mb = free / (1024 * 1024);
+                info!("GPU memory check passed: {free_mb} MB free");
+            }
+            Err(e) => {
+                info!("Could not query GPU memory ({e}), proceeding with CUDA attempt");
+            }
+        }
+        Ok(())
     }
 
     /// Query free CUDA GPU memory in bytes.
@@ -489,35 +654,27 @@ impl SuperSTTDaemon {
         Err(anyhow::anyhow!("CUDA not available"))
     }
 
-    /// Download and load a model.
+    /// Download and load a built-in model.
     ///
     /// # Errors
     /// This function will return an error if the model fails to download or load.
     pub async fn download_and_load_model(
         &self,
-        model: STTModel,
+        model: String,
+        provider: Provider,
         tracker: Arc<DownloadProgressTracker>,
         start_time: std::time::Instant,
-    ) -> anyhow::Result<STTModelInstance> {
-        let override_path = self
-            .config
-            .read()
-            .await
-            .transcription
-            .model_override_path
-            .clone();
+    ) -> anyhow::Result<Box<dyn Transcribe>> {
+        let def = registry::find_by(&model, provider).ok_or_else(|| {
+            anyhow::anyhow!(
+                "download_and_load_model called with non-built-in '{model}' via {provider}; \
+                 custom models load directly without download"
+            )
+        })?;
 
-        // Check if model files exist in the override path; if so skip download
-        let found_in_override = override_path.as_ref().is_some_and(|p| {
-            crate::stt_models::local::download::get_model_file_paths(&model, Some(p.as_str()))
-                .is_ok()
-        });
+        // Download model files if not already cached
+        crate::stt_models::local::download::with_progress(def, Arc::clone(&tracker)).await?;
 
-        if found_in_override {
-            info!("Model found in override path, skipping download");
-        } else {
-            crate::stt_models::local::download::with_progress(&model, Arc::clone(&tracker)).await?;
-        }
         if tracker.is_cancelled() {
             anyhow::bail!("Model loading was cancelled");
         }
@@ -526,11 +683,10 @@ impl SuperSTTDaemon {
         tracker.broadcast_progress().await;
 
         let preferred_device = self.preferred_device.read().await.clone();
-        let preferred_device_clone = preferred_device.clone();
-        let custom_path_clone = override_path;
+        let preferred_device_for_check = preferred_device.clone();
+        let name = model.clone();
         let instance = tokio::task::spawn_blocking(move || {
-            let result =
-                Self::load_model_sync(model, &preferred_device_clone, custom_path_clone.as_deref());
+            let result = Self::load_model_sync(name, provider, None, &preferred_device);
             let duration = start_time.elapsed();
             info!("Model loading completed in {duration:?}");
             result
@@ -545,7 +701,7 @@ impl SuperSTTDaemon {
         };
         *self.actual_device.write().await = actual_device_str.to_string();
 
-        if actual_device_str != preferred_device && preferred_device == "cuda" {
+        if actual_device_str != preferred_device_for_check && preferred_device_for_check == "cuda" {
             warn!("CUDA loading failed, successfully fell back to CPU");
             info!("Model loaded on CPU fallback device");
         } else {
@@ -557,34 +713,25 @@ impl SuperSTTDaemon {
 
     async fn finalize_model_switch_success(
         &self,
-        model: STTModel,
+        model: String,
         provider: Provider,
-        instance: STTModelInstance,
+        instance: Box<dyn Transcribe>,
         tracker: &Arc<DownloadProgressTracker>,
     ) -> DaemonResponse {
-        let model_name = match &instance {
-            STTModelInstance::Whisper(_) => "Whisper",
-            STTModelInstance::Voxtral(_) => "Voxtral",
-            STTModelInstance::OpenAI(_) => "OpenAI",
-            STTModelInstance::Mistral(_) => "Mistral",
-            STTModelInstance::Deepgram(_) => "Deepgram",
-        };
         tracker.mark_completed();
         *tracker.current_file.write() = "Model loaded successfully".to_string();
         tracker.broadcast_progress().await;
         self.download_manager.clear_download();
-        {
-            let mut model_guard = self.model.write().await;
-            *model_guard = Some(instance);
-        }
-        {
-            let mut model_type_guard = self.model_type.write().await;
-            *model_type_guard = Some(model);
-        }
-        *self.model_provider.write().await = Some(provider);
+        let definition = registry::find_by(&model, provider)
+            .cloned()
+            .expect("built-in switch resolved a registry entry");
+        *self.model.write().await = Some(crate::daemon::types::LoadedModel {
+            definition,
+            instance,
+        });
         {
             let mut config_guard = self.config.write().await;
-            config_guard.update_preferred_model(model, provider);
+            config_guard.update_preferred_model(model.clone(), provider, SourceKind::Builtin);
         }
         if let Err(e) = self.broadcast_config_change().await {
             warn!("Failed to broadcast config change after model switch: {e}");
@@ -596,8 +743,7 @@ impl SuperSTTDaemon {
                 "daemon".to_string(),
                 serde_json::json!({
                     "status": "model_switched",
-                    "model_type": model_name.to_lowercase(),
-                    "model_name": model.to_string(),
+                    "model_name": model.clone(),
                     "timestamp": Utc::now().to_rfc3339()
                 }),
             )
@@ -610,14 +756,13 @@ impl SuperSTTDaemon {
                 serde_json::json!({
                     "status": "ready",
                     "model_loaded": true,
-                    "model_type": model_name.to_lowercase(),
-                    "model_name": model.to_string(),
+                    "model_name": model.clone(),
                     "timestamp": Utc::now().to_rfc3339()
                 }),
             )
             .await;
         DaemonResponse::success()
-            .with_current_model(model)
+            .with_current_model(model.clone())
             .with_current_provider(provider)
             .with_message(format!("Successfully switched to model: {model}"))
     }

@@ -6,8 +6,8 @@ use crate::daemon::client::{
     RecordEvent, cancel_download, fetch_daemon_config, get_allow_online_models, get_current_device,
     get_current_model, get_download_status, get_preview_typing, get_recording_stop_mode,
     get_write_method, list_available_models, load_audio_themes, ping_daemon, record_command_stream,
-    set_allow_online_models, set_and_test_audio_theme, set_audio_theme, set_device, set_model,
-    set_model_override_path, set_preview_typing, set_recording_stop_mode, set_volume,
+    set_allow_online_models, set_and_test_audio_theme, set_audio_theme, set_custom_models_dir,
+    set_device, set_model, set_preview_typing, set_recording_stop_mode, set_volume,
     set_write_method, stop_record_command, test_daemon_connection,
 };
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};
@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use super_stt_shared::UdpAuth;
 use super_stt_shared::models::provider::{OnlineProvider, Provider};
-use super_stt_shared::stt_model::STTModel;
+use super_stt_shared::models::registry::{self, SourceKind};
 use tokio::net::UdpSocket;
 use tokio::time::Duration;
 
@@ -35,12 +35,12 @@ pub enum ModelOperationState {
     Ready,
     /// Downloading model files with progress information
     Downloading {
-        target_model: STTModel,
+        target_model: String,
         progress: super_stt_shared::models::protocol::DownloadProgress,
     },
     /// Loading model into memory (after download completed)
     Loading {
-        target_model: STTModel,
+        target_model: String,
         status_message: String,
     },
     /// Model operation failed
@@ -98,12 +98,20 @@ pub struct AppModel {
     // Model management state
     /// Search input for model selection context drawer
     pub model_search: String,
-    /// Available models from daemon
-    pub available_models: Vec<STTModel>,
+    /// Available models from daemon as `(name, provider)` pairs.
+    pub available_models: Vec<(String, Provider, SourceKind)>,
     /// Currently loaded model
-    pub current_model: STTModel,
+    pub current_model: String,
+    /// Provider of the currently loaded model
+    pub current_provider: Provider,
+    /// Source kind of the currently loaded model
+    pub current_source: SourceKind,
     /// The model we had before starting a download (to revert to on cancel)
-    pub previous_model: STTModel,
+    pub previous_model: String,
+    /// Provider of the previous model
+    pub previous_provider: Provider,
+    /// Source kind of the previous model
+    pub previous_source: SourceKind,
     /// Model operation state (downloading, loading, or ready)
     pub model_operation_state: ModelOperationState,
 
@@ -134,10 +142,10 @@ pub struct AppModel {
     // Master volume (0-100)
     pub volume: u8,
 
-    // Model override path
-    pub model_override_path: Option<String>,
-    pub model_override_path_input: String,
-    pub model_override_path_editing: bool,
+    // Custom models directory
+    pub custom_models_dir: Option<String>,
+    pub custom_models_dir_input: String,
+    pub custom_models_dir_editing: bool,
 
     // Online models state
     pub allow_online_models: bool,
@@ -232,10 +240,14 @@ impl cosmic::Application for AppModel {
             // Initialize model state
             model_search: String::new(),
             available_models: Vec::new(),
-            current_model: STTModel::default(), // Use default model before loading from daemon
-            previous_model: STTModel::default(), // Use default model before loading from daemon
+            current_model: registry::default_definition().name.to_string(),
+            current_provider: registry::default_definition().provider,
+            current_source: registry::default_definition().source.kind(),
+            previous_model: registry::default_definition().name.to_string(),
+            previous_provider: registry::default_definition().provider,
+            previous_source: registry::default_definition().source.kind(),
             model_operation_state: ModelOperationState::Loading {
-                target_model: STTModel::default(),
+                target_model: registry::default_definition().name.to_string(),
                 status_message: "Loading initial model state...".to_string(),
             },
 
@@ -254,10 +266,10 @@ impl cosmic::Application for AppModel {
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),
             volume: 100,
 
-            // Model override path
-            model_override_path: None,
-            model_override_path_input: String::new(),
-            model_override_path_editing: false,
+            // Custom models directory
+            custom_models_dir: None,
+            custom_models_dir_input: String::new(),
+            custom_models_dir_editing: false,
 
             // Online models state
             allow_online_models: false,
@@ -346,17 +358,17 @@ impl cosmic::Application for AppModel {
                 let has_mistral = self.has_mistral_api_key;
                 let has_deepgram = self.has_deepgram_api_key;
 
-                let filtered_models: Vec<STTModel> = self
+                let filtered_models: Vec<(String, Provider, SourceKind)> = self
                     .available_models
                     .iter()
-                    .filter(|m| {
-                        // Hide models that require GPU when GPU is off
-                        if m.requires_gpu() && !gpu_enabled {
-                            return false;
+                    .filter(|(_, provider, source)| {
+                        // Customs are always shown
+                        if matches!(source, SourceKind::Custom) {
+                            return true;
                         }
-                        // For each model, at least one of its providers must be usable
-                        m.providers().iter().any(|p| match p {
-                            Provider::Local => true,
+                        match provider {
+                            Provider::LocalWhisper => true,
+                            Provider::LocalVoxtral => gpu_enabled,
                             Provider::Online(OnlineProvider::OpenAI) => {
                                 self.allow_online_models && has_openai
                             }
@@ -366,14 +378,16 @@ impl cosmic::Application for AppModel {
                             Provider::Online(OnlineProvider::Deepgram) => {
                                 self.allow_online_models && has_deepgram
                             }
-                        })
+                        }
                     })
-                    .copied()
+                    .cloned()
                     .collect();
                 context_drawer::context_drawer(
                     views::models::model_selection_list(
-                        filtered_models,
-                        self.current_model,
+                        &filtered_models,
+                        &self.current_model,
+                        self.current_provider,
+                        self.current_source,
                         &self.model_search,
                         gpu_enabled,
                         self.gpu_memory,
@@ -431,9 +445,9 @@ impl cosmic::Application for AppModel {
                 &self.current_model,
                 &self.model_operation_state,
                 &self.device_state,
-                self.model_override_path.as_deref(),
-                &self.model_override_path_input,
-                self.model_override_path_editing,
+                self.custom_models_dir.as_deref(),
+                &self.custom_models_dir_input,
+                self.custom_models_dir_editing,
             ),
             Page::OnlineModels => views::online_models::page(
                 self.allow_online_models,
@@ -511,11 +525,11 @@ impl cosmic::Application for AppModel {
         if matches!(
             message,
             Message::LoadInitialData
-                | Message::ModelSelected(_)
+                | Message::ModelSelected { .. }
                 | Message::ModelsLoaded { .. }
                 | Message::AvailableModelsLoaded(_)
-                | Message::CurrentModelLoaded(_)
-                | Message::ModelChanged(_)
+                | Message::CurrentModelLoaded { .. }
+                | Message::ModelChanged { .. }
                 | Message::ModelError(_)
         ) {
             return self.handle_model_messages(message);
@@ -575,33 +589,38 @@ impl cosmic::Application for AppModel {
         }
 
         match &message {
-            Message::ModelOverridePathInput(input) => {
-                self.model_override_path_input = input.clone();
+            Message::CustomModelsDirInput(input) => {
+                self.custom_models_dir_input = input.clone();
                 return Task::none();
             }
-            Message::ModelOverridePathEdit(editing) => {
-                self.model_override_path_editing = *editing;
+            Message::CustomModelsDirEdit(editing) => {
+                self.custom_models_dir_editing = *editing;
                 if *editing {
-                    self.model_override_path_input =
-                        self.model_override_path.clone().unwrap_or_default();
+                    self.custom_models_dir_input =
+                        self.custom_models_dir.clone().unwrap_or_default();
                 }
                 return Task::none();
             }
-            Message::ModelOverridePathSet(path) => {
+            Message::CustomModelsDirSet(path) => {
                 let path = path.clone();
-                self.model_override_path_input = path.as_deref().unwrap_or_default().to_string();
-                self.model_override_path_editing = false;
-                self.model_override_path.clone_from(&path);
+                self.custom_models_dir_input = path.as_deref().unwrap_or_default().to_string();
+                self.custom_models_dir_editing = false;
+                self.custom_models_dir.clone_from(&path);
+                let socket_path = self.socket_path.clone();
                 return Task::perform(
-                    set_model_override_path(self.socket_path.clone(), path),
+                    async move {
+                        set_custom_models_dir(socket_path.clone(), path).await?;
+                        // Re-fetch model list so newly discovered custom models appear
+                        list_available_models(socket_path).await
+                    },
                     |result| match result {
-                        Ok(()) => cosmic::Action::None,
-                        Err(e) => cosmic::Action::App(Message::ModelOverridePathError(e)),
+                        Ok(models) => cosmic::Action::App(Message::AvailableModelsLoaded(models)),
+                        Err(e) => cosmic::Action::App(Message::CustomModelsDirError(e)),
                     },
                 );
             }
-            Message::ModelOverridePathError(err) => {
-                log::warn!("Model override path error: {err}");
+            Message::CustomModelsDirError(err) => {
+                log::warn!("Custom models dir error: {err}");
                 return Task::none();
             }
             _ => {}
@@ -810,7 +829,7 @@ impl AppModel {
     /// Set model to downloading state
     pub fn set_model_downloading(
         &mut self,
-        target_model: STTModel,
+        target_model: String,
         progress: super_stt_shared::models::protocol::DownloadProgress,
     ) {
         self.model_operation_state = ModelOperationState::Downloading {
@@ -820,7 +839,7 @@ impl AppModel {
     }
 
     /// Set model to loading state
-    pub fn set_model_loading(&mut self, target_model: STTModel, status_message: String) {
+    pub fn set_model_loading(&mut self, target_model: String, status_message: String) {
         self.model_operation_state = ModelOperationState::Loading {
             target_model,
             status_message,
@@ -933,16 +952,16 @@ impl AppModel {
                 // Sync custom model path from daemon config
                 let custom_path = config
                     .get("transcription")
-                    .and_then(|t| t.get("model_override_path"))
+                    .and_then(|t| t.get("custom_models_dir"))
                     .and_then(|v| v.as_str())
                     .map(String::from);
                 // Only update the input if the user hasn't edited it
-                let old_committed = self.model_override_path.as_deref().unwrap_or_default();
-                if self.model_override_path_input == old_committed {
-                    self.model_override_path_input =
+                let old_committed = self.custom_models_dir.as_deref().unwrap_or_default();
+                if self.custom_models_dir_input == old_committed {
+                    self.custom_models_dir_input =
                         custom_path.as_deref().unwrap_or_default().to_string();
                 }
-                self.model_override_path = custom_path;
+                self.custom_models_dir = custom_path;
 
                 // Sync volume from daemon config
                 if let Some(vol) = config
@@ -1119,13 +1138,30 @@ impl AppModel {
                                 "model_switched" => {
                                     if let Some(model_name) =
                                         event.data.get("model_name").and_then(|m| m.as_str())
-                                        && let Ok(model) = model_name.parse::<STTModel>()
                                     {
+                                        let model = model_name.to_string();
+                                        let provider = event
+                                            .data
+                                            .get("provider")
+                                            .and_then(|p| p.as_str())
+                                            .and_then(|s| s.parse::<Provider>().ok())
+                                            .unwrap_or_else(|| {
+                                                registry::find(&model)
+                                                    .map_or(self.current_provider, |d| d.provider)
+                                            });
+                                        let source = event
+                                            .data
+                                            .get("source")
+                                            .and_then(|p| p.as_str())
+                                            .and_then(|s| s.parse::<SourceKind>().ok())
+                                            .unwrap_or(self.current_source);
                                         info!(
-                                            "Received model_switched event: current_model={:?} -> {:?}",
+                                            "Received model_switched event: current_model={:?} -> {:?} via {provider} ({source})",
                                             self.current_model, model
                                         );
                                         self.current_model = model;
+                                        self.current_provider = provider;
+                                        self.current_source = source;
                                         self.model_operation_state = ModelOperationState::Ready;
                                         info!(
                                             "Model state updated to Ready after model_switched event"
@@ -1186,7 +1222,8 @@ impl AppModel {
                                 progress.percentage, progress.model_name
                             );
                             // Determine target model from progress data
-                            if let Ok(target_model) = progress.model_name.parse::<STTModel>() {
+                            {
+                                let target_model = progress.model_name.clone();
                                 match progress.status.as_str() {
                                     "loading_model" => {
                                         self.set_model_loading(
@@ -1332,7 +1369,8 @@ impl AppModel {
         match message {
             Message::DownloadProgressUpdate(progress) => {
                 // We have an actual download in progress
-                if let Ok(target_model) = progress.model_name.parse::<STTModel>() {
+                {
+                    let target_model = progress.model_name.clone();
                     match progress.status.as_str() {
                         "loading_model" => {
                             self.set_model_loading(
@@ -1376,14 +1414,23 @@ impl AppModel {
                 self.model_operation_state = ModelOperationState::Ready;
 
                 // Revert to previous model
-                let previous_model = self.previous_model;
+                let previous_model = self.previous_model.clone();
+                let previous_provider = self.previous_provider;
+                let previous_source = self.previous_source;
                 Task::perform(
-                    set_model(self.socket_path.clone(), self.previous_model),
-                    move |result| {
-                        match result {
-                            Ok(_) => cosmic::Action::App(Message::ModelChanged(previous_model)), // Model change will come via event
-                            Err(e) => cosmic::Action::App(Message::ModelError(e)),
-                        }
+                    set_model(
+                        self.socket_path.clone(),
+                        self.previous_model.clone(),
+                        self.previous_provider,
+                        self.previous_source,
+                    ),
+                    move |result| match result {
+                        Ok(_) => cosmic::Action::App(Message::ModelChanged {
+                            model: previous_model.clone(),
+                            provider: previous_provider,
+                            source: previous_source,
+                        }),
+                        Err(e) => cosmic::Action::App(Message::ModelError(e)),
                     },
                 )
             }
@@ -1394,14 +1441,23 @@ impl AppModel {
                 self.transcription_text = format!("Download Error: {error}");
 
                 // Revert to previous model
-                let previous_model = self.previous_model;
+                let previous_model = self.previous_model.clone();
+                let previous_provider = self.previous_provider;
+                let previous_source = self.previous_source;
                 Task::perform(
-                    set_model(self.socket_path.clone(), self.previous_model),
-                    move |result| {
-                        match result {
-                            Ok(_) => cosmic::Action::App(Message::ModelChanged(previous_model)), // Model change will come via event
-                            Err(e) => cosmic::Action::App(Message::ModelError(e)),
-                        }
+                    set_model(
+                        self.socket_path.clone(),
+                        self.previous_model.clone(),
+                        self.previous_provider,
+                        self.previous_source,
+                    ),
+                    move |result| match result {
+                        Ok(_) => cosmic::Action::App(Message::ModelChanged {
+                            model: previous_model.clone(),
+                            provider: previous_provider,
+                            source: previous_source,
+                        }),
+                        Err(e) => cosmic::Action::App(Message::ModelError(e)),
                     },
                 )
             }
@@ -1460,7 +1516,13 @@ impl AppModel {
                     Task::perform(
                         get_current_model(self.socket_path.clone()),
                         |result| match result {
-                            Ok(model) => cosmic::Action::App(Message::CurrentModelLoaded(model)),
+                            Ok((model, provider, source)) => {
+                                cosmic::Action::App(Message::CurrentModelLoaded {
+                                    model,
+                                    provider,
+                                    source,
+                                })
+                            }
                             Err(e) => cosmic::Action::App(Message::ModelError(e)),
                         },
                     ),
@@ -1506,12 +1568,19 @@ impl AppModel {
                 ])
             }
 
-            Message::ModelSelected(model) => {
+            Message::ModelSelected {
+                model,
+                provider,
+                source,
+            } => {
                 // Close the model selection drawer and clear search
                 self.core.window.show_context = false;
                 self.model_search.clear();
 
-                if model == self.current_model {
+                if model == self.current_model
+                    && provider == self.current_provider
+                    && source == self.current_source
+                {
                     Task::none()
                 } else {
                     // Atomic state check and transition to prevent race conditions
@@ -1521,19 +1590,26 @@ impl AppModel {
                     }
 
                     // Set loading state for the target model
-                    self.set_model_loading(model, "Initiating model switch...".to_string());
+                    self.set_model_loading(model.clone(), "Initiating model switch...".to_string());
 
                     // Save the current model as previous (to revert to on cancel)
-                    self.previous_model = self.current_model;
+                    self.previous_model = self.current_model.clone();
+                    self.previous_provider = self.current_provider;
+                    self.previous_source = self.current_source;
 
-                    let selected_model = model;
+                    let selected_model = model.clone();
                     Task::batch([
-                        Task::perform(set_model(self.socket_path.clone(), model), move |result| {
-                            match result {
-                                Ok(_) => cosmic::Action::App(Message::ModelChanged(selected_model)), // Notify UI of intended change, actual change will come via event
+                        Task::perform(
+                            set_model(self.socket_path.clone(), model, provider, source),
+                            move |result| match result {
+                                Ok(_) => cosmic::Action::App(Message::ModelChanged {
+                                    model: selected_model.clone(),
+                                    provider,
+                                    source,
+                                }),
                                 Err(e) => cosmic::Action::App(Message::ModelError(e)),
-                            }
-                        }),
+                            },
+                        ),
                         // Check download status immediately to see if download is needed
                         Task::perform(
                             async move {
@@ -1546,14 +1622,19 @@ impl AppModel {
                 }
             }
 
-            Message::ModelsLoaded { current, available } => {
+            Message::ModelsLoaded {
+                current_model,
+                current_provider,
+                current_source,
+                available,
+            } => {
                 self.available_models = available;
-                self.current_model = current;
+                self.current_model = current_model;
+                self.current_provider = current_provider;
+                self.current_source = current_source;
 
                 // Set model to ready state
                 self.model_operation_state = ModelOperationState::Ready;
-
-                // Download state is handled by the unified model operation state
 
                 Task::none()
             }
@@ -1563,8 +1644,19 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::CurrentModelLoaded(model) | Message::ModelChanged(model) => {
+            Message::CurrentModelLoaded {
+                model,
+                provider,
+                source,
+            }
+            | Message::ModelChanged {
+                model,
+                provider,
+                source,
+            } => {
                 self.current_model = model;
+                self.current_provider = provider;
+                self.current_source = source;
                 self.model_operation_state = ModelOperationState::Ready;
                 Task::none()
             }

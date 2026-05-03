@@ -2,9 +2,10 @@
 
 //! Message types for the Super STT application.
 
+use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::models::registry::SourceKind;
 use super_stt_shared::models::write_method::WriteMethod;
-use super_stt_shared::stt_model::STTModel;
 
 use crate::state::{AudioTheme, ContextPage};
 
@@ -46,14 +47,28 @@ pub enum Message {
     // Model management messages
     LoadInitialData, // Load models + device info at startup
     ModelSearchChanged(String),
-    ModelSelected(STTModel),
-    ModelsLoaded {
-        current: STTModel,
-        available: Vec<STTModel>,
+    ModelSelected {
+        model: String,
+        provider: Provider,
+        source: SourceKind,
     },
-    AvailableModelsLoaded(Vec<STTModel>),
-    CurrentModelLoaded(STTModel),
-    ModelChanged(STTModel),
+    ModelsLoaded {
+        current_model: String,
+        current_provider: Provider,
+        current_source: SourceKind,
+        available: Vec<(String, Provider, SourceKind)>,
+    },
+    AvailableModelsLoaded(Vec<(String, Provider, SourceKind)>),
+    CurrentModelLoaded {
+        model: String,
+        provider: Provider,
+        source: SourceKind,
+    },
+    ModelChanged {
+        model: String,
+        provider: Provider,
+        source: SourceKind,
+    },
     ModelError(String),
 
     // Device management messages
@@ -96,11 +111,11 @@ pub enum Message {
     // Volume messages
     VolumeChanged(u8),
 
-    // Model override path messages
-    ModelOverridePathInput(String),
-    ModelOverridePathSet(Option<String>),
-    ModelOverridePathEdit(bool),
-    ModelOverridePathError(String),
+    // Custom models directory messages
+    CustomModelsDirInput(String),
+    CustomModelsDirSet(Option<String>),
+    CustomModelsDirEdit(bool),
+    CustomModelsDirError(String),
 
     // Online models messages
     AllowOnlineModelsToggled(bool),

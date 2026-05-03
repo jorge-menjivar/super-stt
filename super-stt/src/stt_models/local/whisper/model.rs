@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use byteorder::{LittleEndian, ReadBytesExt};
 use candle_core::utils::cuda_is_available;
 use candle_core::{Device, IndexOp, Tensor};
@@ -7,10 +8,12 @@ use candle_nn::{VarBuilder, ops::softmax};
 use candle_transformers::models::whisper::{self as m, Config, audio};
 use log::{debug, info, warn};
 use std::io::Cursor;
+use std::path::{Path, PathBuf};
 use super_stt_shared::audio_utils::ResampleQuality;
-use super_stt_shared::stt_model::STTModel;
+use super_stt_shared::models::provider::Provider;
 use tokenizers::Tokenizer;
 
+use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
 use super_stt_shared::utils::audio::resample;
 
 const SAMPLE_RATE: u32 = 16000;
@@ -58,6 +61,7 @@ pub struct WhisperModel {
     tokenizer: Tokenizer,
     device: Device,
     config: Config,
+    info: ModelInfoData,
     mel_filters: Vec<f32>,
     sot_token: u32,
     transcribe_token: u32,
@@ -75,9 +79,47 @@ impl WhisperModel {
     /// Panics if file paths from the model cache cannot be converted to valid UTF-8
     /// or if a required path component is unexpectedly missing when extracting
     /// `config.json`, `tokenizer.json`, or `model.safetensors`.
-    pub fn new(stt_model: &STTModel, force_cpu: bool, override_path: Option<&str>) -> Result<Self> {
-        info!("Loading Whisper {stt_model:?} model...");
+    /// Load a Whisper model.
+    ///
+    /// - `name`: model name. Used for identity and (when `custom_path` is `None`)
+    ///   to look up the `HuggingFace` repo in the registry.
+    /// - `custom_path`: if `Some`, files are loaded from this directory and the
+    ///   model is treated as custom. If `None`, `name` must match a registry entry.
+    pub fn new(name: &str, custom_path: Option<&Path>, force_cpu: bool) -> Result<Self> {
+        info!(
+            "Loading Whisper {name} model (custom={})",
+            custom_path.is_some()
+        );
 
+        let (file_paths, info) = if let Some(path) = custom_path {
+            let files = crate::stt_models::local::download::get_custom_model_file_paths(path)?;
+            (
+                files,
+                ModelInfoData::custom(
+                    name.to_string(),
+                    super_stt_shared::models::provider::Provider::LocalWhisper,
+                ),
+            )
+        } else {
+            let info = ModelInfoData::standard(name, Provider::LocalWhisper)
+                .ok_or_else(|| anyhow::anyhow!("Unknown built-in model: {name}"))?;
+            let def = info
+                .definition
+                .expect("standard() returned Some so definition must be set");
+            let files = crate::stt_models::local::download::get_model_file_paths(def)?;
+            (files, info)
+        };
+
+        Self::load_from_paths(&file_paths, force_cpu, info)
+    }
+
+    /// Internal helper that builds a `WhisperModel` from concrete file paths +
+    /// pre-built `ModelInfoData`. All public constructors funnel through here.
+    fn load_from_paths(
+        file_paths: &[PathBuf],
+        force_cpu: bool,
+        info: ModelInfoData,
+    ) -> Result<Self> {
         // Determine device
         let device = if !force_cpu && cuda_is_available() {
             info!("Using CUDA device");
@@ -91,25 +133,18 @@ impl WhisperModel {
             Device::Cpu
         };
 
-        // Get file paths from the unified download system
-        let file_paths =
-            crate::stt_models::local::download::get_model_file_paths(stt_model, override_path)?;
-
         // Extract the specific files we need
-        let config_path = file_paths
-            .iter()
-            .find(|p| p.file_name().unwrap().to_str().unwrap() == "config.json")
-            .ok_or_else(|| anyhow::anyhow!("config.json not found"))?;
-        let tokenizer_path = file_paths
-            .iter()
-            .find(|p| p.file_name().unwrap().to_str().unwrap() == "tokenizer.json")
-            .ok_or_else(|| anyhow::anyhow!("tokenizer.json not found"))?;
-        let weights_path = file_paths
-            .iter()
-            .find(|p| p.file_name().unwrap().to_str().unwrap() == "model.safetensors")
-            .ok_or_else(|| anyhow::anyhow!("model.safetensors not found"))?;
+        let find = |name: &str| -> Result<&PathBuf> {
+            file_paths
+                .iter()
+                .find(|p| p.file_name().and_then(|f| f.to_str()) == Some(name))
+                .ok_or_else(|| anyhow::anyhow!("{name} not found"))
+        };
+        let config_path = find("config.json")?;
+        let tokenizer_path = find("tokenizer.json")?;
+        let weights_path = find("model.safetensors")?;
 
-        info!("Model files downloaded successfully");
+        info!("Model files located");
 
         // Load config
         let config_str =
@@ -164,6 +199,7 @@ impl WhisperModel {
             tokenizer,
             device,
             config,
+            info,
             mel_filters,
             sot_token,
             transcribe_token,
@@ -175,7 +211,7 @@ impl WhisperModel {
     /// # Errors
     ///
     /// Returns an error if the audio data cannot be converted to a mel spectrogram.
-    pub fn transcribe_audio(&mut self, audio_data: &[f32], sample_rate: u32) -> Result<String> {
+    fn transcribe_internal(&mut self, audio_data: &[f32], sample_rate: u32) -> Result<String> {
         debug!("Transcribing audio with sample rate {sample_rate}Hz");
 
         // Resample to 16kHz if needed
@@ -338,11 +374,28 @@ impl WhisperModel {
         Ok(text.to_string())
     }
 
-    pub fn device(&self) -> &Device {
-        &self.device
-    }
-
     pub fn config(&self) -> &Config {
         &self.config
+    }
+}
+
+impl ModelInfo for WhisperModel {
+    fn info(&self) -> &ModelInfoData {
+        &self.info
+    }
+}
+
+impl ModelState for WhisperModel {
+    fn device(&self) -> &Device {
+        &self.device
+    }
+}
+
+#[async_trait]
+impl Transcribe for WhisperModel {
+    async fn transcribe_audio(&mut self, audio: &[f32], sample_rate: u32) -> Result<String> {
+        // Inference is CPU/GPU-bound and synchronous; daemon callers wrap heavy
+        // work in `tokio::task::spawn_blocking` outside of the trait call.
+        self.transcribe_internal(audio, sample_rate)
     }
 }

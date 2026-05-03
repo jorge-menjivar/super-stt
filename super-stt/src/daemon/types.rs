@@ -6,7 +6,7 @@ use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::services::dbus::DBusManager;
 use crate::services::transcription::RealTimeTranscriptionManager;
-use crate::stt_models::local::{voxtral::VoxtralModel, whisper::WhisperModel};
+use crate::stt_models::local::download::CustomModelInfo;
 use crate::stt_models::third_party::{
     deepgram::DeepgramModel, mistralai::MistralModel, openai::OpenAIModel,
 };
@@ -17,8 +17,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use super_stt_shared::NotificationManager;
 use super_stt_shared::models::provider::{OnlineProvider, Provider};
+use super_stt_shared::models::registry;
 use super_stt_shared::resource_management::ResourceManager;
-use super_stt_shared::stt_model::STTModel;
 use super_stt_shared::theme::AudioTheme;
 use tokio::net::UnixListener;
 use tokio::sync::broadcast;
@@ -31,91 +31,24 @@ pub enum DeviceOverride {
     Cuda,
 }
 
-/// Enum to hold different STT model types
-pub enum STTModelInstance {
-    Whisper(Box<WhisperModel>),
-    Voxtral(Box<VoxtralModel>),
-    OpenAI(Box<OpenAIModel>),
-    Mistral(Box<MistralModel>),
-    Deepgram(Box<DeepgramModel>),
+/// A live model: its full resolved [`ModelDefinition`] plus the running
+/// inference instance. Replaces what used to be parallel
+/// `Arc<RwLock<Option<…>>>` slots for name, provider, and instance — those
+/// always changed together and could drift during a switch. The definition
+/// owns the name, provider, source, and architecture; nothing has to be
+/// re-derived at read sites.
+pub struct LoadedModel {
+    pub definition: super_stt_shared::models::registry::ModelDefinition,
+    pub instance: Box<dyn crate::stt_models::transcribe::Transcribe>,
 }
 
-impl STTModelInstance {
-    /// Transcribe audio using a local model (sync).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the underlying model fails to transcribe,
-    /// or if called on an online model (use `transcribe_audio_online` instead).
-    pub fn transcribe_audio(&mut self, audio_data: &[f32], sample_rate: u32) -> Result<String> {
-        match self {
-            STTModelInstance::Whisper(model) => model.transcribe_audio(audio_data, sample_rate),
-            STTModelInstance::Voxtral(model) => model.transcribe_audio(audio_data, sample_rate),
-            STTModelInstance::OpenAI(_)
-            | STTModelInstance::Mistral(_)
-            | STTModelInstance::Deepgram(_) => Err(anyhow::anyhow!(
-                "Use transcribe_audio_online for online models"
-            )),
-        }
-    }
-
-    /// Transcribe audio using an online model (async).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the API call fails or if called on a local model.
-    pub async fn transcribe_audio_online(
-        &self,
-        audio_data: &[f32],
-        sample_rate: u32,
-    ) -> Result<String> {
-        match self {
-            STTModelInstance::OpenAI(model) => {
-                model.transcribe_audio(audio_data, sample_rate).await
-            }
-            STTModelInstance::Mistral(model) => {
-                model.transcribe_audio(audio_data, sample_rate).await
-            }
-            STTModelInstance::Deepgram(model) => {
-                model.transcribe_audio(audio_data, sample_rate).await
-            }
-            _ => Err(anyhow::anyhow!(
-                "transcribe_audio_online called on local model"
-            )),
-        }
-    }
-
-    /// Returns true if this is an online model that sends audio to an external API.
-    #[must_use]
-    pub fn is_online(&self) -> bool {
-        matches!(
-            self,
-            STTModelInstance::OpenAI(_)
-                | STTModelInstance::Mistral(_)
-                | STTModelInstance::Deepgram(_)
-        )
-    }
-
-    /// Get the device used by the model.
-    /// Returns `Device::Cpu` as a placeholder for online models.
-    #[must_use]
-    pub fn device(&self) -> &candle_core::Device {
-        match self {
-            STTModelInstance::Whisper(model) => model.device(),
-            STTModelInstance::Voxtral(model) => model.device(),
-            STTModelInstance::OpenAI(_)
-            | STTModelInstance::Mistral(_)
-            | STTModelInstance::Deepgram(_) => &candle_core::Device::Cpu,
-        }
-    }
-}
+/// Shared handle to the currently-loaded model (or `None` while idle/loading).
+pub type SharedLoadedModel = Arc<tokio::sync::RwLock<Option<LoadedModel>>>;
 
 #[derive(Clone)]
 pub struct SuperSTTDaemon {
     pub socket_path: PathBuf,
-    pub model: Arc<tokio::sync::RwLock<Option<STTModelInstance>>>,
-    pub model_type: Arc<tokio::sync::RwLock<Option<super_stt_shared::stt_model::STTModel>>>,
-    pub model_provider: Arc<tokio::sync::RwLock<Option<Provider>>>,
+    pub model: SharedLoadedModel,
     pub notification_manager: Arc<NotificationManager>,
     pub audio_processor: Arc<AudioProcessor>,
     pub shutdown_tx: broadcast::Sender<()>,
@@ -146,6 +79,8 @@ pub struct SuperSTTDaemon {
     pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
     // Channel for streaming preview text to a waiting client (set by client_management)
     pub preview_text: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
+    // Custom models discovered from custom_models_dir
+    pub custom_models: Arc<tokio::sync::RwLock<Vec<CustomModelInfo>>>,
 }
 
 impl SuperSTTDaemon {
@@ -158,7 +93,7 @@ impl SuperSTTDaemon {
     #[allow(clippy::too_many_lines)]
     pub async fn new(
         socket_path: PathBuf,
-        stt_model_override: Option<STTModel>,
+        stt_model_override: Option<String>,
         device_override: Option<DeviceOverride>,
         udp_port: u16,
         audio_theme_override: Option<AudioTheme>,
@@ -187,16 +122,12 @@ impl SuperSTTDaemon {
         let notification_manager = Arc::new(NotificationManager::new(1000, 100)); // max 1000 events, 100 subscribers
         let audio_processor = Arc::new(AudioProcessor::new());
 
-        // Initialize model storage
-        let model = Arc::new(tokio::sync::RwLock::new(None));
-        let model_type = Arc::new(tokio::sync::RwLock::new(Some(
-            config.transcription.preferred_model,
-        )));
+        // Initialize model storage (None until the initial load below succeeds)
+        let model: SharedLoadedModel = Arc::new(tokio::sync::RwLock::new(None));
 
         // Initialize other managers
         let realtime_manager = Arc::new(RealTimeTranscriptionManager::new(
             Arc::clone(&model),
-            Arc::clone(&model_type),
             Arc::clone(&notification_manager),
             Arc::clone(&audio_processor),
         ));
@@ -241,12 +172,6 @@ impl SuperSTTDaemon {
         let daemon = SuperSTTDaemon {
             socket_path,
             model,
-            model_type: Arc::new(tokio::sync::RwLock::new(Some(
-                config.transcription.preferred_model,
-            ))),
-            model_provider: Arc::new(tokio::sync::RwLock::new(Some(
-                config.transcription.preferred_provider,
-            ))),
             notification_manager,
             audio_processor,
             shutdown_tx,
@@ -270,7 +195,11 @@ impl SuperSTTDaemon {
             manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
             simulator: Arc::new(tokio::sync::RwLock::new(None)),
             preview_text: Arc::new(tokio::sync::RwLock::new(None)),
+            custom_models: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         };
+
+        // Scan custom models directory if configured
+        daemon.refresh_custom_models().await;
 
         // Apply temporary device override for current session (not saved to config)
         if matches!(device_override, Some(DeviceOverride::Cpu)) {
@@ -287,11 +216,13 @@ impl SuperSTTDaemon {
         // Broadcast loading status
         Self::broadcast_loading_status(&daemon.notification_manager).await;
 
-        // Load the appropriate STT model based on config preferences
-        // If the preferred provider is online but the toggle is off or no key, fall back to default
+        // Load the appropriate STT model based on config preferences.
+        // (name, provider) is the durable identity, both stored in config.
+        // If the preferred model is online but online models are disabled
+        // or no API key is present, fall back to the safe default.
         let (model_to_load, provider_to_load) = {
             let config_guard = daemon.config.read().await;
-            let preferred = config_guard.transcription.preferred_model;
+            let preferred = config_guard.transcription.preferred_model.clone();
             let preferred_provider = config_guard.transcription.preferred_provider;
             if let Provider::Online(online) = preferred_provider {
                 if config_guard.online.allow_online_models
@@ -300,23 +231,43 @@ impl SuperSTTDaemon {
                     (preferred, preferred_provider)
                 } else {
                     warn!(
-                        "Preferred provider is online but online models are disabled or no API key; falling back to default"
+                        "Preferred model is online but online models are disabled or no API key; falling back to default"
                     );
-                    let default = STTModel::default();
-                    (default, default.default_provider())
+                    let default = registry::default_definition();
+                    (default.name.to_string(), default.provider)
                 }
             } else {
                 (preferred, preferred_provider)
             }
         };
-        Self::load_initial_model_and_broadcast(&daemon, model_to_load, provider_to_load).await?;
+
+        // Try the preferred model; on failure, fall back to the safe default so the
+        // daemon comes up in a usable state instead of exiting (e.g. configured
+        // model name no longer exists in the registry).
+        if let Err(e) =
+            Self::load_initial_model_and_broadcast(&daemon, model_to_load.clone(), provider_to_load)
+                .await
+        {
+            let default_def = registry::default_definition();
+            let default = default_def.name.to_string();
+            let default_provider = default_def.provider;
+            if model_to_load == default && provider_to_load == default_provider {
+                return Err(e);
+            }
+            warn!(
+                "Failed to load preferred model {model_to_load} ({provider_to_load}): {e}; \
+                 falling back to {default} ({default_provider})"
+            );
+            daemon.download_manager.clear_download();
+            Self::load_initial_model_and_broadcast(&daemon, default, default_provider).await?;
+        }
 
         Ok(daemon)
     }
 
     fn apply_cli_overrides_to_config(
         config: &mut DaemonConfig,
-        stt_model_override: Option<STTModel>,
+        stt_model_override: Option<String>,
         device_override: Option<DeviceOverride>,
         audio_theme_override: Option<AudioTheme>,
     ) -> bool {
@@ -378,10 +329,12 @@ impl SuperSTTDaemon {
 
     async fn load_initial_model_and_broadcast(
         daemon: &SuperSTTDaemon,
-        model_to_load: STTModel,
+        model_to_load: String,
         provider: Provider,
     ) -> Result<()> {
-        daemon.broadcast_model_loading_status(model_to_load).await;
+        daemon
+            .broadcast_model_loading_status(model_to_load.clone())
+            .await;
 
         // Online providers don't need downloading — create instance directly
         if let Provider::Online(online) = provider {
@@ -390,15 +343,18 @@ impl SuperSTTDaemon {
                 .map_err(|e| anyhow::anyhow!(e))?
                 .ok_or_else(|| anyhow::anyhow!("{key_name} API key not configured"))?;
 
-            let model_id = model_to_load
-                .api_model_id(online)
-                .ok_or_else(|| anyhow::anyhow!("{model_to_load} not available via {provider}"))?
-                .to_string();
-            let instance = Self::create_online_instance(online, api_key, model_id);
+            let instance = Self::create_online_instance(online, api_key, &model_to_load)
+                .map_err(|e| anyhow::anyhow!(e))?;
             info!("{provider} model {model_to_load} loaded successfully");
-            *daemon.model.write().await = Some(instance);
-            *daemon.model_type.write().await = Some(model_to_load);
-            *daemon.model_provider.write().await = Some(provider);
+            let definition = registry::find_by(&model_to_load, provider)
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("{model_to_load} via {provider}: not in registry")
+                })?;
+            *daemon.model.write().await = Some(LoadedModel {
+                definition,
+                instance,
+            });
 
             if let Err(e) = daemon
                 .notification_manager
@@ -420,7 +376,7 @@ impl SuperSTTDaemon {
         }
 
         // Local model path: download if needed, then load
-        let tracker = daemon.create_progress_tracker(model_to_load);
+        let tracker = daemon.create_progress_tracker(&model_to_load);
         if let Err(resp) = daemon.register_download(&tracker) {
             tracker.cancel();
             anyhow::bail!(
@@ -431,7 +387,12 @@ impl SuperSTTDaemon {
 
         let start_time = std::time::Instant::now();
         let instance = daemon
-            .download_and_load_model(model_to_load, Arc::clone(&tracker), start_time)
+            .download_and_load_model(
+                model_to_load.clone(),
+                provider,
+                Arc::clone(&tracker),
+                start_time,
+            )
             .await?;
 
         // Mark completed and clear download state
@@ -441,16 +402,14 @@ impl SuperSTTDaemon {
         daemon.download_manager.clear_download();
 
         // Store into daemon state
-        let model_name = match &instance {
-            STTModelInstance::Whisper(_) => "Whisper",
-            STTModelInstance::Voxtral(_) => "Voxtral",
-            STTModelInstance::OpenAI(_) => "OpenAI",
-            STTModelInstance::Mistral(_) => "Mistral",
-            STTModelInstance::Deepgram(_) => "Deepgram",
-        };
-        info!("{model_name} model loaded successfully");
-        *daemon.model.write().await = Some(instance);
-        *daemon.model_type.write().await = Some(model_to_load);
+        info!("{provider} model loaded successfully");
+        let definition = registry::find_by(&model_to_load, provider)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("{model_to_load} via {provider}: not in registry"))?;
+        *daemon.model.write().await = Some(LoadedModel {
+            definition,
+            instance,
+        });
 
         // Broadcast ready status
         if let Err(e) = daemon
@@ -461,7 +420,6 @@ impl SuperSTTDaemon {
                 serde_json::json!({
                     "status": "ready",
                     "model_loaded": true,
-                    "model_type": model_name.to_lowercase(),
                     "timestamp": chrono::Utc::now().to_rfc3339()
                 }),
             )
@@ -473,23 +431,33 @@ impl SuperSTTDaemon {
     }
 
     /// Create the appropriate online model instance based on provider.
-    #[must_use]
+    ///
+    /// # Errors
+    /// Returns an error if `name` is unknown to the provider's registry entries
+    /// or if constructing the underlying client fails (e.g. malformed API key).
     pub fn create_online_instance(
         provider: OnlineProvider,
         api_key: String,
-        model_id: String,
-    ) -> STTModelInstance {
-        match provider {
-            OnlineProvider::OpenAI => {
-                STTModelInstance::OpenAI(Box::new(OpenAIModel::new(api_key, model_id)))
-            }
-            OnlineProvider::Mistral => {
-                STTModelInstance::Mistral(Box::new(MistralModel::new(api_key, model_id)))
-            }
-            OnlineProvider::Deepgram => {
-                STTModelInstance::Deepgram(Box::new(DeepgramModel::new(api_key, model_id)))
-            }
-        }
+        name: &str,
+    ) -> Result<Box<dyn crate::stt_models::transcribe::Transcribe>> {
+        Ok(match provider {
+            OnlineProvider::OpenAI => Box::new(OpenAIModel::new(name, api_key)?),
+            OnlineProvider::Mistral => Box::new(MistralModel::new(name, api_key)?),
+            OnlineProvider::Deepgram => Box::new(DeepgramModel::new(name, api_key)?),
+        })
+    }
+
+    /// Resolve a wire-level `(name, provider, source)` triple into a
+    /// [`ModelDefinition`], consulting both the static built-in registry
+    /// and the daemon's discovered custom models. Returns `None` on miss.
+    pub async fn resolve_definition(
+        &self,
+        name: &str,
+        provider: Provider,
+        source: super_stt_shared::models::registry::SourceKind,
+    ) -> Option<super_stt_shared::models::registry::ModelDefinition> {
+        let custom = self.custom_models.read().await;
+        super_stt_shared::models::registry::resolve(name, provider, source, &custom)
     }
 
     /// Start the daemon and listen for connections
@@ -728,10 +696,10 @@ mod tests {
         let instance = SuperSTTDaemon::create_online_instance(
             OnlineProvider::OpenAI,
             "test-key".to_string(),
-            "whisper-1".to_string(),
-        );
+            "whisper-1",
+        )
+        .unwrap();
         assert!(instance.is_online());
-        assert!(matches!(instance, STTModelInstance::OpenAI(_)));
     }
 
     #[test]
@@ -739,10 +707,10 @@ mod tests {
         let instance = SuperSTTDaemon::create_online_instance(
             OnlineProvider::Mistral,
             "test-key".to_string(),
-            "voxtral-mini-latest".to_string(),
-        );
+            "voxtral-mini-latest",
+        )
+        .unwrap();
         assert!(instance.is_online());
-        assert!(matches!(instance, STTModelInstance::Mistral(_)));
     }
 
     #[test]
@@ -750,27 +718,10 @@ mod tests {
         let instance = SuperSTTDaemon::create_online_instance(
             OnlineProvider::Deepgram,
             "test-key".to_string(),
-            "nova-3".to_string(),
-        );
+            "nova-3",
+        )
+        .unwrap();
         assert!(instance.is_online());
-        assert!(matches!(instance, STTModelInstance::Deepgram(_)));
-    }
-
-    #[test]
-    fn online_instance_transcribe_sync_returns_error() {
-        let mut instance = SuperSTTDaemon::create_online_instance(
-            OnlineProvider::OpenAI,
-            "key".to_string(),
-            "whisper-1".to_string(),
-        );
-        let result = instance.transcribe_audio(&[0.0; 16000], 16000);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("transcribe_audio_online")
-        );
     }
 
     #[test]
@@ -778,8 +729,9 @@ mod tests {
         let instance = SuperSTTDaemon::create_online_instance(
             OnlineProvider::OpenAI,
             "key".to_string(),
-            "whisper-1".to_string(),
-        );
+            "whisper-1",
+        )
+        .unwrap();
         assert!(matches!(instance.device(), candle_core::Device::Cpu));
     }
 }

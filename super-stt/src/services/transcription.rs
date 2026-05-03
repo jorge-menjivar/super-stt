@@ -8,10 +8,9 @@ use tokio::sync::{RwLock, broadcast};
 use tokio::time::{Duration, interval};
 use tokio_util::sync::CancellationToken;
 
-use crate::daemon::types::STTModelInstance;
+use crate::daemon::types::SharedLoadedModel;
 use crate::input::audio::AudioProcessor;
 use super_stt_shared::services::notification::NotificationManager;
-use super_stt_shared::stt_model::STTModel;
 
 use std::collections::VecDeque;
 
@@ -190,8 +189,7 @@ impl RealTimeSession {
 
 pub struct RealTimeTranscriptionManager {
     sessions: Arc<RwLock<HashMap<String, RealTimeSession>>>,
-    model: Arc<RwLock<Option<STTModelInstance>>>,
-    model_type: Arc<RwLock<Option<STTModel>>>,
+    model: SharedLoadedModel,
     notification_manager: Arc<NotificationManager>,
     audio_processor: Arc<AudioProcessor>,
 }
@@ -199,15 +197,13 @@ pub struct RealTimeTranscriptionManager {
 impl RealTimeTranscriptionManager {
     /// Construct a new real-time transcription manager
     pub fn new(
-        model: Arc<RwLock<Option<STTModelInstance>>>,
-        model_type: Arc<RwLock<Option<STTModel>>>,
+        model: SharedLoadedModel,
         notification_manager: Arc<NotificationManager>,
         audio_processor: Arc<AudioProcessor>,
     ) -> Self {
         let manager = Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             model,
-            model_type,
             notification_manager,
             audio_processor,
         };
@@ -251,14 +247,12 @@ impl RealTimeTranscriptionManager {
     ) -> Result<broadcast::Receiver<String>> {
         let sample_rate = sample_rate.unwrap_or(16000);
 
-        // Get processing interval from the model type
+        // Get processing interval from the loaded model's definition
         let min_interval = {
-            let model_type_guard = self.model_type.read().await;
-            if let Some(model_type) = model_type_guard.as_ref() {
-                model_type.get_processing_interval()
-            } else {
-                Duration::from_secs(1) // Default fallback
-            }
+            let guard = self.model.read().await;
+            guard.as_ref().map_or(Duration::from_secs(1), |loaded| {
+                loaded.definition.processing_interval
+            })
         };
 
         let session = RealTimeSession::new(client_id.clone(), sample_rate, language, min_interval)?;
@@ -314,7 +308,7 @@ impl RealTimeTranscriptionManager {
 
     async fn process_all_sessions(
         sessions: &Arc<RwLock<HashMap<String, RealTimeSession>>>,
-        model: &Arc<RwLock<Option<STTModelInstance>>>,
+        model: &SharedLoadedModel,
         audio_processor: &Arc<AudioProcessor>,
         notification_manager: &Arc<NotificationManager>,
     ) -> Result<()> {
@@ -378,7 +372,7 @@ impl RealTimeTranscriptionManager {
     async fn transcribe_audio_chunk(
         client_id: &str,
         audio_data: Vec<f32>,
-        model: &Arc<RwLock<Option<STTModelInstance>>>,
+        model: &SharedLoadedModel,
         audio_processor: &Arc<AudioProcessor>,
         sessions: &Arc<RwLock<HashMap<String, RealTimeSession>>>,
         notification_manager: &Arc<NotificationManager>,
@@ -390,13 +384,15 @@ impl RealTimeTranscriptionManager {
         // Check if online model to choose async vs blocking path
         let is_online = {
             let guard = model.read().await;
-            guard.as_ref().is_some_and(STTModelInstance::is_online)
+            guard
+                .as_ref()
+                .is_some_and(|loaded| loaded.instance.is_online())
         };
 
         let transcription_result = if is_online {
-            let model_guard = model.read().await;
-            if let Some(m) = model_guard.as_ref() {
-                Ok(m.transcribe_audio_online(&processed, 16000).await)
+            let mut model_guard = model.write().await;
+            if let Some(loaded) = model_guard.as_mut() {
+                Ok(loaded.instance.transcribe_audio(&processed, 16000).await)
             } else {
                 Ok(Err(anyhow::anyhow!("Model not loaded")))
             }
@@ -405,9 +401,10 @@ impl RealTimeTranscriptionManager {
                 let model_clone = Arc::clone(model);
                 let audio = processed;
                 move || {
+                    let handle = tokio::runtime::Handle::current();
                     let mut model_guard = model_clone.blocking_write();
-                    if let Some(model) = model_guard.as_mut() {
-                        model.transcribe_audio(&audio, 16000)
+                    if let Some(loaded) = model_guard.as_mut() {
+                        handle.block_on(loaded.instance.transcribe_audio(&audio, 16000))
                     } else {
                         Err(anyhow::anyhow!("Model not loaded"))
                     }

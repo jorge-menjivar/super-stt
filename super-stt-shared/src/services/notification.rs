@@ -75,7 +75,7 @@ impl NotificationManager {
                         .collect();
 
                     // Sort by timestamp (oldest first)
-                    events_with_time.sort_by(|a, b| a.1.cmp(&b.1));
+                    events_with_time.sort_by_key(|a| a.1);
 
                     // Remove oldest events
                     let to_remove = events_with_time.len().saturating_sub(max_history_size);

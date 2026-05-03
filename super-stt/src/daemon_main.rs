@@ -11,7 +11,6 @@ use crate::daemon::types::{DeviceOverride, SuperSTTDaemon};
 use anyhow::{Context, Result};
 use log::{error, info, warn};
 use std::path::PathBuf;
-use super_stt_shared::stt_model::STTModel;
 use super_stt_shared::theme::AudioTheme;
 
 /// Main entry point for the daemon
@@ -45,12 +44,12 @@ pub async fn run() -> Result<()> {
     // Load saved configuration first
     let config = DaemonConfig::load();
 
-    // Only use CLI arguments if they were explicitly provided (not defaults)
-    let model = if matches.value_source("model") == Some(clap::parser::ValueSource::CommandLine) {
-        *matches.get_one::<STTModel>("model").unwrap()
-    } else {
-        config.transcription.preferred_model
-    };
+    // CLI flag overrides the saved preferred model for this session;
+    // when it's not passed, fall back to whatever the config has.
+    let model: String = matches.get_one::<String>("model").map_or_else(
+        || config.transcription.preferred_model.clone(),
+        Clone::clone,
+    );
 
     let device = matches.get_one::<String>("device").unwrap();
     let force_cpu = device == "cpu";
@@ -402,7 +401,12 @@ async fn send_status_request_to_daemon(socket_path: &PathBuf) -> Result<()> {
     match response.status.as_str() {
         "success" => {
             info!("Daemon Status:");
-            info!("  Model: {}", response.current_model.unwrap_or_default());
+            info!(
+                "  Model: {}",
+                response
+                    .current_model
+                    .unwrap_or_else(|| "unknown".to_string())
+            );
             info!(
                 "  Device: {}",
                 response.device.unwrap_or("unknown".to_string())

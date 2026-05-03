@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
 use crate::models::provider::Provider;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::theme::AudioTheme;
 use crate::models::write_method::WriteMethod;
-use crate::stt_model::STTModel;
 use crate::validation::{self, Validate, ValidationError};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -51,11 +50,13 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_loaded: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_model: Option<STTModel>,
+    pub current_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_provider: Option<Provider>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub available_models: Option<Vec<STTModel>>,
+    pub current_source: Option<crate::models::registry::SourceKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_models: Option<Vec<(String, Provider, crate::models::registry::SourceKind)>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_devices: Option<Vec<String>>,
 
@@ -160,6 +161,7 @@ impl DaemonResponse {
             model_loaded: None,
             current_model: None,
             current_provider: None,
+            current_source: None,
             available_models: None,
             available_devices: None,
             gpu_free_memory: None,
@@ -190,9 +192,7 @@ impl DaemonResponse {
         // Full details remain available in daemon logs.
         fn sanitize_error_message(message: &str) -> String {
             // Opt-in detailed errors for local debugging
-            let debug = std::env::var("SUPER_STT_DEBUG_ERRORS")
-                .map(|v| matches!(v.as_str(), "1"))
-                .unwrap_or(false)
+            let debug = std::env::var("SUPER_STT_DEBUG_ERRORS").is_ok_and(|v| v == "1")
                 || cfg!(debug_assertions);
             if debug {
                 return message.to_string();
@@ -215,6 +215,7 @@ impl DaemonResponse {
             model_loaded: None,
             current_model: None,
             current_provider: None,
+            current_source: None,
             available_models: None,
             available_devices: None,
             gpu_free_memory: None,
@@ -258,14 +259,20 @@ impl DaemonResponse {
     }
 
     #[must_use]
-    pub fn with_current_model(mut self, model: STTModel) -> Self {
-        self.current_model = Some(model);
+    pub fn with_current_model(mut self, model: impl Into<String>) -> Self {
+        self.current_model = Some(model.into());
         self
     }
 
     #[must_use]
     pub fn with_current_provider(mut self, provider: Provider) -> Self {
         self.current_provider = Some(provider);
+        self
+    }
+
+    #[must_use]
+    pub fn with_current_source(mut self, source: crate::models::registry::SourceKind) -> Self {
+        self.current_source = Some(source);
         self
     }
 
@@ -318,7 +325,10 @@ impl DaemonResponse {
     }
 
     #[must_use]
-    pub fn with_available_models(mut self, models: Vec<STTModel>) -> Self {
+    pub fn with_available_models(
+        mut self,
+        models: Vec<(String, Provider, crate::models::registry::SourceKind)>,
+    ) -> Self {
         self.available_models = Some(models);
         self
     }
@@ -439,8 +449,9 @@ pub enum Command {
     GetAudioTheme,
     TestAudioTheme,
     SetModel {
-        model: STTModel,
+        model: String,
         provider: Provider,
+        source: crate::models::registry::SourceKind,
     },
     GetModel,
     ListModels,
@@ -472,7 +483,7 @@ pub enum Command {
         enabled: bool,
     },
     GetAllowOnlineModels,
-    SetModelOverridePath {
+    SetCustomModelsDir {
         path: Option<String>,
     },
 }
@@ -712,20 +723,29 @@ mod tests {
 
     #[test]
     fn set_model_parses_online_models() {
-        for model_name in [
-            "whisper-1",
-            "gpt-4o-transcribe",
-            "gpt-4o-mini-transcribe",
-            "voxtral-mini-transcribe-v2",
-            "nova-3",
-        ] {
-            let request = make_request("set_model", Some(json!({ "model": model_name })));
+        let cases: &[(&str, &str)] = &[
+            ("whisper-1", "openai"),
+            ("gpt-4o-transcribe", "openai"),
+            ("gpt-4o-mini-transcribe", "openai"),
+            ("voxtral-mini-latest", "mistral"),
+            ("nova-3", "deepgram"),
+        ];
+        for (model_name, provider_str) in cases {
+            let request = make_request(
+                "set_model",
+                Some(json!({ "model": model_name, "provider": provider_str })),
+            );
             let command = Command::try_from(request)
                 .unwrap_or_else(|e| panic!("set_model should parse {model_name}: {e}"));
             match command {
-                Command::SetModel { model, provider } => {
-                    assert_eq!(model.to_string(), model_name);
-                    assert!(provider.is_online());
+                Command::SetModel {
+                    model,
+                    provider,
+                    source,
+                } => {
+                    assert_eq!(model.to_string(), *model_name);
+                    assert!(matches!(provider, Provider::Online(_)), "{model_name}");
+                    assert_eq!(source, crate::models::registry::SourceKind::Online);
                 }
                 _ => panic!("expected Command::SetModel for {model_name}"),
             }
@@ -733,35 +753,53 @@ mod tests {
     }
 
     #[test]
-    fn set_model_with_explicit_provider() {
+    fn set_model_parses_local_name() {
         let request = make_request(
             "set_model",
-            Some(json!({ "model": "voxtral-mini", "provider": "mistral" })),
+            Some(json!({ "model": "whisper-tiny", "provider": "local-whisper" })),
         );
         let command = Command::try_from(request).expect("should parse");
         match command {
-            Command::SetModel { model, provider } => {
-                assert_eq!(model, STTModel::VoxtralMini);
-                assert_eq!(
-                    provider,
-                    Provider::Online(crate::models::provider::OnlineProvider::Mistral)
-                );
+            Command::SetModel {
+                model,
+                provider,
+                source,
+            } => {
+                assert_eq!(model, "whisper-tiny");
+                assert_eq!(provider, crate::models::provider::Provider::LocalWhisper);
+                assert_eq!(source, crate::models::registry::SourceKind::Builtin);
             }
             _ => panic!("expected Command::SetModel"),
         }
     }
 
     #[test]
-    fn set_model_defaults_provider_for_local() {
-        let request = make_request("set_model", Some(json!({ "model": "whisper-tiny" })));
+    fn set_model_with_explicit_custom_source() {
+        let request = make_request(
+            "set_model",
+            Some(json!({
+                "model": "whisper-tiny",
+                "provider": "local-whisper",
+                "source": "custom",
+            })),
+        );
         let command = Command::try_from(request).expect("should parse");
         match command {
-            Command::SetModel { model, provider } => {
-                assert_eq!(model, STTModel::WhisperTiny);
-                assert_eq!(provider, Provider::Local);
+            Command::SetModel { source, .. } => {
+                assert_eq!(source, crate::models::registry::SourceKind::Custom);
             }
             _ => panic!("expected Command::SetModel"),
         }
+    }
+
+    #[test]
+    fn set_model_rejects_missing_provider() {
+        let request = make_request("set_model", Some(json!({ "model": "whisper-tiny" })));
+        let result = Command::try_from(request);
+        assert!(
+            result.is_err(),
+            "set_model without provider should be rejected"
+        );
     }
 
     #[test]
@@ -780,41 +818,41 @@ mod tests {
     }
 
     #[test]
-    fn set_model_override_path_parses_with_path() {
+    fn set_custom_models_dir_parses_with_path() {
         let request = make_request(
-            "set_model_override_path",
+            "set_custom_models_dir",
             Some(json!({ "path": "/tmp/models" })),
         );
         let command = Command::try_from(request).expect("command should parse");
         match command {
-            Command::SetModelOverridePath { path } => {
+            Command::SetCustomModelsDir { path } => {
                 assert_eq!(path.as_deref(), Some("/tmp/models"));
             }
-            _ => panic!("expected Command::SetModelOverridePath"),
+            _ => panic!("expected Command::SetCustomModelsDir"),
         }
     }
 
     #[test]
-    fn set_model_override_path_parses_with_null() {
-        let request = make_request("set_model_override_path", Some(json!({ "path": null })));
+    fn set_custom_models_dir_parses_with_null() {
+        let request = make_request("set_custom_models_dir", Some(json!({ "path": null })));
         let command = Command::try_from(request).expect("command should parse");
         match command {
-            Command::SetModelOverridePath { path } => {
+            Command::SetCustomModelsDir { path } => {
                 assert!(path.is_none());
             }
-            _ => panic!("expected Command::SetModelOverridePath"),
+            _ => panic!("expected Command::SetCustomModelsDir"),
         }
     }
 
     #[test]
-    fn set_model_override_path_parses_without_data() {
-        let request = make_request("set_model_override_path", None);
+    fn set_custom_models_dir_parses_without_data() {
+        let request = make_request("set_custom_models_dir", None);
         let command = Command::try_from(request).expect("command should parse");
         match command {
-            Command::SetModelOverridePath { path } => {
+            Command::SetCustomModelsDir { path } => {
                 assert!(path.is_none());
             }
-            _ => panic!("expected Command::SetModelOverridePath"),
+            _ => panic!("expected Command::SetCustomModelsDir"),
         }
     }
 }
@@ -863,7 +901,7 @@ impl TryFrom<DaemonRequest> for Command {
             "get_volume" => Ok(Command::GetVolume),
             "set_allow_online_models" => cmd_set_allow_online_models(&request),
             "get_allow_online_models" => Ok(Command::GetAllowOnlineModels),
-            "set_model_override_path" => Ok(cmd_set_model_override_path(&request)),
+            "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
             _ => Err(format!("Unknown command: {}", request.command)),
         }
     }
@@ -1025,23 +1063,41 @@ fn cmd_set_audio_theme(request: &DaemonRequest) -> Result<Command, String> {
 }
 
 fn cmd_set_model(request: &DaemonRequest) -> Result<Command, String> {
-    let model_value = request.data.as_ref().and_then(|data| data.get("model"));
-    let model_str = model_value.and_then(|v| v.as_str());
-    if let Some(model_str) = model_str {
-        let model =
-            STTModel::from_str(model_str).map_err(|err| format!("Failed to parse model: {err}"))?;
-        let provider = request
-            .data
-            .as_ref()
-            .and_then(|data| data.get("provider"))
-            .and_then(|v| v.as_str())
-            .map(|s| Provider::from_str(s).map_err(|e| format!("Failed to parse provider: {e}")))
-            .transpose()?
-            .unwrap_or_else(|| model.default_provider());
-        Ok(Command::SetModel { model, provider })
-    } else {
-        Err("Model string is empty".to_string())
-    }
+    let data = request.data.as_ref();
+    let model_str = data
+        .and_then(|d| d.get("model"))
+        .and_then(|v| v.as_str())
+        .ok_or("Model string is empty")?;
+
+    let provider_str = data
+        .and_then(|d| d.get("provider"))
+        .and_then(|v| v.as_str())
+        .ok_or("Provider string is required for set_model")?;
+    let provider: Provider = provider_str
+        .parse()
+        .map_err(|e| format!("Invalid provider {provider_str:?}: {e}"))?;
+
+    let source = match data.and_then(|d| d.get("source")).and_then(|v| v.as_str()) {
+        Some(s) => s
+            .parse()
+            .map_err(|e| format!("Invalid source {s:?}: {e}"))?,
+        None => {
+            // For backward compat: derive a sensible default from provider.
+            // Online providers always have source=Online; local providers
+            // default to Builtin (the registry path).
+            if matches!(provider, Provider::Online(_)) {
+                crate::models::registry::SourceKind::Online
+            } else {
+                crate::models::registry::SourceKind::Builtin
+            }
+        }
+    };
+
+    Ok(Command::SetModel {
+        model: model_str.to_string(),
+        provider,
+        source,
+    })
 }
 
 fn cmd_set_device(request: &DaemonRequest) -> Result<Command, String> {
@@ -1118,12 +1174,12 @@ fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {
     Ok(Command::SetVolume { volume })
 }
 
-fn cmd_set_model_override_path(request: &DaemonRequest) -> Command {
+fn cmd_set_custom_models_dir(request: &DaemonRequest) -> Command {
     let path = request
         .data
         .as_ref()
         .and_then(|data| data.get("path"))
         .and_then(|v| v.as_str())
         .map(String::from);
-    Command::SetModelOverridePath { path }
+    Command::SetCustomModelsDir { path }
 }

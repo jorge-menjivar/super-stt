@@ -73,9 +73,13 @@ impl SuperSTTDaemon {
             Command::SetAudioTheme { theme } => self.handle_set_audio_theme(theme),
             Command::GetAudioTheme => self.handle_get_audio_theme(),
             Command::TestAudioTheme => self.handle_test_audio_theme().await,
-            Command::SetModel { model, provider } => self.handle_set_model(model, provider).await,
+            Command::SetModel {
+                model,
+                provider,
+                source,
+            } => self.handle_set_model(model, provider, source).await,
             Command::GetModel => self.handle_get_model().await,
-            Command::ListModels => self.handle_list_models(),
+            Command::ListModels => self.handle_list_models().await,
             Command::SetDevice { device } => self.handle_set_device(device).await,
             Command::GetDevice => self.handle_get_device().await,
             Command::GetConfig => self.handle_get_config().await,
@@ -96,9 +100,7 @@ impl SuperSTTDaemon {
                 self.handle_set_allow_online_models(enabled).await
             }
             Command::GetAllowOnlineModels => self.handle_get_allow_online_models().await,
-            Command::SetModelOverridePath { path } => {
-                self.handle_set_model_override_path(path).await
-            }
+            Command::SetCustomModelsDir { path } => self.handle_set_custom_models_dir(path).await,
         }
     }
 
@@ -249,13 +251,11 @@ mod tests {
     async fn test_daemon() -> SuperSTTDaemon {
         let socket_path = PathBuf::from("/tmp/super-stt-test.sock");
         let model = Arc::new(tokio::sync::RwLock::new(None));
-        let model_type = Arc::new(tokio::sync::RwLock::new(None));
         let notification_manager = Arc::new(NotificationManager::new(10, 10));
         let audio_processor = Arc::new(AudioProcessor::new());
         let (shutdown_tx, _) = broadcast::channel(1);
         let realtime_manager = Arc::new(RealTimeTranscriptionManager::new(
             Arc::clone(&model),
-            Arc::clone(&model_type),
             Arc::clone(&notification_manager),
             Arc::clone(&audio_processor),
         ));
@@ -268,8 +268,6 @@ mod tests {
         SuperSTTDaemon {
             socket_path,
             model,
-            model_type,
-            model_provider: Arc::new(tokio::sync::RwLock::new(None)),
             notification_manager,
             audio_processor,
             shutdown_tx,
@@ -291,6 +289,7 @@ mod tests {
             manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
             simulator: Arc::new(tokio::sync::RwLock::new(None)),
             preview_text: Arc::new(tokio::sync::RwLock::new(None)),
+            custom_models: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         }
     }
 
@@ -604,7 +603,7 @@ mod tests {
             since_timestamp: None,
             limit: None,
             event_type: None,
-            data: Some(serde_json::json!({ "model": "whisper-1" })),
+            data: Some(serde_json::json!({ "model": "whisper-1", "provider": "openai" })),
             language: None,
             enabled: None,
         };
@@ -692,17 +691,17 @@ mod tests {
         let models = response.available_models.expect("should have models");
         // Should include online models in the list
         assert!(
-            models.iter().any(|m| m.to_string() == "whisper-1"),
+            models.iter().any(|(name, _, _)| name == "whisper-1"),
             "list should include OpenAI models"
         );
         assert!(
             models
                 .iter()
-                .any(|m| m.to_string() == "voxtral-mini-transcribe-v2"),
+                .any(|(name, _, _)| name == "voxtral-mini-latest"),
             "list should include Mistral models"
         );
         assert!(
-            models.iter().any(|m| m.to_string() == "nova-3"),
+            models.iter().any(|(name, _, _)| name == "nova-3"),
             "list should include Deepgram models"
         );
     }

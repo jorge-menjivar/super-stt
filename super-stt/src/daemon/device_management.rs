@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::daemon::types::{STTModelInstance, SuperSTTDaemon};
+use crate::daemon::types::SuperSTTDaemon;
+use crate::stt_models::transcribe::Transcribe;
 use chrono::Utc;
 use log::{error, info, warn};
 use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::provider::Provider;
 
 impl SuperSTTDaemon {
     /// Handle set device command - switch between CPU and CUDA
@@ -28,12 +30,11 @@ impl SuperSTTDaemon {
         }
 
         // Get context for the device switch
-        let (current_preferred, model_to_reload) = self.get_device_switch_context(&device).await;
+        let (current_preferred, model_to_reload, provider, source) =
+            self.get_device_switch_context(&device).await;
 
         // Online models don't use local GPU — just update the preference
-        let current_provider = self.model_provider.read().await;
-        if current_provider.is_some_and(|p| p.is_online()) {
-            drop(current_provider);
+        if matches!(provider, Provider::Online(_)) {
             info!("Current model uses online provider, updating device preference only");
             *self.preferred_device.write().await = device.clone();
             {
@@ -45,7 +46,6 @@ impl SuperSTTDaemon {
                 .with_device(device)
                 .with_message("Device preference updated (online model unaffected)".to_string());
         }
-        drop(current_provider);
 
         info!(
             "Starting device switch from {current_preferred} to {device} (will reload model: {model_to_reload})"
@@ -64,7 +64,7 @@ impl SuperSTTDaemon {
 
         // Try to reload model with the requested device, but cancel if shutdown occurs
         let load_result = tokio::select! {
-            result = self.load_model_with_target_device(&model_to_reload, &device) => {
+            result = self.load_model_with_target_device(&model_to_reload, provider, source, &device) => {
                 result
             }
             _ = shutdown_rx.recv() => {
@@ -79,13 +79,22 @@ impl SuperSTTDaemon {
                     model_instance,
                     &device,
                     &model_to_reload,
+                    provider,
+                    source,
                     &current_preferred,
                 )
                 .await
             }
             Err(e) => {
-                self.handle_device_switch_failure(e, &device, &model_to_reload, &current_preferred)
-                    .await
+                self.handle_device_switch_failure(
+                    e,
+                    &device,
+                    &model_to_reload,
+                    provider,
+                    source,
+                    &current_preferred,
+                )
+                .await
             }
         }
     }
@@ -145,12 +154,9 @@ impl SuperSTTDaemon {
         }
 
         // Check if a model is currently loaded - we'll need to reload it
-        let current_model_type = {
-            let model_type_guard = self.model_type.read().await;
-            *model_type_guard
-        };
+        let model_loaded = self.model.read().await.is_some();
 
-        if current_model_type.is_none() {
+        if !model_loaded {
             warn!("Device switch rejected - no model loaded");
             return Some(DaemonResponse::error(
                 "Cannot switch devices when no model is loaded. Load a model first.",
@@ -164,25 +170,32 @@ impl SuperSTTDaemon {
     async fn get_device_switch_context(
         &self,
         _device: &str,
-    ) -> (String, super_stt_shared::stt_model::STTModel) {
+    ) -> (
+        String,
+        String,
+        super_stt_shared::models::provider::Provider,
+        super_stt_shared::models::registry::SourceKind,
+    ) {
         // Get the model that needs to be reloaded (validated to exist already)
-        let current_model_type = {
-            let model_type_guard = self.model_type.read().await;
-            *model_type_guard
+        let (model_to_reload, provider, source) = {
+            let guard = self.model.read().await;
+            guard
+                .as_ref()
+                .map(|loaded| {
+                    (
+                        loaded.definition.name.to_string(),
+                        loaded.definition.provider,
+                        loaded.definition.source.kind(),
+                    )
+                })
+                .expect("Model existence already validated")
         };
-
-        let model_to_reload = current_model_type.expect("Model existence already validated");
         let current_preferred = self.preferred_device.read().await.clone();
-        (current_preferred, model_to_reload)
+        (current_preferred, model_to_reload, provider, source)
     }
 
     /// Prepare for device switch by broadcasting status and unloading current model
-    async fn prepare_device_switch(
-        &self,
-        from_device: &str,
-        to_device: &str,
-        model: &super_stt_shared::stt_model::STTModel,
-    ) {
+    async fn prepare_device_switch(&self, from_device: &str, to_device: &str, model: &str) {
         // Broadcast device switching status
         if let Err(e) = self
             .notification_manager
@@ -193,7 +206,7 @@ impl SuperSTTDaemon {
                     "status": "switching_device",
                     "from_device": from_device,
                     "to_device": to_device,
-                    "model": model.to_string(),
+                    "model": model,
                     "timestamp": Utc::now().to_rfc3339()
                 }),
             )
@@ -213,19 +226,13 @@ impl SuperSTTDaemon {
     /// Handle successful device switch
     async fn handle_device_switch_success(
         &self,
-        model_instance: STTModelInstance,
+        model_instance: Box<dyn Transcribe>,
         device: &str,
-        model_to_reload: &super_stt_shared::stt_model::STTModel,
+        model_to_reload: &str,
+        provider: super_stt_shared::models::provider::Provider,
+        source: super_stt_shared::models::registry::SourceKind,
         previous_device: &str,
     ) -> DaemonResponse {
-        let model_name = match &model_instance {
-            STTModelInstance::Whisper(_) => "Whisper",
-            STTModelInstance::Voxtral(_) => "Voxtral",
-            STTModelInstance::OpenAI(_) => "OpenAI",
-            STTModelInstance::Mistral(_) => "Mistral",
-            STTModelInstance::Deepgram(_) => "Deepgram",
-        };
-
         let actual_device = {
             let actual_device_str = match model_instance.device() {
                 candle_core::Device::Cpu => "cpu",
@@ -236,7 +243,14 @@ impl SuperSTTDaemon {
         };
 
         // Store the reloaded model
-        *self.model.write().await = Some(model_instance);
+        let definition = self
+            .resolve_definition(model_to_reload, provider, source)
+            .await
+            .expect("device-switched model resolved before reload");
+        *self.model.write().await = Some(crate::daemon::types::LoadedModel {
+            definition,
+            instance: model_instance,
+        });
 
         // Update both preferred and actual device after successful reload
         {
@@ -279,8 +293,7 @@ impl SuperSTTDaemon {
                     "model_loaded": true,
                     "preferred_device": device,
                     "actual_device": actual_device,
-                    "model_type": model_name.to_lowercase(),
-                    "model_name": model_to_reload.to_string(),
+                    "model_name": model_to_reload,
                     "timestamp": Utc::now().to_rfc3339()
                 }),
             )
@@ -299,7 +312,9 @@ impl SuperSTTDaemon {
         &self,
         error: anyhow::Error,
         device: &str,
-        model_to_reload: &super_stt_shared::stt_model::STTModel,
+        model_to_reload: &str,
+        provider: super_stt_shared::models::provider::Provider,
+        source: super_stt_shared::models::registry::SourceKind,
         previous_device: &str,
     ) -> DaemonResponse {
         error!("Failed to reload model on new device: {error}");
@@ -314,7 +329,7 @@ impl SuperSTTDaemon {
                     "status": "device_switch_error",
                     "error": error.to_string(),
                     "failed_device": device,
-                    "model": model_to_reload.to_string(),
+                    "model": model_to_reload,
                     "timestamp": Utc::now().to_rfc3339()
                 }),
             )
@@ -333,7 +348,7 @@ impl SuperSTTDaemon {
         warn!("Attempting to recover by reverting to previous device: {previous_device}");
 
         match self
-            .load_model_with_target_device(model_to_reload, previous_device)
+            .load_model_with_target_device(model_to_reload, provider, source, previous_device)
             .await
         {
             Ok(model_instance) => {
@@ -345,16 +360,14 @@ impl SuperSTTDaemon {
                 }
                 .to_string();
 
-                // Extract model type before moving the instance
-                let model_type_name = match &model_instance {
-                    STTModelInstance::Whisper(_) => "whisper",
-                    STTModelInstance::Voxtral(_) => "voxtral",
-                    STTModelInstance::OpenAI(_) => "openai",
-                    STTModelInstance::Mistral(_) => "mistral",
-                    STTModelInstance::Deepgram(_) => "deepgram",
-                };
-
-                *self.model.write().await = Some(model_instance);
+                let definition = self
+                    .resolve_definition(model_to_reload, provider, source)
+                    .await
+                    .expect("recovery model resolved before reload");
+                *self.model.write().await = Some(crate::daemon::types::LoadedModel {
+                    definition,
+                    instance: model_instance,
+                });
                 {
                     let mut w = self.preferred_device.write().await;
                     *w = previous_device.to_string();
@@ -390,8 +403,7 @@ impl SuperSTTDaemon {
                             "model_loaded": true,
                             "preferred_device": previous_device,
                             "actual_device": recovery_actual_device,
-                            "model_type": model_type_name,
-                            "model_name": model_to_reload.to_string(),
+                            "model_name": model_to_reload,
                             "timestamp": Utc::now().to_rfc3339()
                         }),
                     )

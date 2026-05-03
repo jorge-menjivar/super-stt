@@ -6,40 +6,72 @@
 //! and returns the transcribed text. Deepgram uses `Token` auth (not Bearer)
 //! and returns transcription at `results.channels[0].alternatives[0].transcript`.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
+use async_trait::async_trait;
+use candle_core::Device;
 use log::{debug, info};
+use super_stt_shared::models::provider::{OnlineProvider, Provider};
 
 use crate::stt_models::third_party::audio::encode_wav_in_memory;
+use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
 
 pub struct DeepgramModel {
     api_key: String,
     model_id: String,
     client: reqwest::Client,
+    info: ModelInfoData,
 }
 
 impl DeepgramModel {
-    #[must_use]
-    pub fn new(api_key: String, model_id: String) -> Self {
+    /// Create a Deepgram client.
+    /// `name` must match a registry entry whose provider is Deepgram; the name
+    /// itself doubles as the API model ID.
+    ///
+    /// # Errors
+    /// Returns an error if `name` is not a registry entry served by Deepgram.
+    ///
+    /// # Panics
+    /// Panics if a registry-resolved `ModelInfoData` is missing its definition
+    /// (an internal invariant — `ModelInfoData::standard` always populates it).
+    pub fn new(name: &str, api_key: String) -> Result<Self> {
+        let info = ModelInfoData::standard(name, Provider::Online(OnlineProvider::Deepgram))
+            .ok_or_else(|| anyhow!("Unknown built-in model: {name}"))?;
+        let def = info.definition.expect("standard() guarantees a definition");
+        if !matches!(def.provider, Provider::Online(OnlineProvider::Deepgram)) {
+            return Err(anyhow!("{name} is not available via Deepgram"));
+        }
+        let model_id = def.name.to_string();
         info!("Creating Deepgram model client for {model_id}");
-        Self {
+        Ok(Self {
             api_key,
             model_id,
             client: {
                 crate::install_crypto_provider();
                 reqwest::Client::new()
             },
-        }
+            info,
+        })
     }
+}
 
-    /// Transcribe audio data by sending it to Deepgram's listen API.
-    ///
+impl ModelInfo for DeepgramModel {
+    fn info(&self) -> &ModelInfoData {
+        &self.info
+    }
+}
+
+impl ModelState for DeepgramModel {
+    fn device(&self) -> &Device {
+        &Device::Cpu
+    }
+}
+
+#[async_trait]
+impl Transcribe for DeepgramModel {
+    /// Transcribe audio by sending it to Deepgram's listen API.
     /// Audio is encoded as WAV and sent as a raw binary body (not multipart).
     /// The model is specified as a query parameter.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if WAV encoding, the HTTP request, or response parsing fails.
-    pub async fn transcribe_audio(&self, audio_data: &[f32], sample_rate: u32) -> Result<String> {
+    async fn transcribe_audio(&mut self, audio_data: &[f32], sample_rate: u32) -> Result<String> {
         debug!(
             "Sending {} samples at {sample_rate}Hz to Deepgram {} API",
             audio_data.len(),
@@ -98,7 +130,13 @@ mod tests {
 
     #[test]
     fn deepgram_model_constructs() {
-        let model = DeepgramModel::new("test-key".to_string(), "nova-3".to_string());
+        let model = DeepgramModel::new("nova-3", "test-key".to_string()).unwrap();
         assert_eq!(model.model_id, "nova-3");
+    }
+
+    #[test]
+    fn deepgram_model_rejects_non_deepgram_name() {
+        let result = DeepgramModel::new("whisper-tiny", "test-key".to_string());
+        assert!(result.is_err());
     }
 }
