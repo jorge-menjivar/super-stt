@@ -6522,7 +6522,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "super-stt-app"
-version = "0.1.4-beta.1"
+version = "0.1.4-beta.2"
 dependencies = [
  "anyhow",
  "dirs",
@@ -6551,7 +6551,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-cli"
-version = "0.1.4-beta.1"
+version = "0.1.4-beta.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -6566,7 +6566,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-consent"
-version = "0.1.4-beta.1"
+version = "0.1.4-beta.2"
 dependencies = [
  "env_logger",
  "libc",
@@ -6576,7 +6576,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-cosmic-applet"
-version = "0.1.4-beta.1"
+version = "0.1.4-beta.2"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -6595,7 +6595,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-daemon"
-version = "0.1.4-beta.1"
+version = "0.1.4-beta.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6648,7 +6648,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-shared"
-version = "0.1.4-beta.1"
+version = "0.1.4-beta.2"
 dependencies = [
  "anyhow",
  "async-stream",
