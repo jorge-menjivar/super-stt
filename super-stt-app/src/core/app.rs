@@ -10,12 +10,13 @@ use crate::daemon::client::{
     set_write_method, stop_record_command, test_daemon_connection,
 };
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};
+use crate::ui::icons;
 use crate::ui::messages::Message;
 use crate::ui::views;
 use cosmic::app::context_drawer;
 use cosmic::iced::Subscription;
 use cosmic::prelude::*;
-use cosmic::widget::{icon, menu, nav_bar};
+use cosmic::widget::{menu, nav_bar};
 use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use std::collections::HashMap;
@@ -184,33 +185,33 @@ impl cosmic::Application for AppModel {
         nav.insert()
             .text("Customization")
             .data::<Page>(Page::Customization)
-            .icon(icon::from_name("preferences-desktop-symbolic"))
+            .icon(icons::phosphor(icons::GEAR))
             .activate();
 
         nav.insert()
             .text("Recording")
             .data::<Page>(Page::Recording)
-            .icon(icon::from_name("audio-input-microphone-symbolic"));
+            .icon(icons::phosphor(icons::MICROPHONE));
 
         nav.insert()
             .text("Input Simulation")
             .data::<Page>(Page::InputSimulation)
-            .icon(icon::from_name("input-keyboard-symbolic"));
+            .icon(icons::phosphor(icons::KEYBOARD));
 
         nav.insert()
             .text("Models")
             .data::<Page>(Page::Models)
-            .icon(icon::from_name("applications-science-symbolic"));
+            .icon(icons::phosphor(icons::BRAIN));
 
         nav.insert()
             .text("Online Models")
             .data::<Page>(Page::OnlineModels)
-            .icon(icon::from_name("network-wireless-symbolic"));
+            .icon(icons::phosphor(icons::CLOUD));
 
         nav.insert()
             .text("Connection")
             .data::<Page>(Page::Connection)
-            .icon(icon::from_name("help-about-symbolic"));
+            .icon(icons::phosphor(icons::PLUG));
 
         // Construct the app model with the runtime's core.
         let mut app = AppModel {

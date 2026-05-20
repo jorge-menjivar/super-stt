@@ -2,5 +2,6 @@
 
 //! User interface module containing views and messages.
 
+pub mod icons;
 pub mod messages;
 pub mod views;

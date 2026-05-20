@@ -10,6 +10,7 @@ use super_stt_shared::models::registry::{self, SourceKind};
 use super::common::{go_next_with_item, page_layout};
 use crate::core::app::ModelOperationState;
 use crate::state::ContextPage;
+use crate::ui::icons;
 use crate::ui::messages::Message;
 
 /// Custom models directory section
@@ -187,9 +188,7 @@ fn model_loading_section<'a>(
 fn model_error_section(error_message: &str) -> Element<'_, Message> {
     let error_widget = column![
         row![
-            cosmic::widget::icon::from_name("dialog-warning-symbolic")
-                .size(20)
-                .icon(),
+            icons::phosphor(icons::WARNING).size(20),
             text::body(error_message),
         ]
         .spacing(cosmic::theme::spacing().space_xs)
@@ -290,12 +289,7 @@ fn model_row(
     ];
 
     if wont_fit {
-        items.push(
-            cosmic::widget::icon::from_name("dialog-warning-symbolic")
-                .size(16)
-                .icon()
-                .into(),
-        );
+        items.push(icons::phosphor(icons::WARNING).size(16).into());
     }
 
     if !size_label.is_empty() {
@@ -303,9 +297,8 @@ fn model_row(
     }
 
     items.push(if selected {
-        cosmic::widget::icon::from_name("object-select-symbolic")
+        icons::phosphor(icons::CHECK)
             .size(16)
-            .icon()
             .class(cosmic::theme::Svg::Custom(std::rc::Rc::new(Box::new(
                 svg_accent,
             ))))

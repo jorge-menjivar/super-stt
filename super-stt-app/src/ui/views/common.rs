@@ -4,9 +4,10 @@
 use cosmic::iced::Length;
 use cosmic::iced_core::Alignment;
 use cosmic::iced_core::text::Wrapping;
-use cosmic::widget::{self, button, icon, settings, space::horizontal as horizontal_space, text};
+use cosmic::widget::{self, button, settings, space::horizontal as horizontal_space, text};
 use cosmic::{Apply, Element};
 
+use crate::ui::icons;
 use crate::ui::messages::Message;
 
 /// Create a page container following cosmic-settings patterns
@@ -62,7 +63,7 @@ pub fn go_next_with_item<'a>(
         horizontal_space().into(),
         widget::row::with_capacity(2)
             .push(item)
-            .push(icon::from_name("go-next-symbolic").size(16).icon())
+            .push(icons::phosphor(icons::CARET_RIGHT).size(16))
             .align_y(Alignment::Center)
             .spacing(cosmic::theme::spacing().space_s)
             .into(),

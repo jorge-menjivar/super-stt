@@ -40,6 +40,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 const APP_ID: &str = "ai.menjivar.super-stt-consent";
 
+const QUESTION_ICON: &[u8] = include_bytes!("../resources/icons/phosphor/question.svg");
+
 /// Stable id for the autosize widget that wraps the dialog body.
 /// `widget::autosize::autosize` measures its child to size the parent
 /// layer-shell surface; without it the surface is 0×0.
@@ -185,7 +187,12 @@ impl cosmic::Application for ConsentApp {
         let dialog_widget = dialog::dialog()
             .title("Allow access to Super STT?")
             .body(body_text)
-            .icon(icon::from_name("dialog-question-symbolic").size(64))
+            .icon(
+                icon::from_svg_bytes(QUESTION_ICON)
+                    .symbolic(true)
+                    .icon()
+                    .size(64),
+            )
             .control(permission_lines)
             .primary_action(button::suggested("Allow").on_press(Message::Allow))
             .secondary_action(button::destructive("Deny").on_press(Message::Deny));
