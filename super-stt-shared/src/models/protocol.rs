@@ -121,6 +121,10 @@ pub struct DaemonResponse {
     // Online models
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_online_models: Option<bool>,
+
+    // Custom models directory (None = no override, daemon uses default cache)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_models_dir: Option<Option<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -183,6 +187,7 @@ impl DaemonResponse {
             write_method: None,
             preview_text: None,
             allow_online_models: None,
+            custom_models_dir: None,
         }
     }
 
@@ -237,6 +242,7 @@ impl DaemonResponse {
             write_method: None,
             preview_text: None,
             allow_online_models: None,
+            custom_models_dir: None,
         }
     }
 
@@ -398,6 +404,12 @@ impl DaemonResponse {
         self.allow_online_models = Some(allowed);
         self
     }
+
+    #[must_use]
+    pub fn with_custom_models_dir(mut self, dir: Option<String>) -> Self {
+        self.custom_models_dir = Some(dir);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -486,6 +498,7 @@ pub enum Command {
     SetCustomModelsDir {
         path: Option<String>,
     },
+    GetCustomModelsDir,
 }
 
 impl Validate for DaemonRequest {
@@ -756,7 +769,7 @@ mod tests {
     fn set_model_parses_local_name() {
         let request = make_request(
             "set_model",
-            Some(json!({ "model": "whisper-tiny", "provider": "local-whisper" })),
+            Some(json!({ "model": "whisper-tiny", "provider": "local_whisper" })),
         );
         let command = Command::try_from(request).expect("should parse");
         match command {
@@ -779,7 +792,7 @@ mod tests {
             "set_model",
             Some(json!({
                 "model": "whisper-tiny",
-                "provider": "local-whisper",
+                "provider": "local_whisper",
                 "source": "custom",
             })),
         );
@@ -902,6 +915,7 @@ impl TryFrom<DaemonRequest> for Command {
             "set_allow_online_models" => cmd_set_allow_online_models(&request),
             "get_allow_online_models" => Ok(Command::GetAllowOnlineModels),
             "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
+            "get_custom_models_dir" => Ok(Command::GetCustomModelsDir),
             _ => Err(format!("Unknown command: {}", request.command)),
         }
     }

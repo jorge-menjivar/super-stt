@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-pub mod auth;
-#[cfg(test)]
-mod auth_integration_test;
 pub mod daemon;
 pub mod models;
-pub mod networking;
 pub mod resource_management;
 pub mod services;
 pub mod utils;
@@ -14,9 +10,7 @@ pub mod validation;
 pub mod audio;
 
 // Re-export commonly used types for convenience
-pub use auth::UdpAuth;
 pub use models::*;
-pub use networking::*;
 pub use services::*;
 pub use utils::logger;
 

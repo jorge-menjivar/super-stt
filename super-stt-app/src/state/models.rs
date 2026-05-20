@@ -13,6 +13,13 @@ pub enum DaemonStatus {
     Connecting,
     Connected,
     Error(String),
+    /// User denied the settings-scope consent prompt (either just now
+    /// or via the daemon's sticky deny cache). All settings-scope
+    /// operations will fail until the user explicitly retries
+    /// authorization — usually after `systemctl --user restart
+    /// super-stt`. The auto-retry loop is suppressed in this state to
+    /// avoid spamming the daemon's deny cache.
+    Blocked(String),
 }
 
 /// Recording status
@@ -46,11 +53,4 @@ pub enum ContextPage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MenuAction {
     About,
-}
-
-/// Audio level data from UDP packets
-#[derive(Debug)]
-pub struct AudioLevelData {
-    pub level: f32,
-    pub is_speech: bool,
 }

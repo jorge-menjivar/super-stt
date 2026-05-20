@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::str::FromStr;
 
 /// An online API provider with guaranteed API configuration.
 /// Every variant has a key name and base URL — no panics possible.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OnlineProvider {
     OpenAI,
     Mistral,
@@ -57,6 +57,19 @@ impl FromStr for OnlineProvider {
     }
 }
 
+impl Serialize for OnlineProvider {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for OnlineProvider {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 /// What kind of inference engine a model uses.
 ///
 /// `Provider` carries both the architecture family (Whisper / Voxtral /
@@ -64,7 +77,7 @@ impl FromStr for OnlineProvider {
 /// local disk, no files) is separate — see [`crate::models::registry::ModelSource`].
 /// Custom user-provided models use whichever local variant matches the
 /// architecture detected from their `config.json`.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Provider {
     /// Whisper engine, served from local files (HF cache or `custom_models_dir`).
     #[default]
@@ -95,8 +108,8 @@ impl From<OnlineProvider> for Provider {
 impl fmt::Display for Provider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::LocalWhisper => write!(f, "local-whisper"),
-            Self::LocalVoxtral => write!(f, "local-voxtral"),
+            Self::LocalWhisper => write!(f, "local_whisper"),
+            Self::LocalVoxtral => write!(f, "local_voxtral"),
             Self::Online(p) => write!(f, "{p}"),
         }
     }
@@ -107,10 +120,23 @@ impl FromStr for Provider {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "local-whisper" | "local" => Ok(Self::LocalWhisper),
-            "local-voxtral" => Ok(Self::LocalVoxtral),
+            "local_whisper" => Ok(Self::LocalWhisper),
+            "local_voxtral" => Ok(Self::LocalVoxtral),
             other => OnlineProvider::from_str(other).map(Self::Online),
         }
+    }
+}
+
+impl Serialize for Provider {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Provider {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -157,10 +183,13 @@ mod tests {
     }
 
     #[test]
-    fn legacy_local_alias_parses() {
-        // "local" used to be the wire string for the default local variant.
-        // Keep accepting it for compat with existing callers/configs.
-        assert_eq!("local".parse::<Provider>().unwrap(), Provider::LocalWhisper);
+    fn unknown_provider_strings_are_rejected() {
+        // No legacy aliases — bad strings must error so the deserializer can
+        // fall back to default at the field level instead of silently
+        // accepting a stale format.
+        for bad in ["local", "LocalWhisper", "local-whisper", "OpenAI"] {
+            assert!(bad.parse::<Provider>().is_err(), "{bad} should fail");
+        }
     }
 
     #[test]
@@ -186,5 +215,76 @@ mod tests {
     #[test]
     fn default_is_local_whisper() {
         assert_eq!(Provider::default(), Provider::LocalWhisper);
+    }
+
+    #[test]
+    fn provider_serializes_as_canonical_string() {
+        assert_eq!(
+            serde_json::to_string(&Provider::LocalWhisper).unwrap(),
+            "\"local_whisper\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::LocalVoxtral).unwrap(),
+            "\"local_voxtral\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::Online(OnlineProvider::OpenAI)).unwrap(),
+            "\"openai\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::Online(OnlineProvider::Mistral)).unwrap(),
+            "\"mistral\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::Online(OnlineProvider::Deepgram)).unwrap(),
+            "\"deepgram\""
+        );
+    }
+
+    #[test]
+    fn provider_deserializes_canonical_form() {
+        for (json, expected) in [
+            ("\"local_whisper\"", Provider::LocalWhisper),
+            ("\"local_voxtral\"", Provider::LocalVoxtral),
+            ("\"openai\"", Provider::Online(OnlineProvider::OpenAI)),
+            ("\"mistral\"", Provider::Online(OnlineProvider::Mistral)),
+            ("\"deepgram\"", Provider::Online(OnlineProvider::Deepgram)),
+        ] {
+            let parsed: Provider = serde_json::from_str(json).unwrap();
+            assert_eq!(parsed, expected, "json={json}");
+        }
+    }
+
+    #[test]
+    fn provider_rejects_non_canonical_strings() {
+        for bad in [
+            "\"LocalWhisper\"",
+            "\"LocalVoxtral\"",
+            "\"local-whisper\"",
+            "\"local-voxtral\"",
+            "\"local\"",
+            "\"OpenAI\"",
+        ] {
+            assert!(
+                serde_json::from_str::<Provider>(bad).is_err(),
+                "{bad} should fail to deserialize"
+            );
+        }
+    }
+
+    #[test]
+    fn online_provider_serializes_as_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&OnlineProvider::OpenAI).unwrap(),
+            "\"openai\""
+        );
+        assert_eq!(
+            serde_json::to_string(&OnlineProvider::Mistral).unwrap(),
+            "\"mistral\""
+        );
+        assert_eq!(
+            serde_json::to_string(&OnlineProvider::Deepgram).unwrap(),
+            "\"deepgram\""
+        );
     }
 }

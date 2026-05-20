@@ -1,7 +1,10 @@
 app_name := 'super-stt-app'
-daemon_name := 'super-stt'
+daemon_bin_name := 'super-stt-daemon'
+# systemd unit name (matches super-stt-daemon/systemd/super-stt.service)
+service_name := 'super-stt'
+cli_name := 'super-stt-cli'
+consent_name := 'super-stt-consent'
 wrapper_name := 'stt'
-cosmic_name := 'cosmic-ext'
 applet_name := 'super-stt-cosmic-applet'
 
 # Applet
@@ -10,25 +13,25 @@ applet_left_desktop_file_name := 'super-stt-cosmic-applet-left.desktop'
 applet_right_desktop_file_name := 'super-stt-cosmic-applet-right.desktop'
 
 # Installation paths
-home_dir := env_var('HOME')
+home_dir := env('HOME')
 user_bin_dir := home_dir / '.local' / 'bin'
-user_prefix := home_dir / '.local'
-system_bin_dir := '/usr/local/bin'
 user_systemd_dir := home_dir / '.config' / 'systemd' / 'user'
-run_dir := env_var('XDG_RUNTIME_DIR') / 'stt'
+run_dir := env('XDG_RUNTIME_DIR') / 'stt'
 log_dir := home_dir / '.local' / 'share' / 'stt' / 'logs'
 user_desktop_dir := home_dir / '.local' / 'share' / 'applications'
 user_icons_dir := home_dir / '.local' / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
 
 # Binary paths
 app_src := 'target' / 'release' / app_name
-daemon_src := 'target' / 'release' / daemon_name
-cosmic_src := 'target' / 'release' / cosmic_name
+daemon_src := 'target' / 'release' / daemon_bin_name
+cli_src := 'target' / 'release' / cli_name
+consent_src := 'target' / 'release' / consent_name
 applet_src := 'target' / 'release' / applet_name
 debug_applet_src := 'target' / 'debug' / applet_name
 app_dst := user_bin_dir / app_name
-daemon_dst := user_bin_dir / daemon_name
-cosmic_dst := user_bin_dir / cosmic_name
+daemon_dst := user_bin_dir / daemon_bin_name
+cli_dst := user_bin_dir / cli_name
+consent_dst := user_bin_dir / consent_name
 applet_dst := user_bin_dir / applet_name
 wrapper_dst := user_bin_dir / wrapper_name
 
@@ -50,7 +53,7 @@ applet_right_desktop_file_dst := user_desktop_dir / applet_right_desktop_file_na
 applet_icon_dst := user_icons_dir / 'super-stt-cosmic-applet.svg'
 
 # Service file
-service_file := daemon_name + '.service'
+service_file := service_name + '.service'
 service_dst := user_systemd_dir / service_file
 
 # Default recipe which runs `just build-release`
@@ -70,33 +73,38 @@ clean-dist: clean clean-vendor
 # Compiles with debug profile
 # Usage: just build-debug [--cuda|--cudnn]
 build-debug *args:
-    cargo build {{args}}
+    cargo build {{ args }}
 
 # Compiles with release profile
 # Usage: just build-release [--cuda|--cudnn]
 build-release *args:
-    cargo build --release {{args}}
+    cargo build --release {{ args }}
 
 # Compiles release profile with vendored dependencies
 # Usage: just build-vendored [--cuda|--cudnn]
 build-vendored *args: vendor-extract
-    just build-release --frozen --offline {{args}}
+    just build-release --frozen --offline {{ args }}
 
 # Runs a clippy check
 check *args:
-    cargo clippy --all-features --workspace {{args}} -- -W clippy::pedantic -D warnings -D unused_must_use
+    cargo clippy --all-features --workspace {{ args }} -- -W clippy::pedantic -D warnings -D unused_must_use
 
 # Runs a clippy check with JSON message format
 check-json: (check '--message-format=json')
 
 # Run the app for testing purposes
 run-app *args:
-    env RUST_BACKTRACE=full RUST_LOG=super_stt_app=debug,super_stt_shared=debug cargo run --bin {{app_name}} {{args}}
+    env RUST_BACKTRACE=full RUST_LOG=super_stt_app=debug,super_stt_shared=debug cargo run --bin {{ app_name }} {{ args }}
 
 # Run the daemon for testing purposes
 # Usage: just run-daemon [--model MODEL] [other args]
 run-daemon *args:
-    env RUST_BACKTRACE=full RUST_LOG=super_stt=debug cargo run --bin {{daemon_name}} -v {{args}}
+    env RUST_BACKTRACE=full RUST_LOG=super_stt_daemon=debug cargo run --bin {{ daemon_bin_name }} -v {{ args }}
+
+# Run the CLI for testing purposes (talks to the running daemon over the HTTP socket)
+# Usage: just run-cli [ping|status|record|stop|logout] [args]
+run-cli *args:
+    env RUST_BACKTRACE=full RUST_LOG=super_stt_cli=debug,super_stt_shared=debug cargo run --bin {{ cli_name }} -- {{ args }}
 
 # Run security audit to check for vulnerabilities
 audit:
@@ -107,53 +115,53 @@ run-applet *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build --bin {{applet_name}} {{args}}
+    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build --bin {{ applet_name }} {{ args }}
 
     echo "Installing Debug Super STT COSMIC applet..."
-    mkdir -p {{user_bin_dir}}
-    install -m755 {{debug_applet_src}} {{applet_dst}}
+    mkdir -p {{ user_bin_dir }}
+    install -m755 {{ debug_applet_src }} {{ applet_dst }}
 
     # Install the debug desktop entries for panel integration
-    mkdir -p {{user_desktop_dir}}
+    mkdir -p {{ user_desktop_dir }}
 
     echo "Installing desktop entries for COSMIC panel integration..."
-    install -Dm0644 {{applet_full_desktop_file_src}} {{applet_full_desktop_file_dst}}
-    install -Dm0644 {{applet_left_desktop_file_src}} {{applet_left_desktop_file_dst}}
-    install -Dm0644 {{applet_right_desktop_file_src}} {{applet_right_desktop_file_dst}}
+    install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
+    install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
+    install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
 
     # Install the applet icon
-    mkdir -p {{user_icons_dir}}
+    mkdir -p {{ user_icons_dir }}
     echo "Installing applet icon..."
-    install -Dm0644 {{applet_icon_src}} {{applet_icon_dst}}
+    install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
 
     cosmic-panel
 
 run-applet-windowed *args:
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{applet_name}} {{args}}
+    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }}
 
 # Run the cosmic applet in the cosmic panel for testing purposes
 run-applet-kill *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build --bin {{applet_name}} {{args}}
+    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build --bin {{ applet_name }} {{ args }}
 
     echo "Installing Debug Super STT COSMIC applet..."
-    mkdir -p {{user_bin_dir}}
-    install -m755 {{debug_applet_src}} {{applet_dst}}
+    mkdir -p {{ user_bin_dir }}
+    install -m755 {{ debug_applet_src }} {{ applet_dst }}
 
     # Install the debug desktop entries for panel integration
-    mkdir -p {{user_desktop_dir}}
+    mkdir -p {{ user_desktop_dir }}
 
     echo "Installing desktop entries for COSMIC panel integration..."
-    install -Dm0644 {{applet_full_desktop_file_src}} {{applet_full_desktop_file_dst}}
-    install -Dm0644 {{applet_left_desktop_file_src}} {{applet_left_desktop_file_dst}}
-    install -Dm0644 {{applet_right_desktop_file_src}} {{applet_right_desktop_file_dst}}
+    install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
+    install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
+    install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
 
     # Install the applet icon
-    mkdir -p {{user_icons_dir}}
+    mkdir -p {{ user_icons_dir }}
     echo "Installing applet icon..."
-    install -Dm0644 {{applet_icon_src}} {{applet_icon_dst}}
+    install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
 
     # Restart cosmic panel for changes to take effect
     pkill -f cosmic-panel || true
@@ -163,26 +171,34 @@ run-applet-kill *args:
 
 # Run the cosmic applet for testing purposes with different sides
 run-applet-left *args:
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{applet_name}} {{args}} -- --side left
+    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }} -- --side left
 
 run-applet-right *args:
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{applet_name}} {{args}} -- --side right
+    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }} -- --side right
 
 run-applet-full *args:
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{applet_name}} {{args}} -- --side full
+    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }} -- --side full
 
 # Build only the app
 build-app *args:
-    cargo build --release --bin {{app_name}} {{args}}
+    cargo build --release --bin {{ app_name }} {{ args }}
 
 # Build only the daemon
 build-daemon *args:
-    cargo build --release --bin {{daemon_name}} {{args}}
+    cargo build --release --bin {{ daemon_bin_name }} {{ args }}
+
+# Build only the CLI
+build-cli *args:
+    cargo build --release --bin {{ cli_name }} {{ args }}
+
+# Build only the consent helper (co-located with the daemon binary)
+build-consent:
+    cargo build --release --bin {{ consent_name }}
 
 # Build only the cosmic applet
 build-applet:
     echo "🔧 Building COSMIC applet..."
-    cargo build --release --bin {{applet_name}}
+    cargo build --release --bin {{ applet_name }}
 
 # Install the app (user-local installation)
 install-app:
@@ -195,39 +211,38 @@ install-app:
     fi
 
     # Check if binary exists
-    if [ ! -f "{{app_src}}" ]; then
-        echo "❌ App binary not found at {{app_src}}"
+    if [ ! -f "{{ app_src }}" ]; then
+        echo "❌ App binary not found at {{ app_src }}"
         exit 1
     fi
 
-    echo "Installing Super STT app to {{app_dst}}"
-    mkdir -p {{user_bin_dir}}
-    install -m755 {{app_src}} {{app_dst}}
+    echo "Installing Super STT app to {{ app_dst }}"
+    mkdir -p {{ user_bin_dir }}
+    install -m755 {{ app_src }} {{ app_dst }}
 
     # Install the desktop entry for application menu
-    mkdir -p {{user_desktop_dir}}
+    mkdir -p {{ user_desktop_dir }}
     echo "Installing desktop entry..."
-    install -Dm0644 {{app_desktop_file_src}} {{app_desktop_file_dst}}
+    install -Dm0644 {{ app_desktop_file_src }} {{ app_desktop_file_dst }}
 
     # Install the app icon
-    mkdir -p {{user_icons_dir}}
+    mkdir -p {{ user_icons_dir }}
     echo "Installing app icon..."
-    install -Dm0644 {{app_icon_src}} {{app_icon_dst}}
+    install -Dm0644 {{ app_icon_src }} {{ app_icon_dst }}
 
     # Update desktop database
     if command -v update-desktop-database &> /dev/null; then
-        update-desktop-database {{user_desktop_dir}} 2>/dev/null || true
+        update-desktop-database {{ user_desktop_dir }} 2>/dev/null || true
     fi
 
     # Update icon cache
     if command -v gtk-update-icon-cache &> /dev/null; then
-        gtk-update-icon-cache {{user_icons_dir}} 2>/dev/null || true
+        gtk-update-icon-cache {{ user_icons_dir }} 2>/dev/null || true
     fi
 
-    echo "✓ Super STT app installed: {{app_dst}}"
-    echo "✓ Desktop entry installed: {{app_desktop_file_dst}}"
-    echo "✓ App icon installed: {{app_icon_dst}}"
-
+    echo "✓ Super STT app installed: {{ app_dst }}"
+    echo "✓ Desktop entry installed: {{ app_desktop_file_dst }}"
+    echo "✓ App icon installed: {{ app_icon_dst }}"
 
 # Install the cosmic applet (user-local installation)
 install-applet:
@@ -240,29 +255,29 @@ install-applet:
     fi
 
     # Check if binary exists
-    if [ ! -f "{{applet_src}}" ]; then
-        echo "❌ COSMIC applet binary not found at {{applet_src}}"
+    if [ ! -f "{{ applet_src }}" ]; then
+        echo "❌ COSMIC applet binary not found at {{ applet_src }}"
         exit 1
     fi
 
     echo "Installing Super STT COSMIC applet..."
-    mkdir -p {{user_bin_dir}}
-    install -m755 {{applet_src}} {{applet_dst}}
+    mkdir -p {{ user_bin_dir }}
+    install -m755 {{ applet_src }} {{ applet_dst }}
 
     # Install the desktop entries for panel integration
-    mkdir -p {{user_desktop_dir}}
+    mkdir -p {{ user_desktop_dir }}
 
     echo "Installing desktop entries for COSMIC panel integration..."
-    install -Dm0644 {{applet_full_desktop_file_src}} {{applet_full_desktop_file_dst}}
-    install -Dm0644 {{applet_left_desktop_file_src}} {{applet_left_desktop_file_dst}}
-    install -Dm0644 {{applet_right_desktop_file_src}} {{applet_right_desktop_file_dst}}
+    install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
+    install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
+    install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
 
     # Install the applet icon
-    mkdir -p {{user_icons_dir}}
+    mkdir -p {{ user_icons_dir }}
     echo "Installing applet icon..."
-    install -Dm0644 {{applet_icon_src}} {{applet_icon_dst}}
+    install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
 
-    echo "✓ COSMIC applet installed: {{applet_dst}}"
+    echo "✓ COSMIC applet installed: {{ applet_dst }}"
     echo "✓ Desktop entries installed for panel integration:"
     echo "  - Super STT Applet (Full)"
     echo "  - Super STT Applet (Left Side)"
@@ -280,7 +295,7 @@ install-daemon *args:
 
     # Extract model parameter
     model=""
-    args_array=({{args}})
+    args_array=({{ args }})
     for i in "${!args_array[@]}"; do
         if [[ "${args_array[$i]}" == "--model" ]]; then
             # Next argument is the model name
@@ -294,12 +309,12 @@ install-daemon *args:
         fi
     done
 
-    if [[ "{{args}}" == *"--cudnn"* ]]; then
+    if [[ "{{ args }}" == *"--cudnn"* ]]; then
         if ! just build-daemon --features "cuda,cudnn"; then
             echo "❌ Daemon build failed or was interrupted"
             exit 1
         fi
-    elif [[ "{{args}}" == *"--cuda"* ]]; then
+    elif [[ "{{ args }}" == *"--cuda"* ]]; then
         if ! just build-daemon --features "cuda"; then
             echo "❌ Daemon build failed or was interrupted"
             exit 1
@@ -312,8 +327,8 @@ install-daemon *args:
     fi
 
     # Check if binary exists
-    if [ ! -f "{{daemon_src}}" ]; then
-        echo "❌ Daemon binary not found at {{daemon_src}}"
+    if [ ! -f "{{ daemon_src }}" ]; then
+        echo "❌ Daemon binary not found at {{ daemon_src }}"
         exit 1
     fi
 
@@ -326,34 +341,59 @@ install-daemon *args:
     fi
 
     # Install binary
-    echo "Installing daemon binary to {{daemon_dst}}"
-    mkdir -p {{user_bin_dir}}
-    install -m755 {{daemon_src}} {{daemon_dst}}
+    echo "Installing daemon binary to {{ daemon_dst }}"
+    mkdir -p {{ user_bin_dir }}
+    install -m755 {{ daemon_src }} {{ daemon_dst }}
+
+    # Build + install the consent helper alongside the daemon. The
+    # daemon's `locate_consent_helper` only looks for it next to its
+    # own binary (no PATH fallback, for security), so without this
+    # step every /auth/request fails with `popup_failed`.
+    echo "Building consent helper..."
+    if ! just build-consent; then
+        echo "❌ Consent helper build failed"
+        exit 1
+    fi
+    if [ ! -f "{{ consent_src }}" ]; then
+        echo "❌ Consent helper binary not found at {{ consent_src }}"
+        exit 1
+    fi
+    echo "Installing consent helper to {{ consent_dst }}"
+    install -m755 {{ consent_src }} {{ consent_dst }}
 
     # Create user directories
     echo "Creating user directories..."
-    mkdir -p {{run_dir}}
-    mkdir -p {{log_dir}}
-    mkdir -p {{user_systemd_dir}}
+    mkdir -p {{ run_dir }}
+    mkdir -p {{ log_dir }}
+    mkdir -p {{ user_systemd_dir }}
 
     # Copy the service file from the repo
     echo "Installing user systemd service file..."
-    cp super-stt/systemd/super-stt.service {{service_dst}}
+    cp super-stt-daemon/systemd/{{ service_file }} {{ service_dst }}
 
     # Add model parameter to ExecStart if specified
     if [[ -n "$model" ]]; then
         echo "Configuring daemon to use model: $model"
-        sed -i "s|--socket %t/stt/super-stt.sock|--socket %t/stt/super-stt.sock --model $model|" {{service_dst}}
+        sed -i "s|--socket %t/stt/super-stt.sock|--socket %t/stt/super-stt.sock --model $model|" {{ service_dst }}
     fi
 
-    # Create wrapper script for automatic group switching
-    echo "Creating wrapper script at {{wrapper_dst}}"
-    echo '#!/bin/bash' > {{wrapper_dst}}
-    echo '# Super STT Daemon Wrapper' >> {{wrapper_dst}}
-    echo '# This wrapper automatically uses the stt group for socket access' >> {{wrapper_dst}}
-    echo '' >> {{wrapper_dst}}
-    echo 'exec sg stt -c "{{daemon_dst}} $*"' >> {{wrapper_dst}}
-    chmod +x {{wrapper_dst}}
+    # Create the `stt` convenience wrapper (for keyboard shortcuts like
+    # `stt record --write`). Note: we deliberately do NOT use `sg stt
+    # -c "..."` here. Changing the GID of the daemon (or its CLI
+    # peers) breaks `/proc/<pid>/exe` readlinks across the daemon ↔
+    # client boundary — the kernel's `__ptrace_may_access` check
+    # requires *both* matching UID and matching GID, and clients run
+    # with the user's primary GID. The `stt` group is no longer
+    # required for socket ACLs in the user-mode systemd unit; the
+    # socket file is owned `user:user-primary-group` with 0660, so the
+    # owner (same user) can access regardless of group membership.
+    echo "Creating wrapper script at {{ wrapper_dst }}"
+    echo '#!/bin/bash' > {{ wrapper_dst }}
+    echo '# Super STT convenience wrapper — invokes super-stt-daemon directly.' >> {{ wrapper_dst }}
+    echo '# Used by keyboard shortcuts (e.g. Super+Space → "stt record --write").' >> {{ wrapper_dst }}
+    echo '' >> {{ wrapper_dst }}
+    echo 'exec {{ daemon_dst }} "$@"' >> {{ wrapper_dst }}
+    chmod +x {{ wrapper_dst }}
 
     # Setup COSMIC keyboard shortcut if available
     # Setup COSMIC keyboard shortcut
@@ -366,7 +406,7 @@ install-daemon *args:
 
         if [[ ! "$add_shortcut" =~ ^[Nn]$ ]]; then
             mkdir -p "$COSMIC_SHORTCUTS_DIR"
-            stt_command="{{user_bin_dir}}/stt record --write"
+            stt_command="{{ user_bin_dir }}/stt record --write"
 
             if [ -f "$COSMIC_SHORTCUTS_FILE" ] && [ -s "$COSMIC_SHORTCUTS_FILE" ]; then
                 if ! grep -q "Super STT" "$COSMIC_SHORTCUTS_FILE"; then
@@ -411,14 +451,14 @@ install-daemon *args:
         shell_config="$HOME/.zshrc"
     fi
 
-    if ! grep -q "{{user_bin_dir}}" "$shell_config" 2>/dev/null; then
-        echo "Adding {{user_bin_dir}} to PATH in $shell_config"
-        echo 'export PATH="{{user_bin_dir}}:$PATH"' >> "$shell_config"
+    if ! grep -q "{{ user_bin_dir }}" "$shell_config" 2>/dev/null; then
+        echo "Adding {{ user_bin_dir }} to PATH in $shell_config"
+        echo 'export PATH="{{ user_bin_dir }}:$PATH"' >> "$shell_config"
         echo "⚠️  Restart your shell or run: source $shell_config"
     fi
 
-    echo "✓ Super STT installed to {{daemon_dst}}"
-    echo "✓ Wrapper script created at {{wrapper_dst}}"
+    echo "✓ Super STT installed to {{ daemon_dst }}"
+    echo "✓ Wrapper script created at {{ wrapper_dst }}"
     echo "✓ Convenience shortcut 'stt' created"
     echo ""
     echo "🚀 Ready to use!"
@@ -430,22 +470,26 @@ install-daemon *args:
 
     echo "✓ Daemon installed successfully as user service!"
     echo ""
-    systemctl --user start {{daemon_name}}
-    systemctl --user enable {{daemon_name}}
+    systemctl --user start {{ service_name }}
+    systemctl --user enable {{ service_name }}
 
-
-# Install both client and daemon
+# Install daemon, settings app, and CLI
 # Usage: just install [--cuda|--cudnn] [--model MODEL]
 install *args:
     #!/usr/bin/env bash
     # Check if cuDNN or CUDA is requested and call commands with the right args
-    if ! just install-daemon {{args}}; then
+    if ! just install-daemon {{ args }}; then
         echo "❌ Daemon installation failed"
         exit 1
     fi
 
     if ! just install-app; then
         echo "❌ App installation failed"
+        exit 1
+    fi
+
+    if ! just install-cli; then
+        echo "❌ CLI installation failed"
         exit 1
     fi
 
@@ -473,7 +517,7 @@ setup-cosmic-shortcut:
     mkdir -p "$COSMIC_SHORTCUTS_DIR"
 
     # Use the full path to the stt wrapper for reliability
-    stt_command="{{user_bin_dir}}/stt record --write"
+    stt_command="{{ user_bin_dir }}/stt record --write"
 
     # Check if shortcuts file exists and has content
     if [ -f "$COSMIC_SHORTCUTS_FILE" ] && [ -s "$COSMIC_SHORTCUTS_FILE" ]; then
@@ -543,12 +587,11 @@ setup-cosmic-shortcut:
         echo '}' >> "$COSMIC_SHORTCUTS_FILE"
     fi
 
-
 # Install everything (daemon, app, and COSMIC applet)
 # Usage: just install-all [--cuda|--cudnn] [--model MODEL]
 install-all *args:
     #!/usr/bin/env bash
-    if ! just install {{args}}; then
+    if ! just install {{ args }}; then
         echo "❌ Core installation failed"
         exit 1
     fi
@@ -570,18 +613,18 @@ install-all *args:
 uninstall-app:
     #!/usr/bin/env bash
     echo "Uninstalling Super STT App..."
-    rm -f {{app_dst}}
-    rm -f {{app_desktop_file_dst}}
-    rm -f {{app_icon_dst}}
+    rm -f {{ app_dst }}
+    rm -f {{ app_desktop_file_dst }}
+    rm -f {{ app_icon_dst }}
 
     # Update desktop database
     if command -v update-desktop-database &> /dev/null; then
-        update-desktop-database {{user_desktop_dir}} 2>/dev/null || true
+        update-desktop-database {{ user_desktop_dir }} 2>/dev/null || true
     fi
 
     # Update icon cache
     if command -v gtk-update-icon-cache &> /dev/null; then
-        gtk-update-icon-cache {{user_icons_dir}} 2>/dev/null || true
+        gtk-update-icon-cache {{ user_icons_dir }} 2>/dev/null || true
     fi
 
     echo "✓ Super STT App uninstalled"
@@ -592,12 +635,12 @@ uninstall-app:
 uninstall-applet:
     #!/usr/bin/env bash
     echo "Uninstalling Super STT COSMIC applet..."
-    rm -f {{applet_dst}}
-    rm -f {{applet_full_desktop_file_dst}}
-    rm -f {{applet_left_desktop_file_dst}}
-    rm -f {{applet_right_desktop_file_dst}}
+    rm -f {{ applet_dst }}
+    rm -f {{ applet_full_desktop_file_dst }}
+    rm -f {{ applet_left_desktop_file_dst }}
+    rm -f {{ applet_right_desktop_file_dst }}
     # Remove the applet icon
-    rm -f {{applet_icon_dst}}
+    rm -f {{ applet_icon_dst }}
     echo "✓ COSMIC applet uninstalled"
     echo "✓ Desktop entries removed"
     echo "✓ Applet icon removed"
@@ -608,48 +651,100 @@ uninstall-daemon:
     echo "Uninstalling Super STT daemon user service..."
 
     # Stop and disable user service
-    systemctl --user stop {{daemon_name}} || true
-    systemctl --user disable {{daemon_name}} || true
+    systemctl --user stop {{ service_name }} || true
+    systemctl --user disable {{ service_name }} || true
 
     # Remove service file
-    rm -f {{service_dst}}
+    rm -f {{ service_dst }}
 
     # Remove binary
-    rm -f {{daemon_dst}}
+    rm -f {{ daemon_dst }}
 
-    rm -f "{{user_bin_dir}}/stt"
+    # Remove the co-located consent helper — without it the daemon
+    # would deny every auth_request, so it's part of the daemon's
+    # install contract.
+    rm -f {{ consent_dst }}
+
+    rm -f "{{ user_bin_dir }}/stt"
 
     # Remove directories (but preserve logs)
-    rm -rf {{run_dir}}
-    echo "Log directory {{log_dir}} preserved"
+    rm -rf {{ run_dir }}
+    echo "Log directory {{ log_dir }} preserved"
 
     # Reload user systemd
     systemctl --user daemon-reload
 
     echo "✓ Super STT Daemon user service uninstalled"
 
-# Uninstall both app and daemon
-uninstall: uninstall-daemon uninstall-app uninstall-applet
+# Install just the consent helper (normally bundled with install-daemon)
+install-consent:
+    #!/usr/bin/env bash
+    if ! just build-consent; then
+        echo "❌ Consent helper build failed"
+        exit 1
+    fi
+    if [ ! -f "{{ consent_src }}" ]; then
+        echo "❌ Consent helper binary not found at {{ consent_src }}"
+        exit 1
+    fi
+    mkdir -p {{ user_bin_dir }}
+    install -m755 {{ consent_src }} {{ consent_dst }}
+    echo "✓ Consent helper installed: {{ consent_dst }}"
+
+# Uninstall the consent helper.
+uninstall-consent:
+    #!/usr/bin/env bash
+    echo "Uninstalling Super STT consent helper..."
+    rm -f {{ consent_dst }}
+    echo "✓ Consent helper uninstalled"
+
+# Install the CLI binary (user-local installation)
+install-cli:
+    #!/usr/bin/env bash
+    echo "Building CLI..."
+    if ! just build-cli; then
+        echo "❌ CLI build failed or was interrupted"
+        exit 1
+    fi
+
+    if [ ! -f "{{ cli_src }}" ]; then
+        echo "❌ CLI binary not found at {{ cli_src }}"
+        exit 1
+    fi
+
+    mkdir -p {{ user_bin_dir }}
+    install -m755 {{ cli_src }} {{ cli_dst }}
+    echo "✓ Super STT CLI installed: {{ cli_dst }}"
+
+# Uninstall the CLI binary
+uninstall-cli:
+    #!/usr/bin/env bash
+    echo "Uninstalling Super STT CLI..."
+    rm -f {{ cli_dst }}
+    echo "✓ Super STT CLI uninstalled"
+
+# Uninstall daemon, app, applet, and CLI
+uninstall: uninstall-daemon uninstall-app uninstall-applet uninstall-cli
 
 # Start the daemon user service
 start-daemon:
-    systemctl --user start {{daemon_name}}
+    systemctl --user start {{ service_name }}
 
 # Stop the daemon user service
 stop-daemon:
-    systemctl --user stop {{daemon_name}}
+    systemctl --user stop {{ service_name }}
 
 # Enable daemon to start with user session
 enable-daemon:
-    systemctl --user enable {{daemon_name}}
+    systemctl --user enable {{ service_name }}
 
 # Disable daemon from starting with user session
 disable-daemon:
-    systemctl --user disable {{daemon_name}}
+    systemctl --user disable {{ service_name }}
 
 # Check daemon status
 status-daemon:
-    systemctl --user status {{daemon_name}}
+    systemctl --user status {{ service_name }}
 
 # Show overall system status and test connectivity
 status: status-daemon
@@ -662,21 +757,28 @@ status: status-daemon
     # Check if app is installed
     if command -v stt &> /dev/null; then
         echo "✅ App tools: Installed (stt command available)"
-    elif [ -f "{{app_dst}}" ]; then
+    elif [ -f "{{ app_dst }}" ]; then
         echo "✅ Super STT App: Installed"
     else
         echo "❌ Super STT App: Not installed"
     fi
 
     # Check if daemon binary exists
-    if [ -f "{{daemon_dst}}" ]; then
+    if [ -f "{{ daemon_dst }}" ]; then
         echo "✅ Daemon binary: Installed"
     else
         echo "❌ Daemon binary: Not installed"
     fi
 
+    # Check if CLI binary exists
+    if [ -f "{{ cli_dst }}" ]; then
+        echo "✅ CLI binary: Installed"
+    else
+        echo "❌ CLI binary: Not installed"
+    fi
+
     # Check if cosmic applet is installed
-    if [ -f "{{applet_dst}}" ]; then
+    if [ -f "{{ applet_dst }}" ]; then
         echo "✅ COSMIC applet: Installed"
     else
         echo "❌ COSMIC applet: Not installed"
@@ -684,15 +786,15 @@ status: status-daemon
 
 # View daemon logs
 logs-daemon:
-    journalctl --user -u {{daemon_name}} -f
+    journalctl --user -u {{ service_name }} -f
 
 # View recent daemon logs
 logs-daemon-recent:
-    journalctl --user -u {{daemon_name}} -n 50
+    journalctl --user -u {{ service_name }} -n 50
 
 # Restart the daemon user service
 restart-daemon:
-    systemctl --user restart {{daemon_name}}
+    systemctl --user restart {{ service_name }}
 
 # Vendor dependencies locally
 vendor:

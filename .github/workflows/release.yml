@@ -1,9 +1,20 @@
 name: Release
 
+# Legacy stable workflow — builds the pre-protocol-rewrite layout
+# (single `super-stt` binary). Tags containing the word "beta" go to
+# release-beta.yml instead, which builds the new
+# daemon/CLI/consent-helper split.
+#
+# This workflow currently references `--bin super-stt`, which no
+# longer exists in the workspace. It is preserved so existing stable
+# releases stay reachable; cutting a new stable tag will need a
+# follow-up update once we're ready to promote the rewrite.
+
 on:
   push:
     tags:
       - "v*"
+      - "!v*beta*"
   workflow_dispatch:
 
 permissions:
@@ -282,7 +293,7 @@ jobs:
 
           # Include systemd service files
           mkdir -p dist/systemd
-          cp super-stt/systemd/super-stt.service dist/systemd/
+          cp super-stt-daemon/systemd/super-stt.service dist/systemd/
 
           mkdir -p dist/resources
 

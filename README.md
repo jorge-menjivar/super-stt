@@ -19,26 +19,37 @@ https://github.com/user-attachments/assets/bbbe20c3-6802-4797-afc8-aa81d1b48415
 
 Install with our automated installer that detects your system and downloads pre-built binaries:
 
-> Note: You may need to log out and back in after installation.
-
 ```bash
 curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh | bash
 ```
 
-The installer will show a menu where you can choose which components to install:
-- **All** [DEFAULT] - Everything (daemon, app, applet if on COSMIC, systemd service)
-- **Daemon + CLI** - Core functionality + systemd service
-- **Desktop App** - GUI for configuration only
-- **COSMIC Applet** - Panel integration only
+You can also append `-- --beta` to the command to install the latest beta version.
 
-The installer automatically:
-- Detects your system architecture (x86_64/ARM64) to download the optimal pre-built binary
-- Installs components to `~/.local/bin`
-- **Daemon**: Detects CUDA/cuDNN for automatic GPU acceleration
-- **Daemon**: Creates the `stt` group and adds the current user to it **(requires sudo)**
-- **Daemon**: Sets up systemd user service
-- **Daemon**: Creates required directories for logs and sockets
-- **COSMIC Desktop**: Offers to configure Super+Space keyboard shortcut automatically
+### Build from source
+
+If you want the very latest changes, build locally:
+
+```bash
+git clone https://github.com/jorge-menjivar/super-stt.git
+cd super-stt
+just install                # CPU
+just install --cuda         # NVIDIA GPU
+```
+
+`just install` builds and installs the daemon, CLI, consent helper, desktop app, and (on COSMIC) the panel applet, then enables the user systemd service. Run `just install-daemon`, `just install-app`, or `just install-applet` to install just one piece.
+
+### What gets installed
+
+The install script does the following:
+
+- Drop binaries in `~/.local/bin` (`super-stt-daemon`, `super-stt-cli`, `super-stt-app`, plus `super-stt-consent` and `super-stt-cosmic-applet` where applicable)
+- Set up a `systemctl --user` service for the daemon
+- Detect CUDA/cuDNN and pick the right GPU build automatically
+- Offer to wire up Super+Space → `stt record --write` on COSMIC
+
+The installer's menu lets you pick a subset (daemon only, app only, applet only).
+
+> For protocol, auth, and security details, see [docs/](./docs/).
 
 
 ## Recording Modes
@@ -130,69 +141,9 @@ API keys are stored securely in your system keyring (GNOME Keyring, KWallet, etc
 </tr>
 </table>
 
-## ⌨️ Setting Up Keyboard Shortcuts
+## ⌨️ Keyboard Shortcuts
 
-For the best experience, add a keyboard shortcut to your desktop environment:
-
-### COSMIC Desktop
-
-**Automatic Setup**:
-- **Web Installer**: The installer automatically offers to configure Super+Space shortcut during daemon installation. Just answer "Y" when prompted!
-- **Building from source**:
-  - Run `just install-daemon` - it will offer to set up the shortcut automatically
-  - Or run `just setup-cosmic-shortcut` anytime (no separate scripts needed)
-
-**What gets configured**:
-- The shortcut uses the full path for reliability: `/home/user/.local/bin/stt record --write`
-- Safely extends your existing COSMIC shortcuts without overwriting
-- Detects conflicts and warns if Super+Space is already in use
-
-**Manual Setup**:
-1. Open COSMIC Settings
-2. Navigate to: **Input Devices** → **Keyboard** → **View and customize shortcuts** → **Custom**
-3. Click **Add Shortcut**
-4. Set command: `/home/user/.local/bin/stt record --write` (replace `/home/user` with your actual home path)
-5. Choose your preferred key combination (e.g., `Super+Space`)
-
-### Other Desktop Environments
-
-**GNOME:**
-```bash
-# Add via command line
-gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/']"
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ name 'Super STT'
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ command 'stt record --write'
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ binding '<Super>space'
-```
-
-**KDE Plasma:**
-1. Open System Settings → Shortcuts → Custom Shortcuts
-2. Add new shortcut with command: `stt record --write`
-
-**Or configure through your desktop environment's settings for custom keyboard shortcuts.**
-
-### Building from Source
-
-```bash
-git clone https://github.com/jorge-menjivar/super-stt.git
-cd super-stt
-
-# The Desktop application to manage settings and models
-just install-app
-
-# (Optional) COSMIC Desktop applet to show visualizations
-just install-applet
-
-# The Daemon and CLI tool (offers to set up COSMIC shortcut automatically)
-just install-daemon
-# (Suggestion) If you have an NVIDIA GPU with CUDA installed, build with CUDA acceleration instead to load models onto the GPU
-# just install-daemon --cuda
-# (Suggestion) If you have an NVIDIA GPU with CUDA and cuDNN installed, build with cuDNN acceleration instead for better performance
-# just install-daemon --cudnn
-
-# Or set up COSMIC keyboard shortcut separately
-just setup-cosmic-shortcut
-```
+Bind `stt record --write` to a key combo (Super+Space is the convention). On COSMIC the installer offers to do this for you. For other desktops, add a custom shortcut through Settings (the full command is `~/.local/bin/stt record --write`).
 
 ## Prerequisites
 
@@ -236,23 +187,15 @@ sudo pacman -S cuda
 
 **Note**: If you already have the CUDA toolkit installed, but the installation script still cannot find it, please create a new issue. Thanks!
 
-## ⌨️ Shortcuts
-Add a shortcut that executes the following command to your desktop environment to start the app.
-```sh
-stt record --write
-```
+## How it works
 
-On COSMIC, you can add the shortcut in COSMIC Settings app: Input Devices -> Keyboard -> View and customize shortcuts -> Custom -> Add Shortcut
+> **Note**: On first run, Super STT downloads the required AI model (~1-2GB). This may take a few minutes.
 
-> **Note**: On first run, Super STT will automatically download the required AI model (~1-2GB). This may take a few minutes depending on your internet connection.
+When you press the shortcut:
 
-The following will then happen:
-
-1. `stt` will contact the already running daemon and ask it to use the microphone to transcribe audio.
-2. The daemon will then process the audio and start typing a preview of the transcription into whatever application is currently focused. This may be a bit inaccurate.
-3. The daemon will automatically stop listening when it no longer detects speech.
-4. Once it stops recording, it will process the full transcription one more time, this will produce an accurate transcription.
-5. The daemon will automatically replace the preview with the accurate transcription.
+1. `stt` asks the running daemon to start transcribing from your mic.
+2. While you speak, the daemon types a live preview into whatever app is focused.
+3. When you stop speaking (or press the shortcut again, depending on stop mode), the daemon does a final pass for accuracy and replaces the preview with the final text.
 
 ### Usage
 
@@ -283,50 +226,34 @@ stt record --write
 ### Troubleshooting
 
 #### `stt` command not found
-The installer adds `~/.local/bin` to your PATH. Either:
-- Restart your terminal, or
-- Run: `export PATH="$HOME/.local/bin:$PATH"`
+The installer adds `~/.local/bin` to your PATH. Restart your terminal, or run `export PATH="$HOME/.local/bin:$PATH"`.
 
-#### "sg: group 'stt' does not exist" error
-The `stt` group wasn't created properly. Run:
-```bash
-sudo groupadd stt
-sudo usermod -a -G stt $(whoami)
-newgrp stt
-```
-
-#### "Operation not permitted" when using stt
-You need to be in the `stt` group. Either:
-- Log out and back in, or
-- Run: `newgrp stt`
+#### Authorization popup shows "Path: <unknown>" or never appears
+A previously installed legacy build is shadowing the daemon. Run `just uninstall` from the source tree (or remove `~/.local/bin/super-stt*` manually) and reinstall.
 
 #### Daemon not starting
-Check the logs for errors:
 ```bash
 journalctl --user -u super-stt -n 50
+```
+
+#### "sg: group 'stt' does not exist" / "Operation not permitted"
+The installer expects an `stt` group. Fix:
+```bash
+sudo groupadd stt && sudo usermod -a -G stt $(whoami)
+# then log out and back in
 ```
 
 ## 🔧 Development
 
 ```bash
-# Run the daemon
-just run-daemon
-
-# Run the app
-just run-app
-
-# Run the applet
-just run-applet
-
-# Setup COSMIC keyboard shortcut (interactive)
-just setup-cosmic-shortcut
-
-# Install daemon with automatic COSMIC shortcut setup
-just install-daemon
-
-# Run security audit
-just audit
+just run-daemon         # run the daemon in the foreground
+just run-app            # run the settings app
+just run-applet         # run the COSMIC applet
+just setup-cosmic-shortcut  # add Super+Space binding on COSMIC
+just audit              # security audit (cargo audit)
 ```
+
+Architecture, protocol design, and security model live in [docs/](./docs/).
 
 ---
 

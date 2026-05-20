@@ -5,6 +5,4 @@
 pub mod models;
 
 // Re-export commonly used types
-pub use models::{
-    AudioLevelData, AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus,
-};
+pub use models::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};

@@ -1,0 +1,27 @@
+[package]
+    name = "super-stt-consent"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
+    description = "Floating libcosmic consent dialog spawned by the Super STT daemon"
+    repository = "https://github.com/jorge-menjivar/super-stt"
+    license = "GPL-3.0-only"
+
+[[bin]]
+    name = "super-stt-consent"
+    path = "src/main.rs"
+
+[dependencies]
+    cosmic = { package = "libcosmic", git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = [
+        "autosize",
+        "multi-window",
+        "tokio",
+        "wayland",
+        "winit",
+    ] }
+env_logger.workspace = true
+libc.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+libc.workspace = true

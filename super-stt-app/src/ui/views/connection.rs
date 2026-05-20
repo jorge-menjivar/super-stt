@@ -4,30 +4,41 @@ use crate::state::DaemonStatus;
 use crate::ui::messages::Message;
 use cosmic::{
     Element,
-    widget::{settings, text},
+    widget::{button, settings, text},
 };
 
 /// Settings page view using cosmic-settings style
-pub fn page(
-    daemon_status: &DaemonStatus,
-    socket_path: String,
-    udp_port: u16,
-) -> Element<'_, Message> {
+pub fn page(daemon_status: &DaemonStatus, socket_path: String) -> Element<'_, Message> {
     let status_text = match daemon_status {
         DaemonStatus::Connected => "✅ Connected".to_string(),
         DaemonStatus::Connecting => "⏳ Connecting...".to_string(),
         DaemonStatus::Disconnected => "❌ Disconnected".to_string(),
         DaemonStatus::Error(err) => format!("❌ Error: {err}"),
+        DaemonStatus::Blocked(reason) => format!("⛔ Authorization denied ({reason})"),
     };
 
-    let sections = vec![
-        settings::section()
-            .title("Connection Information")
-            .add(settings::item("Connection", text::body(status_text)))
-            .add(settings::item("Socket Path", text::body(socket_path)))
-            .add(settings::item("UDP Port", text::body(udp_port.to_string())))
-            .into(),
-    ];
+    let mut connection_section = settings::section()
+        .title("Connection Information")
+        .add(settings::item("Connection", text::body(status_text)))
+        .add(settings::item("Socket Path", text::body(socket_path)));
+
+    if matches!(daemon_status, DaemonStatus::Blocked(_)) {
+        connection_section = connection_section
+            .add(settings::item(
+                "Action required",
+                text::body(
+                    "Authorization was denied. Restart the daemon to clear the deny \
+                     cache (systemctl --user restart super-stt), then click Retry to \
+                     request access again.",
+                ),
+            ))
+            .add(settings::item(
+                "",
+                button::standard("Retry authorization").on_press(Message::RetryAuthorization),
+            ));
+    }
+
+    let sections = vec![connection_section.into()];
 
     let sections_view = settings::view_column(sections);
     page_layout("Connection", sections_view)

@@ -1,106 +1,108 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use std::path::PathBuf;
-use std::sync::OnceLock;
+//! Daemon-facing operations for the settings app.
+//!
+//! All commands here go through the new HTTP protocol. Each call uses
+//! `super_stt_shared::daemon::http_client` with a session token cached
+//! in the system keyring (`session::with_token`). The token is minted
+//! on first call via the daemon's libcosmic consent popup; subsequent
+//! calls reuse the cached token. On `invalid_session` the cache is
+//! dropped and re-auth runs once.
+//!
+//! Recording streaming uses the SSE-based `/transcribe` endpoint with
+//! `event: preview`, `event: done`, and `event: error` frames.
+//! Closing the stream mid-recording triggers a server-side stop.
 
 use crate::state::AudioTheme;
+use super_stt_shared::daemon::http_client;
+use super_stt_shared::daemon::session::{self, AppId};
+use super_stt_shared::validation::get_http_socket_path;
 
-// Generate a unique client ID for this app instance
-static CLIENT_ID: OnceLock<String> = OnceLock::new();
+const SETTINGS_SCOPE: &str = "settings";
+const APP_NAME: &str = "Super STT Settings App";
+const APP_ID_NAME: AppId = AppId("super-stt-app");
 
-fn get_client_id() -> &'static str {
-    CLIENT_ID
-        .get_or_init(|| super_stt_shared::validation::generate_secure_client_id("super-stt-app"))
+/// Run an HTTP-protocol operation with the cached settings-scope token.
+/// On `invalid_session` the cache is invalidated and the operation
+/// retries once with a fresh consent flow.
+async fn with_settings_token<F, Fut, T>(op: F) -> Result<T, String>
+where
+    F: Fn(std::path::PathBuf, String) -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let socket = get_http_socket_path();
+    let socket_for_op = socket.clone();
+    session::with_token(
+        socket,
+        APP_ID_NAME,
+        APP_NAME,
+        SETTINGS_SCOPE,
+        move |token| op(socket_for_op.clone(), token),
+    )
+    .await
 }
+
+// =============================================================================
+// Recording — HTTP/SSE via /transcribe
+// =============================================================================
 
 /// Result type for streaming record responses.
 pub enum RecordEvent {
-    /// Intermediate preview text during recording.
+    /// Intermediate preview text during recording. Snapshot semantics:
+    /// the text replaces (not appends to) any previously-displayed
+    /// preview.
     Preview(String),
     /// Final transcription result.
     Final(Result<String, String>),
 }
 
-/// Send a record command to the daemon and stream results.
-/// Yields `RecordEvent::Preview` for intermediate previews and
-/// `RecordEvent::Final` when the transcription is complete.
-pub fn record_command_stream(
-    socket_path: PathBuf,
-) -> impl futures_util::Stream<Item = RecordEvent> + Send + 'static {
+/// Start a recording and stream `RecordEvent`s as the daemon emits SSE
+/// events on `POST /transcribe`. Closing the returned stream early
+/// signals the daemon to stop the recording.
+pub fn record_command_stream() -> impl futures_util::Stream<Item = RecordEvent> + Send + 'static {
     cosmic::iced::stream::channel(
         32,
         move |mut channel: cosmic::iced::futures::channel::mpsc::Sender<RecordEvent>| async move {
-            use futures_util::SinkExt;
-            use super_stt_shared::models::protocol::DaemonResponse;
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            use futures_util::{SinkExt, StreamExt};
+            use super_stt_shared::daemon::http_client::{TranscribeEvent, TranscribeOptions};
 
             let result: Result<(), String> = async {
-                let mut stream = tokio::net::UnixStream::connect(&socket_path)
-                    .await
-                    .map_err(|e| format!("Failed to connect: {e}"))?;
+                let socket = get_http_socket_path();
+                let token =
+                    session::obtain(socket.clone(), APP_ID_NAME, APP_NAME, SETTINGS_SCOPE).await?;
 
-                let mut request = super_stt_shared::daemon::client::create_daemon_request(
-                    "record",
-                    get_client_id(),
-                );
-                request.data = Some(serde_json::json!({
-                    "write_mode": false,
-                    "stop_mode": "manual-only",
-                    "wait": true,
-                }));
+                let opts = TranscribeOptions {
+                    wait: true,
+                    write_mode: false,
+                    stop_mode: Some("manual-only".to_string()),
+                };
+                let mut stream =
+                    Box::pin(http_client::transcribe_stream(socket, &token, opts).await?);
 
-                let data =
-                    serde_json::to_vec(&request).map_err(|e| format!("Serialize failed: {e}"))?;
-                let size = data.len() as u64;
-                stream
-                    .write_all(&size.to_be_bytes())
-                    .await
-                    .map_err(|e| format!("Write failed: {e}"))?;
-                stream
-                    .write_all(&data)
-                    .await
-                    .map_err(|e| format!("Write failed: {e}"))?;
-
-                loop {
-                    let mut size_buf = [0u8; 8];
-                    if stream.read_exact(&mut size_buf).await.is_err() {
-                        break;
+                while let Some(event) = stream.next().await {
+                    match event {
+                        TranscribeEvent::Preview(text) => {
+                            let _ = channel.send(RecordEvent::Preview(text)).await;
+                        }
+                        TranscribeEvent::Done(text) => {
+                            let result = if text.trim().is_empty() {
+                                "No speech detected".to_string()
+                            } else {
+                                text
+                            };
+                            let _ = channel.send(RecordEvent::Final(Ok(result))).await;
+                            return Ok(());
+                        }
+                        TranscribeEvent::Error(msg) => {
+                            let _ = channel.send(RecordEvent::Final(Err(msg))).await;
+                            return Ok(());
+                        }
                     }
-                    let resp_size = u64::from_be_bytes(size_buf);
-                    let resp_len =
-                        usize::try_from(resp_size).map_err(|_| "Response too large".to_string())?;
-                    let mut resp_buf = vec![0u8; resp_len];
-                    stream
-                        .read_exact(&mut resp_buf)
-                        .await
-                        .map_err(|e| format!("Read failed: {e}"))?;
-                    let response: DaemonResponse = serde_json::from_slice(&resp_buf)
-                        .map_err(|e| format!("Parse failed: {e}"))?;
-
-                    if let Some(preview) = response.preview_text {
-                        let _ = channel.send(RecordEvent::Preview(preview)).await;
-                        continue;
-                    }
-
-                    // Final response
-                    if response.status == "success" {
-                        let text = response
-                            .transcription
-                            .or(response.message)
-                            .unwrap_or_default();
-                        let result = if text.trim().is_empty() {
-                            "No speech detected".to_string()
-                        } else {
-                            text
-                        };
-                        let _ = channel.send(RecordEvent::Final(Ok(result))).await;
-                    } else {
-                        let err = response
-                            .message
-                            .unwrap_or_else(|| "Recording failed".to_string());
-                        let _ = channel.send(RecordEvent::Final(Err(err))).await;
-                    }
-                    break;
                 }
+                let _ = channel
+                    .send(RecordEvent::Final(Err(
+                        "transcribe stream ended unexpectedly".to_string(),
+                    )))
+                    .await;
                 Ok(())
             }
             .await;
@@ -112,90 +114,95 @@ pub fn record_command_stream(
     )
 }
 
-/// Send a stop signal to a running recording.
-pub async fn stop_record_command(socket_path: PathBuf) -> Result<(), String> {
-    let mut request =
-        super_stt_shared::daemon::client::create_daemon_request("record", get_client_id());
-    request.data = Some(serde_json::json!({
-        "write_mode": false,
-        "stop_mode": "manual-only",
-    }));
-
-    let response =
-        super_stt_shared::daemon::client::send_daemon_request_pub(&socket_path, request).await?;
-
-    if response.status == "success" {
+/// Send a stop signal to a running recording (HTTP `POST /transcribe/stop`).
+pub async fn stop_record_command() -> Result<(), String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::transcribe_stop(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp.message.unwrap_or_else(|| "Stop failed".to_string()));
+        }
         Ok(())
-    } else {
-        Err(response
-            .message
-            .unwrap_or_else(|| "Stop failed".to_string()))
-    }
-}
-
-/// Test daemon connection
-pub async fn test_daemon_connection(socket_path: PathBuf) -> Result<(), String> {
-    super_stt_shared::daemon::client::test_daemon_connection(socket_path, get_client_id()).await
-}
-
-/// Load available audio themes from daemon with fallback
-pub async fn load_audio_themes(socket_path: PathBuf) -> Vec<AudioTheme> {
-    // Try to get available themes from daemon
-    if let Ok(themes) = list_available_audio_themes(socket_path.clone()).await {
-        return themes;
-    }
-
-    // Fallback to all available themes if daemon is unavailable
-    AudioTheme::all_themes()
-}
-
-/// List available audio themes from daemon
-pub async fn list_available_audio_themes(socket_path: PathBuf) -> Result<Vec<AudioTheme>, String> {
-    let theme_strings =
-        super_stt_shared::daemon::client::list_available_audio_themes(socket_path, get_client_id())
-            .await?;
-
-    // Convert strings back to AudioTheme enum
-    let themes = theme_strings
-        .into_iter()
-        .filter_map(|theme_str| theme_str.parse::<AudioTheme>().ok())
-        .collect();
-
-    Ok(themes)
-}
-
-/// Set audio theme without playing a test sound
-pub async fn set_audio_theme(socket_path: PathBuf, theme: AudioTheme) -> Result<String, String> {
-    super_stt_shared::daemon::client::set_audio_theme(
-        socket_path,
-        &theme.to_string().to_lowercase(),
-        get_client_id(),
-    )
+    })
     .await
 }
 
-/// Set and test audio theme - convenience function
-pub async fn set_and_test_audio_theme(
-    socket_path: PathBuf,
-    theme: AudioTheme,
-) -> Result<String, String> {
-    super_stt_shared::daemon::client::set_and_test_audio_theme(
-        socket_path,
-        &theme.to_string().to_lowercase(),
-        get_client_id(),
-    )
+// =============================================================================
+// Settings calls — daemon is reached via the new /endpoint surface.
+// =============================================================================
+
+/// Test daemon connection (HTTP `/ping`).
+pub async fn test_daemon_connection() -> Result<(), String> {
+    with_settings_token(|socket, token| async move {
+        http_client::ping(socket, &token).await.map(|_| ())
+    })
     .await
 }
 
-/// Ping daemon to check connectivity
-pub async fn ping_daemon(socket_path: PathBuf) -> Result<String, String> {
-    super_stt_shared::daemon::client::ping_daemon(socket_path, get_client_id()).await
+/// Ping daemon to check connectivity (HTTP `/ping`).
+pub async fn ping_daemon() -> Result<String, String> {
+    with_settings_token(|socket, token| async move { http_client::ping(socket, &token).await })
+        .await
 }
 
-/// Get current loaded model from daemon as `(name, provider, source)`.
-pub async fn get_current_model(
-    socket_path: PathBuf,
-) -> Result<
+/// Load available audio themes from daemon with fallback.
+pub async fn load_audio_themes() -> Vec<AudioTheme> {
+    list_available_audio_themes()
+        .await
+        .unwrap_or_else(|_| AudioTheme::all_themes())
+}
+
+/// List available audio themes from daemon (HTTP `/audio_themes`).
+pub async fn list_available_audio_themes() -> Result<Vec<AudioTheme>, String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::list_audio_themes(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "list_themes failed".to_string()));
+        }
+        let themes = resp
+            .available_audio_themes
+            .unwrap_or_default()
+            .into_iter()
+            .map(|t| t.to_string())
+            .filter_map(|s| s.parse::<AudioTheme>().ok())
+            .collect();
+        Ok(themes)
+    })
+    .await
+}
+
+/// Set audio theme without playing a test sound (HTTP `POST /audio_theme`).
+pub async fn set_audio_theme(theme: AudioTheme) -> Result<String, String> {
+    let theme_str = theme.to_string().to_lowercase();
+    with_settings_token(move |socket, token| {
+        let theme_str = theme_str.clone();
+        async move {
+            let resp = http_client::set_audio_theme(socket, &token, &theme_str).await?;
+            if resp.status != "success" {
+                return Err(resp
+                    .message
+                    .unwrap_or_else(|| "set_theme failed".to_string()));
+            }
+            Ok(resp.message.unwrap_or_default())
+        }
+    })
+    .await
+}
+
+/// Set and test audio theme — convenience function (`POST /audio_theme` + `POST /audio_theme/test`).
+pub async fn set_and_test_audio_theme(theme: AudioTheme) -> Result<String, String> {
+    set_audio_theme(theme).await?;
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::test_audio_theme(socket, &token).await?;
+        Ok(resp.message.unwrap_or_default())
+    })
+    .await
+}
+
+/// Get current loaded model from daemon as `(name, provider, source)`
+/// (HTTP `GET /active_model`).
+pub async fn get_current_model() -> Result<
     (
         String,
         super_stt_shared::models::provider::Provider,
@@ -203,30 +210,61 @@ pub async fn get_current_model(
     ),
     String,
 > {
-    super_stt_shared::daemon::client::get_current_model(socket_path, get_client_id()).await
+    with_settings_token(|socket, token| async move {
+        let status = http_client::get_active_model(socket, &token).await?;
+        let current = status.active_model.current;
+        let model = current.model.ok_or("missing active_model.current.model")?;
+        let provider_str = current
+            .provider
+            .ok_or("missing active_model.current.provider")?;
+        let provider: super_stt_shared::models::provider::Provider = provider_str
+            .parse()
+            .map_err(|e| format!("invalid provider {provider_str:?}: {e}"))?;
+        let source_str = current
+            .source
+            .ok_or("missing active_model.current.source")?;
+        let source: super_stt_shared::models::registry::SourceKind = source_str
+            .parse()
+            .map_err(|e| format!("invalid source {source_str:?}: {e}"))?;
+        Ok((model, provider, source))
+    })
+    .await
 }
 
-/// Set/switch to a different model identified by `(name, provider, source)`.
+/// Set/switch to a different model (HTTP `POST /active_model`).
 pub async fn set_model(
-    socket_path: PathBuf,
     model: String,
     provider: super_stt_shared::models::provider::Provider,
     source: super_stt_shared::models::registry::SourceKind,
 ) -> Result<String, String> {
-    super_stt_shared::daemon::client::set_model(
-        socket_path,
-        &model,
-        provider,
-        source,
-        get_client_id(),
-    )
+    let provider_str = provider.to_string();
+    let source_str = source.to_string();
+    with_settings_token(move |socket, token| {
+        let model = model.clone();
+        let provider_str = provider_str.clone();
+        let source_str = source_str.clone();
+        async move {
+            let resp = http_client::set_active_model(
+                socket,
+                &token,
+                &model,
+                &provider_str,
+                Some(&source_str),
+            )
+            .await?;
+            if resp.status != "success" {
+                return Err(resp
+                    .message
+                    .unwrap_or_else(|| "set_model failed".to_string()));
+            }
+            Ok(resp.message.unwrap_or_default())
+        }
+    })
     .await
 }
 
-/// List all available models from daemon
-pub async fn list_available_models(
-    socket_path: PathBuf,
-) -> Result<
+/// List all available models from daemon (HTTP `GET /models`).
+pub async fn list_available_models() -> Result<
     Vec<(
         String,
         super_stt_shared::models::provider::Provider,
@@ -234,25 +272,64 @@ pub async fn list_available_models(
     )>,
     String,
 > {
-    super_stt_shared::daemon::client::list_available_models(socket_path, get_client_id()).await
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::list_models(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "list_models failed".to_string()));
+        }
+        Ok(resp.available_models.unwrap_or_default())
+    })
+    .await
 }
 
-/// Cancel any ongoing download
-pub async fn cancel_download(socket_path: PathBuf) -> Result<String, String> {
-    super_stt_shared::daemon::client::cancel_download(socket_path, get_client_id()).await
+/// Cancel any ongoing model-switch download (HTTP `POST /active_model/cancel`).
+pub async fn cancel_download() -> Result<String, String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::cancel_set_active_model(socket, &token).await?;
+        Ok(resp.message.unwrap_or_default())
+    })
+    .await
 }
 
-/// Get current download status
-pub async fn get_download_status(
-    socket_path: PathBuf,
-) -> Result<Option<super_stt_shared::models::protocol::DownloadProgress>, String> {
-    super_stt_shared::daemon::client::get_download_status(socket_path, get_client_id()).await
+/// Get current download status. Composed from `/active_model`'s
+/// `switch.download` sub-object.
+pub async fn get_download_status()
+-> Result<Option<super_stt_shared::models::protocol::DownloadProgress>, String> {
+    with_settings_token(|socket, token| async move {
+        let status = http_client::get_active_model(socket, &token).await?;
+        let Some(switch) = status.active_model.switch else {
+            return Ok(None);
+        };
+        let Some(download) = switch.download else {
+            return Ok(None);
+        };
+        let model_name = switch
+            .target
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let progress = super_stt_shared::models::protocol::DownloadProgress {
+            model_name,
+            current_file: download.current_file,
+            file_index: download.file_index,
+            total_files: download.total_files,
+            bytes_downloaded: download.bytes_downloaded,
+            total_bytes: download.total_bytes,
+            percentage: download.percentage,
+            status: switch.phase,
+            started_at: switch.started_at.unwrap_or_default(),
+            eta_seconds: download.eta_seconds,
+        };
+        Ok(Some(progress))
+    })
+    .await
 }
 
-/// Get current device, available devices, and GPU memory info from daemon
-pub async fn get_current_device(
-    socket_path: PathBuf,
-) -> Result<
+/// Get current device + GPU memory info (HTTP `GET /active_device`).
+pub async fn get_current_device() -> Result<
     (
         String,
         Vec<String>,
@@ -260,76 +337,241 @@ pub async fn get_current_device(
     ),
     String,
 > {
-    super_stt_shared::daemon::client::get_current_device(socket_path, get_client_id()).await
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::get_active_device(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "get_device failed".to_string()));
+        }
+        let device = resp.device.unwrap_or_else(|| "unknown".to_string());
+        let available_devices = resp
+            .available_devices
+            .unwrap_or_else(|| vec!["cpu".to_string()]);
+        let gpu_memory = match (resp.gpu_free_memory, resp.gpu_total_memory) {
+            (Some(free), Some(total)) => Some((free, total)),
+            _ => None,
+        };
+        Ok((device, available_devices, gpu_memory))
+    })
+    .await
 }
 
-/// Set device on daemon
-pub async fn set_device(socket_path: PathBuf, device: String) -> Result<(), String> {
-    super_stt_shared::daemon::client::set_device(socket_path, device, get_client_id()).await
+/// Set device on daemon (HTTP `POST /active_device`).
+pub async fn set_device(device: String) -> Result<(), String> {
+    with_settings_token(move |socket, token| {
+        let device = device.clone();
+        async move {
+            let resp = http_client::set_active_device(socket, &token, &device).await?;
+            if resp.status != "success" {
+                return Err(resp
+                    .message
+                    .unwrap_or_else(|| "set_device failed".to_string()));
+            }
+            Ok(())
+        }
+    })
+    .await
 }
 
-/// Get current daemon configuration
-pub async fn fetch_daemon_config(socket_path: PathBuf) -> Result<serde_json::Value, String> {
-    super_stt_shared::daemon::client::fetch_daemon_config(socket_path, get_client_id()).await
+/// Read currently-configured audio cue theme (HTTP `GET /audio_theme`).
+pub async fn get_current_audio_theme() -> Result<AudioTheme, String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::get_audio_theme(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "get_audio_theme failed".to_string()));
+        }
+        let theme_str = resp.audio_theme.unwrap_or_default();
+        Ok(theme_str.parse::<AudioTheme>().unwrap_or_default())
+    })
+    .await
 }
 
-/// Set preview typing enabled/disabled on daemon
-pub async fn set_preview_typing(socket_path: PathBuf, enabled: bool) -> Result<(), String> {
-    super_stt_shared::daemon::client::set_preview_typing(socket_path, enabled, get_client_id())
-        .await
+/// Read current cue volume (HTTP `GET /volume`).
+pub async fn get_volume() -> Result<u8, String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::get_volume(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "get_volume failed".to_string()));
+        }
+        // The legacy daemon returns volume in the `message` field as
+        // text ("Volume is 75"). Parse it out.
+        let msg = resp.message.unwrap_or_default();
+        let vol = msg
+            .rsplit(' ')
+            .next()
+            .and_then(|s| s.parse::<u8>().ok())
+            .unwrap_or(100);
+        Ok(vol)
+    })
+    .await
 }
 
-/// Get current preview typing setting from daemon
-pub async fn get_preview_typing(socket_path: PathBuf) -> Result<bool, String> {
-    super_stt_shared::daemon::client::get_preview_typing(socket_path, get_client_id()).await
+/// Read configured custom-models directory (HTTP `GET /custom_models_dir`).
+pub async fn get_custom_models_dir() -> Result<Option<String>, String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::get_custom_models_dir(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "get_custom_models_dir failed".to_string()));
+        }
+        Ok(resp.custom_models_dir.unwrap_or(None))
+    })
+    .await
 }
 
-/// Set recording stop mode on daemon
-pub async fn set_recording_stop_mode(socket_path: PathBuf, mode: String) -> Result<(), String> {
-    super_stt_shared::daemon::client::set_recording_stop_mode(socket_path, &mode, get_client_id())
-        .await
+/// Set preview-typing flag (HTTP `POST /preview_typing`).
+pub async fn set_preview_typing(enabled: bool) -> Result<(), String> {
+    with_settings_token(move |socket, token| async move {
+        let resp = http_client::set_preview_typing(socket, &token, enabled).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "set_preview_typing failed".to_string()));
+        }
+        Ok(())
+    })
+    .await
 }
 
-/// Get current recording stop mode from daemon
-pub async fn get_recording_stop_mode(socket_path: PathBuf) -> Result<String, String> {
-    super_stt_shared::daemon::client::get_recording_stop_mode(socket_path, get_client_id()).await
+/// Get preview-typing flag (HTTP `GET /preview_typing`).
+pub async fn get_preview_typing() -> Result<bool, String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::get_preview_typing(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "get_preview_typing failed".to_string()));
+        }
+        Ok(resp.preview_typing_enabled.unwrap_or(false))
+    })
+    .await
 }
 
-/// Set write method on daemon
-pub async fn set_write_method(socket_path: PathBuf, method: String) -> Result<(), String> {
-    super_stt_shared::daemon::client::set_write_method(socket_path, &method, get_client_id()).await
+/// Set recording stop mode (HTTP `POST /recording_stop_mode`).
+pub async fn set_recording_stop_mode(mode: String) -> Result<(), String> {
+    with_settings_token(move |socket, token| {
+        let mode = mode.clone();
+        async move {
+            let resp = http_client::set_recording_stop_mode(socket, &token, &mode).await?;
+            if resp.status != "success" {
+                return Err(resp
+                    .message
+                    .unwrap_or_else(|| "set_stop_mode failed".to_string()));
+            }
+            Ok(())
+        }
+    })
+    .await
 }
 
-/// Get current write method from daemon
-pub async fn get_write_method(socket_path: PathBuf) -> Result<String, String> {
-    super_stt_shared::daemon::client::get_write_method(socket_path, get_client_id()).await
+/// Get recording stop mode (HTTP `GET /recording_stop_mode`).
+pub async fn get_recording_stop_mode() -> Result<String, String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::get_recording_stop_mode(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "get_stop_mode failed".to_string()));
+        }
+        Ok(resp
+            .recording_stop_mode
+            .unwrap_or_else(|| "silence-and-manual".to_string()))
+    })
+    .await
 }
 
-/// Set master volume on daemon
-pub async fn set_volume(socket_path: PathBuf, volume: u8) -> Result<(), String> {
-    super_stt_shared::daemon::client::set_volume(socket_path, volume, get_client_id()).await
+/// Set write method (HTTP `POST /write_method`).
+pub async fn set_write_method(method: String) -> Result<(), String> {
+    with_settings_token(move |socket, token| {
+        let method = method.clone();
+        async move {
+            let resp = http_client::set_write_method(socket, &token, &method).await?;
+            if resp.status != "success" {
+                return Err(resp
+                    .message
+                    .unwrap_or_else(|| "set_write_method failed".to_string()));
+            }
+            Ok(())
+        }
+    })
+    .await
 }
 
-/// Set allow online models on daemon
-pub async fn set_allow_online_models(socket_path: PathBuf, enabled: bool) -> Result<(), String> {
-    super_stt_shared::daemon::client::set_allow_online_models(socket_path, enabled, get_client_id())
-        .await
+/// Get write method (HTTP `GET /write_method`).
+pub async fn get_write_method() -> Result<String, String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::get_write_method(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "get_write_method failed".to_string()));
+        }
+        Ok(resp.write_method.unwrap_or_else(|| "auto".to_string()))
+    })
+    .await
 }
 
-/// Get current allow online models setting from daemon
-pub async fn get_allow_online_models(socket_path: PathBuf) -> Result<bool, String> {
-    super_stt_shared::daemon::client::get_allow_online_models(socket_path, get_client_id()).await
+/// Set master volume (HTTP `POST /volume`).
+pub async fn set_volume(volume: u8) -> Result<(), String> {
+    with_settings_token(move |socket, token| async move {
+        let resp = http_client::set_volume(socket, &token, volume).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "set_volume failed".to_string()));
+        }
+        Ok(())
+    })
+    .await
 }
 
-/// Set custom models directory on daemon
-pub async fn set_custom_models_dir(
-    socket_path: PathBuf,
-    path: Option<String>,
-) -> Result<(), String> {
-    super_stt_shared::daemon::client::set_custom_models_dir(
-        socket_path,
-        path.as_deref(),
-        get_client_id(),
-    )
+/// Set allow-online-models flag (HTTP `POST /allow_online_models`).
+pub async fn set_allow_online_models(enabled: bool) -> Result<(), String> {
+    with_settings_token(move |socket, token| async move {
+        let resp = http_client::set_allow_online_models(socket, &token, enabled).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "set_allow_online failed".to_string()));
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Get allow-online-models flag (HTTP `GET /allow_online_models`).
+pub async fn get_allow_online_models() -> Result<bool, String> {
+    with_settings_token(|socket, token| async move {
+        let resp = http_client::get_allow_online_models(socket, &token).await?;
+        if resp.status != "success" {
+            return Err(resp
+                .message
+                .unwrap_or_else(|| "get_allow_online failed".to_string()));
+        }
+        Ok(resp.allow_online_models.unwrap_or(false))
+    })
+    .await
+}
+
+/// Set custom-models directory (HTTP `POST /custom_models_dir`).
+pub async fn set_custom_models_dir(path: Option<String>) -> Result<(), String> {
+    with_settings_token(move |socket, token| {
+        let path = path.clone();
+        async move {
+            let resp = http_client::set_custom_models_dir(socket, &token, path.as_deref()).await?;
+            if resp.status != "success" {
+                return Err(resp
+                    .message
+                    .unwrap_or_else(|| "set_custom_models_dir failed".to_string()));
+            }
+            Ok(())
+        }
+    })
     .await
 }

@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::audio::{parse_audio_level_from_udp, parse_recording_state_from_udp};
-
 use crate::daemon::client::{
-    RecordEvent, cancel_download, fetch_daemon_config, get_allow_online_models, get_current_device,
-    get_current_model, get_download_status, get_preview_typing, get_recording_stop_mode,
-    get_write_method, list_available_models, load_audio_themes, ping_daemon, record_command_stream,
+    RecordEvent, cancel_download, get_allow_online_models, get_current_audio_theme,
+    get_current_device, get_current_model, get_custom_models_dir, get_download_status,
+    get_preview_typing, get_recording_stop_mode, get_volume, get_write_method,
+    list_available_models, load_audio_themes, ping_daemon, record_command_stream,
     set_allow_online_models, set_and_test_audio_theme, set_audio_theme, set_custom_models_dir,
     set_device, set_model, set_preview_typing, set_recording_stop_mode, set_volume,
     set_write_method, stop_record_command, test_daemon_connection,
@@ -21,11 +20,8 @@ use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use super_stt_shared::UdpAuth;
 use super_stt_shared::models::provider::{OnlineProvider, Provider};
 use super_stt_shared::models::registry::{self, SourceKind};
-use tokio::net::UdpSocket;
 use tokio::time::Duration;
 
 /// Unified model operation state that encompasses downloading, loading, and switching
@@ -72,8 +68,6 @@ pub struct AppModel {
     // Super STT specific state
     /// Socket path for daemon communication
     pub socket_path: PathBuf,
-    /// UDP port for audio streaming
-    pub udp_port: u16,
     /// Current daemon connection status
     pub daemon_status: DaemonStatus,
     /// Current recording status
@@ -225,7 +219,6 @@ impl cosmic::Application for AppModel {
             nav,
             // Initialize Super STT state using proper socket path
             socket_path: super_stt_shared::validation::get_secure_socket_path(),
-            udp_port: 8765,
             daemon_status: DaemonStatus::Disconnected,
             recording_status: RecordingStatus::Idle,
             transcription_text: String::new(),
@@ -285,12 +278,12 @@ impl cosmic::Application for AppModel {
         let title_command = app.update_title();
 
         // Load audio themes on startup (always available)
-        let load_themes = Task::perform(load_audio_themes(app.socket_path.clone()), |themes| {
+        let load_themes = Task::perform(load_audio_themes(), |themes| {
             cosmic::Action::App(Message::AudioThemesLoaded(themes))
         });
 
         // Try to ping the daemon on startup
-        let initial_ping = Task::perform(ping_daemon(app.socket_path.clone()), |result| {
+        let initial_ping = Task::perform(ping_daemon(), |result| {
             cosmic::Action::App(match result {
                 Ok(_) => Message::DaemonConnected,
                 Err(e) => Message::DaemonError(e),
@@ -416,7 +409,6 @@ impl cosmic::Application for AppModel {
             return views::connection::page(
                 &self.daemon_status,
                 self.socket_path.to_string_lossy().to_string(),
-                self.udp_port,
             );
         }
 
@@ -461,7 +453,6 @@ impl cosmic::Application for AppModel {
             Page::Connection => views::connection::page(
                 &self.daemon_status,
                 self.socket_path.to_string_lossy().to_string(),
-                self.udp_port,
             ),
         }
     }
@@ -479,7 +470,7 @@ impl cosmic::Application for AppModel {
             // UDP audio level streaming subscription with restart capability
             Subscription::run_with(
                 UdpSubscriptionId(self.udp_restart_counter),
-                udp_audio_subscription,
+                audio_events_subscription,
             ),
             // Periodic connection monitoring
             cosmic::iced::time::every(std::time::Duration::from_secs(PING_INTERVAL_SECS))
@@ -504,9 +495,13 @@ impl cosmic::Application for AppModel {
             Message::ConnectToDaemon
                 | Message::DaemonConnectionResult(_)
                 | Message::DaemonConnected
-                | Message::DaemonConfigReceived(_)
+                | Message::CurrentAudioThemeLoaded(_)
+                | Message::VolumeLoaded(_)
+                | Message::CustomModelsDirLoaded(_)
                 | Message::DaemonError(_)
                 | Message::RetryConnection
+                | Message::WidgetBlocked(_)
+                | Message::RetryAuthorization
                 | Message::RefreshDaemonStatus
                 | Message::PingTimeout
                 | Message::DaemonEventsReceived(_)
@@ -606,12 +601,11 @@ impl cosmic::Application for AppModel {
                 self.custom_models_dir_input = path.as_deref().unwrap_or_default().to_string();
                 self.custom_models_dir_editing = false;
                 self.custom_models_dir.clone_from(&path);
-                let socket_path = self.socket_path.clone();
                 return Task::perform(
                     async move {
-                        set_custom_models_dir(socket_path.clone(), path).await?;
+                        set_custom_models_dir(path).await?;
                         // Re-fetch model list so newly discovered custom models appear
-                        list_available_models(socket_path).await
+                        list_available_models().await
                     },
                     |result| match result {
                         Ok(models) => cosmic::Action::App(Message::AvailableModelsLoaded(models)),
@@ -666,13 +660,11 @@ impl cosmic::Application for AppModel {
 
                 // Refresh device info (including GPU free memory) when opening model drawer
                 if context_page == ContextPage::ModelSelection && self.core.window.show_context {
-                    return Task::perform(get_current_device(self.socket_path.clone()), |result| {
-                        match result {
-                            Ok((device, available_devices, gpu_memory)) => cosmic::Action::App(
-                                Message::DeviceInfoLoaded(device, available_devices, gpu_memory),
-                            ),
-                            Err(e) => cosmic::Action::App(Message::DeviceError(e)),
-                        }
+                    return Task::perform(get_current_device(), |result| match result {
+                        Ok((device, available_devices, gpu_memory)) => cosmic::Action::App(
+                            Message::DeviceInfoLoaded(device, available_devices, gpu_memory),
+                        ),
+                        Err(e) => cosmic::Action::App(Message::DeviceError(e)),
                     });
                 }
             }
@@ -693,7 +685,7 @@ impl cosmic::Application for AppModel {
                 self.recording_status = RecordingStatus::Recording;
                 self.transcription_text.clear();
 
-                let stream = record_command_stream(self.socket_path.clone());
+                let stream = record_command_stream();
                 return cosmic::task::stream(stream.map(|event| match event {
                     RecordEvent::Preview(text) => {
                         cosmic::Action::App(Message::PreviewTextReceived(text))
@@ -708,11 +700,7 @@ impl cosmic::Application for AppModel {
             }
 
             Message::StopRecording => {
-                // Send a second record command to trigger the manual stop.
-                // The transcription result arrives via the pending
-                // StartRecording task as TranscriptionReceived.
-                let socket = self.socket_path.clone();
-                return Task::perform(stop_record_command(socket), |result| {
+                return Task::perform(stop_record_command(), |result| {
                     if let Err(e) = result {
                         log::warn!("Stop recording failed: {e}");
                     }
@@ -746,11 +734,9 @@ impl cosmic::Application for AppModel {
                     AudioTheme::Silent
                 };
                 self.selected_audio_theme = theme;
-                return Task::perform(set_audio_theme(self.socket_path.clone(), theme), |result| {
-                    match result {
-                        Ok(_) => cosmic::Action::App(Message::DaemonConnected),
-                        Err(e) => cosmic::Action::App(Message::DaemonError(e)),
-                    }
+                return Task::perform(set_audio_theme(theme), |result| match result {
+                    Ok(_) => cosmic::Action::App(Message::DaemonConnected),
+                    Err(e) => cosmic::Action::App(Message::DaemonError(e)),
                 });
             }
 
@@ -759,13 +745,10 @@ impl cosmic::Application for AppModel {
                 if theme != AudioTheme::Silent {
                     self.last_non_silent_theme = theme;
                 }
-                return Task::perform(
-                    set_and_test_audio_theme(self.socket_path.clone(), theme),
-                    |result| match result {
-                        Ok(_) => cosmic::Action::App(Message::DaemonConnected),
-                        Err(e) => cosmic::Action::App(Message::DaemonError(e)),
-                    },
-                );
+                return Task::perform(set_and_test_audio_theme(theme), |result| match result {
+                    Ok(_) => cosmic::Action::App(Message::DaemonConnected),
+                    Err(e) => cosmic::Action::App(Message::DaemonError(e)),
+                });
             }
 
             Message::SetAudioTheme(theme) => {
@@ -779,26 +762,24 @@ impl cosmic::Application for AppModel {
 
             Message::VolumeChanged(vol) => {
                 self.volume = vol;
-                return Task::perform(set_volume(self.socket_path.clone(), vol), |result| {
-                    match result {
-                        Ok(()) => cosmic::Action::None,
-                        Err(e) => cosmic::Action::App(Message::DaemonError(e)),
-                    }
+                return Task::perform(set_volume(vol), |result| match result {
+                    Ok(()) => cosmic::Action::None,
+                    Err(e) => cosmic::Action::App(Message::DaemonError(e)),
                 });
             }
 
-            Message::UdpDataReceived(data) => {
+            Message::WidgetAudioLevel { level, is_speech } => {
                 self.last_udp_data = std::time::Instant::now();
-
-                // Try parsing as recording state first (like the applet)
-                if let Some(state) = parse_recording_state_from_udp(&data) {
-                    self.recording_status = state;
+                self.audio_level = level;
+                self.is_speech_detected = is_speech;
+            }
+            Message::WidgetRecordingState(is_recording) => {
+                self.last_udp_data = std::time::Instant::now();
+                self.recording_status = if is_recording {
+                    RecordingStatus::Recording
                 } else {
-                    let audio_data = parse_audio_level_from_udp(&data);
-                    // Always update audio level regardless of recording state
-                    self.audio_level = audio_data.level;
-                    self.is_speech_detected = audio_data.is_speech;
-                }
+                    RecordingStatus::Idle
+                };
             }
 
             Message::RecordingStateChanged(state) => {
@@ -860,7 +841,7 @@ impl AppModel {
         match message {
             Message::ConnectToDaemon => {
                 self.daemon_status = DaemonStatus::Connecting;
-                Task::perform(test_daemon_connection(self.socket_path.clone()), |result| {
+                Task::perform(test_daemon_connection(), |result| {
                     cosmic::Action::App(Message::DaemonConnectionResult(result))
                 })
             }
@@ -871,7 +852,7 @@ impl AppModel {
                         self.daemon_status = DaemonStatus::Connected;
                     }
                     Err(e) => {
-                        self.daemon_status = DaemonStatus::Error(e);
+                        self.daemon_status = classify_daemon_error(e);
                     }
                 }
                 Task::none()
@@ -889,12 +870,16 @@ impl AppModel {
                     self.transcription_text.clear();
                 }
 
-                // Only restart UDP subscription when actually reconnecting, not on periodic pings
+                // The /events subscription is self-healing
+                // (`run_widget_subscription` in super-stt-shared owns
+                // its own reconnect loop), so we deliberately do NOT
+                // bump `udp_restart_counter` on reconnect. Restarting
+                // the iced subscription would cancel the helper
+                // mid-retry and cause another `session::obtain` round
+                // — i.e. another potential keyring touch.
                 if was_disconnected {
-                    self.udp_restart_counter += 1;
                     info!(
-                        "Daemon reconnected, restarting UDP subscription (counter: {})",
-                        self.udp_restart_counter
+                        "Daemon reconnected; events subscription is self-healing, no iced restart"
                     );
                 }
 
@@ -912,102 +897,59 @@ impl AppModel {
                     }
                 }
 
-                // Reload models, device info, and daemon config on reconnect
-                let socket_path = self.socket_path.clone();
-                let config_task =
-                    Task::perform(fetch_daemon_config(socket_path), |result| match result {
-                        Ok(config) => cosmic::Action::App(Message::DaemonConfigReceived(config)),
-                        Err(err) => {
-                            warn!("Failed to fetch daemon config: {err}");
-                            cosmic::Action::App(Message::RefreshDaemonStatus)
+                // Reload models, device info, and per-setting state on reconnect.
+                // Each setting is fetched with its own dedicated GET call —
+                // no bulk fetch_daemon_config anymore.
+                let load_settings = Task::batch([
+                    Task::perform(get_current_audio_theme(), |result| match result {
+                        Ok(theme) => cosmic::Action::App(Message::CurrentAudioThemeLoaded(theme)),
+                        Err(e) => {
+                            warn!("Failed to load audio theme: {e}");
+                            cosmic::Action::App(Message::CurrentAudioThemeLoaded(
+                                AudioTheme::default(),
+                            ))
                         }
-                    });
-
-                if was_disconnected {
-                    Task::batch([
-                        self.handle_model_messages(Message::LoadInitialData),
-                        config_task,
-                    ])
-                } else {
-                    config_task
-                }
-            }
-
-            Message::DaemonConfigReceived(config) => {
-                // Parse daemon configuration and sync audio theme settings
-                if let Some(audio_config) = config
-                    .get("audio")
-                    .and_then(|audio| audio.get("theme"))
-                    .and_then(|theme| theme.as_str())
-                {
-                    let daemon_audio_theme = audio_config.parse::<AudioTheme>().unwrap_or_default();
-                    self.selected_audio_theme = daemon_audio_theme;
-                    if daemon_audio_theme != AudioTheme::Silent {
-                        self.last_non_silent_theme = daemon_audio_theme;
-                    }
-                } else {
-                    warn!("No audio theme found in daemon configuration");
-                }
-
-                // Sync custom model path from daemon config
-                let custom_path = config
-                    .get("transcription")
-                    .and_then(|t| t.get("custom_models_dir"))
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
-                // Only update the input if the user hasn't edited it
-                let old_committed = self.custom_models_dir.as_deref().unwrap_or_default();
-                if self.custom_models_dir_input == old_committed {
-                    self.custom_models_dir_input =
-                        custom_path.as_deref().unwrap_or_default().to_string();
-                }
-                self.custom_models_dir = custom_path;
-
-                // Sync volume from daemon config
-                if let Some(vol) = config
-                    .get("audio")
-                    .and_then(|audio| audio.get("volume"))
-                    .and_then(serde_json::Value::as_u64)
-                {
-                    self.volume = u8::try_from(vol).unwrap_or(100);
-                }
-
-                // Load settings from daemon
-                Task::batch([
-                    // Load preview typing setting from daemon
-                    Task::perform(get_preview_typing(self.socket_path.clone()), |result| {
+                    }),
+                    Task::perform(get_volume(), |result| match result {
+                        Ok(vol) => cosmic::Action::App(Message::VolumeLoaded(vol)),
+                        Err(e) => {
+                            warn!("Failed to load volume: {e}");
+                            cosmic::Action::App(Message::VolumeLoaded(100))
+                        }
+                    }),
+                    Task::perform(get_custom_models_dir(), |result| match result {
+                        Ok(dir) => cosmic::Action::App(Message::CustomModelsDirLoaded(dir)),
+                        Err(e) => {
+                            warn!("Failed to load custom models dir: {e}");
+                            cosmic::Action::App(Message::CustomModelsDirLoaded(None))
+                        }
+                    }),
+                    Task::perform(get_preview_typing(), |result| match result {
+                        Ok(enabled) => {
+                            cosmic::Action::App(Message::PreviewTypingSettingLoaded(enabled))
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to load preview typing setting: {e}");
+                            cosmic::Action::App(Message::PreviewTypingSettingLoaded(false))
+                        }
+                    }),
+                    Task::perform(get_recording_stop_mode(), |result| {
+                        use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
                         match result {
-                            Ok(enabled) => {
-                                cosmic::Action::App(Message::PreviewTypingSettingLoaded(enabled))
+                            Ok(mode_str) => {
+                                let mode =
+                                    mode_str.parse::<RecordingStopMode>().unwrap_or_default();
+                                cosmic::Action::App(Message::RecordingStopModeLoaded(mode))
                             }
                             Err(e) => {
-                                log::warn!("Failed to load preview typing setting: {e}");
-                                cosmic::Action::App(Message::PreviewTypingSettingLoaded(false))
+                                log::warn!("Failed to load recording stop mode: {e}");
+                                cosmic::Action::App(Message::RecordingStopModeLoaded(
+                                    RecordingStopMode::default(),
+                                ))
                             }
                         }
                     }),
-                    // Load recording stop mode from daemon
-                    Task::perform(
-                        get_recording_stop_mode(self.socket_path.clone()),
-                        |result| {
-                            use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-                            match result {
-                                Ok(mode_str) => {
-                                    let mode =
-                                        mode_str.parse::<RecordingStopMode>().unwrap_or_default();
-                                    cosmic::Action::App(Message::RecordingStopModeLoaded(mode))
-                                }
-                                Err(e) => {
-                                    log::warn!("Failed to load recording stop mode: {e}");
-                                    cosmic::Action::App(Message::RecordingStopModeLoaded(
-                                        RecordingStopMode::default(),
-                                    ))
-                                }
-                            }
-                        },
-                    ),
-                    // Load write method from daemon
-                    Task::perform(get_write_method(self.socket_path.clone()), |result| {
+                    Task::perform(get_write_method(), |result| {
                         use super_stt_shared::models::write_method::WriteMethod;
                         match result {
                             Ok(method_str) => {
@@ -1022,22 +964,66 @@ impl AppModel {
                             }
                         }
                     }),
-                ])
+                ]);
+
+                if was_disconnected {
+                    Task::batch([
+                        self.handle_model_messages(Message::LoadInitialData),
+                        load_settings,
+                    ])
+                } else {
+                    load_settings
+                }
+            }
+
+            Message::CurrentAudioThemeLoaded(theme) => {
+                self.selected_audio_theme = theme;
+                if theme != AudioTheme::Silent {
+                    self.last_non_silent_theme = theme;
+                }
+                Task::none()
+            }
+
+            Message::VolumeLoaded(vol) => {
+                self.volume = vol;
+                Task::none()
+            }
+
+            Message::CustomModelsDirLoaded(custom_path) => {
+                let old_committed = self.custom_models_dir.as_deref().unwrap_or_default();
+                if self.custom_models_dir_input == old_committed {
+                    self.custom_models_dir_input =
+                        custom_path.as_deref().unwrap_or_default().to_string();
+                }
+                self.custom_models_dir = custom_path;
+                Task::none()
             }
 
             Message::DaemonError(err) => {
-                self.daemon_status = DaemonStatus::Error(err);
-                Task::perform(
-                    async {
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    },
-                    |()| cosmic::Action::App(Message::RetryConnection),
-                )
+                // Route user-denied responses into the Blocked state
+                // so we don't keep pinging the daemon every 5s and
+                // re-priming its in-memory deny cache. Any other
+                // error is transient (daemon restarting, socket
+                // missing, etc.) and gets the auto-retry loop.
+                let next = classify_daemon_error(err);
+                if matches!(next, DaemonStatus::Blocked(_)) {
+                    warn!("Daemon access blocked by user denial; auto-retry suppressed: {next:?}");
+                    self.daemon_status = next;
+                    Task::none()
+                } else {
+                    self.daemon_status = next;
+                    Task::perform(
+                        async {
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        },
+                        |()| cosmic::Action::App(Message::RetryConnection),
+                    )
+                }
             }
 
             Message::RetryConnection => {
                 self.daemon_status = DaemonStatus::Connecting;
-                Task::perform(ping_daemon(self.socket_path.clone()), |result| {
+                Task::perform(ping_daemon(), |result| {
                     cosmic::Action::App(match result {
                         Ok(_) => Message::DaemonConnected,
                         Err(e) => Message::DaemonError(e),
@@ -1045,15 +1031,40 @@ impl AppModel {
                 })
             }
 
-            Message::RefreshDaemonStatus => {
-                Task::perform(test_daemon_connection(self.socket_path.clone()), |result| {
-                    cosmic::Action::App(Message::DaemonConnectionResult(result))
+            Message::WidgetBlocked(reason) => {
+                warn!("Widget subscription blocked ({reason}); halting auto-retry");
+                self.daemon_status = DaemonStatus::Blocked(reason);
+                Task::none()
+            }
+
+            Message::RetryAuthorization => {
+                info!("Retrying authorization after user denial");
+                // Drop the cached settings token so the next
+                // session::obtain fires /auth/request and (after a
+                // daemon restart) spawns a fresh consent popup.
+                if let Err(e) = super_stt_shared::daemon::session::forget(SETTINGS_APP_ID) {
+                    warn!("Failed to forget settings session before retry: {e}");
+                }
+                // Bump the iced subscription key so the audio-events
+                // task re-spawns from scratch — its previous instance
+                // ended with `Blocked`.
+                self.udp_restart_counter = self.udp_restart_counter.wrapping_add(1);
+                self.daemon_status = DaemonStatus::Connecting;
+                Task::perform(ping_daemon(), |result| {
+                    cosmic::Action::App(match result {
+                        Ok(_) => Message::DaemonConnected,
+                        Err(e) => Message::DaemonError(e),
+                    })
                 })
             }
 
+            Message::RefreshDaemonStatus => Task::perform(test_daemon_connection(), |result| {
+                cosmic::Action::App(Message::DaemonConnectionResult(result))
+            }),
+
             Message::PingTimeout => {
                 if self.daemon_status == DaemonStatus::Connected {
-                    Task::perform(ping_daemon(self.socket_path.clone()), |result| {
+                    Task::perform(ping_daemon(), |result| {
                         cosmic::Action::App(match result {
                             Ok(_) => Message::DaemonConnected,
                             Err(e) => Message::DaemonError(e),
@@ -1296,11 +1307,10 @@ impl AppModel {
 
                     info!("Switching to device: {device}");
                     let target_device = device.clone();
-                    let socket_path = self.socket_path.clone();
                     Task::perform(
                         async move {
                             // Send device switch command and trust the daemon's response
-                            match set_device(socket_path, target_device.clone()).await {
+                            match set_device(target_device.clone()).await {
                                 Ok(()) => {
                                     // Device switch command succeeded - assume the target device is now active
                                     // We don't verify with get_device to avoid premature requests
@@ -1392,16 +1402,13 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::CancelDownload => Task::perform(
-                cancel_download(self.socket_path.clone()),
-                |result| match result {
-                    Ok(_) => cosmic::Action::App(Message::DownloadCancelled(String::new())),
-                    Err(e) => cosmic::Action::App(Message::DownloadError {
-                        model: String::new(),
-                        error: e,
-                    }),
-                },
-            ),
+            Message::CancelDownload => Task::perform(cancel_download(), |result| match result {
+                Ok(_) => cosmic::Action::App(Message::DownloadCancelled(String::new())),
+                Err(e) => cosmic::Action::App(Message::DownloadError {
+                    model: String::new(),
+                    error: e,
+                }),
+            }),
 
             Message::DownloadCompleted(model_name) => {
                 info!("Model {model_name} finished downloading");
@@ -1419,7 +1426,6 @@ impl AppModel {
                 let previous_source = self.previous_source;
                 Task::perform(
                     set_model(
-                        self.socket_path.clone(),
                         self.previous_model.clone(),
                         self.previous_provider,
                         self.previous_source,
@@ -1446,7 +1452,6 @@ impl AppModel {
                 let previous_source = self.previous_source;
                 Task::perform(
                     set_model(
-                        self.socket_path.clone(),
                         self.previous_model.clone(),
                         self.previous_provider,
                         self.previous_source,
@@ -1467,20 +1472,18 @@ impl AppModel {
                 if self.is_model_ready() {
                     Task::none()
                 } else {
-                    Task::perform(get_download_status(self.socket_path.clone()), |result| {
-                        match result {
-                            Ok(Some(progress)) => {
-                                // Download is actually happening
-                                cosmic::Action::App(Message::DownloadProgressUpdate(progress))
-                            }
-                            Ok(None) => {
-                                // No download in progress, model must have loaded from cache
-                                cosmic::Action::App(Message::NoDownloadInProgress)
-                            }
-                            Err(_) => {
-                                // Failed to get status, assume no download
-                                cosmic::Action::App(Message::NoDownloadInProgress)
-                            }
+                    Task::perform(get_download_status(), |result| match result {
+                        Ok(Some(progress)) => {
+                            // Download is actually happening
+                            cosmic::Action::App(Message::DownloadProgressUpdate(progress))
+                        }
+                        Ok(None) => {
+                            // No download in progress, model must have loaded from cache
+                            cosmic::Action::App(Message::NoDownloadInProgress)
+                        }
+                        Err(_) => {
+                            // Failed to get status, assume no download
+                            cosmic::Action::App(Message::NoDownloadInProgress)
                         }
                     })
                 }
@@ -1505,54 +1508,42 @@ impl AppModel {
                 info!("LoadInitialData: Loading models and device info at startup");
                 // One-time startup load: models + device info
                 Task::batch([
-                    Task::perform(list_available_models(self.socket_path.clone()), |result| {
-                        match result {
-                            Ok(models) => {
-                                cosmic::Action::App(Message::AvailableModelsLoaded(models))
-                            }
-                            Err(e) => cosmic::Action::App(Message::ModelError(e)),
+                    Task::perform(list_available_models(), |result| match result {
+                        Ok(models) => cosmic::Action::App(Message::AvailableModelsLoaded(models)),
+                        Err(e) => cosmic::Action::App(Message::ModelError(e)),
+                    }),
+                    Task::perform(get_current_model(), |result| match result {
+                        Ok((model, provider, source)) => {
+                            cosmic::Action::App(Message::CurrentModelLoaded {
+                                model,
+                                provider,
+                                source,
+                            })
+                        }
+                        Err(e) => cosmic::Action::App(Message::ModelError(e)),
+                    }),
+                    Task::perform(get_current_device(), |result| match result {
+                        Ok((device, available_devices, gpu_memory)) => {
+                            info!(
+                                "Initial device load successful: device={device}, available_devices={available_devices:?}"
+                            );
+                            cosmic::Action::App(Message::DeviceInfoLoaded(
+                                device,
+                                available_devices,
+                                gpu_memory,
+                            ))
+                        }
+                        Err(e) => {
+                            warn!("Initial device load failed: {e}");
+                            cosmic::Action::App(Message::DeviceError(e))
                         }
                     }),
-                    Task::perform(
-                        get_current_model(self.socket_path.clone()),
-                        |result| match result {
-                            Ok((model, provider, source)) => {
-                                cosmic::Action::App(Message::CurrentModelLoaded {
-                                    model,
-                                    provider,
-                                    source,
-                                })
-                            }
-                            Err(e) => cosmic::Action::App(Message::ModelError(e)),
-                        },
-                    ),
-                    Task::perform(get_current_device(self.socket_path.clone()), |result| {
-                        match result {
-                            Ok((device, available_devices, gpu_memory)) => {
-                                info!(
-                                    "Initial device load successful: device={device}, available_devices={available_devices:?}"
-                                );
-                                cosmic::Action::App(Message::DeviceInfoLoaded(
-                                    device,
-                                    available_devices,
-                                    gpu_memory,
-                                ))
-                            }
-                            Err(e) => {
-                                warn!("Initial device load failed: {e}");
-                                cosmic::Action::App(Message::DeviceError(e))
-                            }
+                    Task::perform(get_allow_online_models(), |result| match result {
+                        Ok(enabled) => {
+                            cosmic::Action::App(Message::AllowOnlineModelsLoaded(enabled))
                         }
+                        Err(e) => cosmic::Action::App(Message::AllowOnlineModelsError(e)),
                     }),
-                    Task::perform(
-                        get_allow_online_models(self.socket_path.clone()),
-                        |result| match result {
-                            Ok(enabled) => {
-                                cosmic::Action::App(Message::AllowOnlineModelsLoaded(enabled))
-                            }
-                            Err(e) => cosmic::Action::App(Message::AllowOnlineModelsError(e)),
-                        },
-                    ),
                     Task::perform(
                         async { crate::keyring::has_api_key("openai").unwrap_or(false) },
                         |has_key| cosmic::Action::App(Message::OpenAIApiKeyStatusLoaded(has_key)),
@@ -1600,7 +1591,7 @@ impl AppModel {
                     let selected_model = model.clone();
                     Task::batch([
                         Task::perform(
-                            set_model(self.socket_path.clone(), model, provider, source),
+                            set_model(model, provider, source),
                             move |result| match result {
                                 Ok(_) => cosmic::Action::App(Message::ModelChanged {
                                     model: selected_model.clone(),
@@ -1684,13 +1675,10 @@ impl AppModel {
         match message {
             Message::PreviewTypingToggled(enabled) => {
                 self.preview_typing_enabled = enabled;
-                Task::perform(
-                    set_preview_typing(self.socket_path.clone(), enabled),
-                    move |result| match result {
-                        Ok(()) => cosmic::Action::App(Message::PreviewTypingSettingLoaded(enabled)),
-                        Err(e) => cosmic::Action::App(Message::PreviewTypingError(e)),
-                    },
-                )
+                Task::perform(set_preview_typing(enabled), move |result| match result {
+                    Ok(()) => cosmic::Action::App(Message::PreviewTypingSettingLoaded(enabled)),
+                    Err(e) => cosmic::Action::App(Message::PreviewTypingError(e)),
+                })
             }
 
             Message::PreviewTypingSettingLoaded(enabled) => {
@@ -1719,7 +1707,7 @@ impl AppModel {
                 self.recording_stop_mode = mode;
                 let mode_str = mode.to_string();
                 Task::perform(
-                    set_recording_stop_mode(self.socket_path.clone(), mode_str),
+                    set_recording_stop_mode(mode_str),
                     move |result| match result {
                         Ok(()) => cosmic::Action::App(Message::RecordingStopModeLoaded(mode)),
                         Err(e) => cosmic::Action::App(Message::RecordingStopModeError(e)),
@@ -1747,13 +1735,10 @@ impl AppModel {
             Message::WriteMethodChanged(method) => {
                 self.write_method = method;
                 let method_str = method.to_string();
-                Task::perform(
-                    set_write_method(self.socket_path.clone(), method_str),
-                    move |result| match result {
-                        Ok(()) => cosmic::Action::App(Message::WriteMethodLoaded(method)),
-                        Err(e) => cosmic::Action::App(Message::WriteMethodError(e)),
-                    },
-                )
+                Task::perform(set_write_method(method_str), move |result| match result {
+                    Ok(()) => cosmic::Action::App(Message::WriteMethodLoaded(method)),
+                    Err(e) => cosmic::Action::App(Message::WriteMethodError(e)),
+                })
             }
 
             Message::WriteMethodLoaded(method) => {
@@ -1777,7 +1762,7 @@ impl AppModel {
             Message::AllowOnlineModelsToggled(enabled) => {
                 self.allow_online_models = enabled;
                 Task::perform(
-                    set_allow_online_models(self.socket_path.clone(), enabled),
+                    set_allow_online_models(enabled),
                     move |result| match result {
                         Ok(()) => cosmic::Action::App(Message::AllowOnlineModelsLoaded(enabled)),
                         Err(e) => cosmic::Action::App(Message::AllowOnlineModelsError(e)),
@@ -1936,96 +1921,135 @@ impl AppModel {
     }
 }
 
+/// Classify a daemon error message into the right next `DaemonStatus`.
+///
+/// `auth_denied (user_denied)` / `auth_denied (user_denied_cached)`
+/// must transition to [`DaemonStatus::Blocked`] so the surrounding
+/// auto-retry loop in `Message::DaemonError` stops firing — otherwise
+/// the settings app re-pings every 5s and the daemon's in-memory
+/// deny cache keeps logging the same `user_denied_cached`. Any other
+/// error string is transient (daemon restarting, socket missing,
+/// etc.) and gets [`DaemonStatus::Error`], which the caller pairs
+/// with the 5s retry. Extracted out of `Message::DaemonError` so
+/// this load-bearing branch is unit-testable without dragging the
+/// full cosmic update loop into the test harness.
+fn classify_daemon_error(err: String) -> DaemonStatus {
+    if super_stt_shared::daemon::widget_subscription::is_user_denied(&err) {
+        DaemonStatus::Blocked(err)
+    } else {
+        DaemonStatus::Error(err)
+    }
+}
+
 /// Wrapper for `Subscription::run_with` so the subscription restarts when the counter changes.
 #[derive(Hash)]
 struct UdpSubscriptionId(u64);
 
-/// Creates a UDP audio level streaming subscription
-fn udp_audio_subscription(
+/// Subscribe to the daemon's `/events` SSE stream for the settings UI's
+/// audio meter and recording-state indicator. Reuses the
+/// settings-scope token that's already cached for normal config calls
+/// — settings is god-mode so it can subscribe to widget topics.
+const SETTINGS_APP_ID: super_stt_shared::daemon::session::AppId =
+    super_stt_shared::daemon::session::AppId("super-stt-app");
+const SETTINGS_APP_NAME: &str = "Super STT Settings App";
+const SETTINGS_SCOPE: &str = "settings";
+const SETTINGS_AUDIO_TOPICS: &[&str] = &["recording_state", "frequency_bands"];
+
+/// Self-healing `/events` subscription for the settings UI's audio
+/// meter + recording-status badge. Routes through the shared
+/// [`run_widget_subscription`] helper so silent drops, idle wedges,
+/// and daemon-side revocations all auto-recover with backoff.
+fn audio_events_subscription(
     _id: &UdpSubscriptionId,
 ) -> std::pin::Pin<Box<dyn cosmic::iced::futures::Stream<Item = Message> + Send>> {
+    use futures_util::StreamExt;
+    use super_stt_shared::daemon::widget_subscription::{
+        WidgetSubscriptionConfig, WidgetSubscriptionUpdate, run_widget_subscription,
+    };
+    use super_stt_shared::validation::get_http_socket_path;
+
     Box::pin(cosmic::iced::stream::channel(100, async |mut channel| {
-        let socket = match UdpSocket::bind("127.0.0.1:0").await {
-            Ok(socket) => Arc::new(socket),
-            Err(e) => {
-                warn!("Failed to bind UDP socket: {e}");
-                futures_util::future::pending().await
-            }
-        };
-
-        // Register with daemon using authentication (use 'applet' to get continuous audio data like the applet)
-        let auth = match UdpAuth::new() {
-            Ok(auth) => auth,
-            Err(e) => {
-                warn!("Failed to initialize UDP authentication: {e}");
-                return;
-            }
-        };
-
-        let registration_msg = match auth.create_auth_message("applet") {
-            Ok(msg) => msg,
-            Err(e) => {
-                warn!("Failed to create authenticated registration message: {e}");
-                return;
-            }
-        };
-
-        if let Err(e) = socket
-            .send_to(registration_msg.as_bytes(), "127.0.0.1:8765")
-            .await
-        {
-            warn!("Failed to register with daemon: {e}");
-            return;
-        }
-
-        // Wait for registration confirmation
-        let mut reg_buffer = [0u8; 1024];
-        match tokio::time::timeout(Duration::from_secs(5), socket.recv_from(&mut reg_buffer)).await
-        {
-            Ok(Ok((len, addr))) => {
-                let response = String::from_utf8_lossy(&reg_buffer[0..len]);
-                if response.starts_with("REGISTERED:") {
-                    info!("Successfully registered with daemon: {response} from {addr}");
-                } else {
-                    warn!("Unexpected registration response: {response} from {addr}");
-                }
-            }
-            Ok(Err(e)) => {
-                warn!("Failed to receive registration response: {e}");
-            }
-            Err(_) => {
-                warn!("Registration response timeout");
-            }
-        }
-
-        let mut buffer = [0u8; 1024];
-        loop {
-            match socket.recv_from(&mut buffer).await {
-                Ok((len, addr)) => {
-                    // Validate source address - only accept from localhost
-                    if addr.ip() != std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST) {
-                        warn!("Rejected UDP packet from unauthorized source: {addr}");
-                        continue;
-                    }
-
-                    // Validate packet size
-                    if !(1..=1024).contains(&len) {
-                        warn!("Rejected UDP packet with invalid size: {len}");
-                        continue;
-                    }
-
-                    let data = buffer[..len].to_vec();
-                    if channel.send(Message::UdpDataReceived(data)).await.is_err() {
-                        break;
+        let config = WidgetSubscriptionConfig::new(
+            SETTINGS_APP_ID,
+            SETTINGS_APP_NAME,
+            SETTINGS_SCOPE,
+            SETTINGS_AUDIO_TOPICS,
+        );
+        let mut updates = Box::pin(run_widget_subscription(get_http_socket_path(), config));
+        info!("Settings subscription starting");
+        while let Some(update) = updates.next().await {
+            let msg = match update {
+                WidgetSubscriptionUpdate::Connected => continue,
+                WidgetSubscriptionUpdate::Event(evt) => {
+                    match settings_widget_event_to_message(&evt) {
+                        Some(m) => m,
+                        None => continue,
                     }
                 }
-                Err(e) => {
-                    warn!("UDP receive error: {e}");
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                WidgetSubscriptionUpdate::Disconnected { reason } => {
+                    warn!("Settings /events disconnected ({reason}); reconnecting");
+                    continue;
                 }
+                WidgetSubscriptionUpdate::NeedsReauth { reason } => {
+                    warn!(
+                        "Settings session needs re-auth ({reason}); will re-consent on next attempt"
+                    );
+                    continue;
+                }
+                WidgetSubscriptionUpdate::Blocked { reason } => {
+                    warn!("Settings session blocked by user denial ({reason}); subscription ended");
+                    // Forward to the update loop so the UI flips to
+                    // the Blocked state (Retry button) instead of
+                    // sitting silently with a dead audio meter.
+                    Message::WidgetBlocked(reason)
+                }
+            };
+            if channel.send(msg).await.is_err() {
+                break;
             }
         }
+        info!("Settings subscription ended");
     }))
+}
+
+/// Pick out the events the settings UI cares about and translate them
+/// into the `Message` variants that drive the audio meter +
+/// recording-status badge. Returns `None` for events we don't render
+/// (e.g. `subscribed`, `error`, `revoked`).
+fn settings_widget_event_to_message(
+    evt: &super_stt_shared::daemon::http_client::WidgetEvent,
+) -> Option<Message> {
+    use serde_json::Value;
+    let p: &Value = &evt.payload;
+    match evt.name.as_str() {
+        "recording_state" => Some(Message::WidgetRecordingState(
+            p.get("is_recording")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        )),
+        "frequency_bands" => {
+            #[allow(clippy::cast_possible_truncation)]
+            let total_energy = p.get("total_energy").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+            let level = raw_level_to_db_display_percent(total_energy);
+            let is_speech = total_energy > 0.0001;
+            Some(Message::WidgetAudioLevel { level, is_speech })
+        }
+        _ => None,
+    }
+}
+
+/// Convert raw frequency-band energy (typically 0.00001-0.1) into a
+/// 0.0-1.0 display percentage via a -60 dB ... 0 dB log mapping. Same
+/// transform the legacy UDP path applied in `audio/networking.rs`.
+fn raw_level_to_db_display_percent(raw_level: f32) -> f32 {
+    let db = if raw_level <= 0.0 {
+        -60.0
+    } else {
+        // Same scaling used in the legacy UDP path: map quiet/normal/loud
+        // speech (0.003 / 0.005 / 0.008) to ~80-97% display.
+        (20.0 * (raw_level * 10.0).log10()).clamp(-60.0, 0.0)
+    };
+    ((db + 60.0) / 60.0).clamp(0.0, 1.0)
 }
 
 /// Wrapper for `Subscription::run_with` to avoid passing `&PathBuf` directly.
@@ -2225,5 +2249,58 @@ impl menu::action::MenuAction for MenuAction {
         match self {
             MenuAction::About => Message::ToggleContextPage(ContextPage::About),
         }
+    }
+}
+
+#[cfg(test)]
+mod classify_daemon_error_tests {
+    //! Pin the decision in `Message::DaemonError`: which error
+    //! strings should suppress the 5s auto-retry vs. trigger it.
+    //! Locking this in protects against a regression of the deny
+    //! spam loop the helper change already fixed for the applet.
+    use super::*;
+
+    #[test]
+    fn user_denied_cached_routes_to_blocked() {
+        // Verbatim daemon response shape — see
+        // super-stt-daemon/src/daemon/http_server.rs::auth_err.
+        let next = classify_daemon_error("auth_denied (user_denied_cached)".to_string());
+        match next {
+            DaemonStatus::Blocked(reason) => {
+                assert_eq!(reason, "auth_denied (user_denied_cached)");
+            }
+            other => panic!("user_denied_cached must route to Blocked, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fresh_user_denied_routes_to_blocked() {
+        let next = classify_daemon_error("auth_denied (user_denied)".to_string());
+        assert!(matches!(next, DaemonStatus::Blocked(_)));
+    }
+
+    #[test]
+    fn dismissed_popup_routes_to_error_so_retry_can_recover() {
+        // user_dismissed is recoverable — next attempt pops the
+        // popup fresh — so the retry loop must keep firing.
+        let next = classify_daemon_error("auth_denied (user_dismissed)".to_string());
+        assert!(matches!(next, DaemonStatus::Error(_)));
+    }
+
+    #[test]
+    fn invalid_session_routes_to_error() {
+        // Token expiry / exe_changed are transient — let the
+        // retry loop drive a fresh consent on the next attempt.
+        let next = classify_daemon_error("invalid_session (expired)".to_string());
+        assert!(matches!(next, DaemonStatus::Error(_)));
+    }
+
+    #[test]
+    fn socket_unreachable_routes_to_error() {
+        // Daemon restarting / socket missing — pure transient.
+        let next = classify_daemon_error(
+            "Daemon HTTP listener not running. Start the daemon first.".to_string(),
+        );
+        assert!(matches!(next, DaemonStatus::Error(_)));
     }
 }

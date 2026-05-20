@@ -354,6 +354,46 @@ pub fn get_secure_socket_path() -> std::path::PathBuf {
     }
 }
 
+/// Get the path of the *new* HTTP-protocol Unix socket (`super-stt-http.sock`).
+///
+/// This sits next to the legacy length-prefix socket from `get_secure_socket_path`,
+/// in the same `$XDG_RUNTIME_DIR/stt/` directory. The two listeners run
+/// side-by-side; clients pick whichever one matches their protocol.
+#[must_use]
+pub fn get_http_socket_path() -> std::path::PathBuf {
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| format!("/run/user/{}", unsafe { libc::getuid() }));
+
+    if runtime_dir.is_empty() || runtime_dir.len() > 256 {
+        log::warn!("Invalid XDG_RUNTIME_DIR length, using fallback");
+        return std::path::PathBuf::from("/tmp/stt/super-stt-http.sock");
+    }
+
+    if runtime_dir.contains("..") || runtime_dir.contains('\0') {
+        log::warn!("Potential path traversal in XDG_RUNTIME_DIR, using fallback");
+        return std::path::PathBuf::from("/tmp/stt/super-stt-http.sock");
+    }
+
+    if !runtime_dir.starts_with("/run/user/") && !runtime_dir.starts_with("/tmp/") {
+        log::warn!("XDG_RUNTIME_DIR outside allowed directories: {runtime_dir}, using fallback");
+        return std::path::PathBuf::from("/tmp/stt/super-stt-http.sock");
+    }
+
+    let path = std::path::PathBuf::from(runtime_dir)
+        .join("stt")
+        .join("super-stt-http.sock");
+
+    if let Ok(canonical) = path.canonicalize() {
+        if !canonical.starts_with("/run/user/") && !canonical.starts_with("/tmp/") {
+            log::warn!("Canonical http socket path outside allowed directories, using fallback");
+            return std::path::PathBuf::from("/tmp/stt/super-stt-http.sock");
+        }
+        canonical
+    } else {
+        path
+    }
+}
+
 // Helper to check JSON nesting depth without defining items after statements
 fn check_depth(
     value: &Value,

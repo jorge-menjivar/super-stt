@@ -1,9 +1,11 @@
 [workspace]
     resolver = "2"
     members = [
-        "super-stt",
         "super-stt-app",
+        "super-stt-cli",
+        "super-stt-consent",
         "super-stt-cosmic-applet",
+        "super-stt-daemon",
         "super-stt-shared",
     ]
 
@@ -19,12 +21,10 @@
         # Shared dependencies with common versions
         # Candle ML framework (for daemon)
         candle-core = { git = "https://github.com/huggingface/candle.git", branch = "main" }
-        candle-flash-attn = { git = "https://github.com/huggingface/candle.git", branch = "main" }
         candle-nn = { git = "https://github.com/huggingface/candle.git", branch = "main" }
         candle-transformers = { git = "https://github.com/huggingface/candle.git", branch = "main" }
         chrono = { version = "0.4", features = ["serde"] }
         clap = { version = "4.5.54", features = ["cargo", "derive"] }
-        clap_complete = "4.5.56"
         cpal = "0.17.3"
         dashmap = "6.1.0"
         dirs = "6.0.0"
@@ -74,7 +74,6 @@
         strum = { version = "0.28.0", features = ["derive"] }
         strum_macros = "0.27"
         symphonia = { version = "0.5", features = ["all"] }
-        sysinfo = "0.37.0"
         tekken-rs = "0.1.1"
         thiserror = "2.0"
         # Tokenizers (for daemon)

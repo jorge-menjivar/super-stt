@@ -25,7 +25,12 @@ pub enum Message {
     ConnectToDaemon,
     DaemonConnectionResult(Result<(), String>),
     DaemonConnected,
-    DaemonConfigReceived(serde_json::Value),
+    // Settings loaded from daemon at connection time (replaces the
+    // legacy bulk fetch_daemon_config). Each is fetched with its own
+    // GET endpoint.
+    CurrentAudioThemeLoaded(AudioTheme),
+    VolumeLoaded(u8),
+    CustomModelsDirLoaded(Option<String>),
     DaemonError(String),
     TranscriptionReceived(String),
     AudioFeedbackToggled(bool),
@@ -33,8 +38,25 @@ pub enum Message {
     SetAudioTheme(AudioTheme),
     AudioThemesLoaded(Vec<AudioTheme>),
     RefreshDaemonStatus,
-    UdpDataReceived(Vec<u8>),
+    /// `frequency_bands` event from the daemon's `/events` SSE stream
+    /// — already converted to (`display_level_percent`, `is_speech`) so
+    /// the settings UI can drive its meter unchanged.
+    WidgetAudioLevel {
+        level: f32,
+        is_speech: bool,
+    },
+    /// `recording_state` event from `/events` — coarse `is_recording`
+    /// flag the UI projects into a `RecordingStatus`.
+    WidgetRecordingState(bool),
     RetryConnection,
+    /// User denied (or had been denying via deny cache) settings-scope
+    /// consent. Halts the auto-retry loop and surfaces a Retry
+    /// affordance to the user.
+    WidgetBlocked(String),
+    /// User pressed the "Retry authorization" button in the Connection
+    /// page. Drops the cached settings token and triggers a fresh
+    /// consent flow.
+    RetryAuthorization,
     PingTimeout,
     DaemonEventsReceived(Vec<super_stt_shared::models::protocol::NotificationEvent>), // Received events
     DaemonEventsError(String), // Error receiving or parsing events

@@ -8,13 +8,19 @@
 [dependencies]
     # Core shared dependencies
     anyhow.workspace = true
+async-stream = "0.3.6"
     chrono.workspace = true
     clap.workspace = true
     cpal = { workspace = true, optional = true }
     # Notification service dependencies
     dashmap.workspace = true
+futures-util.workspace = true
     # Audio processing (optional feature)
     hound = { workspace = true, optional = true }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
+keyring.workspace = true
     libc.workspace = true
     log.workspace = true
     rubato = { workspace = true, optional = true }
@@ -31,6 +37,7 @@
         "rt-multi-thread",
         "time",
     ] }
+tokio-stream = { version = "0.1.18", features = ["sync"] }
     uuid.workspace = true
 
 [features]

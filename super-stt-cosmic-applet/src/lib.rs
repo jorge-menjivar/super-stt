@@ -20,10 +20,9 @@ use cosmic::{
     },
 };
 
-use futures_util::SinkExt;
+use futures_util::{SinkExt, StreamExt};
 use log::{info, warn};
 use std::{path::PathBuf, rc::Rc};
-use tokio::net::UdpSocket;
 
 // Cache icon bytes to avoid allocation on every render
 static NORMAL_ICON: &[u8] = include_bytes!("../resources/assets/super-stt-icon.svg");
@@ -38,16 +37,14 @@ use crate::{
     ui::views::{PopupContentParams, create_popup_content},
 };
 use crate::{
-    daemon::{
-        RetryStrategy, TokenBucketRateLimiter, fetch_daemon_config, ping_daemon,
-        ping_daemon_with_status,
-    },
+    daemon::{RetryStrategy, fetch_daemon_config, ping_daemon, ping_daemon_with_status},
     models::theme::ThemeConfig,
 };
-use super_stt_shared::{
-    UdpAuth, parse_audio_samples_from_udp, parse_frequency_bands_from_udp,
-    parse_recording_state_from_udp,
+use super_stt_shared::daemon::session::{self, AppId};
+use super_stt_shared::daemon::widget_subscription::{
+    WidgetSubscriptionConfig, WidgetSubscriptionUpdate, run_widget_subscription,
 };
+use super_stt_shared::validation::get_http_socket_path;
 
 // Connection monitoring constants
 const PING_INTERVAL_SECS: u64 = 5; // Ping every 5 seconds to check daemon health
@@ -215,10 +212,16 @@ impl cosmic::Application for SuperSttApplet {
 
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
-            // UDP subscription for audio level monitoring that restarts when daemon reconnects
+            // Daemon `/events` SSE subscription. Wrapped in
+            // `Subscription::run_with` keyed on `udp_restart_counter`
+            // so a daemon-reconnect (`Message::DaemonConnected` bumps
+            // the counter) tears down the old stream and starts a
+            // fresh one with whatever auth state the daemon now has.
+            // The name `UdpSubscriptionId` is preserved while the
+            // legacy UDP path is being deprecated.
             Subscription::run_with(
                 UdpSubscriptionId(self.udp_restart_counter),
-                applet_udp_subscription,
+                applet_events_subscription,
             ),
             // Periodic connection monitoring
             cosmic::iced::time::every(std::time::Duration::from_secs(PING_INTERVAL_SECS))
@@ -259,12 +262,14 @@ impl cosmic::Application for SuperSttApplet {
                 self.daemon_state = DaemonConnectionState::Connected;
                 // Reset retry strategy on successful connection
                 self.retry_strategy.reset();
-                // Restart UDP subscription when daemon reconnects
-                self.udp_restart_counter += 1;
-                info!(
-                    "Daemon connected, restarting UDP subscription (counter: {})",
-                    self.udp_restart_counter
-                );
+                // The widget /events subscription is self-healing
+                // (`run_widget_subscription` in super-stt-shared owns
+                // its own reconnect loop), so we deliberately do NOT
+                // bump `udp_restart_counter` here. Restarting the iced
+                // subscription on every successful ping would cancel
+                // the helper task mid-flight and cause every ping
+                // cycle to re-enter `session::obtain` — i.e. another
+                // potential keyring touch.
 
                 // Fetch daemon configuration
                 let socket_path = self.socket_path.clone();
@@ -384,62 +389,91 @@ impl cosmic::Application for SuperSttApplet {
                     .update_audio_level(self.audio_level, self.is_speech_detected);
                 self.is_open = IsOpen::None;
             }
-            #[allow(clippy::cast_precision_loss)]
-            Message::UdpData(data) => {
-                // Update last UDP data timestamp
+            Message::WidgetRecordingState(is_recording) => {
+                // Update last-event timestamp (used by the connection
+                // health watchdog the same way the UDP path did).
                 self.last_udp_data = std::time::Instant::now();
 
-                // Try to parse as recording state first
-                if let Ok(state_data) = parse_recording_state_from_udp(&data) {
-                    let new_state = if state_data.is_recording {
-                        RecordingState::Recording
-                    } else {
-                        // Recording stopped - transition to Processing to show transcription is happening
-                        // Only transition to Processing if we were Recording before
-                        if matches!(self.recording_state, RecordingState::Recording) {
-                            RecordingState::Processing
-                        } else {
-                            RecordingState::Idle
-                        }
-                    };
+                let new_state = if is_recording {
+                    RecordingState::Recording
+                } else if matches!(self.recording_state, RecordingState::Recording) {
+                    // Just transitioned out of Recording — give the visualizer a
+                    // brief Processing state while the daemon transcribes.
+                    RecordingState::Processing
+                } else {
+                    RecordingState::Idle
+                };
 
-                    // Clear visualization data when transitioning away from recording
-                    let was_recording = matches!(self.recording_state, RecordingState::Recording);
-                    let will_be_recording = matches!(new_state, RecordingState::Recording);
+                let was_recording = matches!(self.recording_state, RecordingState::Recording);
+                let will_be_recording = matches!(new_state, RecordingState::Recording);
 
-                    self.recording_state = new_state;
+                self.recording_state = new_state;
 
-                    // Clear the visualization when stopping recording to prevent artifacts
-                    if was_recording && !will_be_recording {
-                        self.visualization.clear();
-                    }
-                } else if let Ok(frequency_data) = parse_frequency_bands_from_udp(&data) {
-                    // Update visualization with pre-computed frequency bands
-                    self.visualization
-                        .update_frequency_bands(&frequency_data.bands, frequency_data.total_energy);
-
-                    // Use total energy for audio level and speech detection
-                    self.audio_level = frequency_data.total_energy;
-                    self.is_speech_detected = frequency_data.total_energy > 0.02;
-                } else if let Ok(samples_data) = parse_audio_samples_from_udp(&data) {
-                    // Update visualization with real audio samples for frequency analysis
-                    self.visualization
-                        .update_audio_samples(&samples_data.samples);
-
-                    // Calculate overall audio level from samples for state management
-                    let audio_level = if samples_data.samples.is_empty() {
-                        0.0
-                    } else {
-                        let rms: f32 = samples_data.samples.iter().map(|&s| s * s).sum::<f32>()
-                            / samples_data.samples.len() as f32;
-                        rms.sqrt().min(1.0)
-                    };
-
-                    self.audio_level = audio_level;
-                    // Speech detection based on audio activity
-                    self.is_speech_detected = audio_level > 0.02;
+                if was_recording && !will_be_recording {
+                    self.visualization.clear();
                 }
-                // Note: Unknown packets (like registration acks) are silently ignored
+            }
+            Message::WidgetFrequencyBands {
+                bands,
+                sample_rate: _,
+                total_energy,
+            } => {
+                self.last_udp_data = std::time::Instant::now();
+                self.visualization
+                    .update_frequency_bands(&bands, total_energy);
+                self.audio_level = total_energy;
+                self.is_speech_detected = total_energy > 0.02;
+            }
+            #[allow(clippy::cast_precision_loss)]
+            Message::WidgetAudioSamples {
+                samples,
+                sample_rate: _,
+                channels: _,
+            } => {
+                self.last_udp_data = std::time::Instant::now();
+                self.visualization.update_audio_samples(&samples);
+                let audio_level = if samples.is_empty() {
+                    0.0
+                } else {
+                    let rms: f32 =
+                        samples.iter().map(|&s| s * s).sum::<f32>() / samples.len() as f32;
+                    rms.sqrt().min(1.0)
+                };
+                self.audio_level = audio_level;
+                self.is_speech_detected = audio_level > 0.02;
+            }
+            Message::WidgetRevoked(reason) => {
+                warn!(
+                    "Widget session revoked by daemon (reason={reason}); will re-subscribe via consent flow on next retry"
+                );
+                // Treat the same way as a connection drop so the
+                // existing reconnect path triggers a fresh
+                // /auth/request → consent popup → re-subscribe.
+                self.daemon_state = DaemonConnectionState::Error(format!("revoked: {reason}"));
+            }
+            Message::WidgetOtherEvent(_) | Message::WidgetSubscriptionError(_) => {
+                // Other events are informational only; subscription
+                // errors are logged inside the subscription task.
+            }
+            Message::WidgetBlocked(reason) => {
+                warn!(
+                    "Widget subscription blocked by user denial ({reason}); waiting for explicit retry"
+                );
+                self.daemon_state = DaemonConnectionState::Blocked(reason);
+            }
+            Message::RetryAuthorization => {
+                info!("Retrying authorization after user denial");
+                // Drop any cached token (in-memory + keyring) so the
+                // next subscription cycle hits the daemon's
+                // /auth/request and spawns a fresh consent prompt.
+                if let Err(e) = session::forget(APPLET_APP_ID) {
+                    warn!("Failed to forget session before retry: {e}");
+                }
+                // Restart the iced subscription so the dropped
+                // helper task re-spawns from scratch.
+                self.udp_restart_counter = self.udp_restart_counter.wrapping_add(1);
+                self.daemon_state = DaemonConnectionState::Connecting;
+                self.retry_strategy = RetryStrategy::for_initial_connection();
             }
             Message::RetryConnection => {
                 // Check if this is a manual retry (from error state) or automatic retry
@@ -757,93 +791,205 @@ fn transparent_icon_button<'a>(
     .on_press_down(Message::TogglePopup)
 }
 
-/// Creates a UDP audio level streaming subscription for the applet
-fn applet_udp_subscription(
+/// Stable identity used to cache the applet's widget-scope session
+/// token under `(super-stt-session, super-stt-cosmic-applet)`. Mirrors
+/// the layout the CLI and settings app already use.
+const APPLET_APP_ID: AppId = AppId("super-stt-cosmic-applet");
+const APPLET_APP_NAME: &str = "Super STT COSMIC Applet";
+const APPLET_SCOPE: &str = "widget";
+const APPLET_TOPICS: &[&str] = &["recording_state", "frequency_bands", "audio_samples"];
+
+/// Subscribes to the daemon's `GET /events` SSE stream and forwards
+/// each event as a typed [`Message`]. The subscription is self-healing
+/// — if the SSE stream drops, the daemon revokes the session, or the
+/// connection wedges past the keepalive deadline, the shared
+/// [`run_widget_subscription`] helper reconnects (with backoff) and
+/// re-auths automatically. The wrapping iced subscription only
+/// terminates when the applet is shutting down.
+fn applet_events_subscription(
     _id: &UdpSubscriptionId,
 ) -> std::pin::Pin<Box<dyn cosmic::iced::futures::Stream<Item = Message> + Send>> {
     Box::pin(cosmic::iced::stream::channel(100, async |mut channel| {
-        let socket = match UdpSocket::bind("127.0.0.1:0").await {
-            Ok(socket) => socket,
-            Err(e) => {
-                warn!("Failed to bind UDP socket: {e}");
-                futures_util::future::pending().await
-            }
-        };
-
-        // Register with daemon using authentication
-        let auth = match UdpAuth::new() {
-            Ok(auth) => auth,
-            Err(e) => {
-                warn!("Failed to initialize UDP authentication: {e}");
-                return;
-            }
-        };
-
-        let registration_msg = match auth.create_auth_message("applet") {
-            Ok(msg) => msg,
-            Err(e) => {
-                warn!("Failed to create authenticated registration message: {e}");
-                return;
-            }
-        };
-
-        if let Err(e) = socket
-            .send_to(registration_msg.as_bytes(), "127.0.0.1:8765")
-            .await
-        {
-            warn!("Failed to register with daemon: {e}");
-            return;
-        }
-
-        // Test if registration was successful by sending a test message
-        if let Err(e) = socket.send_to(b"PING", "127.0.0.1:8765").await {
-            warn!("Failed to send ping to daemon: {e}");
-        }
-
-        let mut buffer = [0u8; 1024];
-        let mut rate_limiter = TokenBucketRateLimiter::for_audio_processing();
-        let mut keepalive_interval = tokio::time::interval(tokio::time::Duration::from_mins(1));
-
-        loop {
-            tokio::select! {
-                // Handle incoming UDP data
-                recv_result = socket.recv_from(&mut buffer) => {
-                    match recv_result {
-                        Ok((len, _addr)) => {
-                            // Apply rate limiting to prevent UDP flooding DoS attacks
-                            if !rate_limiter.try_consume() {
-                                // Rate limited - drop packet and log warning
-                                warn!("UDP packet rate limit exceeded, dropping packet");
-
-                                // Optional: Add a small delay to further throttle rapid senders
-                                if let Some(delay) = rate_limiter.time_until_next_token() {
-                                    tokio::time::sleep(
-                                        delay.min(std::time::Duration::from_millis(10)),
-                                    )
-                                    .await;
-                                }
-                                continue;
-                            }
-
-                            let data = buffer[..len].to_vec();
-                            if channel.send(Message::UdpData(data)).await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            warn!("UDP receive error: {e}");
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        }
-                    }
-                }
-                // Send periodic keep-alive pings
-                _ = keepalive_interval.tick() => {
-                    // Send keep-alive ping to maintain connection
-                    if let Err(e) = socket.send_to(b"PING", "127.0.0.1:8765").await {
-                        warn!("Failed to send UDP keep-alive: {e}");
-                    }
-                }
+        let config = WidgetSubscriptionConfig::new(
+            APPLET_APP_ID,
+            APPLET_APP_NAME,
+            APPLET_SCOPE,
+            APPLET_TOPICS,
+        );
+        let mut updates = Box::pin(run_widget_subscription(get_http_socket_path(), config));
+        info!("Widget subscription starting");
+        while let Some(update) = updates.next().await {
+            let msg = applet_subscription_update_to_message(update);
+            if channel.send(msg).await.is_err() {
+                break; // applet shutting down
             }
         }
+        info!("Widget subscription ended");
     }))
+}
+
+/// Project a [`WidgetSubscriptionUpdate`] from the shared helper into
+/// the applet's typed [`Message`] enum.
+fn applet_subscription_update_to_message(update: WidgetSubscriptionUpdate) -> Message {
+    match update {
+        // Route a successful (re)connect into the existing
+        // `DaemonConnected` handler so it clears any prior
+        // `Error("revoked: …")` state and resets retry. Without this,
+        // a user-denied → daemon-restart → auto-reconnect cycle would
+        // leave the UI stuck on the stale "revoked" error even though
+        // the subscription is live again.
+        WidgetSubscriptionUpdate::Connected => Message::DaemonConnected,
+        WidgetSubscriptionUpdate::Event(evt) => widget_event_to_message(evt),
+        WidgetSubscriptionUpdate::Disconnected { reason } => {
+            warn!("Widget /events disconnected ({reason}); reconnecting");
+            Message::WidgetSubscriptionError(reason)
+        }
+        WidgetSubscriptionUpdate::NeedsReauth { reason } => {
+            warn!("Widget session needs re-auth ({reason}); will re-consent on next attempt");
+            Message::WidgetRevoked(reason)
+        }
+        WidgetSubscriptionUpdate::Blocked { reason } => {
+            warn!("Widget subscription blocked ({reason}); stream terminated");
+            Message::WidgetBlocked(reason)
+        }
+    }
+}
+
+/// Translate one [`super_stt_shared::daemon::http_client::WidgetEvent`]
+/// into the applet's typed [`Message`] enum. Unknown event names are
+/// surfaced as `WidgetOtherEvent(name)` so the update loop can log
+/// them at most once per event type.
+fn widget_event_to_message(evt: super_stt_shared::daemon::http_client::WidgetEvent) -> Message {
+    use serde_json::Value;
+    fn b64_to_f32_vec(s: Option<&str>) -> Vec<f32> {
+        let Some(s) = s else { return Vec::new() };
+        let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s)
+        else {
+            return Vec::new();
+        };
+        bytes
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect()
+    }
+
+    let p: &Value = &evt.payload;
+    match evt.name.as_str() {
+        "recording_state" => Message::WidgetRecordingState(
+            p.get("is_recording")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        ),
+        "frequency_bands" => Message::WidgetFrequencyBands {
+            bands: b64_to_f32_vec(p.get("bands_b64").and_then(Value::as_str)),
+            #[allow(clippy::cast_possible_truncation)]
+            sample_rate: p.get("sample_rate").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+            #[allow(clippy::cast_possible_truncation)]
+            total_energy: p.get("total_energy").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+        },
+        "audio_samples" => Message::WidgetAudioSamples {
+            samples: b64_to_f32_vec(p.get("samples_b64").and_then(Value::as_str)),
+            #[allow(clippy::cast_possible_truncation)]
+            sample_rate: p.get("sample_rate").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            channels: p.get("channels").and_then(Value::as_u64).unwrap_or(1) as u16,
+        },
+        "revoked" => Message::WidgetRevoked(
+            p.get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string(),
+        ),
+        "subscribed" | "error" => Message::WidgetOtherEvent(evt.name),
+        other => Message::WidgetOtherEvent(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod widget_subscription_mapping_tests {
+    //! These tests pin the mapping between the shared
+    //! `WidgetSubscriptionUpdate` variants and the applet's `Message`
+    //! enum. Each variant has a load-bearing UX contract:
+    //!
+    //! - `Connected` → `Message::DaemonConnected` so the existing
+    //!   handler clears any prior `Error("revoked: …")` state after
+    //!   auto-recovery. If this mapping silently changes, the applet
+    //!   gets stuck on a stale revoked banner forever.
+    //! - `Blocked` → `Message::WidgetBlocked` so the UI flips to the
+    //!   sticky "Authorization denied" view with a Retry button. If
+    //!   this maps to anything else, the helper's
+    //!   stop-spamming-on-deny fix becomes invisible.
+    //! - `NeedsReauth` → `Message::WidgetRevoked` so the UI shows a
+    //!   transient revoked banner while the helper does the
+    //!   `session::forget` → fresh-consent cycle.
+    //! - `Disconnected` → `Message::WidgetSubscriptionError` so the
+    //!   UI doesn't change state during the helper's internal
+    //!   backoff/reconnect — the helper auto-recovers.
+    use super::*;
+    use super_stt_shared::daemon::http_client::WidgetEvent;
+
+    #[test]
+    fn blocked_maps_to_widget_blocked_with_reason() {
+        let update = WidgetSubscriptionUpdate::Blocked {
+            reason: "auth_denied (user_denied_cached)".to_string(),
+        };
+        match applet_subscription_update_to_message(update) {
+            Message::WidgetBlocked(reason) => {
+                assert_eq!(reason, "auth_denied (user_denied_cached)");
+            }
+            other => panic!("Blocked must map to Message::WidgetBlocked, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn needs_reauth_maps_to_widget_revoked_with_reason() {
+        let update = WidgetSubscriptionUpdate::NeedsReauth {
+            reason: "invalid_session (expired)".to_string(),
+        };
+        match applet_subscription_update_to_message(update) {
+            Message::WidgetRevoked(reason) => {
+                assert_eq!(reason, "invalid_session (expired)");
+            }
+            other => panic!("NeedsReauth must map to Message::WidgetRevoked, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn connected_maps_to_daemon_connected_for_state_clear() {
+        // Critical regression guard: an earlier bug had this mapping
+        // to a no-op `WidgetOtherEvent`, which left a stale
+        // `Error("revoked: …")` banner up after auto-recovery.
+        let update = WidgetSubscriptionUpdate::Connected;
+        assert!(matches!(
+            applet_subscription_update_to_message(update),
+            Message::DaemonConnected
+        ));
+    }
+
+    #[test]
+    fn disconnected_maps_to_subscription_error() {
+        let update = WidgetSubscriptionUpdate::Disconnected {
+            reason: "stream ended".to_string(),
+        };
+        match applet_subscription_update_to_message(update) {
+            Message::WidgetSubscriptionError(reason) => {
+                assert_eq!(reason, "stream ended");
+            }
+            other => {
+                panic!("Disconnected must map to Message::WidgetSubscriptionError, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn revoked_widget_event_maps_to_widget_revoked() {
+        let evt = WidgetEvent {
+            name: "revoked".to_string(),
+            payload: serde_json::json!({ "reason": "exe_changed" }),
+        };
+        match widget_event_to_message(evt) {
+            Message::WidgetRevoked(reason) => assert_eq!(reason, "exe_changed"),
+            other => panic!("revoked event must map to WidgetRevoked, got {other:?}"),
+        }
+    }
 }

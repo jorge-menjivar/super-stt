@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 pub mod audio;
-pub mod daemon_state;
 pub mod protocol;
 pub mod provider;
 pub mod recording_stop_mode;
 pub mod registry;
-pub mod stt;
 pub mod theme;
-pub mod udp;
 pub mod write_method;
