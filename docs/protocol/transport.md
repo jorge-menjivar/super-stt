@@ -8,9 +8,9 @@ Sent Events.
 It is the protocol-wide companion to:
 
 - [auth.md](./auth.md) — authentication handshake
-- [client.md](./client.md) — client-scope endpoints
-- [settings.md](./settings.md) — settings-scope endpoints
-- [widget.md](./widget.md) — widget-scope endpoints
+- [client.md](./scopes/client.md) — client-scope endpoints
+- [settings.md](./scopes/settings.md) — settings-scope endpoints
+- [widget.md](./scopes/widget.md) — widget-scope endpoints
 
 The wire shape is HTTP/1.1 over a Unix domain socket. A future config
 flag will let the daemon bind a TCP listener with the same HTTP API
@@ -19,16 +19,20 @@ headers, JSON bodies, and SSE framing all stay the same.
 
 ## Where the daemon listens
 
-| Transport      | Address                                       | When                                |
-|----------------|-----------------------------------------------|-------------------------------------|
-| Unix socket    | `$XDG_RUNTIME_DIR/stt/super-stt.sock`         | Always (default)                    |
-| TCP            | `127.0.0.1:<configurable port>`               | Optional, opt-in via daemon config  |
+| Transport      | Address                                            | When                                |
+|----------------|----------------------------------------------------|-------------------------------------|
+| Unix socket    | `$XDG_RUNTIME_DIR/stt/super-stt-http.sock`         | Always (default)                    |
+| TCP            | `127.0.0.1:<configurable port>`                    | Optional, opt-in via daemon config  |
 
 Native Linux clients should use the Unix socket. The daemon authenticates
 peers there via `SO_PEERCRED` + `/proc/<pid>/exe`, which is what the
 consent design depends on. The TCP bind is intended for browser apps
 where `SO_PEERCRED` isn't available — see
 [auth.md](./auth.md#tcp-bound-clients).
+
+The socket path can be overridden via the `SUPER_STT_HTTP_SOCKET`
+environment variable on the daemon (tests use this to bind a unique
+socket per run).
 
 The daemon serves the same routes on both transports.
 
@@ -64,13 +68,13 @@ Content-Length: 60
 }
 ```
 
-Anything an HTTP/1.1 client library does — connection reuse, pipelining,
-chunked transfer encoding — is fine. The daemon doesn't care whether
-clients open one connection per request or hold a keep-alive open;
-authentication is per-request via the `Authorization` header.
+Anything an HTTP/1.1 client library does — connection reuse,
+pipelining, chunked transfer encoding — is supported. Whether you
+open one connection per request or hold a keep-alive open is up to
+you; authentication is per-request via the `Authorization` header.
 
-The `Host` header is required by HTTP/1.1 but the daemon ignores its
-value. Clients can use `stt.local`, `localhost`, or anything else.
+The `Host` header is required by HTTP/1.1 but its value is ignored.
+Use `stt.local`, `localhost`, or anything else.
 
 ## Authentication header
 
@@ -81,10 +85,8 @@ Authorization: Bearer <session_token>
 ```
 
 The session token is a 32-byte random value, hex-encoded, returned by
-[`/auth/request`](./auth.md). The daemon validates it on every request
-by looking it up in its keyring, comparing the stored exe-path against
-`/proc/<peer_pid>/exe`, and checking the expiry. On failure the daemon
-responds:
+[`/auth/request`](./auth.md). It's validated on every request. On
+failure you'll see:
 
 ```http
 HTTP/1.1 401 Unauthorized
@@ -112,7 +114,7 @@ must re-issue `POST /auth/request` to obtain a fresh token.
 Responses are always JSON with a top-level `status` field that is
 `"success"` or `"error"`. The HTTP status code mirrors the JSON status:
 2xx for success, 4xx for client errors (auth, validation, scope
-denial), 5xx for daemon-internal failures.
+denial), 5xx for server-side failures.
 
 | HTTP status | When                                                        |
 |-------------|-------------------------------------------------------------|
@@ -133,7 +135,7 @@ connection open and writes one SSE frame per published event until the
 client disconnects or the daemon shuts down.
 
 ```http
-GET /events?topics=config_changed,model_switch_started,model_switch_progress,model_switch_completed,model_switch_failed HTTP/1.1
+GET /events?topics=recording_state,frequency_bands,daemon_status_changed,download_progress HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…
 Accept: text/event-stream
@@ -145,28 +147,42 @@ Content-Type: text/event-stream
 Cache-Control: no-store
 
 event: subscribed
-data: {"client_id":"sub_…","subscribed_to":["config_changed", "..."]}
+data: {"client_id":"sub_…","subscribed_to":["recording_state","frequency_bands","daemon_status_changed","download_progress"]}
 
-event: config_changed
-data: {"client_id":"src_…","timestamp":"2026-05-03T12:34:56Z","data":{"key":"volume","value":75}}
+event: recording_state
+data: {"is_recording":true}
 
-event: model_switch_progress
-data: {"client_id":"src_…","timestamp":"2026-05-03T12:34:57Z","data":{"phase":"downloading","target":{"model":"whisper-base","provider":"local_whisper","source":"builtin"},"download":{"current_file":"model.safetensors","file_index":1,"total_files":3,"bytes_downloaded":12345,"total_bytes":45678,"percentage":27.0,"eta_seconds":14}}}
+event: daemon_status_changed
+data: {"status":"loading_model","new_model":"whisper-base","timestamp":"2026-05-22T12:34:56Z"}
+
+event: download_progress
+data: {"model_name":"whisper-base","current_file":"model.safetensors","file_index":1,"total_files":3,"bytes_downloaded":12345,"total_bytes":45678,"percentage":27.0,"status":"downloading","eta_seconds":14,"timestamp":"2026-05-22T12:34:57Z"}
+
+event: daemon_status_changed
+data: {"status":"ready","model_loaded":true,"model_name":"whisper-base","timestamp":"2026-05-22T12:35:14Z"}
 ```
 
 Conventions:
 
 - The first frame is always `event: subscribed` with the assigned
-  `client_id` (the subscriber's id, distinct from the originator field
-  on subsequent events) and the resolved topic list.
-- Each subsequent frame's `event:` field is the topic name. The `data:`
-  field is one JSON line carrying `client_id` (originator), `timestamp`,
-  and a topic-specific `data` payload.
-- Multi-line `data:` is permitted by SSE but the daemon always emits a
-  single line per event.
-- The daemon writes SSE comments (lines starting with `:`) every 30
-  seconds as keep-alive ping. Clients should ignore them; they exist
-  so HTTP intermediaries don't time the connection out.
+  subscriber `client_id` and the resolved topic list. Topics the
+  client requested but isn't allowed to see (e.g. a widget asking
+  for `daemon_status_changed`) cause a `403 scope_denied` before the
+  stream opens; partial subscriptions aren't supported.
+- Each subsequent frame's `event:` field is the topic name. The
+  `data:` field is one JSON line carrying the topic-specific payload
+  directly (no wrapper envelope). For example, `recording_state` is
+  `{"is_recording":true}`; `daemon_status_changed` is
+  `{"status":"…", …, "timestamp":"…"}`. See [widget.md](./scopes/widget.md)
+  and [settings.md](./scopes/settings.md) for per-topic shapes.
+- Multi-line `data:` is permitted by SSE; events arrive as a single
+  line per event.
+- An SSE comment (line starting with `:`) arrives every 30 seconds
+  as a keep-alive. Clients should ignore them; their job is to stop
+  HTTP intermediaries from timing the connection out and to give
+  clients a stable cadence to detect a wedged stream (if no comment
+  or event arrives for a minute, the connection is dead — close it
+  and reconnect).
 
 The `topics` query parameter is comma-separated. Repeating it
 (`?topics=a&topics=b`) is also accepted and merges to the same set.
@@ -174,39 +190,37 @@ The `topics` query parameter is comma-separated. Repeating it
 ### Audio fan-out is on the same stream
 
 The widget scope's audio fan-out — recording state, raw PCM samples,
-frequency bands, partial/final STT — is just additional topics on
-the SSE stream. There is no separate UDP socket. See
-[widget.md](./widget.md) for the audio-specific topic payloads.
+frequency bands, partial / final STT — is just additional topics on
+the same SSE stream. There is no separate UDP socket. See
+[widget.md](./scopes/widget.md) for the audio-specific topic payloads.
 
 For binary efficiency, audio sample payloads use base64 inside the
-JSON `data` field. At ~30 KB/s the encoding overhead (~33%) is
-negligible on a local socket.
+JSON `data` field (`samples_b64`, `bands_b64`). At ~30 KB/s the
+encoding overhead (~33 %) is negligible on a local socket.
 
 ### Slow consumers
 
-Each subscriber gets a bounded outgoing queue. A subscriber that
-doesn't drain fast enough has its oldest events dropped, not the
-connection itself dropped. The next live event arrives normally. This
-matches the loss-on-overload behavior the audio fan-out had over UDP,
-without needing a second transport. Lag is logged on the daemon side.
-
-A subscriber that wants to verify it didn't miss critical events can
-issue a fresh `GET` on the relevant resource (e.g.
-`GET /active_model`) — the snapshot reflects current state
-authoritatively.
+A subscriber that doesn't drain fast enough has its oldest queued
+events dropped — the connection itself isn't closed, and the next
+live event arrives normally. Clients that want to verify they
+didn't miss critical state can issue a fresh `GET` on the relevant
+resource (e.g. `GET /active_model`) — those snapshots are
+authoritative.
 
 ### Closing the stream
 
 The client closes the stream by closing the underlying HTTP
-connection. There is no `unsubscribe` request — the connection is the
-subscription. The daemon closes the stream on:
+connection. There is no `unsubscribe` request — the connection *is*
+the subscription. The stream may also end on the server side, in
+which case the last frame the client receives identifies why:
 
-- Daemon shutdown (writes the SSE frame `event: shutdown\ndata: {}\n\n` if
-  there's time, then closes).
-- Token revocation or expiry detected during a periodic re-validation
-  pass (writes `event: revoked\ndata: {"reason":"..."}\n\n`, then closes).
-- `/proc/<peer_pid>/exe` no longer matches the keyring entry (same
-  `revoked` event, reason `exe_changed`).
+- `event: shutdown` / `data: {}` — the daemon is going away.
+- `event: revoked` / `data: { "reason": "..." }` — the session is no
+  longer accepted. Reasons include `expired`, `exe_changed` (the
+  client's binary identity changed, see
+  [auth.md](./auth.md#widget-anti-replacement)), and any other
+  revocation cause. The client must re-issue `/auth/request` before
+  reopening the stream.
 
 ## Error responses
 
@@ -221,13 +235,9 @@ Every error returns a JSON body with the same shape:
 ```
 
 `message` is a stable identifier suitable for clients to switch on.
-The optional `data` carries machine-readable detail. Free-form text
-goes in the daemon's logs, not the wire response — error messages on
-the wire are sanitized to one line so secrets in formatted error
-chains don't leak.
-
-Set `SUPER_STT_DEBUG_ERRORS=1` in the daemon environment to disable
-sanitization while developing.
+The optional `data` carries machine-readable detail. Wire errors are
+sanitized to a single line so secrets can't accidentally leak into
+the response body.
 
 ## Forward compatibility with TCP
 
@@ -240,10 +250,10 @@ on `127.0.0.1:<port>`. Three things change:
    `(app_name, web_origin)` instead of `(app_name, exe_path)`. The
    wire shape (Authorization header, JSON bodies) is identical.
 
-2. **CORS / Private Network Access headers** are emitted on the TCP
-   responses. Browsers enforce them; raw TCP clients ignore them. The
-   daemon emits them on the Unix socket too, where they're harmlessly
-   ignored.
+2. **CORS / Private Network Access headers** are present on TCP
+   responses. Browsers enforce them; raw TCP clients ignore them.
+   These headers are emitted on the Unix socket too, where they're
+   harmlessly ignored.
 
 3. **TLS.** Chrome's Private Network Access spec wants HTTPS for
    public-site → localhost requests. The daemon presents a self-signed
@@ -251,8 +261,7 @@ on `127.0.0.1:<port>`. Three things change:
 
 Native Linux clients on the Unix socket get peer-credential-verified
 identity. Browser clients on TCP get origin-verified identity. Both
-hit the same endpoints. A Rust shared client can target either with
-just a different `Connector`.
+hit the same endpoints.
 
 ## Authoring a non-Rust client
 
@@ -260,7 +269,7 @@ The minimal recipe for a fresh client of any scope:
 
 1. Use any HTTP client your language has. Examples:
    ```bash
-   curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt.sock" \
+   curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt-http.sock" \
         -X POST http://stt.local/auth/request \
         -H 'Content-Type: application/json' \
         -d '{"app_name":"My App","scope":"client","version":"0.1"}'
@@ -268,7 +277,7 @@ The minimal recipe for a fresh client of any scope:
    ```python
    import requests_unixsocket
    s = requests_unixsocket.Session()
-   r = s.post("http+unix://%2Frun%2Fuser%2F1000%2Fstt%2Fsuper-stt.sock/auth/request",
+   r = s.post("http+unix://%2Frun%2Fuser%2F1000%2Fstt%2Fsuper-stt-http.sock/auth/request",
               json={"app_name": "My App", "scope": "client", "version": "0.1"})
    token = r.json()["session_token"]
    ```
@@ -276,7 +285,7 @@ The minimal recipe for a fresh client of any scope:
    // Node
    const http = require('http');
    const req = http.request({
-     socketPath: '/run/user/1000/stt/super-stt.sock',
+     socketPath: '/run/user/1000/stt/super-stt-http.sock',
      method: 'POST',
      path: '/auth/request',
      headers: {'Content-Type': 'application/json'}
@@ -287,7 +296,7 @@ The minimal recipe for a fresh client of any scope:
 
 3. For commands, send `Authorization: Bearer <token>` on every request:
    ```bash
-   curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt.sock" \
+   curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt-http.sock" \
         -X POST http://stt.local/transcribe \
         -H "Authorization: Bearer $STT_TOKEN" \
         -H 'Content-Type: application/json' \
@@ -297,14 +306,11 @@ The minimal recipe for a fresh client of any scope:
 4. For event streams, use any HTTP client that supports SSE (or just
    read line-by-line):
    ```bash
-   curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt.sock" \
+   curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt-http.sock" \
         -N \
-        "http://stt.local/events?topics=config_changed,model_switch_progress" \
+        "http://stt.local/events?topics=recording_state,daemon_status_changed,download_progress" \
         -H "Authorization: Bearer $STT_TOKEN"
    ```
 
 5. On any 401 with `message: "invalid_session"`, run the auth flow
    again and retry the original request.
-
-The Rust shared client (`super_stt_shared::daemon::client`) wraps all
-of this into typed function calls.
