@@ -157,6 +157,18 @@ async fn cmd_record(
     wait: bool,
     stop_mode: Option<String>,
 ) -> std::result::Result<(), String> {
+    // Toggle behavior: probe `/v1/status` first. If a daemon-mic
+    // capture is already in progress, this invocation acts as a stop
+    // signal; otherwise we start a fresh recording. The daemon's
+    // `/v1/transcribe` endpoint refuses with `409 recording_in_progress`
+    // when something is already running — the protocol places the
+    // start-or-stop decision on the client (see
+    // `docs/protocol/endpoints/v1/transcribe.md`).
+    let status = http_client::status(socket_path.clone(), &token).await?;
+    if status.is_recording.unwrap_or(false) {
+        return cmd_stop(socket_path, token).await;
+    }
+
     let resp = http_client::transcribe(
         socket_path,
         &token,

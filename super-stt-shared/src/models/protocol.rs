@@ -102,6 +102,13 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection_active: Option<bool>,
 
+    // Whether a daemon-mic capture is currently in progress.
+    // Surfaced on `GET /v1/status` so clients can decide whether to
+    // call `POST /v1/transcribe` (start) or `POST /v1/transcribe/stop`
+    // (toggle stop). Absent on responses where it's not meaningful.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_recording: Option<bool>,
+
     // Preview typing fields
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_typing_enabled: Option<bool>,
@@ -182,6 +189,7 @@ impl DaemonResponse {
             download_progress: None,
             daemon_config: None,
             connection_active: None,
+            is_recording: None,
             preview_typing_enabled: None,
             recording_stop_mode: None,
             write_method: None,
@@ -237,6 +245,7 @@ impl DaemonResponse {
             download_progress: None,
             daemon_config: None,
             connection_active: None,
+            is_recording: None,
             preview_typing_enabled: None,
             recording_stop_mode: None,
             write_method: None,
@@ -376,6 +385,12 @@ impl DaemonResponse {
     }
 
     #[must_use]
+    pub fn with_is_recording(mut self, is_recording: bool) -> Self {
+        self.is_recording = Some(is_recording);
+        self
+    }
+
+    #[must_use]
     pub fn with_preview_typing_enabled(mut self, enabled: bool) -> Self {
         self.preview_typing_enabled = Some(enabled);
         self
@@ -418,22 +433,6 @@ pub enum Command {
         audio_data: Vec<f32>,
         sample_rate: u32,
         client_id: String,
-    },
-    Subscribe {
-        event_types: Vec<String>,
-        client_info: HashMap<String, Value>,
-    },
-    Unsubscribe,
-    GetEvents {
-        since_timestamp: Option<String>,
-        event_types: Option<Vec<String>>,
-        limit: u32,
-    },
-    GetSubscriberInfo,
-    Notify {
-        event_type: String,
-        client_id: String,
-        data: Value,
     },
     Ping {
         client_id: Option<String>,
@@ -880,11 +879,6 @@ impl TryFrom<DaemonRequest> for Command {
         }
         match request.command.as_str() {
             "transcribe" => cmd_transcribe(&request),
-            "subscribe" => cmd_subscribe(&request),
-            "unsubscribe" => Ok(Command::Unsubscribe),
-            "get_events" => cmd_get_events(&request),
-            "get_subscriber_info" => Ok(Command::GetSubscriberInfo),
-            "notify" => cmd_notify(&request),
             "ping" => Ok(Command::Ping {
                 client_id: request.client_id.clone(),
             }),
@@ -935,50 +929,6 @@ fn cmd_transcribe(request: &DaemonRequest) -> Result<Command, String> {
         audio_data,
         sample_rate,
         client_id,
-    })
-}
-
-fn cmd_subscribe(request: &DaemonRequest) -> Result<Command, String> {
-    let event_types = request
-        .event_types
-        .clone()
-        .ok_or("Missing event_types for subscribe command")?;
-    let client_info = request.client_info.clone().unwrap_or_default();
-    Ok(Command::Subscribe {
-        event_types,
-        client_info,
-    })
-}
-
-fn cmd_get_events(request: &DaemonRequest) -> Result<Command, String> {
-    let limit = request.limit.unwrap_or(100);
-    if let Err(e) = validation::validate_limit(limit) {
-        return Err(e.to_string());
-    }
-    Ok(Command::GetEvents {
-        since_timestamp: request.since_timestamp.clone(),
-        event_types: request.event_types.clone(),
-        limit,
-    })
-}
-
-fn cmd_notify(request: &DaemonRequest) -> Result<Command, String> {
-    let event_type = request
-        .event_type
-        .clone()
-        .ok_or("Missing event_type for notify command")?;
-    let client_id = request
-        .client_id
-        .clone()
-        .ok_or("Missing client_id for notify command")?;
-    let data = request
-        .data
-        .clone()
-        .ok_or("Missing data for notify command")?;
-    Ok(Command::Notify {
-        event_type,
-        client_id,
-        data,
     })
 }
 

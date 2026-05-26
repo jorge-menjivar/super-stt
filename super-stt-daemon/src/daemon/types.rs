@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::DaemonConfig;
-use crate::daemon::auth::ProcessAuth;
 use crate::daemon::events::EventBus;
 use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
@@ -10,25 +9,32 @@ use crate::stt_models::local::download::CustomModelInfo;
 use crate::stt_models::third_party::{
     deepgram::DeepgramModel, mistralai::MistralModel, openai::OpenAIModel,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use log::{info, warn};
-use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use super_stt_shared::NotificationManager;
 use super_stt_shared::models::provider::{OnlineProvider, Provider};
 use super_stt_shared::models::registry;
 use super_stt_shared::resource_management::ResourceManager;
 use super_stt_shared::theme::AudioTheme;
-use tokio::net::UnixListener;
 use tokio::sync::broadcast;
-
-use super::client_management::ClientConnectionsMap;
 
 #[derive(Copy, Clone, Debug)]
 pub enum DeviceOverride {
     Cpu,
     Cuda,
+}
+
+/// Map a candle `Device` to the short wire-name (`"cpu"` / `"cuda"` /
+/// `"metal"`) used in `daemon_status_changed` SSE payloads and on the
+/// `/active_device` endpoint. Mirrors the same mapping inlined at
+/// other call sites (e.g. `device_management::handle_device_switch_success`).
+#[must_use]
+pub(crate) fn device_str(device: &candle_core::Device) -> &'static str {
+    match device {
+        candle_core::Device::Cpu => "cpu",
+        candle_core::Device::Cuda(_) => "cuda",
+        candle_core::Device::Metal(_) => "metal",
+    }
 }
 
 /// A live model: its full resolved [`ModelDefinition`] plus the running
@@ -47,31 +53,23 @@ pub type SharedLoadedModel = Arc<tokio::sync::RwLock<Option<LoadedModel>>>;
 
 #[derive(Clone)]
 pub struct SuperSTTDaemon {
-    pub socket_path: PathBuf,
     pub model: SharedLoadedModel,
-    pub notification_manager: Arc<NotificationManager>,
     pub audio_processor: Arc<AudioProcessor>,
     pub shutdown_tx: broadcast::Sender<()>,
     pub dbus_manager: Option<Arc<DBusManager>>,
     pub realtime_manager: Arc<RealTimeTranscriptionManager>,
     /// Internal pub/sub bus that fans recording / audio / STT events
-    /// out to widget HTTP/SSE subscribers via `GET /events`. Replaces
-    /// the legacy UDP streamer.
+    /// out to widget HTTP/SSE subscribers via `GET /events`.
     pub events: Arc<EventBus>,
     pub audio_theme: Arc<RwLock<AudioTheme>>,
     pub volume: Arc<RwLock<u8>>,
     pub is_recording: Arc<tokio::sync::RwLock<bool>>,
-    pub audio_monitoring_handle: Arc<tokio::sync::RwLock<Option<tokio::task::JoinHandle<()>>>>,
     pub download_manager: Arc<DownloadStateManager>,
     // Device management
     pub preferred_device: Arc<tokio::sync::RwLock<String>>, // "cpu" or "cuda"
     pub actual_device: Arc<tokio::sync::RwLock<String>>,    // actual device in use (may fallback)
     // Configuration management
     pub config: Arc<tokio::sync::RwLock<DaemonConfig>>,
-    // Connection tracking
-    pub active_connections: ClientConnectionsMap,
-    // Process authentication for write operations
-    pub process_auth: ProcessAuth,
     // Resource management for connection and rate limiting
     pub resource_manager: Arc<ResourceManager>,
     // Preview typing setting (beta feature)
@@ -80,7 +78,7 @@ pub struct SuperSTTDaemon {
     pub manual_stop_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::broadcast::Sender<()>>>>,
     // Cached keyboard simulator (session persists across recordings)
     pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
-    // Channel for streaming preview text to a waiting client (set by client_management)
+    // Channel for streaming preview text to a waiting client (set by the recording flow)
     pub preview_text: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
     // Custom models discovered from custom_models_dir
     pub custom_models: Arc<tokio::sync::RwLock<Vec<CustomModelInfo>>>,
@@ -94,7 +92,6 @@ impl SuperSTTDaemon {
     /// Returns an error if model loading fails.
     #[allow(clippy::too_many_lines)]
     pub async fn new(
-        socket_path: PathBuf,
         stt_model_override: Option<String>,
         device_override: Option<DeviceOverride>,
         audio_theme_override: Option<AudioTheme>,
@@ -120,7 +117,6 @@ impl SuperSTTDaemon {
 
         // Initialize components
         let (shutdown_tx, _) = broadcast::channel(1);
-        let notification_manager = Arc::new(NotificationManager::new(1000, 100)); // max 1000 events, 100 subscribers
         let audio_processor = Arc::new(AudioProcessor::new());
 
         // Initialize model storage (None until the initial load below succeeds)
@@ -129,13 +125,9 @@ impl SuperSTTDaemon {
         // Initialize other managers
         let realtime_manager = Arc::new(RealTimeTranscriptionManager::new(
             Arc::clone(&model),
-            Arc::clone(&notification_manager),
             Arc::clone(&audio_processor),
         ));
         let download_manager = Arc::new(DownloadStateManager::new());
-
-        // Initialize process authentication for write operations
-        let process_auth = ProcessAuth::new();
 
         // Initialize resource manager for connection and rate limiting
         let resource_manager = if cfg!(debug_assertions) {
@@ -162,9 +154,7 @@ impl SuperSTTDaemon {
 
         // Create the daemon instance first (needed for model loading)
         let daemon = SuperSTTDaemon {
-            socket_path,
             model,
-            notification_manager,
             audio_processor,
             shutdown_tx,
             dbus_manager,
@@ -173,13 +163,10 @@ impl SuperSTTDaemon {
             audio_theme: Arc::new(RwLock::new(config.audio.theme)),
             volume: Arc::new(RwLock::new(config.audio.volume)),
             is_recording: Arc::new(tokio::sync::RwLock::new(false)),
-            audio_monitoring_handle: Arc::new(tokio::sync::RwLock::new(None)),
             download_manager,
             preferred_device: Arc::new(tokio::sync::RwLock::new(preferred_device)),
             actual_device: Arc::new(tokio::sync::RwLock::new(actual_device)),
             config: Arc::new(tokio::sync::RwLock::new(config)),
-            active_connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            process_auth,
             resource_manager,
             preview_typing_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 preview_typing_enabled,
@@ -206,7 +193,7 @@ impl SuperSTTDaemon {
         }
 
         // Broadcast loading status
-        Self::broadcast_loading_status(&daemon.notification_manager).await;
+        Self::broadcast_loading_status(&daemon.events);
 
         // Load the appropriate STT model based on config preferences.
         // (name, provider) is the durable identity, both stored in config.
@@ -312,20 +299,11 @@ impl SuperSTTDaemon {
         changed
     }
 
-    async fn broadcast_loading_status(notification_manager: &Arc<NotificationManager>) {
-        if let Err(e) = notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "loading_model",
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                }),
-            )
-            .await
-        {
-            warn!("Failed to broadcast daemon loading status: {e}");
-        }
+    fn broadcast_loading_status(events: &EventBus) {
+        events.publish_daemon_status_changed(serde_json::json!({
+            "status": "loading_model",
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        }));
     }
 
     async fn load_initial_model_and_broadcast(
@@ -333,9 +311,7 @@ impl SuperSTTDaemon {
         model_to_load: String,
         provider: Provider,
     ) -> Result<()> {
-        daemon
-            .broadcast_model_loading_status(model_to_load.clone())
-            .await;
+        daemon.broadcast_model_loading_status(&model_to_load);
 
         // Online providers don't need downloading — create instance directly
         if let Provider::Online(online) = provider {
@@ -352,27 +328,26 @@ impl SuperSTTDaemon {
                 .ok_or_else(|| {
                     anyhow::anyhow!("{model_to_load} via {provider}: not in registry")
                 })?;
+            // Capture the device string before moving `instance` into the
+            // shared `LoadedModel` — the `ready` event consumers (e.g. the
+            // settings app's current_device tracking) only update their UI
+            // when `actual_device` is present in the payload.
+            let actual_device = device_str(instance.device());
             *daemon.model.write().await = Some(LoadedModel {
                 definition,
                 instance,
             });
 
-            if let Err(e) = daemon
-                .notification_manager
-                .broadcast_event(
-                    "daemon_status_changed".to_string(),
-                    "daemon".to_string(),
-                    serde_json::json!({
-                        "status": "ready",
-                        "model_loaded": true,
-                        "provider": provider.to_string(),
-                        "timestamp": chrono::Utc::now().to_rfc3339()
-                    }),
-                )
-                .await
-            {
-                warn!("Failed to broadcast model ready status: {e}");
-            }
+            daemon
+                .events
+                .publish_daemon_status_changed(serde_json::json!({
+                    "status": "ready",
+                    "model_loaded": true,
+                    "provider": provider.to_string(),
+                    "actual_device": actual_device,
+                    "model_name": model_to_load,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                }));
             return Ok(());
         }
 
@@ -399,7 +374,7 @@ impl SuperSTTDaemon {
         // Mark completed and clear download state
         tracker.mark_completed();
         *tracker.current_file.write() = "Model loaded successfully".to_string();
-        tracker.broadcast_progress().await;
+        tracker.broadcast_progress();
         daemon.download_manager.clear_download();
 
         // Store into daemon state
@@ -407,27 +382,26 @@ impl SuperSTTDaemon {
         let definition = registry::find_by(&model_to_load, provider)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("{model_to_load} via {provider}: not in registry"))?;
+        // Capture the device string before moving `instance` into the
+        // shared `LoadedModel` — the `ready` event consumers (e.g. the
+        // settings app's current_device tracking) only update their UI
+        // when `actual_device` is present in the payload.
+        let actual_device = device_str(instance.device());
         *daemon.model.write().await = Some(LoadedModel {
             definition,
             instance,
         });
 
         // Broadcast ready status
-        if let Err(e) = daemon
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "ready",
-                    "model_loaded": true,
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                }),
-            )
-            .await
-        {
-            warn!("Failed to broadcast model ready status: {e}");
-        }
+        daemon
+            .events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "ready",
+                "model_loaded": true,
+                "actual_device": actual_device,
+                "model_name": model_to_load,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }));
         Ok(())
     }
 
@@ -459,117 +433,6 @@ impl SuperSTTDaemon {
     ) -> Option<super_stt_shared::models::registry::ModelDefinition> {
         let custom = self.custom_models.read().await;
         super_stt_shared::models::registry::resolve(name, provider, source, &custom)
-    }
-
-    /// Start the daemon and listen for connections
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the socket directory cannot be created,
-    /// if binding the Unix socket fails, or if setting permissions fails.
-    pub async fn start(&self) -> Result<()> {
-        info!(
-            "Starting Super STT Daemon on socket: {}",
-            self.socket_path.display()
-        );
-
-        // Create parent directory if it doesn't exist
-        if let Some(parent) = self.socket_path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .context("Failed to create socket directory")?;
-        }
-
-        // Remove existing socket file
-        if self.socket_path.exists() {
-            tokio::fs::remove_file(&self.socket_path)
-                .await
-                .context("Failed to remove existing socket file")?;
-        }
-
-        // Create Unix domain socket listener
-        let listener =
-            UnixListener::bind(&self.socket_path).context("Failed to bind Unix socket")?;
-
-        // Set socket permissions based on environment
-        // Production: 0o660 - owner read/write, group read/write (for 'stt' group members)
-        // Development: 0o666 - world read/write (for convenience during development)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            // Use compile-time security model: debug builds vs release builds
-            let mode = if cfg!(debug_assertions) {
-                log::warn!("Debug build - socket permissions set to 0o666 (world accessible)");
-                log::warn!("For production security, use release builds: cargo build --release");
-                0o666
-            } else {
-                log::info!("Socket permissions set to 0o660 (owner + stt group access only)");
-                log::info!("Ensure users are in the 'stt' group: sudo usermod -a -G stt $USER");
-                log::info!("Authorized binaries: super-stt, stt wrapper");
-                0o660
-            };
-
-            let permissions = std::fs::Permissions::from_mode(mode);
-            std::fs::set_permissions(&self.socket_path, permissions)
-                .context("Failed to set socket permissions")?;
-        }
-
-        info!("Daemon listening on socket: {}", self.socket_path.display());
-
-        // Set up shutdown receiver
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-
-        // Main server loop
-        loop {
-            tokio::select! {
-                // Accept new connections
-                result = listener.accept() => {
-                    match result {
-                        Ok((stream, _addr)) => {
-                            let daemon_clone = self.clone();
-                            let mut client_shutdown_rx = self.shutdown_tx.subscribe();
-                            tokio::spawn(async move {
-                                tokio::select! {
-                                    result = daemon_clone.handle_client(stream) => {
-                                        if let Err(e) = result {
-                                            log::warn!("Error handling client: {e}");
-                                        }
-                                    }
-                                    _ = client_shutdown_rx.recv() => {
-                                        log::debug!("Client handler cancelled due to shutdown");
-                                    }
-                                }
-                            });
-                        }
-                        Err(e) => {
-                            log::error!("Failed to accept connection: {e}");
-                        }
-                    }
-                }
-
-                // Handle shutdown signal
-                _ = shutdown_rx.recv() => {
-                    info!("Shutdown signal received");
-                    break;
-                }
-            }
-        }
-
-        // Cleanup with timeout to prevent hanging
-        let cleanup_result = tokio::time::timeout(tokio::time::Duration::from_secs(5), async {
-            if self.socket_path.exists() {
-                let _ = tokio::fs::remove_file(&self.socket_path).await;
-            }
-        })
-        .await;
-
-        if cleanup_result.is_err() {
-            log::warn!("Socket cleanup timed out, continuing shutdown");
-        }
-
-        info!("Daemon shutdown complete");
-        Ok(())
     }
 
     /// Set the audio theme
@@ -638,52 +501,42 @@ impl SuperSTTDaemon {
         f32::from(self.get_volume()) / 100.0
     }
 
-    /// Broadcast config change event to all connected clients
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if serialization or broadcasting fails.
-    pub async fn broadcast_config_change(&self) -> Result<(), anyhow::Error> {
-        Self::broadcast_config_change_static(&self.notification_manager, &self.config).await
+    /// Publish a recording-state transition on the SSE event bus so any
+    /// connected `/events` subscribers (e.g. the COSMIC applet) update
+    /// their visualization. The legacy notification path is gone; this
+    /// is the only fan-out.
+    pub fn broadcast_recording_state_change(&self, is_recording: bool) {
+        self.events.publish_recording_state(is_recording);
     }
 
-    /// Static helper method to broadcast config changes (for use in spawned tasks)
+    /// Persist the current config to disk. Settings handlers call this
+    /// after mutating the in-memory config so the change survives a
+    /// restart. The legacy `config_changed` broadcast that used to
+    /// follow this save is no longer part of the documented protocol
+    /// (see `docs/protocol/endpoints/v1/events.md`); a future
+    /// cross-app sync mechanism should be added as a documented topic.
     ///
     /// # Errors
     ///
-    /// Returns an error if serialization or broadcasting fails.
-    pub async fn broadcast_config_change_static(
-        notification_manager: &Arc<NotificationManager>,
+    /// Returns an error if the on-disk write fails.
+    pub async fn persist_config(&self) -> Result<(), anyhow::Error> {
+        Self::persist_config_static(&self.config).await
+    }
+
+    /// Static variant of [`persist_config`] for use in spawned tasks
+    /// that hold a `Clone<Arc<RwLock<DaemonConfig>>>` directly.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the on-disk write fails.
+    pub async fn persist_config_static(
         config: &Arc<tokio::sync::RwLock<DaemonConfig>>,
     ) -> Result<(), anyhow::Error> {
-        // Save config to disk first
-        {
-            let config_guard = config.read().await;
-            if let Err(e) = config_guard.save() {
-                log::warn!("Failed to save config to disk: {e}");
-                return Err(anyhow::anyhow!("Failed to save config to disk: {e}"));
-            }
-        }
-
-        // Then broadcast the change
         let config_guard = config.read().await;
-        let config_json = serde_json::to_value(&*config_guard)?;
-        drop(config_guard);
-
-        notification_manager
-            .broadcast_event(
-                "config_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "config": config_json,
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                }),
-            )
-            .await?;
-
-        log::debug!(
-            "Saved config to disk and broadcasted config change event to all connected clients"
-        );
+        config_guard
+            .save()
+            .map_err(|e| anyhow::anyhow!("Failed to save config to disk: {e}"))?;
+        log::debug!("Persisted config to disk");
         Ok(())
     }
 }

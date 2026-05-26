@@ -149,6 +149,26 @@ impl SuperSTTDaemon {
                 break;
             }
 
+            // Skip the preview-transcription work entirely when the
+            // preview-typing setting is off. The previous shape ran
+            // the audio-buffer extraction (a copy of up to 5 s of
+            // f32 samples) on every loop iteration and only checked
+            // `preview_enabled` AFTER doing that copy — wasted CPU
+            // and lock contention for a setting that's off by
+            // default. The loop's other job (`recorder_handle.is_finished()`
+            // polling) is already done above the gate.
+            let preview_enabled = self
+                .preview_typing_enabled
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if !preview_enabled {
+                debug!("Preview typing is disabled, skipping audio processing and transcription");
+                if start_time.elapsed() > std::time::Duration::from_mins(1) {
+                    warn!("Recording timeout reached, stopping preview loop");
+                    break;
+                }
+                continue;
+            }
+
             // Get last 10 seconds of audio data directly from buffer for preview
             debug!("About to get 10 secs from buffer");
             let audio_data = {
@@ -193,12 +213,9 @@ impl SuperSTTDaemon {
 
             debug!("Got {} audio samples for preview", audio_data.len());
 
-            // Check if preview typing is enabled before doing any processing
-            let preview_enabled = self
-                .preview_typing_enabled
-                .load(std::sync::atomic::Ordering::Relaxed);
-
-            if !audio_data.is_empty() && preview_enabled {
+            if audio_data.is_empty() {
+                debug!("No audio data available for preview yet");
+            } else {
                 // Resample to 16kHz if needed (same as final recording does)
                 let resampled_audio = if device_sample_rate == 16000 {
                     debug!("No resampling needed, device already at 16kHz");
@@ -251,10 +268,6 @@ impl SuperSTTDaemon {
                         typer.update_preview(&text, &mut actually_typed_guard);
                     }
                 }
-            } else if !preview_enabled {
-                debug!("Preview typing is disabled, skipping audio processing and transcription");
-            } else if audio_data.is_empty() {
-                debug!("No audio data available for preview yet");
             }
 
             // Prevent infinite loops with a reasonable timeout

@@ -6,11 +6,6 @@ use super_stt_shared::models::protocol::{Command, DaemonRequest, DaemonResponse}
 impl SuperSTTDaemon {
     /// Main command handler - routes commands to appropriate handlers
     pub async fn handle_command(&self, request: DaemonRequest) -> DaemonResponse {
-        // Track connection if client_id is present
-        if let Some(client_id) = &request.client_id {
-            self.update_client_connection(client_id.clone()).await;
-        }
-
         let command = match Command::try_from(request) {
             Ok(cmd) => cmd,
             Err(e) => return DaemonResponse::error(&e),
@@ -25,25 +20,7 @@ impl SuperSTTDaemon {
                 self.handle_transcribe(audio_data, sample_rate, client_id)
                     .await
             }
-            Command::Subscribe {
-                event_types,
-                client_info,
-            } => self.handle_subscribe(event_types, client_info),
-            Command::Unsubscribe => {
-                DaemonResponse::error("Unsubscribe must be called on persistent connection")
-            }
-            Command::GetEvents {
-                since_timestamp,
-                event_types,
-                limit,
-            } => self.handle_get_events(since_timestamp, event_types, limit),
-            Command::GetSubscriberInfo => self.handle_get_subscriber_info(),
-            Command::Notify {
-                event_type,
-                client_id,
-                data,
-            } => self.handle_notify(event_type, client_id, data).await,
-            Command::Ping { client_id } => self.handle_ping(client_id).await,
+            Command::Ping { client_id } => self.handle_ping(client_id),
             Command::Status => self.handle_status().await,
             Command::StartRealTimeTranscription {
                 client_id,
@@ -234,36 +211,27 @@ impl SuperSTTDaemon {
 mod tests {
     use super::*;
     use crate::config::DaemonConfig;
-    use crate::daemon::auth::ProcessAuth;
     use crate::daemon::events::EventBus;
     use crate::download_progress::DownloadStateManager;
     use crate::input::audio::AudioProcessor;
     use crate::services::transcription::RealTimeTranscriptionManager;
-    use std::collections::HashMap;
-    use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, RwLock};
-    use super_stt_shared::NotificationManager;
     use super_stt_shared::resource_management::ResourceManager;
     use super_stt_shared::theme::AudioTheme;
     use tokio::sync::broadcast;
     use tokio::time::{Duration, timeout};
 
     async fn test_daemon() -> SuperSTTDaemon {
-        let socket_path = PathBuf::from("/tmp/super-stt-test.sock");
         let model = Arc::new(tokio::sync::RwLock::new(None));
-        let notification_manager = Arc::new(NotificationManager::new(10, 10));
         let audio_processor = Arc::new(AudioProcessor::new());
         let (shutdown_tx, _) = broadcast::channel(1);
         let realtime_manager = Arc::new(RealTimeTranscriptionManager::new(
             Arc::clone(&model),
-            Arc::clone(&notification_manager),
             Arc::clone(&audio_processor),
         ));
         SuperSTTDaemon {
-            socket_path,
             model,
-            notification_manager,
             audio_processor,
             shutdown_tx,
             dbus_manager: None,
@@ -272,13 +240,10 @@ mod tests {
             audio_theme: Arc::new(RwLock::new(AudioTheme::default())),
             volume: Arc::new(RwLock::new(100)),
             is_recording: Arc::new(tokio::sync::RwLock::new(false)),
-            audio_monitoring_handle: Arc::new(tokio::sync::RwLock::new(None)),
             download_manager: Arc::new(DownloadStateManager::new()),
             preferred_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
             actual_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
             config: Arc::new(tokio::sync::RwLock::new(DaemonConfig::default())),
-            active_connections: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            process_auth: ProcessAuth::new(),
             resource_manager: Arc::new(ResourceManager::development()),
             preview_typing_enabled: Arc::new(AtomicBool::new(false)),
             manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
@@ -484,6 +449,38 @@ mod tests {
             response.message.as_deref(),
             Some(DaemonResponse::RECORDING_STOP_SIGNAL_MSG)
         );
+    }
+
+    /// Verify that `handle_status` reports `is_recording` correctly.
+    /// The CLI's record subcommand uses this to decide between
+    /// starting a fresh recording (`POST /v1/transcribe`) and stopping
+    /// an in-flight one (`POST /v1/transcribe/stop`).
+    #[tokio::test]
+    async fn handle_status_reports_is_recording_correctly() {
+        let daemon = test_daemon().await;
+
+        // Idle: must report `is_recording: Some(false)`.
+        let response = daemon.handle_status().await;
+        assert_eq!(response.status, "success");
+        assert_eq!(
+            response.is_recording,
+            Some(false),
+            "fresh daemon must report is_recording=false; got {response:?}"
+        );
+
+        // Force recording state and confirm the handler tracks it.
+        *daemon.is_recording.write().await = true;
+        let response = daemon.handle_status().await;
+        assert_eq!(
+            response.is_recording,
+            Some(true),
+            "is_recording=true must be surfaced by handle_status"
+        );
+
+        // Recovery: clearing the flag flips the response field back.
+        *daemon.is_recording.write().await = false;
+        let response = daemon.handle_status().await;
+        assert_eq!(response.is_recording, Some(false));
     }
 
     #[tokio::test]

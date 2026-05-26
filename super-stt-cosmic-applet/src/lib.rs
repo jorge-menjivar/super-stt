@@ -37,7 +37,7 @@ use crate::{
     ui::views::{PopupContentParams, create_popup_content},
 };
 use crate::{
-    daemon::{RetryStrategy, fetch_daemon_config, ping_daemon, ping_daemon_with_status},
+    daemon::{RetryStrategy, ping_daemon, ping_daemon_with_status},
     models::theme::ThemeConfig,
 };
 use super_stt_shared::daemon::session::{self, AppId};
@@ -161,7 +161,7 @@ impl cosmic::Application for SuperSttApplet {
             recording_state: RecordingState::Idle,
             daemon_state: DaemonConnectionState::Connecting,
             popup: None,
-            socket_path: super_stt_shared::validation::get_secure_socket_path(),
+            socket_path: super_stt_shared::validation::get_http_socket_path(),
             audio_level: 0.0,
             is_speech_detected: false,
             is_open: IsOpen::None,
@@ -260,7 +260,7 @@ impl cosmic::Application for SuperSttApplet {
             }
             Message::DaemonConnected => {
                 self.daemon_state = DaemonConnectionState::Connected;
-                // Reset retry strategy on successful connection
+                // Reset retry strategy on successful connection.
                 self.retry_strategy.reset();
                 // The widget /events subscription is self-healing
                 // (`run_widget_subscription` in super-stt-shared owns
@@ -269,48 +269,20 @@ impl cosmic::Application for SuperSttApplet {
                 // subscription on every successful ping would cancel
                 // the helper task mid-flight and cause every ping
                 // cycle to re-enter `session::obtain` — i.e. another
-                // potential keyring touch.
-
-                // Fetch daemon configuration
-                let socket_path = self.socket_path.clone();
-
-                return cosmic_app::Task::perform(fetch_daemon_config(socket_path), |result| {
-                    match result {
-                        Ok(config) => cosmic::Action::App(Message::DaemonConfigReceived(config)),
-                        Err(err) => {
-                            warn!("Failed to fetch daemon config: {err}");
-                            cosmic::Action::App(Message::DaemonError(format!(
-                                "Failed to fetch config: {err}"
-                            )))
-                        }
-                    }
-                });
+                // potential keyring touch. Audio settings live in the
+                // settings app; the applet doesn't need to fetch them.
             }
             Message::PingResponse {
                 message: _,
-                connection_active,
+                connection_active: _,
             } => {
-                if connection_active {
-                    info!("Daemon ping successful and connection is active - daemon may be idle");
-                    // Connection is still active, no need to reconnect
-                    self.daemon_state = DaemonConnectionState::Connected;
-                    self.retry_strategy.reset();
-                } else {
-                    warn!(
-                        "Daemon responded but connection is marked as inactive - forcing reconnect"
-                    );
-                    // Connection is broken, need to reconnect
-                    self.daemon_state =
-                        DaemonConnectionState::Error("Connection inactive".to_string());
-                    self.retry_strategy = RetryStrategy::for_initial_connection();
-                    // Trigger reconnection
-                    return cosmic_app::Task::perform(async {}, |()| {
-                        cosmic::Action::App(Message::RetryConnection)
-                    });
-                }
-            }
-            Message::DaemonConfigReceived(_config) => {
-                // Config received from daemon — audio settings are managed by the desktop app
+                // A successful `/v1/ping` always means the daemon is
+                // reachable — the HTTP protocol carries no separate
+                // "connection is marked inactive" path (the legacy
+                // protocol used to). Always flip to Connected.
+                info!("Daemon ping successful and connection is active - daemon may be idle");
+                self.daemon_state = DaemonConnectionState::Connected;
+                self.retry_strategy.reset();
             }
             Message::DaemonError(err) => {
                 warn!("Daemon error: {err}");

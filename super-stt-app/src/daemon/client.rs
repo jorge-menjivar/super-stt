@@ -58,25 +58,60 @@ pub enum RecordEvent {
 /// Start a recording and stream `RecordEvent`s as the daemon emits SSE
 /// events on `POST /transcribe`. Closing the returned stream early
 /// signals the daemon to stop the recording.
+///
+/// On `invalid_session` from the initial connect (the cached settings
+/// token expired or was revoked), we forget the cache, mint a fresh
+/// token, and retry once — mirroring the behavior of
+/// [`session::with_token`] for non-streaming calls. Without this,
+/// once the cached token went stale the settings UI's transcription
+/// test panel would surface `"Error: invalid_session (expired)"`
+/// forever, since the cache is never invalidated.
 pub fn record_command_stream() -> impl futures_util::Stream<Item = RecordEvent> + Send + 'static {
     cosmic::iced::stream::channel(
         32,
         move |mut channel: cosmic::iced::futures::channel::mpsc::Sender<RecordEvent>| async move {
             use futures_util::{SinkExt, StreamExt};
-            use super_stt_shared::daemon::http_client::{TranscribeEvent, TranscribeOptions};
+            use super_stt_shared::daemon::http_client::{
+                HttpError, TranscribeEvent, TranscribeOptions,
+            };
 
             let result: Result<(), String> = async {
                 let socket = get_http_socket_path();
-                let token =
-                    session::obtain(socket.clone(), APP_ID_NAME, APP_NAME, SETTINGS_SCOPE).await?;
-
                 let opts = TranscribeOptions {
                     wait: true,
                     write_mode: false,
                     stop_mode: Some("manual-only".to_string()),
                 };
-                let mut stream =
-                    Box::pin(http_client::transcribe_stream(socket, &token, opts).await?);
+
+                // Try to open the stream with the cached token; on
+                // InvalidSession, drop the cache and re-auth once.
+                let mut stream = {
+                    let token =
+                        session::obtain(socket.clone(), APP_ID_NAME, APP_NAME, SETTINGS_SCOPE)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    match http_client::transcribe_stream(socket.clone(), &token, opts.clone()).await
+                    {
+                        Ok(s) => Box::pin(s),
+                        Err(HttpError::InvalidSession { .. }) => {
+                            let _ = session::forget(APP_ID_NAME);
+                            let token = session::obtain(
+                                socket.clone(),
+                                APP_ID_NAME,
+                                APP_NAME,
+                                SETTINGS_SCOPE,
+                            )
+                            .await
+                            .map_err(|e| e.to_string())?;
+                            Box::pin(
+                                http_client::transcribe_stream(socket, &token, opts)
+                                    .await
+                                    .map_err(|e| e.to_string())?,
+                            )
+                        }
+                        Err(e) => return Err(e.to_string()),
+                    }
+                };
 
                 while let Some(event) = stream.next().await {
                     match event {
@@ -133,15 +168,22 @@ pub async fn stop_record_command() -> Result<(), String> {
 /// Test daemon connection (HTTP `/ping`).
 pub async fn test_daemon_connection() -> Result<(), String> {
     with_settings_token(|socket, token| async move {
-        http_client::ping(socket, &token).await.map(|_| ())
+        http_client::ping(socket, &token)
+            .await
+            .map(|_| ())
+            .map_err(String::from)
     })
     .await
 }
 
 /// Ping daemon to check connectivity (HTTP `/ping`).
 pub async fn ping_daemon() -> Result<String, String> {
-    with_settings_token(|socket, token| async move { http_client::ping(socket, &token).await })
-        .await
+    with_settings_token(|socket, token| async move {
+        http_client::ping(socket, &token)
+            .await
+            .map_err(String::from)
+    })
+    .await
 }
 
 /// Load available audio themes from daemon with fallback.
@@ -333,7 +375,7 @@ pub async fn get_current_device() -> Result<
     (
         String,
         Vec<String>,
-        super_stt_shared::daemon::client::GpuMemoryInfo,
+        super_stt_shared::daemon::http_client::GpuMemoryInfo,
     ),
     String,
 > {

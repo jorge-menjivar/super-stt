@@ -5,9 +5,10 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
-use super_stt_shared::NotificationManager;
 use super_stt_shared::models::protocol::DownloadProgress;
 use tokio::sync::mpsc;
+
+use crate::daemon::events::EventBus;
 
 /// Progress tracker for model downloads that implements the hf-hub Progress trait
 pub struct DownloadProgressTracker {
@@ -22,8 +23,17 @@ pub struct DownloadProgressTracker {
     pub started_at_str: String,
     pub cancelled: Arc<AtomicBool>,
     pub progress_sender: Option<mpsc::UnboundedSender<DownloadProgress>>,
-    pub notification_manager: Option<Arc<NotificationManager>>,
+    /// Optional event bus the tracker publishes `download_progress`
+    /// SSE events into. Set via [`Self::with_event_bus`]; when `None`
+    /// the tracker still drives `progress_sender` but the HTTP
+    /// `/events` channel sees nothing.
+    pub events: Option<Arc<EventBus>>,
     last_broadcast_percentage: AtomicU64, // Store as fixed point (percentage * 100)
+    /// The `status` string we most recently broadcast. Used so that
+    /// transitions to "completed" / "cancelled" / "error" are emitted
+    /// even when the 1%-increment percentage gate would otherwise
+    /// suppress them.
+    last_broadcast_status: Arc<RwLock<String>>,
 }
 
 impl DownloadProgressTracker {
@@ -40,14 +50,18 @@ impl DownloadProgressTracker {
             started_at_str: Utc::now().to_rfc3339(),
             cancelled,
             progress_sender: None,
-            notification_manager: None,
+            events: None,
             last_broadcast_percentage: AtomicU64::new(0),
+            last_broadcast_status: Arc::new(RwLock::new(String::new())),
         }
     }
 
+    /// Attach the daemon's event bus so progress updates fan out as
+    /// `download_progress` SSE events on `GET /events` (settings-scope
+    /// only — see `super-stt-daemon/src/daemon/events.rs::Topic`).
     #[must_use]
-    pub fn with_notification_manager(mut self, nm: Arc<NotificationManager>) -> Self {
-        self.notification_manager = Some(nm);
+    pub fn with_event_bus(mut self, events: Arc<EventBus>) -> Self {
+        self.events = Some(events);
         self
     }
 
@@ -106,39 +120,46 @@ impl DownloadProgressTracker {
         }
     }
 
-    /// Broadcast progress update via notification system
-    pub async fn broadcast_progress(&self) {
+    /// Broadcast progress update via the HTTP `/events` SSE bus and the
+    /// optional in-process `progress_sender`. Throttled to 1%
+    /// increments so a tight streaming download doesn't flood
+    /// subscribers — but any transition to a terminal `status` value
+    /// (`completed` / `cancelled` / `error`) always publishes, since
+    /// the consumer's `if progress.status == "completed"` arm clears
+    /// the in-UI download indicator and a dropped event there leaves
+    /// the UI permanently stuck.
+    pub fn broadcast_progress(&self) {
         let progress = self.get_progress();
 
-        // Only broadcast at 1% intervals to avoid flooding
         // Clamp, round and convert to a fixed-point integer (percentage * 100)
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let current_percentage = (progress.percentage.clamp(0.0, 100.0) * 100.0).round() as u64;
         let last_percentage = self.last_broadcast_percentage.load(Ordering::Relaxed);
 
-        if current_percentage > last_percentage && current_percentage - last_percentage >= 100 {
+        let status_changed = {
+            let last = self.last_broadcast_status.read().clone();
+            last != progress.status
+        };
+        let percentage_crossed =
+            current_percentage > last_percentage && current_percentage - last_percentage >= 100;
+
+        if status_changed || percentage_crossed {
             self.last_broadcast_percentage
                 .store(current_percentage, Ordering::Relaxed);
+            self.last_broadcast_status
+                .write()
+                .clone_from(&progress.status);
 
-            if let Some(ref nm) = self.notification_manager {
-                let _ = nm
-                    .broadcast_event(
-                        "download_progress".to_string(),
-                        "daemon".to_string(),
-                        serde_json::json!({
-                            "model_name": progress.model_name,
-                            "current_file": progress.current_file,
-                            "file_index": progress.file_index,
-                            "total_files": progress.total_files,
-                            "bytes_downloaded": progress.bytes_downloaded,
-                            "total_bytes": progress.total_bytes,
-                            "percentage": progress.percentage,
-                            "status": progress.status,
-                            "eta_seconds": progress.eta_seconds,
-                            "timestamp": Utc::now().to_rfc3339()
-                        }),
-                    )
-                    .await;
+            if let Some(ref events) = self.events {
+                let mut payload =
+                    serde_json::to_value(&progress).unwrap_or_else(|_| serde_json::json!({}));
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert(
+                        "timestamp".to_string(),
+                        serde_json::Value::String(Utc::now().to_rfc3339()),
+                    );
+                }
+                events.publish_download_progress(payload);
             }
         }
 
@@ -247,5 +268,69 @@ impl DownloadStateManager {
     #[must_use]
     pub fn get_cancellation_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.cancellation_flag)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression for the silent UI-stuck bug: when the post-download
+    /// `mark_completed()` runs and `broadcast_progress()` is called,
+    /// the underlying computed percentage often isn't strictly greater
+    /// than the last broadcast (it may even drop). The 1%-increment
+    /// throttle alone would suppress the publish, and the consumer's
+    /// `if progress.status == "completed"` arm would never fire — the
+    /// "downloading" indicator would stay forever. Status transitions
+    /// must bypass the throttle.
+    #[test]
+    fn broadcast_progress_publishes_completed_status_even_without_percentage_increase() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new("test-model".to_string(), 1, cancelled);
+        tracker.total_bytes.store(1000, Ordering::Relaxed);
+        tracker.bytes_downloaded.store(900, Ordering::Relaxed);
+
+        // Simulate the throttle having already seen 90%.
+        tracker
+            .last_broadcast_percentage
+            .store(9000, Ordering::Relaxed);
+        *tracker.last_broadcast_status.write() = "downloading".to_string();
+
+        // Now mark completed without bumping bytes_downloaded — so the
+        // computed percentage stays at 90 — and confirm the broadcast
+        // path still fired, evidenced by `last_broadcast_status`.
+        *tracker.status.write() = "completed".to_string();
+        tracker.broadcast_progress();
+
+        assert_eq!(
+            *tracker.last_broadcast_status.read(),
+            "completed",
+            "broadcast must fire on status transition to `completed` regardless of percentage"
+        );
+    }
+
+    /// Companion of the test above: when neither percentage nor status
+    /// changes, the throttle suppresses the publish. Without this
+    /// guard, broadcast_progress would spam events.
+    #[test]
+    fn broadcast_progress_suppressed_when_neither_percentage_nor_status_changes() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new("test-model".to_string(), 1, cancelled);
+        tracker.total_bytes.store(1000, Ordering::Relaxed);
+        tracker.bytes_downloaded.store(500, Ordering::Relaxed);
+
+        // First broadcast — percentage of 500/1000 capped at 90% =
+        // 45%, fixed-point 4500.
+        tracker.broadcast_progress();
+        let after_first = tracker.last_broadcast_percentage.load(Ordering::Relaxed);
+        assert_eq!(after_first, 4500);
+
+        // Same percentage, same status → no change.
+        tracker.broadcast_progress();
+        assert_eq!(
+            tracker.last_broadcast_percentage.load(Ordering::Relaxed),
+            4500,
+            "second call with identical state must be a no-op"
+        );
     }
 }

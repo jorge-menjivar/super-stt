@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! HTTP client for the new daemon protocol.
-//!
-//! Lives **side-by-side** with `client.rs` (the legacy length-prefix Unix
-//! socket client). Nothing in `client.rs` is touched; this module is
-//! additive and can be removed when/if the legacy path is retired.
+//! HTTP client for the daemon protocol.
 //!
 //! The transport is HTTP/1.1 over a Unix domain socket
 //! (`super_stt_shared::validation::get_http_socket_path()`). Each request
 //! opens a fresh `tokio::net::UnixStream`, runs `hyper::client::conn::http1`
 //! over it, and parses the JSON response into a `DaemonResponse`.
 //!
-//! Authentication is **stubbed** in v1: requests are sent with no
-//! `Authorization` header and the daemon accepts everything. The
-//! libcosmic consent flow + bearer-token enforcement is a follow-up.
+//! Authentication is per-request: callers pass a session token (obtained
+//! from [`crate::daemon::session::obtain`]) and this module attaches it
+//! as `Authorization: Bearer <token>` on every call except
+//! [`auth_request`]. On 401 the daemon's `data.reason` is surfaced so the
+//! caller can `session::forget` + re-`obtain`.
 
 use crate::models::protocol::DaemonResponse;
 use http_body_util::{BodyExt, Empty, Full};
@@ -22,8 +20,102 @@ use serde::{Deserialize, de::DeserializeOwned};
 use std::path::PathBuf;
 use tokio::net::UnixStream;
 
-/// Result type for all HTTP-protocol calls.
-pub type HttpResult<T> = Result<T, String>;
+/// Errors returned by every HTTP-protocol call. The `Display` impl
+/// reproduces the legacy `String` error wording so existing UI
+/// error-toast plumbing keeps working unchanged.
+#[derive(Debug, Clone)]
+pub enum HttpError {
+    /// Daemon rejected the bearer token. Mirrors the 401
+    /// `{ "message": "invalid_session", "data": { "reason": ... } }`
+    /// response body. Callers should drop the cached token
+    /// (`session::forget`) and re-`obtain`.
+    InvalidSession {
+        /// Daemon-supplied reason: `unknown`, `expired`, `exe_changed`.
+        reason: String,
+    },
+    /// `POST /auth/request` denied. Mirrors the 403 `auth_denied` body.
+    /// Reasons: `user_denied`, `user_denied_cached`, `user_dismissed`,
+    /// `popup_failed`, `invalid_scope`, `throttled`, …
+    AuthDenied {
+        /// Daemon-supplied reason — see [`auth.md`].
+        ///
+        /// [`auth.md`]: ../../../docs/protocol/auth.md
+        reason: String,
+    },
+    /// Anything else: daemon unreachable, malformed body, transport
+    /// error, daemon-returned `{"status":"error",…}` body without a
+    /// recognized identifier, etc.
+    Other(String),
+}
+
+impl HttpError {
+    /// True if the error means "your bearer token is no longer good"
+    /// — the only condition that should trigger a re-`obtain`.
+    /// Convenience helper for the small handful of retry-on-401 sites.
+    #[must_use]
+    pub const fn is_invalid_session(&self) -> bool {
+        matches!(self, Self::InvalidSession { .. })
+    }
+}
+
+impl std::fmt::Display for HttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidSession { reason } => write!(f, "invalid_session ({reason})"),
+            Self::AuthDenied { reason } => write!(f, "auth_denied ({reason})"),
+            Self::Other(s) => f.write_str(s),
+        }
+    }
+}
+
+impl std::error::Error for HttpError {}
+
+/// Internal `?`-bridge: a handful of helpers inside this crate
+/// (`build_request`, `connect_socket`, …) return `Result<_, String>`
+/// for transport-level failures that don't have a typed variant. Wrap
+/// those in `HttpError::Other` so callers can keep using `?` against
+/// `HttpResult<T>`.
+///
+/// **This produces `Other` only.** A `String` whose text happens to
+/// match the `Display` of `InvalidSession`/`AuthDenied` (e.g. round-
+/// tripping `HttpError → String → HttpError`) does NOT round-trip back
+/// to the original typed variant; `is_invalid_session()` would
+/// disagree with `Display`. Don't reach for this conversion as a way
+/// to parse a wire string back into a typed error — construct the
+/// variant directly at the production site (the `send_request` 401
+/// path, the `auth_request` 4xx path) where the structured info is
+/// available.
+impl From<String> for HttpError {
+    fn from(s: String) -> Self {
+        Self::Other(s)
+    }
+}
+
+/// `From<HttpError> for String` lets existing UI plumbing that uses
+/// `Result<T, String>` propagate an HTTP-typed error via `?` without
+/// rewriting every iced task closure. Equivalent to
+/// `e.to_string()` — preserves the wire-visible message text.
+impl From<HttpError> for String {
+    fn from(e: HttpError) -> Self {
+        e.to_string()
+    }
+}
+
+/// Result type for all HTTP-protocol calls. `HttpError` formats to the
+/// same string the previous `Result<T, String>` produced, so callers
+/// that only care about the message text don't change.
+pub type HttpResult<T> = Result<T, HttpError>;
+
+/// All endpoints are served under the `/v1` URL prefix. The request
+/// builders below prepend this automatically, so call sites use bare
+/// paths like `/ping`, `/transcribe`, `/active_model` — the actual
+/// URL on the wire is `/v1/ping`, `/v1/transcribe`, etc.
+const API_PREFIX: &str = "/v1";
+
+/// `(free_bytes, total_bytes)` for a CUDA device. `None` when the daemon
+/// is on CPU or couldn't query the driver. Returned from
+/// [`get_active_device`] inside the `DaemonResponse` JSON body.
+pub type GpuMemoryInfo = Option<(u64, u64)>;
 
 /// Open an HTTP/1.1 connection over a fresh Unix socket and run one
 /// request. Generic over the deserialized response type — pass
@@ -33,10 +125,10 @@ pub type HttpResult<T> = Result<T, String>;
 ///
 /// On `401 Unauthorized`, the response body is parsed for the
 /// `data.reason` field and the function returns
-/// `Err("invalid_session (<reason>)")` so callers can re-auth. Other
-/// HTTP statuses (2xx, 4xx other than 401, 5xx) are deserialized into
-/// `T` — for `DaemonResponse` that includes the `status: "error"`
-/// variant clients can inspect.
+/// `Err(HttpError::InvalidSession { reason })` so callers can match on
+/// the variant and re-auth. Other HTTP statuses (2xx, 4xx other than
+/// 401, 5xx) are deserialized into `T` — for `DaemonResponse` that
+/// includes the `status: "error"` variant clients can inspect.
 async fn send_request<T: DeserializeOwned>(
     socket_path: &PathBuf,
     req: Request<RequestBody>,
@@ -45,15 +137,17 @@ async fn send_request<T: DeserializeOwned>(
         .await
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
-                "Daemon HTTP listener not running. Start the daemon first.".to_string()
+                HttpError::Other(
+                    "Daemon HTTP listener not running. Start the daemon first.".to_string(),
+                )
             }
-            _ => format!("Connection failed: {e}"),
+            _ => HttpError::Other(format!("Connection failed: {e}")),
         })?;
 
     let io = hyper_util::rt::TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await
-        .map_err(|e| format!("HTTP handshake failed: {e}"))?;
+        .map_err(|e| HttpError::Other(format!("HTTP handshake failed: {e}")))?;
     tokio::spawn(async move {
         if let Err(e) = conn.await {
             log::debug!("http connection ended: {e}");
@@ -63,28 +157,37 @@ async fn send_request<T: DeserializeOwned>(
     let response = sender
         .send_request(req)
         .await
-        .map_err(|e| format!("Request failed: {e}"))?;
+        .map_err(|e| HttpError::Other(format!("Request failed: {e}")))?;
 
     let status = response.status();
     let body = response
         .into_body()
         .collect()
         .await
-        .map_err(|e| format!("Failed to read response: {e}"))?
+        .map_err(|e| HttpError::Other(format!("Failed to read response: {e}")))?
         .to_bytes();
 
     if status == hyper::StatusCode::UNAUTHORIZED {
-        let parsed: serde_json::Value =
-            serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-        let reason = parsed
-            .get("data")
-            .and_then(|d| d.get("reason"))
-            .and_then(|r| r.as_str())
-            .unwrap_or("unknown");
-        return Err(format!("invalid_session ({reason})"));
+        return Err(HttpError::InvalidSession {
+            reason: parse_invalid_session_reason(&body),
+        });
     }
 
-    serde_json::from_slice::<T>(&body).map_err(|e| format!("Failed to parse response: {e}"))
+    serde_json::from_slice::<T>(&body)
+        .map_err(|e| HttpError::Other(format!("Failed to parse response: {e}")))
+}
+
+/// Extract the `data.reason` field from a 401 response body. Falls
+/// back to `"unknown"` if the body is malformed. Centralized so the
+/// three `invalid_session` sites stay consistent.
+fn parse_invalid_session_reason(body: &[u8]) -> String {
+    let parsed: serde_json::Value = serde_json::from_slice(body).unwrap_or(serde_json::Value::Null);
+    parsed
+        .get("data")
+        .and_then(|d| d.get("reason"))
+        .and_then(|r| r.as_str())
+        .unwrap_or("unknown")
+        .to_string()
 }
 
 /// Body type wrapper so we can use either an empty body (GET) or a JSON body
@@ -119,7 +222,7 @@ impl hyper::body::Body for RequestBody {
 fn build_get(path: &str, token: Option<&str>) -> Result<Request<RequestBody>, String> {
     let mut builder = Request::builder()
         .method(Method::GET)
-        .uri(format!("http://stt.local{path}"))
+        .uri(format!("http://stt.local{API_PREFIX}{path}"))
         .header("host", "stt.local");
     if let Some(t) = token {
         builder = builder.header("authorization", format!("Bearer {t}"));
@@ -137,7 +240,7 @@ fn build_post_json(
     let body_bytes = serde_json::to_vec(body).map_err(|e| format!("Failed to encode body: {e}"))?;
     let mut builder = Request::builder()
         .method(Method::POST)
-        .uri(format!("http://stt.local{path}"))
+        .uri(format!("http://stt.local{API_PREFIX}{path}"))
         .header("host", "stt.local")
         .header("content-type", "application/json")
         .header("content-length", body_bytes.len().to_string());
@@ -181,14 +284,16 @@ pub async fn auth_request(socket_path: PathBuf, app_name: &str, scope: &str) -> 
         .await
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
-                "Daemon HTTP listener not running. Start the daemon first.".to_string()
+                HttpError::Other(
+                    "Daemon HTTP listener not running. Start the daemon first.".to_string(),
+                )
             }
-            _ => format!("Connection failed: {e}"),
+            _ => HttpError::Other(format!("Connection failed: {e}")),
         })?;
     let io = hyper_util::rt::TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await
-        .map_err(|e| format!("HTTP handshake failed: {e}"))?;
+        .map_err(|e| HttpError::Other(format!("HTTP handshake failed: {e}")))?;
     tokio::spawn(async move {
         if let Err(e) = conn.await {
             log::debug!("http connection ended: {e}");
@@ -198,14 +303,14 @@ pub async fn auth_request(socket_path: PathBuf, app_name: &str, scope: &str) -> 
     let response = sender
         .send_request(req)
         .await
-        .map_err(|e| format!("Request failed: {e}"))?;
+        .map_err(|e| HttpError::Other(format!("Request failed: {e}")))?;
 
     let status = response.status();
     let body = response
         .into_body()
         .collect()
         .await
-        .map_err(|e| format!("Failed to read response: {e}"))?
+        .map_err(|e| HttpError::Other(format!("Failed to read response: {e}")))?
         .to_bytes();
 
     if !status.is_success() {
@@ -215,11 +320,13 @@ pub async fn auth_request(socket_path: PathBuf, app_name: &str, scope: &str) -> 
             .get("data")
             .and_then(|d| d.get("reason"))
             .and_then(|r| r.as_str())
-            .unwrap_or("auth_denied");
-        return Err(format!("auth_denied ({reason})"));
+            .unwrap_or("auth_denied")
+            .to_string();
+        return Err(HttpError::AuthDenied { reason });
     }
 
-    serde_json::from_slice::<AuthOk>(&body).map_err(|e| format!("Failed to parse auth_ok: {e}"))
+    serde_json::from_slice::<AuthOk>(&body)
+        .map_err(|e| HttpError::Other(format!("Failed to parse auth_ok: {e}")))
 }
 
 /// `GET /ping` — liveness check.
@@ -245,9 +352,34 @@ pub async fn status(socket_path: PathBuf, token: &str) -> HttpResult<DaemonRespo
     send_request::<DaemonResponse>(&socket_path, req).await
 }
 
+/// `GET /auth/status` — probe whether the held token is still valid.
+///
+/// Returns the scope + RFC 3339 expiry on success. On invalid token,
+/// the underlying request returns `Err("invalid_session (<reason>)")`
+/// — same shape as any other 401 from the daemon — so callers can
+/// switch on `contains("invalid_session")` to trigger a re-auth.
+///
+/// # Errors
+/// Returns an error if the daemon HTTP listener isn't reachable, the
+/// token is invalid, or the response can't be parsed.
+pub async fn auth_status(socket_path: PathBuf, token: &str) -> HttpResult<AuthStatusInfo> {
+    let req = build_get("/auth/status", Some(token))?;
+    send_request::<AuthStatusInfo>(&socket_path, req).await
+}
+
+/// Response shape for [`auth_status`]. `status` is `"success"` on the
+/// valid-token path; an invalid token surfaces as an `Err` from the
+/// caller, not a `status: "error"` body.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthStatusInfo {
+    pub status: String,
+    pub scope: String,
+    pub expires_at: String,
+}
+
 /// Options for [`transcribe`]. v1 only wires the daemon-mic capture path
 /// (no `audio_data`); pre-captured audio is a follow-up.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TranscribeOptions {
     pub write_mode: bool,
     pub stop_mode: Option<String>,
@@ -342,14 +474,16 @@ pub async fn transcribe_stream(
         .await
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
-                "Daemon HTTP listener not running. Start the daemon first.".to_string()
+                HttpError::Other(
+                    "Daemon HTTP listener not running. Start the daemon first.".to_string(),
+                )
             }
-            _ => format!("Connection failed: {e}"),
+            _ => HttpError::Other(format!("Connection failed: {e}")),
         })?;
     let io = hyper_util::rt::TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await
-        .map_err(|e| format!("HTTP handshake failed: {e}"))?;
+        .map_err(|e| HttpError::Other(format!("HTTP handshake failed: {e}")))?;
     tokio::spawn(async move {
         if let Err(e) = conn.await {
             log::debug!("http connection ended: {e}");
@@ -359,7 +493,7 @@ pub async fn transcribe_stream(
     let response = sender
         .send_request(req)
         .await
-        .map_err(|e| format!("Request failed: {e}"))?;
+        .map_err(|e| HttpError::Other(format!("Request failed: {e}")))?;
 
     let status = response.status();
     if status == hyper::StatusCode::UNAUTHORIZED {
@@ -367,16 +501,30 @@ pub async fn transcribe_stream(
             .into_body()
             .collect()
             .await
-            .map_err(|e| format!("Failed to read response: {e}"))?
+            .map_err(|e| HttpError::Other(format!("Failed to read response: {e}")))?
             .to_bytes();
-        let parsed: serde_json::Value =
-            serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-        let reason = parsed
-            .get("data")
-            .and_then(|d| d.get("reason"))
-            .and_then(|r| r.as_str())
-            .unwrap_or("unknown");
-        return Err(format!("invalid_session ({reason})"));
+        return Err(HttpError::InvalidSession {
+            reason: parse_invalid_session_reason(&body),
+        });
+    }
+    if !status.is_success() {
+        // Non-2xx response (e.g. 409 `recording_in_progress`, 403
+        // `scope_denied`, 429 `rate_limited`). The body is JSON, not
+        // SSE — parse `{"message": "..."}` and surface it as
+        // `HttpError::Other` so the caller doesn't try to read it as
+        // an event stream and report "transcribe stream ended
+        // unexpectedly".
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .map_err(|e| HttpError::Other(format!("Failed to read response: {e}")))?
+            .to_bytes();
+        let message: String = serde_json::from_slice::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+            .unwrap_or_else(|| format!("HTTP {status}"));
+        return Err(HttpError::Other(message));
     }
 
     // Parse Server-Sent Events as they arrive. Each event is a block
@@ -920,7 +1068,9 @@ pub async fn events_stream(
     topics: &[&str],
 ) -> HttpResult<impl futures_util::Stream<Item = WidgetEvent> + Send + 'static> {
     if topics.is_empty() {
-        return Err("events_stream requires at least one topic".to_string());
+        return Err(HttpError::Other(
+            "events_stream requires at least one topic".to_string(),
+        ));
     }
     let req = build_events_request(token, topics)?;
     let response = open_http_unix(&socket_path, req).await?;
@@ -933,7 +1083,9 @@ fn build_events_request(token: &str, topics: &[&str]) -> Result<Request<RequestB
     let topics_csv = topics.join(",");
     Request::builder()
         .method(Method::GET)
-        .uri(format!("http://stt.local/events?topics={topics_csv}"))
+        .uri(format!(
+            "http://stt.local{API_PREFIX}/events?topics={topics_csv}"
+        ))
         .header("host", "stt.local")
         .header("accept", "text/event-stream")
         .header("authorization", format!("Bearer {token}"))
@@ -952,14 +1104,16 @@ async fn open_http_unix(
         .await
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
-                "Daemon HTTP listener not running. Start the daemon first.".to_string()
+                HttpError::Other(
+                    "Daemon HTTP listener not running. Start the daemon first.".to_string(),
+                )
             }
-            _ => format!("Connection failed: {e}"),
+            _ => HttpError::Other(format!("Connection failed: {e}")),
         })?;
     let io = hyper_util::rt::TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await
-        .map_err(|e| format!("HTTP handshake failed: {e}"))?;
+        .map_err(|e| HttpError::Other(format!("HTTP handshake failed: {e}")))?;
     tokio::spawn(async move {
         if let Err(e) = conn.await {
             log::debug!("http connection ended: {e}");
@@ -968,12 +1122,13 @@ async fn open_http_unix(
     sender
         .send_request(req)
         .await
-        .map_err(|e| format!("Request failed: {e}"))
+        .map_err(|e| HttpError::Other(format!("Request failed: {e}")))
 }
 
-/// Map non-success statuses on the `/events` subscribe call to typed
-/// error strings (so the caller can detect `invalid_session` for
-/// re-auth) and pass through 2xx responses unchanged.
+/// Map non-success statuses on the `/events` subscribe call to the
+/// typed [`HttpError`] surface (so the caller can `match` on
+/// `InvalidSession` for re-auth) and pass through 2xx responses
+/// unchanged.
 async fn check_subscribe_status(
     response: hyper::Response<hyper::body::Incoming>,
 ) -> HttpResult<hyper::Response<hyper::body::Incoming>> {
@@ -985,21 +1140,18 @@ async fn check_subscribe_status(
         .into_body()
         .collect()
         .await
-        .map_err(|e| format!("Failed to read response: {e}"))?
+        .map_err(|e| HttpError::Other(format!("Failed to read response: {e}")))?
         .to_bytes();
+    if status == hyper::StatusCode::UNAUTHORIZED {
+        return Err(HttpError::InvalidSession {
+            reason: parse_invalid_session_reason(&body),
+        });
+    }
     let parsed: serde_json::Value =
         serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-    if status == hyper::StatusCode::UNAUTHORIZED {
-        let reason = parsed
-            .get("data")
-            .and_then(|d| d.get("reason"))
-            .and_then(|r| r.as_str())
-            .unwrap_or("unknown");
-        return Err(format!("invalid_session ({reason})"));
-    }
-    Err(format!(
+    Err(HttpError::Other(format!(
         "events subscribe failed (status {status}): {parsed}"
-    ))
+    )))
 }
 
 /// Wrap an SSE response body in an async stream that yields one
@@ -1148,5 +1300,44 @@ mod widget_sse_parser_tests {
         // structurally empty.
         let block = "id: 42\nretry: 1000";
         assert!(parse_widget_sse_block(block).is_none());
+    }
+
+    #[test]
+    fn http_error_display_locks_wire_format() {
+        // `session::with_token` recognizes the InvalidSession retry
+        // signal by matching the `Display` prefix
+        // `invalid_session (`. If this format ever changes the retry
+        // stops firing — so this test pins it down.
+        let e = HttpError::InvalidSession {
+            reason: "expired".to_string(),
+        };
+        assert_eq!(e.to_string(), "invalid_session (expired)");
+        assert!(e.to_string().starts_with("invalid_session ("));
+
+        let e = HttpError::AuthDenied {
+            reason: "user_denied_cached".to_string(),
+        };
+        assert_eq!(e.to_string(), "auth_denied (user_denied_cached)");
+
+        // Other variants don't share the InvalidSession prefix.
+        let e = HttpError::Other("Daemon HTTP listener not running.".to_string());
+        assert!(!e.to_string().starts_with("invalid_session ("));
+    }
+
+    #[test]
+    fn http_error_is_invalid_session_helper_matches_only_invalid_session() {
+        assert!(
+            HttpError::InvalidSession {
+                reason: "unknown".into()
+            }
+            .is_invalid_session()
+        );
+        assert!(
+            !HttpError::AuthDenied {
+                reason: "user_denied".into()
+            }
+            .is_invalid_session()
+        );
+        assert!(!HttpError::Other("anything".into()).is_invalid_session());
     }
 }

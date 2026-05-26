@@ -58,7 +58,7 @@ async fn cancellable_download(
     // Broadcast progress update
     let tracker_clone = Arc::clone(&tracker);
     tokio::spawn(async move {
-        tracker_clone.broadcast_progress().await;
+        tracker_clone.broadcast_progress();
     });
 
     // Check for cancellation before starting download
@@ -135,7 +135,7 @@ async fn cancellable_download(
     // Broadcast final progress update
     let tracker_clone = Arc::clone(&tracker);
     tokio::spawn(async move {
-        tracker_clone.broadcast_progress().await;
+        tracker_clone.broadcast_progress();
     });
 
     info!("Successfully downloaded and symlinked: {filename}");
@@ -203,7 +203,7 @@ async fn download_and_hash_with_cancellation(
         if downloaded.is_multiple_of(1024 * 1024) {
             let tracker_clone = Arc::clone(&tracker);
             tokio::spawn(async move {
-                tracker_clone.broadcast_progress().await;
+                tracker_clone.broadcast_progress();
             });
         }
     }
@@ -257,7 +257,7 @@ pub async fn with_progress(
     let files = model_filenames(def);
 
     tracker.total_files.store(files.len(), Ordering::Relaxed);
-    tracker.broadcast_progress().await;
+    tracker.broadcast_progress();
 
     for (index, filename) in files.iter().enumerate() {
         if tracker.is_cancelled() {
@@ -267,7 +267,7 @@ pub async fn with_progress(
     }
 
     tracker.mark_completed();
-    tracker.broadcast_progress().await;
+    tracker.broadcast_progress();
     Ok(())
 }
 

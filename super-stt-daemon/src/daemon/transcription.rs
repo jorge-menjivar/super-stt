@@ -51,46 +51,10 @@ impl SuperSTTDaemon {
                 }
             }
 
-            // Broadcast audio level event via notification system
-            if let Err(e) = self
-                .notification_manager
-                .broadcast_event(
-                    "audio_level".to_string(),
-                    client_id.clone(),
-                    serde_json::json!({
-                        "level": rms,
-                        "is_speech": is_speech,
-                        "timestamp": Utc::now().to_rfc3339()
-                    }),
-                )
-                .await
-            {
-                warn!("Failed to broadcast audio level event: {e}");
-            }
-
             rms
         };
 
         debug!("Audio level calculated: {audio_level:.3}");
-
-        // Broadcast transcription started event
-        if let Err(e) = self
-            .notification_manager
-            .broadcast_event(
-                "transcription_started".to_string(),
-                client_id.clone(),
-                serde_json::json!({
-                    "audio_length_ms": (audio_data.len() as f64 / f64::from(sample_rate)) * 1000.0,
-                    "sample_rate": sample_rate,
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
-            .await
-        {
-            warn!("Failed to broadcast transcription started event: {e}");
-        }
-
-        debug!("Transcription started event broadcasted");
 
         // Emit D-Bus transcription started signal
         if let Some(ref dbus_manager) = self.dbus_manager {
@@ -185,20 +149,6 @@ impl SuperSTTDaemon {
         // Handle the result of the blocking task
         match transcription_result {
             Ok(Ok((transcription, duration))) => {
-                // Broadcast transcription completed event
-                let _ = self
-                    .notification_manager
-                    .broadcast_event(
-                        "transcription_completed".to_string(),
-                        client_id.clone(),
-                        serde_json::json!({
-                            "transcription": transcription,
-                            "duration_ms": duration.as_millis(),
-                            "timestamp": Utc::now().to_rfc3339()
-                        }),
-                    )
-                    .await;
-
                 // Emit D-Bus transcription completed signal
                 if let Some(ref dbus_manager) = self.dbus_manager {
                     let event = crate::services::dbus::TranscriptionCompletedEvent {
@@ -219,35 +169,9 @@ impl SuperSTTDaemon {
 
                 DaemonResponse::success().with_transcription(transcription)
             }
-            Ok(Err(e)) => {
-                // Transcription error
-                let _ = self
-                    .notification_manager
-                    .broadcast_event(
-                        "transcription_failed".to_string(),
-                        client_id,
-                        serde_json::json!({
-                            "error": e.to_string(),
-                            "timestamp": Utc::now().to_rfc3339()
-                        }),
-                    )
-                    .await;
-                DaemonResponse::error(&format!("Transcription failed: {e}"))
-            }
+            Ok(Err(e)) => DaemonResponse::error(&format!("Transcription failed: {e}")),
             Err(e) => {
-                // Task join error
                 error!("Transcription task failed: {e}");
-                let _ = self
-                    .notification_manager
-                    .broadcast_event(
-                        "transcription_failed".to_string(),
-                        client_id,
-                        serde_json::json!({
-                            "error": format!("Task execution failed: {}", e),
-                            "timestamp": Utc::now().to_rfc3339()
-                        }),
-                    )
-                    .await;
                 DaemonResponse::error(&format!("Task execution failed: {e}"))
             }
         }

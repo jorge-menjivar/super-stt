@@ -83,22 +83,33 @@ impl Drop for DaemonGuard {
     }
 }
 
+/// Monotonic per-call counter so concurrent tests in the same test
+/// binary get unique paths. `Instant::now().elapsed().as_nanos()`
+/// returns 0 immediately after construction and would collide.
+fn next_test_uniq() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static UNIQ: AtomicU64 = AtomicU64::new(0);
+    UNIQ.fetch_add(1, Ordering::Relaxed)
+}
+
 async fn start_daemon_no_auto_approve() -> (DaemonGuard, PathBuf) {
     let xdg = std::env::temp_dir().join(format!(
         "stt-gui-test-{}-{}",
         std::process::id(),
-        Instant::now().elapsed().as_nanos()
+        next_test_uniq()
     ));
     std::fs::create_dir_all(xdg.join("stt")).expect("create xdg/stt dir");
+    // Isolate XDG_CONFIG_HOME so the test daemon doesn't overwrite
+    // the developer's real config via `apply_cli_overrides_to_config`.
+    let config_home = xdg.join("config");
+    std::fs::create_dir_all(&config_home).expect("create xdg/config dir");
 
-    let legacy_socket = xdg.join("stt").join("super-stt.sock");
     let http_socket = xdg.join("stt").join("super-stt-http.sock");
 
     let child = Command::new(DAEMON_BIN)
         .env("XDG_RUNTIME_DIR", &xdg)
+        .env("XDG_CONFIG_HOME", &config_home)
         .env_remove("SUPER_STT_AUTO_APPROVE") // ensure the popup path runs
-        .arg("--socket")
-        .arg(&legacy_socket)
         .arg("--device")
         .arg("cpu")
         .arg("--audio-theme")
@@ -203,8 +214,9 @@ async fn auth_request_dismissed_returns_user_dismissed() {
         .expect("auth task panicked");
 
     let err = result.expect_err("auth_request should have failed since the popup was dismissed");
+    let display = err.to_string();
     assert!(
-        err.contains("user_dismissed") || err.contains("popup_failed"),
+        display.contains("user_dismissed") || display.contains("popup_failed"),
         "expected user_dismissed or popup_failed in error; got: {err}"
     );
 }

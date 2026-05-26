@@ -33,8 +33,7 @@ impl SuperSTTDaemon {
         info!("Loading model with target device: {target_device}");
 
         // Broadcast model loading status for device switch
-        self.broadcast_device_model_loading_status(name_owned.clone(), target_device)
-            .await;
+        self.broadcast_device_model_loading_status(&name_owned, target_device);
 
         // Customs carry their disk path; built-ins load via the HF cache.
         let custom_path = if matches!(source, SourceKind::Custom) {
@@ -180,7 +179,7 @@ impl SuperSTTDaemon {
             })
         };
 
-        self.broadcast_model_loading_status(model.clone()).await;
+        self.broadcast_model_loading_status(&model);
         let tracker = self.create_progress_tracker(&model);
         if let Err(resp) = self.register_download(&tracker) {
             tracker.cancel();
@@ -239,7 +238,7 @@ impl SuperSTTDaemon {
                 )
             })
         };
-        self.broadcast_model_loading_status(model.clone()).await;
+        self.broadcast_model_loading_status(&model);
         self.unload_current_model().await;
 
         let preferred_device = self.preferred_device.read().await.clone();
@@ -341,7 +340,7 @@ impl SuperSTTDaemon {
             ));
         };
 
-        self.broadcast_model_loading_status(model.clone()).await;
+        self.broadcast_model_loading_status(&model);
         self.unload_current_model().await;
 
         let instance = match Self::create_online_instance(online, api_key, &model) {
@@ -359,23 +358,17 @@ impl SuperSTTDaemon {
             let mut config_guard = self.config.write().await;
             config_guard.update_preferred_model(model.clone(), provider, SourceKind::Online);
         }
-        if let Err(e) = self.broadcast_config_change().await {
-            warn!("Failed to broadcast config change after online model switch: {e}");
+        if let Err(e) = self.persist_config().await {
+            warn!("Failed to persist config after online model switch: {e}");
         }
-        let _ = self
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "ready",
-                    "model_loaded": true,
-                    "provider": provider.to_string(),
-                    "model_name": model.clone(),
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                }),
-            )
-            .await;
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "ready",
+                "model_loaded": true,
+                "provider": provider.to_string(),
+                "model_name": model.clone(),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }));
 
         info!("Switched to online model: {model} via {provider}");
         DaemonResponse::success()
@@ -425,42 +418,24 @@ impl SuperSTTDaemon {
         None
     }
 
-    pub async fn broadcast_model_loading_status(&self, model: String) {
-        if let Err(e) = self
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "loading_model",
-                    "new_model": model.clone(),
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
-            .await
-        {
-            warn!("Failed to broadcast model loading status: {e}");
-        }
+    pub fn broadcast_model_loading_status(&self, model: &str) {
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "loading_model",
+                "new_model": model,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
     }
 
     /// Broadcast model loading status specifically for device switching
-    pub async fn broadcast_device_model_loading_status(&self, model: String, target_device: &str) {
-        if let Err(e) = self
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "loading_model_for_device",
-                    "model": model.clone(),
-                    "target_device": target_device,
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
-            .await
-        {
-            warn!("Failed to broadcast device model loading status: {e}");
-        }
+    pub fn broadcast_device_model_loading_status(&self, model: &str, target_device: &str) {
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "loading_model_for_device",
+                "model": model,
+                "target_device": target_device,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
     }
 
     #[must_use]
@@ -468,7 +443,7 @@ impl SuperSTTDaemon {
         let flag = self.download_manager.get_cancellation_flag();
         Arc::new(
             DownloadProgressTracker::new(model.to_string(), 0, Arc::clone(&flag))
-                .with_notification_manager(Arc::clone(&self.notification_manager)),
+                .with_event_bus(Arc::clone(&self.events)),
         )
     }
 
@@ -680,7 +655,7 @@ impl SuperSTTDaemon {
         }
         *tracker.status.write() = "loading_model".to_string();
         *tracker.current_file.write() = "Loading model into memory...".to_string();
-        tracker.broadcast_progress().await;
+        tracker.broadcast_progress();
 
         let preferred_device = self.preferred_device.read().await.clone();
         let preferred_device_for_check = preferred_device.clone();
@@ -720,11 +695,16 @@ impl SuperSTTDaemon {
     ) -> DaemonResponse {
         tracker.mark_completed();
         *tracker.current_file.write() = "Model loaded successfully".to_string();
-        tracker.broadcast_progress().await;
+        tracker.broadcast_progress();
         self.download_manager.clear_download();
         let definition = registry::find_by(&model, provider)
             .cloned()
             .expect("built-in switch resolved a registry entry");
+        // Capture the device string before moving `instance` into the
+        // shared `LoadedModel` — the `ready` event consumers (e.g. the
+        // settings app's current_device tracking) only update their UI
+        // when `actual_device` is present in the payload.
+        let actual_device = crate::daemon::types::device_str(instance.device());
         *self.model.write().await = Some(crate::daemon::types::LoadedModel {
             definition,
             instance,
@@ -733,34 +713,24 @@ impl SuperSTTDaemon {
             let mut config_guard = self.config.write().await;
             config_guard.update_preferred_model(model.clone(), provider, SourceKind::Builtin);
         }
-        if let Err(e) = self.broadcast_config_change().await {
-            warn!("Failed to broadcast config change after model switch: {e}");
+        if let Err(e) = self.persist_config().await {
+            warn!("Failed to persist config after model switch: {e}");
         }
-        let _ = self
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "model_switched",
-                    "model_name": model.clone(),
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
-            .await;
-        let _ = self
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "ready",
-                    "model_loaded": true,
-                    "model_name": model.clone(),
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
-            .await;
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "model_switched",
+                "model_name": model.clone(),
+                "actual_device": actual_device,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "ready",
+                "model_loaded": true,
+                "model_name": model.clone(),
+                "actual_device": actual_device,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
         DaemonResponse::success()
             .with_current_model(model.clone())
             .with_current_provider(provider)

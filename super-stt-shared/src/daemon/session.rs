@@ -133,7 +133,7 @@ pub async fn obtain(
     app_id: AppId,
     app_name: &str,
     scope: &str,
-) -> Result<String, String> {
+) -> http_client::HttpResult<String> {
     // 1. In-memory cache hit — no keyring access, no I/O.
     if let Some(t) = cache_get(app_id) {
         return Ok(t);
@@ -170,11 +170,16 @@ pub async fn obtain(
 }
 
 /// Run `op` with the cached or freshly-minted token. On
-/// `invalid_session` from the daemon, drops the cached token and
-/// retries `op` once with a fresh consent flow.
+/// [`HttpError::InvalidSession`] from the daemon, drops the cached
+/// token and retries `op` once with a fresh consent flow.
 ///
-/// `op` should return `Err("invalid_session ...")` for token-rejection
-/// errors so the retry path triggers; any other error short-circuits.
+/// `op` returns `Result<T, String>` so the iced UI plumbing can
+/// shovel error strings straight into toasts. Internally the retry
+/// decision parses the wire-deterministic `HttpError::Display`
+/// prefix — `invalid_session (<reason>)` is produced by exactly one
+/// site in `http_client.rs` ([`http_client::HttpError::InvalidSession`]),
+/// so this substring inspection is checking content the shared crate
+/// just produced rather than arbitrary error text.
 ///
 /// # Errors
 /// Returns the underlying error if `op` fails for any non-auth reason
@@ -190,17 +195,29 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = Result<T, String>>,
 {
-    let token = obtain(socket_path.clone(), app_id, app_name, scope).await?;
+    let token = obtain(socket_path.clone(), app_id, app_name, scope)
+        .await
+        .map_err(|e| e.to_string())?;
     match op(token).await {
         Ok(v) => Ok(v),
-        Err(e) if e.contains("invalid_session") => {
+        Err(e) if is_wire_invalid_session(&e) => {
             // Token rejected — drop cache, re-auth, retry once.
             let _ = forget(app_id);
-            let token = obtain(socket_path, app_id, app_name, scope).await?;
+            let token = obtain(socket_path, app_id, app_name, scope)
+                .await
+                .map_err(|e| e.to_string())?;
             op(token).await
         }
         Err(e) => Err(e),
     }
+}
+
+/// True if `s` matches the deterministic prefix
+/// `HttpError::InvalidSession::Display` emits. Centralized so the
+/// retry-on-401 logic isn't matching arbitrary error text — only
+/// strings the shared `http_client` produced.
+fn is_wire_invalid_session(s: &str) -> bool {
+    s.starts_with("invalid_session (")
 }
 
 #[cfg(test)]

@@ -10,7 +10,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::daemon::types::SharedLoadedModel;
 use crate::input::audio::AudioProcessor;
-use super_stt_shared::services::notification::NotificationManager;
 
 use std::collections::VecDeque;
 
@@ -190,21 +189,15 @@ impl RealTimeSession {
 pub struct RealTimeTranscriptionManager {
     sessions: Arc<RwLock<HashMap<String, RealTimeSession>>>,
     model: SharedLoadedModel,
-    notification_manager: Arc<NotificationManager>,
     audio_processor: Arc<AudioProcessor>,
 }
 
 impl RealTimeTranscriptionManager {
     /// Construct a new real-time transcription manager
-    pub fn new(
-        model: SharedLoadedModel,
-        notification_manager: Arc<NotificationManager>,
-        audio_processor: Arc<AudioProcessor>,
-    ) -> Self {
+    pub fn new(model: SharedLoadedModel, audio_processor: Arc<AudioProcessor>) -> Self {
         let manager = Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             model,
-            notification_manager,
             audio_processor,
         };
 
@@ -212,19 +205,14 @@ impl RealTimeTranscriptionManager {
         let sessions_clone = Arc::clone(&manager.sessions);
         let model_clone = Arc::clone(&manager.model);
         let processor_clone = Arc::clone(&manager.audio_processor);
-        let notification_clone = Arc::clone(&manager.notification_manager);
 
         tokio::spawn(async move {
             let mut processing_interval = interval(Duration::from_millis(200)); // Check every 200ms for more responsiveness
             loop {
                 processing_interval.tick().await;
-                if let Err(e) = Self::process_all_sessions(
-                    &sessions_clone,
-                    &model_clone,
-                    &processor_clone,
-                    &notification_clone,
-                )
-                .await
+                if let Err(e) =
+                    Self::process_all_sessions(&sessions_clone, &model_clone, &processor_clone)
+                        .await
                 {
                     error!("Error processing real-time sessions: {e}");
                 }
@@ -263,19 +251,6 @@ impl RealTimeTranscriptionManager {
 
         info!("Started real-time transcription session for client: {client_id}");
 
-        // Broadcast session started event
-        let _ = self
-            .notification_manager
-            .broadcast_event(
-                "realtime_session_started".to_string(),
-                client_id,
-                serde_json::json!({
-                    "sample_rate": sample_rate,
-                    "timestamp": chrono::Utc::now().to_rfc3339()
-                }),
-            )
-            .await;
-
         Ok(receiver)
     }
 
@@ -310,7 +285,6 @@ impl RealTimeTranscriptionManager {
         sessions: &Arc<RwLock<HashMap<String, RealTimeSession>>>,
         model: &SharedLoadedModel,
         audio_processor: &Arc<AudioProcessor>,
-        notification_manager: &Arc<NotificationManager>,
     ) -> Result<()> {
         // Collect clients that have audio ready for processing
         let mut ready_clients: Vec<(String, Vec<f32>, CancellationToken)> = Vec::new();
@@ -337,7 +311,6 @@ impl RealTimeTranscriptionManager {
             let model_clone = Arc::clone(model);
             let proc_clone = Arc::clone(audio_processor);
             let sessions_clone = Arc::clone(sessions);
-            let notification_clone = Arc::clone(notification_manager);
 
             tokio::spawn(async move {
                 tokio::select! {
@@ -347,7 +320,6 @@ impl RealTimeTranscriptionManager {
                         &model_clone,
                         &proc_clone,
                         &sessions_clone,
-                        &notification_clone,
                     ) => {
                         if let Err(e) = result {
                             error!("Error transcribing audio for client {client_id}: {e}");
@@ -375,7 +347,6 @@ impl RealTimeTranscriptionManager {
         model: &SharedLoadedModel,
         audio_processor: &Arc<AudioProcessor>,
         sessions: &Arc<RwLock<HashMap<String, RealTimeSession>>>,
-        notification_manager: &Arc<NotificationManager>,
     ) -> Result<()> {
         // Prepare and submit audio to model
         let resampled_len = audio_data.len();
@@ -430,18 +401,6 @@ impl RealTimeTranscriptionManager {
                     if let Some(session) = sessions_read.get(client_id) {
                         let _ = session.send_transcription(transcription.clone());
                     }
-
-                    // Broadcast transcription event
-                    let _ = notification_manager
-                        .broadcast_event(
-                            "realtime_transcription".to_string(),
-                            client_id.to_string(),
-                            serde_json::json!({
-                                "transcription": transcription,
-                                "timestamp": chrono::Utc::now().to_rfc3339()
-                            }),
-                        )
-                        .await;
 
                     debug!("Real-time transcription for {}: {}", client_id, "<omitted>");
                 }

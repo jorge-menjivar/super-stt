@@ -41,7 +41,7 @@ impl SuperSTTDaemon {
                 let mut config = self.config.write().await;
                 config.update_preferred_device(device.clone());
             }
-            let _ = self.broadcast_config_change().await;
+            let _ = self.persist_config().await;
             return DaemonResponse::success()
                 .with_device(device)
                 .with_message("Device preference updated (online model unaffected)".to_string());
@@ -196,24 +196,15 @@ impl SuperSTTDaemon {
 
     /// Prepare for device switch by broadcasting status and unloading current model
     async fn prepare_device_switch(&self, from_device: &str, to_device: &str, model: &str) {
-        // Broadcast device switching status
-        if let Err(e) = self
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "switching_device",
-                    "from_device": from_device,
-                    "to_device": to_device,
-                    "model": model,
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
-            .await
-        {
-            warn!("Failed to broadcast device switching status: {e}");
-        }
+        // Broadcast device switching status to settings subscribers
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "switching_device",
+                "from_device": from_device,
+                "to_device": to_device,
+                "model": model,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
 
         // Unload current model (free memory)
         {
@@ -269,8 +260,8 @@ impl SuperSTTDaemon {
         }
 
         // Broadcast config change event
-        if let Err(e) = self.broadcast_config_change().await {
-            warn!("Failed to broadcast config change after device switch: {e}");
+        if let Err(e) = self.persist_config().await {
+            warn!("Failed to persist config after device switch: {e}");
         }
 
         let success_message = if actual_device != device && device == "cuda" {
@@ -283,24 +274,15 @@ impl SuperSTTDaemon {
         info!("Device switch completed: {previous_device} -> {device} (actual: {actual_device})");
 
         // Broadcast ready status with new device
-        if let Err(e) = self
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "ready",
-                    "model_loaded": true,
-                    "preferred_device": device,
-                    "actual_device": actual_device,
-                    "model_name": model_to_reload,
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
-            .await
-        {
-            warn!("Failed to broadcast ready status with new device: {e}");
-        }
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "ready",
+                "model_loaded": true,
+                "preferred_device": device,
+                "actual_device": actual_device,
+                "model_name": model_to_reload,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
 
         DaemonResponse::success()
             .with_device(actual_device)
@@ -320,20 +302,14 @@ impl SuperSTTDaemon {
         error!("Failed to reload model on new device: {error}");
 
         // Broadcast error status
-        let _ = self
-            .notification_manager
-            .broadcast_event(
-                "daemon_status_changed".to_string(),
-                "daemon".to_string(),
-                serde_json::json!({
-                    "status": "device_switch_error",
-                    "error": error.to_string(),
-                    "failed_device": device,
-                    "model": model_to_reload,
-                    "timestamp": Utc::now().to_rfc3339()
-                }),
-            )
-            .await;
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "device_switch_error",
+                "error": error.to_string(),
+                "failed_device": device,
+                "model": model_to_reload,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
 
         // Check if shutdown is in progress before attempting recovery
         let mut shutdown_rx = self.shutdown_tx.subscribe();
@@ -384,8 +360,8 @@ impl SuperSTTDaemon {
                 }
 
                 // Broadcast config change event for recovery
-                if let Err(e) = self.broadcast_config_change().await {
-                    warn!("Failed to broadcast config change after device recovery: {e}");
+                if let Err(e) = self.persist_config().await {
+                    warn!("Failed to persist config after device recovery: {e}");
                 }
 
                 warn!(
@@ -393,24 +369,15 @@ impl SuperSTTDaemon {
                 );
 
                 // Broadcast ready status after successful recovery
-                if let Err(e) = self
-                    .notification_manager
-                    .broadcast_event(
-                        "daemon_status_changed".to_string(),
-                        "daemon".to_string(),
-                        serde_json::json!({
-                            "status": "ready",
-                            "model_loaded": true,
-                            "preferred_device": previous_device,
-                            "actual_device": recovery_actual_device,
-                            "model_name": model_to_reload,
-                            "timestamp": Utc::now().to_rfc3339()
-                        }),
-                    )
-                    .await
-                {
-                    warn!("Failed to broadcast ready status after recovery: {e}");
-                }
+                self.events
+                    .publish_daemon_status_changed(serde_json::json!({
+                        "status": "ready",
+                        "model_loaded": true,
+                        "preferred_device": previous_device,
+                        "actual_device": recovery_actual_device,
+                        "model_name": model_to_reload,
+                        "timestamp": Utc::now().to_rfc3339(),
+                    }));
 
                 DaemonResponse::error(&format!(
                     "Failed to switch to device '{device}': {error}. Reverted to previous device '{recovery_actual_device}'."

@@ -26,6 +26,8 @@
 //! to a regular window. On X11 tiling WMs you'd add a per-class float
 //! rule using the `WM_CLASS` `super-stt-consent`.
 
+mod constants;
+
 use cosmic::iced::Limits;
 use cosmic::iced::platform_specific::shell::commands::layer_surface::{
     Anchor, KeyboardInteractivity, Layer, destroy_layer_surface, get_layer_surface,
@@ -142,47 +144,24 @@ impl cosmic::Application for ConsentApp {
         } else {
             self.app_name.clone()
         };
-        let body_text = format!(
-            "{request_label} is requesting {} access to Super STT.",
-            self.scope
-        );
+        let body_text = format!("{request_label} wants {} access to Super STT.", self.scope);
 
-        let path_line = text::body(format!("Path:  {}", self.exe_path));
-        let permission_lines = match self.scope.as_str() {
-            "client" => cosmic::widget::column()
-                .push(path_line)
-                .push(text::body(""))
-                .push(text::body("It will be able to:"))
-                .push(text::body("• Start and stop recordings"))
-                .push(text::body(
-                    "• Receive its own preview text and final transcriptions",
-                ))
-                .spacing(2),
-            "settings" => cosmic::widget::column()
-                .push(path_line)
-                .push(text::body(""))
-                .push(text::body("It will be able to:"))
-                .push(text::body("• Everything a client can do"))
-                .push(text::body(
-                    "• Read and modify any daemon configuration value",
-                ))
-                .push(text::body("• Receive cross-app state-change events"))
-                .spacing(2),
-            "widget" => cosmic::widget::column()
-                .push(path_line)
-                .push(text::body(""))
-                .push(text::body("It will be able to:"))
-                .push(text::body(
-                    "• Subscribe to recording state, audio frames, and",
-                ))
-                .push(text::body("  optional transcription text (read-only)"))
-                .spacing(2),
-            other => cosmic::widget::column()
-                .push(path_line)
-                .push(text::body(""))
-                .push(text::body(format!("Unknown scope: {other}")))
-                .spacing(2),
-        };
+        let permission_lines = permissions_for_scope(&self.scope);
+
+        let mut bullet_column = cosmic::widget::column().spacing(6);
+        for line in permission_lines {
+            bullet_column = bullet_column.push(bullet_row(line));
+        }
+
+        let control = cosmic::widget::column()
+            .push(text::body(format!("Executable:  {}", self.exe_path)))
+            .push(
+                cosmic::widget::column()
+                    .push(text::heading("This will allow it to:"))
+                    .push(bullet_column)
+                    .spacing(6),
+            )
+            .spacing(12);
 
         let dialog_widget = dialog::dialog()
             .title("Allow access to Super STT?")
@@ -193,7 +172,7 @@ impl cosmic::Application for ConsentApp {
                     .icon()
                     .size(64),
             )
-            .control(permission_lines)
+            .control(control)
             .primary_action(button::suggested("Allow").on_press(Message::Allow))
             .secondary_action(button::destructive("Deny").on_press(Message::Deny));
 
@@ -216,6 +195,26 @@ impl cosmic::Application for ConsentApp {
         let _ = destroy_layer_surface::<Self::Message>(self.surface_id);
         emit_and_exit(decision);
     }
+}
+
+fn permissions_for_scope(scope: &str) -> &'static [&'static str] {
+    match scope {
+        "client" => constants::CLIENT_PERMISSIONS,
+        "settings" => constants::SETTINGS_PERMISSIONS,
+        "widget" => constants::WIDGET_PERMISSIONS,
+        _ => constants::UNKNOWN_SCOPE_PERMISSIONS,
+    }
+}
+
+/// Render one bullet line. Uses a Row so wrapped text hangs under
+/// itself instead of slipping behind the bullet character.
+fn bullet_row(line: &str) -> Element<'_, Message> {
+    cosmic::widget::row()
+        .push(text::body("•"))
+        .push(text::body(line))
+        .spacing(8)
+        .align_y(cosmic::iced::Alignment::Start)
+        .into()
 }
 
 /// Write the decision to stdout, flush, then exit with `_exit(2)`.

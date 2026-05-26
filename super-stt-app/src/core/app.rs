@@ -23,7 +23,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use super_stt_shared::models::provider::{OnlineProvider, Provider};
 use super_stt_shared::models::registry::{self, SourceKind};
-use tokio::time::Duration;
 
 /// Unified model operation state that encompasses downloading, loading, and switching
 #[derive(Debug, Clone)]
@@ -116,7 +115,7 @@ pub struct AppModel {
     /// Available devices from daemon
     pub available_devices: Vec<String>,
     /// GPU memory info: (free, total) in bytes. None if CUDA unavailable.
-    pub gpu_memory: super_stt_shared::daemon::client::GpuMemoryInfo,
+    pub gpu_memory: super_stt_shared::daemon::http_client::GpuMemoryInfo,
     /// Device switching state
     pub device_state: DeviceState,
     /// Timestamp of last device switch to avoid polling too soon
@@ -219,7 +218,7 @@ impl cosmic::Application for AppModel {
             context_page: ContextPage::default(),
             nav,
             // Initialize Super STT state using proper socket path
-            socket_path: super_stt_shared::validation::get_secure_socket_path(),
+            socket_path: super_stt_shared::validation::get_http_socket_path(),
             daemon_status: DaemonStatus::Disconnected,
             recording_status: RecordingStatus::Idle,
             transcription_text: String::new(),
@@ -343,10 +342,6 @@ impl cosmic::Application for AppModel {
             .title("About"),
 
             ContextPage::ModelSelection => {
-                let device_switching = matches!(
-                    self.device_state,
-                    DeviceState::Switching { .. } | DeviceState::Cooldown
-                );
                 let gpu_enabled = self.current_device == "cuda";
                 let has_openai = self.has_openai_api_key;
                 let has_mistral = self.has_mistral_api_key;
@@ -393,7 +388,7 @@ impl cosmic::Application for AppModel {
                     &self.model_search,
                     &self.current_device,
                     &self.available_devices,
-                    device_switching,
+                    &self.device_state,
                     self.gpu_memory,
                 ))
             }
@@ -468,7 +463,10 @@ impl cosmic::Application for AppModel {
         const PING_INTERVAL_SECS: u64 = 5;
 
         Subscription::batch(vec![
-            // UDP audio level streaming subscription with restart capability
+            // HTTP /events SSE subscription. Covers both the audio-meter
+            // widget topics and the settings-only model/device/download
+            // status topics — settings tokens skip the WIDGET_TOPICS
+            // allowlist, so one subscription carries the full set.
             Subscription::run_with(
                 UdpSubscriptionId(self.udp_restart_counter),
                 audio_events_subscription,
@@ -476,11 +474,6 @@ impl cosmic::Application for AppModel {
             // Periodic connection monitoring
             cosmic::iced::time::every(std::time::Duration::from_secs(PING_INTERVAL_SECS))
                 .map(|_| Message::PingTimeout),
-            // Event subscription for daemon events (stable subscription that handles reconnection internally)
-            Subscription::run_with(
-                DaemonSocketPath(self.socket_path.clone()),
-                daemon_event_subscription,
-            ),
         ])
     }
 
@@ -1954,7 +1947,19 @@ const SETTINGS_APP_ID: super_stt_shared::daemon::session::AppId =
     super_stt_shared::daemon::session::AppId("super-stt-app");
 const SETTINGS_APP_NAME: &str = "Super STT Settings App";
 const SETTINGS_SCOPE: &str = "settings";
-const SETTINGS_AUDIO_TOPICS: &[&str] = &["recording_state", "frequency_bands"];
+/// Topics the settings app subscribes to over `GET /events`.
+///
+/// `recording_state` + `frequency_bands` drive the recording badge and
+/// audio meter. `daemon_status_changed` + `download_progress` drive
+/// the model-switch progress bar — both are settings-scope-only on the
+/// daemon, so widget tokens can't subscribe to them
+/// (`super-stt-daemon/src/daemon/http_server.rs::WIDGET_TOPICS`).
+const SETTINGS_TOPICS: &[&str] = &[
+    "recording_state",
+    "frequency_bands",
+    "daemon_status_changed",
+    "download_progress",
+];
 
 /// Self-healing `/events` subscription for the settings UI's audio
 /// meter + recording-status badge. Routes through the shared
@@ -1974,13 +1979,21 @@ fn audio_events_subscription(
             SETTINGS_APP_ID,
             SETTINGS_APP_NAME,
             SETTINGS_SCOPE,
-            SETTINGS_AUDIO_TOPICS,
+            SETTINGS_TOPICS,
         );
         let mut updates = Box::pin(run_widget_subscription(get_http_socket_path(), config));
         info!("Settings subscription starting");
         while let Some(update) = updates.next().await {
             let msg = match update {
-                WidgetSubscriptionUpdate::Connected => continue,
+                WidgetSubscriptionUpdate::Connected => {
+                    // Mirror the applet's mapping: a successful
+                    // reconnect must clear any sticky `Blocked` /
+                    // `Error` state on the daemon-status badge.
+                    // Without forwarding this, the settings UI sits in
+                    // whatever state it was last in (e.g. Blocked from a
+                    // denial the user has since cleared).
+                    Message::DaemonConnected
+                }
                 WidgetSubscriptionUpdate::Event(evt) => {
                     match settings_widget_event_to_message(&evt) {
                         Some(m) => m,
@@ -2035,8 +2048,50 @@ fn settings_widget_event_to_message(
             let is_speech = total_energy > 0.0001;
             Some(Message::WidgetAudioLevel { level, is_speech })
         }
+        // `daemon_status_changed` and `download_progress` arrive as
+        // settings-scope SSE topics now; the existing
+        // `Message::DaemonEventsReceived` handler already knows how to
+        // dispatch the legacy JSON shape, so we wrap each event in a
+        // singleton `NotificationEvent` and feed it through unchanged.
+        "daemon_status_changed" | "download_progress" => {
+            widget_event_to_notification(evt).map(|n| Message::DaemonEventsReceived(vec![n]))
+        }
         _ => None,
     }
+}
+
+/// Wrap a settings-scope SSE event in the legacy `NotificationEvent`
+/// shape so the long-standing `Message::DaemonEventsReceived` handler
+/// keeps working without restructuring.
+///
+/// Returns `None` when the event is malformed — specifically, when
+/// the `timestamp` field is missing or not a string. Per the daemon's
+/// wire contract every `daemon_status_changed` / `download_progress`
+/// publish includes a string `timestamp`, so its absence is a
+/// protocol violation and the event should be dropped rather than
+/// patched up with a fake clock value.
+fn widget_event_to_notification(
+    evt: &super_stt_shared::daemon::http_client::WidgetEvent,
+) -> Option<super_stt_shared::models::protocol::NotificationEvent> {
+    let Some(timestamp) = evt
+        .payload
+        .get("timestamp")
+        .and_then(serde_json::Value::as_str)
+    else {
+        warn!(
+            "widget event '{}' missing string `timestamp` field — \
+             dropping malformed event (payload: {})",
+            evt.name, evt.payload
+        );
+        return None;
+    };
+    Some(super_stt_shared::models::protocol::NotificationEvent {
+        event_type_field: evt.name.clone(),
+        event_type: evt.name.clone(),
+        client_id: "daemon".to_string(),
+        timestamp: timestamp.to_owned(),
+        data: evt.payload.clone(),
+    })
 }
 
 /// Convert raw frequency-band energy (typically 0.00001-0.1) into a
@@ -2051,196 +2106,6 @@ fn raw_level_to_db_display_percent(raw_level: f32) -> f32 {
         (20.0 * (raw_level * 10.0).log10()).clamp(-60.0, 0.0)
     };
     ((db + 60.0) / 60.0).clamp(0.0, 1.0)
-}
-
-/// Wrapper for `Subscription::run_with` to avoid passing `&PathBuf` directly.
-#[derive(Hash)]
-struct DaemonSocketPath(PathBuf);
-
-/// Creates a persistent subscription to daemon events
-/// This maintains a persistent connection to receive real-time event notifications
-fn daemon_event_subscription(
-    config: &DaemonSocketPath,
-) -> std::pin::Pin<Box<dyn cosmic::iced::futures::Stream<Item = Message> + Send>> {
-    let socket_path = config.0.clone();
-    Box::pin(cosmic::iced::stream::channel(
-        100,
-        async move |mut channel| {
-            info!("Starting daemon event subscription loop");
-
-            loop {
-                info!("Attempting to establish persistent event connection");
-
-                // Try to establish persistent connection to daemon for event streaming
-                match create_persistent_event_connection(&socket_path, &mut channel).await {
-                    Ok(()) => {
-                        info!("Persistent event connection completed, will restart if needed");
-                    }
-                    Err(e) => {
-                        warn!("Persistent event connection failed: {e}, retrying in 5 seconds");
-                        let _ = channel.send(Message::DaemonEventsError(e)).await;
-
-                        // Wait before retrying
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                    }
-                }
-
-                // Brief pause before retrying connection
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        },
-    ))
-}
-
-/// Creates a persistent connection for receiving real-time events from daemon
-async fn create_persistent_event_connection<T>(
-    socket_path: &PathBuf,
-    channel: &mut T,
-) -> Result<(), String>
-where
-    T: futures_util::SinkExt<Message> + Unpin,
-{
-    use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::UnixStream;
-
-    // Connect to daemon
-    let mut stream = UnixStream::connect(socket_path)
-        .await
-        .map_err(|e| format!("Failed to connect to daemon: {e}"))?;
-
-    info!("Connected to daemon for persistent event subscription");
-
-    // Create subscription request
-    let request = DaemonRequest {
-        command: "subscribe".to_string(),
-        event_types: Some(vec![
-            "daemon_status_changed".to_string(),
-            "download_progress".to_string(),
-        ]),
-        client_info: Some(std::collections::HashMap::new()),
-        client_id: Some("super-stt-app-events".to_string()),
-        data: None,
-        audio_data: None,
-        sample_rate: None,
-        since_timestamp: None,
-        limit: None,
-        event_type: None,
-        language: None,
-        enabled: None,
-    };
-
-    // Serialize and send subscription request
-    let request_data = serde_json::to_vec(&request)
-        .map_err(|e| format!("Failed to serialize subscription request: {e}"))?;
-
-    // Send size header + request
-    let size = request_data.len() as u64;
-    stream
-        .write_all(&size.to_be_bytes())
-        .await
-        .map_err(|e| format!("Failed to write request size: {e}"))?;
-    stream
-        .write_all(&request_data)
-        .await
-        .map_err(|e| format!("Failed to write subscription request: {e}"))?;
-
-    // Read initial response
-    let mut size_buf = [0u8; 8];
-    stream
-        .read_exact(&mut size_buf)
-        .await
-        .map_err(|e| format!("Failed to read response size: {e}"))?;
-
-    let response_size = u64::from_be_bytes(size_buf);
-    let response_len = usize::try_from(response_size)
-        .map_err(|_| "Response too large for this platform".to_string())?;
-
-    let mut response_buf = vec![0u8; response_len];
-    stream
-        .read_exact(&mut response_buf)
-        .await
-        .map_err(|e| format!("Failed to read response: {e}"))?;
-
-    // Parse initial response
-    let response: DaemonResponse = serde_json::from_slice(&response_buf)
-        .map_err(|e| format!("Failed to parse subscription response: {e}"))?;
-
-    if response.status != "success" {
-        return Err(format!(
-            "Subscription failed: {}",
-            response
-                .message
-                .unwrap_or_else(|| "Unknown error".to_string())
-        ));
-    }
-
-    info!("Successfully subscribed to daemon events, entering streaming mode");
-
-    // Now continuously read streamed events
-    stream_daemon_events(stream, channel).await?;
-
-    Ok(())
-}
-
-/// Continuously read and process streamed events from the daemon
-async fn stream_daemon_events<T>(
-    mut stream: tokio::net::UnixStream,
-    channel: &mut T,
-) -> Result<(), String>
-where
-    T: futures_util::SinkExt<Message> + Unpin,
-{
-    use tokio::io::AsyncReadExt;
-
-    loop {
-        // Read event size
-        let mut size_buf = [0u8; 8];
-        match stream.read_exact(&mut size_buf).await {
-            Ok(_) => {}
-            Err(e) => {
-                warn!("Connection closed or error reading event size: {e}");
-                break;
-            }
-        }
-
-        let event_size = u64::from_be_bytes(size_buf);
-        let Ok(event_len) = usize::try_from(event_size) else {
-            warn!("Event too large, skipping");
-            continue;
-        };
-
-        // Read event data
-        let mut event_buf = vec![0u8; event_len];
-        match stream.read_exact(&mut event_buf).await {
-            Ok(_) => {}
-            Err(e) => {
-                warn!("Error reading event data: {e}");
-                break;
-            }
-        }
-
-        // Parse event
-        match serde_json::from_slice::<super_stt_shared::models::protocol::NotificationEvent>(
-            &event_buf,
-        ) {
-            Ok(event) => {
-                if channel
-                    .send(Message::DaemonEventsReceived(vec![event]))
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-            Err(e) => {
-                warn!("Failed to parse streamed event: {e}");
-                // Continue processing other events
-            }
-        }
-    }
-
-    Ok(())
 }
 
 impl menu::action::MenuAction for MenuAction {
@@ -2303,5 +2168,51 @@ mod classify_daemon_error_tests {
             "Daemon HTTP listener not running. Start the daemon first.".to_string(),
         );
         assert!(matches!(next, DaemonStatus::Error(_)));
+    }
+}
+
+#[cfg(test)]
+mod widget_event_to_notification_tests {
+    //! Pin the contract that malformed events (missing or non-string
+    //! `timestamp`) are dropped rather than patched up with a
+    //! consumer-side clock value.
+    use super::*;
+    use super_stt_shared::daemon::http_client::WidgetEvent;
+
+    #[test]
+    fn well_formed_event_produces_notification() {
+        let evt = WidgetEvent {
+            name: "daemon_status_changed".to_string(),
+            payload: serde_json::json!({
+                "status": "ready",
+                "model_loaded": true,
+                "timestamp": "2026-05-22T12:35:14Z",
+            }),
+        };
+        let n = widget_event_to_notification(&evt).expect("should produce a NotificationEvent");
+        assert_eq!(n.event_type, "daemon_status_changed");
+        assert_eq!(n.timestamp, "2026-05-22T12:35:14Z");
+        assert_eq!(n.data["status"], "ready");
+    }
+
+    #[test]
+    fn missing_timestamp_is_dropped() {
+        let evt = WidgetEvent {
+            name: "daemon_status_changed".to_string(),
+            payload: serde_json::json!({ "status": "ready" }),
+        };
+        assert!(widget_event_to_notification(&evt).is_none());
+    }
+
+    #[test]
+    fn non_string_timestamp_is_dropped() {
+        let evt = WidgetEvent {
+            name: "download_progress".to_string(),
+            payload: serde_json::json!({
+                "percentage": 25.0,
+                "timestamp": 1_716_393_314_i64,
+            }),
+        };
+        assert!(widget_event_to_notification(&evt).is_none());
     }
 }

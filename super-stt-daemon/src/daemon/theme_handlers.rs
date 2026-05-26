@@ -14,22 +14,16 @@ impl SuperSTTDaemon {
         let theme = theme_str.parse::<AudioTheme>().unwrap_or_default();
         self.set_audio_theme(theme);
 
-        // Update the config with new audio theme and save to disk
-        // Note: This needs to be done in an async context, but this method is sync
-        // We'll spawn a task to handle the config update and broadcast
+        // Persist the change to disk so it survives a restart. The
+        // handler is sync; spawn a task to mutate the config + flush.
         let config_clone = Arc::clone(&self.config);
-        let notification_manager = Arc::clone(&self.notification_manager);
         tokio::spawn(async move {
             let mut config_guard = config_clone.write().await;
             config_guard.update_audio_theme(theme);
             drop(config_guard);
 
-            // Broadcast config change event
-            if let Err(e) =
-                SuperSTTDaemon::broadcast_config_change_static(&notification_manager, &config_clone)
-                    .await
-            {
-                log::warn!("Failed to broadcast config change after audio theme change: {e}");
+            if let Err(e) = SuperSTTDaemon::persist_config_static(&config_clone).await {
+                log::warn!("Failed to persist config after audio theme change: {e}");
             }
         });
 
@@ -53,17 +47,13 @@ impl SuperSTTDaemon {
         self.set_volume(volume);
 
         let config_clone = Arc::clone(&self.config);
-        let notification_manager = Arc::clone(&self.notification_manager);
         tokio::spawn(async move {
             let mut config_guard = config_clone.write().await;
             config_guard.update_volume(volume);
             drop(config_guard);
 
-            if let Err(e) =
-                SuperSTTDaemon::broadcast_config_change_static(&notification_manager, &config_clone)
-                    .await
-            {
-                log::warn!("Failed to broadcast config change after volume change: {e}");
+            if let Err(e) = SuperSTTDaemon::persist_config_static(&config_clone).await {
+                log::warn!("Failed to persist config after volume change: {e}");
             }
         });
 

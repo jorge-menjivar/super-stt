@@ -11,7 +11,6 @@ pub enum Message {
     TogglePopup,
     CloseRequested(window::Id),
     DaemonConnected,
-    DaemonConfigReceived(serde_json::Value),
     DaemonError(String),
     RecordingStateChanged(RecordingState),
     AudioLevelUpdate {

@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! HTTP server for the new daemon protocol.
+//! HTTP server for the daemon protocol.
 //!
-//! Runs **side-by-side** with the legacy length-prefix Unix-socket listener
-//! (in `client_management.rs` / `types.rs::start`). The legacy listener stays
-//! exactly as-is; this module only adds a second listener on a separate
-//! socket path (`$XDG_RUNTIME_DIR/stt/super-stt-http.sock`).
+//! Binds `$XDG_RUNTIME_DIR/stt/super-stt-http.sock` (override via
+//! `SUPER_STT_HTTP_SOCKET`). All endpoints are served under the `/v1`
+//! URL prefix — route definitions in `build_router` are written as
+//! bare paths (`/ping`, `/auth/request`, …) and the prefix is applied
+//! via a single `Router::nest("/v1", …)` at the bottom of the file.
 //!
-//! v1 endpoint set:
+//! v1 endpoint set (wire paths):
 //!
-//! - `POST /auth/request`     — interactive consent → mints a session token
-//! - `GET  /ping`             — liveness (requires Bearer token)
-//! - `GET  /status`           — current model + device (requires Bearer token)
-//! - `POST /transcribe`       — start a daemon-mic recording (requires Bearer token)
-//! - `POST /transcribe/stop`  — stop an in-flight daemon-mic recording (requires Bearer token)
+//! - `POST /v1/auth/request`     — interactive consent → mints a session token
+//! - `GET  /v1/auth/status`      — probe token validity (no consent UI)
+//! - `GET  /v1/ping`             — liveness (any authenticated token)
+//! - `GET  /v1/status`           — current model + device (client/settings)
+//! - `POST /v1/transcribe`       — start a daemon-mic recording
+//! - `POST /v1/transcribe/stop`  — stop an in-flight daemon-mic recording
+//! - `GET  /v1/events?topics=…`  — Server-Sent Events stream (widget/settings)
+//! - … plus the settings configuration surface (see [`build_router`])
 //!
 //! Authentication:
 //! - The daemon uses `SO_PEERCRED` on each connection to get the peer PID
@@ -20,16 +24,13 @@
 //!   popup so the user knows which binary is asking.
 //! - On Allow, the daemon mints a 32-byte hex session token and stores it
 //!   keyed in an in-memory `TokenStore`. The token has a 30-day expiry.
-//! - Every endpoint other than `/auth/request` requires
+//! - Every endpoint other than `/v1/auth/request` requires
 //!   `Authorization: Bearer <token>`. Missing/invalid → 401 with
 //!   `{ status: "error", message: "invalid_session", data: { reason } }`.
 //! - The popup is the `super-stt-consent` helper binary, spawned as a
 //!   subprocess. It writes "allow" / "deny" / "dismissed" to stdout.
 //! - Set `SUPER_STT_AUTO_APPROVE=1` in the daemon environment to skip
 //!   the popup entirely (intended for tests / CI).
-//!
-//! Token persistence to the system keyring is a follow-up; v1 keeps
-//! tokens in memory only.
 
 use crate::daemon::types::SuperSTTDaemon;
 use anyhow::{Context, Result};
@@ -204,7 +205,13 @@ impl TokenStore {
     /// behavior across daemon restarts is covered by the integration
     /// smoke test in `tests/http_smoke_full.rs` (which exercises this
     /// crate built without the `test` cfg flag).
-    fn flush_locked(map: &HashMap<String, TokenMeta>) {
+    ///
+    /// Takes a snapshot by value so the caller can drop its `Mutex`
+    /// guard *before* calling — keyring writes go through `DBus` and
+    /// can stall for seconds when the keyring is locked, and holding
+    /// `TokenStore::inner` across that stall would serialize every
+    /// authenticated request behind it.
+    fn flush_snapshot(snapshot: HashMap<String, TokenMeta>) {
         if cfg!(test) {
             return;
         }
@@ -215,10 +222,7 @@ impl TokenStore {
         }
         let payload = SessionsFile {
             version: SESSIONS_SCHEMA_VERSION,
-            // Cheap clone — TokenMeta is small. Avoids holding a
-            // borrow across the keyring write so callers can drop the
-            // guard right after.
-            sessions: map.clone(),
+            sessions: snapshot,
         };
         let json = match serde_json::to_string(&payload) {
             Ok(j) => j,
@@ -252,21 +256,37 @@ impl TokenStore {
             issued_at: now,
             expires_at,
         };
-        let mut tokens = self.inner.lock().unwrap();
-        tokens.insert(token.clone(), meta);
-        Self::flush_locked(&tokens);
+        let snapshot = {
+            let mut tokens = self.inner.lock().unwrap();
+            tokens.insert(token.clone(), meta);
+            tokens.clone()
+        };
+        Self::flush_snapshot(snapshot);
         (token, expires_at)
     }
 
     fn validate(&self, token: &str) -> Result<TokenMeta, &'static str> {
-        let mut tokens = self.inner.lock().unwrap();
-        let meta = tokens.get(token).ok_or("unknown")?.clone();
-        if meta.expires_at < Utc::now() {
-            tokens.remove(token);
-            Self::flush_locked(&tokens);
-            return Err("expired");
+        // Two-phase: drop the lock before flushing to avoid holding it
+        // across keyring DBus I/O. The expired-removal flush is best-effort
+        // — if the keyring write fails, the in-memory state is already
+        // correct and the cooldown mechanism handles transient failures.
+        let (result, maybe_snapshot) = {
+            let mut tokens = self.inner.lock().unwrap();
+            let Some(meta) = tokens.get(token).cloned() else {
+                return Err("unknown");
+            };
+            if meta.expires_at < Utc::now() {
+                tokens.remove(token);
+                let snapshot = tokens.clone();
+                (Err("expired"), Some(snapshot))
+            } else {
+                (Ok(meta), None)
+            }
+        };
+        if let Some(snapshot) = maybe_snapshot {
+            Self::flush_snapshot(snapshot);
         }
-        Ok(meta)
+        result
     }
 
     /// Drop a session token immediately and persist the change. Used by
@@ -275,9 +295,16 @@ impl TokenStore {
     /// the session, so the daemon revokes the token, emits a `revoked`
     /// SSE event, and closes the stream. Idempotent.
     fn revoke(&self, token: &str) {
-        let mut tokens = self.inner.lock().unwrap();
-        if tokens.remove(token).is_some() {
-            Self::flush_locked(&tokens);
+        let maybe_snapshot = {
+            let mut tokens = self.inner.lock().unwrap();
+            if tokens.remove(token).is_some() {
+                Some(tokens.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(snapshot) = maybe_snapshot {
+            Self::flush_snapshot(snapshot);
         }
     }
 }
@@ -294,25 +321,50 @@ fn generate_token() -> String {
     s
 }
 
-/// Per-connection extension carrying the peer PID resolved at accept time
-/// via `SO_PEERCRED`. None when the platform doesn't support it.
+/// Per-connection extension carrying peer credentials resolved at
+/// accept time via `SO_PEERCRED`. Fields are `None` when the
+/// platform doesn't support `peer_cred()`.
 #[derive(Clone, Debug)]
 pub struct PeerInfo {
     pub pid: Option<u32>,
+    pub uid: Option<u32>,
 }
 
-/// Identifies the consent flow uniquely: (`app_name`, `exe_path`,
-/// `scope`). Two requests with the same key share a single
-/// popup-and-mint cycle.
-type ConsentKey = (String, PathBuf, String);
+impl PeerInfo {
+    /// Stable client identifier built from peer credentials, used as
+    /// the key into [`ResourceManager`] for connection / rate-limit
+    /// tracking. Falls back to `"unknown"` if neither uid nor pid is
+    /// available — that bucket aggregates traffic from any peer whose
+    /// credentials we couldn't resolve.
+    #[must_use]
+    pub fn client_id(&self) -> String {
+        match (self.uid, self.pid) {
+            (Some(uid), Some(pid)) => format!("{uid}:{pid}"),
+            (Some(uid), None) => format!("{uid}:?"),
+            (None, Some(pid)) => format!("?:{pid}"),
+            (None, None) => "unknown".to_string(),
+        }
+    }
+}
+
+/// Identifies the consent flow uniquely: (`exe_path`, `scope`). The
+/// user verifies a *binary*, not a self-reported display name, so
+/// the deny / dedup key is keyed on the kernel-resolved `exe_path`
+/// only. `app_name` is shown in the popup but isn't part of the
+/// identity.
+type ConsentKey = (PathBuf, String);
 type ConsentLock = Arc<tokio::sync::Mutex<()>>;
 
-/// Per-`(app_name, exe_path, scope)` async mutex registry used by the
+/// Per-`(exe_path, scope)` async mutex registry used by the
 /// `/auth/request` handler to dedup concurrent first-time consent
 /// requests. Without this, two clients that ping the daemon at the same
 /// time on a fresh install would each spawn their own consent popup;
 /// with it, the second blocks until the first finishes and then
 /// short-circuits via the reuse-scan against the now-minted token.
+///
+/// The map is pruned via [`Self::release`] after the auth flow
+/// completes so a malicious client can't drive unbounded memory
+/// growth by spamming /auth/request with rotating keys.
 #[derive(Clone, Default)]
 struct ConsentLocks {
     inner: Arc<Mutex<HashMap<ConsentKey, ConsentLock>>>,
@@ -325,11 +377,27 @@ impl ConsentLocks {
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone()
     }
+
+    /// Drop the registry entry for `key` if no other task is still
+    /// holding the `ConsentLock`. Called from the `auth_request`
+    /// handler after the consent flow finishes — success or denial.
+    /// `strong_count == 2` means exactly the map and our local clone
+    /// hold references; anything higher means another in-flight
+    /// `auth_request` for the same key is still waiting on the same
+    /// mutex and we leave the entry in place for it.
+    fn release(&self, key: &ConsentKey, lock: &ConsentLock) {
+        let mut map = self.inner.lock().unwrap();
+        // Our `lock` reference plus the one inside the map. If
+        // anything else is still holding, leave it.
+        if Arc::strong_count(lock) <= 2 {
+            map.remove(key);
+        }
+    }
 }
 
-/// In-memory record of `(app_name, exe_path, scope)` triples the user
-/// has clicked Deny on. Subsequent `/auth/request` calls for the same
-/// triple short-circuit to `403 auth_denied` without spawning another
+/// In-memory record of `(exe_path, scope)` pairs the user has clicked
+/// Deny on. Subsequent `/auth/request` calls for the same pair
+/// short-circuit to `403 auth_denied` without spawning another
 /// consent popup — the user already said no, no point asking again.
 ///
 /// **In-memory only.** The set lives for the daemon's lifetime; a
@@ -363,29 +431,53 @@ struct AppState {
 /// state. Endpoint groups split by required scope:
 ///
 /// - `/auth/request`: reachable WITHOUT a token (it's how you get one).
-/// - client-scope: any valid token (client OR settings).
+/// - any-authenticated: `/ping` — every scope can call this.
+/// - client-scope: client OR settings tokens.
 /// - settings-scope: only valid `settings` tokens. Client tokens get
 ///   403 `scope_denied` here.
 /// - widget-scope: `widget` or `settings` tokens (settings is god-mode).
 ///   Hosts the long-lived `GET /events` SSE subscription.
 fn build_router(state: AppState) -> Router {
-    let client_scope = Router::new()
+    // Both `/ping` and `/auth/status` are no-info-leak probes
+    // callable by any authenticated token (client / settings /
+    // widget). Carved out of `client_scope` so widget-only callers
+    // (e.g. the COSMIC applet) can drive their own connection state
+    // machine without having to claim client scope.
+    let any_scope = Router::new()
         .route("/ping", get(ping))
+        .route("/auth/status", get(auth_status))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_rate_limit,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_any_authenticated,
+        ));
+
+    let client_scope = Router::new()
         .route("/status", get(status))
         .route("/transcribe", post(transcribe))
         .route("/transcribe/stop", post(transcribe_stop))
         .layer(middleware::from_fn_with_state(
             state.clone(),
+            require_rate_limit,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
             require_client_scope,
         ));
 
-    let widget_scope =
-        Router::new()
-            .route("/events", get(events))
-            .layer(middleware::from_fn_with_state(
-                state.clone(),
-                require_widget_scope,
-            ));
+    let widget_scope = Router::new()
+        .route("/events", get(events))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_rate_limit,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_widget_scope,
+        ));
 
     let settings_scope = Router::new()
         // Active model
@@ -433,28 +525,45 @@ fn build_router(state: AppState) -> Router {
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),
+            require_rate_limit,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
             require_settings_scope,
         ));
 
-    Router::new()
+    // All endpoints are served under the `/v1` prefix so we can
+    // version the API on the wire. Clients call e.g. `GET /v1/ping`,
+    // `POST /v1/auth/request`. Route definitions above stay bare
+    // (`/ping`, `/auth/request`) — the prefix is applied via `nest`.
+    let v1 = Router::new()
+        .merge(any_scope)
         .merge(client_scope)
         .merge(settings_scope)
         .merge(widget_scope)
-        .route("/auth/request", post(auth_request))
-        .with_state(state)
+        .route("/auth/request", post(auth_request));
+
+    Router::new().nest("/v1", v1).with_state(state)
 }
 
 /// Spawn the HTTP server on the dedicated Unix socket. Returns once the
-/// listener is bound (the actual accept loop runs in a background task and
-/// terminates when `shutdown_tx` fires).
+/// listener is bound; the actual accept loop runs in a background task.
+///
+/// Returns the [`JoinHandle`] of the spawned accept-loop task so the
+/// caller can supervise it: if the task ends before `shutdown_tx`
+/// fires (panic, fatal `accept()` error, etc.), the caller should
+/// treat the daemon as unreachable and exit. See
+/// [`daemon_main::run`](crate::daemon_main::run) for the supervision
+/// `tokio::select!`.
 ///
 /// # Errors
 /// Returns an error if the socket can't be created or bound.
+#[allow(clippy::too_many_lines)]
 pub async fn start_http_server(
     daemon: Arc<SuperSTTDaemon>,
     socket_path: PathBuf,
     shutdown_tx: broadcast::Sender<()>,
-) -> Result<()> {
+) -> Result<tokio::task::JoinHandle<()>> {
     if let Some(parent) = socket_path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -492,8 +601,9 @@ pub async fn start_http_server(
     let app = build_router(state);
 
     let cleanup_path = socket_path.clone();
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         let mut shutdown_rx = shutdown_tx.subscribe();
+        let resource_manager = Arc::clone(&daemon.resource_manager);
         let server_loop = async {
             loop {
                 let (stream, _addr) = match listener.accept().await {
@@ -503,15 +613,51 @@ pub async fn start_http_server(
                         continue;
                     }
                 };
+                let peer_cred = stream.peer_cred().ok();
                 #[allow(clippy::cast_sign_loss)]
-                let peer_pid = stream
-                    .peer_cred()
-                    .ok()
-                    .and_then(|c| c.pid())
+                let resolved_process_id = peer_cred
+                    .as_ref()
+                    .and_then(tokio::net::unix::UCred::pid)
                     .map(|p| p as u32);
-                let app_for_conn = app
-                    .clone()
-                    .layer(axum::Extension(PeerInfo { pid: peer_pid }));
+                let resolved_user_id = peer_cred.as_ref().map(tokio::net::unix::UCred::uid);
+                let peer = PeerInfo {
+                    pid: resolved_process_id,
+                    uid: resolved_user_id,
+                };
+
+                // 503 connection_rejected if the per-client cap is
+                // hit. We have to write the response by hand here
+                // since axum isn't in the picture yet — we never
+                // hand the stream to serve_connection.
+                //
+                // Registration is idempotent per client_id (uid:pid):
+                // each call upserts the entry, the cap-check passes
+                // when the entry already exists, and we deliberately
+                // do NOT call `unregister_connection` on conn-close.
+                // The same client_id may have multiple concurrent
+                // connections (e.g., /v1/events open while /v1/ping
+                // fires), and an eager unregister would brick the
+                // sibling's rate-limit lookup. Stale entries are
+                // pruned by `ResourceManager::cleanup_task` after
+                // the configured idle timeout.
+                let client_id = peer.client_id();
+                if let Err(e) = resource_manager
+                    .register_connection(client_id.clone(), None)
+                    .await
+                {
+                    warn!(
+                        "connection rejected for {client_id}: {e}; sending 503 connection_rejected"
+                    );
+                    let _ = write_oneshot_response(
+                        stream,
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "connection_rejected",
+                    )
+                    .await;
+                    continue;
+                }
+
+                let app_for_conn = app.clone().layer(axum::Extension(peer.clone()));
                 tokio::spawn(async move {
                     let io = hyper_util::rt::TokioIo::new(stream);
                     let svc = hyper_util::service::TowerToHyperService::new(app_for_conn);
@@ -525,17 +671,41 @@ pub async fn start_http_server(
             }
         };
         tokio::select! {
-            _ = server_loop => {}
+            biased;
             _ = shutdown_rx.recv() => {
                 info!("HTTP server shutting down");
             }
+            _ = server_loop => {}
         }
         if cleanup_path.exists() {
             let _ = tokio::fs::remove_file(&cleanup_path).await;
         }
     });
 
-    Ok(())
+    Ok(handle)
+}
+
+/// Write a single short HTTP/1.1 error response directly to a Unix
+/// stream, bypassing axum/hyper. Used in the accept loop when we
+/// need to reject a connection (e.g., `503 connection_rejected`)
+/// before handing the stream to `serve_connection`.
+async fn write_oneshot_response(
+    mut stream: tokio::net::UnixStream,
+    status: StatusCode,
+    message: &str,
+) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let body = format!(r#"{{"status":"error","message":"{message}"}}"#);
+    let reason = status.canonical_reason().unwrap_or("Unknown");
+    let raw = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        status.as_u16(),
+        reason,
+        body.len(),
+        body,
+    );
+    stream.write_all(raw.as_bytes()).await?;
+    stream.shutdown().await
 }
 
 // -----------------------------------------------------------------------------
@@ -631,6 +801,26 @@ async fn require_widget_scope(
     require_scope(RequiredScope::Widget, state, headers, request, next).await
 }
 
+/// Accept any valid bearer token regardless of scope. Used for `/ping`
+/// — a no-info-leak liveness probe that all scopes legitimately need.
+async fn require_any_authenticated(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut request: Request<Body>,
+    next: Next,
+) -> Response {
+    let Some(token) = extract_bearer_token(&headers) else {
+        return invalid_session("unknown");
+    };
+    match state.tokens.validate(&token) {
+        Ok(meta) => {
+            request.extensions_mut().insert(AuthContext { meta, token });
+            next.run(request).await
+        }
+        Err(reason) => invalid_session(reason),
+    }
+}
+
 fn invalid_session(reason: &'static str) -> Response {
     let body = serde_json::json!({
         "status":  "error",
@@ -656,6 +846,61 @@ fn scope_denied() -> Response {
         body.to_string(),
     )
         .into_response()
+}
+
+fn rate_limited() -> Response {
+    let body = serde_json::json!({
+        "status":  "error",
+        "message": "rate_limited",
+    });
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [("content-type", "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+/// Pre-built `409 recording_in_progress` JSON response for the
+/// `/v1/transcribe` handler. Clients should check `GET /v1/status`
+/// for `is_recording` and call `/v1/transcribe/stop` instead of
+/// retrying `/v1/transcribe`.
+fn recording_in_progress_response() -> Response {
+    let body = serde_json::json!({
+        "status":  "error",
+        "message": "recording_in_progress",
+    });
+    (
+        StatusCode::CONFLICT,
+        [("content-type", "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+/// Per-request rate-limit gate. Layered on every authenticated
+/// scope (`any`, `client`, `widget`, `settings`) — `/auth/request`
+/// is excluded because its abuse model is the consent popup, not
+/// per-request quota.
+async fn require_rate_limit(
+    State(state): State<AppState>,
+    axum::Extension(peer): axum::Extension<PeerInfo>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let client_id = peer.client_id();
+    match state
+        .daemon
+        .resource_manager
+        .record_request(&client_id)
+        .await
+    {
+        Ok(()) => next.run(request).await,
+        Err(e) => {
+            log::warn!("rate-limit hit for {client_id}: {e}");
+            rate_limited()
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -704,6 +949,29 @@ async fn auth_request(
         return auth_err(StatusCode::BAD_REQUEST, "auth_denied", "invalid_scope");
     }
 
+    // Reject same-host, different-user peers BEFORE spawning a popup
+    // or touching consent state. Socket perms 0o660 + group `stt`
+    // mean a second user in that group can otherwise pop dialogs on
+    // the daemon owner's desktop in another app's name. peer_cred is
+    // None only on platforms without SO_PEERCRED — treat that as
+    // safe-fail-closed since we expect Linux.
+    #[allow(clippy::cast_sign_loss)]
+    let daemon_uid = unsafe { libc::geteuid() };
+    let peer_uid = peer.as_ref().and_then(|p| p.0.uid);
+    match peer_uid {
+        Some(uid) if uid == daemon_uid => {}
+        Some(uid) => {
+            log::warn!(
+                "auth_request rejected: peer uid {uid} differs from daemon uid {daemon_uid}"
+            );
+            return auth_err(StatusCode::FORBIDDEN, "auth_denied", "uid_mismatch");
+        }
+        None => {
+            log::warn!("auth_request rejected: peer uid unavailable");
+            return auth_err(StatusCode::FORBIDDEN, "auth_denied", "uid_mismatch");
+        }
+    }
+
     // Resolve the calling binary via /proc/<pid>/exe. Log each
     // failure mode separately so we can tell whether the issue is
     // missing peer credentials, a missing pid, or a kernel/proc
@@ -715,10 +983,11 @@ async fn auth_request(
     // pair. Used by both reuse-scan paths (fast and slow) and the
     // post-mint path so they all serialize the same JSON shape.
     let ok_response = |token: String, expires_at: DateTime<Utc>| -> Response {
+        // `body.scope` is validated above (`client`/`settings`/`widget`).
         let payload = AuthOk {
             status: "success",
             session_token: token,
-            scope: scope_str(&body.scope),
+            scope: scope_str(&body.scope).expect("scope was validated above"),
             expires_at: expires_at.to_rfc3339(),
         };
         (
@@ -737,17 +1006,18 @@ async fn auth_request(
     // do so precisely because they need a fresh token, and the
     // consistent semantic is "request fresh consent".
 
-    let consent_key = (body.app_name.clone(), exe_path.clone(), body.scope.clone());
+    let consent_key: ConsentKey = (exe_path.clone(), body.scope.clone());
 
     // Sticky-deny short-circuit. If the user previously clicked Deny
-    // for this exact triple in this daemon's lifetime, reject
-    // immediately without ever spawning another popup. The cache is
-    // cleared by daemon restart; there's no other reset path on
-    // purpose.
+    // for this exact (exe_path, scope) pair in this daemon's
+    // lifetime, reject immediately without spawning another popup.
+    // The cache is cleared by daemon restart; there's no other reset
+    // path on purpose. `app_name` is not part of the key because a
+    // misbehaving client could otherwise rotate it to bypass deny.
     if state.deny_cache.contains(&consent_key) {
         log::info!(
-            "auth_request denied from cache (user previously denied): app={} scope={}",
-            body.app_name,
+            "auth_request denied from cache (user previously denied): exe={} scope={}",
+            exe_path.display(),
             body.scope
         );
         return auth_err(StatusCode::FORBIDDEN, "auth_denied", "user_denied_cached");
@@ -756,46 +1026,55 @@ async fn auth_request(
     // Serialize concurrent first-time requests for the same identity
     // so we don't spawn N consent popups when N clients race. Each
     // racer still gets its own popup, but they happen one at a time
-    // rather than stacking on screen. (We no longer post-lock reuse
-    // an identity-only match — see the rationale on
-    // `find_session_by_token_and_identity` above.)
+    // rather than stacking on screen. The lock entry is released by
+    // `state.consent_locks.release` after the flow completes so the
+    // registry doesn't grow unboundedly.
     let lock = state.consent_locks.lock_for(consent_key.clone());
-    let _guard = lock.lock().await;
+    let response = {
+        let _guard = lock.lock().await;
 
-    // Re-check the deny cache: a concurrent caller for the same
-    // triple may have been denied while we were queued behind their
-    // popup.
-    if state.deny_cache.contains(&consent_key) {
-        log::info!(
-            "auth_request denied from cache (concurrent caller denied): app={} scope={}",
-            body.app_name,
-            body.scope
-        );
-        return auth_err(StatusCode::FORBIDDEN, "auth_denied", "user_denied_cached");
-    }
+        // Re-check the deny cache: a concurrent caller for the same
+        // pair may have been denied while we were queued behind
+        // their popup.
+        if state.deny_cache.contains(&consent_key) {
+            log::info!(
+                "auth_request denied from cache (concurrent caller denied): exe={} scope={}",
+                exe_path.display(),
+                body.scope
+            );
+            auth_err(StatusCode::FORBIDDEN, "auth_denied", "user_denied_cached")
+        } else {
+            // Auto-approve if the daemon is in test/CI mode.
+            let auto_approve = std::env::var(AUTO_APPROVE_ENV).is_ok_and(|v| v == "1");
 
-    // Auto-approve if the daemon is in test/CI mode.
-    let auto_approve = std::env::var(AUTO_APPROVE_ENV).is_ok_and(|v| v == "1");
+            let decision = if auto_approve {
+                log::info!(
+                    "{AUTO_APPROVE_ENV}=1 set; auto-approving auth_request for {} ({})",
+                    body.app_name,
+                    exe_path.display()
+                );
+                ConsentDecision::Allow
+            } else {
+                ask_user_for_consent(&body.app_name, &body.scope, &exe_path).await
+            };
 
-    let decision = if auto_approve {
-        log::info!(
-            "{AUTO_APPROVE_ENV}=1 set; auto-approving auth_request for {} ({})",
-            body.app_name,
-            exe_path.display()
-        );
-        ConsentDecision::Allow
-    } else {
-        ask_user_for_consent(&body.app_name, &body.scope, &exe_path).await
+            finalize_consent_decision(
+                decision,
+                &state,
+                &body,
+                &exe_path,
+                consent_key.clone(),
+                &ok_response,
+            )
+        }
     };
 
-    finalize_consent_decision(
-        decision,
-        &state,
-        &body,
-        &exe_path,
-        consent_key,
-        &ok_response,
-    )
+    // Prune the consent-locks registry entry. If another in-flight
+    // auth_request is still waiting on the same key, `release` keeps
+    // the entry; once everyone is done it gets removed.
+    state.consent_locks.release(&consent_key, &lock);
+
+    response
 }
 
 /// Resolve a [`ConsentDecision`] into the matching HTTP response,
@@ -859,12 +1138,75 @@ fn auth_err(status: StatusCode, message: &str, reason: &str) -> Response {
         .into_response()
 }
 
-fn scope_str(s: &str) -> &'static str {
+/// Map a stored scope string to its canonical `&'static str` form for
+/// wire responses. Returns `None` for unrecognized scope values — a
+/// corrupted persisted token or a future-version scope that hasn't
+/// landed in this daemon yet — so callers can fail-fast rather than
+/// silently re-label as "client". Currently recognized: `"client"`,
+/// `"settings"`, `"widget"` (per `docs/protocol/`).
+fn scope_str(s: &str) -> Option<&'static str> {
     match s {
-        "settings" => "settings",
-        "widget" => "widget",
-        _ => "client",
+        "client" => Some("client"),
+        "settings" => Some("settings"),
+        "widget" => Some("widget"),
+        _ => None,
     }
+}
+
+fn internal_error_response() -> Response {
+    let body = serde_json::json!({
+        "status":  "error",
+        "message": "internal_error",
+    });
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        [("content-type", "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+#[derive(Serialize)]
+struct AuthStatusOk<'a> {
+    status: &'a str,
+    scope: &'a str,
+    expires_at: String,
+}
+
+/// `GET /v1/auth/status` — no-side-effect probe that the bearer token
+/// is still valid. The `require_any_authenticated` middleware has
+/// already validated the token and inserted [`AuthContext`] into the
+/// request extensions by the time this handler runs, so reaching the
+/// handler at all means the token was good. The handler reports back
+/// the scope it was minted under and the expiry timestamp so a
+/// headless / CLI client can fail-fast on a soon-to-expire token
+/// without invoking the consent UI.
+///
+/// Errors (`401 invalid_session` with `data.reason` of `unknown`,
+/// `expired`, or `exe_changed`) are produced upstream by
+/// `require_any_authenticated` before this handler runs.
+async fn auth_status(ctx: Option<axum::Extension<AuthContext>>) -> Response {
+    let Some(axum::Extension(ctx)) = ctx else {
+        return invalid_session("unknown");
+    };
+    let Some(scope) = scope_str(&ctx.meta.scope) else {
+        log::error!(
+            "auth_status: token has unrecognized scope `{}` — corrupted blob? returning 500",
+            ctx.meta.scope
+        );
+        return internal_error_response();
+    };
+    let payload = AuthStatusOk {
+        status: "success",
+        scope,
+        expires_at: ctx.meta.expires_at.to_rfc3339(),
+    };
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        serde_json::to_string(&payload).unwrap_or_default(),
+    )
+        .into_response()
 }
 
 /// Resolve the calling process's executable path from the
@@ -1069,12 +1411,77 @@ fn build_request(command: &str, data: Option<Value>) -> DaemonRequest {
     }
 }
 
+/// Map a [`DaemonResponse`] to the HTTP status code it should surface
+/// on the wire.
+///
+/// `DaemonResponse.message` is supposed to be a stable identifier
+/// (per `docs/protocol/transport.md`), but in practice handlers
+/// return free-form sentences here. Rather than refactor every
+/// handler, this function matches on the substrings each error
+/// message reliably contains and maps them to the right HTTP class:
+///
+/// | Category                                | HTTP |
+/// |-----------------------------------------|------|
+/// | "success" body                          | 200  |
+/// | Validation failures (unknown enum/name) | 400  |
+/// | Online-models gate or CUDA unavailable  | 400  |
+/// | State conflicts (no switch, recording)  | 409  |
+/// | Everything else                         | 500  |
+///
+/// Free-form text is fine in `message` — the matcher is conservative
+/// (substring-on-stable-phrasing) and falls through to 500 for
+/// anything unrecognized, which is the right default for unexpected
+/// errors.
+/// Phrases (matched as substrings) that map an error `message` to
+/// `400 Bad Request`. These are bad-input conditions — the client
+/// gave the daemon something it couldn't use.
+const BAD_REQUEST_PHRASES: &[&str] = &[
+    "Unknown model",
+    "Unknown ",
+    "CUDA unavailable",
+    "Online models are disabled",
+    "not a valid",
+    "Invalid ",
+];
+
+/// Phrases (matched as substrings) that map an error `message` to
+/// `409 Conflict`. These are state-conflict conditions — the request
+/// is well-formed but the daemon's current state forbids it.
+///
+/// Update this list when adding a new state-conflict error string;
+/// the canonical strings live in `daemon/device_management.rs`,
+/// `daemon/model_management.rs`, and `download_progress.rs`. Any
+/// "Already using …" message should be a `DaemonResponse::success()`
+/// (so it short-circuits to 200 above) — keep it that way and do
+/// not add an alternate match here.
+const CONFLICT_PHRASES: &[&str] = &[
+    "No download in progress",
+    "Cannot switch models during",
+    "Cannot switch devices during",
+    "Cannot switch devices when",
+    "recording in progress",
+    "A download is already in progress",
+    "Another download is in progress",
+    "Failed to register download",
+];
+
+fn status_code_for_response(resp: &DaemonResponse) -> StatusCode {
+    if resp.status == "success" {
+        return StatusCode::OK;
+    }
+    let msg = resp.message.as_deref().unwrap_or("");
+
+    if BAD_REQUEST_PHRASES.iter().any(|p| msg.contains(p)) {
+        return StatusCode::BAD_REQUEST;
+    }
+    if CONFLICT_PHRASES.iter().any(|p| msg.contains(p)) {
+        return StatusCode::CONFLICT;
+    }
+    StatusCode::INTERNAL_SERVER_ERROR
+}
+
 fn json_response(resp: &DaemonResponse) -> (StatusCode, [(&'static str, &'static str); 1], String) {
-    let status = if resp.status == "success" {
-        StatusCode::OK
-    } else {
-        StatusCode::INTERNAL_SERVER_ERROR
-    };
+    let status = status_code_for_response(resp);
     let body =
         serde_json::to_string(&resp).unwrap_or_else(|_| String::from("{\"status\":\"error\"}"));
     (status, [("content-type", "application/json")], body)
@@ -1137,9 +1544,29 @@ async fn transcribe(
     let data = body.map(|axum::Json(v)| v);
     let req = build_request("record", data);
 
+    // Reject with `409 recording_in_progress` if a capture is already
+    // in progress. `/v1/transcribe` is "start a fresh recording" only —
+    // toggle semantics live in the client (see
+    // `docs/protocol/endpoints/v1/transcribe.md`). The client is
+    // expected to consult `GET /v1/status::is_recording` and call
+    // `/v1/transcribe/stop` to end an in-flight capture.
+    if *s.daemon.is_recording.read().await {
+        return recording_in_progress_response();
+    }
+
     // mpsc channel that produces SSE byte chunks into the HTTP response body.
     let (line_tx, line_rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<axum::body::Bytes, std::io::Error>>();
+
+    // Initial `: stream-open` comment sent BEFORE the spawn returns
+    // its response so hyper on the client side sees response bytes
+    // immediately. Without this, a short silent recording finishes
+    // before the first 5 s keep-alive arm fires, and the client's
+    // hyper drops the connection on idle — which then cancels the
+    // spawn task's `cmd_fut` and leaves the daemon stuck with
+    // `is_recording=true` forever (`record_and_transcribe` never
+    // reaches `finalize_recording_session`).
+    let _ = line_tx.send(Ok(axum::body::Bytes::from_static(b": stream-open\n\n")));
 
     let daemon = Arc::clone(&s.daemon);
     tokio::spawn(async move {
@@ -1150,34 +1577,71 @@ async fn transcribe(
 
         let cmd_fut = daemon.handle_command(req);
         let mut cmd_fut = std::pin::pin!(cmd_fut);
-        let mut done = false;
         let mut final_response: Option<DaemonResponse> = None;
+        let mut client_disconnected = false;
 
+        // SSE keep-alive: write `: keepalive\n\n` every 2 s of
+        // inactivity so the hyper client (and any intermediate proxy)
+        // doesn't drop the connection during a silent recording or a
+        // slow CPU transcription pass. Short cadence is intentional —
+        // `/v1/transcribe` with preview disabled has long stretches
+        // with zero events, and the CLI's hyper has been observed to
+        // disconnect after ~4 s of body silence.
+        let keepalive_interval = tokio::time::Duration::from_secs(2);
+
+        // Phase 1: drive `cmd_fut` to completion. Forward preview
+        // events to the client and emit periodic keep-alive comments.
+        // Break out only if `cmd_fut` finishes OR the client closes
+        // the connection — and in the disconnect case we MUST still
+        // run `cmd_fut` to completion in Phase 2 below so the daemon
+        // cleanup chain runs.
         loop {
             tokio::select! {
-                // Drive the recording to completion.
-                resp = &mut cmd_fut, if !done => {
-                    done = true;
+                biased;
+                resp = &mut cmd_fut => {
                     final_response = Some(resp);
-                    *daemon.preview_text.write().await = None;
+                    break;
                 }
-                // Drain preview text and forward as `preview` events.
                 preview = preview_rx.recv() => {
-                    match preview {
-                        Some(text) => {
-                            let payload = serde_json::json!({ "text": text });
-                            if !emit_sse_event(&line_tx, "preview", &payload) {
-                                // Client disconnected — stop draining.
-                                break;
-                            }
+                    if let Some(text) = preview {
+                        let payload = serde_json::json!({ "text": text });
+                        if !emit_sse_event(&line_tx, "preview", &payload) {
+                            client_disconnected = true;
+                            break;
                         }
-                        None if done => break,
-                        None => {} // Will get a Some later, keep waiting.
+                    }
+                    // preview_rx.recv() returning None during Phase 1
+                    // would mean our sender was dropped, which we
+                    // don't do until Phase 3. Fall through and keep
+                    // looping; cmd_fut should resolve soon.
+                }
+                () = tokio::time::sleep(keepalive_interval) => {
+                    let bytes = axum::body::Bytes::from_static(b": keepalive\n\n");
+                    if line_tx.send(Ok(bytes)).is_err() {
+                        client_disconnected = true;
+                        break;
                     }
                 }
             }
         }
 
+        // Phase 2: if the client gave up before the recording
+        // finished, signal stop AND await `cmd_fut` to completion.
+        // Cancelling `cmd_fut` here (by letting the async block end)
+        // would leave `record_and_transcribe` mid-execution — it
+        // would never reach `finalize_recording_session`, and the
+        // daemon would be stuck with `is_recording=true` /
+        // `manual_stop_tx=Some(_)` until the next daemon restart.
+        if client_disconnected {
+            if let Some(tx) = daemon.manual_stop_tx.read().await.as_ref() {
+                let _ = tx.send(());
+            }
+            final_response = Some(cmd_fut.await);
+        }
+
+        // Phase 3: clear our preview slot and emit the terminal event.
+        // If the client is gone, the SSE sends are silent no-ops.
+        *daemon.preview_text.write().await = None;
         if let Some(resp) = final_response {
             if resp.status == "success" {
                 let payload = serde_json::json!({
@@ -1210,14 +1674,26 @@ async fn transcribe(
             )
                 .into_response()
         })
+        .into_response()
 }
 
 async fn transcribe_stop(State(s): State<AppState>) -> impl IntoResponse {
-    let data = serde_json::json!({
-        "write_mode": false,
-        "stop_mode": "manual-only",
-    });
-    let req = build_request("record", Some(data));
+    // Idempotent: nothing to stop. Direct response — going through
+    // `handle_record_command` here would start a fresh recording
+    // because that path is shared with `record`'s start case.
+    if !*s.daemon.is_recording.read().await {
+        let resp = DaemonResponse::success().with_message("No recording in progress".to_string());
+        return json_response(&resp);
+    }
+
+    // Recording active — dispatch through `handle_record_command`'s
+    // toggle branch, which produces one of the documented stop
+    // messages:
+    //   - "Recording stop signal sent"
+    //   - "Manual stop not enabled in current mode"
+    //   - "Transcription in progress, please wait"
+    // (See `docs/protocol/endpoints/v1/transcribe/stop.md`.)
+    let req = build_request("record", None);
     let resp = dispatch(&s.daemon, req).await;
     json_response(&resp)
 }
@@ -1300,10 +1776,20 @@ async fn events(
     let (sse_tx, sse_rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<axum::body::Bytes, std::io::Error>>();
 
-    // Initial `subscribed` event with a fresh subscriber id and the
-    // confirmed topic list — this is what tells the client its
-    // subscription was accepted.
+    // Subscribe BEFORE emitting `subscribed`. Subscribing creates the
+    // broadcast::Receiver that captures any event fired from this
+    // point on — and once we send the `subscribed` ack the client is
+    // entitled to assume every subsequent event reaches it. Doing the
+    // ack first would leave a gap where events fire and are missed
+    // even though the client believes the subscription is live.
     let topic_names: Vec<&'static str> = requested.iter().map(|t| t.as_str()).collect();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    for topic in &requested {
+        let rx = s.daemon.events.subscribe(*topic);
+        spawn_topic_forwarder(rx, sse_tx.clone(), cancel.clone());
+    }
+
+    // Now that the receivers exist, ack the client.
     let _ = emit_sse_event(
         &sse_tx,
         "subscribed",
@@ -1313,13 +1799,6 @@ async fn events(
         }),
     );
 
-    // Subscribe + spawn forwarders. Cancellation propagates to the
-    // keepalive/exe-watch task through the shared token.
-    let cancel = tokio_util::sync::CancellationToken::new();
-    for topic in &requested {
-        let rx = s.daemon.events.subscribe(*topic);
-        spawn_topic_forwarder(rx, sse_tx.clone(), cancel.clone());
-    }
     spawn_events_keepalive_and_exe_watch(
         sse_tx.clone(),
         cancel,
@@ -1391,6 +1870,7 @@ fn spawn_topic_forwarder(
     tokio::spawn(async move {
         loop {
             tokio::select! {
+                biased;
                 () = cancel.cancelled() => break,
                 res = rx.recv_json() => {
                     match res {
@@ -1436,6 +1916,7 @@ fn spawn_events_keepalive_and_exe_watch(
 
         loop {
             tokio::select! {
+                biased;
                 () = cancel.cancelled() => break,
                 _ = keepalive.tick() => {
                     if tx
@@ -1516,6 +1997,16 @@ async fn get_active_model(State(s): State<AppState>) -> impl IntoResponse {
     let model_resp = dispatch(&s.daemon, build_request("get_model", None)).await;
     let device_resp = dispatch(&s.daemon, build_request("get_device", None)).await;
     let download_resp = dispatch(&s.daemon, build_request("get_download_status", None)).await;
+
+    // If any of the three internal dispatches failed, surface that
+    // upward rather than papering over with `null` fields. The
+    // client can't distinguish 'no model loaded' from 'daemon hit
+    // an error' otherwise.
+    for resp in [&model_resp, &device_resp, &download_resp] {
+        if resp.status != "success" {
+            return json_response(resp).into_response();
+        }
+    }
 
     let switch_payload = download_resp.download_progress.map(|p| {
         serde_json::json!({
@@ -1910,8 +2401,13 @@ mod tests {
         assert!(store.inner.lock().unwrap().get("stale").is_none());
     }
 
-    fn deny_key(app: &str, exe: &str, scope: &str) -> ConsentKey {
-        (app.to_string(), PathBuf::from(exe), scope.to_string())
+    fn deny_key(_app: &str, exe: &str, scope: &str) -> ConsentKey {
+        // ConsentKey dropped `app_name` from the tuple in this branch:
+        // app_name is client-controlled and untrusted, so the deny key
+        // is now `(exe_path, scope)` only. We keep the `_app` arg in
+        // the test helper signature so we don't have to rewrite every
+        // call site at once.
+        (PathBuf::from(exe), scope.to_string())
     }
 
     /// Sticky deny: once `insert(key)` runs, `contains(key)` must keep
@@ -1934,29 +2430,34 @@ mod tests {
         );
     }
 
-    /// Different `(app_name, exe_path, scope)` triples must be
-    /// distinguished. Otherwise an unrelated app's denial would
-    /// poison every other app's consent flow.
+    /// Different `(exe_path, scope)` pairs must be distinguished —
+    /// otherwise an unrelated binary's denial would poison every
+    /// other binary's consent flow. `app_name` is intentionally NOT
+    /// part of the key: it's client-controlled, so a misbehaving
+    /// caller could otherwise bypass a deny by rotating its declared
+    /// app name. Two requests from the same binary in the same scope
+    /// SHOULD collide regardless of app_name — that's the bug fix.
     #[test]
     fn deny_cache_distinguishes_keys_by_each_component() {
         let cache = DenyCache::default();
         let app_a = deny_key("App A", "/usr/bin/a", "widget");
-        let app_b_same_path = deny_key("App B", "/usr/bin/a", "widget");
-        let app_a_other_path = deny_key("App A", "/usr/bin/a-renamed", "widget");
-        let app_a_other_scope = deny_key("App A", "/usr/bin/a", "settings");
+        let same_path_renamed = deny_key("Renamed App", "/usr/bin/a", "widget");
+        let other_path = deny_key("App A", "/usr/bin/a-renamed", "widget");
+        let other_scope = deny_key("App A", "/usr/bin/a", "settings");
 
         cache.insert(app_a.clone());
         assert!(cache.contains(&app_a));
         assert!(
-            !cache.contains(&app_b_same_path),
-            "different app_name must not collide"
+            cache.contains(&same_path_renamed),
+            "same exe_path + scope must collide regardless of declared app_name \
+             (denial sticks to the binary, not the self-reported name)"
         );
         assert!(
-            !cache.contains(&app_a_other_path),
+            !cache.contains(&other_path),
             "different exe_path must not collide"
         );
         assert!(
-            !cache.contains(&app_a_other_scope),
+            !cache.contains(&other_scope),
             "different scope must not collide"
         );
     }

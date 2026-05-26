@@ -138,6 +138,7 @@ impl WidgetSubscriptionConfig {
 ///    `session::forget` and re-obtains.
 /// 5. On any drop (idle, EOF, error), backs off and reconnects
 ///    (exponential, capped at `config.max_backoff`).
+#[allow(clippy::too_many_lines)]
 pub fn run_widget_subscription(
     socket: PathBuf,
     config: WidgetSubscriptionConfig,
@@ -147,6 +148,13 @@ pub fn run_widget_subscription(
 
         loop {
             // 1. Token: cached or freshly minted via consent popup.
+            //    Three error families:
+            //    - AuthDenied with a user-denied reason → terminal `Blocked`.
+            //    - AuthDenied with another reason (dismissed, popup_failed,
+            //      throttled) or InvalidSession → recoverable `NeedsReauth`.
+            //    - Other (daemon unreachable, network IO, etc.) → recoverable
+            //      `Disconnected`. Without this split, callers see a
+            //      "session revoked" UI for a plain daemon-offline state.
             let token = match session::obtain(
                 socket.clone(),
                 config.app_id,
@@ -156,16 +164,23 @@ pub fn run_widget_subscription(
             .await
             {
                 Ok(t) => t,
-                Err(e) if is_user_denied(&e) => {
-                    // User said no — including the daemon's sticky
-                    // deny cache after a previous denial. Auto-retry
-                    // would just spam, so end the stream and let the
-                    // consumer drive an explicit retry.
-                    yield WidgetSubscriptionUpdate::Blocked { reason: e };
+                Err(http_client::HttpError::AuthDenied { reason })
+                    if is_user_denied_reason(&reason) =>
+                {
+                    yield WidgetSubscriptionUpdate::Blocked {
+                        reason: format!("auth_denied ({reason})"),
+                    };
                     return;
                 }
-                Err(e) => {
-                    yield WidgetSubscriptionUpdate::NeedsReauth { reason: e };
+                Err(e @ (http_client::HttpError::AuthDenied { .. }
+                | http_client::HttpError::InvalidSession { .. })) => {
+                    yield WidgetSubscriptionUpdate::NeedsReauth { reason: e.to_string() };
+                    tokio::time::sleep(backoff).await;
+                    backoff = next_backoff(backoff, config.max_backoff);
+                    continue;
+                }
+                Err(e @ http_client::HttpError::Other(_)) => {
+                    yield WidgetSubscriptionUpdate::Disconnected { reason: e.to_string() };
                     tokio::time::sleep(backoff).await;
                     backoff = next_backoff(backoff, config.max_backoff);
                     continue;
@@ -181,14 +196,14 @@ pub fn run_widget_subscription(
             .await
             {
                 Ok(s) => s,
-                Err(e) if is_invalid_session(&e) => {
+                Err(e) if e.is_invalid_session() => {
                     let _ = session::forget(config.app_id);
-                    yield WidgetSubscriptionUpdate::NeedsReauth { reason: e };
+                    yield WidgetSubscriptionUpdate::NeedsReauth { reason: e.to_string() };
                     // No backoff — go straight to fresh consent.
                     continue;
                 }
                 Err(e) => {
-                    yield WidgetSubscriptionUpdate::Disconnected { reason: e };
+                    yield WidgetSubscriptionUpdate::Disconnected { reason: e.to_string() };
                     tokio::time::sleep(backoff).await;
                     backoff = next_backoff(backoff, config.max_backoff);
                     continue;
@@ -259,22 +274,30 @@ pub fn run_widget_subscription(
     }
 }
 
-fn is_invalid_session(err: &str) -> bool {
-    err.contains("invalid_session")
+/// True if the daemon's `auth_denied` reason string is one of the
+/// user-denied variants — `user_denied` (just clicked Deny) or
+/// `user_denied_cached` (sticky deny still in the daemon's
+/// in-memory cache). Exact-match so a future reason that happens to
+/// embed `user_denied` as a substring (e.g.
+/// `post_user_denied_cleanup_failed`) doesn't terminate the
+/// subscription by accident.
+fn is_user_denied_reason(reason: &str) -> bool {
+    matches!(reason, "user_denied" | "user_denied_cached")
 }
 
-/// Matches both `auth_denied (user_denied)` and
-/// `auth_denied (user_denied_cached)` — i.e. any error string that
-/// means "the user said no". The substring is unique enough to cover
-/// both daemon responses without listing each reason separately.
+/// Public version of [`is_user_denied_reason`] that takes the wire
+/// `Display` output of an [`HttpError`]: `auth_denied (user_denied)`
+/// or `auth_denied (user_denied_cached)`. Returns false for any
+/// other `auth_denied` reason and for non-auth errors.
 ///
-/// Public so non-helper callers (the settings app's HTTP-error
-/// classifier, future custom subscriptions, etc.) can route the same
-/// terminal-on-denial behavior the helper already does, without
-/// hardcoding the response shape in multiple places.
+/// Operates on the `Display`-formatted string so callers don't have
+/// to import the enum.
 #[must_use]
 pub fn is_user_denied(err: &str) -> bool {
-    err.contains("user_denied")
+    matches!(
+        err,
+        "auth_denied (user_denied)" | "auth_denied (user_denied_cached)"
+    )
 }
 
 fn next_backoff(current: Duration, max: Duration) -> Duration {
@@ -307,19 +330,39 @@ mod tests {
     }
 
     #[test]
-    fn is_invalid_session_matches_known_shape() {
-        // What the http_client emits today.
-        assert!(is_invalid_session("invalid_session (unknown)"));
-        assert!(is_invalid_session("invalid_session (expired)"));
-        assert!(is_invalid_session("invalid_session (exe_changed)"));
-        // Other errors should not be classified as needing re-auth.
-        assert!(!is_invalid_session(
-            "Daemon HTTP listener not running. Start the daemon first."
-        ));
-        assert!(!is_invalid_session("Connection failed: broken pipe"));
-        assert!(!is_invalid_session(
-            "subscribe failed (status 400 Bad Request): \"...\""
-        ));
+    fn http_error_is_invalid_session_matches_only_invalid_session() {
+        use http_client::HttpError;
+        // The replacement for the old free `is_invalid_session(&str)`
+        // is `HttpError::is_invalid_session()` on the typed error.
+        assert!(
+            HttpError::InvalidSession {
+                reason: "unknown".into()
+            }
+            .is_invalid_session()
+        );
+        assert!(
+            HttpError::InvalidSession {
+                reason: "expired".into()
+            }
+            .is_invalid_session()
+        );
+        // Other variants must NOT classify as invalid_session.
+        assert!(
+            !HttpError::AuthDenied {
+                reason: "user_denied".into()
+            }
+            .is_invalid_session()
+        );
+        assert!(!HttpError::Other("connection refused".into()).is_invalid_session());
+    }
+
+    #[test]
+    fn is_user_denied_reason_matches_both_deny_variants() {
+        assert!(is_user_denied_reason("user_denied"));
+        assert!(is_user_denied_reason("user_denied_cached"));
+        // Other reasons must not.
+        assert!(!is_user_denied_reason("user_dismissed"));
+        assert!(!is_user_denied_reason("popup_failed"));
     }
 
     #[test]
@@ -389,6 +432,58 @@ mod tests {
                 assert_eq!(reason, "auth_denied (user_denied_cached)");
             }
             other => panic!("variant constructed Blocked but pattern saw {other:?}"),
+        }
+    }
+
+    /// Routing contract: which `HttpError` variant maps to which
+    /// `WidgetSubscriptionUpdate` variant. Pins the fix for the
+    /// "daemon offline reported as 'session revoked'" UX bug —
+    /// `HttpError::Other` must drive `Disconnected`, not
+    /// `NeedsReauth`. The actual routing lives inside the
+    /// `run_widget_subscription` match, but we can verify the
+    /// intent by enumerating the discriminants we expect each
+    /// variant to land in.
+    #[test]
+    fn obtain_error_routing_contract() {
+        use http_client::HttpError;
+
+        // The catch-all `Err(e @ HttpError::Other(_)) => Disconnected`
+        // arm fires here. Failing this would mean a daemon-offline
+        // state is again reported as a revoked session.
+        let daemon_offline = HttpError::Other("Daemon HTTP listener not running.".to_string());
+        assert!(
+            !daemon_offline.is_invalid_session(),
+            "Other must not be classified as invalid_session"
+        );
+        assert!(matches!(daemon_offline, HttpError::Other(_)));
+
+        // `InvalidSession` and non-user-denied `AuthDenied` must
+        // land in `NeedsReauth`. We can't observe the stream output
+        // synchronously here, but we lock in the predicate the
+        // routing relies on.
+        let invalid = HttpError::InvalidSession {
+            reason: "expired".to_string(),
+        };
+        assert!(invalid.is_invalid_session());
+
+        let popup_failed = HttpError::AuthDenied {
+            reason: "popup_failed".to_string(),
+        };
+        assert!(
+            !matches!(&popup_failed, HttpError::AuthDenied { reason } if is_user_denied_reason(reason)),
+            "popup_failed must NOT be classified as user-denied — \
+             it's recoverable, not terminal"
+        );
+
+        // The terminal `Blocked` path only triggers on these two.
+        for reason in ["user_denied", "user_denied_cached"] {
+            let e = HttpError::AuthDenied {
+                reason: reason.to_string(),
+            };
+            assert!(
+                matches!(&e, HttpError::AuthDenied { reason } if is_user_denied_reason(reason)),
+                "`{reason}` must classify as terminal user-denied"
+            );
         }
     }
 

@@ -88,19 +88,28 @@ impl Drop for DaemonGuard {
     }
 }
 
+/// Monotonic per-call counter so concurrent tests in the same test
+/// binary get unique paths. `Instant::now().elapsed().as_nanos()`
+/// returns 0 immediately after construction and would collide.
+fn next_test_uniq() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static UNIQ: AtomicU64 = AtomicU64::new(0);
+    UNIQ.fetch_add(1, Ordering::Relaxed)
+}
+
 async fn start_daemon_with_auto_approve_timer() -> (DaemonGuard, PathBuf) {
     // Use the user's real $XDG_RUNTIME_DIR so the consent helper can
     // still find the Wayland socket. We isolate by using unique daemon
     // socket paths (legacy via --socket, HTTP via SUPER_STT_HTTP_SOCKET)
     // rather than redirecting XDG_RUNTIME_DIR.
-    let unique = format!(
-        "stt-full-{}-{}",
-        std::process::id(),
-        Instant::now().elapsed().as_nanos()
-    );
+    let unique = format!("stt-full-{}-{}", std::process::id(), next_test_uniq());
     let tmp = std::env::temp_dir();
     let legacy_socket = tmp.join(format!("{unique}-legacy.sock"));
     let http_socket = tmp.join(format!("{unique}-http.sock"));
+    // Isolate XDG_CONFIG_HOME so the test daemon doesn't overwrite
+    // the developer's real config via `apply_cli_overrides_to_config`.
+    let config_home = tmp.join(format!("{unique}-config"));
+    std::fs::create_dir_all(&config_home).expect("create test config dir");
 
     // Capture daemon stderr so we can diagnose hangs during dev.
     // Set SUPER_STT_TEST_LOG=1 to also surface it on the test runner's
@@ -121,12 +130,11 @@ async fn start_daemon_with_auto_approve_timer() -> (DaemonGuard, PathBuf) {
             AUTO_APPROVE_MS.to_string(),
         )
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
+        .env("XDG_CONFIG_HOME", &config_home)
         .env(
             "RUST_LOG",
             "info,super_stt_daemon::daemon::http_server=debug",
         )
-        .arg("--socket")
-        .arg(&legacy_socket)
         .arg("--device")
         .arg("cpu")
         .arg("--audio-theme")
@@ -220,8 +228,8 @@ async fn auth_request_real_helper_returns_working_token() {
     let unauthorized = http_client::ping(http_socket.clone(), "not-a-real-token").await;
     let err = unauthorized.expect_err("ping with bogus token should be rejected");
     assert!(
-        err.contains("invalid_session"),
-        "expected invalid_session error, got: {err}"
+        err.is_invalid_session(),
+        "expected InvalidSession variant, got: {err}"
     );
 
     // (We deliberately skip exercising /transcribe here — the HTTP

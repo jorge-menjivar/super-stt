@@ -332,7 +332,7 @@ pub fn model_selection_list(
     current_source: SourceKind,
     search: &str,
     gpu_enabled: bool,
-    gpu_memory: super_stt_shared::daemon::client::GpuMemoryInfo,
+    gpu_memory: super_stt_shared::daemon::http_client::GpuMemoryInfo,
 ) -> Element<'static, Message> {
     // Effective free VRAM = current free + what the current model uses (it gets unloaded on switch)
     let current_vram =
@@ -415,16 +415,26 @@ pub fn model_selection_list(
         .into()
 }
 
-/// Context drawer header: device toggle + search input
+/// Context drawer header: device toggle + search input.
+///
+/// While a device switch is in flight (`device_state == Switching` or
+/// `Cooldown`), the toggle is **disabled** — its `on_toggle` handler
+/// is dropped so clicks are ignored. The displayed state reflects the
+/// target device of the in-flight switch (so the toggle visually
+/// flips immediately on click) and the toggle is dimmed to ~50%
+/// opacity to make the disabled state visually obvious. On switch
+/// completion (or error) the toggle re-enables and snaps to whatever
+/// `current_device` ended up being.
 pub fn model_drawer_header<'a>(
     search: &'a str,
     current_device: &'a str,
     available_devices: &'a [String],
-    device_switching: bool,
-    gpu_memory: super_stt_shared::daemon::client::GpuMemoryInfo,
+    device_state: &'a crate::core::app::DeviceState,
+    gpu_memory: super_stt_shared::daemon::http_client::GpuMemoryInfo,
 ) -> Element<'a, Message> {
+    use crate::core::app::DeviceState;
+
     let has_gpu = available_devices.contains(&"cuda".to_string());
-    let gpu_enabled = current_device == "cuda";
 
     let search_input: Element<'a, Message> = widget::search_input("Search models...", search)
         .on_input(Message::ModelSearchChanged)
@@ -435,8 +445,28 @@ pub fn model_drawer_header<'a>(
         return search_input;
     }
 
+    // Effective device shown by the toggle: while switching, show the
+    // target so the toggle visually flips the moment the user clicks
+    // it; otherwise show the live `current_device`.
+    let device_switching = matches!(device_state, DeviceState::Switching { .. });
+    let effective_device = match device_state {
+        DeviceState::Switching { target_device, .. } => target_device.as_str(),
+        _ => current_device,
+    };
+    let gpu_enabled = effective_device == "cuda";
+    // Cooldown is the brief window after the daemon's "ready" event
+    // before we accept a new switch — UI stays disabled to debounce
+    // rapid toggles, but the toggle's displayed state is already
+    // `current_device`.
+    let toggle_disabled = device_switching || matches!(device_state, DeviceState::Cooldown);
+
+    // The cosmic toggler renders itself in a "disabled" appearance
+    // when its `on_toggle` handler is `None` — we drop the handler
+    // while a switch is in flight (or in the brief cooldown that
+    // follows) to block re-entry until the daemon confirms the
+    // result.
     let mut toggler = cosmic::widget::toggler(gpu_enabled);
-    if !device_switching {
+    if !toggle_disabled {
         toggler = toggler.on_toggle(move |on| {
             Message::DeviceSelected(if on { "cuda" } else { "cpu" }.to_string())
         });
@@ -444,9 +474,17 @@ pub fn model_drawer_header<'a>(
 
     let mut items = column![].spacing(cosmic::theme::spacing().space_s);
 
+    let description = if device_switching {
+        "Switching device — please wait..."
+    } else if matches!(device_state, DeviceState::Cooldown) {
+        "Finishing previous switch..."
+    } else {
+        "Enable to use more powerful models and faster transcriptions"
+    };
+
     items = items.push(
         settings::item::builder("GPU Acceleration")
-            .description("Enable to use more powerful models and faster transcriptions")
+            .description(description)
             .control(toggler),
     );
 

@@ -33,6 +33,10 @@ const STATE_BUF_CAPACITY: usize = 32;
 
 /// Set of topics the daemon emits over `GET /events`. The `as_str` mapping
 /// is the wire name used in the `event:` line of each SSE frame.
+///
+/// `DaemonStatusChanged` and `DownloadProgress` are **settings-only**
+/// — `WIDGET_TOPICS` in `http_server.rs` doesn't include them, so a
+/// widget-scope token requesting either gets `403 scope_denied`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Topic {
     RecordingStarted,
@@ -42,6 +46,8 @@ pub enum Topic {
     FrequencyBands,
     PartialStt,
     FinalStt,
+    DaemonStatusChanged,
+    DownloadProgress,
 }
 
 impl Topic {
@@ -56,6 +62,8 @@ impl Topic {
             Self::FrequencyBands => "frequency_bands",
             Self::PartialStt => "partial_stt",
             Self::FinalStt => "final_stt",
+            Self::DaemonStatusChanged => "daemon_status_changed",
+            Self::DownloadProgress => "download_progress",
         }
     }
 
@@ -73,6 +81,8 @@ impl Topic {
             "frequency_bands" => Some(Self::FrequencyBands),
             "partial_stt" => Some(Self::PartialStt),
             "final_stt" => Some(Self::FinalStt),
+            "daemon_status_changed" => Some(Self::DaemonStatusChanged),
+            "download_progress" => Some(Self::DownloadProgress),
             _ => None,
         }
     }
@@ -121,6 +131,21 @@ pub struct SttEvent {
     pub confidence: f32,
 }
 
+/// `daemon_status_changed` carries a heterogeneous payload: the `status`
+/// discriminator selects between `loading_model`, `ready`,
+/// `model_switched`, `switching_device`, `device_switch_error`, etc.
+/// Each variant has its own keys (`model_loaded`, `actual_device`,
+/// `target_device`, …). Storing this as `serde_json::Value` keeps the
+/// shape identical to the legacy notification-manager broadcast so the
+/// settings app's consumer doesn't have to change.
+pub type DaemonStatusChangedEvent = serde_json::Value;
+
+/// `download_progress` mirrors `DownloadProgress` plus a `timestamp`.
+/// Same rationale as above — we hand the consumer the legacy JSON
+/// shape and let it deserialize into
+/// `super_stt_shared::models::protocol::DownloadProgress`.
+pub type DownloadProgressEvent = serde_json::Value;
+
 // ---------- The bus ----------------------------------------------------------
 
 /// One `broadcast::Sender` per topic. The bus is held on `SuperSTTDaemon`
@@ -134,6 +159,8 @@ pub struct EventBus {
     frequency_bands: broadcast::Sender<FrequencyBandsEvent>,
     partial_stt: broadcast::Sender<SttEvent>,
     final_stt: broadcast::Sender<SttEvent>,
+    daemon_status_changed: broadcast::Sender<DaemonStatusChangedEvent>,
+    download_progress: broadcast::Sender<DownloadProgressEvent>,
 }
 
 impl Default for EventBus {
@@ -145,6 +172,8 @@ impl Default for EventBus {
         let (frequency_bands, _) = broadcast::channel(AUDIO_BUF_CAPACITY);
         let (partial_stt, _) = broadcast::channel(STATE_BUF_CAPACITY);
         let (final_stt, _) = broadcast::channel(STATE_BUF_CAPACITY);
+        let (daemon_status_changed, _) = broadcast::channel(STATE_BUF_CAPACITY);
+        let (download_progress, _) = broadcast::channel(STATE_BUF_CAPACITY);
         Self {
             recording_started,
             recording_stopped,
@@ -153,6 +182,8 @@ impl Default for EventBus {
             frequency_bands,
             partial_stt,
             final_stt,
+            daemon_status_changed,
+            download_progress,
         }
     }
 }
@@ -207,6 +238,22 @@ impl EventBus {
         let _ = self.final_stt.send(SttEvent { text, confidence });
     }
 
+    /// Publish a `daemon_status_changed` event. Payload is whatever the
+    /// legacy callers built — `{ status: "ready", model_loaded: true,
+    /// ... }`, `{ status: "loading_model", ... }`, etc. Settings-scope
+    /// only: the SSE router refuses widget tokens for this topic.
+    pub fn publish_daemon_status_changed(&self, data: serde_json::Value) {
+        let _ = self.daemon_status_changed.send(data);
+    }
+
+    /// Publish a `download_progress` event. Payload is the JSON shape
+    /// the legacy `notification_manager.broadcast_event("download_progress",...)`
+    /// used — the keys of `DownloadProgress` plus a `timestamp`.
+    /// Settings-scope only: see [`publish_daemon_status_changed`].
+    pub fn publish_download_progress(&self, data: serde_json::Value) {
+        let _ = self.download_progress.send(data);
+    }
+
     // ---------- Subscribe API ----------------------------------------------
 
     /// Subscribe to a topic. Returns a typed `broadcast::Receiver` whose
@@ -229,6 +276,12 @@ impl EventBus {
             Topic::FrequencyBands => AnyReceiver::FrequencyBands(self.frequency_bands.subscribe()),
             Topic::PartialStt => AnyReceiver::PartialStt(self.partial_stt.subscribe()),
             Topic::FinalStt => AnyReceiver::FinalStt(self.final_stt.subscribe()),
+            Topic::DaemonStatusChanged => {
+                AnyReceiver::DaemonStatusChanged(self.daemon_status_changed.subscribe())
+            }
+            Topic::DownloadProgress => {
+                AnyReceiver::DownloadProgress(self.download_progress.subscribe())
+            }
         }
     }
 }
@@ -244,6 +297,8 @@ pub enum AnyReceiver {
     FrequencyBands(broadcast::Receiver<FrequencyBandsEvent>),
     PartialStt(broadcast::Receiver<SttEvent>),
     FinalStt(broadcast::Receiver<SttEvent>),
+    DaemonStatusChanged(broadcast::Receiver<DaemonStatusChangedEvent>),
+    DownloadProgress(broadcast::Receiver<DownloadProgressEvent>),
 }
 
 impl AnyReceiver {
@@ -276,6 +331,14 @@ impl AnyReceiver {
             Self::FrequencyBands(rx) => recv_arm!(rx, FrequencyBands),
             Self::PartialStt(rx) => recv_arm!(rx, PartialStt),
             Self::FinalStt(rx) => recv_arm!(rx, FinalStt),
+            Self::DaemonStatusChanged(rx) => {
+                let value = rx.recv().await?;
+                Ok((Topic::DaemonStatusChanged.as_str(), value))
+            }
+            Self::DownloadProgress(rx) => {
+                let value = rx.recv().await?;
+                Ok((Topic::DownloadProgress.as_str(), value))
+            }
         }
     }
 }
@@ -414,10 +477,37 @@ mod tests {
             Topic::FrequencyBands,
             Topic::PartialStt,
             Topic::FinalStt,
+            Topic::DaemonStatusChanged,
+            Topic::DownloadProgress,
         ] {
             assert_eq!(Topic::from_wire(t.as_str()), Some(t));
         }
         assert_eq!(Topic::from_wire("not_a_topic"), None);
+    }
+
+    #[tokio::test]
+    async fn settings_only_topics_publish_and_receive() {
+        let bus = EventBus::new();
+        let mut status_rx = bus.subscribe(Topic::DaemonStatusChanged);
+        let mut prog_rx = bus.subscribe(Topic::DownloadProgress);
+
+        bus.publish_daemon_status_changed(serde_json::json!({
+            "status": "ready",
+            "model_loaded": true,
+        }));
+        bus.publish_download_progress(serde_json::json!({
+            "model_name": "whisper-tiny",
+            "percentage": 42.5,
+        }));
+
+        let (topic, payload) = status_rx.recv_json().await.expect("daemon status");
+        assert_eq!(topic, "daemon_status_changed");
+        assert_eq!(payload["status"], serde_json::json!("ready"));
+        assert_eq!(payload["model_loaded"], serde_json::json!(true));
+
+        let (topic, payload) = prog_rx.recv_json().await.expect("download progress");
+        assert_eq!(topic, "download_progress");
+        assert_eq!(payload["model_name"], serde_json::json!("whisper-tiny"));
     }
 
     #[test]

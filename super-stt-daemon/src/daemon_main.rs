@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Main daemon entry point and coordination
+//! Main daemon entry point and coordination.
 //!
-//! This module serves as the entry point for the daemon and coordinates
-//! between the modular daemon components.
+//! Boots the daemon, spawns the HTTP listener on
+//! `$XDG_RUNTIME_DIR/stt/super-stt-http.sock`, and waits for a shutdown
+//! signal. Client commands (`record`, `status`, etc.) live in
+//! `super-stt-cli`, which talks to the daemon over HTTP.
 
 use crate::cli;
 use crate::config::DaemonConfig;
 use crate::daemon::types::{DeviceOverride, SuperSTTDaemon};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use log::{error, info, warn};
 use std::path::PathBuf;
 use super_stt_shared::theme::AudioTheme;
@@ -51,30 +53,28 @@ fn resolve_cli_overrides(
     (model_override, device_override, audio_theme_override)
 }
 
-/// Spawn the new HTTP listener side-by-side with the legacy length-prefix
-/// listener. Failure to bind is non-fatal — the legacy path keeps working
-/// so existing clients don't break during the rollout.
+/// Spawn the HTTP listener that serves every external request the daemon
+/// answers. Failure to bind is fatal — there's no other transport.
+///
+/// Returns the listener task's [`JoinHandle`] so `run` can race it
+/// against the shutdown signal: if the listener task exits before the
+/// shutdown signal fires, the daemon treats itself as unreachable and
+/// exits with a non-zero status.
 ///
 /// `SUPER_STT_HTTP_SOCKET` overrides the default path; tests use this to
 /// bind a unique socket without overriding `$XDG_RUNTIME_DIR` (which would
 /// break the Wayland connection for spawned consent helpers).
-async fn spawn_http_listener(daemon: &SuperSTTDaemon) {
+async fn spawn_http_listener(daemon: &SuperSTTDaemon) -> Result<tokio::task::JoinHandle<()>> {
     let http_socket_path = std::env::var("SUPER_STT_HTTP_SOCKET").ok().map_or_else(
         super_stt_shared::validation::get_http_socket_path,
         PathBuf::from,
     );
-    if let Err(e) = crate::daemon::http_server::start_http_server(
+    crate::daemon::http_server::start_http_server(
         std::sync::Arc::new(daemon.clone()),
-        http_socket_path.clone(),
+        http_socket_path,
         daemon.shutdown_tx.clone(),
     )
     .await
-    {
-        warn!(
-            "HTTP listener failed to start at {}: {e}. Legacy listener will continue.",
-            http_socket_path.display()
-        );
-    }
 }
 
 /// Main entry point for the daemon
@@ -89,22 +89,6 @@ async fn spawn_http_listener(daemon: &SuperSTTDaemon) {
 pub async fn run() -> Result<()> {
     let matches = cli::build().get_matches();
 
-    // Check if record subcommand was used
-    if let Some(record_matches) = matches.subcommand_matches("record") {
-        return handle_record_command(record_matches).await;
-    }
-
-    // Check if ping subcommand was used
-    if matches.subcommand_matches("ping").is_some() {
-        return handle_ping_command(&matches).await;
-    }
-
-    // Check if status subcommand was used
-    if matches.subcommand_matches("status").is_some() {
-        return handle_status_command(&matches).await;
-    }
-
-    // Standard daemon mode
     // Load saved configuration first
     let config = DaemonConfig::load();
 
@@ -118,9 +102,6 @@ pub async fn run() -> Result<()> {
     let device = matches.get_one::<String>("device").unwrap();
     let force_cpu = device == "cpu";
     let verbose = matches.get_flag("verbose");
-    let socket_path = matches
-        .get_one::<PathBuf>("socket")
-        .unwrap_or(&cli::DEFAULT_SOCKET_PATH);
 
     let audio_theme =
         if matches.value_source("audio-theme") == Some(clap::parser::ValueSource::CommandLine) {
@@ -133,7 +114,6 @@ pub async fn run() -> Result<()> {
     init_logging(verbose);
 
     info!("Starting Super STT Daemon");
-    info!("Socket path: {}", socket_path.display());
     info!("Model: {model}");
     info!("Device: {device}");
     info!("Audio theme: {audio_theme}");
@@ -141,13 +121,7 @@ pub async fn run() -> Result<()> {
     let (model_override, device_override, audio_theme_override) =
         resolve_cli_overrides(&matches, model, audio_theme, force_cpu);
 
-    let daemon = SuperSTTDaemon::new(
-        socket_path.clone(),
-        model_override,
-        device_override,
-        audio_theme_override,
-    )
-    .await?;
+    let daemon = SuperSTTDaemon::new(model_override, device_override, audio_theme_override).await?;
 
     info!("Daemon initialized successfully");
 
@@ -161,10 +135,46 @@ pub async fn run() -> Result<()> {
         let _ = shutdown_tx.send(());
     });
 
-    spawn_http_listener(&daemon).await;
+    // Subscribe BEFORE spawning the listener so a Ctrl+C arriving in
+    // the gap between spawn and supervise can't slip past. broadcast
+    // sends are dropped for receivers that don't yet exist; subscribing
+    // first guarantees the supervisor sees every shutdown signal.
+    let mut shutdown_rx = daemon.shutdown_tx.subscribe();
 
-    // Start the daemon and wait for it to complete
-    daemon.start().await?;
+    let listener_handle = match spawn_http_listener(&daemon).await {
+        Ok(h) => h,
+        Err(e) => {
+            warn!("HTTP listener failed to start: {e}");
+            return Err(e);
+        }
+    };
+
+    // Wait for either the shutdown signal or the listener task ending
+    // early. The listener's spawned task is the daemon's only way to
+    // accept new connections — if it panics or exits unexpectedly,
+    // the daemon would otherwise stay parked here looking healthy
+    // while being unreachable. Racing the JoinHandle catches both
+    // panics (surfaced as `JoinError`) and any future code path that
+    // returns from the loop without a shutdown signal.
+    tokio::select! {
+        biased;
+        _ = shutdown_rx.recv() => {
+            info!("Shutdown signal received");
+        }
+        join_result = listener_handle => {
+            // The listener task ended before the shutdown signal —
+            // signal shutdown defensively (in case anything else is
+            // listening) and return an error so the process exits
+            // non-zero. A `JoinError` indicates a panic; `Ok(())` here
+            // means the spawned task body returned without ever
+            // observing the shutdown_rx arm, which is itself a bug.
+            error!("HTTP listener task exited unexpectedly: {join_result:?}");
+            let _ = daemon.shutdown_tx.send(());
+            return Err(anyhow::anyhow!(
+                "HTTP listener task exited before shutdown signal"
+            ));
+        }
+    }
 
     info!("Daemon stopped gracefully");
 
@@ -173,285 +183,4 @@ pub async fn run() -> Result<()> {
 
     info!("Exiting daemon process");
     std::process::exit(0);
-}
-
-/// Handle the record subcommand - direct recording mode
-async fn handle_record_command(matches: &clap::ArgMatches) -> Result<()> {
-    let write_mode = matches.get_flag("write");
-    let wait = matches.get_flag("wait");
-    let config = DaemonConfig::load();
-    // Resolve stop mode: CLI flag → config file → default
-    let stop_mode = if let Some(mode) = matches.get_one::<String>("stop-mode") {
-        mode.clone()
-    } else {
-        config.transcription.recording_stop_mode.to_string()
-    };
-    // Resolve write method: CLI flag → config file → default (auto)
-    let write_method = if let Some(method) = matches.get_one::<String>("write-method") {
-        method.clone()
-    } else {
-        config.transcription.write_method.to_string()
-    };
-    let socket_path = matches
-        .get_one::<PathBuf>("socket")
-        .unwrap_or(&cli::DEFAULT_SOCKET_PATH);
-
-    // Initialize logging for recording mode - respect RUST_LOG env var
-    if std::env::var("RUST_LOG").is_ok() {
-        env_logger::init();
-    } else {
-        env_logger::Builder::from_default_env()
-            .filter_level(log::LevelFilter::Info)
-            .init();
-    }
-
-    info!("Super STT Direct Recording Mode");
-
-    // Try to connect to existing daemon first
-    if socket_path.exists() {
-        info!("Found existing daemon, sending record request...");
-        return send_record_request_to_daemon(
-            socket_path,
-            write_mode,
-            &stop_mode,
-            &write_method,
-            wait,
-        )
-        .await;
-    }
-
-    // If no daemon is running, inform user to start it first
-    error!("❌ No Super STT daemon is running.");
-    error!("Please start the daemon first:");
-    error!("  stt");
-    error!("Then try recording again:");
-    error!("  stt record");
-
-    std::process::exit(1);
-}
-
-/// Handle the ping command - check if daemon is running
-async fn handle_ping_command(matches: &clap::ArgMatches) -> Result<()> {
-    let socket_path = matches
-        .get_one::<PathBuf>("socket")
-        .unwrap_or(&cli::DEFAULT_SOCKET_PATH);
-
-    // Check if socket exists and is accessible
-    if socket_path.exists() {
-        match tokio::net::UnixStream::connect(socket_path).await {
-            Ok(_) => {
-                std::process::exit(0);
-            }
-            Err(_) => {
-                std::process::exit(1);
-            }
-        }
-    } else {
-        std::process::exit(1);
-    }
-}
-
-/// Handle the status command - get daemon status information
-async fn handle_status_command(matches: &clap::ArgMatches) -> Result<()> {
-    let socket_path = matches
-        .get_one::<PathBuf>("socket")
-        .unwrap_or(&cli::DEFAULT_SOCKET_PATH);
-
-    // Try to connect to daemon and get status
-    match send_status_request_to_daemon(socket_path).await {
-        Ok(()) => std::process::exit(0),
-        Err(e) => {
-            error!("❌ Error getting status: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-/// Send a record request to an existing daemon and wait for acknowledgment
-async fn send_record_request_to_daemon(
-    socket_path: &PathBuf,
-    write_mode: bool,
-    stop_mode: &str,
-    write_method: &str,
-    wait: bool,
-) -> Result<()> {
-    use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::UnixStream;
-
-    let mut stream = UnixStream::connect(socket_path)
-        .await
-        .context("Failed to connect to daemon")?;
-
-    // Send record request
-    let request = DaemonRequest {
-        command: "record".to_string(),
-        audio_data: None,
-        sample_rate: None,
-        event_types: None,
-        client_info: None,
-        since_timestamp: None,
-        limit: None,
-        event_type: None,
-        client_id: Some("record_client".to_string()),
-        data: Some(serde_json::json!({
-            "write_mode": write_mode,
-            "stop_mode": stop_mode,
-            "write_method": write_method,
-            "wait": wait,
-        })),
-        language: None,
-        enabled: None,
-    };
-
-    let request_data = serde_json::to_vec(&request)?;
-    let request_size = request_data.len() as u64;
-
-    // Send size then data
-    stream.write_all(&request_size.to_be_bytes()).await?;
-    stream.write_all(&request_data).await?;
-
-    // Read responses from the daemon.
-    // When wait=true, the daemon may stream preview_text responses before the final one.
-    loop {
-        let mut size_bytes = [0u8; 8];
-        stream
-            .read_exact(&mut size_bytes)
-            .await
-            .context("Failed to read response from daemon")?;
-        let response_size = u64::from_be_bytes(size_bytes);
-        let response_len = usize::try_from(response_size)
-            .context("Response size does not fit into memory on this platform")?;
-        let mut response_data = vec![0u8; response_len];
-        stream
-            .read_exact(&mut response_data)
-            .await
-            .context("Failed to read response data from daemon")?;
-        let response: DaemonResponse = serde_json::from_slice(&response_data)?;
-
-        // Preview text — overwrite the current line
-        if let Some(preview) = &response.preview_text {
-            use std::io::Write;
-            print!("\r\x1b[K{preview}");
-            std::io::stdout().flush().ok();
-            continue;
-        }
-
-        // Final response — clear the preview line first if we were streaming
-        if wait {
-            use std::io::Write;
-            print!("\r\x1b[K");
-            std::io::stdout().flush().ok();
-        }
-
-        if response.status == "success" {
-            let msg = response.message.as_deref().unwrap_or("");
-            if msg == DaemonResponse::RECORDING_STOP_SIGNAL_MSG {
-                info!("🛑 Recording stopped successfully");
-            } else if wait {
-                if let Some(transcription) = &response.transcription {
-                    if transcription.is_empty() {
-                        info!("🎤 No speech detected");
-                    } else {
-                        info!("🎤 Transcription: {transcription}");
-                    }
-                } else {
-                    info!("🎤 {msg}");
-                }
-            } else {
-                info!("🎤 Recording started (stop mode: {stop_mode})");
-                if write_mode {
-                    info!("📝 Will type transcription when complete");
-                }
-            }
-        } else {
-            warn!(
-                "Daemon rejected record request: {}",
-                response.message.unwrap_or_default()
-            );
-        }
-
-        break;
-    }
-
-    Ok(())
-}
-
-/// Send a status request to an existing daemon and display the response
-async fn send_status_request_to_daemon(socket_path: &PathBuf) -> Result<()> {
-    use super_stt_shared::models::protocol::{DaemonRequest, DaemonResponse};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::UnixStream;
-
-    let mut stream = UnixStream::connect(socket_path)
-        .await
-        .context("Failed to connect to daemon")?;
-
-    // Send status request
-    let request = DaemonRequest {
-        command: "status".to_string(),
-        audio_data: None,
-        sample_rate: None,
-        event_types: None,
-        client_info: None,
-        since_timestamp: None,
-        limit: None,
-        event_type: None,
-        client_id: Some("status_client".to_string()),
-        data: None,
-        language: None,
-        enabled: None,
-    };
-
-    let request_data = serde_json::to_vec(&request)?;
-    let request_size = request_data.len() as u64;
-
-    // Send size then data
-    stream.write_all(&request_size.to_be_bytes()).await?;
-    stream.write_all(&request_data).await?;
-
-    // Read response size
-    let mut size_bytes = [0u8; 8];
-    stream.read_exact(&mut size_bytes).await?;
-    let response_size = u64::from_be_bytes(size_bytes);
-
-    // Read response data
-    let response_len: usize = usize::try_from(response_size)
-        .context("Response size does not fit into memory on this platform")?;
-    let mut response_data = vec![0u8; response_len];
-    stream.read_exact(&mut response_data).await?;
-
-    // Parse response
-    let response: DaemonResponse = serde_json::from_slice(&response_data)?;
-
-    // Display status information
-    match response.status.as_str() {
-        "success" => {
-            info!("Daemon Status:");
-            info!(
-                "  Model: {}",
-                response
-                    .current_model
-                    .unwrap_or_else(|| "unknown".to_string())
-            );
-            info!(
-                "  Device: {}",
-                response.device.unwrap_or("unknown".to_string())
-            );
-        }
-        "error" => {
-            let message = response.message.unwrap_or("Unknown error".to_string());
-            error!("❌ Error from daemon: {message}");
-            return Err(anyhow::anyhow!("Daemon error: {message}"));
-        }
-        _ => {
-            error!("❌ Unexpected response from daemon: {}", response.status);
-            return Err(anyhow::anyhow!(
-                "Unexpected response status: {}",
-                response.status
-            ));
-        }
-    }
-
-    Ok(())
 }

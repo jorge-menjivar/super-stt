@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::daemon::types::SuperSTTDaemon;
-use chrono::Utc;
 use log::{error, info, warn};
-use serde_json::Value;
-use std::collections::HashMap;
 use super_stt_shared::models::protocol::DaemonResponse;
 use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
@@ -13,19 +10,12 @@ use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
 
 impl SuperSTTDaemon {
-    /// Handle ping command - test connectivity and connection status
-    pub async fn handle_ping(&self, client_id: Option<String>) -> DaemonResponse {
-        // Clean up old connections
-        self.cleanup_old_connections().await;
-
-        let mut response = DaemonResponse::success().with_message("pong".to_string());
-
-        if let Some(client_id) = client_id {
-            let connection_active = self.is_client_connection_active(&client_id).await;
-            response = response.with_connection_active(connection_active);
-        }
-
-        response
+    /// Handle ping command — returns `pong`. The HTTP layer is the only
+    /// caller now, so there's no per-client liveness map to consult; a
+    /// successful HTTP response is itself the liveness signal.
+    #[must_use]
+    pub fn handle_ping(&self, _client_id: Option<String>) -> DaemonResponse {
+        DaemonResponse::success().with_message("pong".to_string())
     }
 
     /// Handle status command - return daemon and model status
@@ -44,175 +34,18 @@ impl SuperSTTDaemon {
             None => ("unknown".to_string(), false, None),
         };
 
-        let notification_info = self.notification_manager.get_subscriber_info();
+        let is_recording = *self.is_recording.read().await;
 
         let mut response = DaemonResponse::success()
             .with_device(device)
             .with_model_loaded(model_loaded)
-            .with_notification_info(notification_info);
+            .with_is_recording(is_recording);
 
         if let Some(model) = current_model {
             response = response.with_current_model(model);
         }
 
         response
-    }
-
-    /// Handle notify command - broadcast events to subscribers
-    #[allow(clippy::cast_possible_truncation)]
-    pub async fn handle_notify(
-        &self,
-        event_type: String,
-        client_id: String,
-        data: Value,
-    ) -> DaemonResponse {
-        // Emit D-Bus signals for listening events
-        if let Some(ref dbus_manager) = self.dbus_manager {
-            match event_type.as_str() {
-                "listening_started" => {
-                    use crate::services::dbus::ListeningEvent;
-                    let event = ListeningEvent {
-                        client_id: client_id.clone(),
-                        timestamp: Utc::now().to_rfc3339(),
-                        write_mode: data
-                            .get("write_mode")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false),
-                        timeout_seconds: data
-                            .get("timeout_seconds")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0),
-                        audio_level: data
-                            .get("audio_level")
-                            .and_then(Value::as_f64)
-                            .unwrap_or(0.0) as f32,
-                    };
-
-                    if let Err(e) = dbus_manager.emit_listening_started(event).await {
-                        warn!("Failed to emit D-Bus listening_started signal: {e}");
-                    } else {
-                        log::debug!(
-                            "Emitted D-Bus listening_started signal for client: {client_id}"
-                        );
-                    }
-                }
-                "listening_stopped" => {
-                    use crate::services::dbus::ListeningStoppedEvent;
-                    let event = ListeningStoppedEvent {
-                        client_id: client_id.clone(),
-                        timestamp: Utc::now().to_rfc3339(),
-                        transcription_success: data
-                            .get("transcription_success")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false),
-                        error: data
-                            .get("error")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                    };
-
-                    if let Err(e) = dbus_manager.emit_listening_stopped(event).await {
-                        warn!("Failed to emit D-Bus listening_stopped signal: {e}");
-                    } else {
-                        log::debug!(
-                            "Emitted D-Bus listening_stopped signal for client: {client_id}"
-                        );
-                    }
-                }
-                "audio_level" => {
-                    use crate::services::dbus::AudioLevelEvent;
-                    let event = AudioLevelEvent {
-                        client_id: client_id.clone(),
-                        timestamp: Utc::now().to_rfc3339(),
-                        level: data.get("level").and_then(Value::as_f64).unwrap_or(0.0) as f32,
-                        is_speech: data
-                            .get("is_speech")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false),
-                    };
-
-                    if let Err(e) = dbus_manager.emit_audio_level(event).await {
-                        warn!("Failed to emit D-Bus audio_level signal: {e}");
-                    } else {
-                        log::debug!("Emitted D-Bus audio_level signal for client: {client_id}");
-                    }
-                }
-                _ => {
-                    // For other event types, just log
-                    log::debug!(
-                        "Received notification event: {event_type} from client: {client_id}"
-                    );
-                }
-            }
-        }
-
-        // Continue with existing notification system
-        match self
-            .notification_manager
-            .broadcast_event(event_type, client_id, data)
-            .await
-        {
-            Ok(delivered) => DaemonResponse::success()
-                .with_message(format!("Event broadcasted to {delivered} subscribers")),
-            Err(e) => DaemonResponse::error(&format!("Failed to broadcast event: {e}")),
-        }
-    }
-
-    /// Handle subscribe command - subscribe to event types
-    #[must_use]
-    pub fn handle_subscribe(
-        &self,
-        event_types: Vec<String>,
-        client_info: HashMap<String, Value>,
-    ) -> DaemonResponse {
-        match self
-            .notification_manager
-            .subscribe(event_types.clone(), client_info)
-        {
-            Ok((client_id, _receiver)) => {
-                info!("Client {client_id} subscribed to events: {event_types:?}");
-
-                // Note: Audio monitoring will only start during recording sessions
-                // No continuous monitoring for event subscriptions
-
-                DaemonResponse::success()
-                    .with_client_id(client_id)
-                    .with_subscribed_to(event_types)
-                    .with_total_subscribers(
-                        u32::try_from(self.notification_manager.get_total_subscribers())
-                            .unwrap_or(u32::MAX),
-                    )
-            }
-            Err(e) => {
-                warn!("Subscription failed: {e}");
-                DaemonResponse::error(&e.to_string())
-            }
-        }
-    }
-
-    /// Handle get events command - retrieve recent events
-    #[must_use]
-    pub fn handle_get_events(
-        &self,
-        since_timestamp: Option<String>,
-        event_types: Option<Vec<String>>,
-        limit: u32,
-    ) -> DaemonResponse {
-        match self
-            .notification_manager
-            .get_recent_events(since_timestamp, event_types, limit)
-        {
-            Ok(events) => DaemonResponse::success().with_events(events),
-            Err(e) => DaemonResponse::error(&e.to_string()),
-        }
-    }
-
-    /// Handle get subscriber info command
-    #[must_use]
-    pub fn handle_get_subscriber_info(&self) -> DaemonResponse {
-        let info = self.notification_manager.get_subscriber_info();
-        DaemonResponse::success().with_notification_info(info)
     }
 
     /// Handle get config command - return current daemon configuration
@@ -314,10 +147,10 @@ impl SuperSTTDaemon {
             config_guard.transcription.preview_typing_enabled = enabled;
         }
 
-        // Broadcast config change (this saves the config to disk)
-        let broadcast_result = self.broadcast_config_change().await;
+        // Persist the change to disk so it survives a restart.
+        let persist_result = self.persist_config().await;
 
-        match broadcast_result {
+        match persist_result {
             Ok(()) => {
                 info!(
                     "Preview typing {} and saved to config",
@@ -361,9 +194,9 @@ impl SuperSTTDaemon {
             config_guard.transcription.recording_stop_mode = mode;
         }
 
-        let broadcast_result = self.broadcast_config_change().await;
+        let persist_result = self.persist_config().await;
 
-        match broadcast_result {
+        match persist_result {
             Ok(()) => {
                 info!("Recording stop mode set to {mode} and saved to config");
                 DaemonResponse::success()
@@ -397,9 +230,9 @@ impl SuperSTTDaemon {
         // Invalidate the cached simulator so the next recording creates a fresh one.
         *self.simulator.write().await = None;
 
-        let broadcast_result = self.broadcast_config_change().await;
+        let persist_result = self.persist_config().await;
 
-        match broadcast_result {
+        match persist_result {
             Ok(()) => {
                 info!("Write method set to {method} and saved to config");
                 DaemonResponse::success()
@@ -450,9 +283,9 @@ impl SuperSTTDaemon {
             }
         }
 
-        let broadcast_result = self.broadcast_config_change().await;
+        let persist_result = self.persist_config().await;
 
-        match broadcast_result {
+        match persist_result {
             Ok(()) => {
                 info!(
                     "Online models {}",
@@ -514,9 +347,9 @@ impl SuperSTTDaemon {
         // Re-scan the new directory
         self.refresh_custom_models().await;
 
-        let broadcast_result = self.broadcast_config_change().await;
+        let persist_result = self.persist_config().await;
 
-        match broadcast_result {
+        match persist_result {
             Ok(()) => {
                 info!("Custom models directory set to {path_display} and saved to config");
                 DaemonResponse::success()

@@ -99,7 +99,7 @@ pub enum Message {
     DeviceInfoLoaded(
         String,
         Vec<String>,
-        super_stt_shared::daemon::client::GpuMemoryInfo,
+        super_stt_shared::daemon::http_client::GpuMemoryInfo,
     ), // Current device, available devices, GPU memory (free, total)
     DeviceError(String),    // Device switching error
 

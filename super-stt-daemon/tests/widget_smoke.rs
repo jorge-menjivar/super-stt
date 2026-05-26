@@ -64,12 +64,17 @@ impl Drop for KeyringCleanupGuard {
     }
 }
 
+/// Monotonic per-call counter so concurrent tests in the same test
+/// binary get unique paths. `Instant::now().elapsed().as_nanos()`
+/// returns 0 immediately after construction and would collide.
+fn next_test_uniq() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static UNIQ: AtomicU64 = AtomicU64::new(0);
+    UNIQ.fetch_add(1, Ordering::Relaxed)
+}
+
 fn unique_socket_paths(label: &str) -> (PathBuf, PathBuf) {
-    let unique = format!(
-        "stt-{label}-{}-{}",
-        std::process::id(),
-        Instant::now().elapsed().as_nanos()
-    );
+    let unique = format!("stt-{label}-{}-{}", std::process::id(), next_test_uniq());
     let tmp = std::env::temp_dir();
     (
         tmp.join(format!("{unique}-legacy.sock")),
@@ -77,12 +82,21 @@ fn unique_socket_paths(label: &str) -> (PathBuf, PathBuf) {
     )
 }
 
-async fn spawn_daemon(legacy_socket: &Path, http_socket: &Path) -> Child {
+async fn spawn_daemon(_legacy_socket: &Path, http_socket: &Path) -> Child {
+    // Isolate XDG_CONFIG_HOME so the test daemon doesn't overwrite
+    // the developer's real config when applying `--audio-theme` /
+    // `--device` CLI overrides.
+    let config_home = std::env::temp_dir().join(format!(
+        "stt-widget-cfg-{}-{}",
+        std::process::id(),
+        next_test_uniq()
+    ));
+    std::fs::create_dir_all(&config_home).expect("create test config dir");
+
     Command::new(DAEMON_BIN)
         .env("SUPER_STT_AUTO_APPROVE", "1")
         .env("SUPER_STT_HTTP_SOCKET", http_socket)
-        .arg("--socket")
-        .arg(legacy_socket)
+        .env("XDG_CONFIG_HOME", &config_home)
         .arg("--device")
         .arg("cpu")
         .arg("--audio-theme")
