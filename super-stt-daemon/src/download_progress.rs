@@ -34,6 +34,22 @@ pub struct DownloadProgressTracker {
     /// even when the 1%-increment percentage gate would otherwise
     /// suppress them.
     last_broadcast_status: Arc<RwLock<String>>,
+    /// The `total_bytes` value we most recently broadcast. A change
+    /// here (typically 0 → file size, once we resolve it from
+    /// `X-Linked-Size` / `Content-Length` / HEAD) must publish even
+    /// when neither percentage nor status changed — otherwise the UI's
+    /// "x.x / y.y MB" line stays at "0.0 / 0.0 MB" until enough bytes
+    /// stream for the percentage to cross a 1% boundary, which for a
+    /// multi-GB file can be several seconds of frozen UI.
+    last_broadcast_total_bytes: AtomicU64,
+    /// The `file_index` we most recently broadcast. File transitions
+    /// (per-file `total_bytes`/`bytes_downloaded` reset, percentage
+    /// dropping from ~90% back to 0%) must publish even when the new
+    /// file happens to be the same size as the previous one — the
+    /// percentage drop alone is *not* caught by `percentage_crossed`
+    /// (which only fires on increases). Initialized to `usize::MAX`
+    /// so the very first broadcast also fires.
+    last_broadcast_file_index: AtomicUsize,
 }
 
 impl DownloadProgressTracker {
@@ -53,6 +69,8 @@ impl DownloadProgressTracker {
             events: None,
             last_broadcast_percentage: AtomicU64::new(0),
             last_broadcast_status: Arc::new(RwLock::new(String::new())),
+            last_broadcast_total_bytes: AtomicU64::new(0),
+            last_broadcast_file_index: AtomicUsize::new(usize::MAX),
         }
     }
 
@@ -71,29 +89,38 @@ impl DownloadProgressTracker {
         self
     }
 
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
     pub fn get_progress(&self) -> DownloadProgress {
         let bytes_downloaded = self.bytes_downloaded.load(Ordering::Relaxed);
         let total_bytes = self.total_bytes.load(Ordering::Relaxed);
 
-        // Calculate percentage based on file progress if byte-level tracking isn't available
-        let file_index = self.file_index.load(Ordering::Relaxed);
-        let total_files = self.total_files.load(Ordering::Relaxed);
-
         let status = self.status.read().clone();
-        let percentage: f32 = if status == "loading_model" {
-            // For model loading phase, show 95% to indicate almost complete
-            95.0
+        let percentage: f32 = if status == "completed" || status == "loading_model" {
+            // Files are all on disk. The remaining work (spawning the
+            // backend, loading weights onto the device) isn't
+            // byte-tracked, so keep the bar full — the app shows a
+            // separate "Loading…" indicator for the `loading_model`
+            // phase.
+            100.0
         } else if total_bytes > 0 {
-            // Use byte-level progress if available (capped at 90% for download phase)
-            let pct = ((bytes_downloaded as f64 / total_bytes as f64) * 90.0).min(90.0);
-            pct as f32
-        } else if total_files > 0 {
-            // Use file-based progress (capped at 90% for download phase)
-            let completed_files = file_index.min(total_files) as f64;
-            let pct = ((completed_files / total_files as f64) * 90.0).min(90.0);
-            pct as f32
+            // Per-file progress: how much of the *current* file has
+            // arrived, matching the per-file "X.X / Y.Y MB" readout.
+            // `bytes_downloaded`/`total_bytes` reset at each file
+            // boundary (`start_file`), so the bar fills 0→100% per file
+            // and the last file's final chunk fills it to the end. No
+            // 90% cap: the old in-tree flow reserved 90–100% for a
+            // loading phase, but subprocess backends report that phase
+            // separately via the `loading_model` status above. The
+            // `file_index` counter ("2/4") conveys which file is in
+            // flight.
+            crate::num_cast::f64_to_f32(
+                (crate::num_cast::u64_to_f64(bytes_downloaded)
+                    / crate::num_cast::u64_to_f64(total_bytes)
+                    * 100.0)
+                    .min(100.0),
+            )
         } else {
+            // Size for the current file not resolved yet (or there's
+            // nothing to download).
             0.0
         };
 
@@ -132,8 +159,8 @@ impl DownloadProgressTracker {
         let progress = self.get_progress();
 
         // Clamp, round and convert to a fixed-point integer (percentage * 100)
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let current_percentage = (progress.percentage.clamp(0.0, 100.0) * 100.0).round() as u64;
+        let current_percentage =
+            crate::num_cast::f32_to_u64((progress.percentage.clamp(0.0, 100.0) * 100.0).round());
         let last_percentage = self.last_broadcast_percentage.load(Ordering::Relaxed);
 
         let status_changed = {
@@ -142,13 +169,28 @@ impl DownloadProgressTracker {
         };
         let percentage_crossed =
             current_percentage > last_percentage && current_percentage - last_percentage >= 100;
+        // Newly-resolved file size — broadcast immediately so the UI's
+        // "x.x / y.y MB" line flips from "0.0 / 0.0 MB" to the real total
+        // before the first chunk's percentage update lands.
+        let total_bytes_changed =
+            self.last_broadcast_total_bytes.load(Ordering::Relaxed) != progress.total_bytes;
+        // File boundary — per-file counters reset at the start of the
+        // next file, so we publish even if the new file's size matches
+        // the previous file's (which would otherwise leave every
+        // throttle arm unchanged).
+        let file_index_changed =
+            self.last_broadcast_file_index.load(Ordering::Relaxed) != progress.file_index;
 
-        if status_changed || percentage_crossed {
+        if status_changed || percentage_crossed || total_bytes_changed || file_index_changed {
             self.last_broadcast_percentage
                 .store(current_percentage, Ordering::Relaxed);
             self.last_broadcast_status
                 .write()
                 .clone_from(&progress.status);
+            self.last_broadcast_total_bytes
+                .store(progress.total_bytes, Ordering::Relaxed);
+            self.last_broadcast_file_index
+                .store(progress.file_index, Ordering::Relaxed);
 
             if let Some(ref events) = self.events {
                 let mut payload =
@@ -172,6 +214,20 @@ impl DownloadProgressTracker {
     pub fn start_file(&self, filename: &str, file_index: usize) {
         *self.current_file.write() = filename.to_string();
         self.file_index.store(file_index, Ordering::Relaxed);
+        // Per-file counters: `total_bytes` and `bytes_downloaded`
+        // reflect only the current file, so each file's UI display
+        // is "X.X / <this file's size> MB" rather than an aggregate
+        // across the whole model (which is confusing when sizes
+        // vary by orders of magnitude — `config.json` is sub-MB,
+        // `model-*.safetensors` is multi-GB). The caller publishes
+        // the new file's real numbers after this returns: cached
+        // files store `(md.len(), md.len())` directly, fresh
+        // downloads resolve size via `X-Linked-Size`/HEAD and store
+        // `(file_size, 0)`. Until then we're at 0/0, but no
+        // broadcast goes out between this reset and the caller's
+        // store, so the UI never observes the transient.
+        self.bytes_downloaded.store(0, Ordering::Relaxed);
+        self.total_bytes.store(0, Ordering::Relaxed);
         info!(
             "Downloading file {}/{}: {}",
             file_index + 1,
@@ -188,6 +244,18 @@ impl DownloadProgressTracker {
         self.cancelled.store(true, Ordering::Relaxed);
         *self.status.write() = "cancelled".to_string();
         warn!("Download cancelled for model: {}", self.model_name);
+    }
+
+    /// Mark the file-download phase done and the (untracked) weight-load
+    /// phase begun. The settings app maps this status to a "Loading model
+    /// into memory…" indicator, so the user sees the operation is still
+    /// progressing after the download bar fills.
+    pub fn mark_loading(&self) {
+        *self.status.write() = "loading_model".to_string();
+        info!(
+            "Files downloaded; loading model into memory: {}",
+            self.model_name
+        );
     }
 
     pub fn mark_completed(&self) {
@@ -309,9 +377,153 @@ mod tests {
         );
     }
 
-    /// Companion of the test above: when neither percentage nor status
-    /// changes, the throttle suppresses the publish. Without this
-    /// guard, broadcast_progress would spam events.
+    /// Regression for the "0.0 / 0.0 MB" UI bug: when a download starts
+    /// with `total_bytes = 0` (HF's CDN serves large `.safetensors`
+    /// chunked, so no `Content-Length`), the first broadcast publishes
+    /// `total_bytes = 0`. Once the daemon resolves the real size via
+    /// `X-Linked-Size`/HEAD, it bumps `total_bytes` and calls
+    /// `broadcast_progress()` — but `bytes_downloaded` is still 0, so
+    /// percentage stays 0% and status stays "downloading". Without
+    /// detecting the `total_bytes` change, the throttle would suppress
+    /// the publish and the UI would freeze on "0.0 / 0.0 MB" until
+    /// enough chunks streamed to cross the 1% gate (several seconds on
+    /// a slow connection for a multi-GB file).
+    #[test]
+    fn broadcast_progress_publishes_when_total_bytes_changes() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new("test-model".to_string(), 1, cancelled);
+
+        // Initial broadcast — empty status → "downloading", total_bytes = 0.
+        tracker.broadcast_progress();
+        assert_eq!(
+            tracker.last_broadcast_total_bytes.load(Ordering::Relaxed),
+            0
+        );
+
+        // Size resolves (4 GB). bytes_downloaded still 0, status
+        // unchanged, percentage still 0%. The publish must fire because
+        // total_bytes changed.
+        tracker.total_bytes.store(4_000_000_000, Ordering::Relaxed);
+        tracker.broadcast_progress();
+        assert_eq!(
+            tracker.last_broadcast_total_bytes.load(Ordering::Relaxed),
+            4_000_000_000,
+            "broadcast must fire when total_bytes flips from 0 to the resolved file size"
+        );
+    }
+
+    /// Per-file counters: `start_file` zeroes `total_bytes` and
+    /// `bytes_downloaded` so the UI's "X.X / Y.Y MB" displays only
+    /// the current file's size, not an aggregate across the whole
+    /// model. Without this, a multi-file model (e.g. Voxtral with two
+    /// 3GB safetensors plus a config) shows a cumulative "1500 /
+    /// 6000 MB" mid-second-file, which is confusing.
+    #[test]
+    fn start_file_resets_per_file_counters() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new("test-model".to_string(), 2, cancelled);
+
+        // Simulate file 0 finishing.
+        tracker.total_bytes.store(3_000_000_000, Ordering::Relaxed);
+        tracker
+            .bytes_downloaded
+            .store(3_000_000_000, Ordering::Relaxed);
+
+        // Starting file 1 must zero out per-file counters so the next
+        // size resolution / chunk doesn't accumulate on top of file 0.
+        tracker.start_file("model-00002-of-00002.safetensors", 1);
+        assert_eq!(tracker.total_bytes.load(Ordering::Relaxed), 0);
+        assert_eq!(tracker.bytes_downloaded.load(Ordering::Relaxed), 0);
+        assert_eq!(tracker.file_index.load(Ordering::Relaxed), 1);
+    }
+
+    /// File-index transitions must publish even when the overall
+    /// percentage is flat across the boundary — which is precisely the
+    /// common case with overall (not per-file) progress: file N
+    /// finishing at `(N+1)/total` and file N+1 starting at
+    /// `(N+1)/total` are the same number. Neither `percentage_crossed`
+    /// nor `total_bytes_changed` (same-size files) fires, so without the
+    /// `file_index` arm the throttle would suppress the publish and the
+    /// per-file "X / Y MB" display would stay frozen on the old file.
+    #[test]
+    fn broadcast_progress_publishes_when_file_index_advances() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new("test-model".to_string(), 2, cancelled);
+
+        // File 0 fully downloaded: overall = (0 + 1)/2 = 50%.
+        tracker.total_bytes.store(1000, Ordering::Relaxed);
+        tracker.bytes_downloaded.store(1000, Ordering::Relaxed);
+        tracker.broadcast_progress();
+        assert_eq!(tracker.last_broadcast_file_index.load(Ordering::Relaxed), 0);
+
+        // File 1 starts at 0 bytes, same size: overall = (1 + 0)/2 =
+        // 50% — identical to the previous broadcast. Only file_index
+        // moved.
+        tracker.start_file("file2", 1);
+        tracker.total_bytes.store(1000, Ordering::Relaxed);
+        tracker.broadcast_progress();
+        assert_eq!(
+            tracker.last_broadcast_file_index.load(Ordering::Relaxed),
+            1,
+            "file_index update must publish even when overall percentage is flat across the boundary"
+        );
+    }
+
+    /// The per-file bar reaches 100% when the current file is fully
+    /// downloaded — no 90% cap left over from the in-tree flow. (The
+    /// last file hitting 100%, then `loading_model`/`completed`, fills
+    /// the bar to the end of the whole operation.)
+    #[test]
+    fn percentage_reaches_100_when_current_file_complete() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new("m".to_string(), 3, cancelled);
+        tracker.start_file("f3", 2);
+        tracker.total_bytes.store(500, Ordering::Relaxed);
+        tracker.bytes_downloaded.store(500, Ordering::Relaxed);
+        let pct = tracker.get_progress().percentage;
+        assert!((pct - 100.0).abs() < 0.01, "expected 100%, got {pct}");
+    }
+
+    /// Per-file bar: progress is the current file's byte fraction, not
+    /// an aggregate across files. A half-downloaded second file reads
+    /// 50% regardless of how large the already-finished first file was.
+    #[test]
+    fn percentage_is_per_file_not_aggregate() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new("m".to_string(), 2, cancelled);
+        // Second file (index 1 of 2), half downloaded.
+        tracker.start_file("f2", 1);
+        tracker.total_bytes.store(1000, Ordering::Relaxed);
+        tracker.bytes_downloaded.store(500, Ordering::Relaxed);
+        let pct = tracker.get_progress().percentage;
+        assert!(
+            (pct - 50.0).abs() < 0.01,
+            "expected per-file 50%, got {pct}"
+        );
+    }
+
+    /// `loading_model` and `completed` both pin the bar at 100% — the
+    /// post-download weight-load phase keeps the bar full while the app
+    /// shows its "Loading…" indicator.
+    #[test]
+    fn loading_and_completed_statuses_are_100_percent() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new("m".to_string(), 2, cancelled);
+        tracker.start_file("f1", 0);
+        tracker.total_bytes.store(500, Ordering::Relaxed);
+        tracker.bytes_downloaded.store(100, Ordering::Relaxed);
+
+        tracker.mark_loading();
+        assert!((tracker.get_progress().percentage - 100.0).abs() < 0.01);
+
+        tracker.mark_completed();
+        assert!((tracker.get_progress().percentage - 100.0).abs() < 0.01);
+    }
+
+    /// Companion of the tests above: when nothing meaningful changes
+    /// (percentage, status, total_bytes, file_index all stable), the
+    /// throttle suppresses the publish. Without this guard,
+    /// broadcast_progress would spam events on every chunk.
     #[test]
     fn broadcast_progress_suppressed_when_neither_percentage_nor_status_changes() {
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -319,17 +531,17 @@ mod tests {
         tracker.total_bytes.store(1000, Ordering::Relaxed);
         tracker.bytes_downloaded.store(500, Ordering::Relaxed);
 
-        // First broadcast — percentage of 500/1000 capped at 90% =
-        // 45%, fixed-point 4500.
+        // First broadcast — overall progress of the sole file at
+        // 500/1000 = 50%, fixed-point 5000.
         tracker.broadcast_progress();
         let after_first = tracker.last_broadcast_percentage.load(Ordering::Relaxed);
-        assert_eq!(after_first, 4500);
+        assert_eq!(after_first, 5000);
 
-        // Same percentage, same status → no change.
+        // Same percentage, same status, same file_index → no change.
         tracker.broadcast_progress();
         assert_eq!(
             tracker.last_broadcast_percentage.load(Ordering::Relaxed),
-            4500,
+            5000,
             "second call with identical state must be a no-op"
         );
     }

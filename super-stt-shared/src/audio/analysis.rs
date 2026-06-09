@@ -29,16 +29,23 @@ impl Default for FrequencyData {
 /// Using 64 bands provides richer visualization detail
 const NUM_FREQUENCY_BANDS: usize = 64;
 
+/// Ratio `i / n` as f32 for small loop bounds (band/sample counts here are
+/// `≤ 65_535`). Exact at these magnitudes; centralizes the `usize`→`f32` cast.
+fn ratio(i: usize, n: usize) -> f32 {
+    f32::from(u16::try_from(i).unwrap_or(u16::MAX))
+        / f32::from(u16::try_from(n).unwrap_or(u16::MAX))
+}
+
 /// Audio analyzer that converts time-domain audio samples to frequency bands
 #[derive(Debug, Clone)]
 pub struct AudioAnalyzer {
-    sample_rate: f32,
+    sample_rate: u32,
     buffer_size: usize,
 }
 
 impl AudioAnalyzer {
     #[must_use]
-    pub fn new(sample_rate: f32, buffer_size: usize) -> Self {
+    pub fn new(sample_rate: u32, buffer_size: usize) -> Self {
         Self {
             sample_rate,
             buffer_size,
@@ -47,12 +54,6 @@ impl AudioAnalyzer {
 
     /// Analyze audio samples and return frequency band amplitudes
     #[must_use]
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::too_many_lines,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss
-    )]
     pub fn analyze(&self, samples: &[f32]) -> FrequencyData {
         if samples.is_empty() {
             return FrequencyData {
@@ -84,7 +85,7 @@ impl AudioAnalyzer {
         // Perform FFT
         let spectrum_result = samples_fft_to_spectrum(
             &windowed_samples,
-            self.sample_rate as u32,
+            self.sample_rate,
             FrequencyLimit::All,
             Some(&divide_by_N_sqrt),
         );
@@ -103,9 +104,45 @@ impl AudioAnalyzer {
             }
         };
 
-        // Generate hybrid frequency bands: linear for low frequencies, logarithmic for high
-        // This ensures good resolution where spectrum points are sparse (low freq)
-        // and logarithmic spacing where human perception needs it (high freq)
+        // Generate hybrid frequency bands: linear for low frequencies, logarithmic
+        // for high. ~20 bands are linear (50Hz-800Hz), ~44 logarithmic (800Hz-16kHz).
+        let (mut band_amplitudes, mut total_energy) = Self::generate_bands(&spectrum);
+
+        // Calculate RMS total energy
+        total_energy = (total_energy
+            / f32::from(u16::try_from(NUM_FREQUENCY_BANDS).unwrap_or(u16::MAX)))
+        .sqrt();
+
+        // Apply smart amplitude scaling with noise floor handling. The mean is
+        // computed in f64 (deliberately wider than the original f32) so the
+        // usize sample count converts losslessly; the result only feeds the
+        // discrete noise-floor threshold comparisons below.
+        let sum_sq: f32 = samples_to_use.iter().map(|&x| x * x).sum();
+        let n = u32::try_from(samples_to_use.len()).unwrap_or(u32::MAX);
+        let input_rms: f64 = (f64::from(sum_sq) / f64::from(n)).sqrt();
+
+        Self::scale_bands(&mut band_amplitudes, input_rms);
+
+        // Apply frequency-specific balancing for better visualization.
+        let linear_bands = (NUM_FREQUENCY_BANDS * 5) / 16; // ~20 bands
+        Self::balance_bands(&mut band_amplitudes, linear_bands);
+
+        // Extract dominant frequency for dynamic wave visualization
+        let (dominant_frequency, frequency_confidence) =
+            Self::extract_dominant_frequency(&spectrum, &band_amplitudes);
+
+        FrequencyData {
+            bands: band_amplitudes,
+            total_energy,
+            dominant_frequency,
+            frequency_confidence,
+            dynamic_wave_frequency: None, // Let the applet handle wave frequency mapping
+        }
+    }
+
+    /// Generate the hybrid (linear + logarithmic) frequency bands from the
+    /// spectrum. Returns `(band_amplitudes, sum_of_squared_amplitudes)`.
+    fn generate_bands(spectrum: &FrequencySpectrum) -> (Vec<f32>, f32) {
         let mut band_amplitudes = Vec::with_capacity(NUM_FREQUENCY_BANDS);
         let mut total_energy = 0.0;
 
@@ -123,13 +160,13 @@ impl AudioAnalyzer {
         // Generate linear frequency bands (50Hz - 800Hz)
         let linear_min_freq = 50.0;
         for i in 0..linear_bands {
-            let t1 = i as f32 / linear_bands as f32;
-            let t2 = (i + 1) as f32 / linear_bands as f32;
+            let t1 = ratio(i, linear_bands);
+            let t2 = ratio(i + 1, linear_bands);
 
             let low_freq = linear_min_freq + t1 * (linear_max_freq - linear_min_freq);
             let high_freq = linear_min_freq + t2 * (linear_max_freq - linear_min_freq);
 
-            let amplitude = self.calculate_band_amplitude(&spectrum, low_freq, high_freq);
+            let amplitude = Self::calculate_band_amplitude(spectrum, low_freq, high_freq);
             band_amplitudes.push(amplitude);
             total_energy += amplitude * amplitude;
         }
@@ -139,32 +176,29 @@ impl AudioAnalyzer {
         let log_max = log_max_freq.ln();
 
         for i in 0..log_bands {
-            let t1 = i as f32 / log_bands as f32;
-            let t2 = (i + 1) as f32 / log_bands as f32;
+            let t1 = ratio(i, log_bands);
+            let t2 = ratio(i + 1, log_bands);
 
             let low_freq = (log_min + t1 * (log_max - log_min)).exp();
             let high_freq = (log_min + t2 * (log_max - log_min)).exp();
 
-            let amplitude = self.calculate_band_amplitude(&spectrum, low_freq, high_freq);
+            let amplitude = Self::calculate_band_amplitude(spectrum, low_freq, high_freq);
             band_amplitudes.push(amplitude);
             total_energy += amplitude * amplitude;
         }
 
-        // Calculate RMS total energy
-        total_energy = (total_energy / NUM_FREQUENCY_BANDS as f32).sqrt();
+        (band_amplitudes, total_energy)
+    }
 
-        // Apply smart amplitude scaling with noise floor handling
-        let input_rms = (samples_to_use.iter().map(|&x| x * x).sum::<f32>()
-            / samples_to_use.len() as f32)
-            .sqrt();
-
+    /// Apply noise-floor-aware amplitude scaling to the bands in place.
+    fn scale_bands(bands: &mut [f32], input_rms: f64) {
         // Determine noise floor dynamically
         let noise_floor_threshold = 0.0005; // Very low threshold for noise detection
         let quiet_threshold = 0.002; // Threshold for "quiet but real" audio
         let normal_threshold = 0.01; // Threshold for normal audio levels
 
         // Simple scaling without clamping - let natural differences show
-        let scale_factor = if input_rms < noise_floor_threshold {
+        let scale_factor: f32 = if input_rms < noise_floor_threshold {
             5.0 // Very quiet scaling for noise
         } else if input_rms < quiet_threshold {
             25.0 // Light scaling for quiet audio
@@ -174,53 +208,43 @@ impl AudioAnalyzer {
             100.0 // Full scaling for loud audio
         };
 
-        for band in &mut band_amplitudes {
+        for band in bands.iter_mut() {
             *band = (*band * scale_factor).sqrt();
         }
+    }
 
-        // Apply frequency-specific balancing for better visualization
-        if band_amplitudes.len() >= 64 {
-            // Reduce dominance of low frequencies (first ~20 bands) by applying gentle dampening
-            for i in 0..linear_bands {
-                if i < band_amplitudes.len() {
-                    // Apply progressive dampening: more dampening for lower frequencies
-                    let damping_factor = 0.7 + (i as f32 / linear_bands as f32) * 0.3; // 0.7 to 1.0
-                    band_amplitudes[i] *= damping_factor;
-                }
+    /// Apply frequency-specific balancing (low-freq dampening, mid/high boost).
+    fn balance_bands(bands: &mut [f32], linear_bands: usize) {
+        if bands.len() < 64 {
+            return;
+        }
+
+        // Reduce dominance of low frequencies (first ~20 bands) by applying gentle dampening
+        for i in 0..linear_bands {
+            if i < bands.len() {
+                // Apply progressive dampening: more dampening for lower frequencies
+                let damping_factor = 0.3f32.mul_add(ratio(i, linear_bands), 0.7); // 0.7 to 1.0
+                bands[i] *= damping_factor;
             }
-
-            // Boost mid-high frequencies (logarithmic bands) which are often weaker
-            band_amplitudes
-                .iter_mut()
-                .skip(linear_bands)
-                .take(20)
-                .for_each(|v| *v *= 1.4); // 40% boost for mid frequencies
-
-            // Additional boost for high frequencies which are typically very weak
-            band_amplitudes
-                .iter_mut()
-                .skip(linear_bands + 20)
-                .for_each(|v| *v *= 1.8); // 80% boost for high frequencies
         }
 
-        // Extract dominant frequency for dynamic wave visualization
-        let (dominant_frequency, frequency_confidence) =
-            self.extract_dominant_frequency(&spectrum, &band_amplitudes);
+        // Boost mid-high frequencies (logarithmic bands) which are often weaker
+        bands
+            .iter_mut()
+            .skip(linear_bands)
+            .take(20)
+            .for_each(|v| *v *= 1.4); // 40% boost for mid frequencies
 
-        FrequencyData {
-            bands: band_amplitudes,
-            total_energy,
-            dominant_frequency,
-            frequency_confidence,
-            dynamic_wave_frequency: None, // Let the applet handle wave frequency mapping
-        }
+        // Additional boost for high frequencies which are typically very weak
+        bands
+            .iter_mut()
+            .skip(linear_bands + 20)
+            .for_each(|v| *v *= 1.8); // 80% boost for high frequencies
     }
 
     /// Calculate amplitude for a frequency band using interpolation
     /// This ensures all bands get meaningful data even when spectrum points don't align perfectly
-    #[allow(clippy::unused_self)]
     fn calculate_band_amplitude(
-        &self,
         spectrum: &FrequencySpectrum,
         low_freq: f32,
         high_freq: f32,
@@ -235,7 +259,7 @@ impl AudioAnalyzer {
             let amp_val = amplitude.val();
 
             // Calculate how much this spectrum point contributes to our band
-            let weight = self.calculate_frequency_weight(
+            let weight = Self::calculate_frequency_weight(
                 freq_hz,
                 low_freq,
                 high_freq,
@@ -258,9 +282,7 @@ impl AudioAnalyzer {
 
     /// Calculate how much a spectrum frequency contributes to a frequency band
     /// Uses a smooth weighting function to interpolate between spectrum points
-    #[allow(clippy::unused_self)]
     fn calculate_frequency_weight(
-        &self,
         freq: f32,
         band_low: f32,
         band_high: f32,
@@ -288,7 +310,6 @@ impl AudioAnalyzer {
     /// Extract the dominant frequency from the spectrum and frequency bands
     /// Returns (`frequency_hz`, `confidence_score`)
     fn extract_dominant_frequency(
-        &self,
         spectrum: &FrequencySpectrum,
         band_amplitudes: &[f32],
     ) -> (f32, f32) {
@@ -340,8 +361,7 @@ impl AudioAnalyzer {
         // For real-time visualization, we want some stability
         let smoothed_freq = if confidence < 0.3 {
             // Low confidence - fall back to analyzing frequency bands for general trends
-            self.estimate_frequency_from_bands(band_amplitudes)
-                .unwrap_or(440.0)
+            Self::estimate_frequency_from_bands(band_amplitudes).unwrap_or(440.0)
         } else {
             dominant_freq
         };
@@ -351,8 +371,7 @@ impl AudioAnalyzer {
 
     /// Estimate dominant frequency from frequency bands when direct spectrum analysis is uncertain
     /// This provides a fallback method that looks at energy distribution across bands
-    #[allow(clippy::unused_self, clippy::cast_precision_loss)]
-    fn estimate_frequency_from_bands(&self, bands: &[f32]) -> Option<f32> {
+    fn estimate_frequency_from_bands(bands: &[f32]) -> Option<f32> {
         if bands.len() < 32 {
             return None;
         }
@@ -374,13 +393,13 @@ impl AudioAnalyzer {
 
         let estimated_freq = if max_band_idx < linear_bands {
             // Linear frequency mapping (50Hz - 800Hz)
-            let t = max_band_idx as f32 / linear_bands as f32;
+            let t = ratio(max_band_idx, linear_bands);
             50.0 + t * (800.0 - 50.0)
         } else {
             // Logarithmic frequency mapping (800Hz - 16kHz)
             let log_bands = NUM_FREQUENCY_BANDS - linear_bands;
             let log_idx = max_band_idx - linear_bands;
-            let t = log_idx as f32 / log_bands as f32;
+            let t = ratio(log_idx, log_bands);
 
             let log_min = 800.0f32.ln();
             let log_max = 16000.0f32.ln();
@@ -397,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_audio_analyzer() {
-        let analyzer = AudioAnalyzer::new(44100.0, 1024);
+        let analyzer = AudioAnalyzer::new(44_100, 1024);
 
         // Generate a test tone at 440Hz (A4)
         let samples: Vec<f32> = (0..1024)
@@ -426,5 +445,72 @@ mod tests {
             freq_data.frequency_confidence > 0.0,
             "Should have some confidence in frequency detection"
         );
+    }
+
+    fn tone(freq: f32, n: usize, sample_rate: f32) -> Vec<f32> {
+        (0..n)
+            .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate).sin())
+            .collect()
+    }
+
+    #[test]
+    fn empty_input_yields_default_bands() {
+        let analyzer = AudioAnalyzer::new(44_100, 1024);
+        let data = analyzer.analyze(&[]);
+        assert_eq!(data.bands.len(), NUM_FREQUENCY_BANDS);
+        assert!(data.bands.iter().all(|&b| b == 0.0));
+        assert_eq!(data.total_energy, 0.0);
+        assert_eq!(data.dominant_frequency, 440.0);
+        assert_eq!(data.frequency_confidence, 0.0);
+    }
+
+    #[test]
+    fn band_count_is_stable_across_input_sizes() {
+        let analyzer = AudioAnalyzer::new(44_100, 1024);
+        for n in [1usize, 16, 63, 64, 512, 1024, 4096] {
+            let data = analyzer.analyze(&tone(440.0, n, 44_100.0));
+            assert_eq!(
+                data.bands.len(),
+                NUM_FREQUENCY_BANDS,
+                "band count must stay {NUM_FREQUENCY_BANDS} for input of {n} samples"
+            );
+        }
+    }
+
+    #[test]
+    fn analyze_is_deterministic() {
+        let analyzer = AudioAnalyzer::new(44_100, 1024);
+        let samples = tone(440.0, 1024, 44_100.0);
+        let a = analyzer.analyze(&samples);
+        let b = analyzer.analyze(&samples);
+        assert_eq!(a.bands, b.bands);
+        assert_eq!(a.dominant_frequency, b.dominant_frequency);
+        assert_eq!(a.total_energy, b.total_energy);
+    }
+
+    #[test]
+    fn tone_has_more_energy_than_silence() {
+        let analyzer = AudioAnalyzer::new(44_100, 1024);
+        let silence = analyzer.analyze(&vec![0.0; 1024]);
+        let loud = analyzer.analyze(&tone(440.0, 1024, 44_100.0));
+        assert!(
+            loud.total_energy > silence.total_energy,
+            "a 440Hz tone ({}) should carry more energy than silence ({})",
+            loud.total_energy,
+            silence.total_energy
+        );
+    }
+
+    #[test]
+    fn dominant_frequency_tracks_a_clean_tone() {
+        let analyzer = AudioAnalyzer::new(44_100, 1024);
+        for freq in [440.0_f32, 880.0] {
+            let data = analyzer.analyze(&tone(freq, 1024, 44_100.0));
+            assert!(
+                data.dominant_frequency >= freq * 0.85 && data.dominant_frequency <= freq * 1.15,
+                "dominant for {freq}Hz tone was {}, outside ±15%",
+                data.dominant_frequency
+            );
+        }
     }
 }

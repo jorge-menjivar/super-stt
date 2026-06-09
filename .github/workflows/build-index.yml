@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: GPL-3.0-only
+name: Build registry index
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'    # every 6 hours
+  push:
+    branches: [main]
+    paths: ['registry/registry.toml']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to push to gh-pages branch
+
+concurrency:
+  group: build-index
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: src
+
+      - name: Checkout gh-pages (for prior index)
+        uses: actions/checkout@v6
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: pages
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src/registry/scripts/build_index/target
+          key: build-index-${{ hashFiles('src/registry/scripts/build_index/Cargo.lock') }}
+
+      - name: Build indexer
+        working-directory: src/registry/scripts/build_index
+        run: cargo build --release
+
+      - name: Run indexer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p out
+          src/registry/scripts/build_index/target/release/super-stt-build-index \
+            --registry src/registry/registry.toml \
+            --prior-index pages/index.json \
+            --out out/index.json
+
+      - name: Publish to gh-pages
+        run: |
+          if [ ! -d pages/.git ]; then
+            mkdir -p pages
+            git -C pages init -b gh-pages
+            git -C pages remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          fi
+          cp out/index.json pages/index.json
+          cd pages
+          git add index.json
+          if git diff --cached --quiet; then
+            echo "index.json unchanged; nothing to publish"
+            exit 0
+          fi
+          git -c user.name=actions -c user.email=actions@github.com \
+              commit -m "Update index.json ($GITHUB_SHA)"
+          git push origin gh-pages

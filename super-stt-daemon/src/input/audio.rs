@@ -55,7 +55,6 @@ impl AudioProcessor {
     /// # Errors
     ///
     /// Returns an error if the audio data cannot be converted to WAV format.
-    #[allow(clippy::cast_possible_truncation)]
     pub fn audio_to_wav(&self, audio: &[f32], sample_rate: u32) -> Result<Vec<u8>> {
         use std::io::{Cursor, Write};
 
@@ -80,9 +79,10 @@ impl AudioProcessor {
         cursor.write_all(b"data")?;
         cursor.write_all(&(audio.len() * 2).to_le_bytes())?; // Data chunk size
 
-        // Convert f32 samples to i16
+        // Convert f32 samples to i16; clamped to [-1, 1] before scaling so the result
+        // is always in [i16::MIN, i16::MAX] before the cast.
         for &sample in audio {
-            let sample_i16 = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
+            let sample_i16 = crate::num_cast::f32_to_i16(sample.clamp(-1.0, 1.0) * 32767.0);
             cursor.write_all(&sample_i16.to_le_bytes())?;
         }
 

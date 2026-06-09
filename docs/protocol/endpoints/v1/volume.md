@@ -8,7 +8,7 @@ itself is read / set via [`/audio_theme`](./audio_theme.md).
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `POST /volume`
 
@@ -47,7 +47,7 @@ Content-Type: application/json
 |------|-------------------|---------------------------------------------------------------|
 | 400  | `invalid_volume`  | `volume` outside `0..=100`                                    |
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |
 
 ## `GET /volume`
 
@@ -80,4 +80,4 @@ parse the number out of the message rather than displaying it raw.
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |

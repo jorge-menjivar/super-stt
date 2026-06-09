@@ -1,31 +1,40 @@
 # Authentication
 
 This document is the reference for everything a client needs to do
-to obtain and use a session token. The three scopes
-([client](./scopes/client.md), [settings](./scopes/settings.md), [widget](./scopes/widget.md))
-share the same handshake and the same token format; only the
-permission set they unlock differs. For HTTP framing and SSE
-mechanics, see [transport.md](./transport.md).
+to obtain and use a session token. A token grants a **set of scopes**
+— fine-grained permissions the client requested and the user
+approved in a single consent. All scopes share the same handshake
+and the same token format; only the set of permissions a token
+carries differs. For HTTP framing and SSE mechanics, see
+[transport.md](./transport.md).
 
 ## Why scopes
 
 Auth on Super STT is consent-based: the user approves an app once,
-under a stated scope, and that approval is bound to the binary the
-user just saw — not to the app name the client claimed. A client
+for a stated set of scopes, and that approval is bound to the binary
+the user just saw — not to the app name the client claimed. A client
 cannot widen its own permissions; it can only present a token that
-was already approved for the scope it's using.
+was already approved for the scopes it's using.
 
-## The three scopes
+## Scopes
 
-| Scope        | What you can do with the token                                                            |
-|--------------|-------------------------------------------------------------------------------------------|
-| **client**   | Start / stop recording; receive your own preview text and final transcription              |
-| **settings** | Everything in `client`, plus read/write every configuration value                          |
-| **widget**   | Subscribe (read-only) to recording state, audio frames, optional transcription preview     |
+Scopes are fine-grained and **composable** — a token can carry any
+combination. **No scope implies another**: request the exact set you
+need, and the user approves that set.
 
-A widget cannot mutate state. A `client`-scoped app cannot read or
-change settings. A `settings`-scoped app inherits everything a
-client can do.
+| Scope                   | What the token can do                                                       | Reference                                          |
+|-------------------------|-----------------------------------------------------------------------------|----------------------------------------------------|
+| `transcribe`            | Start / stop recording; read back your own transcription results            | [transcribe](./scopes/transcribe.md)               |
+| `status`                | Read the daemon's current model + device                                     | [status](./scopes/status.md)                       |
+| `settings`              | Read / write every configuration value and manage the backend registry      | [settings](./scopes/settings.md)                   |
+| `recording_events`      | Subscribe to recording lifecycle events on `/events`                        | [recording_events](./scopes/recording_events.md)   |
+| `audio_visualization`   | Subscribe to frequency-band visualization data on `/events`                 | [audio_visualization](./scopes/audio_visualization.md) |
+| `global_transcriptions` | Subscribe to **every** app's live + final transcription text on `/events`   | [global_transcriptions](./scopes/global_transcriptions.md) |
+| `daemon_status`         | Subscribe to model/device/download/registry status on `/events`             | [daemon_status](./scopes/daemon_status.md)         |
+
+A Settings UI, for example, requests several at once
+(`["settings", "status", "transcribe", "recording_events", "audio_visualization", "daemon_status"]`),
+while a CLI that only dictates requests `["transcribe", "status"]`.
 
 ## Endpoints
 
@@ -51,7 +60,7 @@ Content-Type: application/json
 
 {
   "app_name": "Super STT Settings App",
-  "scope":    "settings",
+  "scopes":   ["settings", "status", "daemon_status"],
   "version":  "0.10.0"
 }
 ```
@@ -65,7 +74,7 @@ Content-Type: application/json
 {
   "status":        "success",
   "session_token": "stt_…64hex…",
-  "scope":         "settings",
+  "scopes":        ["settings", "status", "daemon_status"],
   "expires_at":    "2026-06-04T12:34:56Z"
 }
 ```
@@ -86,10 +95,10 @@ Content-Type: application/json
 | `data.reason`         | Meaning                                                                                          | What the client should do                                                                 |
 |-----------------------|--------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
 | `user_denied`         | The user clicked **Deny** in the consent popup.                                                  | Don't auto-retry. Offer an explicit "Retry authorization" affordance the user must click. |
-| `user_denied_cached`  | The user previously denied this scope for this binary; the deny is sticky until the daemon restarts. | Same as `user_denied`. Hint that restarting the daemon (`systemctl --user restart super-stt`) clears the deny. |
+| `user_denied_cached`  | The user previously denied this scope set for this binary; the deny is sticky until the daemon restarts. | Same as `user_denied`. Hint that restarting the daemon (`systemctl --user restart super-stt`) clears the deny. |
 | `user_dismissed`      | The user closed the popup without choosing, or it timed out (60 s default).                      | Recoverable — re-prompt when the user takes an action that requires it.                   |
 | `popup_failed`        | The consent popup couldn't be shown (no display server, no Wayland session, etc.).               | Fall back to read-only mode if possible; surface a hint that a desktop session is needed. |
-| `invalid_scope`       | The requested `scope` wasn't one of `client`, `settings`, `widget`.                              | Bug in the client. Fix the request.                                                       |
+| `invalid_scope`       | `scopes` was empty, missing, or contained a name that isn't a known scope.                       | Bug in the client. Fix the request.                                                       |
 | `throttled`           | Too many `/auth/request` calls in a short window.                                                | Back off and retry later.                                                                 |
 | `uid_mismatch`        | The peer's UID doesn't match the daemon's effective UID — the request came from a different user on the same machine. The daemon refuses cross-user consent flows regardless of socket group membership. | Run the requesting binary as the same user the daemon runs under (typically the desktop user).             |
 
@@ -112,7 +121,7 @@ Content-Type: application/json
 
 {
   "status":     "success",
-  "scope":      "settings",
+  "scopes":     ["settings", "status", "daemon_status"],
   "expires_at": "2026-06-04T12:34:56Z"
 }
 ```
@@ -142,22 +151,22 @@ sequenceDiagram
     participant D as "Daemon"
     participant U as "User"
 
-    App->>D: POST /auth/request<br/>{ app_name, scope, version }
+    App->>D: POST /auth/request<br/>{ app_name, scopes, version }
 
-    alt scope not in { client, settings, widget }
+    alt scopes empty or contains an unknown name
         D-->>App: 403 auth_denied<br/>{ reason: "invalid_scope" }
     else throttled
         D-->>App: 403 auth_denied<br/>{ reason: "throttled" }
     else previously denied for this binary
         D-->>App: 403 auth_denied<br/>{ reason: "user_denied_cached" }
     else ok
-        D->>U: consent popup<br/>(app name, exe path, scope permissions)
+        D->>U: consent popup<br/>(app name, exe path, requested scopes)
 
         alt popup couldn't be shown
             D-->>App: 403 auth_denied<br/>{ reason: "popup_failed" }
         else Allow
             U-->>D: Allow
-            D-->>App: 200 { session_token, scope, expires_at }
+            D-->>App: 200 { session_token, scopes, expires_at }
             App->>App: persist token in own keyring
         else Deny
             U-->>D: Deny
@@ -173,12 +182,13 @@ The popup the user sees displays:
 - **Application name** — declared by the app (untrusted; for UX only).
 - **Executable path** — resolved from the peer's `/proc/<pid>/exe`
   (trusted; what the user actually approves against).
-- **Scope and permissions** — a human-readable list of what the
-  scope unlocks.
+- **Scopes and permissions** — a human-readable list of what each
+  requested scope unlocks.
 
 The token returned on Allow is a 32-byte random hex string
 (`stt_…64hex…`). It carries no scope information by itself — the
-scope is bound server-side at issue time and validated per request.
+scope set is bound server-side at issue time and validated per
+request.
 
 **Persist the token in a secure store** (your platform keyring,
 libsecret/KWallet, the OS credential manager). Plaintext on disk
@@ -213,7 +223,7 @@ Content-Type: application/json
 | `exe_changed`  | Your binary's path no longer matches what the user approved (upgrade, relocation, replacement).     | Same — re-auth. The user must consent again to the new binary.   |
 
 A second class of failure is `403 scope_denied` — the token is
-valid but doesn't have permission for this endpoint:
+valid but wasn't granted the scope this endpoint (or topic) requires:
 
 ```http
 HTTP/1.1 403 Forbidden
@@ -225,10 +235,10 @@ Content-Type: application/json
 }
 ```
 
-This is a bug in the client (a `client`-scoped app trying to call
-`POST /active_model`, for example). Re-issuing `/auth/request` with
-a higher scope is the only path forward, and the user has to
-explicitly approve the new scope.
+This is a bug in the client (a token without the `settings` scope
+trying to call `POST /active_model`, for example). Re-issuing
+`/auth/request` with the missing scope added is the only path
+forward, and the user has to explicitly approve the new set.
 
 There is no separate "resume" handshake. The next request a
 returning app issues already validates the token; the app only has
@@ -236,9 +246,9 @@ to call `/auth/request` again when it sees `invalid_session`.
 
 ## Scope to endpoint mapping
 
-Scope is checked before each endpoint runs. The reachable surface
-breaks down into a small auth-owned set plus whatever the
-per-scope docs define.
+Scopes are checked before each endpoint runs. The reachable surface
+breaks down into a small auth-owned set plus whatever the per-scope
+docs define.
 
 ### Unauthenticated
 
@@ -250,45 +260,42 @@ No token required. This is the only way a new app can bootstrap.
 
 ### Any authenticated token
 
-Reachable with a valid `client`, `settings`, *or* `widget` token.
-These endpoints leak no per-scope information.
+Reachable with any valid token, regardless of scopes. These
+endpoints leak no per-scope information.
 
 | Endpoint            | Purpose                                          |
 |---------------------|--------------------------------------------------|
 | `GET /auth/status`  | Probe whether the held token is still valid      |
 | `GET /ping`         | Liveness probe                                   |
 
-### `client`, `settings`, `widget`
+### Per-scope surface
 
-The per-scope endpoint reference for each lives in the dedicated
-doc — those tables are the source of truth, not duplicated here:
+The endpoints and topics each scope unlocks live in the dedicated
+docs — those are the source of truth, not duplicated here:
 
-- **`client` scope** — see [client.md](./scopes/client.md).
-- **`settings` scope** — inherits everything in `client.md` and adds
-  the configuration surface; see [settings.md](./scopes/settings.md).
-- **`widget` scope** — read-only subscription to a restricted topic
-  set on `GET /events`; see [widget.md](./scopes/widget.md).
+- `transcribe` — `/transcribe`, `/transcribe/stop`, `/transcribe/realtime`; see [transcribe.md](./scopes/transcribe.md).
+- `status` — `GET /status`; see [status.md](./scopes/status.md).
+- `settings` — the configuration + registry surface; see [settings.md](./scopes/settings.md).
+- `recording_events`, `audio_visualization`, `global_transcriptions`, `daemon_status` — topic sets on `GET /events`; see each scope doc and [`/events`](./endpoints/v1/events.md).
 
-Cross-scope access rules to remember:
+Rules to remember:
 
-- A `client` token cannot reach `settings`-scope endpoints; the
-  daemon returns `403 scope_denied`.
-- A `widget` token cannot reach anything outside its own scope (or
-  the "any authenticated" set above); same `403 scope_denied`.
-- A `settings` token satisfies `client` too, so it can drive
-  recordings without a separate `client`-scoped session.
-- Settings-only SSE topics (e.g. `daemon_status_changed`,
-  `download_progress`) return `403 scope_denied` when requested by
-  a widget token. See [widget.md](./scopes/widget.md) for the topic set
-  widget tokens *are* allowed to request.
+- A token reaches exactly the endpoints and topics its scopes grant.
+  Anything else returns `403 scope_denied`. No scope implies another
+  — a `settings` token cannot drive recordings unless it also holds
+  `transcribe`.
+- On `GET /events`, requesting any topic outside the token's granted
+  scopes fails the whole subscription with `403 scope_denied` before
+  the stream opens.
 
 ## Token characteristics
 
 - **Shape:** 32-byte random value, hex-encoded, prefixed `stt_`.
 - **Lifetime:** 30 days from issue (`expires_at` returned alongside
   the token).
-- **Scope:** Bound at issue time. Use one token per scope; never
-  share a token across apps.
+- **Scopes:** The set the user approved, bound at issue time. To
+  change the set, request a new token (a new popup); never share a
+  token across apps.
 - **Binding:** Tied to the binary's `/proc/<pid>/exe` at issue
   time. If that path changes (upgrade, move, replacement), the
   next request returns `401 invalid_session` with reason
@@ -330,22 +337,24 @@ differences:
 
 The wire shape (endpoints, headers, JSON bodies) is identical.
 
-## Widget anti-replacement
+## Anti-replacement
 
-The widget scope subscribes to a long-lived event stream that
-carries audio frames and transcription text. If your binary's
-identity changes mid-stream (upgrade in place, replaced on disk),
-the stream ends with:
+Every `GET /events` subscription is long-lived and is checked for
+binary replacement for as long as it stays open, regardless of which
+topics it carries — this covers all four event-stream scopes
+(`recording_events`, `audio_visualization`, `global_transcriptions`,
+`daemon_status`). If your binary's identity changes mid-stream (upgrade
+in place, replaced on disk), the stream ends with:
 
 ```
 event: revoked
 data: { "reason": "exe_changed" }
 ```
 
-and the connection closes. The widget must re-issue
+and the connection closes. The client must re-issue
 `/auth/request` (which triggers a fresh popup) before reopening
-the subscription. For TCP-bound widget clients the same check
-runs against the `Origin` header instead of `/proc/<pid>/exe`.
+the subscription. For TCP-bound clients the same check runs against
+the `Origin` header instead of `/proc/<pid>/exe`.
 
 ## Unauthenticated requests
 

@@ -1,0 +1,162 @@
+// SPDX-License-Identifier: GPL-3.0-only
+use std::rc::Rc;
+
+use cosmic::{
+    Element,
+    iced::{Alignment, Length, Size},
+    iced_widget,
+    theme::{self, Button},
+    widget::{self, button, container, layer_container, mouse_area},
+};
+
+use super::SuperSttApplet;
+use crate::app::Message;
+use crate::models::state::{DaemonConnectionState, RecordingState};
+use crate::ui::views::{PopupContentParams, create_popup_content};
+use crate::util::u32_to_f32;
+
+// Cache icon bytes to avoid allocation on every render.
+static NORMAL_ICON: &[u8] = include_bytes!("../../resources/assets/super-stt-icon.svg");
+static TRANSPARENT_ICON: &[u8] = include_bytes!("../../resources/assets/transparent-icon.svg");
+static ERROR_ICON: &[u8] = include_bytes!("../../resources/assets/error-icon.svg");
+
+/// Visualization height in pixels.
+const VISUALIZATION_HEIGHT: f32 = 100.0;
+
+impl SuperSttApplet {
+    pub(super) fn view_applet(&self) -> Element<'_, Message> {
+        // Show visualizations only when the daemon is actively recording
+        // and the user has visualizations enabled.
+        let should_show_visualizations = matches!(self.recording_state, RecordingState::Recording)
+            && self.config.ui.show_visualization;
+        let should_show_working = matches!(self.recording_state, RecordingState::Processing)
+            && self.config.ui.show_visualization;
+
+        let visualization_size = self.visualization_size();
+
+        if self.daemon_state == DaemonConnectionState::Connected && should_show_visualizations {
+            let visualization_element =
+                container(mouse_area(self.visualization.clone()).on_press(Message::TogglePopup))
+                    .width(Length::Fixed(visualization_size.width))
+                    .height(Length::Fixed(visualization_size.height));
+
+            self.core
+                .applet
+                .autosize_window(visualization_element)
+                .into()
+        } else if self.daemon_state == DaemonConnectionState::Connected && should_show_working {
+            let working_element =
+                container(mouse_area(self.working_animation.clone()).on_press(Message::TogglePopup))
+                    .width(Length::Fixed(visualization_size.width))
+                    .height(Length::Fixed(visualization_size.height));
+
+            self.core.applet.autosize_window(working_element).into()
+        } else {
+            let icon_bytes = if !(self.daemon_state == DaemonConnectionState::Connected
+                || self.daemon_state == DaemonConnectionState::Connecting)
+            {
+                ERROR_ICON
+            } else if self.config.ui.show_icon {
+                NORMAL_ICON
+            } else {
+                TRANSPARENT_ICON
+            };
+
+            let (applet_padding, _) = self.core.applet.suggested_padding(false);
+
+            let icon_alignment = match self.config.ui.icon_alignment.as_str() {
+                "center" => Alignment::Center,
+                "end" => Alignment::End,
+                _ => Alignment::Start,
+            };
+
+            let icon_button = transparent_icon_button(
+                icon_bytes,
+                visualization_size,
+                applet_padding,
+                icon_alignment,
+            );
+
+            self.core.applet.autosize_window(icon_button).into()
+        }
+    }
+
+    pub(super) fn view_popup(&self) -> Element<'_, Message> {
+        let content = create_popup_content(&PopupContentParams {
+            daemon_state: &self.daemon_state,
+            is_open: &self.is_open,
+            theme_config: &self.theme_config,
+            config: &self.config,
+            icon_alignment_model: &self.icon_alignment_model,
+            theme_selector_model: &self.theme_selector_model,
+            selected_theme_for_config: self.selected_theme_for_config,
+        });
+
+        self.core.applet.popup_container(content).into()
+    }
+
+    /// Compute the applet's window size from the panel orientation and
+    /// user configuration. When visualizations are disabled the applet
+    /// shrinks to a compact icon-only square.
+    fn visualization_size(&self) -> Size {
+        let (suggested_width, suggested_height) = self.core.applet.suggested_window_size();
+        let (_, suggested_padding_h) = self.core.applet.suggested_padding(false);
+        let padding = f32::from(suggested_padding_h);
+        let horizontal = self.core.applet.is_horizontal();
+
+        if self.config.ui.show_visualization {
+            let configured_width = u32_to_f32(self.config.ui.applet_width);
+            if horizontal {
+                // Constrain by height but respect the user's width preference.
+                let available_height = u32_to_f32(suggested_height.get()) - (padding * 2.0);
+                let constrained_height = available_height.min(VISUALIZATION_HEIGHT + 8.0);
+                let constrained_width = configured_width.min(available_height * 8.0).max(60.0);
+                Size::new(constrained_width, constrained_height)
+            } else {
+                let available_width = u32_to_f32(suggested_width.get()) - (padding * 2.0);
+                let constrained_width = configured_width.min(available_width * 2.0).max(60.0);
+                Size::new(constrained_width, VISUALIZATION_HEIGHT + 8.0)
+            }
+        } else {
+            let icon_size = if horizontal {
+                (u32_to_f32(suggested_height.get()) - (padding * 2.0)).clamp(24.0, 48.0)
+            } else {
+                (u32_to_f32(suggested_width.get()) - (padding * 2.0)).clamp(24.0, 48.0)
+            };
+            Size::new(icon_size, icon_size)
+        }
+    }
+}
+
+fn transparent_icon_button<'a>(
+    icon_bytes: &'static [u8],
+    visualization_size: Size,
+    applet_padding: u16,
+    alignment: Alignment,
+) -> cosmic::widget::Button<'a, Message> {
+    let icon_size =
+        (visualization_size.height.min(visualization_size.width) * 0.6).clamp(16.0, 32.0);
+
+    button::custom(
+        layer_container(
+            widget::icon(widget::icon::from_svg_bytes(icon_bytes))
+                .class(theme::Svg::Custom(Rc::new(|theme| {
+                    iced_widget::svg::Style {
+                        color: Some(theme.cosmic().background.on.into()),
+                    }
+                })))
+                .width(Length::Fixed(icon_size))
+                .height(Length::Fixed(icon_size)),
+        )
+        .align_x(alignment)
+        .center_y(Length::Fill),
+    )
+    .width(Length::Fixed(
+        visualization_size.width + 2f32 * f32::from(applet_padding),
+    ))
+    .height(Length::Fixed(
+        visualization_size.height + 2f32 * f32::from(applet_padding),
+    ))
+    .class(Button::AppletIcon)
+    .on_press_down(Message::TogglePopup)
+}

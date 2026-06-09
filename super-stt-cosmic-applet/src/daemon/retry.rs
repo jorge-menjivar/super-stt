@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use std::time::Duration;
 
+/// Whole milliseconds of a `Duration` as `u64`, saturating on the
+/// (practically impossible) overflow.
+fn duration_millis(d: Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
 /// Connection retry strategy configuration
 #[derive(Debug, Clone)]
 pub struct RetryStrategy {
@@ -42,21 +48,17 @@ impl RetryStrategy {
             return self.initial_delay;
         }
 
-        // Use exponential backoff with jitter
-        #[allow(clippy::cast_possible_truncation)]
-        let base_delay = self.initial_delay.as_millis() as u64;
+        // Exponential backoff with jitter.
+        let base_delay = duration_millis(self.initial_delay);
         let exponential_delay = base_delay.saturating_mul(2_u64.saturating_pow(self.attempt));
-        #[allow(clippy::cast_possible_truncation)]
-        let capped_delay = exponential_delay.min(self.max_delay.as_millis() as u64);
+        let capped_delay = exponential_delay.min(duration_millis(self.max_delay));
 
-        // Add some jitter (±10%) to prevent thundering herd
+        // Add ±10% jitter to prevent a thundering herd.
         let jitter_range = capped_delay / 10;
-        #[allow(clippy::cast_possible_truncation)]
-        let jitter = (std::time::SystemTime::now()
+        let now_since_epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64)
-            % (jitter_range * 2);
+            .unwrap_or_default();
+        let jitter = duration_millis(now_since_epoch) % (jitter_range * 2);
         let final_delay = capped_delay + jitter - jitter_range;
 
         Duration::from_millis(final_delay)

@@ -7,7 +7,7 @@ Requires=graphical-session.target
 [Service]
 Type=simple
 ExecStartPre=/bin/sh -c 'while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do sleep 0.1; done'
-ExecStart=%h/.local/bin/super-stt-daemon --socket %t/stt/super-stt.sock
+ExecStart=%h/.local/bin/super-stt-daemon
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5

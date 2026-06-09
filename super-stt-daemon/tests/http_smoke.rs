@@ -25,7 +25,7 @@ use tokio::time::sleep;
 
 const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 const APP_NAME: &str = "super-stt smoke test";
-const SCOPE: &str = "client";
+const SCOPES: &[&str] = &["transcribe", "status"];
 
 struct DaemonGuard {
     child: Child,
@@ -64,12 +64,17 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     // `apply_cli_overrides_to_config`.
     let config_home = xdg.join("config");
     std::fs::create_dir_all(&config_home).expect("create xdg/config dir");
+    // Isolate XDG_DATA_HOME so the daemon discovers no backends (hermetic):
+    // it comes up idle and fast, without spawning a real backend at startup.
+    let data_home = xdg.join("data");
+    std::fs::create_dir_all(&data_home).expect("create xdg/data dir");
 
     let http_socket = xdg.join("stt").join("super-stt-http.sock");
 
     let child = Command::new(DAEMON_BIN)
         .env("XDG_RUNTIME_DIR", &xdg)
         .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_DATA_HOME", &data_home)
         .env("SUPER_STT_AUTO_APPROVE", "1") // bypass consent popup
         .arg("--device")
         .arg("cpu")
@@ -84,7 +89,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists() {
             // Try minting a token to confirm the HTTP listener is fully alive.
-            if http_client::auth_request(http_socket.clone(), APP_NAME, SCOPE)
+            if http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
                 .await
                 .is_ok()
             {
@@ -110,11 +115,15 @@ async fn http_endpoints_respond() {
     let (_guard, http_socket) = start_daemon().await;
 
     // --- POST /auth/request (auto-approved by SUPER_STT_AUTO_APPROVE=1) ---
-    let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPE)
+    let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
         .await
         .expect("auth_request should succeed under SUPER_STT_AUTO_APPROVE=1");
     assert!(!auth.session_token.is_empty(), "token should not be empty");
-    assert_eq!(auth.scope, SCOPE);
+    assert!(
+        SCOPES.iter().all(|s| auth.scopes.iter().any(|g| g.as_str() == *s)),
+        "granted scopes {:?} should cover requested {SCOPES:?}",
+        auth.scopes
+    );
     let token = auth.session_token;
 
     // --- GET /ping with the token ---
@@ -132,7 +141,11 @@ async fn http_endpoints_respond() {
         .await
         .expect("auth_status should succeed");
     assert_eq!(status_info.status, "success");
-    assert_eq!(status_info.scope, SCOPE);
+    assert!(
+        SCOPES.iter().all(|s| status_info.scopes.iter().any(|g| g.as_str() == *s)),
+        "auth_status scopes {:?} should cover {SCOPES:?}",
+        status_info.scopes
+    );
     assert!(
         !status_info.expires_at.is_empty(),
         "auth_status should report an expires_at"
@@ -156,17 +169,15 @@ async fn http_endpoints_respond() {
         .await
         .expect("status should succeed");
     assert_eq!(status.status, "success", "status response: {status:?}");
-    assert!(
-        status.current_model.is_some(),
-        "status should have current_model"
-    );
+    // With no backends installed (hermetic test), the daemon is idle and has
+    // no current model; with a backend it would report one. Either is valid.
     assert!(status.device.is_some(), "status should have device");
-    // `is_recording` is the affordance the CLI uses to decide
+    // `busy` is the affordance the CLI uses to decide
     // start-vs-stop on the toggle hotkey — must always be present.
     assert_eq!(
-        status.is_recording,
+        status.busy,
         Some(false),
-        "status must report is_recording on a freshly-booted daemon"
+        "status must report busy=false on a freshly-booted daemon"
     );
 
     // --- POST /transcribe (fire-and-forget) ---
@@ -224,18 +235,18 @@ async fn http_endpoints_respond() {
 #[tokio::test]
 async fn transcribe_stop_idempotent_when_idle() {
     let (_guard, http_socket) = start_daemon().await;
-    let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPE)
+    let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
         .await
         .expect("auth_request should succeed");
     let token = auth.session_token;
 
-    // Idle daemon: status must report is_recording=false BEFORE we
+    // Idle daemon: status must report busy=false BEFORE we
     // call /transcribe/stop.
     let pre = http_client::status(http_socket.clone(), &token)
         .await
         .expect("status before stop");
     assert_eq!(
-        pre.is_recording,
+        pre.busy,
         Some(false),
         "test setup: daemon must be idle before calling transcribe_stop"
     );
@@ -264,7 +275,7 @@ async fn transcribe_stop_idempotent_when_idle() {
         .await
         .expect("status after stop");
     assert_eq!(
-        post.is_recording,
+        post.busy,
         Some(false),
         "transcribe_stop on idle daemon must not start a recording; got {post:?}"
     );
@@ -287,7 +298,7 @@ async fn transcribe_stop_idempotent_when_idle() {
 async fn second_transcribe_during_active_recording_surfaces_recording_in_progress() {
     let (_guard, http_socket) = start_daemon().await;
 
-    let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPE)
+    let auth = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
         .await
         .expect("auth_request should succeed");
     let token = auth.session_token;

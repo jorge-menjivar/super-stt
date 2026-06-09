@@ -96,9 +96,12 @@ check-json: (check '--message-format=json')
 run-app *args:
     env RUST_BACKTRACE=full RUST_LOG=super_stt_app=debug,super_stt_shared=debug cargo run --bin {{ app_name }} {{ args }}
 
-# Run the daemon for testing purposes
-# Usage: just run-daemon [--model MODEL] [other args]
+# Run the daemon for testing purposes. Also builds super-stt-consent into
+# the same target dir, since the daemon only looks for the consent helper
+# alongside its own binary (auth_request popups fail without it).
+# Usage: just run-daemon [cargo flags, e.g. --release]
 run-daemon *args:
+    cargo build --bin {{ consent_name }} --bin {{ daemon_bin_name }} {{ args }}
     env RUST_BACKTRACE=full RUST_LOG=super_stt_daemon=debug cargo run --bin {{ daemon_bin_name }} -v {{ args }}
 
 # Run the CLI for testing purposes (talks to the running daemon over the HTTP socket)
@@ -199,6 +202,141 @@ build-consent:
 build-applet:
     echo "🔧 Building COSMIC applet..."
     cargo build --release --bin {{ applet_name }}
+
+# Build the OpenAI WASM backend component (wasm32-wasip2).
+# Requires: rustup target add wasm32-wasip2
+build-openai-backend:
+    cargo build --manifest-path backends/openai/Cargo.toml --target wasm32-wasip2 --release
+
+# Build the Mistral WASM backend component (wasm32-wasip2).
+# Requires: rustup target add wasm32-wasip2
+build-mistral-backend:
+    cargo build --manifest-path backends/mistral/Cargo.toml --target wasm32-wasip2 --release
+
+# Build the Deepgram WASM backend component (wasm32-wasip2).
+# Requires: rustup target add wasm32-wasip2
+build-deepgram-backend:
+    cargo build --manifest-path backends/deepgram/Cargo.toml --target wasm32-wasip2 --release
+
+# Copy the canonical WIT (realtime.wit + deps) into every backend that bundles it.
+sync-wit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for dir in backends/*/wit; do
+        cp docs/protocol/wit/realtime.wit "$dir/realtime.wit"
+        rm -rf "$dir/deps"
+        mkdir -p "$dir/deps"
+        cp docs/protocol/wit/deps/*.wit "$dir/deps/"
+        echo "synced $dir (realtime.wit + deps)"
+    done
+
+# CI check: every bundled WIT (realtime.wit + deps) must match the canonical.
+check-wit-sync:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fail=0
+    for dir in backends/*/wit; do
+        if ! diff -q "$dir/realtime.wit" docs/protocol/wit/realtime.wit >/dev/null; then
+            echo "WIT drift: $dir/realtime.wit" >&2; fail=1
+        fi
+        if ! diff -rq "$dir/deps" docs/protocol/wit/deps >/dev/null 2>&1; then
+            echo "WIT deps drift: $dir/deps" >&2; fail=1
+        fi
+    done
+    [ "$fail" -eq 0 ]
+
+# Build the standalone Voxtral subprocess backend.
+# Usage: just build-voxtral-backend [--features cuda]
+build-voxtral-backend *args:
+    cargo build --manifest-path backends/voxtral/Cargo.toml --release {{ args }}
+
+# Build the standalone Whisper subprocess backend.
+# Usage: just build-whisper-backend [--features cuda]
+build-whisper-backend *args:
+    cargo build --manifest-path backends/whisper/Cargo.toml --release {{ args }}
+
+# Serve a local offline registry for testing the Download/Install flow without
+# any GitHub release or Pages setup. Builds the OpenAI + Mistral wasm
+# components, stages them with their asset filenames, generates an index.json
+# with real SHA-256 hashes, and serves the directory over HTTP. In the daemon's
+# environment set `SUPER_STT_REGISTRY_URL=http://localhost:8787/index.json`
+# before starting it, then open the app's Models > Download tab.
+# Requires: `rustup target add wasm32-wasip2` and Python 3.11+.
+serve-test-registry port="8787": build-openai-backend build-mistral-backend
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="target/test-registry"
+    base="http://localhost:{{ port }}"
+    mkdir -p "$out"
+    cp backends/openai/target/wasm32-wasip2/release/super_stt_backend_openai.wasm "$out/openai.wasm"
+    cp backends/mistral/target/wasm32-wasip2/release/super_stt_backend_mistral.wasm "$out/mistral.wasm"
+    python3 registry/scripts/gen_test_index.py --out "$out" --base-url "$base" \
+        backends/openai/backend.toml backends/mistral/backend.toml
+    echo ""
+    echo "Test registry ready. In the daemon's environment, run:"
+    echo "    export SUPER_STT_REGISTRY_URL=$base/index.json"
+    echo "then restart the daemon and open Models > Download."
+    echo ""
+    echo "Serving $out at $base (Ctrl-C to stop)…"
+    cd "$out" && exec python3 -m http.server {{ port }}
+
+# Install built backends into the daemon's discovery directory
+# (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI
+# and Mistral components; the Voxtral binary is installed only if already built
+# (run `just build-{voxtral,whisper}-backend [--features cuda]` first for GPU support).
+install-backends: build-openai-backend build-mistral-backend build-deepgram-backend
+    #!/usr/bin/env bash
+    set -euo pipefail
+    backends_dir="${XDG_DATA_HOME:-$HOME/.local/share}/super-stt/backends"
+
+    # OpenAI (WASM component). backend.toml's entrypoint is "openai.wasm".
+    openai_dir="$backends_dir/openai"
+    mkdir -p "$openai_dir"
+    cp backends/openai/backend.toml "$openai_dir/backend.toml"
+    cp backends/openai/target/wasm32-wasip2/release/super_stt_backend_openai.wasm \
+        "$openai_dir/openai.wasm"
+    echo "Installed OpenAI backend -> $openai_dir"
+
+    # Mistral (WASM component). backend.toml's entrypoint is "mistral.wasm".
+    mistral_dir="$backends_dir/mistral"
+    mkdir -p "$mistral_dir"
+    cp backends/mistral/backend.toml "$mistral_dir/backend.toml"
+    cp backends/mistral/target/wasm32-wasip2/release/super_stt_backend_mistral.wasm \
+        "$mistral_dir/mistral.wasm"
+    echo "Installed Mistral backend -> $mistral_dir"
+
+    # Deepgram (WASM component). backend.toml's entrypoint is "deepgram.wasm".
+    deepgram_dir="$backends_dir/deepgram"
+    mkdir -p "$deepgram_dir"
+    cp backends/deepgram/backend.toml "$deepgram_dir/backend.toml"
+    cp backends/deepgram/target/wasm32-wasip2/release/super_stt_backend_deepgram.wasm \
+        "$deepgram_dir/deepgram.wasm"
+    echo "Installed Deepgram backend -> $deepgram_dir"
+
+    # Voxtral (subprocess). Installed only if the binary has been built.
+    vox_bin="backends/voxtral/target/release/super-stt-backend-voxtral"
+    if [ -f "$vox_bin" ]; then
+        vox_dir="$backends_dir/voxtral"
+        mkdir -p "$vox_dir"
+        cp backends/voxtral/backend.toml "$vox_dir/backend.toml"
+        cp "$vox_bin" "$vox_dir/super-stt-backend-voxtral"
+        echo "Installed Voxtral backend -> $vox_dir"
+    else
+        echo "Voxtral backend not built; run 'just build-voxtral-backend [--features cuda]' to enable it." >&2
+    fi
+
+    # Whisper (subprocess). Installed only if the binary has been built.
+    whisper_bin="backends/whisper/target/release/super-stt-backend-whisper"
+    if [ -f "$whisper_bin" ]; then
+        whisper_dir="$backends_dir/whisper"
+        mkdir -p "$whisper_dir"
+        cp backends/whisper/backend.toml "$whisper_dir/backend.toml"
+        cp "$whisper_bin" "$whisper_dir/super-stt-backend-whisper"
+        echo "Installed Whisper backend -> $whisper_dir"
+    else
+        echo "Whisper backend not built; run 'just build-whisper-backend [--features cuda]' to enable it." >&2
+    fi
+    echo "Done. Restart the daemon (systemctl --user restart super-stt) to discover backends."
 
 # Install the app (user-local installation)
 install-app:

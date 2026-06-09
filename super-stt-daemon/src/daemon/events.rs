@@ -3,8 +3,8 @@
 //! Internal event bus for the widget HTTP/SSE protocol.
 //!
 //! `EventBus` owns one `tokio::sync::broadcast::Sender` per topic that the
-//! daemon publishes to widget subscribers (recording state, audio frames,
-//! frequency bands, transcription text). The HTTP `GET /events` handler
+//! daemon publishes to `/events` subscribers (recording state, frequency
+//! bands, transcription text, daemon status). The HTTP `GET /events` handler
 //! subscribes to whichever topics the client requested and forwards each
 //! event as an SSE frame.
 //!
@@ -15,9 +15,9 @@
 //! capture pipeline) never blocks, and other subscribers are unaffected.
 //!
 //! The wire shape of each topic is set by the structs below and matches
-//! `docs/protocol/widget.md` §"Topics" exactly. Audio and frequency-band
-//! payloads carry their `f32` slice base64-encoded into a `_b64` field
-//! so the JSON envelope is self-contained.
+//! the topic tables in `docs/protocol/endpoints/v1/events.md` exactly.
+//! Frequency-band payloads carry their `f32` slice base64-encoded into a
+//! `bands_b64` field so the JSON envelope is self-contained.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Serialize;
@@ -32,22 +32,23 @@ const AUDIO_BUF_CAPACITY: usize = 256;
 const STATE_BUF_CAPACITY: usize = 32;
 
 /// Set of topics the daemon emits over `GET /events`. The `as_str` mapping
-/// is the wire name used in the `event:` line of each SSE frame.
-///
-/// `DaemonStatusChanged` and `DownloadProgress` are **settings-only**
-/// — `WIDGET_TOPICS` in `http_server.rs` doesn't include them, so a
-/// widget-scope token requesting either gets `403 scope_denied`.
+/// is the wire name used in the `event:` line of each SSE frame; each topic's
+/// [`Topic::required_scope`] gates who may subscribe to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Topic {
     RecordingStarted,
     RecordingStopped,
     RecordingState,
-    AudioSamples,
+    TranscribingStarted,
+    TranscribingStopped,
     FrequencyBands,
     PartialStt,
     FinalStt,
     DaemonStatusChanged,
     DownloadProgress,
+    /// Registry install / refresh progress events. Requires the `daemon_status`
+    /// scope (same as `DaemonStatusChanged`).
+    RegistryInstall,
 }
 
 impl Topic {
@@ -58,12 +59,14 @@ impl Topic {
             Self::RecordingStarted => "recording_started",
             Self::RecordingStopped => "recording_stopped",
             Self::RecordingState => "recording_state",
-            Self::AudioSamples => "audio_samples",
+            Self::TranscribingStarted => "transcribing_started",
+            Self::TranscribingStopped => "transcribing_stopped",
             Self::FrequencyBands => "frequency_bands",
             Self::PartialStt => "partial_stt",
             Self::FinalStt => "final_stt",
             Self::DaemonStatusChanged => "daemon_status_changed",
             Self::DownloadProgress => "download_progress",
+            Self::RegistryInstall => "registry_install",
         }
     }
 
@@ -77,13 +80,33 @@ impl Topic {
             "recording_started" => Some(Self::RecordingStarted),
             "recording_stopped" => Some(Self::RecordingStopped),
             "recording_state" => Some(Self::RecordingState),
-            "audio_samples" => Some(Self::AudioSamples),
+            "transcribing_started" => Some(Self::TranscribingStarted),
+            "transcribing_stopped" => Some(Self::TranscribingStopped),
             "frequency_bands" => Some(Self::FrequencyBands),
             "partial_stt" => Some(Self::PartialStt),
             "final_stt" => Some(Self::FinalStt),
             "daemon_status_changed" => Some(Self::DaemonStatusChanged),
             "download_progress" => Some(Self::DownloadProgress),
+            "registry_install" => Some(Self::RegistryInstall),
             _ => None,
+        }
+    }
+
+    /// The scope a token must hold to subscribe to this topic on
+    /// `GET /events`. Single source of truth for the topic→scope gate.
+    #[must_use]
+    pub const fn required_scope(self) -> &'static str {
+        match self {
+            Self::RecordingStarted
+            | Self::RecordingStopped
+            | Self::RecordingState
+            | Self::TranscribingStarted
+            | Self::TranscribingStopped => "recording_events",
+            Self::FrequencyBands => "audio_visualization",
+            Self::PartialStt | Self::FinalStt => "global_transcriptions",
+            Self::DaemonStatusChanged | Self::DownloadProgress | Self::RegistryInstall => {
+                "daemon_status"
+            }
         }
     }
 }
@@ -97,8 +120,23 @@ pub struct RecordingStartedEvent {
     pub write_mode: bool,
 }
 
+/// `recording_stopped` — mic capture ended (before transcription).
 #[derive(Clone, Debug, Serialize)]
 pub struct RecordingStoppedEvent {
+    pub client_id: String,
+    pub timestamp: String,
+}
+
+/// `transcribing_started` — model decode of the captured audio began.
+#[derive(Clone, Debug, Serialize)]
+pub struct TranscribingStartedEvent {
+    pub client_id: String,
+    pub timestamp: String,
+}
+
+/// `transcribing_stopped` — decode + typing finished; carries the outcome.
+#[derive(Clone, Debug, Serialize)]
+pub struct TranscribingStoppedEvent {
     pub client_id: String,
     pub timestamp: String,
     pub transcription_success: bool,
@@ -109,13 +147,6 @@ pub struct RecordingStoppedEvent {
 #[derive(Clone, Debug, Serialize)]
 pub struct RecordingStateEvent {
     pub is_recording: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct AudioSamplesEvent {
-    pub sample_rate: f32,
-    pub channels: u16,
-    pub samples_b64: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -146,6 +177,13 @@ pub type DaemonStatusChangedEvent = serde_json::Value;
 /// `super_stt_shared::models::protocol::DownloadProgress`.
 pub type DownloadProgressEvent = serde_json::Value;
 
+/// `registry_install` carries a serialized `RegistryEvent` payload
+/// (install.progress / install.completed / install.failed / refresh.completed /
+/// refresh.failed). Stored as a raw `Value` for the same reason as
+/// `DaemonStatusChangedEvent` — avoids a cyclic dep between events.rs and
+/// the registry types. Settings-scope only.
+pub type RegistryInstallEvent = serde_json::Value;
+
 // ---------- The bus ----------------------------------------------------------
 
 /// One `broadcast::Sender` per topic. The bus is held on `SuperSTTDaemon`
@@ -155,12 +193,14 @@ pub struct EventBus {
     recording_started: broadcast::Sender<RecordingStartedEvent>,
     recording_stopped: broadcast::Sender<RecordingStoppedEvent>,
     recording_state: broadcast::Sender<RecordingStateEvent>,
-    audio_samples: broadcast::Sender<AudioSamplesEvent>,
+    transcribing_started: broadcast::Sender<TranscribingStartedEvent>,
+    transcribing_stopped: broadcast::Sender<TranscribingStoppedEvent>,
     frequency_bands: broadcast::Sender<FrequencyBandsEvent>,
     partial_stt: broadcast::Sender<SttEvent>,
     final_stt: broadcast::Sender<SttEvent>,
     daemon_status_changed: broadcast::Sender<DaemonStatusChangedEvent>,
     download_progress: broadcast::Sender<DownloadProgressEvent>,
+    registry_install: broadcast::Sender<RegistryInstallEvent>,
 }
 
 impl Default for EventBus {
@@ -168,22 +208,26 @@ impl Default for EventBus {
         let (recording_started, _) = broadcast::channel(STATE_BUF_CAPACITY);
         let (recording_stopped, _) = broadcast::channel(STATE_BUF_CAPACITY);
         let (recording_state, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (audio_samples, _) = broadcast::channel(AUDIO_BUF_CAPACITY);
+        let (transcribing_started, _) = broadcast::channel(STATE_BUF_CAPACITY);
+        let (transcribing_stopped, _) = broadcast::channel(STATE_BUF_CAPACITY);
         let (frequency_bands, _) = broadcast::channel(AUDIO_BUF_CAPACITY);
         let (partial_stt, _) = broadcast::channel(STATE_BUF_CAPACITY);
         let (final_stt, _) = broadcast::channel(STATE_BUF_CAPACITY);
         let (daemon_status_changed, _) = broadcast::channel(STATE_BUF_CAPACITY);
         let (download_progress, _) = broadcast::channel(STATE_BUF_CAPACITY);
+        let (registry_install, _) = broadcast::channel(STATE_BUF_CAPACITY);
         Self {
             recording_started,
             recording_stopped,
             recording_state,
-            audio_samples,
+            transcribing_started,
+            transcribing_stopped,
             frequency_bands,
             partial_stt,
             final_stt,
             daemon_status_changed,
             download_progress,
+            registry_install,
         }
     }
 }
@@ -208,18 +252,20 @@ impl EventBus {
         let _ = self.recording_stopped.send(evt);
     }
 
+    /// Publish a `transcribing_started` event (paired with `publish_transcribing_stopped`).
+    pub fn publish_transcribing_started(&self, evt: TranscribingStartedEvent) {
+        let _ = self.transcribing_started.send(evt);
+    }
+
+    /// Publish a `transcribing_stopped` event (paired with `publish_transcribing_started`).
+    pub fn publish_transcribing_stopped(&self, evt: TranscribingStoppedEvent) {
+        let _ = self.transcribing_stopped.send(evt);
+    }
+
     pub fn publish_recording_state(&self, is_recording: bool) {
         let _ = self
             .recording_state
             .send(RecordingStateEvent { is_recording });
-    }
-
-    pub fn publish_audio_samples(&self, samples: &[f32], sample_rate: f32, channels: u16) {
-        let _ = self.audio_samples.send(AudioSamplesEvent {
-            sample_rate,
-            channels,
-            samples_b64: encode_f32_b64(samples),
-        });
     }
 
     pub fn publish_frequency_bands(&self, bands: &[f32], sample_rate: f32, total_energy: f32) {
@@ -240,18 +286,25 @@ impl EventBus {
 
     /// Publish a `daemon_status_changed` event. Payload is whatever the
     /// legacy callers built — `{ status: "ready", model_loaded: true,
-    /// ... }`, `{ status: "loading_model", ... }`, etc. Settings-scope
-    /// only: the SSE router refuses widget tokens for this topic.
+    /// ... }`, `{ status: "loading_model", ... }`, etc. Subscribers need
+    /// the `daemon_status` scope (gated by [`Topic::required_scope`]).
     pub fn publish_daemon_status_changed(&self, data: serde_json::Value) {
         let _ = self.daemon_status_changed.send(data);
     }
 
     /// Publish a `download_progress` event. Payload is the JSON shape
     /// the legacy `notification_manager.broadcast_event("download_progress",...)`
-    /// used — the keys of `DownloadProgress` plus a `timestamp`.
-    /// Settings-scope only: see [`publish_daemon_status_changed`].
+    /// used — the keys of `DownloadProgress` plus a `timestamp`. Requires
+    /// the `daemon_status` scope: see [`publish_daemon_status_changed`].
     pub fn publish_download_progress(&self, data: serde_json::Value) {
         let _ = self.download_progress.send(data);
+    }
+
+    /// Publish a `registry_install` event.  Payload is a serialized
+    /// `super_stt_shared::registry::events::RegistryEvent`. Requires the
+    /// `daemon_status` scope.
+    pub fn publish_registry_install(&self, data: serde_json::Value) {
+        let _ = self.registry_install.send(data);
     }
 
     // ---------- Subscribe API ----------------------------------------------
@@ -272,7 +325,12 @@ impl EventBus {
                 AnyReceiver::RecordingStopped(self.recording_stopped.subscribe())
             }
             Topic::RecordingState => AnyReceiver::RecordingState(self.recording_state.subscribe()),
-            Topic::AudioSamples => AnyReceiver::AudioSamples(self.audio_samples.subscribe()),
+            Topic::TranscribingStarted => {
+                AnyReceiver::TranscribingStarted(self.transcribing_started.subscribe())
+            }
+            Topic::TranscribingStopped => {
+                AnyReceiver::TranscribingStopped(self.transcribing_stopped.subscribe())
+            }
             Topic::FrequencyBands => AnyReceiver::FrequencyBands(self.frequency_bands.subscribe()),
             Topic::PartialStt => AnyReceiver::PartialStt(self.partial_stt.subscribe()),
             Topic::FinalStt => AnyReceiver::FinalStt(self.final_stt.subscribe()),
@@ -281,6 +339,9 @@ impl EventBus {
             }
             Topic::DownloadProgress => {
                 AnyReceiver::DownloadProgress(self.download_progress.subscribe())
+            }
+            Topic::RegistryInstall => {
+                AnyReceiver::RegistryInstall(self.registry_install.subscribe())
             }
         }
     }
@@ -293,12 +354,14 @@ pub enum AnyReceiver {
     RecordingStarted(broadcast::Receiver<RecordingStartedEvent>),
     RecordingStopped(broadcast::Receiver<RecordingStoppedEvent>),
     RecordingState(broadcast::Receiver<RecordingStateEvent>),
-    AudioSamples(broadcast::Receiver<AudioSamplesEvent>),
+    TranscribingStarted(broadcast::Receiver<TranscribingStartedEvent>),
+    TranscribingStopped(broadcast::Receiver<TranscribingStoppedEvent>),
     FrequencyBands(broadcast::Receiver<FrequencyBandsEvent>),
     PartialStt(broadcast::Receiver<SttEvent>),
     FinalStt(broadcast::Receiver<SttEvent>),
     DaemonStatusChanged(broadcast::Receiver<DaemonStatusChangedEvent>),
     DownloadProgress(broadcast::Receiver<DownloadProgressEvent>),
+    RegistryInstall(broadcast::Receiver<RegistryInstallEvent>),
 }
 
 impl AnyReceiver {
@@ -327,7 +390,8 @@ impl AnyReceiver {
             Self::RecordingStarted(rx) => recv_arm!(rx, RecordingStarted),
             Self::RecordingStopped(rx) => recv_arm!(rx, RecordingStopped),
             Self::RecordingState(rx) => recv_arm!(rx, RecordingState),
-            Self::AudioSamples(rx) => recv_arm!(rx, AudioSamples),
+            Self::TranscribingStarted(rx) => recv_arm!(rx, TranscribingStarted),
+            Self::TranscribingStopped(rx) => recv_arm!(rx, TranscribingStopped),
             Self::FrequencyBands(rx) => recv_arm!(rx, FrequencyBands),
             Self::PartialStt(rx) => recv_arm!(rx, PartialStt),
             Self::FinalStt(rx) => recv_arm!(rx, FinalStt),
@@ -338,6 +402,10 @@ impl AnyReceiver {
             Self::DownloadProgress(rx) => {
                 let value = rx.recv().await?;
                 Ok((Topic::DownloadProgress.as_str(), value))
+            }
+            Self::RegistryInstall(rx) => {
+                let value = rx.recv().await?;
+                Ok((Topic::RegistryInstall.as_str(), value))
             }
         }
     }
@@ -473,12 +541,14 @@ mod tests {
             Topic::RecordingStarted,
             Topic::RecordingStopped,
             Topic::RecordingState,
-            Topic::AudioSamples,
+            Topic::TranscribingStarted,
+            Topic::TranscribingStopped,
             Topic::FrequencyBands,
             Topic::PartialStt,
             Topic::FinalStt,
             Topic::DaemonStatusChanged,
             Topic::DownloadProgress,
+            Topic::RegistryInstall,
         ] {
             assert_eq!(Topic::from_wire(t.as_str()), Some(t));
         }
@@ -510,6 +580,23 @@ mod tests {
         assert_eq!(payload["model_name"], serde_json::json!("whisper-tiny"));
     }
 
+    #[tokio::test]
+    async fn transcribing_stopped_round_trip() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe(Topic::TranscribingStopped);
+        bus.publish_transcribing_stopped(TranscribingStoppedEvent {
+            client_id: "test-client".into(),
+            timestamp: "2026-06-08T00:00:00Z".into(),
+            transcription_success: true,
+            error: None,
+        });
+        let (topic, payload) = rx.recv_json().await.expect("should receive");
+        assert_eq!(topic, "transcribing_stopped");
+        assert_eq!(payload["client_id"], serde_json::json!("test-client"));
+        assert_eq!(payload["transcription_success"], serde_json::json!(true));
+        assert!(payload.get("error").is_none(), "None fields must be omitted");
+    }
+
     #[test]
     fn b64_round_trip_preserves_f32_slice() {
         let original = vec![0.0_f32, -1.5, 2.5, f32::INFINITY, f32::NEG_INFINITY];
@@ -518,6 +605,50 @@ mod tests {
         assert_eq!(decoded.len(), original.len());
         for (a, b) in decoded.iter().zip(original.iter()) {
             assert_eq!(a.to_bits(), b.to_bits());
+        }
+    }
+
+    #[test]
+    fn required_scope_maps_every_topic() {
+        assert_eq!(Topic::RecordingStarted.required_scope(), "recording_events");
+        assert_eq!(Topic::RecordingStopped.required_scope(), "recording_events");
+        assert_eq!(Topic::RecordingState.required_scope(), "recording_events");
+        assert_eq!(Topic::TranscribingStarted.required_scope(), "recording_events");
+        assert_eq!(Topic::TranscribingStopped.required_scope(), "recording_events");
+        assert_eq!(Topic::FrequencyBands.required_scope(), "audio_visualization");
+        assert_eq!(Topic::PartialStt.required_scope(), "global_transcriptions");
+        assert_eq!(Topic::FinalStt.required_scope(), "global_transcriptions");
+        assert_eq!(Topic::DaemonStatusChanged.required_scope(), "daemon_status");
+        assert_eq!(Topic::DownloadProgress.required_scope(), "daemon_status");
+        assert_eq!(Topic::RegistryInstall.required_scope(), "daemon_status");
+    }
+
+    #[test]
+    fn required_scope_matches_shared_mapping() {
+        // The daemon enum and the client-facing helper in `super-stt-shared`
+        // must agree on every topic's scope, so a client validating its
+        // (scopes, topics) against the shared mapping sees the same gate the
+        // daemon enforces here. This pins the two sources of truth together.
+        use super_stt_shared::daemon::widget_subscription::required_scope_for_topic;
+        for topic in [
+            Topic::RecordingStarted,
+            Topic::RecordingStopped,
+            Topic::RecordingState,
+            Topic::TranscribingStarted,
+            Topic::TranscribingStopped,
+            Topic::FrequencyBands,
+            Topic::PartialStt,
+            Topic::FinalStt,
+            Topic::DaemonStatusChanged,
+            Topic::DownloadProgress,
+            Topic::RegistryInstall,
+        ] {
+            assert_eq!(
+                required_scope_for_topic(topic.as_str()),
+                Some(topic.required_scope()),
+                "shared mapping disagrees with Topic::required_scope for {}",
+                topic.as_str()
+            );
         }
     }
 }

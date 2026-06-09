@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::{
-    IsOpen,
     app::Message,
     config::AppletConfig,
-    models::{state::DaemonConnectionState, theme::ThemeConfig},
+    models::{
+        state::{DaemonConnectionState, IsOpen},
+        theme::ThemeConfig,
+    },
     ui::sections::{
         app_info::create_app_info_section, launch::create_launch_section,
-        settings::settings::create_applet_settings_section, status::create_status_section,
+        settings::section::create_applet_settings_section, status::create_status_section,
     },
 };
 use cosmic::{

@@ -24,7 +24,7 @@ use super_stt_shared::validation::get_http_socket_path;
 
 const APP_ID: AppId = AppId("super-stt-cli");
 const APP_NAME: &str = "Super STT CLI";
-const SCOPE: &str = "client";
+const SCOPES: &[&str] = &["transcribe", "status"];
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -117,7 +117,7 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = std::result::Result<T, String>>,
 {
-    session::with_token(socket_path, APP_ID, APP_NAME, SCOPE, op)
+    session::with_token(socket_path, APP_ID, APP_NAME, SCOPES, op)
         .await
         .map_err(|e| anyhow!(e))
 }
@@ -165,7 +165,7 @@ async fn cmd_record(
     // start-or-stop decision on the client (see
     // `docs/protocol/endpoints/v1/transcribe.md`).
     let status = http_client::status(socket_path.clone(), &token).await?;
-    if status.is_recording.unwrap_or(false) {
+    if status.busy.unwrap_or(false) {
         return cmd_stop(socket_path, token).await;
     }
 

@@ -39,6 +39,25 @@ pub struct DaemonAudioRecorder {
     audio_device_cache: Arc<Mutex<Option<AudioDeviceCache>>>,
 }
 
+/// Return type of [`DaemonAudioRecorder::build_audio_stream`].
+type AudioStreamBundle = (
+    Stream,
+    tokio::task::JoinHandle<()>,
+    cpal::StreamConfig,
+    tokio::sync::mpsc::UnboundedSender<Vec<f32>>,
+);
+
+/// All parameters needed to build a `cpal` input stream.
+struct StreamSetup<'a> {
+    device: &'a Device,
+    config: &'a StreamConfig,
+    sample_format: SampleFormat,
+    buffer: Arc<Mutex<VecDeque<f32>>>,
+    state: Arc<Mutex<RecordingState>>,
+    level_tx: broadcast::Sender<AudioLevel>,
+    samples_tx: tokio::sync::mpsc::UnboundedSender<Vec<f32>>,
+}
+
 impl DaemonAudioRecorder {
     /// Create a new recorder with default theme
     ///
@@ -125,7 +144,6 @@ impl DaemonAudioRecorder {
     /// # Panics
     ///
     /// Panics if internal mutexes for buffers or state are poisoned.
-    #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
     pub async fn record_until_silence_with_streaming(
         &mut self,
         // Internal pub/sub bus that fans frequency-band frames out to
@@ -143,36 +161,77 @@ impl DaemonAudioRecorder {
         // Play start sound and wait for it to complete
         self.play_start_sound_and_wait();
 
-        // Clear previous recording
-        {
-            let mut buffer = match self.audio_buffer.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    log::warn!("Audio buffer lock was poisoned, attempting recovery");
-                    poisoned.into_inner()
-                }
-            };
-            buffer.clear();
+        self.init_recording_state(silence_detection_disabled);
 
-            let mut state = match self.recording_state.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    log::warn!("Recording state lock was poisoned, attempting recovery");
-                    poisoned.into_inner()
-                }
-            };
-            *state = RecordingState::new();
-            state.recording_start = Some(Instant::now());
-            state.silence_detection_disabled = silence_detection_disabled;
+        let (stream, analysis_task, stream_config, samples_tx) =
+            self.build_audio_stream(&events, preview_tx)?;
+
+        let timeout_occurred = self
+            .run_silence_loop(silence_detection_disabled, &mut stop_rx)
+            .await;
+
+        drop(stream);
+
+        // Close the samples channel to stop the analysis task
+        drop(samples_tx);
+
+        // Wait for analysis task to finish
+        let _ = analysis_task.await;
+
+        // Check if timeout occurred
+        if timeout_occurred {
+            return Err(anyhow::anyhow!(
+                "Timeout: No speech detected within 60 seconds"
+            ));
         }
 
-        // Set up audio stream
+        let final_audio = self.drain_and_resample(stream_config.sample_rate)?;
+
+        log::info!("🎤 Recording completed: {} samples", final_audio.len());
+
+        // Play end sound
+        self.play_end_sound();
+
+        Ok(final_audio)
+    }
+
+    /// Clear the audio buffer and reset recording state before a new recording.
+    fn init_recording_state(&self, silence_detection_disabled: bool) {
+        let mut buffer = match self.audio_buffer.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("Audio buffer lock was poisoned, attempting recovery");
+                poisoned.into_inner()
+            }
+        };
+        buffer.clear();
+
+        let mut state = match self.recording_state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::warn!("Recording state lock was poisoned, attempting recovery");
+                poisoned.into_inner()
+            }
+        };
+        *state = RecordingState::new();
+        state.recording_start = Some(Instant::now());
+        state.silence_detection_disabled = silence_detection_disabled;
+    }
+
+    /// Set up the audio device, spawn the frequency-analysis task, and build the
+    /// cpal input stream.  Returns `(stream, analysis_task, stream_config,
+    /// samples_tx)` so the caller can drive the lifetime of each piece.
+    fn build_audio_stream(
+        &self,
+        events: &Arc<EventBus>,
+        preview_tx: Option<tokio::sync::mpsc::UnboundedSender<(Vec<f32>, u32)>>,
+    ) -> Result<AudioStreamBundle> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
             .context("No input device available")?;
 
-        let config = self.get_optimal_config(&device)?;
+        let config = Self::get_optimal_config(&device)?;
         let sample_format = config.sample_format();
         let stream_config = config.config();
 
@@ -184,11 +243,13 @@ impl DaemonAudioRecorder {
         // unconditionally — publishes with no subscribers are a cheap
         // `send` error that's dropped silently, and computing bands at
         // the cpal callback rate is cheap relative to the STT model.
-        let events_clone = Arc::clone(&events);
+        let events_clone = Arc::clone(events);
         let device_sample_rate_u32 = stream_config.sample_rate;
-        let device_sample_rate = device_sample_rate_u32 as f32;
+        // sample_rate is u32 (cpal::SampleRate = u32); sample rates ≤ 384_000 round-trip
+        // exactly in f32.
+        let device_sample_rate = crate::num_cast::u32_to_f32(device_sample_rate_u32);
         let analysis_task = tokio::spawn(async move {
-            let frequency_analyzer = AudioAnalyzer::new(device_sample_rate, 1024);
+            let frequency_analyzer = AudioAnalyzer::new(device_sample_rate_u32, 1024);
 
             while let Some(samples) = samples_rx.recv().await {
                 let freq_data = frequency_analyzer.analyze(&samples);
@@ -211,26 +272,34 @@ impl DaemonAudioRecorder {
         let state_clone = self.recording_state.clone();
         let level_tx = self.audio_level_tx.clone();
 
-        let stream = self.create_audio_stream_with_streaming(
-            &device,
-            &stream_config,
+        let stream = Self::create_audio_stream_with_streaming(StreamSetup {
+            device: &device,
+            config: &stream_config,
             sample_format,
-            buffer_clone,
-            state_clone,
+            buffer: buffer_clone,
+            state: state_clone,
             level_tx,
-            samples_tx.clone(),
-        )?;
+            samples_tx: samples_tx.clone(),
+        })?;
 
-        // Wait for recording to complete with intelligent timeout
+        Ok((stream, analysis_task, stream_config, samples_tx))
+    }
+
+    /// Poll the recording state until silence / stop signal / timeout.
+    /// Returns `true` if a timeout occurred (no speech within 60 s).
+    async fn run_silence_loop(
+        &self,
+        silence_detection_disabled: bool,
+        stop_rx: &mut Option<tokio::sync::broadcast::Receiver<()>>,
+    ) -> bool {
         let start_time = Instant::now();
-        let mut timeout_occurred = false;
 
         loop {
             // When a stop signal is present, race between the periodic check and the stop signal
-            if let Some(ref mut stop_rx) = stop_rx {
+            if let Some(rx) = stop_rx {
                 tokio::select! {
                     () = time::sleep(AUDIO_LOOP_INTERVAL) => {}
-                    _ = stop_rx.recv() => {
+                    _ = rx.recv() => {
                         info!("🛑 Stop signal received, ending recording");
                         break;
                     }
@@ -277,28 +346,16 @@ impl DaemonAudioRecorder {
                 // Only timeout if no speech has been detected at all
                 if !has_detected_speech && elapsed >= Duration::from_mins(1) {
                     log::warn!("⚠️ Recording timeout: No speech detected within 60 seconds");
-                    timeout_occurred = true;
-                    break;
+                    return true;
                 }
             }
         }
 
-        drop(stream);
+        false
+    }
 
-        // Close the samples channel to stop the analysis task
-        drop(samples_tx);
-
-        // Wait for analysis task to finish
-        let _ = analysis_task.await;
-
-        // Check if timeout occurred
-        if timeout_occurred {
-            return Err(anyhow::anyhow!(
-                "Timeout: No speech detected within 60 seconds"
-            ));
-        }
-
-        // Extract recorded audio
+    /// Extract buffered audio and resample to the target rate when needed.
+    fn drain_and_resample(&self, device_sample_rate: u32) -> Result<Vec<f32>> {
         let audio_data: Vec<f32> = {
             let buffer = match self.audio_buffer.lock() {
                 Ok(guard) => guard,
@@ -316,29 +373,19 @@ impl DaemonAudioRecorder {
             return Err(anyhow::anyhow!("No audio recorded"));
         }
 
-        // Resample if needed
-        let device_sample_rate = stream_config.sample_rate;
-        let final_audio = if device_sample_rate == self.sample_rate {
-            audio_data
+        if device_sample_rate == self.sample_rate {
+            Ok(audio_data)
         } else {
             resample(
                 &audio_data,
                 device_sample_rate,
                 self.sample_rate,
                 ResampleQuality::Fast,
-            )?
-        };
-
-        log::info!("🎤 Recording completed: {} samples", final_audio.len());
-
-        // Play end sound
-        self.play_end_sound();
-
-        Ok(final_audio)
+            )
+        }
     }
 
-    #[allow(clippy::unused_self)]
-    fn get_optimal_config(&self, device: &Device) -> Result<cpal::SupportedStreamConfig> {
+    fn get_optimal_config(device: &Device) -> Result<cpal::SupportedStreamConfig> {
         let mut supported_configs: Vec<_> = device.supported_input_configs()?.collect();
 
         // Sort by preference: F32, I16, I32, others
@@ -406,21 +453,20 @@ impl DaemonAudioRecorder {
         });
     }
 
-    #[allow(clippy::too_many_arguments, clippy::unused_self)]
-    fn create_audio_stream_with_streaming(
-        &self,
-        device: &Device,
-        config: &StreamConfig,
-        sample_format: SampleFormat,
-        buffer: Arc<Mutex<VecDeque<f32>>>,
-        state: Arc<Mutex<RecordingState>>,
-        level_tx: broadcast::Sender<AudioLevel>,
-        samples_tx: tokio::sync::mpsc::UnboundedSender<Vec<f32>>,
-    ) -> Result<Stream> {
-        let channels = config.channels as usize;
+    fn create_audio_stream_with_streaming(setup: StreamSetup<'_>) -> Result<Stream> {
+        let channels = setup.config.channels as usize;
 
-        match sample_format {
+        match setup.sample_format {
             SampleFormat::F32 => {
+                let StreamSetup {
+                    device,
+                    config,
+                    buffer,
+                    state,
+                    level_tx,
+                    samples_tx,
+                    ..
+                } = setup;
                 let stream = device.build_input_stream(
                     config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -439,6 +485,15 @@ impl DaemonAudioRecorder {
                 Ok(stream)
             }
             SampleFormat::I16 => {
+                let StreamSetup {
+                    device,
+                    config,
+                    buffer,
+                    state,
+                    level_tx,
+                    samples_tx,
+                    ..
+                } = setup;
                 let stream = device.build_input_stream(
                     config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
@@ -457,14 +512,15 @@ impl DaemonAudioRecorder {
                 Ok(stream)
             }
             _ => Err(anyhow::anyhow!(
-                "Unsupported sample format: {sample_format:?}"
+                "Unsupported sample format: {:?}",
+                setup.sample_format
             )),
         }
     }
+
     /// Detect the default input device's chosen sample rate using the same logic
     /// as the recording stream setup, so callers can preconfigure dependencies
     /// (e.g., real-time preview) with the correct rate.
-    /// Detect the default input device's sample rate using the optimal config.
     ///
     /// # Errors
     ///
@@ -474,7 +530,7 @@ impl DaemonAudioRecorder {
         let device = host
             .default_input_device()
             .context("No input device available")?;
-        let config = self.get_optimal_config(&device)?;
+        let config = Self::get_optimal_config(&device)?;
         Ok(config.config().sample_rate)
     }
 

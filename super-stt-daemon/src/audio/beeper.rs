@@ -4,6 +4,7 @@ use anyhow::Result;
 use cpal::Device;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use log::debug;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -28,18 +29,250 @@ pub fn play_warmup_tone() -> Result<()> {
     Ok(())
 }
 
+/// Timing parameters derived from the sample rate and ms inputs.
+struct BeepParams {
+    sample_rate: f32,
+    channels: usize,
+    total_samples: usize,
+    fade_in_samples: usize,
+    fade_out_samples: usize,
+    samples_per_beep: usize,
+    total_samples_with_padding: usize,
+}
+
+impl BeepParams {
+    fn compute(
+        device: &Device,
+        config: &cpal::SupportedStreamConfig,
+        frequencies: &[f32],
+        duration_ms: u64,
+        fade_in_ms: u64,
+        fade_out_ms: u64,
+    ) -> Self {
+        // sample_rate() returns u32 (cpal::SampleRate = u32); routed through num_cast helper
+        // since sample rates ≤ 384_000 round-trip exactly in f32.
+        let sample_rate = crate::num_cast::u32_to_f32(config.sample_rate());
+        let channels = usize::from(config.channels());
+        // duration_ms/fade_*_ms are tiny (< a few thousand ms); their u64 values fit in u32 and
+        // thus in f32 exactly. Route through num_cast helper.
+        let duration_ms_f32 =
+            crate::num_cast::u32_to_f32(u32::try_from(duration_ms).unwrap_or(u32::MAX));
+        let fade_in_ms_f32 =
+            crate::num_cast::u32_to_f32(u32::try_from(fade_in_ms).unwrap_or(u32::MAX));
+        let fade_out_ms_f32 =
+            crate::num_cast::u32_to_f32(u32::try_from(fade_out_ms).unwrap_or(u32::MAX));
+        // f32 → usize: values are tiny sample counts (< a few million); truncation is intentional
+        // and the result fits usize.
+        let samples_per_beep =
+            crate::num_cast::f32_to_usize(sample_rate * duration_ms_f32 / 1000.0);
+        let total_samples = frequencies.len() * samples_per_beep;
+        let fade_in_samples = crate::num_cast::f32_to_usize(sample_rate * fade_in_ms_f32 / 1000.0);
+        let fade_out_samples =
+            crate::num_cast::f32_to_usize(sample_rate * fade_out_ms_f32 / 1000.0);
+        // 50 ms silence padding to let the fade-out complete before the stream stops.
+        let silence_padding_samples = crate::num_cast::f32_to_usize(sample_rate * 0.05);
+        let total_samples_with_padding = total_samples + silence_padding_samples;
+        let _ = device; // consumed only by build_stream; held here for coherence
+        Self {
+            sample_rate,
+            channels,
+            total_samples,
+            fade_in_samples,
+            fade_out_samples,
+            samples_per_beep,
+            total_samples_with_padding,
+        }
+    }
+}
+
+/// Advance the sine-wave generator by one sample and return the normalised
+/// float value in `[-1, 1]` (scaled by `0.3 * volume`).
+///
+/// Mutates `phase` and `sample_clock` in place.
+fn next_sample_f32(
+    sample_clock: &mut usize,
+    phase: &mut f32,
+    params: &BeepParams,
+    frequencies: &[f32],
+    volume: f32,
+    finished: &AtomicBool,
+) -> Option<f32> {
+    if *sample_clock >= params.total_samples_with_padding {
+        finished.store(true, Ordering::Relaxed);
+        return None; // silence
+    }
+    if *sample_clock >= params.total_samples {
+        *sample_clock += 1;
+        return None; // padding silence
+    }
+    let beep_index = *sample_clock / params.samples_per_beep;
+    let sample_in_beep = *sample_clock % params.samples_per_beep;
+    if beep_index >= frequencies.len() {
+        *sample_clock += 1;
+        return None; // guard: in padding zone
+    }
+    let frequency = frequencies[beep_index];
+
+    // sample_in_beep and fade_in_samples are tiny sample counts (≤ a few hundred thousand);
+    // they fit in u32 and thus in f32 with no precision loss for realistic values.
+    let fade_in = if beep_index == 0 && sample_in_beep < params.fade_in_samples {
+        let num = crate::num_cast::u32_to_f32(u32::try_from(sample_in_beep).unwrap_or(u32::MAX));
+        let den =
+            crate::num_cast::u32_to_f32(u32::try_from(params.fade_in_samples).unwrap_or(u32::MAX));
+        num / den
+    } else {
+        1.0
+    };
+
+    let samples_from_end = params.total_samples.saturating_sub(*sample_clock);
+    let fade_out = if samples_from_end <= params.fade_out_samples {
+        if samples_from_end == 0 {
+            0.0
+        } else {
+            // samples_from_end - 1 and fade_out_samples - 1 are tiny sample counts
+            let num = crate::num_cast::u32_to_f32(
+                u32::try_from(samples_from_end - 1).unwrap_or(u32::MAX),
+            );
+            let den = crate::num_cast::u32_to_f32(
+                u32::try_from(params.fade_out_samples - 1).unwrap_or(u32::MAX),
+            );
+            num / den
+        }
+    } else {
+        1.0
+    };
+
+    let value = phase.sin() * 0.3 * volume * fade_in * fade_out;
+
+    *phase += frequency * 2.0 * std::f32::consts::PI / params.sample_rate;
+    while *phase > 2.0 * std::f32::consts::PI {
+        *phase -= 2.0 * std::f32::consts::PI;
+    }
+    *sample_clock += 1;
+    Some(value)
+}
+
+/// Build an output stream for the given device + config, wiring up the
+/// per-sample generator for both F32 and I16 sample formats.
+///
+/// # Errors
+/// Returns an error when the sample format is unsupported or `build_output_stream` fails.
+fn build_stream(
+    device: &Device,
+    config: &cpal::SupportedStreamConfig,
+    params: BeepParams,
+    frequencies: Vec<f32>,
+    volume: f32,
+    finished: Arc<AtomicBool>,
+) -> Result<cpal::Stream> {
+    let channels = params.channels;
+    match config.sample_format() {
+        cpal::SampleFormat::F32 => {
+            let mut sample_clock = 0usize;
+            let mut phase = 0.0f32;
+            let stream = device
+                .build_output_stream(
+                    &config.config(),
+                    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        for frame in data.chunks_mut(channels) {
+                            let v = next_sample_f32(
+                                &mut sample_clock,
+                                &mut phase,
+                                &params,
+                                &frequencies,
+                                volume,
+                                &finished,
+                            )
+                            .unwrap_or(0.0);
+                            for s in frame {
+                                *s = v;
+                            }
+                        }
+                    },
+                    |err| log::warn!("Audio stream error: {err}"),
+                    None,
+                )
+                .map_err(|e| anyhow::anyhow!("Failed to build F32 stream: {e}"))?;
+            Ok(stream)
+        }
+        cpal::SampleFormat::I16 => {
+            let mut sample_clock = 0usize;
+            let mut phase = 0.0f32;
+            let stream = device
+                .build_output_stream(
+                    &config.config(),
+                    move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+                        for frame in data.chunks_mut(channels) {
+                            let v = next_sample_f32(
+                                &mut sample_clock,
+                                &mut phase,
+                                &params,
+                                &frequencies,
+                                volume,
+                                &finished,
+                            )
+                            .unwrap_or(0.0);
+                            // v is in [-1, 1]; scale to i16 range. The clamp guarantees the
+                            // value fits in i16 before the cast — routed through num_cast helper.
+                            let scaled = v * f32::from(i16::MAX);
+                            let scaled_clamped =
+                                scaled.clamp(f32::from(i16::MIN), f32::from(i16::MAX));
+                            let iv = crate::num_cast::f32_to_i16(scaled_clamped);
+                            for s in frame {
+                                *s = iv;
+                            }
+                        }
+                    },
+                    |err| log::warn!("Audio stream error: {err}"),
+                    None,
+                )
+                .map_err(|e| anyhow::anyhow!("Failed to build I16 stream: {e}"))?;
+            Ok(stream)
+        }
+        _ => Err(anyhow::anyhow!(
+            "Unsupported sample format for beep playback"
+        )),
+    }
+}
+
+/// Spin-wait until the stream finishes or the timeout elapses, then sleep
+/// an extra buffer-flush period and drop the stream.
+fn wait_for_completion(
+    stream: cpal::Stream,
+    finished: &AtomicBool,
+    total_duration_ms: u64,
+    freq_count: usize,
+    sample_rate: f32,
+) {
+    let beep_start = std::time::Instant::now();
+    // freq_count is a tiny count of frequencies (typically 1–4); fits u64.
+    let freq_count_u64 = u64::try_from(freq_count).unwrap_or(u64::MAX);
+    let beep_timeout = Duration::from_millis(total_duration_ms * freq_count_u64 + 2000);
+    while !finished.load(Ordering::Relaxed) {
+        if beep_start.elapsed() > beep_timeout {
+            log::warn!("Beep playback timed out after {:?}", beep_start.elapsed());
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    // Most audio drivers use 256–2048 sample buffers; assume ~1024 worst-case.
+    // 1024/sample_rate*1000 is in the range [~10, ~46] ms for typical rates, then clamped to
+    // [100, 200]. The f32 result is non-negative and well within u64 range; clamp before cast.
+    let buffer_flush_ms_f32 = (1024.0_f32 / sample_rate * 1000.0).clamp(0.0, f32::MAX);
+    let buffer_flush_ms = crate::num_cast::f32_to_u64(buffer_flush_ms_f32);
+    let buffer_flush_time = Duration::from_millis(buffer_flush_ms.clamp(100, 200));
+    std::thread::sleep(buffer_flush_time);
+
+    drop(stream);
+}
+
 /// Play a sequence of beeps on a freshly initialized output device.
 ///
 /// # Errors
 ///
 /// Returns an error if no output device is available or if the output stream
 /// cannot be created or played.
-#[allow(
-    clippy::too_many_lines,
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
 pub fn play_beep_sequence(
     frequencies: &[f32],
     duration_ms: u64,
@@ -59,220 +292,41 @@ pub fn play_beep_sequence(
     let device = host
         .default_output_device()
         .ok_or_else(|| anyhow::anyhow!("No output device available"))?;
-
     let config = device
         .default_output_config()
         .map_err(|e| anyhow::anyhow!("Failed to get output config: {e}"))?;
 
-    let sample_rate = config.sample_rate() as f32;
-    let channels = config.channels() as usize;
+    let params = BeepParams::compute(
+        &device,
+        &config,
+        frequencies,
+        duration_ms,
+        fade_in_ms,
+        fade_out_ms,
+    );
+    let sample_rate = params.sample_rate;
 
-    // Calculate total duration for all beeps to play continuously
-    let total_samples = frequencies.len() * (sample_rate * duration_ms as f32 / 1000.0) as usize;
-    let fade_in_samples = (sample_rate * fade_in_ms as f32 / 1000.0) as usize;
-    let fade_out_samples = (sample_rate * fade_out_ms as f32 / 1000.0) as usize;
-    let samples_per_beep = (sample_rate * duration_ms as f32 / 1000.0) as usize;
-    // Add silence padding at the end to ensure fade-out completes before stream stops
-    let silence_padding_samples = (sample_rate * 0.05) as usize; // 50ms of silence
-    let total_samples_with_padding = total_samples + silence_padding_samples;
-
-    let mut sample_clock = 0usize;
-    let mut phase = 0.0f32; // Track phase for smooth transitions
-    let finished = std::sync::Arc::new(AtomicBool::new(false));
-    let finished_clone = finished.clone();
-    let frequencies_clone = frequencies.to_vec();
-
-    let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => device.build_output_stream(
-            &config.config(),
-            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                for frame in data.chunks_mut(channels) {
-                    if sample_clock >= total_samples_with_padding {
-                        finished_clone.store(true, Ordering::Relaxed);
-                        for sample in frame {
-                            *sample = 0.0;
-                        }
-                        return;
-                    }
-
-                    // Output silence during padding period
-                    if sample_clock >= total_samples {
-                        for sample in frame {
-                            *sample = 0.0;
-                        }
-                        sample_clock += 1;
-                        continue;
-                    }
-
-                    // Determine which beep we're on and position within that beep
-                    let beep_index = sample_clock / samples_per_beep;
-                    let sample_in_beep = sample_clock % samples_per_beep;
-
-                    if beep_index >= frequencies_clone.len() {
-                        // We're in the padding zone
-                        for sample in frame {
-                            *sample = 0.0;
-                        }
-                        sample_clock += 1;
-                        continue;
-                    }
-
-                    let frequency = frequencies_clone[beep_index];
-
-                    // Apply fade-in at the start of the first beep
-                    let fade_in_multiplier = if beep_index == 0 && sample_in_beep < fade_in_samples
-                    {
-                        sample_in_beep as f32 / fade_in_samples as f32
-                    } else {
-                        1.0
-                    };
-
-                    // Apply fade-out at the end of the entire sequence
-                    let samples_from_total_end = total_samples.saturating_sub(sample_clock);
-                    let fade_out_multiplier = if samples_from_total_end <= fade_out_samples {
-                        // Fade from 1.0 to 0.0 over fade_out_samples
-                        if samples_from_total_end == 0 {
-                            0.0
-                        } else {
-                            (samples_from_total_end - 1) as f32 / (fade_out_samples - 1) as f32
-                        }
-                    } else {
-                        1.0
-                    };
-
-                    // Generate sine wave with continuous phase and both fades
-                    let value =
-                        phase.sin() * 0.3 * volume * fade_in_multiplier * fade_out_multiplier;
-
-                    // Update phase for next sample
-                    phase += frequency * 2.0 * std::f32::consts::PI / sample_rate;
-                    // Keep phase in reasonable range to avoid precision issues
-                    while phase > 2.0 * std::f32::consts::PI {
-                        phase -= 2.0 * std::f32::consts::PI;
-                    }
-
-                    for sample in frame {
-                        *sample = value;
-                    }
-                    sample_clock += 1;
-                }
-            },
-            |err| log::warn!("Audio stream error: {err}"),
-            None,
-        ),
-        cpal::SampleFormat::I16 => {
-            let frequencies_clone = frequencies.to_vec();
-            let mut phase = 0.0f32; // Track phase for smooth transitions
-            device.build_output_stream(
-                &config.config(),
-                move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                    for frame in data.chunks_mut(channels) {
-                        if sample_clock >= total_samples_with_padding {
-                            finished_clone.store(true, Ordering::Relaxed);
-                            for sample in frame {
-                                *sample = 0;
-                            }
-                            return;
-                        }
-
-                        // Output silence during padding period
-                        if sample_clock >= total_samples {
-                            for sample in frame {
-                                *sample = 0;
-                            }
-                            sample_clock += 1;
-                            continue;
-                        }
-
-                        // Determine which beep we're on and position within that beep
-                        let beep_index = sample_clock / samples_per_beep;
-                        let sample_in_beep = sample_clock % samples_per_beep;
-
-                        if beep_index >= frequencies_clone.len() {
-                            // We're in the padding zone
-                            for sample in frame {
-                                *sample = 0;
-                            }
-                            sample_clock += 1;
-                            continue;
-                        }
-
-                        let frequency = frequencies_clone[beep_index];
-
-                        // Apply fade-in at the start of the first beep
-                        let fade_in_multiplier =
-                            if beep_index == 0 && sample_in_beep < fade_in_samples {
-                                sample_in_beep as f32 / fade_in_samples as f32
-                            } else {
-                                1.0
-                            };
-
-                        // Apply fade-out at the end of the entire sequence
-                        let samples_from_total_end = total_samples.saturating_sub(sample_clock);
-                        let fade_out_multiplier = if samples_from_total_end <= fade_out_samples {
-                            // Fade from 1.0 to 0.0 over fade_out_samples
-                            if samples_from_total_end == 0 {
-                                0.0
-                            } else {
-                                (samples_from_total_end - 1) as f32 / (fade_out_samples - 1) as f32
-                            }
-                        } else {
-                            1.0
-                        };
-
-                        // Generate sine wave with continuous phase and both fades
-                        let value =
-                            phase.sin() * 0.3 * volume * fade_in_multiplier * fade_out_multiplier;
-                        let sample_value = (value * f32::from(i16::MAX)) as i16;
-
-                        // Update phase for next sample
-                        phase += frequency * 2.0 * std::f32::consts::PI / sample_rate;
-                        // Keep phase in reasonable range to avoid precision issues
-                        while phase > 2.0 * std::f32::consts::PI {
-                            phase -= 2.0 * std::f32::consts::PI;
-                        }
-
-                        for sample in frame {
-                            *sample = sample_value;
-                        }
-                        sample_clock += 1;
-                    }
-                },
-                |err| log::warn!("Audio stream error: {err}"),
-                None,
-            )
-        }
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unsupported sample format for beep playback"
-            ));
-        }
-    }?;
+    let finished = Arc::new(AtomicBool::new(false));
+    let stream = build_stream(
+        &device,
+        &config,
+        params,
+        frequencies.to_vec(),
+        volume,
+        Arc::clone(&finished),
+    )?;
 
     stream
         .play()
         .map_err(|e| anyhow::anyhow!("Failed to play beep: {e}"))?;
 
-    let beep_start = std::time::Instant::now();
-    let beep_timeout = Duration::from_millis((duration_ms * frequencies.len() as u64) + 2000);
-    while !finished.load(Ordering::Relaxed) {
-        if beep_start.elapsed() > beep_timeout {
-            log::warn!("Beep playback timed out after {:?}", beep_start.elapsed());
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-
-    // Calculate buffer flush time based on sample rate and typical audio buffer sizes
-    // Most audio drivers use 256-2048 sample buffers, we'll assume ~1024 samples worst case
-    let estimated_buffer_samples = 1024.0;
-    let buffer_flush_ms = (estimated_buffer_samples / sample_rate * 1000.0) as u64;
-    let buffer_flush_time = Duration::from_millis(buffer_flush_ms.clamp(100, 200)); // 100-200ms range
-
-    std::thread::sleep(buffer_flush_time);
-
-    drop(stream);
-
+    wait_for_completion(
+        stream,
+        &finished,
+        duration_ms,
+        frequencies.len(),
+        sample_rate,
+    );
     Ok(())
 }
 
@@ -291,11 +345,40 @@ mod tests {
             if samples_from_total_end == 0 {
                 0.0
             } else {
-                (samples_from_total_end - 1) as f32 / (fade_out_samples - 1) as f32
+                let num = crate::num_cast::u32_to_f32(
+                    u32::try_from(samples_from_total_end - 1).unwrap_or(u32::MAX),
+                );
+                let den = crate::num_cast::u32_to_f32(
+                    u32::try_from(fade_out_samples - 1).unwrap_or(u32::MAX),
+                );
+                num / den
             }
         } else {
             1.0
         }
+    }
+
+    #[test]
+    fn test_warmup_tone_constants() {
+        // Verify warmup tone constants are reasonable
+        assert!(
+            WARMUP_TONE_DURATION_MS > 0,
+            "Warmup duration should be positive"
+        );
+        assert!(
+            WARMUP_TONE_FREQUENCY > 20.0,
+            "Warmup frequency should be positive"
+        );
+        // Note: Warmup tone uses very high frequency (44kHz) intentionally to warm up audio drivers
+        // without creating audible noise for users
+        assert!(
+            WARMUP_TONE_FREQUENCY < 50000.0,
+            "Warmup frequency should be reasonable"
+        );
+        assert!(
+            WARMUP_DELAY_AFTER_TONE_MS < 1000,
+            "Warmup delay should be reasonable"
+        );
     }
 
     #[test]
@@ -365,12 +448,13 @@ mod tests {
 
     #[test]
     fn test_buffer_flush_calculation() {
-        let sample_rates = vec![44100.0, 48000.0, 96000.0, 22050.0];
+        let sample_rates: Vec<f32> = vec![44100.0, 48000.0, 96000.0, 22050.0];
 
         for sample_rate in sample_rates {
-            let estimated_buffer_samples = 1024.0;
-            let buffer_flush_ms = (estimated_buffer_samples / sample_rate * 1000.0) as u64;
-            let buffer_flush_time = buffer_flush_ms.max(100).min(200);
+            // Mirror production code in wait_for_completion
+            let flush_ms_f32 = (1024.0_f32 / sample_rate * 1000.0).clamp(0.0, f32::MAX);
+            let buffer_flush_ms = crate::num_cast::f32_to_u64(flush_ms_f32);
+            let buffer_flush_time = buffer_flush_ms.clamp(100, 200);
 
             // Should be clamped between 100-200ms
             assert!(
@@ -395,92 +479,4 @@ mod tests {
             "Empty frequency array should not cause error"
         );
     }
-
-    #[test]
-    fn test_warmup_tone_constants() {
-        // Verify warmup tone constants are reasonable
-        assert!(
-            WARMUP_TONE_DURATION_MS > 0,
-            "Warmup duration should be positive"
-        );
-        assert!(
-            WARMUP_TONE_FREQUENCY > 20.0,
-            "Warmup frequency should be positive"
-        );
-        // Note: Warmup tone uses very high frequency (44kHz) intentionally to warm up audio drivers
-        // without creating audible noise for users
-        assert!(
-            WARMUP_TONE_FREQUENCY < 50000.0,
-            "Warmup frequency should be reasonable"
-        );
-        assert!(
-            WARMUP_DELAY_AFTER_TONE_MS < 1000,
-            "Warmup delay should be reasonable"
-        );
-    }
-}
-
-/// Verify the output device by opening a short silent stream.
-///
-/// # Errors
-///
-/// Returns an error if a test stream cannot be created or played.
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
-pub fn verify_fresh_device(device: &Device, config: &cpal::SupportedStreamConfig) -> Result<()> {
-    let sample_rate = config.sample_rate() as f32;
-    let channels = config.channels() as usize;
-    let verification_samples = (sample_rate * 0.05) as usize; // 50ms of silence
-    let mut sample_count = 0usize;
-    let completed = std::sync::Arc::new(AtomicBool::new(false));
-    let completed_clone = completed.clone();
-
-    let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => device.build_output_stream(
-            &config.config(),
-            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                for frame in data.chunks_mut(channels) {
-                    if sample_count >= verification_samples {
-                        completed_clone.store(true, Ordering::Relaxed);
-                        return;
-                    }
-                    for sample in frame {
-                        *sample = 0.0;
-                    }
-                    sample_count += 1;
-                }
-            },
-            |err| log::debug!("Verification stream error: {err}"),
-            None,
-        )?,
-        cpal::SampleFormat::I16 => device.build_output_stream(
-            &config.config(),
-            move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
-                for frame in data.chunks_mut(channels) {
-                    if sample_count >= verification_samples {
-                        completed_clone.store(true, Ordering::Relaxed);
-                        return;
-                    }
-                    for sample in frame {
-                        *sample = 0;
-                    }
-                    sample_count += 1;
-                }
-            },
-            |err| log::debug!("Verification stream error: {err}"),
-            None,
-        )?,
-        _ => return Err(anyhow::anyhow!("Unsupported sample format")),
-    };
-
-    stream.play()?;
-    let start = std::time::Instant::now();
-    while !completed.load(Ordering::Relaxed) && start.elapsed() < Duration::from_millis(200) {
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    drop(stream);
-    Ok(())
 }

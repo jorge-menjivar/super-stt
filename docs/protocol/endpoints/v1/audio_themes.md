@@ -7,7 +7,7 @@ List the audio cue themes available for selection via
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `GET /audio_themes`
 
@@ -53,4 +53,4 @@ selected theme without changing which theme is active).
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |

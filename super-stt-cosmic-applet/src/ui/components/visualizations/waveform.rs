@@ -1,23 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::FREQUENCY_NORMALIZATION_MAX;
-use crate::ui::components::visualizations::{VisualizationConfig, VisualizationRenderer};
-use cosmic::iced::{Padding, Radius};
-use super_stt_shared::FrequencyData;
-
-use crate::models::theme::{VisualizationColorConfig, VisualizationSide};
+use crate::models::theme::VisualizationSide;
+use crate::ui::components::visualizations::{
+    DrawContext, VisualizationConfig, VisualizationRenderer,
+};
+use crate::util::{f32_to_usize, usize_to_f32};
 use cosmic::iced::{
-    Point,
+    Padding, Point, Radius,
     core::Rectangle,
     widget::canvas::{Fill, Frame, path, stroke},
 };
+use super_stt_shared::FrequencyData;
 
-/// Bottom-aligned frequency waveform rendering
-/// Shows frequency bands as a smooth continuous wave rising from the bottom
+/// Bottom-aligned frequency waveform: frequency bands rendered as a
+/// smooth continuous wave rising from the bottom edge.
 pub struct WaveformVisualization {
     config: VisualizationConfig,
 }
 
-const SMOOTHING_FACTOR: f32 = 4.0;
+const SMOOTHING_PASSES: usize = 4;
 const STROKE_WIDTH: f32 = 1.5;
 const FILL_OPACITY: f32 = 0.3;
 
@@ -40,235 +41,27 @@ impl Default for WaveformVisualization {
 }
 
 impl VisualizationRenderer for WaveformVisualization {
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::too_many_lines
-    )]
-    fn draw(
-        &self,
-        frame: &mut Frame<cosmic::Renderer>,
-        bounds: Rectangle,
-        frequency_data: &FrequencyData,
-        visualization_side: &VisualizationSide,
-        color_config: &VisualizationColorConfig,
-        is_dark: bool,
-        cosmic_theme: &cosmic::cosmic_theme::Theme,
-    ) {
-        // Use effective bounds with margins
+    fn draw(&self, frame: &mut Frame<cosmic::Renderer>, ctx: &DrawContext) {
+        let DrawContext {
+            bounds,
+            frequency_data,
+            side,
+            color_config,
+            is_dark,
+            cosmic_theme,
+        } = *ctx;
         let effective_bounds = self.config.effective_bounds(bounds);
 
-        // Determine which frequency bands to show based on VisualizationSide
-        let total_bands = frequency_data.bands.len().min(32);
-        let (bands_to_show, band_start_index) = match visualization_side {
-            VisualizationSide::Left => (total_bands / 2, 0),
-            VisualizationSide::Right => (total_bands / 2, total_bands / 2),
-            VisualizationSide::Full => (total_bands, 0),
-        };
-
-        // Normalization factor for frequency amplitudes
-        let normalization_factor = 1.0 / FREQUENCY_NORMALIZATION_MAX;
-        let max_height = self.config.max_element_height(effective_bounds.height);
-
-        // Prepare control points from frequency bands
-        let mut control_points: Vec<(f32, f32)> = Vec::new();
-
-        // Add virtual zero points at edges for smooth interpolation transitions
-        // These create proper control points for the Catmull-Rom spline
-        match visualization_side {
-            VisualizationSide::Full => {
-                // Add virtual zero point slightly before the start for smooth entry
-                control_points.push((-0.1, 0.0));
-            }
-            VisualizationSide::Left => {
-                // Add virtual zero point at left edge (outer edge) for smooth fade-in
-                control_points.push((-0.1, 0.0));
-            }
-            VisualizationSide::Right => {
-                // No zero point at start - the waveform should continue from left
-            }
-        }
-
-        // Map each frequency band to a control point
-        for display_band in 0..bands_to_show {
-            let band_index = band_start_index + display_band;
-            let amplitude = if band_index < frequency_data.bands.len() {
-                frequency_data.bands[band_index] * normalization_factor
-            } else {
-                0.0
-            };
-
-            // Position along x-axis (normalized 0.0 to 1.0)
-            let x_position = match visualization_side {
-                VisualizationSide::Full => (display_band as f32 + 0.5) / bands_to_show as f32,
-                VisualizationSide::Left | VisualizationSide::Right => {
-                    // For side modes, spread evenly across full width
-                    display_band as f32 / (bands_to_show - 1).max(1) as f32
-                }
-            };
-
-            // Height from bottom (clamped to max)
-            let height = (amplitude * max_height).min(max_height);
-
-            control_points.push((x_position, height));
-        }
-
-        // Add virtual zero points at ending edges for smooth interpolation transitions
-        match visualization_side {
-            VisualizationSide::Full => {
-                // Add virtual zero point slightly after the end for smooth exit
-                control_points.push((1.1, 0.0));
-            }
-            VisualizationSide::Left => {
-                // No zero point at end (inner edge) - maintains continuity with right side
-            }
-            VisualizationSide::Right => {
-                // Add virtual zero point slightly after right edge for smooth fade-out
-                control_points.push((1.1, 0.0));
-            }
-        }
-
-        for _ in 0..(SMOOTHING_FACTOR as usize) {
-            let mut smoothed_points = control_points.clone();
-            for i in 1..control_points.len() - 1 {
-                let prev_height = control_points[i - 1].1;
-                let curr_height = control_points[i].1;
-                let next_height = control_points[i + 1].1;
-                smoothed_points[i].1 = prev_height * 0.25 + curr_height * 0.5 + next_height * 0.25;
-            }
-            control_points = smoothed_points;
-        }
-
-        // Calculate rendering points with higher density for smooth curve
-        let render_points = effective_bounds.width as usize;
+        let mut control_points = self.build_control_points(frequency_data, side, effective_bounds);
+        smooth_control_points(&mut control_points);
 
         let bottom_y = effective_bounds.y + effective_bounds.height;
-
-        // Calculate wave curve points first
-        let mut wave_points = Vec::new();
-
-        // Determine the interpolation range based on control points
-        let min_x = control_points
-            .iter()
-            .map(|(x, _)| *x)
-            .fold(f32::INFINITY, f32::min);
-        let max_x = control_points
-            .iter()
-            .map(|(x, _)| *x)
-            .fold(f32::NEG_INFINITY, f32::max);
-
-        // Draw the waveform using cubic interpolation between control points
-        for i in 0..=render_points {
-            let t = min_x + (i as f32 / render_points as f32) * (max_x - min_x);
-
-            // Find the two control points we're between
-            let mut prev_idx = 0;
-            for j in 0..control_points.len() - 1 {
-                if t >= control_points[j].0 && t <= control_points[j + 1].0 {
-                    prev_idx = j;
-                    break;
-                }
-            }
-
-            let next_idx = (prev_idx + 1).min(control_points.len() - 1);
-
-            // Get the four control points for Catmull-Rom interpolation
-            let p0_idx = prev_idx.saturating_sub(1);
-            let p1_idx = prev_idx;
-            let p2_idx = next_idx;
-            let p3_idx = (next_idx + 1).min(control_points.len() - 1);
-
-            let p0 = control_points[p0_idx].1;
-            let p1 = control_points[p1_idx].1;
-            let p2 = control_points[p2_idx].1;
-            let p3 = control_points[p3_idx].1;
-
-            // Calculate local t between the two points
-            #[allow(clippy::float_cmp)]
-            let local_t = if control_points[p2_idx].0 == control_points[p1_idx].0 {
-                0.0
-            } else {
-                (t - control_points[p1_idx].0)
-                    / (control_points[p2_idx].0 - control_points[p1_idx].0)
-            };
-
-            // Catmull-Rom spline interpolation for smooth curves
-            let t2 = local_t * local_t;
-            let t3 = t2 * local_t;
-
-            let height = 0.5
-                * ((2.0 * p1)
-                    + (-p0 + p2) * local_t
-                    + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
-                    + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
-
-            // Ensure height is non-negative and within bounds
-            let clamped_height = height.max(0.0).min(effective_bounds.height);
-
-            // Calculate x and y positions
-            // Map t from the control point range back to the 0.0-1.0 drawable range
-            #[allow(clippy::float_cmp)]
-            let drawable_t = if max_x == min_x {
-                0.0
-            } else {
-                (t - min_x) / (max_x - min_x)
-            }
-            .clamp(0.0, 1.0);
-
-            let x = effective_bounds.x + drawable_t * effective_bounds.width;
-            let y = bottom_y - clamped_height;
-
-            wave_points.push(Point { x, y });
-        }
-
-        // Create the stroke path
-        let mut stroke_path_builder = path::Builder::new();
-        if let Some(first_point) = wave_points.first() {
-            // Hack to get the stroke to be visible when all points have the same y-coordinate
-            stroke_path_builder.line_to(Point {
-                x: first_point.x,
-                y: first_point.y - 0.000_001,
-            });
-
-            for point in wave_points.iter().skip(1) {
-                stroke_path_builder.line_to(*point);
-            }
-        }
-
-        // Create the fill path (curve + bottom area)
-        let mut fill_path_builder = path::Builder::new();
-        if let Some(first_point) = wave_points.first() {
-            // Start from bottom-left
-            fill_path_builder.move_to(Point {
-                x: first_point.x,
-                y: bottom_y,
-            });
-
-            // Draw to first wave point
-            fill_path_builder.line_to(*first_point);
-
-            // Follow the wave curve
-            for point in wave_points.iter().skip(1) {
-                fill_path_builder.line_to(*point);
-            }
-
-            // Complete the fill area by going to bottom-right and closing
-            if let Some(last_point) = wave_points.last() {
-                fill_path_builder.line_to(Point {
-                    x: last_point.x,
-                    y: bottom_y,
-                });
-            }
-            fill_path_builder.close();
-        }
+        let wave_points = compute_wave_points(&control_points, effective_bounds);
+        let (stroke_path, fill_path) = build_paths(&wave_points, bottom_y);
 
         let base = color_config.get_color_with_theme(is_dark, cosmic_theme);
 
-        let fill_path = fill_path_builder.build();
-        let stroke_path = stroke_path_builder.build();
-
-        // Draw the filled area with transparency
+        // Filled area under the curve, with transparency.
         frame.fill(
             &fill_path,
             Fill {
@@ -282,7 +75,7 @@ impl VisualizationRenderer for WaveformVisualization {
             },
         );
 
-        // Draw the wave curve outline
+        // Curve outline on top.
         frame.stroke(
             &stroke_path,
             stroke::Stroke {
@@ -294,4 +87,185 @@ impl VisualizationRenderer for WaveformVisualization {
             },
         );
     }
+}
+
+impl WaveformVisualization {
+    /// Map the visible frequency bands to `(x, height)` control points,
+    /// padding the ends with virtual zero points so the spline enters and
+    /// exits smoothly.
+    fn build_control_points(
+        &self,
+        frequency_data: &FrequencyData,
+        side: &VisualizationSide,
+        effective_bounds: Rectangle,
+    ) -> Vec<(f32, f32)> {
+        let total_bands = frequency_data.bands.len().min(32);
+        let (bands_to_show, band_start_index) = match side {
+            VisualizationSide::Left => (total_bands / 2, 0),
+            VisualizationSide::Right => (total_bands / 2, total_bands / 2),
+            VisualizationSide::Full => (total_bands, 0),
+        };
+
+        let normalization_factor = 1.0 / FREQUENCY_NORMALIZATION_MAX;
+        let max_height = self.config.max_element_height(effective_bounds.height);
+
+        let mut control_points: Vec<(f32, f32)> = Vec::new();
+
+        // Leading virtual zero point for a smooth fade-in (the Right side
+        // continues from the left half, so it gets none).
+        if !matches!(side, VisualizationSide::Right) {
+            control_points.push((-0.1, 0.0));
+        }
+
+        for display_band in 0..bands_to_show {
+            let band_index = band_start_index + display_band;
+            let amplitude = if band_index < frequency_data.bands.len() {
+                frequency_data.bands[band_index] * normalization_factor
+            } else {
+                0.0
+            };
+
+            // Normalized x position (0.0..1.0).
+            let x_position = match side {
+                VisualizationSide::Full => {
+                    (usize_to_f32(display_band) + 0.5) / usize_to_f32(bands_to_show)
+                }
+                VisualizationSide::Left | VisualizationSide::Right => {
+                    usize_to_f32(display_band) / usize_to_f32((bands_to_show - 1).max(1))
+                }
+            };
+
+            let height = (amplitude * max_height).min(max_height);
+            control_points.push((x_position, height));
+        }
+
+        // Trailing virtual zero point for a smooth fade-out (the Left side
+        // keeps continuity with the right half, so it gets none).
+        if !matches!(side, VisualizationSide::Left) {
+            control_points.push((1.1, 0.0));
+        }
+
+        control_points
+    }
+}
+
+/// Smooth control-point heights with repeated 3-tap averaging passes.
+fn smooth_control_points(points: &mut Vec<(f32, f32)>) {
+    for _ in 0..SMOOTHING_PASSES {
+        let mut smoothed = points.clone();
+        for i in 1..points.len().saturating_sub(1) {
+            let prev = points[i - 1].1;
+            let curr = points[i].1;
+            let next = points[i + 1].1;
+            smoothed[i].1 = prev * 0.25 + curr * 0.5 + next * 0.25;
+        }
+        *points = smoothed;
+    }
+}
+
+/// Sample the Catmull-Rom spline through `control_points` at one point per
+/// horizontal pixel, returning canvas-space points along the curve.
+fn compute_wave_points(control_points: &[(f32, f32)], effective_bounds: Rectangle) -> Vec<Point> {
+    let render_points = f32_to_usize(effective_bounds.width);
+    let bottom_y = effective_bounds.y + effective_bounds.height;
+
+    let min_x = control_points
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f32::INFINITY, f32::min);
+    let max_x = control_points
+        .iter()
+        .map(|(x, _)| *x)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let span = max_x - min_x;
+
+    let mut wave_points = Vec::new();
+    for i in 0..=render_points {
+        let t = min_x + (usize_to_f32(i) / usize_to_f32(render_points)) * span;
+
+        // Find the segment containing `t`.
+        let mut prev_idx = 0;
+        for j in 0..control_points.len().saturating_sub(1) {
+            if t >= control_points[j].0 && t <= control_points[j + 1].0 {
+                prev_idx = j;
+                break;
+            }
+        }
+        let next_idx = (prev_idx + 1).min(control_points.len() - 1);
+
+        // Four points for Catmull-Rom interpolation.
+        let p0 = control_points[prev_idx.saturating_sub(1)].1;
+        let p1 = control_points[prev_idx].1;
+        let p2 = control_points[next_idx].1;
+        let p3 = control_points[(next_idx + 1).min(control_points.len() - 1)].1;
+
+        // Local parameter within the segment; degenerate segments map to 0.
+        let segment = control_points[next_idx].0 - control_points[prev_idx].0;
+        let local_t = if segment.abs() < f32::EPSILON {
+            0.0
+        } else {
+            (t - control_points[prev_idx].0) / segment
+        };
+
+        let t2 = local_t * local_t;
+        let t3 = t2 * local_t;
+        let height = 0.5
+            * ((2.0 * p1)
+                + (-p0 + p2) * local_t
+                + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+                + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+        let clamped_height = height.max(0.0).min(effective_bounds.height);
+
+        // Map `t` back into the 0.0..1.0 drawable range.
+        let drawable_t = if span.abs() < f32::EPSILON {
+            0.0
+        } else {
+            (t - min_x) / span
+        }
+        .clamp(0.0, 1.0);
+
+        wave_points.push(Point {
+            x: effective_bounds.x + drawable_t * effective_bounds.width,
+            y: bottom_y - clamped_height,
+        });
+    }
+
+    wave_points
+}
+
+/// Build the stroke (curve outline) and fill (curve plus baseline) paths
+/// from the sampled wave points.
+fn build_paths(wave_points: &[Point], bottom_y: f32) -> (path::Path, path::Path) {
+    let mut stroke_builder = path::Builder::new();
+    if let Some(first) = wave_points.first() {
+        // Nudge the first point so a perfectly flat wave still strokes.
+        stroke_builder.line_to(Point {
+            x: first.x,
+            y: first.y - 0.000_001,
+        });
+        for point in wave_points.iter().skip(1) {
+            stroke_builder.line_to(*point);
+        }
+    }
+
+    let mut fill_builder = path::Builder::new();
+    if let Some(first) = wave_points.first() {
+        fill_builder.move_to(Point {
+            x: first.x,
+            y: bottom_y,
+        });
+        fill_builder.line_to(*first);
+        for point in wave_points.iter().skip(1) {
+            fill_builder.line_to(*point);
+        }
+        if let Some(last) = wave_points.last() {
+            fill_builder.line_to(Point {
+                x: last.x,
+                y: bottom_y,
+            });
+        }
+        fill_builder.close();
+    }
+
+    (stroke_builder.build(), fill_builder.build())
 }

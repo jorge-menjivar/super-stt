@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Daemon-facing operations for the applet.
 //!
-//! Liveness probes (`/ping`) run over the HTTP protocol using a
-//! widget-scope session token cached by
-//! `super_stt_shared::daemon::session`. The applet's main subscription
-//! to `GET /events` is handled separately by
+//! Liveness probes (`/ping`) run over the HTTP protocol using the same
+//! cached session token the applet's `/events` subscription uses (shared
+//! by `AppId`), so both request the same scope set. The main
+//! subscription to `GET /events` is handled separately by
 //! `super_stt_shared::daemon::widget_subscription::run_widget_subscription`.
 
 use std::path::PathBuf;
@@ -13,7 +13,10 @@ use super_stt_shared::daemon::session::{self, AppId};
 
 const APP_ID: AppId = AppId("super-stt-cosmic-applet");
 const APP_NAME: &str = "Super STT Applet";
-const SCOPE: &str = "widget";
+/// Scope set the applet requests. Shared with the `/events` subscription
+/// (same `AppId` token): `recording_events` for the recording indicator,
+/// `audio_visualization` for the frequency-band meter.
+const SCOPES: &[&str] = &["recording_events", "audio_visualization"];
 
 /// What the applet's update loop expects from `ping_daemon_with_status`.
 /// In the legacy protocol the daemon could report
@@ -35,7 +38,7 @@ where
     Fut: std::future::Future<Output = Result<T, String>>,
 {
     let socket_for_op = socket_path.clone();
-    session::with_token(socket_path, APP_ID, APP_NAME, SCOPE, move |token| {
+    session::with_token(socket_path, APP_ID, APP_NAME, SCOPES, move |token| {
         op(socket_for_op.clone(), token)
     })
     .await

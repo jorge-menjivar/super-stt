@@ -17,12 +17,11 @@ use ydotool_backend::YdotoolBackend;
 /// # Safety
 ///
 /// `Simulator` is `Send + Sync` because it is only ever accessed by one
-/// recording session at a time (guarded by `is_recording`). The `!Send`
+/// recording session at a time (guarded by `busy`). The `!Send`
 /// inner type (`Enigo` with raw xkbcommon pointers) is never used
 /// concurrently.
-#[allow(clippy::large_enum_variant)]
 pub enum Simulator {
-    WaylandProtocol(EnigoBackend),
+    WaylandProtocol(Box<EnigoBackend>),
     Ydotool(YdotoolBackend),
     XdgPortal(XdgPortalBackend),
 }
@@ -48,7 +47,7 @@ impl Simulator {
                 anyhow::ensure!(YdotoolBackend::is_available(), "ydotool is not available");
                 Self::Ydotool(YdotoolBackend::new())
             }
-            WriteMethod::WaylandProtocol => Self::WaylandProtocol(EnigoBackend::new()?),
+            WriteMethod::WaylandProtocol => Self::WaylandProtocol(Box::new(EnigoBackend::new()?)),
         };
         Ok(sim)
     }
@@ -73,7 +72,7 @@ impl Simulator {
         }
 
         debug!("Falling back to Wayland protocol");
-        Ok(Self::WaylandProtocol(EnigoBackend::new()?))
+        Ok(Self::WaylandProtocol(Box::new(EnigoBackend::new()?)))
     }
 
     /// Human-readable name for logging.
@@ -93,7 +92,7 @@ impl Simulator {
     pub fn type_text(&mut self, text: &str) -> Result<()> {
         match self {
             Self::WaylandProtocol(b) => b.type_text(text),
-            Self::Ydotool(b) => b.type_text(text),
+            Self::Ydotool(_) => YdotoolBackend::type_text(text),
             Self::XdgPortal(b) => b.type_text(text),
         }
     }
@@ -104,8 +103,11 @@ impl Simulator {
     /// Returns an error if the backend fails to simulate key input.
     pub fn backspace_n(&mut self, n: usize) -> Result<()> {
         match self {
-            Self::WaylandProtocol(b) => b.backspace_n(n),
-            Self::Ydotool(b) => b.backspace_n(n),
+            Self::WaylandProtocol(b) => {
+                b.backspace_n(n);
+                Ok(())
+            }
+            Self::Ydotool(_) => YdotoolBackend::backspace_n(n),
             Self::XdgPortal(b) => b.backspace_n(n),
         }
     }

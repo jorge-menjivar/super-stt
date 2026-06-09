@@ -1,34 +1,45 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Static content shown in the consent popup.
 //!
-//! Each `*_PERMISSIONS` array is the bullet list rendered for one
-//! scope. Edit the strings here to change what the user is told
-//! they're approving — keep each entry concise (≤ one wrapped line
-//! on a typical screen) and user-meaningful. These are what the user
-//! reads in the dialog, not a developer reference.
+//! Each `*_PERMISSIONS` array is the bullet list for one scope. A token
+//! can carry several scopes, so the popup renders the union of these for
+//! every scope the requesting app asked for. Edit the strings here to
+//! change what the user is told they're approving — keep each entry
+//! concise (≤ one wrapped line on a typical screen) and user-meaningful.
+//! These are what the user reads in the dialog, not a developer reference.
 
-/// Bullets shown when the requester asks for the `client` scope.
-pub const CLIENT_PERMISSIONS: &[&str] = &[
+/// Bullets for the `transcribe` scope.
+pub const TRANSCRIBE_PERMISSIONS: &[&str] = &[
     "Use your microphone to record speech for this app",
     "Receive this app's own transcription text (preview and final)",
-    "Read which speech-to-text model is currently loaded",
 ];
 
-/// Bullets shown when the requester asks for the `settings` scope.
+/// Bullets for the `status` scope.
+pub const STATUS_PERMISSIONS: &[&str] =
+    &["Read which speech-to-text model and device are currently active"];
+
+/// Bullets for the `settings` scope.
 pub const SETTINGS_PERMISSIONS: &[&str] = &[
-    "Use your microphone (same as a regular app)",
-    "Choose which speech-to-text model the daemon uses",
+    "Read and change every daemon setting (model, device, audio cues, volume, recording behavior)",
     "Allow or block sending audio to online providers (OpenAI, Mistral, Deepgram)",
-    "Change audio cues, volume, and recording behavior",
-    "Listen in on recordings and transcriptions from every app on this device",
+    "Install, update, and remove speech-to-text backends",
 ];
 
-/// Bullets shown when the requester asks for the `widget` scope.
-pub const WIDGET_PERMISSIONS: &[&str] = &[
-    "See when any recording is active on this device",
-    "Receive raw audio samples and visualization data while a recording is running",
-    "Read live and final transcription text from every app on this device",
-];
+/// Bullets for the `recording_events` scope.
+pub const RECORDING_EVENTS_PERMISSIONS: &[&str] =
+    &["See when any recording starts and stops on this device"];
+
+/// Bullets for the `audio_visualization` scope.
+pub const AUDIO_VISUALIZATION_PERMISSIONS: &[&str] =
+    &["Receive audio visualization data (frequency bars) while a recording is running"];
+
+/// Bullets for the `global_transcriptions` scope.
+pub const GLOBAL_TRANSCRIPTIONS_PERMISSIONS: &[&str] =
+    &["Read live and final transcription text from every app on this device"];
+
+/// Bullets for the `daemon_status` scope.
+pub const DAEMON_STATUS_PERMISSIONS: &[&str] =
+    &["Monitor model changes, downloads, and backend installation progress"];
 
 /// Fallback bullets shown if the daemon spawns the popup with a scope
 /// the helper doesn't recognize. Should never appear in production.

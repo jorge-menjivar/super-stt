@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 pub mod daemon;
 pub mod models;
+pub mod registry;
 pub mod resource_management;
 pub mod services;
 pub mod utils;
@@ -12,7 +13,6 @@ pub mod audio;
 // Re-export commonly used types for convenience
 pub use models::*;
 pub use services::*;
-pub use utils::logger;
 
 #[cfg(feature = "audio")]
 pub use utils::audio as audio_utils;

@@ -1,0 +1,227 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! Per-`Store` host state for running a WASM backend component, including the
+//! outbound-host allowlist that confines a component's network egress.
+
+use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
+
+use wasmtime::component::ResourceTable;
+use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
+use wasmtime_wasi_http::WasiHttpCtx;
+use wasmtime_wasi_http::p2::bindings::http::types::ErrorCode;
+use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
+use wasmtime_wasi_http::p2::types::{HostFutureIncomingResponse, OutgoingRequestConfig};
+use wasmtime_wasi_http::p2::{
+    HttpResult, WasiHttpCtxView, WasiHttpHooks, WasiHttpView, default_send_request,
+};
+
+/// Host state handed to each component invocation.
+pub struct Host {
+    pub table: ResourceTable,
+    pub wasi: WasiCtx,
+    pub http: WasiHttpCtx,
+    pub hooks: AllowlistHooks,
+}
+
+impl WasiView for Host {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
+    }
+}
+
+impl WasiHttpView for Host {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        WasiHttpCtxView {
+            ctx: &mut self.http,
+            table: &mut self.table,
+            hooks: &mut self.hooks,
+        }
+    }
+}
+
+/// Enforces the backend's `allowed_hosts` on every outbound request. A
+/// component's only egress is `wasi:http/outgoing-handler`, which the daemon
+/// implements here — so a request to a host outside the allowlist never
+/// leaves the machine.
+pub struct AllowlistHooks {
+    pub allowed_hosts: Vec<String>,
+}
+
+impl WasiHttpHooks for AllowlistHooks {
+    fn send_request(
+        &mut self,
+        request: hyper::Request<HyperOutgoingBody>,
+        config: OutgoingRequestConfig,
+    ) -> HttpResult<HostFutureIncomingResponse> {
+        let authority = request.uri().authority().map(|a| a.as_str().to_string());
+        let host = request.uri().host().map(str::to_string);
+        let allowed = self.allowed_hosts.iter().any(|a| {
+            Some(a.as_str()) == authority.as_deref() || Some(a.as_str()) == host.as_deref()
+        });
+        if !allowed {
+            return Err(ErrorCode::InternalError(Some(format!(
+                "outbound host not allowed: {}",
+                authority.or(host).unwrap_or_default()
+            )))
+            .into());
+        }
+
+        // SSRF guard: a backend must not reach a private/loopback/link-local
+        // address or the cloud metadata endpoint (169.254.169.254), whether it
+        // names a hostname (which could DNS-rebind) or an IP literal. The
+        // allowlist is backend-declared, so an IP literal is *not* a trusted
+        // operator opt-in — check it against the disallow-list too.
+        //
+        // NOTE: this resolves synchronously; production should use async DNS
+        // and pin the resolved address through to connect.
+        if let Some(h) = host.as_deref() {
+            let port =
+                request
+                    .uri()
+                    .port_u16()
+                    .unwrap_or(if request.uri().scheme_str() == Some("http") {
+                        80
+                    } else {
+                        443
+                    });
+            if let Err(msg) = guard_egress_host(h, port) {
+                return Err(ErrorCode::InternalError(Some(msg)).into());
+            }
+        }
+
+        Ok(default_send_request(request, config))
+    }
+}
+
+/// Confines an outbound connection to the backend's `allowed_hosts` and runs
+/// the SSRF resolver guard. Shared by the HTTP hook and the `ws` host so both
+/// transports enforce identical egress rules.
+///
+/// `host` is the bare hostname or IP literal; `port` is the resolved port.
+/// `allowed` entries may be either a bare host or a `host:port` authority.
+///
+/// # Errors
+/// Returns a human-readable reason when the host is not on the allowlist or a
+/// hostname resolves to a loopback/private/link-local/unspecified address.
+pub(crate) fn check_host_allowed(allowed: &[String], host: &str, port: u16) -> Result<(), String> {
+    let authority = format!("{host}:{port}");
+    let on_allowlist = allowed
+        .iter()
+        .any(|a| a.as_str() == host || a.as_str() == authority);
+    if !on_allowlist {
+        return Err(format!("outbound host not allowed: {host}"));
+    }
+
+    guard_egress_host(host, port)
+}
+
+/// Reject an outbound target that points at an address a sandboxed backend must
+/// never reach. An IP literal is checked directly against the disallow-list —
+/// the `allowed_hosts` list comes from the backend's own (unreviewed) manifest,
+/// so a backend author is not a trusted operator and cannot self-authorize the
+/// metadata endpoint via `allowed_hosts = ["169.254.169.254"]`. A hostname is
+/// resolved and every resulting address checked.
+fn guard_egress_host(host: &str, port: u16) -> Result<(), String> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_disallowed_ip(&ip) {
+            return Err(format!("host {host} is a disallowed address {ip}"));
+        }
+        return Ok(());
+    }
+    check_resolved_addrs(host, port)
+}
+
+/// Resolves `host:port` and rejects if any address is disallowed.
+fn check_resolved_addrs(host: &str, port: u16) -> Result<(), String> {
+    match (host, port).to_socket_addrs() {
+        Ok(addrs) => {
+            for addr in addrs {
+                if is_disallowed_ip(&addr.ip()) {
+                    return Err(format!(
+                        "host {host} resolves to a disallowed address {}",
+                        addr.ip()
+                    ));
+                }
+            }
+            Ok(())
+        }
+        Err(_) => Err(format!("cannot resolve host {host}")),
+    }
+}
+
+/// Addresses a sandboxed backend must never reach.
+pub(crate) fn is_disallowed_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_disallowed_v4(*v4),
+        IpAddr::V6(v6) => {
+            // An IPv4-mapped address (`::ffff:a.b.c.d`) reaches the same host
+            // as the bare v4 — e.g. `::ffff:169.254.169.254` is the metadata
+            // endpoint — so re-check it through the v4 rules.
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_disallowed_v4(mapped);
+            }
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+        }
+    }
+}
+
+fn is_disallowed_v4(v4: Ipv4Addr) -> bool {
+    v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local()
+        || v4.is_unspecified()
+        || v4.is_broadcast()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{check_host_allowed, is_disallowed_ip};
+    use std::net::IpAddr;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn rejects_v6_internal_ranges_and_mapped_metadata() {
+        assert!(is_disallowed_ip(&ip("fc00::1")), "unique-local");
+        assert!(is_disallowed_ip(&ip("fd12:3456::1")), "unique-local");
+        assert!(is_disallowed_ip(&ip("fe80::1")), "link-local");
+        assert!(is_disallowed_ip(&ip("::1")), "loopback");
+        assert!(
+            is_disallowed_ip(&ip("::ffff:169.254.169.254")),
+            "mapped metadata"
+        );
+        assert!(is_disallowed_ip(&ip("::ffff:127.0.0.1")), "mapped loopback");
+    }
+
+    #[test]
+    fn allows_public_addresses() {
+        assert!(!is_disallowed_ip(&ip("93.184.216.34")));
+        assert!(!is_disallowed_ip(&ip("2606:2800:220:1:248:1893:25c8:1946")));
+    }
+
+    #[test]
+    fn ip_literal_metadata_on_allowlist_is_still_rejected() {
+        // A backend cannot self-authorize the metadata endpoint by listing it.
+        let allow = vec!["169.254.169.254".to_string()];
+        assert!(check_host_allowed(&allow, "169.254.169.254", 80).is_err());
+    }
+
+    #[test]
+    fn public_ip_literal_on_allowlist_is_permitted() {
+        let allow = vec!["93.184.216.34".to_string()];
+        assert!(check_host_allowed(&allow, "93.184.216.34", 443).is_ok());
+    }
+
+    #[test]
+    fn host_not_on_allowlist_is_rejected() {
+        let allow = vec!["api.example.com".to_string()];
+        assert!(check_host_allowed(&allow, "169.254.169.254", 80).is_err());
+    }
+}

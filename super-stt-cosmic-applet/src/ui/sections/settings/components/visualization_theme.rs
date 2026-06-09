@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::{
-    IsOpen,
     app::Message,
-    models::theme::{VisualizationColor, VisualizationColorConfig, VisualizationTheme},
+    models::state::IsOpen,
+    models::theme::{
+        VisualizationColor, VisualizationColorConfig, VisualizationTheme, WorkingAnimationTheme,
+    },
     ui::components::{
         color_buttons::{create_color_button, create_system_accent_button},
         common::{revealer, revealer_head},
@@ -43,6 +45,35 @@ pub fn create_visualization_theme_selector<'a>(
         &options,
         Message::RevealerToggle(IsOpen::VisualizationTheme),
         |theme_str| Message::SetVisualizationTheme(VisualizationTheme::from_str(&theme_str)),
+    )
+    .apply(Element::from)
+}
+
+/// Dropdown selector for the working/transcribing animation. Mirrors
+/// [`create_visualization_theme_selector`]; the chosen style drives the
+/// animation shown while the daemon transcribes.
+pub fn create_working_animation_selector<'a>(
+    selected: WorkingAnimationTheme,
+    is_open: &IsOpen,
+) -> Element<'a, Message> {
+    let anims = vec![
+        WorkingAnimationTheme::Droplet,
+        WorkingAnimationTheme::Comet,
+        WorkingAnimationTheme::Dots,
+    ];
+
+    let options: Vec<(String, String)> = anims
+        .into_iter()
+        .map(|anim| (anim.to_string(), anim.pretty_name()))
+        .collect();
+
+    revealer(
+        *is_open == IsOpen::WorkingAnimation,
+        "Loading Animation".to_string(),
+        selected.pretty_name(),
+        &options,
+        Message::RevealerToggle(IsOpen::WorkingAnimation),
+        |anim_str| Message::SetWorkingAnimation(WorkingAnimationTheme::from_str(&anim_str)),
     )
     .apply(Element::from)
 }

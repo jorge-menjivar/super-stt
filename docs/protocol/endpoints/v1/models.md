@@ -1,8 +1,14 @@
 # `GET /models`
 
-List every model the settings UI may switch to: built-in models
-from the static registry plus any custom models discovered under
-[`/custom_models_dir`](./custom_models_dir.md).
+List the models the settings UI may switch to. Models are served by
+out-of-tree backends discovered on disk; each entry is identified by the
+triple `(name, provider, source)`, where `source` is the repo id of the
+backend that serves it (see [`docs/protocol/backend/`](../../backend/)).
+
+The list is **scoped to the [active backend](./active_backend.md)** — it returns
+only the models served by the currently-selected backend, and is empty when no
+backend is selected (daemon idle). The full catalog of installed backends and
+their models is available from [`GET /backends`](./backends.md).
 
 Selecting one is done via
 [`POST /active_model`](./active_model.md#post-active_model).
@@ -11,7 +17,7 @@ Selecting one is done via
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `GET /models`
 
@@ -29,37 +35,19 @@ Authorization: Bearer stt_…64hex…
 {
   "status": "success",
   "available_models": [
-    {
-      "name":     "whisper-tiny",
-      "provider": "local_whisper",
-      "source":   "builtin"
-    },
-    {
-      "name":     "voxtral-mini-latest",
-      "provider": "local_voxtral",
-      "source":   "builtin"
-    },
-    {
-      "name":     "whisper-1",
-      "provider": "openai",
-      "source":   "online"
-    },
-    {
-      "name":     "my-fine-tuned-whisper",
-      "provider": "local_whisper",
-      "source":   "custom"
-    }
+    ["voxtral-mini", "local_voxtral", "github.com/super-stt/voxtral"],
+    ["whisper-1", "openai", "github.com/super-stt/openai"]
   ]
 }
 ```
 
-| Field              | Type           | Notes                                                                 |
-|--------------------|----------------|-----------------------------------------------------------------------|
-| `available_models` | array of objects | Each entry carries `name`, `provider`, `source` — the triple `POST /active_model` accepts |
+| Field              | Type            | Notes                                                                 |
+|--------------------|-----------------|-----------------------------------------------------------------------|
+| `available_models` | array of arrays | Each entry is the `[name, provider, source]` triple `POST /active_model` accepts. `source` is the serving backend's repo id. |
 
 **Errors:**
 
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |

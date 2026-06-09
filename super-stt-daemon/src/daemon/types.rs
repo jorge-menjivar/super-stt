@@ -5,15 +5,11 @@ use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::services::dbus::DBusManager;
 use crate::services::transcription::RealTimeTranscriptionManager;
-use crate::stt_models::local::download::CustomModelInfo;
-use crate::stt_models::third_party::{
-    deepgram::DeepgramModel, mistralai::MistralModel, openai::OpenAIModel,
-};
+use crate::stt_models::backends::{self, DiscoveredBackend};
 use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
-use super_stt_shared::models::provider::{OnlineProvider, Provider};
-use super_stt_shared::models::registry;
+use super_stt_shared::models::provider::Provider;
 use super_stt_shared::resource_management::ResourceManager;
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
@@ -24,16 +20,20 @@ pub enum DeviceOverride {
     Cuda,
 }
 
-/// Map a candle `Device` to the short wire-name (`"cpu"` / `"cuda"` /
-/// `"metal"`) used in `daemon_status_changed` SSE payloads and on the
-/// `/active_device` endpoint. Mirrors the same mapping inlined at
-/// other call sites (e.g. `device_management::handle_device_switch_success`).
+/// Normalize a backend-reported device label to the short wire-name
+/// (`"cpu"` / `"cuda"` / `"metal"` / `"remote"`) used in
+/// `daemon_status_changed` SSE payloads and on the `/active_device` endpoint.
 #[must_use]
-pub(crate) fn device_str(device: &candle_core::Device) -> &'static str {
-    match device {
-        candle_core::Device::Cpu => "cpu",
-        candle_core::Device::Cuda(_) => "cuda",
-        candle_core::Device::Metal(_) => "metal",
+pub(crate) fn normalize_device(label: &str) -> String {
+    let l = label.to_ascii_lowercase();
+    if l.contains("cuda") {
+        "cuda".to_string()
+    } else if l.contains("metal") {
+        "metal".to_string()
+    } else if l.contains("remote") {
+        "remote".to_string()
+    } else {
+        "cpu".to_string()
     }
 }
 
@@ -63,7 +63,7 @@ pub struct SuperSTTDaemon {
     pub events: Arc<EventBus>,
     pub audio_theme: Arc<RwLock<AudioTheme>>,
     pub volume: Arc<RwLock<u8>>,
-    pub is_recording: Arc<tokio::sync::RwLock<bool>>,
+    pub busy: Arc<tokio::sync::RwLock<bool>>,
     pub download_manager: Arc<DownloadStateManager>,
     // Device management
     pub preferred_device: Arc<tokio::sync::RwLock<String>>, // "cpu" or "cuda"
@@ -80,63 +80,48 @@ pub struct SuperSTTDaemon {
     pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
     // Channel for streaming preview text to a waiting client (set by the recording flow)
     pub preview_text: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
-    // Custom models discovered from custom_models_dir
-    pub custom_models: Arc<tokio::sync::RwLock<Vec<CustomModelInfo>>>,
+    // Backends discovered from the backends directory.
+    pub backends: Arc<tokio::sync::RwLock<Vec<DiscoveredBackend>>>,
+    // Active backend: the relative install dir (subdir of the backends dir) of
+    // the selected provider, or None when idle. Runtime mirror of
+    // `config.transcription.active_backend`.
+    pub active_backend: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
-impl SuperSTTDaemon {
-    /// Create a new `SuperSTTDaemon` instance
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if model loading fails.
-    #[allow(clippy::too_many_lines)]
-    pub async fn new(
-        stt_model_override: Option<String>,
-        device_override: Option<DeviceOverride>,
-        audio_theme_override: Option<AudioTheme>,
-    ) -> Result<Self> {
-        info!("Initializing Super STT Daemon...");
+/// Pre-assembled subsystem handles created during daemon startup.
+struct DaemonComponents {
+    shutdown_tx: broadcast::Sender<()>,
+    audio_processor: Arc<AudioProcessor>,
+    model: SharedLoadedModel,
+    realtime_manager: Arc<RealTimeTranscriptionManager>,
+    download_manager: Arc<DownloadStateManager>,
+    resource_manager: Arc<ResourceManager>,
+    dbus_manager: Option<Arc<DBusManager>>,
+}
 
-        // Load or initialize daemon configuration
-        let mut config = DaemonConfig::load();
-        info!("Loaded daemon configuration from disk");
-        let config_changed = Self::apply_cli_overrides_to_config(
-            &mut config,
-            stt_model_override,
-            device_override,
-            audio_theme_override,
-        );
-        if config_changed {
-            if let Err(e) = config.save() {
-                warn!("Failed to save updated daemon config: {e}");
-            } else {
-                info!("Updated daemon configuration saved to disk");
-            }
-        }
-
-        // Initialize components
+impl DaemonComponents {
+    /// Instantiate all subsystem handles that do not depend on configuration
+    /// values (those come from `SuperSTTDaemon::load_and_persist_config`).
+    async fn init() -> Self {
         let (shutdown_tx, _) = broadcast::channel(1);
         let audio_processor = Arc::new(AudioProcessor::new());
 
-        // Initialize model storage (None until the initial load below succeeds)
+        // Model slot starts empty; filled once the startup model loads.
         let model: SharedLoadedModel = Arc::new(tokio::sync::RwLock::new(None));
 
-        // Initialize other managers
         let realtime_manager = Arc::new(RealTimeTranscriptionManager::new(
             Arc::clone(&model),
             Arc::clone(&audio_processor),
         ));
         let download_manager = Arc::new(DownloadStateManager::new());
 
-        // Initialize resource manager for connection and rate limiting
         let resource_manager = if cfg!(debug_assertions) {
             Arc::new(ResourceManager::development())
         } else {
             Arc::new(ResourceManager::production())
         };
 
-        // Initialize D-Bus manager (optional, may fail on systems without D-Bus)
+        // D-Bus is optional; absence is non-fatal.
         let dbus_manager = match DBusManager::new().await {
             Ok(mgr) => Some(Arc::new(mgr)),
             Err(e) => {
@@ -145,44 +130,112 @@ impl SuperSTTDaemon {
             }
         };
 
-        // Initialize device state based on config
+        Self {
+            shutdown_tx,
+            audio_processor,
+            model,
+            realtime_manager,
+            download_manager,
+            resource_manager,
+            dbus_manager,
+        }
+    }
+}
+
+impl SuperSTTDaemon {
+    /// Create a new `SuperSTTDaemon` instance
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if model loading fails.
+    pub async fn new(
+        stt_model_override: Option<String>,
+        device_override: Option<DeviceOverride>,
+        audio_theme_override: Option<AudioTheme>,
+    ) -> Result<Self> {
+        info!("Initializing Super STT Daemon...");
+
+        let config = Self::load_and_persist_config(
+            stt_model_override,
+            device_override,
+            audio_theme_override,
+        );
+
+        // Extract config fields needed for the struct before config is moved in.
         let preferred_device = config.device.preferred_device.clone();
         let actual_device = preferred_device.clone(); // Will be updated when model loads
-
-        // Extract preview typing setting before config gets moved
+        let active_backend = config.transcription.active_backend.clone();
         let preview_typing_enabled = config.transcription.preview_typing_enabled;
+        let audio_theme = config.audio.theme;
+        let volume = config.audio.volume;
 
-        // Create the daemon instance first (needed for model loading)
+        let components = DaemonComponents::init().await;
+
         let daemon = SuperSTTDaemon {
-            model,
-            audio_processor,
-            shutdown_tx,
-            dbus_manager,
-            realtime_manager,
+            model: components.model,
+            audio_processor: components.audio_processor,
+            shutdown_tx: components.shutdown_tx,
+            dbus_manager: components.dbus_manager,
+            realtime_manager: components.realtime_manager,
             events: Arc::new(EventBus::new()),
-            audio_theme: Arc::new(RwLock::new(config.audio.theme)),
-            volume: Arc::new(RwLock::new(config.audio.volume)),
-            is_recording: Arc::new(tokio::sync::RwLock::new(false)),
-            download_manager,
+            audio_theme: Arc::new(RwLock::new(audio_theme)),
+            volume: Arc::new(RwLock::new(volume)),
+            busy: Arc::new(tokio::sync::RwLock::new(false)),
+            download_manager: components.download_manager,
             preferred_device: Arc::new(tokio::sync::RwLock::new(preferred_device)),
             actual_device: Arc::new(tokio::sync::RwLock::new(actual_device)),
             config: Arc::new(tokio::sync::RwLock::new(config)),
-            resource_manager,
+            resource_manager: components.resource_manager,
             preview_typing_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 preview_typing_enabled,
             )),
             manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
             simulator: Arc::new(tokio::sync::RwLock::new(None)),
             preview_text: Arc::new(tokio::sync::RwLock::new(None)),
-            custom_models: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            active_backend: Arc::new(tokio::sync::RwLock::new(active_backend)),
         };
 
-        // Scan custom models directory if configured
-        daemon.refresh_custom_models().await;
+        daemon.post_init(device_override).await;
 
-        // Apply temporary device override for current session (not saved to config)
+        Ok(daemon)
+    }
+
+    /// Load the daemon config from disk, apply any CLI overrides, and persist
+    /// back to disk if anything changed. Returns the ready-to-use config.
+    fn load_and_persist_config(
+        stt_model_override: Option<String>,
+        device_override: Option<DeviceOverride>,
+        audio_theme_override: Option<AudioTheme>,
+    ) -> DaemonConfig {
+        let mut config = DaemonConfig::load();
+        info!("Loaded daemon configuration from disk");
+        let changed = Self::apply_cli_overrides_to_config(
+            &mut config,
+            stt_model_override,
+            device_override,
+            audio_theme_override,
+        );
+        if changed {
+            if let Err(e) = config.save() {
+                warn!("Failed to save updated daemon config: {e}");
+            } else {
+                info!("Updated daemon configuration saved to disk");
+            }
+        }
+        config
+    }
+
+    /// Perform post-construction startup: discover backends, apply any
+    /// temporary session-level device override, then kick off background
+    /// loading of the startup model (if one is configured).
+    async fn post_init(&self, device_override: Option<DeviceOverride>) {
+        // Discover installed backends.
+        self.refresh_backends().await;
+
+        // Apply temporary device override for current session (not saved to config).
         if matches!(device_override, Some(DeviceOverride::Cpu)) {
-            let mut preferred_device_guard = daemon.preferred_device.write().await;
+            let mut preferred_device_guard = self.preferred_device.write().await;
             if *preferred_device_guard != "cpu" {
                 info!(
                     "Temporary session override: device preference {} -> cpu (not saved)",
@@ -192,65 +245,29 @@ impl SuperSTTDaemon {
             }
         }
 
-        // Broadcast loading status
-        Self::broadcast_loading_status(&daemon.events);
-
-        // Load the appropriate STT model based on config preferences.
-        // (name, provider) is the durable identity, both stored in config.
-        // If the preferred model is online but online models are disabled
-        // or no API key is present, fall back to the safe default.
-        let (model_to_load, provider_to_load) = {
-            let config_guard = daemon.config.read().await;
-            let preferred = config_guard.transcription.preferred_model.clone();
-            let preferred_provider = config_guard.transcription.preferred_provider;
-            if let Provider::Online(online) = preferred_provider {
-                if config_guard.online.allow_online_models
-                    && crate::keyring::has_api_key(online.api_key_name()).unwrap_or(false)
+        // Load the configured startup model — if any — in the **background** so
+        // the HTTP listener can come up immediately. A model load may download
+        // gigabytes and bind a GPU; blocking startup on it would leave clients
+        // unable to connect (and unable to pick a lighter model) until it
+        // finishes. Clients watch the `daemon_status_changed` SSE topic for the
+        // `ready` transition. With no configured preference the daemon stays
+        // idle until the user selects a model — it never auto-pulls a model.
+        if let Some((name, provider, source)) = self.pick_startup_model().await {
+            let bg = self.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    Self::load_initial_model_and_broadcast(&bg, name.clone(), provider, source)
+                        .await
                 {
-                    (preferred, preferred_provider)
-                } else {
                     warn!(
-                        "Preferred model is online but online models are disabled or no API key; falling back to default"
+                        "Failed to load startup model {name} via {provider}: {e}; daemon is idle"
                     );
-                    let default = registry::default_definition();
-                    (default.name.to_string(), default.provider)
+                    bg.download_manager.clear_download();
                 }
-            } else {
-                (preferred, preferred_provider)
-            }
-        };
-
-        // Try the preferred model; on failure, fall back to the safe default so the
-        // daemon comes up in a usable state instead of exiting (e.g. configured
-        // model name no longer exists in the registry).
-        if let Err(e) =
-            Self::load_initial_model_and_broadcast(&daemon, model_to_load.clone(), provider_to_load)
-                .await
-        {
-            let default_def = registry::default_definition();
-            let default = default_def.name.to_string();
-            let default_provider = default_def.provider;
-            let default_source = default_def.source.kind();
-            if model_to_load == default && provider_to_load == default_provider {
-                return Err(e);
-            }
-            warn!(
-                "Failed to load preferred model {model_to_load} ({provider_to_load}): {e}; \
-                 falling back to {default} ({default_provider})"
-            );
-            daemon.download_manager.clear_download();
-            Self::load_initial_model_and_broadcast(&daemon, default.clone(), default_provider)
-                .await?;
-            // Persist the fallback so subsequent startups don't repeat the
-            // failed attempt and the user doesn't see the same error again.
-            daemon.config.write().await.update_preferred_model(
-                default,
-                default_provider,
-                default_source,
-            );
+            });
+        } else {
+            info!("No startup model configured; daemon is idle until one is selected");
         }
-
-        Ok(daemon)
     }
 
     fn apply_cli_overrides_to_config(
@@ -299,140 +316,53 @@ impl SuperSTTDaemon {
         changed
     }
 
-    fn broadcast_loading_status(events: &EventBus) {
-        events.publish_daemon_status_changed(serde_json::json!({
-            "status": "loading_model",
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        }));
-    }
-
     async fn load_initial_model_and_broadcast(
         daemon: &SuperSTTDaemon,
-        model_to_load: String,
+        name: String,
         provider: Provider,
+        source: String,
     ) -> Result<()> {
-        daemon.broadcast_model_loading_status(&model_to_load);
+        daemon.broadcast_model_loading_status(&name);
 
-        // Online providers don't need downloading — create instance directly
-        if let Provider::Online(online) = provider {
-            let key_name = online.api_key_name();
-            let api_key = crate::keyring::get_api_key(key_name)
-                .map_err(|e| anyhow::anyhow!(e))?
-                .ok_or_else(|| anyhow::anyhow!("{key_name} API key not configured"))?;
-
-            let instance = Self::create_online_instance(online, api_key, &model_to_load)
-                .map_err(|e| anyhow::anyhow!(e))?;
-            info!("{provider} model {model_to_load} loaded successfully");
-            let definition = registry::find_by(&model_to_load, provider)
-                .cloned()
-                .ok_or_else(|| {
-                    anyhow::anyhow!("{model_to_load} via {provider}: not in registry")
-                })?;
-            // Capture the device string before moving `instance` into the
-            // shared `LoadedModel` — the `ready` event consumers (e.g. the
-            // settings app's current_device tracking) only update their UI
-            // when `actual_device` is present in the payload.
-            let actual_device = device_str(instance.device());
-            *daemon.model.write().await = Some(LoadedModel {
-                definition,
-                instance,
-            });
-
-            daemon
-                .events
-                .publish_daemon_status_changed(serde_json::json!({
-                    "status": "ready",
-                    "model_loaded": true,
-                    "provider": provider.to_string(),
-                    "actual_device": actual_device,
-                    "model_name": model_to_load,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                }));
-            return Ok(());
-        }
-
-        // Local model path: download if needed, then load
-        let tracker = daemon.create_progress_tracker(&model_to_load);
-        if let Err(resp) = daemon.register_download(&tracker) {
-            tracker.cancel();
-            anyhow::bail!(
-                resp.message
-                    .unwrap_or_else(|| "Failed to register download".to_string())
-            );
-        }
-
-        let start_time = std::time::Instant::now();
-        let instance = daemon
-            .download_and_load_model(
-                model_to_load.clone(),
-                provider,
-                Arc::clone(&tracker),
-                start_time,
-            )
+        let device_pref = daemon.preferred_device.read().await.clone();
+        let (instance, definition) = daemon
+            .instantiate_backend(&name, provider, &source, &device_pref)
             .await?;
 
-        // Mark completed and clear download state
-        tracker.mark_completed();
-        *tracker.current_file.write() = "Model loaded successfully".to_string();
-        tracker.broadcast_progress();
-        daemon.download_manager.clear_download();
-
-        // Store into daemon state
-        info!("{provider} model loaded successfully");
-        let definition = registry::find_by(&model_to_load, provider)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("{model_to_load} via {provider}: not in registry"))?;
-        // Capture the device string before moving `instance` into the
-        // shared `LoadedModel` — the `ready` event consumers (e.g. the
-        // settings app's current_device tracking) only update their UI
-        // when `actual_device` is present in the payload.
-        let actual_device = device_str(instance.device());
+        info!("model {name} via {provider} loaded successfully");
+        // Capture the device label before moving `instance` into the shared
+        // `LoadedModel` — `ready` event consumers (e.g. the settings app's
+        // current_device tracking) only update when `actual_device` is present.
+        let actual_device = normalize_device(&instance.device());
+        *daemon.actual_device.write().await = actual_device.clone();
         *daemon.model.write().await = Some(LoadedModel {
             definition,
             instance,
         });
 
-        // Broadcast ready status
         daemon
             .events
             .publish_daemon_status_changed(serde_json::json!({
                 "status": "ready",
                 "model_loaded": true,
+                "provider": provider.to_string(),
                 "actual_device": actual_device,
-                "model_name": model_to_load,
+                "model_name": name,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             }));
         Ok(())
     }
 
-    /// Create the appropriate online model instance based on provider.
-    ///
-    /// # Errors
-    /// Returns an error if `name` is unknown to the provider's registry entries
-    /// or if constructing the underlying client fails (e.g. malformed API key).
-    pub fn create_online_instance(
-        provider: OnlineProvider,
-        api_key: String,
-        name: &str,
-    ) -> Result<Box<dyn crate::stt_models::transcribe::Transcribe>> {
-        Ok(match provider {
-            OnlineProvider::OpenAI => Box::new(OpenAIModel::new(name, api_key)?),
-            OnlineProvider::Mistral => Box::new(MistralModel::new(name, api_key)?),
-            OnlineProvider::Deepgram => Box::new(DeepgramModel::new(name, api_key)?),
-        })
-    }
-
     /// Resolve a wire-level `(name, provider, source)` triple into a
-    /// [`ModelDefinition`], consulting both the static built-in registry
-    /// and the daemon's discovered custom models. Returns `None` on miss.
+    /// [`ModelDefinition`] from the discovered backends. Returns `None` on miss.
     pub async fn resolve_definition(
         &self,
         name: &str,
         provider: Provider,
-        source: super_stt_shared::models::registry::SourceKind,
+        source: &str,
     ) -> Option<super_stt_shared::models::registry::ModelDefinition> {
-        let custom = self.custom_models.read().await;
-        super_stt_shared::models::registry::resolve(name, provider, source, &custom)
+        let backends = self.backends.read().await;
+        backends::find_model(&backends, name, provider, source).map(|(_, def)| def.clone())
     }
 
     /// Set the audio theme
@@ -546,46 +476,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn create_online_instance_openai() {
-        let instance = SuperSTTDaemon::create_online_instance(
-            OnlineProvider::OpenAI,
-            "test-key".to_string(),
-            "whisper-1",
-        )
-        .unwrap();
-        assert!(instance.is_online());
-    }
-
-    #[test]
-    fn create_online_instance_mistral() {
-        let instance = SuperSTTDaemon::create_online_instance(
-            OnlineProvider::Mistral,
-            "test-key".to_string(),
-            "voxtral-mini-latest",
-        )
-        .unwrap();
-        assert!(instance.is_online());
-    }
-
-    #[test]
-    fn create_online_instance_deepgram() {
-        let instance = SuperSTTDaemon::create_online_instance(
-            OnlineProvider::Deepgram,
-            "test-key".to_string(),
-            "nova-3",
-        )
-        .unwrap();
-        assert!(instance.is_online());
-    }
-
-    #[test]
-    fn online_instance_device_returns_cpu() {
-        let instance = SuperSTTDaemon::create_online_instance(
-            OnlineProvider::OpenAI,
-            "key".to_string(),
-            "whisper-1",
-        )
-        .unwrap();
-        assert!(matches!(instance.device(), candle_core::Device::Cpu));
+    fn normalize_device_maps_labels() {
+        assert_eq!(normalize_device("cuda:0"), "cuda");
+        assert_eq!(normalize_device("Cuda(0)"), "cuda");
+        assert_eq!(normalize_device("Metal(0)"), "metal");
+        assert_eq!(normalize_device("remote"), "remote");
+        assert_eq!(normalize_device("cpu"), "cpu");
+        assert_eq!(normalize_device("anything else"), "cpu");
     }
 }

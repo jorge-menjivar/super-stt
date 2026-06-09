@@ -56,11 +56,18 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     // `apply_cli_overrides_to_config`).
     let config_home = tmp.join(format!("{unique}-config"));
     std::fs::create_dir_all(&config_home).expect("create test config dir");
+    // Isolate XDG_DATA_HOME too: the daemon discovers backends under
+    // `<data_dir>/super-stt/backends`. An empty isolated dir keeps the smoke
+    // test hermetic and fast — no real backend is spawned at startup, so the
+    // daemon comes up idle (which the assertions below tolerate).
+    let data_home = tmp.join(format!("{unique}-data"));
+    std::fs::create_dir_all(&data_home).expect("create test data dir");
 
     let child = Command::new(DAEMON_BIN)
         .env("SUPER_STT_AUTO_APPROVE", "1")
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_DATA_HOME", &data_home)
         .arg("--device")
         .arg("cpu")
         .arg("--audio-theme")
@@ -74,7 +81,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     let deadline = Instant::now() + Duration::from_secs(120);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists()
-            && http_client::auth_request(http_socket.clone(), "settings-smoke", "client")
+            && http_client::auth_request(http_socket.clone(), "settings-smoke", &["status"])
                 .await
                 .is_ok()
         {
@@ -168,14 +175,14 @@ async fn settings_scope_endpoints() {
 
     // Mint a settings-scope token.
     let settings_auth =
-        http_client::auth_request(http_socket.clone(), "super-stt settings smoke", "settings")
+        http_client::auth_request(http_socket.clone(), "super-stt settings smoke", &["settings"])
             .await
             .expect("auth_request settings");
     let settings_token = settings_auth.session_token;
 
     // Mint a client-scope token (for the rejection check at the end).
     let client_auth =
-        http_client::auth_request(http_socket.clone(), "super-stt client smoke", "client")
+        http_client::auth_request(http_socket.clone(), "super-stt client smoke", &["transcribe", "status"])
             .await
             .expect("auth_request client");
     let client_token = client_auth.session_token;
@@ -239,9 +246,12 @@ async fn settings_scope_endpoints() {
     assert_eq!(s, StatusCode::OK, "GET /active_model: {body}");
     assert_eq!(body["status"], "success");
     let active_model = &body["active_model"];
+    // With no backends installed (hermetic test), the daemon is idle and the
+    // current model is null; with a backend it would be a string. Accept both.
+    let current_model = &active_model["current"]["model"];
     assert!(
-        active_model["current"]["model"].is_string(),
-        "active_model.current.model missing: {active_model}"
+        current_model.is_string() || current_model.is_null(),
+        "active_model.current.model has unexpected shape: {active_model}"
     );
     // No switch in flight at startup
     assert!(active_model["switch"].is_null());
@@ -467,8 +477,8 @@ async fn settings_scope_endpoints() {
     assert_eq!(body["status"], "error");
     let msg = body["message"].as_str().unwrap_or("");
     assert!(
-        msg.contains("Unknown model"),
-        "active_model unknown-model message should mention 'Unknown model', got: {msg:?}"
+        msg.contains("No installed backend"),
+        "active_model unknown-model message should mention no backend serves it, got: {msg:?}"
     );
 
     // --- Scope enforcement: client-scope token MUST be rejected ---

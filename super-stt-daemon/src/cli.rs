@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use clap::ArgAction;
-use clap::builder::PossibleValuesParser;
 use clap::{Command, arg, command};
 use std::sync::LazyLock;
-use super_stt_shared::models::registry;
-
-/// Set of valid built-in model names for `--model`. Custom models can also be
-/// passed by name from a configured `custom_models_dir`.
-pub static MODEL_NAMES: LazyLock<Vec<&'static str>> =
-    LazyLock::new(|| registry::ALL.iter().map(|d| d.name.as_ref()).collect());
 
 // Build variant (e.g., "cuda13-cudnn-sm89", "cuda12-sm75", "cpu")
 pub const BUILD_VARIANT: &str = env!("BUILD_VARIANT");
@@ -28,10 +21,11 @@ pub fn build() -> Command {
     .subcommand_required(false)
     .arg_required_else_help(false)
     .arg(
+        // Model names are served by installed backends and discovered at
+        // runtime, so any string is accepted here and validated by the daemon.
         arg!(-m --model <model> "Override the saved preferred model for this session")
         .required(false)
         .action(ArgAction::Set)
-        .value_parser(PossibleValuesParser::new(MODEL_NAMES.iter().copied()))
     )
     .arg(
         arg!(--device <device> "Device to use for model execution")

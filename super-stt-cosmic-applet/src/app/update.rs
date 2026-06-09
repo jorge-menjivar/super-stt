@@ -1,0 +1,455 @@
+// SPDX-License-Identifier: GPL-3.0-only
+use std::time::Instant;
+
+use cosmic::{
+    app as cosmic_app,
+    iced::{
+        platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup},
+        window,
+    },
+    widget::segmented_button::Entity,
+};
+use log::{info, warn};
+
+use super::SuperSttApplet;
+use super::subscription::APPLET_APP_ID;
+use crate::app::Message;
+use crate::daemon::{RetryStrategy, ping_daemon, ping_daemon_with_status};
+use crate::models::state::{DaemonConnectionState, IsOpen, RecordingState};
+use crate::models::theme::{VisualizationColor, VisualizationTheme, WorkingAnimationTheme};
+use super_stt_shared::daemon::session;
+
+impl SuperSttApplet {
+    pub(super) fn handle_message(&mut self, message: Message) -> cosmic_app::Task<Message> {
+        match message {
+            Message::TogglePopup => self.toggle_popup(),
+            Message::CloseRequested(id) => self.close_popup(id),
+            Message::DaemonConnected => self.daemon_connected(),
+            Message::PingResponse { .. } => self.ping_response(),
+            Message::DaemonError(err) => self.daemon_error(&err),
+            Message::ScheduleRetry => self.schedule_retry(),
+            Message::RecordingStateChanged(state) => self.recording_state_changed(state),
+            Message::RevealerToggle(src) => self.revealer_toggle(src),
+            Message::AudioLevelUpdate { level, is_speech } => {
+                self.audio_level_update(level, is_speech)
+            }
+            Message::SetVisualizationTheme(theme) => self.set_visualization_theme(theme),
+            Message::SetWorkingAnimation(theme) => self.set_working_animation(theme),
+            Message::WidgetRecordingState(is_recording) => {
+                self.widget_recording_state(is_recording)
+            }
+            Message::WidgetFrequencyBands {
+                bands,
+                total_energy,
+                ..
+            } => self.widget_frequency_bands(&bands, total_energy),
+            Message::WidgetTranscribingStarted => {
+                self.last_udp_data = Instant::now();
+                // Guard against out-of-order delivery: only enter Processing
+                // mid-cycle, never resurrect it after transcribing_stopped
+                // already returned us to Idle.
+                if !matches!(self.recording_state, RecordingState::Idle) {
+                    self.set_recording_state(RecordingState::Processing);
+                }
+                cosmic_app::Task::none()
+            }
+            Message::WidgetTranscribingStopped => {
+                self.last_udp_data = Instant::now();
+                self.set_recording_state(RecordingState::Idle);
+                self.visualization.clear();
+                cosmic_app::Task::none()
+            }
+            Message::WidgetRevoked(reason) => self.widget_revoked(&reason),
+            Message::WidgetOtherEvent(_) | Message::WidgetSubscriptionError(_) => {
+                // Informational only; subscription errors are logged in
+                // the subscription task itself.
+                cosmic_app::Task::none()
+            }
+            Message::WidgetBlocked(reason) => self.widget_blocked(reason),
+            Message::RetryAuthorization => self.retry_authorization(),
+            Message::RetryConnection => self.retry_connection(),
+            Message::PingTimeout => self.ping_timeout(),
+            Message::OpenGitHub => Self::open_github(),
+            Message::LaunchApp => Self::launch_app(),
+            Message::SetAppletWidth(width) => self.set_applet_width(width),
+            Message::SetShowIcon(show_icon) => self.set_show_icon(show_icon),
+            Message::SetIconAlignmentEntity(entity) => self.set_icon_alignment(entity),
+            Message::SetShowVisualizations(show) => self.set_show_visualizations(show),
+            Message::SetVisualizationColor(color, is_dark) => {
+                self.set_visualization_color(color, is_dark)
+            }
+            Message::SetColorThemeEntity(entity) => self.set_color_theme(entity),
+            Message::WorkingAnimationTick => {
+                if let Some(start) = self.working_anim_start {
+                    self.working_animation
+                        .set_elapsed(start.elapsed().as_secs_f32() * 1000.0);
+                }
+                cosmic_app::Task::none()
+            }
+        }
+    }
+
+    fn toggle_popup(&mut self) -> cosmic_app::Task<Message> {
+        if let Some(p) = self.popup.take() {
+            return destroy_popup(p);
+        }
+        if let Some(main_window_id) = self.core.main_window_id() {
+            let new_id = window::Id::unique();
+            self.popup.replace(new_id);
+            let popup_settings =
+                self.core
+                    .applet
+                    .get_popup_settings(main_window_id, new_id, None, None, None);
+            return get_popup(popup_settings);
+        }
+        warn!("Cannot toggle popup: main window ID not available");
+        cosmic_app::Task::none()
+    }
+
+    fn close_popup(&mut self, id: window::Id) -> cosmic_app::Task<Message> {
+        if Some(id) == self.popup {
+            self.popup = None;
+        }
+        cosmic_app::Task::none()
+    }
+
+    fn daemon_connected(&mut self) -> cosmic_app::Task<Message> {
+        self.daemon_state = DaemonConnectionState::Connected;
+        self.retry_strategy.reset();
+        // The widget /events subscription is self-healing
+        // (`run_widget_subscription` in super-stt-shared owns its own
+        // reconnect loop), so we deliberately do NOT bump
+        // `udp_restart_counter` here. Restarting the iced subscription
+        // on every successful ping would cancel the helper task
+        // mid-flight and force every ping cycle to re-enter
+        // `session::obtain` — i.e. another potential keyring touch.
+        cosmic_app::Task::none()
+    }
+
+    fn ping_response(&mut self) -> cosmic_app::Task<Message> {
+        // A successful `/v1/ping` always means the daemon is reachable —
+        // the HTTP protocol carries no separate "connection inactive"
+        // path (the legacy protocol did). Always flip to Connected.
+        info!("Daemon ping successful and connection is active - daemon may be idle");
+        self.daemon_state = DaemonConnectionState::Connected;
+        self.retry_strategy.reset();
+        cosmic_app::Task::none()
+    }
+
+    fn daemon_error(&mut self, err: &str) -> cosmic_app::Task<Message> {
+        warn!("Daemon error: {err}");
+        // Reset backoff when an established connection drops so reconnect
+        // starts from the initial-connection strategy.
+        if matches!(self.daemon_state, DaemonConnectionState::Connected) {
+            self.retry_strategy = RetryStrategy::for_initial_connection();
+            info!("Lost connection to daemon, starting reconnection attempts");
+        }
+        // Retry forever — schedule the next attempt.
+        cosmic_app::Task::perform(async {}, |()| cosmic::Action::App(Message::ScheduleRetry))
+    }
+
+    fn schedule_retry(&mut self) -> cosmic_app::Task<Message> {
+        self.retry_strategy.should_retry(); // Always true; increments the attempt counter.
+        let delay = self.retry_strategy.next_delay();
+        info!(
+            "Scheduling daemon connection retry {} in {:?}",
+            self.retry_strategy.attempt, delay
+        );
+        self.daemon_state = DaemonConnectionState::Connecting;
+        cosmic_app::Task::perform(
+            async move {
+                tokio::time::sleep(delay).await;
+            },
+            |()| cosmic::Action::App(Message::RetryConnection),
+        )
+    }
+
+    fn recording_state_changed(&mut self, state: RecordingState) -> cosmic_app::Task<Message> {
+        if matches!(
+            (&self.recording_state, &state),
+            (RecordingState::Processing, RecordingState::Idle)
+        ) {
+            info!("Transcription completed: Processing -> Idle");
+        }
+        self.set_recording_state(state);
+        cosmic_app::Task::none()
+    }
+
+    fn revealer_toggle(&mut self, is_open_src: IsOpen) -> cosmic_app::Task<Message> {
+        self.is_open = if self.is_open == is_open_src {
+            IsOpen::None
+        } else {
+            is_open_src
+        };
+        cosmic_app::Task::none()
+    }
+
+    fn audio_level_update(&mut self, level: f32, is_speech: bool) -> cosmic_app::Task<Message> {
+        self.audio_level = level;
+        self.is_speech_detected = is_speech;
+        self.visualization.update_audio_level(level, is_speech);
+        cosmic_app::Task::none()
+    }
+
+    fn set_visualization_theme(&mut self, theme: VisualizationTheme) -> cosmic_app::Task<Message> {
+        self.theme_config.visualization_theme = theme.clone();
+        self.config
+            .update_visualization_theme(theme.clone(), &self.variant_name);
+        self.visualization.update_theme(theme);
+        self.visualization
+            .update_audio_level(self.audio_level, self.is_speech_detected);
+        self.is_open = IsOpen::None;
+        cosmic_app::Task::none()
+    }
+
+    fn set_working_animation(
+        &mut self,
+        theme: WorkingAnimationTheme,
+    ) -> cosmic_app::Task<Message> {
+        self.config
+            .update_working_animation(theme, &self.variant_name);
+        self.working_animation.update_theme(theme);
+        self.is_open = IsOpen::None;
+        cosmic_app::Task::none()
+    }
+
+    /// Set the recording state, managing the working-animation clock: start it
+    /// when entering Processing, stop it otherwise. Centralizes the lifecycle
+    /// so every transition keeps the animation in sync.
+    fn set_recording_state(&mut self, new: RecordingState) {
+        if matches!(new, RecordingState::Processing) {
+            if self.working_anim_start.is_none() {
+                self.working_anim_start = Some(Instant::now());
+                self.working_animation.reset();
+            }
+        } else {
+            self.working_anim_start = None;
+        }
+        self.recording_state = new;
+    }
+
+    fn widget_recording_state(&mut self, is_recording: bool) -> cosmic_app::Task<Message> {
+        // Update the last-event timestamp used by the connection health
+        // watchdog.
+        self.last_udp_data = Instant::now();
+
+        let was_recording = matches!(self.recording_state, RecordingState::Recording);
+        let new_state = if is_recording {
+            RecordingState::Recording
+        } else if was_recording {
+            // Just left Recording — show a brief Processing state while
+            // the daemon transcribes.
+            RecordingState::Processing
+        } else {
+            RecordingState::Idle
+        };
+
+        self.set_recording_state(new_state);
+        if was_recording && !is_recording {
+            self.visualization.clear();
+        }
+        cosmic_app::Task::none()
+    }
+
+    fn widget_frequency_bands(
+        &mut self,
+        bands: &[f32],
+        total_energy: f32,
+    ) -> cosmic_app::Task<Message> {
+        self.last_udp_data = Instant::now();
+        self.visualization
+            .update_frequency_bands(bands, total_energy);
+        self.audio_level = total_energy;
+        self.is_speech_detected = total_energy > 0.02;
+        cosmic_app::Task::none()
+    }
+
+    fn widget_revoked(&mut self, reason: &str) -> cosmic_app::Task<Message> {
+        warn!(
+            "Widget session revoked by daemon (reason={reason}); will re-subscribe via consent flow on next retry"
+        );
+        // Treat like a connection drop so the existing reconnect path
+        // triggers a fresh /auth/request → consent popup → re-subscribe.
+        self.daemon_state = DaemonConnectionState::Error(format!("revoked: {reason}"));
+        cosmic_app::Task::none()
+    }
+
+    fn widget_blocked(&mut self, reason: String) -> cosmic_app::Task<Message> {
+        warn!("Widget subscription blocked by user denial ({reason}); waiting for explicit retry");
+        self.daemon_state = DaemonConnectionState::Blocked(reason);
+        cosmic_app::Task::none()
+    }
+
+    fn retry_authorization(&mut self) -> cosmic_app::Task<Message> {
+        info!("Retrying authorization after user denial");
+        // Drop any cached token (in-memory + keyring) so the next
+        // subscription cycle hits the daemon's /auth/request and spawns
+        // a fresh consent prompt.
+        if let Err(e) = session::forget(APPLET_APP_ID) {
+            warn!("Failed to forget session before retry: {e}");
+        }
+        // Restart the iced subscription so the dropped helper task
+        // re-spawns from scratch.
+        self.udp_restart_counter = self.udp_restart_counter.wrapping_add(1);
+        self.daemon_state = DaemonConnectionState::Connecting;
+        self.retry_strategy = RetryStrategy::for_initial_connection();
+        cosmic_app::Task::none()
+    }
+
+    fn retry_connection(&mut self) -> cosmic_app::Task<Message> {
+        if matches!(self.daemon_state, DaemonConnectionState::Error(_)) {
+            // Manual retry from the error state — reset backoff.
+            self.retry_strategy = RetryStrategy::for_initial_connection();
+            self.daemon_state = DaemonConnectionState::Connecting;
+            info!("Manual retry initiated by user");
+        }
+        info!(
+            "Retrying daemon connection (attempt {})...",
+            self.retry_strategy.attempt
+        );
+        cosmic_app::Task::perform(ping_daemon(self.socket_path.clone()), |result| {
+            cosmic::Action::App(match result {
+                Ok(_) => Message::DaemonConnected,
+                Err(e) => {
+                    info!("Retry failed: {e}");
+                    Message::ScheduleRetry
+                }
+            })
+        })
+    }
+
+    fn ping_timeout(&mut self) -> cosmic_app::Task<Message> {
+        if self.daemon_state == DaemonConnectionState::Connected {
+            return cosmic_app::Task::perform(
+                ping_daemon_with_status(self.socket_path.clone()),
+                |result| {
+                    cosmic::Action::App(match result {
+                        Ok(response) => Message::PingResponse {
+                            message: response.message,
+                            connection_active: response.connection_active,
+                        },
+                        Err(e) => {
+                            warn!("Daemon ping failed: {e}");
+                            Message::DaemonError(format!("Connection lost: {e}"))
+                        }
+                    })
+                },
+            );
+        }
+        if self.daemon_state == DaemonConnectionState::Connecting && self.retry_strategy.attempt > 5
+        {
+            // The retry strategy already drives reconnection during the
+            // initial connect; just log occasionally.
+            info!(
+                "Still attempting to connect (attempt {})...",
+                self.retry_strategy.attempt
+            );
+        }
+        cosmic_app::Task::none()
+    }
+
+    fn open_github() -> cosmic_app::Task<Message> {
+        if let Err(e) = std::process::Command::new("xdg-open")
+            .arg(crate::REPOSITORY)
+            .spawn()
+        {
+            warn!("Failed to open GitHub URL: {e}");
+        }
+        cosmic_app::Task::none()
+    }
+
+    fn launch_app() -> cosmic_app::Task<Message> {
+        let launch_attempts = [
+            "super-stt-app",                  // System PATH
+            "./target/debug/super-stt-app",   // Local debug build
+            "./target/release/super-stt-app", // Local release build
+            "/usr/local/bin/super-stt-app",   // Local install
+            "/usr/bin/super-stt-app",         // System install
+        ];
+
+        if let Ok(output) = std::process::Command::new("which")
+            .arg("super-stt-app")
+            .output()
+            && output.status.success()
+            && let Ok(path) = std::str::from_utf8(&output.stdout)
+        {
+            let path = path.trim();
+            if std::process::Command::new(path).spawn().is_ok() {
+                info!("Successfully launched Super STT app from PATH: {path}");
+                return cosmic_app::Task::none();
+            }
+        }
+
+        for command in &launch_attempts {
+            if std::process::Command::new(command).spawn().is_ok() {
+                info!("Successfully launched Super STT app with command: {command}");
+                return cosmic_app::Task::none();
+            }
+        }
+
+        warn!("Failed to launch Super STT app - tried all common locations");
+        cosmic_app::Task::none()
+    }
+
+    fn set_applet_width(&mut self, width: u32) -> cosmic_app::Task<Message> {
+        self.config.update_applet_width(width, &self.variant_name);
+        // Refresh the visualization so it adapts to the new size.
+        self.visualization.clear();
+        self.visualization
+            .update_audio_level(self.audio_level, self.is_speech_detected);
+        cosmic_app::Task::none()
+    }
+
+    fn set_show_icon(&mut self, show_icon: bool) -> cosmic_app::Task<Message> {
+        self.config.update_show_icon(show_icon, &self.variant_name);
+        cosmic_app::Task::none()
+    }
+
+    fn set_icon_alignment(&mut self, entity: Entity) -> cosmic_app::Task<Message> {
+        self.icon_alignment_model.activate(entity);
+        let alignment = if entity == self.icon_alignment_start {
+            "start"
+        } else if entity == self.icon_alignment_center {
+            "center"
+        } else if entity == self.icon_alignment_end {
+            "end"
+        } else {
+            "start"
+        };
+        self.config
+            .update_icon_alignment(alignment.to_string(), &self.variant_name);
+        cosmic_app::Task::none()
+    }
+
+    fn set_show_visualizations(&mut self, show: bool) -> cosmic_app::Task<Message> {
+        self.config
+            .update_show_visualizations(show, &self.variant_name);
+        cosmic_app::Task::none()
+    }
+
+    fn set_visualization_color(
+        &mut self,
+        color: VisualizationColor,
+        is_dark: bool,
+    ) -> cosmic_app::Task<Message> {
+        self.theme_config
+            .visualization_color_config
+            .set_color(color, is_dark);
+        let updated_colors = self.theme_config.visualization_color_config.clone();
+        self.config
+            .update_visualization_colors(updated_colors.clone(), &self.variant_name);
+        self.working_animation.update_colors(updated_colors.clone());
+        self.visualization.update_colors(updated_colors);
+        cosmic_app::Task::none()
+    }
+
+    fn set_color_theme(&mut self, entity: Entity) -> cosmic_app::Task<Message> {
+        self.theme_selector_model.activate(entity);
+        if entity == self.theme_selector_light {
+            self.selected_theme_for_config = false;
+        } else if entity == self.theme_selector_dark {
+            self.selected_theme_for_config = true;
+        }
+        cosmic_app::Task::none()
+    }
+}

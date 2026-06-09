@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::FREQUENCY_NORMALIZATION_MAX;
-use crate::models::theme::{VisualizationColorConfig, VisualizationSide};
-use crate::ui::components::visualizations::{VisualizationConfig, VisualizationRenderer};
-use cosmic::iced::{Padding, Radius};
+use crate::ui::components::visualizations::{
+    DrawContext, VisualizationConfig, VisualizationRenderer,
+};
+use crate::util::usize_to_f32;
 use cosmic::iced::{
-    Point,
-    core::Rectangle,
+    Padding, Point, Radius,
     widget::canvas::{Fill, Frame, path, stroke},
 };
-use super_stt_shared::FrequencyData;
 
 /// A horizontal line pulse that grows in height/thickness with audio intensity
 pub struct PulseVisualization {
@@ -34,24 +33,20 @@ impl Default for PulseVisualization {
 }
 
 impl VisualizationRenderer for PulseVisualization {
-    #[allow(clippy::cast_precision_loss)]
-    fn draw(
-        &self,
-        frame: &mut Frame<cosmic::Renderer>,
-        bounds: Rectangle,
-        frequency_data: &FrequencyData,
-        _side: &VisualizationSide,
-        color_config: &VisualizationColorConfig,
-        is_dark: bool,
-        cosmic_theme: &cosmic::cosmic_theme::Theme,
-    ) {
-        // Use optimized bounds with minimal margins
+    fn draw(&self, frame: &mut Frame<cosmic::Renderer>, ctx: &DrawContext) {
+        let DrawContext {
+            bounds,
+            frequency_data,
+            color_config,
+            is_dark,
+            cosmic_theme,
+            ..
+        } = *ctx;
         let effective_bounds = self.config.effective_bounds(bounds);
 
-        // Calculate overall audio intensity from frequency data
         let normalization_factor = 1.0 / FREQUENCY_NORMALIZATION_MAX;
 
-        // Focus on vocal frequencies for pulse intensity (bands 8-24)
+        // Focus on vocal frequencies (bands 8-24) for pulse intensity.
         let vocal_start = 8;
         let vocal_end = 24;
         let mut vocal_energy = 0.0;
@@ -63,7 +58,7 @@ impl VisualizationRenderer for PulseVisualization {
         }
 
         let average_vocal_energy = if vocal_bands > 0 {
-            vocal_energy / vocal_bands as f32
+            vocal_energy / usize_to_f32(vocal_bands)
         } else {
             frequency_data.total_energy
         };

@@ -21,8 +21,7 @@ impl YdotoolBackend {
             .is_ok_and(|o| o.status.success())
     }
 
-    #[allow(clippy::unused_self)]
-    pub fn type_text(&self, text: &str) -> Result<()> {
+    pub fn type_text(text: &str) -> Result<()> {
         if text.is_empty() {
             return Ok(());
         }
@@ -43,8 +42,7 @@ impl YdotoolBackend {
         Ok(())
     }
 
-    #[allow(clippy::unused_self)]
-    pub fn backspace_n(&self, n: usize) -> Result<()> {
+    pub fn backspace_n(n: usize) -> Result<()> {
         if n == 0 {
             return Ok(());
         }

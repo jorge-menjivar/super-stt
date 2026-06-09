@@ -13,7 +13,7 @@ nothing the user can hear.
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `POST /audio_theme/test`
 
@@ -48,5 +48,5 @@ length depends on the current theme.
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |
 | 500  | `playback_failed` | The cue sequence could not be played (no audio device, etc.)  |

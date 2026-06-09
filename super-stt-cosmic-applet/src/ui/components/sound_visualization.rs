@@ -10,6 +10,8 @@ use cosmic::{
     },
 };
 
+use crate::app::Message;
+use crate::util::usize_to_f32;
 use crate::{
     config::{
         DEFAULT_VISUALIZATION_WAVE_FREQUENCY, FREQUENCY_CONFIDENCE_THRESHOLD, FREQUENCY_SMOOTHING,
@@ -18,13 +20,11 @@ use crate::{
     },
     models::theme::{VisualizationColorConfig, VisualizationSide, VisualizationTheme},
     ui::components::visualizations::{
-        CenteredBarsVisualization, EqualizerVisualization, PulseVisualization,
+        CenteredBarsVisualization, DrawContext, EqualizerVisualization, PulseVisualization,
         VisualizationRenderer, WaveformVisualization,
     },
 };
-use super_stt_shared::{AudioAnalyzer, FrequencyData};
-// Sizing handled by parent container
-use crate::app::Message;
+use super_stt_shared::FrequencyData;
 
 #[derive(Debug, Clone)]
 pub struct VisualizationComponent {
@@ -32,8 +32,6 @@ pub struct VisualizationComponent {
     is_speech_detected: bool,
     visualization_theme: VisualizationTheme,
     visualization_side: VisualizationSide,
-    audio_analyzer: AudioAnalyzer,
-    audio_samples: Vec<f32>, // Store recent audio samples for analysis
     frequency_data: FrequencyData,
     visualization_colors: VisualizationColorConfig,
     smoothed_visualization_frequency: f32, // Smoothed wave frequency for stable visualization
@@ -47,16 +45,11 @@ impl VisualizationComponent {
         visualization_side: VisualizationSide,
         visualization_colors: VisualizationColorConfig,
     ) -> Self {
-        const SAMPLE_RATE: f32 = 44100.0;
-        const BUFFER_SIZE: usize = 1024;
-
         Self {
             audio_level: audio_level.clamp(0.0, 1.0),
             is_speech_detected,
             visualization_theme,
             visualization_side,
-            audio_analyzer: AudioAnalyzer::new(SAMPLE_RATE, BUFFER_SIZE),
-            audio_samples: Vec::with_capacity(BUFFER_SIZE),
             frequency_data: FrequencyData::default(),
             visualization_colors,
             smoothed_visualization_frequency: DEFAULT_VISUALIZATION_WAVE_FREQUENCY,
@@ -66,7 +59,6 @@ impl VisualizationComponent {
     /// Clear the visualization data to ensure clean transition to icon
     pub fn clear(&mut self) {
         self.frequency_data = FrequencyData::default();
-        self.audio_samples.clear();
         self.audio_level = 0.0;
         // Reset to default frequency
         self.smoothed_visualization_frequency = DEFAULT_VISUALIZATION_WAVE_FREQUENCY;
@@ -105,31 +97,6 @@ impl VisualizationComponent {
         self.frequency_data.dynamic_wave_frequency = Some(self.smoothed_visualization_frequency);
     }
 
-    /// Update with new audio samples for frequency analysis
-    pub fn update_audio_samples(&mut self, samples: &[f32]) {
-        // Keep a rolling buffer of samples
-        self.audio_samples.extend_from_slice(samples);
-
-        // Keep only the most recent samples (buffer size)
-        let buffer_size = 1024;
-        if self.audio_samples.len() > buffer_size {
-            let start = self.audio_samples.len() - buffer_size;
-            self.audio_samples.drain(0..start);
-        }
-
-        // Perform real FFT analysis on the audio samples
-        if !self.audio_samples.is_empty() {
-            self.frequency_data = self.audio_analyzer.analyze(&self.audio_samples);
-
-            // Update smoothed wave frequency for dynamic visualization
-            self.update_smoothed_wave_frequency();
-
-            // Set the dynamic wave frequency
-            self.frequency_data.dynamic_wave_frequency =
-                Some(self.smoothed_visualization_frequency);
-        }
-    }
-
     /// Update with just audio level (legacy method - only used when no samples available)
     pub fn update_audio_level(&mut self, audio_level: f32, is_speech_detected: bool) {
         self.audio_level = audio_level.clamp(0.0, 1.0);
@@ -146,13 +113,8 @@ impl VisualizationComponent {
         self.frequency_data.dynamic_wave_frequency = Some(self.smoothed_visualization_frequency);
     }
 
-    /// Update the smoothed wave frequency based on current frequency data
-    /// This implements the frequency-to-wave parameter mapping system
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss
-    )]
+    /// Update the smoothed wave frequency from the current frequency
+    /// data, mapping the dominant audio frequency to a wave parameter.
     fn update_smoothed_wave_frequency(&mut self) {
         // Early exit if frequency confidence is too low (performance optimization)
         let target_wave_frequency =
@@ -215,73 +177,39 @@ impl Program<Message, Theme, Renderer> for VisualizationComponent {
             cosmic::iced::Color::TRANSPARENT,
         );
 
-        let is_dark = theme.cosmic().is_dark;
-        let cosmic_theme = theme.cosmic();
+        let ctx = DrawContext {
+            bounds,
+            frequency_data: &self.frequency_data,
+            side: &self.visualization_side,
+            color_config: &self.visualization_colors,
+            is_dark: theme.cosmic().is_dark,
+            cosmic_theme: theme.cosmic(),
+        };
 
-        // Use the appropriate visualization renderer based on theme
         match self.visualization_theme {
-            VisualizationTheme::Pulse => {
-                PulseVisualization::default().draw(
-                    &mut frame,
-                    bounds,
-                    &self.frequency_data,
-                    &self.visualization_side,
-                    &self.visualization_colors,
-                    is_dark,
-                    cosmic_theme,
-                );
-            }
+            VisualizationTheme::Pulse => PulseVisualization::default().draw(&mut frame, &ctx),
             VisualizationTheme::BottomEqualizer => {
-                EqualizerVisualization::default().draw(
-                    &mut frame,
-                    bounds,
-                    &self.frequency_data,
-                    &self.visualization_side,
-                    &self.visualization_colors,
-                    is_dark,
-                    cosmic_theme,
-                );
+                EqualizerVisualization::default().draw(&mut frame, &ctx);
             }
             VisualizationTheme::CenteredEqualizer => {
-                CenteredBarsVisualization::default().draw(
-                    &mut frame,
-                    bounds,
-                    &self.frequency_data,
-                    &self.visualization_side,
-                    &self.visualization_colors,
-                    is_dark,
-                    cosmic_theme,
-                );
+                CenteredBarsVisualization::default().draw(&mut frame, &ctx);
             }
-            VisualizationTheme::Waveform => {
-                WaveformVisualization::default().draw(
-                    &mut frame,
-                    bounds,
-                    &self.frequency_data,
-                    &self.visualization_side,
-                    &self.visualization_colors,
-                    is_dark,
-                    cosmic_theme,
-                );
-            }
+            VisualizationTheme::Waveform => WaveformVisualization::default().draw(&mut frame, &ctx),
         }
 
         vec![frame.into_geometry()]
     }
 }
 
-/// Create frequency data based on speech characteristics
-/// This is not real frequency analysis, but provides a more realistic representation
-/// of typical speech frequency distribution than flat scaling
-#[allow(clippy::cast_precision_loss)]
+/// Synthesize speech-like frequency data from an overall audio level.
+/// Not real analysis — it approximates a typical speech spectrum (energy
+/// peaking in mid frequencies, tapering at the extremes) so the
+/// equalizer stays lively when only a level is available.
 fn simulate_frequency_data(audio_level: f32) -> FrequencyData {
-    // Generate 64 bands with speech-like frequency distribution (matching new algorithm)
-    // Speech energy peaks in mid frequencies and tapers at extremes
     let mut bands = Vec::with_capacity(64);
 
     for i in 0..64 {
-        // Create a speech-like frequency response curve
-        let normalized_freq = i as f32 / 63.0; // 0.0 to 1.0
+        let normalized_freq = usize_to_f32(i) / 63.0; // 0.0 to 1.0
 
         // Speech frequency response: low at extremes, peak in middle-high
         let speech_response = if normalized_freq < 0.1 {
@@ -301,8 +229,8 @@ fn simulate_frequency_data(audio_level: f32) -> FrequencyData {
             0.8 * (1.0 - normalized_freq) / 0.2
         };
 
-        // Add some variation to make it more realistic
-        let variation = ((i as f32 * 1.618) % 1.0) * 0.3 + 0.8; // 0.8 to 1.1
+        // Pseudo-random variation (0.8..1.1) for a more realistic look.
+        let variation = ((usize_to_f32(i) * 1.618) % 1.0) * 0.3 + 0.8;
         bands.push(audio_level * speech_response * variation);
     }
 
@@ -359,16 +287,14 @@ fn extract_dominant_frequency_from_bands(bands: &[f32]) -> (f32, f32) {
     let linear_bands = (num_bands * 5) / 16; // ~20 bands for 64-band system
 
     let estimated_freq = if max_band_idx < linear_bands {
-        // Linear frequency mapping (50Hz - 800Hz)
-        #[allow(clippy::cast_precision_loss)]
-        let t = max_band_idx as f32 / linear_bands as f32;
+        // Linear frequency mapping (50Hz - 800Hz).
+        let t = usize_to_f32(max_band_idx) / usize_to_f32(linear_bands);
         50.0 + t * (800.0 - 50.0)
     } else {
-        // Logarithmic frequency mapping (800Hz - 16kHz)
+        // Logarithmic frequency mapping (800Hz - 16kHz).
         let log_bands = num_bands - linear_bands;
         let log_idx = max_band_idx - linear_bands;
-        #[allow(clippy::cast_precision_loss)]
-        let t = log_idx as f32 / log_bands as f32;
+        let t = usize_to_f32(log_idx) / usize_to_f32(log_bands);
 
         let log_min = 800.0f32.ln();
         let log_max = 16000.0f32.ln();

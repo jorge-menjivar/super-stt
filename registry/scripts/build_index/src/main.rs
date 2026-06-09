@@ -1,0 +1,272 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! `super-stt-build-index` — top-level orchestration.
+
+use std::path::PathBuf;
+
+use anyhow::Context;
+use clap::Parser;
+use log::{error, info, warn};
+
+mod assets;
+mod carryforward;
+mod github;
+mod index_json;
+mod license;
+mod manifest;
+mod registry_toml;
+mod resolve;
+
+#[derive(Parser, Debug)]
+#[command(version, about)]
+struct Args {
+    /// Path to `registry.toml` to read.
+    #[arg(long, default_value = "registry/registry.toml")]
+    registry: PathBuf,
+    /// Path to the previously-published `index.json` (for carry-forward). If
+    /// missing, falls through cleanly — bootstrap mode.
+    #[arg(long)]
+    prior_index: Option<PathBuf>,
+    /// Where to write the new `index.json`.
+    #[arg(long, default_value = "index.json")]
+    out: PathBuf,
+}
+
+pub struct BuildFailure {
+    pub error: String,
+    pub attempted_version: Option<String>,
+    pub attempted_tag: Option<String>,
+}
+
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+async fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let args = Args::parse();
+
+    let registry_text = std::fs::read_to_string(&args.registry)
+        .with_context(|| format!("reading {}", args.registry.display()))?;
+    let registry = registry_toml::Registry::parse(&registry_text)?;
+
+    let prior = match args.prior_index.as_ref() {
+        Some(p) if p.exists() => {
+            let text = std::fs::read_to_string(p)?;
+            Some(serde_json::from_str::<index_json::Index>(&text)?)
+        }
+        _ => None,
+    };
+
+    let gh = github::GitHub::from_env();
+    let http = reqwest::Client::new();
+    let now_iso = chrono_now_iso();
+
+    let mut out_backends: Vec<index_json::IndexBackend> = Vec::new();
+
+    for (id, entry) in registry.0.iter() {
+        if entry.removed {
+            info!("skip `{id}` — removed");
+            continue;
+        }
+        let owner_repo = owner_repo_from(&entry.repo)?;
+        match build_entry(&gh, &http, id, entry, &owner_repo).await {
+            Ok(b) => out_backends.push(b),
+            Err(failure) => {
+                error!("entry `{id}` failed: {}", failure.error);
+                let prior_entry = prior.as_ref()
+                    .and_then(|p| p.backends.iter().find(|b| b.id == *id));
+                if let Some(carried) = carryforward::maybe_carry_forward(
+                    id, prior_entry, &failure.error,
+                    failure.attempted_version.as_deref().unwrap_or(""),
+                    failure.attempted_tag.as_deref().unwrap_or(""),
+                    &now_iso,
+                    carryforward::MAX_STALENESS_DAYS,
+                ) {
+                    warn!("entry `{id}` — carrying forward last-known-good (v{})", carried.version);
+                    out_backends.push(carried);
+                }
+            }
+        }
+    }
+
+    ensure_unique_sources(&out_backends)?;
+
+    let index = index_json::Index {
+        schema_version: index_json::SCHEMA_VERSION,
+        generated_at: now_iso,
+        min_client: index_json::MIN_CLIENT.into(),
+        backends: out_backends,
+    };
+    let text = serde_json::to_string_pretty(&index)?;
+    std::fs::write(&args.out, text.as_bytes())
+        .with_context(|| format!("writing {}", args.out.display()))?;
+    info!("wrote {} ({} backends)", args.out.display(), index.backends.len());
+    Ok(())
+}
+
+fn owner_repo_from(repo: &str) -> anyhow::Result<String> {
+    // "github.com/jorge-menjivar/super-stt" -> "jorge-menjivar/super-stt"
+    let rest = repo.strip_prefix("github.com/")
+        .ok_or_else(|| anyhow::anyhow!("repo `{repo}` must start with `github.com/`"))?;
+    let segments: Vec<&str> = rest.split('/').collect();
+    anyhow::ensure!(segments.len() == 2 && !segments[0].is_empty() && !segments[1].is_empty(),
+        "repo `{repo}` must be `github.com/<owner>/<repo>`");
+    Ok(rest.to_string())
+}
+
+async fn build_entry(
+    gh: &github::GitHub,
+    http: &reqwest::Client,
+    id: &str,
+    entry: &registry_toml::Entry,
+    owner_repo: &str,
+) -> Result<index_json::IndexBackend, BuildFailure> {
+    let resolved = resolve::resolve(gh, owner_repo, entry).await
+        .map_err(|e| BuildFailure {
+            error: format!("{e:#}"),
+            attempted_version: None,
+            attempted_tag: None,
+        })?;
+    let attempted_version = Some(resolved.version.to_string());
+    let attempted_tag = Some(resolved.tag.clone());
+    let m = manifest::fetch(gh, owner_repo, entry.subdir.as_deref(), &resolved.tag).await
+        .map_err(|e| BuildFailure {
+            error: format!("{e:#}"),
+            attempted_version: attempted_version.clone(),
+            attempted_tag: attempted_tag.clone(),
+        })?;
+    manifest::validate(&m, &resolved.version, &entry.repo)
+        .map_err(|e| BuildFailure {
+            error: format!("{e:#}"),
+            attempted_version: attempted_version.clone(),
+            attempted_tag: attempted_tag.clone(),
+        })?;
+
+    // Decide online from any model with a non-local provider. Conservative
+    // default: if any model has a provider whose name is "openai" / "mistral"
+    // / "deepgram" / "anthropic", flag online.
+    let online_providers: &[&str] = &["openai", "mistral", "deepgram", "anthropic"];
+    let online = m.models.iter().any(|md| online_providers.contains(&md.provider.as_str()));
+
+    let supports_gpu = m.models.iter().any(|md|
+        md.supported_devices.iter().any(|d| d == "cuda" || d == "metal" || d == "rocm"));
+    let supports_cpu = m.models.iter().any(|md|
+        md.supported_devices.iter().any(|d| d == "cpu"));
+
+    // Resolve and hash assets. Any error here is wrapped with the now-known
+    // attempted version + tag so the carry-forward path records them.
+    let wrap = |e: anyhow::Error| BuildFailure {
+        error: format!("{e:#}"),
+        attempted_version: attempted_version.clone(),
+        attempted_tag: attempted_tag.clone(),
+    };
+    let mut idx_assets = index_json::IndexAssets::default();
+    if let Some(wasm) = &m.assets.wasm {
+        let (url, size) = assets::resolve_url(wasm, &resolved.release.assets).map_err(|e| wrap(e.into()))?;
+        let sha = assets::fetch_and_validate(http, &url,
+            assets::AssetExpect::Wasm { file: wasm }).await.map_err(|e| wrap(e.into()))?;
+        idx_assets.wasm = Some(index_json::IndexAsset { url, size, sha256: sha });
+    }
+    for sa in &m.assets.subprocess {
+        let (url, size) = assets::resolve_url(&sa.file, &resolved.release.assets).map_err(|e| wrap(e.into()))?;
+        let sha = assets::fetch_and_validate(http, &url,
+            assets::AssetExpect::Subprocess { file: &sa.file, entrypoint: &m.backend.entrypoint }).await.map_err(|e| wrap(e.into()))?;
+        idx_assets.subprocess.push(index_json::IndexSubprocessAsset {
+            target: sa.target.clone(), accel: sa.accel.clone(),
+            cuda_major: sa.cuda_major, cuda_sm: sa.cuda_sm, cudnn: sa.cudnn,
+            url, size, sha256: sha,
+        });
+    }
+
+    Ok(index_json::IndexBackend {
+        id: id.into(),
+        source: m.backend.source,
+        version: resolved.version.to_string(),
+        tag: resolved.tag,
+        name: m.backend.name,
+        description: m.backend.description,
+        license: m.backend.license.unwrap_or_default(),
+        kind: m.backend.kind,
+        contract: m.backend.contract,
+        entrypoint: m.backend.entrypoint,
+        allowed_hosts: m.network.allowed_hosts,
+        online, supports_gpu, supports_cpu,
+        models: m.models.into_iter().map(|md| index_json::IndexModel {
+            name: md.name, provider: md.provider, supported_devices: md.supported_devices,
+        }).collect(),
+        secrets: m.secrets.into_iter().map(|s| index_json::IndexSecret {
+            name: s.name, label: s.label, required: s.required,
+        }).collect(),
+        options: m.options.into_iter().map(|o| index_json::IndexOption {
+            name: o.name, label: o.label, r#type: o.r#type, default: o.default,
+        }).collect(),
+        assets: idx_assets,
+        index_stale: None,
+    })
+}
+
+/// A backend's `source` is its unique identity. Two distinct entries that
+/// collide on `source` would be indistinguishable to every daemon (the
+/// daemon's `dedup_sources` guard silently drops all but the first), so a
+/// collision must never be published — fail the build instead.
+fn ensure_unique_sources(backends: &[index_json::IndexBackend]) -> anyhow::Result<()> {
+    let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for b in backends {
+        if let Some(prev_id) = seen.insert(b.source.as_str(), b.id.as_str()) {
+            anyhow::bail!(
+                "duplicate source `{}` shared by entries `{}` and `{}`; each backend must have a distinct source",
+                b.source, prev_id, b.id,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn chrono_now_iso() -> String {
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn backend(id: &str, source: &str) -> index_json::IndexBackend {
+        index_json::IndexBackend {
+            id: id.into(),
+            source: source.into(),
+            version: "1.0.0".into(),
+            tag: "v1.0.0".into(),
+            name: id.into(),
+            description: None,
+            license: "Apache-2.0".into(),
+            kind: "wasm".into(),
+            contract: "v1".into(),
+            entrypoint: format!("{id}.wasm"),
+            allowed_hosts: Vec::new(),
+            online: false,
+            supports_gpu: false,
+            supports_cpu: true,
+            models: Vec::new(),
+            secrets: Vec::new(),
+            options: Vec::new(),
+            assets: index_json::IndexAssets::default(),
+            index_stale: None,
+        }
+    }
+
+    #[test]
+    fn unique_sources_pass() {
+        let backends = vec![
+            backend("mistral", "github.com/x/y/mistral"),
+            backend("openai", "github.com/x/y/openai"),
+        ];
+        ensure_unique_sources(&backends).unwrap();
+    }
+
+    #[test]
+    fn duplicate_sources_are_rejected() {
+        let backends = vec![
+            backend("mistral", "github.com/x/y"),
+            backend("openai", "github.com/x/y"),
+        ];
+        let err = ensure_unique_sources(&backends).unwrap_err();
+        assert!(err.to_string().contains("duplicate source"));
+    }
+}

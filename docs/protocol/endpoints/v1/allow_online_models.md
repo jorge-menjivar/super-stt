@@ -13,7 +13,7 @@ follow-up `status: "ready"` event for the new local model.
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `POST /allow_online_models`
 
@@ -57,7 +57,7 @@ subscribers see `daemon_status_changed` with the new model name on
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |
 
 ## `GET /allow_online_models`
 
@@ -86,4 +86,4 @@ Content-Type: application/json
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |

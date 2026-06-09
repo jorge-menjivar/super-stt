@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::daemon::types::SuperSTTDaemon;
+use crate::stt_models::backends;
 use log::{error, info, warn};
 use super_stt_shared::models::protocol::DaemonResponse;
 use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-use super_stt_shared::models::registry;
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
 
@@ -24,22 +24,18 @@ impl SuperSTTDaemon {
 
         let (device, model_loaded, current_model) = match model_guard.as_ref() {
             Some(loaded) => {
-                let device_str = match loaded.instance.device() {
-                    candle_core::Device::Cpu => "cpu".to_string(),
-                    candle_core::Device::Cuda(_) => "cuda".to_string(),
-                    candle_core::Device::Metal(_) => "metal".to_string(),
-                };
-                (device_str, true, Some(loaded.definition.name.to_string()))
+                let device = crate::daemon::types::normalize_device(&loaded.instance.device());
+                (device, true, Some(loaded.definition.name.clone()))
             }
             None => ("unknown".to_string(), false, None),
         };
 
-        let is_recording = *self.is_recording.read().await;
+        let busy = *self.busy.read().await;
 
         let mut response = DaemonResponse::success()
             .with_device(device)
             .with_model_loaded(model_loaded)
-            .with_is_recording(is_recording);
+            .with_busy(busy);
 
         if let Some(model) = current_model {
             response = response.with_current_model(model);
@@ -66,58 +62,35 @@ impl SuperSTTDaemon {
             .with_message("Daemon configuration retrieved successfully".to_string())
     }
 
-    /// Handle list all available models command (built-in + custom)
+    /// Handle list all available models command — every model served by an
+    /// installed backend, as `(name, provider, source)` triples.
     pub async fn handle_list_models(&self) -> DaemonResponse {
-        let mut available_models: Vec<(
-            String,
-            super_stt_shared::models::provider::Provider,
-            super_stt_shared::models::registry::SourceKind,
-        )> = registry::ALL
-            .iter()
-            .map(|d| (d.name.to_string(), d.provider, d.source.kind()))
-            .collect();
-
-        // Append custom models
-        let custom = self.custom_models.read().await;
-        for cm in custom.iter() {
-            available_models.push((
-                cm.name.clone(),
-                cm.provider,
-                super_stt_shared::models::registry::SourceKind::Custom,
-            ));
-        }
+        // Scoped to the active backend: only its models are switchable. The
+        // full catalog of installed backends lives at `GET /backends`.
+        let backends = self.backends.read().await;
+        let active_dir = self.active_backend.read().await.clone();
+        let available_models = active_dir
+            .and_then(|dir| {
+                backends
+                    .iter()
+                    .find(|b| backends::dir_name(b).as_deref() == Some(dir.as_str()))
+            })
+            .map(|b| {
+                b.models
+                    .iter()
+                    .map(|d| (d.name.clone(), d.provider, d.source.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         info!(
-            "Available models requested, returning {} models ({} custom)",
-            available_models.len(),
-            custom.len()
+            "Available models requested, returning {} model(s) for the active backend",
+            available_models.len()
         );
 
         DaemonResponse::success()
             .with_available_models(available_models)
             .with_message("Available models listed successfully".to_string())
-    }
-
-    /// Re-scan `custom_models_dir` and update the registry.
-    pub async fn refresh_custom_models(&self) {
-        let dir = self
-            .config
-            .read()
-            .await
-            .transcription
-            .custom_models_dir
-            .clone();
-
-        let models = if let Some(dir) = dir {
-            crate::stt_models::local::download::discover_custom_models(&std::path::PathBuf::from(
-                dir,
-            ))
-        } else {
-            Vec::new()
-        };
-
-        info!("Custom models registry: {} model(s)", models.len());
-        *self.custom_models.write().await = models;
     }
 
     /// Handle list audio themes command - return all available audio themes
@@ -271,15 +244,13 @@ impl SuperSTTDaemon {
                     .is_some_and(|loaded| matches!(loaded.definition.provider, Provider::Online(_)))
             };
             if current_is_online {
-                info!("Online models disabled; reverting to default local model");
-                let default = registry::default_definition();
-                let _ = self
-                    .handle_set_model(
-                        default.name.to_string(),
-                        default.provider,
-                        default.source.kind(),
-                    )
-                    .await;
+                info!("Online models disabled; reverting to a local model");
+                if let Some((name, provider, source)) = self.first_local_model().await {
+                    let _ = self.handle_set_model(name, provider, source).await;
+                } else {
+                    warn!("No local backend installed to revert to; unloading current model");
+                    *self.model.write().await = None;
+                }
             }
         }
 
@@ -344,9 +315,6 @@ impl SuperSTTDaemon {
             config_guard.transcription.custom_models_dir = path;
         }
 
-        // Re-scan the new directory
-        self.refresh_custom_models().await;
-
         let persist_result = self.persist_config().await;
 
         match persist_result {
@@ -361,6 +329,113 @@ impl SuperSTTDaemon {
                     "Custom models directory set to {path_display} (save failed: {e})"
                 ))
             }
+        }
+    }
+
+    /// Handle list backends command — the installed-backend catalog with each
+    /// backend's models, declared secrets, and options (with effective values).
+    /// Drives the settings UI; see `docs/protocol/endpoints/v1/backends.md`.
+    pub async fn handle_list_backends(&self) -> DaemonResponse {
+        let config = self.config.read().await;
+        let backends = self.backends.read().await;
+
+        let catalog: Vec<serde_json::Value> = backends
+            .iter()
+            .map(|b| {
+                let models: Vec<serde_json::Value> = b
+                    .models
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "name": m.name,
+                            "provider": m.provider.to_string(),
+                            "multilingual": m.is_multilingual,
+                            "supported_devices": m.supported_devices,
+                            "estimated_vram_bytes": m.estimated_vram_bytes,
+                            "realtime": m.realtime,
+                        })
+                    })
+                    .collect();
+                let secrets: Vec<serde_json::Value> = b
+                    .secrets
+                    .iter()
+                    .map(|s| {
+                        serde_json::json!({
+                            "name": s.name,
+                            "label": s.label,
+                            "description": s.description,
+                            "required": s.required,
+                        })
+                    })
+                    .collect();
+                let options: Vec<serde_json::Value> = b
+                    .options
+                    .iter()
+                    .map(|o| {
+                        let default = o.default.as_ref().map(toml_value_to_string);
+                        let value = config
+                            .backend_option(&b.source, &o.name)
+                            .map(str::to_string)
+                            .or_else(|| default.clone());
+                        serde_json::json!({
+                            "name": o.name,
+                            "label": o.label,
+                            "description": o.description,
+                            "type": o.kind,
+                            "default": default,
+                            "required": o.required,
+                            "value": value,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "source": b.source,
+                    "name": b.name,
+                    "kind": b.kind,
+                    "models": models,
+                    "secrets": secrets,
+                    "options": options,
+                })
+            })
+            .collect();
+
+        info!("Backends catalog requested: {} backend(s)", catalog.len());
+        DaemonResponse::success()
+            .with_backends(serde_json::json!(catalog))
+            .with_message("Backends listed successfully".to_string())
+    }
+
+    /// Handle set backend option command — store/clear a plaintext option
+    /// override in config. Takes effect on the backend's next model load.
+    pub async fn handle_set_backend_option(
+        &self,
+        source: String,
+        name: String,
+        value: String,
+    ) -> DaemonResponse {
+        {
+            let mut config = self.config.write().await;
+            config.update_backend_option(source.clone(), name.clone(), value.clone());
+        }
+
+        // If the active model is served by this backend, reload it so the new
+        // option value takes effect immediately (it's read at load time).
+        let active_source = self
+            .model
+            .read()
+            .await
+            .as_ref()
+            .map(|l| l.definition.source.clone());
+        if active_source.as_deref() == Some(source.as_str()) {
+            let _ = self.handle_reload_active_model().await;
+        }
+
+        if value.is_empty() {
+            info!("Cleared backend option {name} for {source}");
+            DaemonResponse::success().with_message(format!("Option {name} cleared"))
+        } else {
+            info!("Set backend option {name} for {source}");
+            DaemonResponse::success().with_message(format!("Option {name} updated"))
         }
     }
 
@@ -389,5 +464,14 @@ impl SuperSTTDaemon {
         } else {
             DaemonResponse::success().with_message("No download in progress".to_string())
         }
+    }
+}
+
+/// Render a TOML option default for the backends catalog: strings pass through
+/// unquoted, everything else uses its TOML display form.
+fn toml_value_to_string(value: &toml::Value) -> String {
+    match value {
+        toml::Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }

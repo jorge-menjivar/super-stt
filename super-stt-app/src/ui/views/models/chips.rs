@@ -1,0 +1,331 @@
+// SPDX-License-Identifier: GPL-3.0-only
+use std::str::FromStr;
+
+use cosmic::iced::Alignment;
+use cosmic::iced_widget::row;
+use cosmic::widget::{self, text};
+use cosmic::{Apply, Element};
+use super_stt_shared::models::provider::Provider;
+
+use crate::ui::icons;
+use crate::ui::messages::Message;
+
+use super::surface::muted_text_color;
+
+/// Whether a backend's models are served by an online provider. Online
+/// backends transmit audio to a third-party service, flagged in the UI.
+pub(super) fn backend_is_online(backend: &crate::daemon::backends::BackendInfo) -> bool {
+    backend
+        .models
+        .iter()
+        .any(|m| matches!(Provider::from_str(&m.provider), Ok(Provider::Online(_))))
+}
+
+/// Whether any model this backend serves can run on a GPU (CUDA or Metal).
+/// Drives the "GPU" capability chip on the backend card.
+pub(super) fn backend_supports_gpu(backend: &crate::daemon::backends::BackendInfo) -> bool {
+    backend.models.iter().any(|m| {
+        m.supported_devices
+            .iter()
+            .any(|d| d == "cuda" || d == "metal")
+    })
+}
+
+/// Whether any model this backend serves can run on the CPU. Drives the
+/// "CPU" capability chip on the backend card.
+pub(super) fn backend_supports_cpu(backend: &crate::daemon::backends::BackendInfo) -> bool {
+    backend
+        .models
+        .iter()
+        .any(|m| m.supported_devices.iter().any(|d| d == "cpu"))
+}
+
+/// A small rounded "pill" advertising one backend capability — a tinted icon
+/// and a short label over a soft, same-hue fill. `fg` is the full-strength
+/// tone (icon, text, and border); the fill and border are derived from it at a
+/// lower alpha so the chip reads as a tag, not a button.
+pub(super) fn capability_chip(
+    icon: &'static [u8],
+    label: &'static str,
+    fg: cosmic::iced::Color,
+) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    let radius = cosmic::theme::active().cosmic().corner_radii.radius_xl;
+    let mut fill = fg;
+    fill.a = 0.14;
+    let mut edge = fg;
+    edge.a = 0.32;
+
+    row![
+        icons::phosphor_tinted(icon, 14.0, fg),
+        text::caption(label).class(cosmic::theme::Text::Color(fg)),
+    ]
+    .spacing(spacing.space_xxxs)
+    .align_y(Alignment::Center)
+    .apply(widget::container)
+    .padding([spacing.space_xxxs, spacing.space_xs])
+    .class(cosmic::theme::Container::custom(move |_| {
+        cosmic::iced_widget::container::Style {
+            background: Some(cosmic::iced::Background::Color(fill)),
+            border: cosmic::iced::Border {
+                radius: radius.into(),
+                width: 1.0,
+                color: edge,
+            },
+            ..Default::default()
+        }
+    }))
+    .into()
+}
+
+/// A neutral, text-only pill — same shape/tone as [`capability_chip`] but
+/// without a leading glyph. Used for the active card's "N models" count.
+pub(super) fn count_chip(label: String) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    let radius = cosmic::theme::active().cosmic().corner_radii.radius_xl;
+    let fg: cosmic::iced::Color = cosmic::theme::active()
+        .current_container()
+        .component
+        .on
+        .into();
+    let mut fill = fg;
+    fill.a = 0.14;
+    let mut edge = fg;
+    edge.a = 0.32;
+
+    text::caption(label)
+        .class(cosmic::theme::Text::Color(fg))
+        .apply(widget::container)
+        .padding([spacing.space_xxxs, spacing.space_xs])
+        .class(cosmic::theme::Container::custom(move |_| {
+            cosmic::iced_widget::container::Style {
+                background: Some(cosmic::iced::Background::Color(fill)),
+                border: cosmic::iced::Border {
+                    radius: radius.into(),
+                    width: 1.0,
+                    color: edge,
+                },
+                ..Default::default()
+            }
+        }))
+        .into()
+}
+
+/// The Cloud capability chip: a [`capability_chip`] with a hover tooltip
+/// listing the hosts the backend transmits audio to. Shares the GPU/CPU
+/// chips' neutral tone so "runs in the cloud" reads as a plain capability,
+/// not a golden/premium value judgment.
+pub(super) fn cloud_chip(fg: cosmic::iced::Color, hosts: &[String]) -> Element<'static, Message> {
+    use super::surface::rounded_tooltip;
+    let chip = capability_chip(icons::CLOUD, "Cloud", fg);
+    if hosts.is_empty() {
+        return chip;
+    }
+    let mut popup = widget::column::with_capacity(hosts.len() + 1)
+        .push(text::body("Transmits audio to:"))
+        .spacing(cosmic::theme::spacing().space_xxxs);
+    for host in hosts {
+        popup = popup.push(text::body(format!("• {host}")));
+    }
+    rounded_tooltip(chip, popup, widget::tooltip::Position::Top)
+}
+
+/// The capability-chip row for a backend: GPU / CPU advertise local compute,
+/// Cloud (when `online_hosts` is `Some`) flags an online backend. Returns
+/// `None` when there's nothing to advertise, so callers skip the row rather
+/// than render an empty band.
+// reason: "supports_gpu" / "supports_cpu" are the clearest names
+#[allow(clippy::similar_names)]
+pub(super) fn capability_chips(
+    supports_gpu: bool,
+    supports_cpu: bool,
+    online_hosts: Option<&[String]>,
+) -> Option<Element<'static, Message>> {
+    use super::surface::rounded_tooltip;
+    let theme = cosmic::theme::active();
+    let neutral: cosmic::iced::Color = theme.current_container().component.on.into();
+
+    let mut chips: Vec<Element<'static, Message>> = Vec::new();
+    if supports_gpu {
+        chips.push(rounded_tooltip(
+            capability_chip(icons::GRAPHICS_CARD, "GPU", neutral),
+            text::body("Accelerated on GPU"),
+            widget::tooltip::Position::Top,
+        ));
+    }
+    if supports_cpu {
+        chips.push(rounded_tooltip(
+            capability_chip(icons::CPU, "CPU", neutral),
+            text::body("Runs on the CPU"),
+            widget::tooltip::Position::Top,
+        ));
+    }
+    if let Some(hosts) = online_hosts {
+        chips.push(cloud_chip(neutral, hosts));
+    }
+    if chips.is_empty() {
+        return None;
+    }
+    Some(
+        row(chips)
+            .spacing(cosmic::theme::spacing().space_xxs)
+            .align_y(Alignment::Center)
+            .into(),
+    )
+}
+
+/// A segmented control of mutually-exclusive filter options: a caption label
+/// followed by chips butted together inside a single rounded "track", so the
+/// group reads as one unified toggle rather than separate buttons. The active
+/// chip is filled — accent by default, or a neutral surface when `neutral` is
+/// set (used for the secondary "Format" filter); inactive chips are transparent
+/// so the track shows through.
+pub(super) fn chip_group(
+    label: &str,
+    neutral: bool,
+    chips: Vec<(&'static str, bool, Message)>,
+) -> Element<'static, Message> {
+    use cosmic::widget::button;
+    let spacing = cosmic::theme::spacing();
+    let muted = muted_text_color();
+
+    // Chips with no gap between them; the surrounding track supplies the inset.
+    let mut segments = row![].spacing(0).align_y(Alignment::Center);
+    for (chip_label, active, msg) in chips {
+        let chip = if active {
+            if neutral {
+                button::standard(chip_label)
+            } else {
+                button::suggested(chip_label)
+            }
+        } else {
+            button::text(chip_label)
+        }
+        // Match the font size (14) so the label's line box hugs the glyph and
+        // sits vertically centered, rather than floating high in the stock 20px
+        // line box. Same centering technique `pill_label` uses (`line_height(1.0)`
+        // = 1.0 × 14px); these stay regular buttons, not pills.
+        .line_height(14)
+        .padding([spacing.space_xxs, spacing.space_s])
+        .on_press(msg);
+        segments = segments.push(chip);
+    }
+
+    // The track: a surface-filled, hairline-bordered, pill-rounded container
+    // with a small inset so the active chip visually sits within it.
+    let track = widget::container(segments)
+        .padding(3)
+        .class(cosmic::theme::Container::custom(|theme| {
+            let cosmic = theme.cosmic();
+            let component = &theme.current_container().component;
+            cosmic::iced_widget::container::Style {
+                background: Some(cosmic::iced::Background::Color(component.base.into())),
+                border: cosmic::iced::Border {
+                    radius: cosmic.corner_radii.radius_xl.into(),
+                    width: 1.0,
+                    color: component.divider.into(),
+                },
+                ..Default::default()
+            }
+        }));
+
+    row![
+        text::caption(label.to_uppercase()).class(cosmic::theme::Text::Color(muted)),
+        track
+    ]
+    .spacing(spacing.space_xs)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// The "{shown} backends found" result-count caption above the filter chips.
+pub(super) fn result_count<'a>(shown: usize) -> Element<'a, Message> {
+    let muted = muted_text_color();
+    let label = format!("{shown} backends found");
+    text::caption(label)
+        .class(cosmic::theme::Text::Color(muted))
+        .into()
+}
+
+/// One unmet-requirement row: a destructive-colored warning glyph and the
+/// message `"{label} must be set."`. The active-backend card is the obvious
+/// source of the constraint, so the message stays short — no backend name,
+/// no internal identifier. Only the icon is tinted red; the text uses the
+/// default body color so the row reads cleanly. Non-dismissible: this row
+/// disappears the moment the requirement is satisfied (no click required).
+pub(super) fn requirement_warning(label: &str) -> Element<'_, Message> {
+    row![
+        icons::phosphor_destructive(icons::WARNING, 16.0),
+        text::body(format!("{label} must be set.")),
+    ]
+    .spacing(cosmic::theme::spacing().space_xs)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+#[cfg(test)]
+mod capability_tests {
+    //! Pin the device→capability mapping behind the GPU/CPU chips: `cuda` and
+    //! `metal` both count as GPU, `cpu` as CPU, and the online sentinel `none`
+    //! as neither. A backend aggregates the capability across every model it
+    //! serves, so one GPU model and one CPU model surface both chips.
+    use super::*;
+    use crate::daemon::backends::{BackendInfo, BackendModel};
+
+    /// Build a backend whose models declare the given device lists.
+    fn backend_with_devices(per_model: &[&[&str]]) -> BackendInfo {
+        BackendInfo {
+            source: "github.com/super-stt/test".to_string(),
+            name: "Test".to_string(),
+            models: per_model
+                .iter()
+                .enumerate()
+                .map(|(i, devices)| BackendModel {
+                    name: format!("m{i}"),
+                    provider: "local_test".to_string(),
+                    supported_devices: devices.iter().map(|s| (*s).to_string()).collect(),
+                    estimated_vram_bytes: 0,
+                })
+                .collect(),
+            secrets: Vec::new(),
+            options: Vec::new(),
+        }
+    }
+
+    /// Both GPU backends (`cuda`, `metal`) surface the GPU chip, including
+    /// when paired with `cpu` in the same model's device list.
+    #[test]
+    fn cuda_and_metal_count_as_gpu() {
+        assert!(backend_supports_gpu(&backend_with_devices(&[&["cuda"]])));
+        assert!(backend_supports_gpu(&backend_with_devices(&[&["metal"]])));
+        assert!(backend_supports_gpu(&backend_with_devices(&[&[
+            "cpu", "cuda"
+        ]])));
+    }
+
+    /// A `cpu`-only model is CPU-capable and not GPU-capable.
+    #[test]
+    fn cpu_only_is_cpu_not_gpu() {
+        let b = backend_with_devices(&[&["cpu"]]);
+        assert!(backend_supports_cpu(&b));
+        assert!(!backend_supports_gpu(&b));
+    }
+
+    /// The online sentinel `none` advertises no local compute at all — its
+    /// card shows the Cloud chip instead (driven separately by online-ness).
+    #[test]
+    fn online_sentinel_is_neither() {
+        let b = backend_with_devices(&[&["none"]]);
+        assert!(!backend_supports_gpu(&b));
+        assert!(!backend_supports_cpu(&b));
+    }
+
+    /// Capability is the union across a backend's models: a CPU-only model
+    /// plus a GPU-only model yields both chips.
+    #[test]
+    fn capability_aggregates_across_models() {
+        let b = backend_with_devices(&[&["cpu"], &["cuda"]]);
+        assert!(backend_supports_gpu(&b));
+        assert!(backend_supports_cpu(&b));
+    }
+}

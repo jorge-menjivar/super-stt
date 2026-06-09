@@ -1,0 +1,260 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Voxtral (local, GPU) subprocess backend. See docs/protocol/backend/.
+
+[backend]
+    source = "github.com/jorge-menjivar/super-stt/voxtral"
+    name = "Voxtral"
+    version = "0.1.0"
+    kind = "subprocess"
+    entrypoint = "super-stt-backend-voxtral"
+    contract = "v1"
+
+[network]
+    allowed_hosts = []
+
+[[assets.subprocess]]
+    file   = "voxtral-x86_64-unknown-linux-gnu-cpu.tar.gz"
+    target = "x86_64-unknown-linux-gnu"
+    accel  = "cpu"
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-sm75.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 75
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-sm80.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 80
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-sm86.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 86
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-sm89.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 89
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-sm90.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 90
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-cudnn-sm75.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 75
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-cudnn-sm80.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 80
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-cudnn-sm86.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 86
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-cudnn-sm89.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 89
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda12-cudnn-sm90.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 12
+    cuda_sm    = 90
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-sm75.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 75
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-sm80.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 80
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-sm86.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 86
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-sm89.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 89
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-sm90.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 90
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-sm100.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 100
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-sm120.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 120
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-cudnn-sm75.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 75
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-cudnn-sm80.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 80
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-cudnn-sm86.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 86
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-cudnn-sm89.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 89
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-cudnn-sm90.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 90
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-cudnn-sm100.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 100
+    cudnn      = true
+
+[[assets.subprocess]]
+    file       = "voxtral-x86_64-unknown-linux-gnu-cuda13-cudnn-sm120.tar.gz"
+    target     = "x86_64-unknown-linux-gnu"
+    accel      = "cuda"
+    cuda_major = 13
+    cuda_sm    = 120
+    cudnn      = true
+
+[[assets.subprocess]]
+    file   = "voxtral-aarch64-unknown-linux-gnu-cpu.tar.gz"
+    target = "aarch64-unknown-linux-gnu"
+    accel  = "cpu"
+
+[[models]]
+    name = "voxtral-mini"
+    provider = "local_voxtral"
+    multilingual = true
+    primary_language = "en"
+    supported_languages = ["en"]
+    supported_devices = ["cuda"]
+    estimated_vram_bytes = 8589934592
+    processing_interval_ms = 2000
+
+    [[models.files]]
+        source = "huggingface"
+        repo = "mistralai/Voxtral-Mini-3B-2507"
+        revision = "main"
+        files = [
+            "config.json",
+            "tekken.json",
+            "model-00001-of-00002.safetensors",
+            "model-00002-of-00002.safetensors",
+        ]
+        dest = "models/voxtral-mini"
+
+[[models]]
+    name = "voxtral-small"
+    provider = "local_voxtral"
+    multilingual = true
+    primary_language = "en"
+    supported_languages = ["en"]
+    supported_devices = ["cuda"]
+    estimated_vram_bytes = 55834574848
+    processing_interval_ms = 2000
+
+    # Sharded HF transformers weights only — the repo also ships a single-file
+    # `consolidated.safetensors`, which is deliberately omitted: the backend
+    # mmaps every `*.safetensors` in the dir, so pulling both would duplicate
+    # the ~48 GB of weights.
+    [[models.files]]
+        source = "huggingface"
+        repo = "mistralai/Voxtral-Small-24B-2507"
+        revision = "main"
+        files = [
+            "config.json",
+            "tekken.json",
+            "model-00001-of-00011.safetensors",
+            "model-00002-of-00011.safetensors",
+            "model-00003-of-00011.safetensors",
+            "model-00004-of-00011.safetensors",
+            "model-00005-of-00011.safetensors",
+            "model-00006-of-00011.safetensors",
+            "model-00007-of-00011.safetensors",
+            "model-00008-of-00011.safetensors",
+            "model-00009-of-00011.safetensors",
+            "model-00010-of-00011.safetensors",
+            "model-00011-of-00011.safetensors",
+        ]
+        dest = "models/voxtral-small"

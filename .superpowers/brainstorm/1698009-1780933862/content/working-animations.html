@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super STT — "Working" animation options</title>
+<style>
+  :root {
+    --bg: #15151b;
+    --panel: #1f1f29;        /* mimics a COSMIC panel strip */
+    --panel-2: #26263280;
+    --card: #1c1c25;
+    --border: #34344a;
+    --text: #e7e7ef;
+    --sub: #a3a3b8;
+    --accent: #7aa2f7;        /* stand-in for COSMIC system accent */
+    --sel: #9ece6a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Inter", "Segoe UI", Roboto, sans-serif;
+    padding: 28px 28px 60px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 650; }
+  .subtitle { color: var(--sub); margin: 0 0 20px; font-size: 14px; max-width: 760px; line-height: 1.5; }
+  .accent-row { display:flex; align-items:center; gap:10px; margin: 0 0 22px; font-size: 13px; color: var(--sub);}
+  .swatch { width:16px; height:16px; border-radius:4px; background: var(--accent); box-shadow:0 0 8px var(--accent);}
+  .grid {
+    display: grid; grid-template-columns: repeat(2, minmax(320px, 1fr));
+    gap: 18px; max-width: 920px;
+  }
+  .card {
+    background: var(--card); border: 1.5px solid var(--border); border-radius: 14px;
+    padding: 14px 14px 16px; cursor: pointer; transition: border-color .15s, transform .1s, box-shadow .15s;
+    user-select: none;
+  }
+  .card:hover { border-color: #4a4a6a; transform: translateY(-2px); }
+  .card.selected { border-color: var(--sel); box-shadow: 0 0 0 2px var(--sel) inset, 0 6px 22px #0008; }
+  .card-head { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:10px; }
+  .card h3 { margin:0; font-size:15px; font-weight:620; }
+  .tag { font-size:11px; color:var(--sub); text-transform:uppercase; letter-spacing:.06em; }
+  .panel-strip {
+    background: linear-gradient(180deg, var(--panel), #181820);
+    border: 1px solid #2c2c3a; border-radius: 10px; height: 104px; width: 100%;
+    overflow:hidden; position:relative;
+  }
+  canvas { display:block; width:100%; height:100%; }
+  .desc { color: var(--sub); font-size: 12.5px; line-height:1.45; margin: 11px 2px 0; }
+  .hint { margin-top: 26px; color: var(--sub); font-size: 13px; }
+  kbd { background:#2a2a38; border:1px solid #3a3a50; border-radius:4px; padding:1px 6px; font-size:12px;}
+</style>
+</head>
+<body>
+  <h1>Super STT — the "working / transcribing" animation</h1>
+  <p class="subtitle">
+    This plays in the panel applet <strong>after you stop talking, while the model is transcribing</strong>
+    (the new <em>transcribing</em> state). It replaces the static icon during that phase and always shows,
+    regardless of the "show icon" setting. Each preview below is rendered at roughly the panel's real
+    proportions and uses the system-accent color. They're looping live — watch the motion, then tell me
+    which feel fits (or mix ideas).
+  </p>
+  <div class="accent-row"><span class="swatch"></span> drawn in the COSMIC system-accent color (placeholder blue here)</div>
+
+  <div class="grid">
+    <div class="card" data-choice="sine" onclick="pick(this)">
+      <div class="card-head"><h3>A · Traveling sine wave</h3><span class="tag">flowing</span></div>
+      <div class="panel-strip"><canvas data-anim="sine"></canvas></div>
+      <p class="desc">A smooth sinusoid scrolling steadily across the strip. Calm, continuous, reads clearly as "audio is being processed." Your "moving sine line."</p>
+    </div>
+
+    <div class="card" data-choice="ripple" onclick="pick(this)">
+      <div class="card-head"><h3>B · Center-out ripple</h3><span class="tag">emanating</span></div>
+      <div class="panel-strip"><canvas data-anim="ripple"></canvas></div>
+      <p class="desc">A flat baseline that repeatedly births a bump in the middle which ripples outward to both edges and fades. Feels like "thinking / pulsing from the core." Your "wave rippling out of the middle."</p>
+    </div>
+
+    <div class="card" data-choice="swing" onclick="pick(this)">
+      <div class="card-head"><h3>C · Swinging line</h3><span class="tag">rocking</span></div>
+      <div class="panel-strip"><canvas data-anim="swing"></canvas></div>
+      <p class="desc">A line that tilts/swings back and forth around its center like a slow metronome, easing at the ends. Mechanical, deliberate "at work" feel. Your "line swinging."</p>
+    </div>
+
+    <div class="card" data-choice="comet" onclick="pick(this)">
+      <div class="card-head"><h3>D · Comet on a sine path</h3><span class="tag">tracing</span></div>
+      <div class="panel-strip"><canvas data-anim="comet"></canvas></div>
+      <p class="desc">A glowing dot races along a sine path leaving a fading trail, looping across the strip. Lively and energetic — a bit more "alive" than a plain wave.</p>
+    </div>
+  </div>
+
+  <p class="hint">Click a card to mark a favorite (you can change it), and tell me in the terminal what you think — including tweaks (speed, amplitude, thickness, a different color, etc.). Press <kbd>↻ refresh</kbd> in the browser if motion ever stalls.</p>
+
+<script>
+  const ACCENT = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7aa2f7';
+
+  function pick(card){
+    document.querySelectorAll('.card').forEach(c=>c.classList.remove('selected'));
+    card.classList.add('selected');
+    // Record to the companion if the injected helper exposes a selector.
+    try {
+      const choice = card.getAttribute('data-choice');
+      const label = card.querySelector('h3').textContent;
+      if (typeof toggleSelect === 'function') { toggleSelect(card); }
+      else if (typeof recordEvent === 'function') { recordEvent({type:'click', choice, text:label}); }
+    } catch(e){}
+  }
+
+  // ---- canvas setup (DPR-aware) ----
+  const canvases = [...document.querySelectorAll('canvas')];
+  function resize(){
+    const dpr = window.devicePixelRatio || 1;
+    for(const cv of canvases){
+      const r = cv.getBoundingClientRect();
+      cv.width = Math.max(1, Math.round(r.width*dpr));
+      cv.height = Math.max(1, Math.round(r.height*dpr));
+      const ctx = cv.getContext('2d');
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+  }
+  window.addEventListener('resize', resize);
+
+  function strokeGlow(ctx, w){
+    ctx.strokeStyle = ACCENT; ctx.lineWidth = w;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.shadowColor = ACCENT; ctx.shadowBlur = 8;
+  }
+
+  // ---- the four animations ----
+  const anims = {
+    // A: traveling sine wave
+    sine(ctx, W, H, t){
+      const midY=H/2, amp=H*0.26, k=2*Math.PI*2.2/W, speed=t*0.0028;
+      strokeGlow(ctx, 2.6); ctx.beginPath();
+      for(let x=0;x<=W;x+=2){
+        const env = Math.sin(Math.PI * (x/W)); // taper at edges
+        const y = midY + Math.sin(x*k - speed)*amp*(0.55+0.45*env);
+        x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+    },
+    // B: center-out ripple
+    ripple(ctx, W, H, t){
+      const midY=H/2, cx=W/2;
+      ctx.strokeStyle='#3a3a50'; ctx.lineWidth=1.5; ctx.shadowBlur=0;
+      ctx.beginPath(); ctx.moveTo(0,midY); ctx.lineTo(W,midY); ctx.stroke(); // baseline
+      strokeGlow(ctx, 2.6);
+      const period=1400, prog=(t%period)/period;        // 0..1 ripple age
+      // draw two staggered ripples for continuity
+      for(const off of [0, 0.5]){
+        const p=(prog+off)%1;
+        const reach=(W/2)*p;                              // how far the bump has traveled
+        const amp=H*0.30*(1-p);                           // fades as it travels
+        ctx.globalAlpha = Math.max(0, 1-p);
+        ctx.beginPath();
+        for(let x=0;x<=W;x+=2){
+          const d=Math.abs(x-cx);
+          const band=Math.max(0, 1-Math.abs(d-reach)/(W*0.10)); // gaussian-ish ring
+          const y=midY - Math.sin(band*Math.PI)*amp;
+          x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+    },
+    // C: swinging line (pendulum tilt around center)
+    swing(ctx, W, H, t){
+      const cx=W/2, cy=H/2, len=Math.min(W,H)*0.72;
+      const ang=Math.sin(t*0.0022)*0.62;                 // eased by sin itself
+      const dx=Math.sin(ang)*len/2, dy=Math.cos(ang)*len/2;
+      // pivot dot
+      ctx.shadowBlur=0; ctx.fillStyle='#3a3a50';
+      ctx.beginPath(); ctx.arc(cx,cy,2.4,0,7); ctx.fill();
+      strokeGlow(ctx, 3.2);
+      ctx.beginPath(); ctx.moveTo(cx-dx, cy-dy); ctx.lineTo(cx+dx, cy+dy); ctx.stroke();
+      // weighted end dot
+      ctx.beginPath(); ctx.arc(cx+dx, cy+dy, 4.2, 0, 7); ctx.fillStyle=ACCENT; ctx.fill();
+    },
+    // D: comet on a sine path with fading trail
+    comet(ctx, W, H, t){
+      const midY=H/2, amp=H*0.28, k=2*Math.PI*1.8/W;
+      // faint full path
+      ctx.strokeStyle='#2f2f44'; ctx.lineWidth=1.5; ctx.shadowBlur=0; ctx.beginPath();
+      for(let x=0;x<=W;x+=3){ const y=midY+Math.sin(x*k)*amp; x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);} ctx.stroke();
+      const headX=((t*0.10)%(W+40))-20;
+      const trail=46;
+      for(let i=trail;i>=0;i--){
+        const x=headX-i*3; if(x<0||x>W) continue;
+        const y=midY+Math.sin(x*k)*amp;
+        const a=(1-i/trail);
+        ctx.beginPath(); ctx.fillStyle=ACCENT; ctx.globalAlpha=a*a*0.9;
+        ctx.shadowColor=ACCENT; ctx.shadowBlur= i===0?12:0;
+        ctx.arc(x,y, i===0?4.2:2.2*a+0.6, 0, 7); ctx.fill();
+      }
+      ctx.globalAlpha=1;
+    }
+  };
+
+  resize();
+  function frame(t){
+    for(const cv of canvases){
+      const ctx=cv.getContext('2d');
+      const dpr=window.devicePixelRatio||1;
+      const W=cv.width/dpr, H=cv.height/dpr;
+      ctx.clearRect(0,0,W,H);
+      const fn=anims[cv.getAttribute('data-anim')];
+      if(fn) fn(ctx, W, H, t);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -37,8 +37,7 @@ impl EnigoBackend {
         Ok(())
     }
 
-    #[allow(clippy::unnecessary_wraps)]
-    pub fn backspace_n(&mut self, n: usize) -> Result<()> {
+    pub fn backspace_n(&mut self, n: usize) {
         let mut remaining = n;
         while remaining > 0 {
             let batch_size = remaining.min(self.backspace_batch_size);
@@ -48,6 +47,5 @@ impl EnigoBackend {
             remaining -= batch_size;
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        Ok(())
     }
 }

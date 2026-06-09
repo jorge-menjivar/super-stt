@@ -1,0 +1,298 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+mod events;
+mod handlers;
+mod init;
+mod small_state;
+mod subscription;
+mod update;
+mod view;
+use subscription::{UdpSubscriptionId, audio_events_subscription};
+
+use crate::daemon::backends::BackendInfo;
+use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, RecordingStatus};
+use crate::ui::messages::Message;
+use cosmic::app::context_drawer;
+use cosmic::iced::Subscription;
+use cosmic::prelude::*;
+use cosmic::widget::{menu, nav_bar, segmented_button};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use super_stt_shared::models::provider::Provider;
+
+/// Unified model operation state that encompasses downloading, loading, and switching
+#[derive(Debug, Clone)]
+pub enum ModelOperationState {
+    /// Model is ready for use
+    Ready,
+    /// Downloading model files with progress information
+    Downloading {
+        target_model: String,
+        progress: super_stt_shared::models::protocol::DownloadProgress,
+    },
+    /// Loading model into memory (after download completed)
+    Loading {
+        target_model: String,
+        status_message: String,
+    },
+    /// Model operation failed
+    Error { message: String },
+}
+
+/// Device switching state
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeviceState {
+    Ready,
+    Switching {
+        target_device: String,
+        status_message: String,
+    },
+    Cooldown, // Brief period after switching to avoid premature device requests
+}
+
+/// The application model stores app-specific state used to describe its interface and
+/// drive its logic.
+// reason: AppModel mirrors discrete UI toggles; COSMIC apps accumulate independent bool flags.
+#[allow(clippy::struct_excessive_bools)]
+pub struct AppModel {
+    /// Application state which is managed by the COSMIC runtime.
+    core: cosmic::Core,
+    /// Display a context drawer with the designated page if defined.
+    context_page: ContextPage,
+    /// Contains items assigned to the nav bar panel.
+    nav: nav_bar::Model,
+
+    // Super STT specific state
+    /// Socket path for daemon communication
+    pub socket_path: PathBuf,
+    /// Current daemon connection status
+    pub daemon_status: DaemonStatus,
+    /// Current recording status
+    pub recording_status: RecordingStatus,
+    /// Latest transcription text
+    pub transcription_text: String,
+    /// Current audio level (0.0 to 1.0)
+    pub audio_level: f32,
+    /// Whether speech is currently detected
+    pub is_speech_detected: bool,
+    /// Available audio themes
+    pub audio_themes: Vec<AudioTheme>,
+    /// Currently selected audio theme
+    pub selected_audio_theme: AudioTheme,
+    /// Last non-silent theme (to restore when toggling audio feedback back on)
+    pub last_non_silent_theme: AudioTheme,
+    /// UDP restart counter for subscriptions
+    pub udp_restart_counter: u64,
+    /// Last UDP data timestamp
+    pub last_udp_data: std::time::Instant,
+
+    // Model management state
+    /// Available models from daemon as `(name, provider, source)` tuples.
+    pub available_models: Vec<(String, Provider, String)>,
+    /// Currently loaded model
+    pub current_model: String,
+    /// Provider of the currently loaded model
+    pub current_provider: Provider,
+    /// Source (serving backend repo id) of the currently loaded model
+    pub current_source: String,
+    /// Model operation state (downloading, loading, or ready)
+    pub model_operation_state: ModelOperationState,
+
+    // Device management state
+    /// Current device (cpu/cuda) from daemon
+    pub current_device: String,
+    /// Available devices from daemon
+    pub available_devices: Vec<String>,
+    /// GPU memory info: (free, total) in bytes. None if CUDA unavailable.
+    pub gpu_memory: crate::daemon::client::GpuMemoryInfo,
+    /// GPU inventory + memory from the daemon's `GET /gpu_info` (gpu-probe).
+    pub gpu_info: Vec<super_stt_shared::models::protocol::GpuInfo>,
+    /// Device switching state
+    pub device_state: DeviceState,
+    /// Timestamp of last device switch to avoid polling too soon
+    pub last_device_switch: Option<std::time::Instant>,
+    /// Last event timestamp for polling daemon events
+    pub last_event_timestamp: Option<String>,
+
+    // Preview typing state
+    /// Whether preview typing is enabled (beta feature)
+    pub preview_typing_enabled: bool,
+
+    // Recording stop mode
+    pub recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
+
+    // Write method
+    pub write_method: super_stt_shared::models::write_method::WriteMethod,
+
+    // Master volume (0-100)
+    pub volume: u8,
+
+    // Custom models directory
+    pub custom_models_dir: Option<String>,
+    pub custom_models_dir_input: String,
+    pub custom_models_dir_editing: bool,
+
+    // Models page UI state
+    /// Installed / Download tab bar for the Models page (active tab carries a
+    /// [`ModelsTab`] as its data).
+    pub models_tabs: segmented_button::SingleSelectModel,
+    /// Source of the currently-selected (active) backend, shown in the card
+    /// above the tabs. `None` when the daemon is idle.
+    pub active_backend: Option<String>,
+    /// Model the user has picked in the active-backend card's dropdown but
+    /// hasn't yet committed via the Load button. Cleared once a model is
+    /// loaded or the user changes backends.
+    pub staged_model: Option<String>,
+    /// Device the user has picked for the staged model (CPU / CUDA / Metal,
+    /// or `"none"` for an online model that needs no device choice). Cleared
+    /// alongside [`Self::staged_model`].
+    pub staged_device: Option<String>,
+    /// The backend whose configuration sub-view is open, if any (`source`).
+    pub configure_backend: Option<String>,
+    /// `source` of the installed-backend card whose overflow ("⋯") menu is
+    /// open, if any. Only one is open at a time.
+    pub installed_menu_open: Option<String>,
+
+    // Installed-backend catalog and per-backend configuration state.
+    /// Backends discovered by the daemon, with the models/secrets/options
+    /// each declares. Drives the per-backend sections on the Models page.
+    pub backends: Vec<BackendInfo>,
+    /// In-progress text for each secret input, keyed by `(source, name)`.
+    pub backend_secret_inputs: HashMap<(String, String), String>,
+    /// Whether each declared secret is currently stored in the keyring,
+    /// keyed by `(source, name)`. Recomputed when the catalog loads.
+    pub backend_secret_configured: HashMap<(String, String), bool>,
+    /// In-progress text for each option input, keyed by `(source, name)`.
+    pub backend_option_inputs: HashMap<(String, String), String>,
+
+    // Registry state (catalog + install progress for the Download tab).
+    pub registry: crate::state::registry::RegistryState,
+}
+
+/// Create a COSMIC application from the app model
+impl cosmic::Application for AppModel {
+    /// The async executor that will be used to run your application's commands.
+    type Executor = cosmic::executor::Default;
+
+    /// Data that your application receives to its init method.
+    type Flags = ();
+
+    /// Messages which the application and its widgets will emit.
+    type Message = Message;
+
+    /// Unique identifier in RDNN (reverse domain name notation) format.
+    const APP_ID: &'static str = "ai.menjivar.super-stt-app";
+
+    fn core(&self) -> &cosmic::Core {
+        &self.core
+    }
+
+    fn core_mut(&mut self) -> &mut cosmic::Core {
+        &mut self.core
+    }
+
+    /// Initializes the application with any given flags and startup commands.
+    fn init(core: cosmic::Core, flags: Self::Flags) -> (Self, Task<cosmic::Action<Self::Message>>) {
+        Self::init_model(core, flags)
+    }
+
+    /// Elements to pack at the start of the header bar.
+    fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
+        let menu_bar = menu::bar(vec![menu::Tree::with_children(
+            menu::root("View").apply(Element::from),
+            menu::items(
+                &HashMap::new(),
+                vec![menu::Item::Button("About", None, MenuAction::About)],
+            ),
+        )]);
+
+        vec![menu_bar.into()]
+    }
+
+    /// Window header-bar readouts (right side): the GPU summary and model
+    /// readiness pills.
+    fn header_end(&self) -> Vec<Element<'_, Self::Message>> {
+        self.header_end_impl()
+    }
+
+    /// Enables the COSMIC application to create a nav bar with this model.
+    fn nav_model(&self) -> Option<&nav_bar::Model> {
+        self.nav_model_impl()
+    }
+
+    /// Display a context drawer if the context page is requested.
+    fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Self::Message>> {
+        self.context_drawer_impl()
+    }
+
+    /// Describes the interface based on the current state of the application model.
+    ///
+    /// Application events will be processed through the view. Any messages emitted by
+    /// events received by widgets will be passed to the update method.
+    fn view(&self) -> Element<'_, Self::Message> {
+        self.view_impl()
+    }
+
+    /// Register subscriptions for this application.
+    ///
+    /// Subscriptions are long-running async tasks running in the background which
+    /// emit messages to the application through a channel. They are started at the
+    /// beginning of the application, and persist through its lifetime.
+    fn subscription(&self) -> Subscription<Self::Message> {
+        // Connection monitoring constants
+        const PING_INTERVAL_SECS: u64 = 5;
+        // GPU memory changes as models load/unload and as other processes use
+        // the card, so poll it a bit faster than the ping to keep the header
+        // readout (and the staged-load fit warning) live.
+        const GPU_POLL_INTERVAL_SECS: u64 = 3;
+
+        Subscription::batch(vec![
+            // HTTP /events SSE subscription. Covers the recording /
+            // audio-meter topics and the model/device/download status
+            // topics — the settings app's token holds every scope these
+            // need, so one subscription carries the full set.
+            Subscription::run_with(
+                UdpSubscriptionId(self.udp_restart_counter),
+                audio_events_subscription,
+            ),
+            // Periodic connection monitoring
+            cosmic::iced::time::every(std::time::Duration::from_secs(PING_INTERVAL_SECS))
+                .map(|_| Message::PingTimeout),
+            // Periodic GPU inventory/memory refresh (gated on connection in the
+            // handler, so it's a no-op while disconnected).
+            cosmic::iced::time::every(std::time::Duration::from_secs(GPU_POLL_INTERVAL_SECS))
+                .map(|_| Message::RefreshGpuInfo),
+        ])
+    }
+
+    /// Handles messages emitted by the application and its widgets.
+    ///
+    /// Tasks may be returned for asynchronous execution of code in the background
+    /// on the application's async runtime.
+    fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
+        self.dispatch(message)
+    }
+
+    /// Called when a nav item is selected.
+    fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<cosmic::Action<Self::Message>> {
+        // Activate the page in the model.
+        self.nav.activate(id);
+        // Leaving the current section dismisses any open context sheet
+        // (e.g. the Models page's "Add backend" / configuration drawer) and
+        // any open per-card overflow menu.
+        self.core.window.show_context = false;
+        self.installed_menu_open = None;
+
+        self.update_title()
+    }
+}
+
+impl menu::action::MenuAction for MenuAction {
+    type Message = Message;
+
+    fn message(&self) -> Self::Message {
+        match self {
+            MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+        }
+    }
+}

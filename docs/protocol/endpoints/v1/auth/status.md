@@ -10,8 +10,7 @@ negative response does **not** trigger consent.
 
 ## Auth
 
-- **Required scope:** any authenticated (`client`, `settings`, or
-  `widget`).
+- **Required scope:** any authenticated (any valid token, regardless of scopes).
 - `Authorization: Bearer <session_token>` is required.
 
 ## `GET /auth/status`
@@ -32,15 +31,15 @@ Content-Type: application/json
 
 {
   "status":     "success",
-  "scope":      "settings",
+  "scopes":     ["settings", "status", "daemon_status"],
   "expires_at": "2026-06-04T12:34:56Z"
 }
 ```
 
-| Field        | Type   | Notes                                                          |
-|--------------|--------|----------------------------------------------------------------|
-| `scope`      | string | The scope the token was issued under                           |
-| `expires_at` | string | ISO 8601 UTC timestamp the token expires                       |
+| Field        | Type     | Notes                                                          |
+|--------------|----------|----------------------------------------------------------------|
+| `scopes`     | string[] | The scope set the token was issued under                       |
+| `expires_at` | string   | ISO 8601 UTC timestamp the token expires                       |
 
 **Response (401, invalid token):**
 
@@ -57,6 +56,6 @@ Content-Type: application/json
 
 | `data.reason`  | Why                                                                                              | Client should                                                |
 |----------------|--------------------------------------------------------------------------------------------------|--------------------------------------------------------------|
-| `unknown`      | Token isn't recognized — never issued, or revoked since.                                         | Drop the cached token; call [`POST /auth/request`](./auth_request.md). |
+| `unknown`      | Token isn't recognized — never issued, or revoked since.                                         | Drop the cached token; call [`POST /auth/request`](./request.md).      |
 | `expired`      | Token is older than its `expires_at` (30 days from issue).                                       | Same — drop and re-auth.                                     |
 | `exe_changed`  | The client's binary path no longer matches what the user approved.                               | Same — the user must consent again to the new binary.        |

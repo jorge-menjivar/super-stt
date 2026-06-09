@@ -1,51 +1,37 @@
-# Settings scope
+# settings scope
 
-> Scope: **settings** (full read/write access to daemon
-> configuration, plus everything in [client](./client.md)).
+> Scope: **settings** (full read/write access to daemon configuration and the
+> backend registry).
 
-The settings scope is the highest-trust scope. A `settings` token
-can do anything in the [client protocol](./client.md) and can
-additionally read every daemon configuration value, change any of
-them, and persist the change to disk.
+The `settings` scope is the configuration surface: a `settings` token can read
+every daemon configuration value, change any of them, persist the change to disk,
+and manage installed backends through the registry.
 
-> Use `client` if you only need to drive recordings; use
-> [`widget`](./widget.md) if you only need to visualize state. The
-> `settings` scope is for the actual Settings UI and CLI tools that
-> manage the daemon. Authentication is shared across all three
-> scopes — see [auth.md](../auth.md).
+It grants **only** that surface — scopes no longer imply one another. A Settings
+UI that also drives test recordings, shows daemon status, or renders a visualizer
+requests those scopes *alongside* `settings` in the same handshake, e.g.
+`["settings", "status", "transcribe", "recording_events", "audio_visualization", "daemon_status"]`.
+See [auth.md](../auth.md) for how scopes compose, and the individual scope docs
+([status](./status.md), [transcribe](./transcribe.md),
+[recording_events](./recording_events.md),
+[audio_visualization](./audio_visualization.md),
+[daemon_status](./daemon_status.md)) for what each adds.
 
-Transport and framing are identical to the client scope; see
-[transport.md](../transport.md) for the HTTP-level details.
+Transport and framing are described in [transport.md](../transport.md).
 
 ## What gets mirrored on `/events`
 
-Settings mutations have **two** observable wire effects: the HTTP
-response on the request that made them, and (for model/device
-transitions) follow-up SSE events on any `GET /events` subscription
-that asked for `daemon_status_changed` or `download_progress`.
+Settings mutations have **two** observable wire effects: the HTTP response on the
+request that made them, and (for model/device transitions) follow-up SSE events
+on any `GET /events` subscription that holds the [`daemon_status`](./daemon_status.md)
+scope and asked for `daemon_status_changed` or `download_progress`.
 
-| Mutation                                                                                                                          | Mirrored as an SSE event?                                                                                  |
-|-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
-| `/active_model`, `/active_device`, `/allow_online_models` (when it triggers a fallback)                                          | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled)                       |
-| `/audio_theme`, `/volume`, `/write_method`, `/recording_stop_mode`, `/preview_typing`, `/allow_online_models` (no fallback), `/custom_models_dir` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.        |
+| Mutation                                                                                                                          | Mirrored as an SSE event?                                                                            |
+|-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| `/active_model`, `/active_backend`, `/active_device`, `/allow_online_models` (when it triggers a fallback)                       | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled)                 |
+| `/audio_theme`, `/volume`, `/write_method`, `/recording_stop_mode`, `/preview_typing`, `/allow_online_models` (no fallback), `/custom_models_dir` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
 
 ## Endpoint reference
-
-The first group is shared with the [client scope](./client.md);
-the rest is settings-only.
-
-### Shared with client
-
-| Endpoint                                                | Methods    | Notes                                                                  |
-|---------------------------------------------------------|------------|------------------------------------------------------------------------|
-| [`/auth/request`](../endpoints/v1/auth/request.md)      | POST       | First-time consent — see [auth.md](../auth.md)                         |
-| [`/auth/status`](../endpoints/v1/auth/status.md)        | GET        | Probe whether the held token is still valid                            |
-| [`/ping`](../endpoints/v1/ping.md)                      | GET        | Liveness check                                                          |
-| [`/status`](../endpoints/v1/status.md)                  | GET        | Current daemon state (model + device)                                   |
-| [`/transcribe`](../endpoints/v1/transcribe.md)          | POST       | Start a transcription                                                   |
-| [`/transcribe/stop`](../endpoints/v1/transcribe/stop.md)| POST       | Stop an in-flight daemon-mic capture                                    |
-
-### Settings-only
 
 | Endpoint                                                    | Methods    | Notes                                                                                                |
 |-------------------------------------------------------------|------------|------------------------------------------------------------------------------------------------------|
@@ -62,31 +48,21 @@ the rest is settings-only.
 | [`/write_method`](../endpoints/v1/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg-desktop-portal / ydotool / wayland-protocol)                   |
 | [`/allow_online_models`](../endpoints/v1/allow_online_models.md) | POST, GET | Privacy gate for online providers (OpenAI / Mistral / Deepgram)                                       |
 | [`/custom_models_dir`](../endpoints/v1/custom_models_dir.md) | POST, GET | Where to scan for user-supplied models                                                                |
-| [`/events`](../endpoints/v1/events.md)                      | GET (SSE)  | Subscribe to every published topic (no widget-scope restrictions)                                     |
-
-## Subscribable topics
-
-The full topic table and payload shapes live on
-[`/events`](../endpoints/v1/events.md). The quick summary:
-
-| Topic                       | Scope          | Carries                                                                        |
-|-----------------------------|----------------|--------------------------------------------------------------------------------|
-| `recording_started`         | widget / settings | `{ client_id, timestamp, write_mode }`                                       |
-| `recording_stopped`         | widget / settings | `{ client_id, timestamp, transcription_success, error }`                     |
-| `recording_state`           | widget / settings | `{ is_recording: bool }`                                                     |
-| `audio_samples`             | widget / settings | base64-encoded f32 PCM                                                       |
-| `frequency_bands`           | widget / settings | base64-encoded f32 visualization bands                                       |
-| `partial_stt` / `final_stt` | widget / settings | `{ text, confidence }`                                                       |
-| `daemon_status_changed`     | **settings only**  | model / device transition status                                            |
-| `download_progress`         | **settings only**  | model-download tick                                                          |
+| [`/backends`](../endpoints/v1/backends.md)                  | GET, POST, DELETE | List installed backends, set a backend option, uninstall a backend                            |
+| [`/active_backend`](../endpoints/v1/active_backend.md)      | GET, POST, DELETE | Read / set / clear the active backend                                                          |
+| [`/gpu_info`](../endpoints/v1/gpu_info.md)                  | GET        | GPU / VRAM information                                                                                 |
+| [`/registry/backends`](../endpoints/v1/registry/backends.md) | GET      | List backends available in the registry                                                               |
+| [`/registry/backends/refresh`](../endpoints/v1/registry/refresh.md) | POST | Refresh the registry index                                                                            |
+| [`/registry/backends/install`](../endpoints/v1/registry/install.md) | POST | Install a backend from the registry                                                                   |
+| [`/registry/backends/update`](../endpoints/v1/registry/update.md) | POST | Update an installed registry backend                                                                  |
 
 ## A typical settings session
 
-A settings UI usually opens two HTTP connections in parallel:
-one-shot connections for each read or write, plus a long-lived SSE
-connection for `/events`. The SSE channel carries running
-model-switch progress so the UI's progress bar updates without
-polling.
+A settings UI usually opens two HTTP connections in parallel: one-shot
+connections for each read or write, plus a long-lived SSE connection for
+`/events`. The SSE channel carries running model-switch progress so the UI's
+progress bar updates without polling — which is why the handshake also requests
+[`daemon_status`](./daemon_status.md).
 
 ```mermaid
 sequenceDiagram
@@ -95,8 +71,8 @@ sequenceDiagram
     participant D as "Daemon"
 
     Note over App,D: 1. Authenticate (one time)
-    App->>D: POST /auth/request<br/>{ app_name, scope: "settings" }
-    D-->>App: 200 { session_token }
+    App->>D: POST /auth/request<br/>{ app_name, scopes: ["settings", "status", "daemon_status", …] }
+    D-->>App: 200 { session_token, scopes }
 
     Note over App,D: 2. Load current state — one round-trip per panel
     App->>D: GET /models, GET /active_model, GET /active_device,<br/>      GET /audio_themes, GET /audio_theme, GET /volume, …
@@ -107,7 +83,7 @@ sequenceDiagram
     D-->>App: 200 SSE stream
 
     Note over App,D: 4. User picks a different model
-    App->>D: POST /active_model<br/>{ model: "whisper-base", provider: "local_whisper", source: "builtin" }
+    App->>D: POST /active_model<br/>{ model: "voxtral-mini", provider: "local_voxtral", source: "github.com/super-stt/voxtral" }
     D-->>App: 202 { message: "Model switch started" }
 
     Note over App,D: 5. Switch progress arrives on the SSE stream
@@ -118,7 +94,6 @@ sequenceDiagram
     D-->>App: event: daemon_status_changed<br/>data: { status: "ready", model_loaded: true, model_name }
 ```
 
-Settings mutations that aren't mirrored on `/events` (the
-non-model row of the table at the top) won't trigger SSE events;
-a settings UI that wants to detect another app changing those needs
-to re-`GET` the relevant endpoint.
+Settings mutations that aren't mirrored on `/events` (the non-model row of the
+table at the top) won't trigger SSE events; a settings UI that wants to detect
+another app changing those needs to re-`GET` the relevant endpoint.

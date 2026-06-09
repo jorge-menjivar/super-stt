@@ -31,9 +31,11 @@ pub fn process_audio_samples(
         }
     };
 
-    #[allow(clippy::cast_precision_loss)]
-    let rms: f32 =
-        (mono_samples.iter().map(|&x| x * x).sum::<f32>() / mono_samples.len() as f32).sqrt();
+    // mono_samples.len() is a chunk size (typically a few hundred to a few thousand);
+    // fits in u32 and thus in f32 exactly.
+    let len_f32 =
+        crate::num_cast::u32_to_f32(u32::try_from(mono_samples.len()).unwrap_or(u32::MAX));
+    let rms: f32 = (mono_samples.iter().map(|&x| x * x).sum::<f32>() / len_f32).sqrt();
 
     buffer.extend(mono_samples);
 
@@ -95,7 +97,6 @@ pub fn process_audio_samples(
     let _ = level_tx.send(audio_level);
 }
 
-#[allow(clippy::cast_precision_loss)]
 pub fn process_audio_data_f32_with_streaming(
     data: &[f32],
     channels: usize,
@@ -104,15 +105,16 @@ pub fn process_audio_data_f32_with_streaming(
     level_tx: &broadcast::Sender<AudioLevel>,
     samples_tx: &tokio::sync::mpsc::UnboundedSender<Vec<f32>>,
 ) {
+    // channels is typically 1–8; fits u16 and thus u32 and f32 exactly.
+    let channels_f32 = f32::from(u16::try_from(channels).unwrap_or(u16::MAX));
     let mono_samples: Vec<f32> = data
         .chunks(channels)
-        .map(|chunk| chunk.iter().sum::<f32>() / channels as f32)
+        .map(|chunk| chunk.iter().sum::<f32>() / channels_f32)
         .collect();
     let _ = samples_tx.send(mono_samples.clone());
     process_audio_samples(&mono_samples, buffer, state, level_tx);
 }
 
-#[allow(clippy::cast_precision_loss)]
 pub fn process_audio_data_i16_with_streaming(
     data: &[i16],
     channels: usize,
@@ -121,10 +123,12 @@ pub fn process_audio_data_i16_with_streaming(
     level_tx: &broadcast::Sender<AudioLevel>,
     samples_tx: &tokio::sync::mpsc::UnboundedSender<Vec<f32>>,
 ) {
+    // channels is typically 1–8; fits u16 and thus u32 and f32 exactly.
+    let channels_f32 = f32::from(u16::try_from(channels).unwrap_or(u16::MAX));
     let samples: Vec<f32> = data.iter().map(|&s| f32::from(s) / 32768.0).collect();
     let mono_samples: Vec<f32> = samples
         .chunks(channels)
-        .map(|chunk| chunk.iter().sum::<f32>() / channels as f32)
+        .map(|chunk| chunk.iter().sum::<f32>() / channels_f32)
         .collect();
     let _ = samples_tx.send(mono_samples.clone());
     process_audio_samples(&mono_samples, buffer, state, level_tx);

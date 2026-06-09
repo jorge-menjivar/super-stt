@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Super STT backend registry. One entry per installable backend, alphabetically
+# sorted. See registry/README.md for the submission rules.
+
+[mistral]
+    repo       = "github.com/jorge-menjivar/super-stt"
+    subdir     = "backends/mistral"
+    tag_prefix = "mistral-"
+
+[openai]
+    repo       = "github.com/jorge-menjivar/super-stt"
+    subdir     = "backends/openai"
+    tag_prefix = "openai-"
+
+[voxtral]
+    repo       = "github.com/jorge-menjivar/super-stt"
+    subdir     = "backends/voxtral"
+    tag_prefix = "voxtral-"

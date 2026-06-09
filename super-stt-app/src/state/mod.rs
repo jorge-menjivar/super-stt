@@ -3,6 +3,9 @@
 //! Application state and domain models.
 
 pub mod models;
+pub mod registry;
 
 // Re-export commonly used types
-pub use models::{AudioTheme, ContextPage, DaemonStatus, MenuAction, Page, RecordingStatus};
+pub use models::{
+    AudioTheme, ContextPage, DaemonStatus, MenuAction, ModelsTab, Page, RecordingStatus,
+};

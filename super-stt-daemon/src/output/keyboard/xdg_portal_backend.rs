@@ -222,10 +222,9 @@ const XKB_KEY_SHIFT_L: i32 = 0xFFE1;
 /// Whether a character requires Shift and what keysym to send.
 /// Returns `(needs_shift, keysym)`.
 fn char_to_keysym(ch: char) -> (bool, i32) {
-    // Uppercase letters → Shift + lowercase keysym
+    // Uppercase letters → Shift + lowercase keysym. ASCII lowercase is always ≤ 0x7A < i32::MAX.
     if ch.is_ascii_uppercase() {
-        #[allow(clippy::cast_possible_wrap)]
-        return (true, ch.to_ascii_lowercase() as i32);
+        return (true, i32::from(ch.to_ascii_lowercase() as u8));
     }
 
     // Characters that are Shift+<base key> on a US layout
@@ -259,12 +258,15 @@ fn char_to_keysym(ch: char) -> (bool, i32) {
     }
 
     let cp = ch as u32;
-    #[allow(clippy::cast_possible_wrap)]
+    // cp ≤ 0x10_FFFF (Unicode max). For the direct-map range (≤ 0xFF) and
+    // the high-keysym range (0x0100_0000 | cp ≤ 0x011F_FFFF) the result
+    // fits in i32; TryFrom with saturating fallback preserves behavior for
+    // any realistic Unicode code point.
     let keysym = match cp {
-        0x20..=0x7E | 0xA0..=0xFF => cp as i32,
+        0x20..=0x7E | 0xA0..=0xFF => i32::try_from(cp).unwrap_or(i32::MAX),
         0x0A => 0xFF0D,
         0x09 => 0xFF09,
-        _ => (0x0100_0000 | cp) as i32,
+        _ => i32::try_from(0x0100_0000_u32 | cp).unwrap_or(i32::MAX),
     };
     (false, keysym)
 }

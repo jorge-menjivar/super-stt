@@ -7,18 +7,25 @@ the catalog of available models lives at [`GET /models`](./models.md).
 The active model is identified by a `(name, provider, source)`
 triple:
 
-- **`name`** — `whisper-tiny`, `voxtral-mini-latest`, …
+- **`name`** — `whisper-1`, `voxtral-mini`, …
 - **`provider`** — `local_whisper`, `local_voxtral`, `openai`,
   `mistral`, or `deepgram`.
-- **`source`** — `builtin` (in the static registry), `custom`
-  (discovered in [`/custom_models_dir`](./custom_models_dir.md)),
-  or `online` (a hosted provider).
+- **`source`** — the repo id of the backend that serves the model
+  (e.g. `github.com/super-stt/openai`), as returned by
+  [`GET /models`](./models.md). Empty/omitted selects the first installed
+  backend serving `(name, provider)`.
+
+Switching the model also sets the [active backend](./active_backend.md) to the
+model's `source`. If the model then fails to load (e.g. a missing secret), the
+backend stays selected but **no model is loaded** — the daemon does not silently
+restore a previously-loaded model. Clear the selection with
+[`DELETE /active_backend`](./active_backend.md).
 
 ## Auth
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `POST /active_model`
 
@@ -39,9 +46,9 @@ Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
 {
-  "model":    "whisper-base",
-  "provider": "local_whisper",
-  "source":   "builtin"
+  "model":    "whisper-1",
+  "provider": "openai",
+  "source":   "github.com/super-stt/openai"
 }
 ```
 
@@ -49,7 +56,7 @@ Content-Type: application/json
 |------------|---------|----------|------------------------------------------------------------------------|
 | `model`    | string  | yes      | One of the names returned by [`GET /models`](./models.md)              |
 | `provider` | string  | yes      | One of `local_whisper`, `local_voxtral`, `openai`, `mistral`, `deepgram` |
-| `source`   | string  | no       | `builtin` / `custom` / `online`. Defaults are derived from `provider`. |
+| `source`   | string  | no       | Repo id of the serving backend. Empty/omitted picks the first backend serving `(model, provider)`. |
 
 **Response (202):**
 
@@ -73,9 +80,9 @@ topics above.
 | HTTP | `message`                  | Meaning                                                                       |
 |------|----------------------------|-------------------------------------------------------------------------------|
 | 400  | `online_models_disabled`   | `provider` is online but [`allow_online_models`](./allow_online_models.md) is `false` |
-| 400  | `invalid_model`            | `(model, provider, source)` doesn't resolve to a known model                  |
+| 400  | `invalid_model`            | No installed backend serves `(model, provider, source)`                       |
 | 401  | `invalid_session`          | Token unknown / expired / `exe_changed`                                       |
-| 403  | `scope_denied`             | Not a `settings` token                                                        |
+| 403  | `scope_denied`             | Token lacks the `settings` scope                                              |
 | 409  | `switch_in_progress`       | Another model switch is already running                                       |
 | 409  | `recording_in_progress`    | A recording is active; cancel or finish it before switching                   |
 
@@ -104,11 +111,11 @@ Authorization: Bearer stt_…64hex…
     // Reflects the previously-loaded model while a switch is in
     // flight, and the new model once that switch succeeds.
     "current": {
-      "model":    "whisper-tiny",
-      "provider": "local_whisper",
-      "source":   "builtin",
+      "model":    "voxtral-mini",
+      "provider": "local_voxtral",
+      "source":   "github.com/super-stt/voxtral",
       "loaded":   true,
-      "device":   "cuda"            // "cpu" / "cuda" / "metal"
+      "device":   "cuda"            // "cpu" / "cuda" / "metal" / "remote"
     },
 
     // Present only when a download is in flight. `null` otherwise.
@@ -149,4 +156,38 @@ Authorization: Bearer stt_…64hex…
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |
+
+## `DELETE /active_model`
+
+Unload the currently loaded model. The active backend stays selected — the
+user can immediately pick another of its models with `POST /active_model`.
+To return the daemon to fully idle, use [`DELETE /active_backend`](./active_backend.md)
+instead. No-op when nothing is loaded; rejected during an active recording or
+real-time transcription session.
+
+**Request:**
+
+```http
+DELETE /active_model HTTP/1.1
+Host: stt.local
+Authorization: Bearer stt_…64hex…
+```
+
+**Response (200):**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{ "status": "success", "message": "Unloaded whisper-1" }
+```
+
+**Errors:**
+
+| HTTP | `message`         | Meaning                                                       |
+|------|-------------------|---------------------------------------------------------------|
+| 400  | `recording_active`      | Recording in progress (try again when it ends)          |
+| 400  | `realtime_active`       | Active real-time transcription sessions                 |
+| 401  | `invalid_session`       | Token unknown / expired / `exe_changed`                  |
+| 403  | `scope_denied`          | Token lacks the `settings` scope                         |

@@ -18,7 +18,7 @@ The new method takes effect on the next `/transcribe` request.
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `POST /write_method`
 
@@ -57,7 +57,7 @@ Content-Type: application/json
 |------|------------------------|---------------------------------------------------------------|
 | 400  | `invalid_write_method` | `method` wasn't one of the four known values                  |
 | 401  | `invalid_session`      | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`         | Not a `settings` token                                        |
+| 403  | `scope_denied`         | Token lacks the `settings` scope                              |
 
 ## `GET /write_method`
 
@@ -86,4 +86,4 @@ Content-Type: application/json
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |

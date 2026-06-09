@@ -9,3 +9,11 @@
 *.wav
 *.flac
 *.ogg
+!backends/whisper/tests/data/*.wav
+
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+
+docs/design/
+docs/superpowers/
+.superpowers/

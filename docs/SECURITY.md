@@ -95,6 +95,31 @@ ls -la $XDG_RUNTIME_DIR/stt/super-stt.sock
 - **Socket permissions**: Enforced at filesystem level
 - **Process authentication**: SO_PEERCRED verification for privileged operations
 
+## Daemon outbound network surface
+
+Prior to the backend registry (see
+`docs/superpowers/specs/2026-05-29-backend-registry-design.md`), the daemon
+process made no outbound network connections; only wasm-backend modules
+issued HTTPS via `wasi:http`, constrained by per-backend `allowed_hosts`.
+
+After the registry work, the daemon process itself opens HTTPS to:
+
+- `jorge-menjivar.github.io` — registry index (`index.json`).
+- `api.github.com` — Custom-repo install flow only (latest-release lookup,
+  `backend.toml` fetch).
+- `objects.githubusercontent.com` and `github.com` — release asset
+  downloads.
+
+No keyring secrets cross these boundaries. Secrets are read at model load
+time only, not at install time.
+
+The integrity story for installed assets is SHA-256 verification against the
+registry's index, computed by the indexer at index-build time. A compromised
+Pages host could serve a malicious index, but cannot bypass the wasm
+sandbox or recover keyring secrets through the install path. Custom-repo
+installs are explicitly unverified — only TLS protects them — and the daemon
+surfaces this to the client.
+
 ## Best Practices
 
 ### For Single-User Systems

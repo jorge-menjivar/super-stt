@@ -6,7 +6,7 @@
 //! details:
 //!
 //! - `STT_AUTH_APP_NAME` — declared (untrusted) app name from the request
-//! - `STT_AUTH_SCOPE`    — `client` / `settings` / `widget`
+//! - `STT_AUTH_SCOPES`   — space-separated scope set (e.g. `transcribe status`)
 //! - `STT_AUTH_EXE_PATH` — peer `/proc/<pid>/exe` (trusted, kernel-resolved)
 //!
 //! The user clicks Allow or Deny. The dialog writes one of `allow`, `deny`,
@@ -70,7 +70,7 @@ struct ConsentApp {
     core: cosmic::Core,
     surface_id: SurfaceId,
     app_name: String,
-    scope: String,
+    scopes: Vec<String>,
     exe_path: String,
 }
 
@@ -116,7 +116,7 @@ impl cosmic::Application for ConsentApp {
                 core,
                 surface_id,
                 app_name: flags.app_name,
-                scope: flags.scope,
+                scopes: flags.scopes,
                 exe_path: flags.exe_path,
             },
             task,
@@ -144,9 +144,9 @@ impl cosmic::Application for ConsentApp {
         } else {
             self.app_name.clone()
         };
-        let body_text = format!("{request_label} wants {} access to Super STT.", self.scope);
+        let body_text = format!("{request_label} wants access to Super STT.");
 
-        let permission_lines = permissions_for_scope(&self.scope);
+        let permission_lines = permissions_for_scopes(&self.scopes);
 
         let mut bullet_column = cosmic::widget::column().spacing(6);
         for line in permission_lines {
@@ -199,11 +199,34 @@ impl cosmic::Application for ConsentApp {
 
 fn permissions_for_scope(scope: &str) -> &'static [&'static str] {
     match scope {
-        "client" => constants::CLIENT_PERMISSIONS,
+        "transcribe" => constants::TRANSCRIBE_PERMISSIONS,
+        "status" => constants::STATUS_PERMISSIONS,
         "settings" => constants::SETTINGS_PERMISSIONS,
-        "widget" => constants::WIDGET_PERMISSIONS,
+        "recording_events" => constants::RECORDING_EVENTS_PERMISSIONS,
+        "audio_visualization" => constants::AUDIO_VISUALIZATION_PERMISSIONS,
+        "global_transcriptions" => constants::GLOBAL_TRANSCRIPTIONS_PERMISSIONS,
+        "daemon_status" => constants::DAEMON_STATUS_PERMISSIONS,
         _ => constants::UNKNOWN_SCOPE_PERMISSIONS,
     }
+}
+
+/// Union of the per-scope bullet lists for every scope the app asked
+/// for, de-duplicated and order-preserving. Falls back to the unknown
+/// bullet if the set is empty.
+fn permissions_for_scopes(scopes: &[String]) -> Vec<&'static str> {
+    let mut lines: Vec<&'static str> = Vec::new();
+    if scopes.is_empty() {
+        lines.extend_from_slice(constants::UNKNOWN_SCOPE_PERMISSIONS);
+        return lines;
+    }
+    for scope in scopes {
+        for &line in permissions_for_scope(scope) {
+            if !lines.contains(&line) {
+                lines.push(line);
+            }
+        }
+    }
+    lines
 }
 
 /// Render one bullet line. Uses a Row so wrapped text hangs under
@@ -295,7 +318,7 @@ fn maybe_spawn_auto_approve_timer() {
 
 struct AuthRequestPayload {
     app_name: String,
-    scope: String,
+    scopes: Vec<String>,
     exe_path: String,
 }
 
@@ -303,7 +326,11 @@ fn read_env() -> AuthRequestPayload {
     AuthRequestPayload {
         app_name: std::env::var("STT_AUTH_APP_NAME")
             .unwrap_or_else(|_| "<unknown app>".to_string()),
-        scope: std::env::var("STT_AUTH_SCOPE").unwrap_or_else(|_| "client".to_string()),
+        scopes: std::env::var("STT_AUTH_SCOPES")
+            .unwrap_or_default()
+            .split_whitespace()
+            .map(str::to_string)
+            .collect(),
         exe_path: std::env::var("STT_AUTH_EXE_PATH")
             .unwrap_or_else(|_| "<unknown path>".to_string()),
     }

@@ -14,7 +14,7 @@ the full list of `auth_denied` reasons.
 ## `POST /auth/request`
 
 Spawn the consent popup. The user is shown the requesting binary's
-identity, the scope being requested, and an Allow / Deny choice.
+identity, the scopes being requested, and an Allow / Deny choice.
 The call blocks until the user chooses, dismisses, or the popup
 times out (60 s default).
 
@@ -27,7 +27,7 @@ Content-Type: application/json
 
 {
   "app_name": "Super STT Settings App",
-  "scope":    "settings",
+  "scopes":   ["settings", "status", "daemon_status"],
   "version":  "0.10.0"
 }
 ```
@@ -35,7 +35,7 @@ Content-Type: application/json
 | Field      | Type     | Required | Notes                                                                       |
 |------------|----------|----------|-----------------------------------------------------------------------------|
 | `app_name` | string   | yes      | Declared (untrusted) name displayed to the user in the popup                |
-| `scope`    | string   | yes      | One of `"client"`, `"settings"`, `"widget"`                                 |
+| `scopes`   | string[] | yes      | Non-empty array of known scope names (see [auth.md](../../auth.md))         |
 | `version`  | string   | no       | Free-form version string for the consent popup; shown for UX context only   |
 
 **Response (200, on Allow):**
@@ -47,16 +47,16 @@ Content-Type: application/json
 {
   "status":        "success",
   "session_token": "stt_…64hex…",
-  "scope":         "settings",
+  "scopes":        ["settings", "status", "daemon_status"],
   "expires_at":    "2026-06-04T12:34:56Z"
 }
 ```
 
 | Field           | Type   | Notes                                                                  |
 |-----------------|--------|------------------------------------------------------------------------|
-| `session_token` | string | Bearer token. Carry it as `Authorization: Bearer <token>` from now on. |
-| `scope`         | string | Echo of the requested scope, confirming what the token actually grants |
-| `expires_at`    | string | ISO 8601 UTC timestamp, 30 days after issue                            |
+| `session_token` | string   | Bearer token. Carry it as `Authorization: Bearer <token>` from now on. |
+| `scopes`        | string[] | Echo of the granted scope set, confirming what the token actually grants |
+| `expires_at`    | string   | ISO 8601 UTC timestamp, 30 days after issue                            |
 
 **Response (403, on failure):**
 
@@ -77,7 +77,7 @@ Content-Type: application/json
 | `user_denied_cached`  | This identity was already denied; popup wasn't shown. Sticky until the daemon restarts.  | Same — surface a hint that restarting the daemon clears the deny.       |
 | `user_dismissed`      | User closed the popup without choosing, or it timed out.                                 | Recoverable. Re-prompt when the user takes an action that requires it. |
 | `popup_failed`        | Consent popup couldn't be shown (no display server, no Wayland session, etc.).           | Fall back to read-only mode if possible.                               |
-| `invalid_scope`       | `scope` wasn't one of `client`, `settings`, `widget`.                                    | Fix the request body.                                                  |
+| `invalid_scope`       | `scopes` was empty, missing, or contained a name that isn't a known scope.               | Fix the request body.                                                  |
 | `throttled`           | Too many `/auth/request` calls from this peer in a short window.                         | Back off and retry later.                                              |
 | `uid_mismatch`        | Peer UID doesn't match the daemon's effective UID. The daemon only serves its own user; cross-user requests under a shared group are rejected before the popup. | Run as the same user as the daemon (typically the desktop user).         |
 

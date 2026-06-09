@@ -31,13 +31,17 @@ impl std::fmt::Debug for AudioDeviceCache {
     }
 }
 
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone)]
-pub struct AudioHealthStatus {
-    pub overall_healthy: bool,
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AudioHealthFlags {
     pub output_device_healthy: bool,
     pub input_device_healthy: bool,
     pub audio_permissions_ok: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioHealthStatus {
+    pub overall_healthy: bool,
+    pub flags: AudioHealthFlags,
     pub output_device_info: AudioDeviceInfo,
     pub input_device_info: AudioDeviceInfo,
     pub output_device_error: Option<String>,
@@ -64,9 +68,7 @@ impl AudioHealthStatus {
     pub fn new() -> Self {
         Self {
             overall_healthy: false,
-            output_device_healthy: false,
-            input_device_healthy: false,
-            audio_permissions_ok: false,
+            flags: AudioHealthFlags::default(),
             output_device_info: AudioDeviceInfo::default(),
             input_device_info: AudioDeviceInfo::default(),
             output_device_error: None,
@@ -395,12 +397,12 @@ pub fn perform_audio_health_check(
 
     match check_output_device_health(audio_device_cache) {
         Ok(output_status) => {
-            health_status.output_device_healthy = true;
+            health_status.flags.output_device_healthy = true;
             health_status.output_device_info = output_status;
             log::info!("Output device health check: PASSED");
         }
         Err(e) => {
-            health_status.output_device_healthy = false;
+            health_status.flags.output_device_healthy = false;
             health_status.output_device_error = Some(e.to_string());
             log::warn!("Output device health check: FAILED - {e}");
         }
@@ -408,21 +410,21 @@ pub fn perform_audio_health_check(
 
     match check_input_device_health() {
         Ok(input_status) => {
-            health_status.input_device_healthy = true;
+            health_status.flags.input_device_healthy = true;
             health_status.input_device_info = input_status;
             log::info!("Input device health check: PASSED");
         }
         Err(e) => {
-            health_status.input_device_healthy = false;
+            health_status.flags.input_device_healthy = false;
             health_status.input_device_error = Some(e.to_string());
             log::warn!("Input device health check: FAILED - {e}");
         }
     }
 
-    health_status.audio_permissions_ok = check_audio_permissions();
-    health_status.overall_healthy = health_status.output_device_healthy
-        && health_status.input_device_healthy
-        && health_status.audio_permissions_ok;
+    health_status.flags.audio_permissions_ok = check_audio_permissions();
+    health_status.overall_healthy = health_status.flags.output_device_healthy
+        && health_status.flags.input_device_healthy
+        && health_status.flags.audio_permissions_ok;
 
     if health_status.overall_healthy {
         log::info!("Audio system health check: ALL SYSTEMS HEALTHY");

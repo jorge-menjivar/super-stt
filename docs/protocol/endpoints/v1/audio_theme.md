@@ -15,7 +15,7 @@ canonical list at any moment is what
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `POST /audio_theme`
 
@@ -54,7 +54,7 @@ Content-Type: application/json
 |------|-----------------------|---------------------------------------------------------------|
 | 400  | `invalid_audio_theme` | Unknown theme name                                            |
 | 401  | `invalid_session`     | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`        | Not a `settings` token                                        |
+| 403  | `scope_denied`        | Token lacks the `settings` scope                              |
 
 ## `GET /audio_theme`
 
@@ -83,4 +83,4 @@ Content-Type: application/json
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |

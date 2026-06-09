@@ -30,9 +30,9 @@ that issued the stop.
 
 ## Auth
 
-- **Required scope:** `client` (also satisfied by `settings`).
+- **Required scope:** `transcribe`.
 - `Authorization: Bearer <session_token>` is required.
-- Widget tokens get `403 scope_denied`.
+- Tokens without the `transcribe` scope get `403 scope_denied`.
 
 ## `POST /transcribe/stop`
 
@@ -72,4 +72,4 @@ The `message` field carries one of:
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed` — re-auth and retry   |
-| 403  | `scope_denied`    | Widget token tried to call this endpoint                      |
+| 403  | `scope_denied`    | Token lacks the `transcribe` scope                           |

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::VisualizationSide;
-use crate::models::theme::{VisualizationColorConfig, VisualizationTheme};
+use crate::models::theme::{VisualizationColorConfig, VisualizationTheme, WorkingAnimationTheme};
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -16,6 +16,9 @@ pub struct VisualizationConfig {
     pub theme: VisualizationTheme,
     pub side: VisualizationSide, // This will be fixed per binary but stored for completeness
     pub colors: VisualizationColorConfig,
+    /// Animation shown while the daemon transcribes (`Processing` state).
+    #[serde(default)]
+    pub working_animation: WorkingAnimationTheme,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +37,7 @@ impl Default for AppletConfig {
                 theme: VisualizationTheme::CenteredEqualizer,
                 side: VisualizationSide::Full,
                 colors: VisualizationColorConfig::default(),
+                working_animation: WorkingAnimationTheme::default(),
             },
             ui: UiConfig {
                 last_popup_state: "None".to_string(),
@@ -120,6 +124,14 @@ impl AppletConfig {
         }
     }
 
+    /// Update the working animation theme and save to disk.
+    pub fn update_working_animation(&mut self, theme: WorkingAnimationTheme, variant: &str) {
+        self.visualization.working_animation = theme;
+        if let Err(e) = self.save(variant) {
+            error!("Failed to save config after working animation update: {e}");
+        }
+    }
+
     /// Update just the applet width and save to disk
     pub fn update_applet_width(&mut self, width: u32, variant: &str) {
         self.ui.applet_width = width;
@@ -158,5 +170,42 @@ impl AppletConfig {
         if let Err(e) = self.save(variant) {
             error!("Failed to save config after visualization colors update: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod working_animation_config_tests {
+    use super::AppletConfig;
+    use crate::models::theme::WorkingAnimationTheme;
+
+    #[test]
+    fn default_working_animation_is_droplet() {
+        assert_eq!(AppletConfig::default().visualization.working_animation, WorkingAnimationTheme::Droplet);
+    }
+
+    #[test]
+    fn round_trips_through_toml() {
+        let mut cfg = AppletConfig::default();
+        cfg.visualization.working_animation = WorkingAnimationTheme::Comet;
+        let s = toml::to_string_pretty(&cfg).expect("serialize");
+        let back: AppletConfig = toml::from_str(&s).expect("deserialize");
+        assert_eq!(back.visualization.working_animation, WorkingAnimationTheme::Comet);
+    }
+
+    #[test]
+    fn old_config_without_field_still_loads() {
+        // Build a TOML string from a default config but with the
+        // working_animation line removed, simulating a pre-existing config
+        // file from before the field existed. It must still parse (serde
+        // default) and yield Droplet — not error out and lose settings.
+        let full = toml::to_string_pretty(&AppletConfig::default()).expect("serialize");
+        let without: String = full
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("working_animation"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!without.contains("working_animation"), "test setup: line not removed");
+        let cfg: AppletConfig = toml::from_str(&without).expect("old config must still parse");
+        assert_eq!(cfg.visualization.working_animation, WorkingAnimationTheme::Droplet);
     }
 }

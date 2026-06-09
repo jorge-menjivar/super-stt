@@ -13,7 +13,7 @@ Pass `path: null` (or omit it) to clear the override.
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `POST /custom_models_dir`
 
@@ -56,7 +56,7 @@ carry `source: "custom"`.
 |------|----------------------------|---------------------------------------------------------------|
 | 400  | `invalid_custom_models_dir`| Path is empty / not absolute / not readable                   |
 | 401  | `invalid_session`          | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`             | Not a `settings` token                                        |
+| 403  | `scope_denied`             | Token lacks the `settings` scope                              |
 
 ## `GET /custom_models_dir`
 
@@ -101,4 +101,4 @@ Content-Type: application/json
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                       |
-| 403  | `scope_denied`    | Not a `settings` token                                        |
+| 403  | `scope_denied`    | Token lacks the `settings` scope                              |

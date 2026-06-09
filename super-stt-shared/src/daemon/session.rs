@@ -132,7 +132,7 @@ pub async fn obtain(
     socket_path: PathBuf,
     app_id: AppId,
     app_name: &str,
-    scope: &str,
+    scopes: &[&str],
 ) -> http_client::HttpResult<String> {
     // 1. In-memory cache hit — no keyring access, no I/O.
     if let Some(t) = cache_get(app_id) {
@@ -161,7 +161,7 @@ pub async fn obtain(
         return Ok(t);
     }
 
-    let auth = http_client::auth_request(socket_path, app_name, scope).await?;
+    let auth = http_client::auth_request(socket_path, app_name, scopes).await?;
     // `save` updates both in-memory cache and keyring; we ignore the
     // keyring half's error so a locked / denied keyring doesn't break
     // the working session.
@@ -188,14 +188,14 @@ pub async fn with_token<F, Fut, T>(
     socket_path: PathBuf,
     app_id: AppId,
     app_name: &str,
-    scope: &str,
+    scopes: &[&str],
     op: F,
 ) -> Result<T, String>
 where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = Result<T, String>>,
 {
-    let token = obtain(socket_path.clone(), app_id, app_name, scope)
+    let token = obtain(socket_path.clone(), app_id, app_name, scopes)
         .await
         .map_err(|e| e.to_string())?;
     match op(token).await {
@@ -203,7 +203,7 @@ where
         Err(e) if is_wire_invalid_session(&e) => {
             // Token rejected — drop cache, re-auth, retry once.
             let _ = forget(app_id);
-            let token = obtain(socket_path, app_id, app_name, scope)
+            let token = obtain(socket_path, app_id, app_name, scopes)
                 .await
                 .map_err(|e| e.to_string())?;
             op(token).await
@@ -235,7 +235,7 @@ mod tests {
         cache_set(app_id, "TOK-from-cache".to_string());
 
         let bogus_socket = PathBuf::from("/nonexistent/super-stt/socket");
-        let result = obtain(bogus_socket, app_id, "Test", "client").await;
+        let result = obtain(bogus_socket, app_id, "Test", &["transcribe"]).await;
 
         // Cleanup before asserting (in case the assert panics, the
         // global cache stays clean for sibling tests).

@@ -49,14 +49,6 @@ fn main() {
         println!("cargo:warning=CUDA_COMPUTE_CAP not set - building for generic CUDA or CPU");
     }
 
-    // Check features
-    if cfg!(feature = "cuda") {
-        println!("cargo:warning=CUDA feature is enabled");
-    }
-    if cfg!(feature = "cudnn") {
-        println!("cargo:warning=cuDNN feature is enabled");
-    }
-
     // For cross-compilation verification
     if let Ok(target) = std::env::var("TARGET") {
         println!("cargo:warning=Building for target: {target}");

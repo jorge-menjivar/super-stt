@@ -95,16 +95,15 @@ impl RecordingState {
         self.update_level_estimates();
     }
 
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss
-    )]
     fn update_level_estimates(&mut self) {
         if !self.quiet_levels.is_empty() {
             let mut sorted_quiet: Vec<f32> = self.quiet_levels.iter().copied().collect();
             sorted_quiet.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let percentile_index = (sorted_quiet.len() as f32 * BASELINE_PERCENTILE) as usize;
+            // sorted_quiet.len() ≤ QUIET_LEVELS_BUFFER_SIZE = 100; fits u32 and f32 exactly.
+            let len_f32 =
+                crate::num_cast::u32_to_f32(u32::try_from(sorted_quiet.len()).unwrap_or(u32::MAX));
+            // Product is ≤ 100.0; truncation to usize is intentional percentile indexing.
+            let percentile_index = crate::num_cast::f32_to_usize(len_f32 * BASELINE_PERCENTILE);
             self.baseline_level = sorted_quiet
                 .get(percentile_index)
                 .copied()
@@ -114,7 +113,11 @@ impl RecordingState {
         if !self.active_levels.is_empty() {
             let mut sorted_active: Vec<f32> = self.active_levels.iter().copied().collect();
             sorted_active.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let percentile_index = (sorted_active.len() as f32 * ACTIVE_PERCENTILE) as usize;
+            // sorted_active.len() ≤ ACTIVE_LEVELS_BUFFER_SIZE = 100; fits u32 and f32 exactly.
+            let len_f32 =
+                crate::num_cast::u32_to_f32(u32::try_from(sorted_active.len()).unwrap_or(u32::MAX));
+            // Product is ≤ 100.0; truncation to usize is intentional percentile indexing.
+            let percentile_index = crate::num_cast::f32_to_usize(len_f32 * ACTIVE_PERCENTILE);
             self.active_level = sorted_active
                 .get(percentile_index)
                 .copied()
@@ -133,7 +136,6 @@ impl RecordingState {
         threshold.clamp(MIN_SPEECH_THRESHOLD, MAX_SPEECH_THRESHOLD)
     }
 
-    #[allow(clippy::cast_precision_loss)]
     pub fn add_speech_decision(&mut self, is_speech: bool) -> bool {
         if self.speech_buffer.len() >= SPEECH_BUFFER_SIZE {
             self.speech_buffer.pop_front();
@@ -142,6 +144,10 @@ impl RecordingState {
 
         let speech_count = self.speech_buffer.iter().filter(|&&x| x).count();
         let total_count = self.speech_buffer.len();
-        speech_count as f32 / total_count as f32 > SPEECH_DETECTION_THRESHOLD
+        // speech_count and total_count are tiny (≤ SPEECH_BUFFER_SIZE = 5); fit in u32 exactly.
+        let speech_f32 =
+            crate::num_cast::u32_to_f32(u32::try_from(speech_count).unwrap_or(u32::MAX));
+        let total_f32 = crate::num_cast::u32_to_f32(u32::try_from(total_count).unwrap_or(u32::MAX));
+        speech_f32 / total_f32 > SPEECH_DETECTION_THRESHOLD
     }
 }

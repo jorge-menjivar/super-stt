@@ -1,0 +1,79 @@
+package super-stt:realtime@0.1.0;
+
+interface ws {
+    use wasi:io/poll@0.2.0.{pollable};
+
+    /// Errors from WebSocket operations.
+    variant ws-error {
+        host-not-allowed(string),
+        connect-failed(string),
+        send-failed(string),
+        recv-failed(string),
+        invalid-url(string),
+        closed,
+    }
+
+    record close-frame {
+        code: u16,
+        reason: string,
+    }
+
+    /// One frame read from or written to a WebSocket.
+    variant ws-frame {
+        text(string),
+        binary(list<u8>),
+        close(close-frame),
+    }
+
+    /// A live outgoing WebSocket connection to an upstream service. Drop
+    /// closes it on the host side.
+    resource ws-stream {
+        send-text: func(text: string) -> result<_, ws-error>;
+        send-binary: func(data: list<u8>) -> result<_, ws-error>;
+        recv: func() -> result<ws-frame, ws-error>;
+        subscribe: func() -> pollable;
+        close: func() -> result<_, ws-error>;
+    }
+
+    /// A live consumer WebSocket connection the daemon hands to the backend
+    /// for a realtime session. Host-owned (the daemon bridges it to the real
+    /// consumer socket); the guest reads/writes frames through it.
+    resource consumer-stream {
+        send-text: func(text: string) -> result<_, ws-error>;
+        send-binary: func(data: list<u8>) -> result<_, ws-error>;
+        recv: func() -> result<ws-frame, ws-error>;
+        subscribe: func() -> pollable;
+        close: func() -> result<_, ws-error>;
+    }
+
+    /// Open an outgoing WebSocket. The URL's host must appear in the
+    /// backend's `[network].allowed_hosts`; the SSRF resolver rejects hosts
+    /// resolving to loopback / link-local / private ranges. Scheme must be
+    /// `ws://` or `wss://`.
+    connect: func(
+        url: string,
+        headers: list<tuple<string, list<u8>>>,
+    ) -> result<ws-stream, ws-error>;
+}
+
+interface ws-server {
+    use ws.{ws-error, consumer-stream};
+
+    /// The daemon invokes this once per consumer realtime session. `headers`
+    /// carries the daemon-injected `x-stt-*` context (model, secrets,
+    /// options); `consumer` is the host-owned consumer WebSocket. The guest
+    /// pumps frames between `consumer` and any upstream it opens, returning
+    /// when the session ends.
+    handle: func(
+        headers: list<tuple<string, list<u8>>>,
+        consumer: consumer-stream,
+    ) -> result<_, ws-error>;
+}
+
+world realtime-backend {
+    import wasi:http/outgoing-handler@0.2.0;
+    import wasi:io/poll@0.2.0;
+    import ws;
+    export wasi:http/incoming-handler@0.2.0;
+    export ws-server;
+}

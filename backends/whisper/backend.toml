@@ -1,0 +1,166 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Whisper (local) subprocess backend. See docs/protocol/backend/.
+
+[backend]
+    source     = "github.com/super-stt/whisper"
+    name       = "Whisper (local)"
+    version    = "0.1.0"
+    kind       = "subprocess"
+    entrypoint = "super-stt-backend-whisper"
+    contract   = "v1"
+
+[network]
+    allowed_hosts = []
+
+[[models]]
+    name                   = "whisper-tiny"
+    provider               = "local_whisper"
+    multilingual           = true
+    primary_language       = "en"
+    supported_languages    = ["en","zh","de","es","ru","ko","fr","ja","pt","tr","pl","ca","nl","ar","sv","it","id","hi","fi","vi","he","uk","el","ms","cs","ro","da","hu","ta","no","th","ur","hr","bg","lt","la","mi","ml","cy","sk","te","fa","lv","bn","sr","az","sl","kn","et","mk","br","eu","is","hy","ne","mn","bs","kk","sq","sw","gl","mr","pa","si","km","sn","yo","so","af","oc","ka","be","tg","sd","gu","am","yi","lo","uz","fo","ht","ps","tk","nn","mt","sa","lb","my","bo","tl","mg","as","tt","haw","ln","ha","ba","jw","su","yue"]
+    supported_devices      = ["cpu", "cuda"]
+    estimated_vram_bytes   = 1073741824
+    processing_interval_ms = 1000
+
+    [[models.files]]
+        source   = "huggingface"
+        repo     = "openai/whisper-tiny"
+        revision = "main"
+        files    = ["config.json", "tokenizer.json", "model.safetensors"]
+        dest     = "models/whisper-tiny"
+
+[[models]]
+    name                   = "whisper-tiny.en"
+    provider               = "local_whisper"
+    multilingual           = false
+    primary_language       = "en"
+    supported_languages    = ["en"]
+    supported_devices      = ["cpu", "cuda"]
+    estimated_vram_bytes   = 1073741824
+    processing_interval_ms = 1000
+
+    [[models.files]]
+        source   = "huggingface"
+        repo     = "openai/whisper-tiny.en"
+        revision = "main"
+        files    = ["config.json", "tokenizer.json", "model.safetensors"]
+        dest     = "models/whisper-tiny.en"
+
+[[models]]
+    name                   = "whisper-base"
+    provider               = "local_whisper"
+    multilingual           = true
+    primary_language       = "en"
+    supported_languages    = ["en","zh","de","es","ru","ko","fr","ja","pt","tr","pl","ca","nl","ar","sv","it","id","hi","fi","vi","he","uk","el","ms","cs","ro","da","hu","ta","no","th","ur","hr","bg","lt","la","mi","ml","cy","sk","te","fa","lv","bn","sr","az","sl","kn","et","mk","br","eu","is","hy","ne","mn","bs","kk","sq","sw","gl","mr","pa","si","km","sn","yo","so","af","oc","ka","be","tg","sd","gu","am","yi","lo","uz","fo","ht","ps","tk","nn","mt","sa","lb","my","bo","tl","mg","as","tt","haw","ln","ha","ba","jw","su","yue"]
+    supported_devices      = ["cpu", "cuda"]
+    estimated_vram_bytes   = 1073741824
+    processing_interval_ms = 1500
+
+    [[models.files]]
+        source   = "huggingface"
+        repo     = "openai/whisper-base"
+        revision = "main"
+        files    = ["config.json", "tokenizer.json", "model.safetensors"]
+        dest     = "models/whisper-base"
+
+[[models]]
+    name                   = "whisper-base.en"
+    provider               = "local_whisper"
+    multilingual           = false
+    primary_language       = "en"
+    supported_languages    = ["en"]
+    supported_devices      = ["cpu", "cuda"]
+    estimated_vram_bytes   = 1073741824
+    processing_interval_ms = 1500
+
+    [[models.files]]
+        source   = "huggingface"
+        repo     = "openai/whisper-base.en"
+        revision = "main"
+        files    = ["config.json", "tokenizer.json", "model.safetensors"]
+        dest     = "models/whisper-base.en"
+
+[[models]]
+    name                   = "whisper-small"
+    provider               = "local_whisper"
+    multilingual           = true
+    primary_language       = "en"
+    supported_languages    = ["en","zh","de","es","ru","ko","fr","ja","pt","tr","pl","ca","nl","ar","sv","it","id","hi","fi","vi","he","uk","el","ms","cs","ro","da","hu","ta","no","th","ur","hr","bg","lt","la","mi","ml","cy","sk","te","fa","lv","bn","sr","az","sl","kn","et","mk","br","eu","is","hy","ne","mn","bs","kk","sq","sw","gl","mr","pa","si","km","sn","yo","so","af","oc","ka","be","tg","sd","gu","am","yi","lo","uz","fo","ht","ps","tk","nn","mt","sa","lb","my","bo","tl","mg","as","tt","haw","ln","ha","ba","jw","su","yue"]
+    supported_devices      = ["cpu", "cuda"]
+    estimated_vram_bytes   = 2147483648
+    processing_interval_ms = 2000
+
+    [[models.files]]
+        source   = "huggingface"
+        repo     = "openai/whisper-small"
+        revision = "main"
+        files    = ["config.json", "tokenizer.json", "model.safetensors"]
+        dest     = "models/whisper-small"
+
+[[models]]
+    name                   = "whisper-small.en"
+    provider               = "local_whisper"
+    multilingual           = false
+    primary_language       = "en"
+    supported_languages    = ["en"]
+    supported_devices      = ["cpu", "cuda"]
+    estimated_vram_bytes   = 2147483648
+    processing_interval_ms = 2000
+
+    [[models.files]]
+        source   = "huggingface"
+        repo     = "openai/whisper-small.en"
+        revision = "main"
+        files    = ["config.json", "tokenizer.json", "model.safetensors"]
+        dest     = "models/whisper-small.en"
+
+[[models]]
+    name                   = "whisper-medium"
+    provider               = "local_whisper"
+    multilingual           = true
+    primary_language       = "en"
+    supported_languages    = ["en","zh","de","es","ru","ko","fr","ja","pt","tr","pl","ca","nl","ar","sv","it","id","hi","fi","vi","he","uk","el","ms","cs","ro","da","hu","ta","no","th","ur","hr","bg","lt","la","mi","ml","cy","sk","te","fa","lv","bn","sr","az","sl","kn","et","mk","br","eu","is","hy","ne","mn","bs","kk","sq","sw","gl","mr","pa","si","km","sn","yo","so","af","oc","ka","be","tg","sd","gu","am","yi","lo","uz","fo","ht","ps","tk","nn","mt","sa","lb","my","bo","tl","mg","as","tt","haw","ln","ha","ba","jw","su","yue"]
+    supported_devices      = ["cpu", "cuda"]
+    estimated_vram_bytes   = 5368709120
+    processing_interval_ms = 2000
+
+    [[models.files]]
+        source   = "huggingface"
+        repo     = "openai/whisper-medium"
+        revision = "main"
+        files    = ["config.json", "tokenizer.json", "model.safetensors"]
+        dest     = "models/whisper-medium"
+
+[[models]]
+    name                   = "whisper-medium.en"
+    provider               = "local_whisper"
+    multilingual           = false
+    primary_language       = "en"
+    supported_languages    = ["en"]
+    supported_devices      = ["cpu", "cuda"]
+    estimated_vram_bytes   = 5368709120
+    processing_interval_ms = 2000
+
+    [[models.files]]
+        source   = "huggingface"
+        repo     = "openai/whisper-medium.en"
+        revision = "main"
+        files    = ["config.json", "tokenizer.json", "model.safetensors"]
+        dest     = "models/whisper-medium.en"
+
+[[models]]
+    name                   = "whisper-large"
+    provider               = "local_whisper"
+    multilingual           = true
+    primary_language       = "en"
+    supported_languages    = ["en","zh","de","es","ru","ko","fr","ja","pt","tr","pl","ca","nl","ar","sv","it","id","hi","fi","vi","he","uk","el","ms","cs","ro","da","hu","ta","no","th","ur","hr","bg","lt","la","mi","ml","cy","sk","te","fa","lv","bn","sr","az","sl","kn","et","mk","br","eu","is","hy","ne","mn","bs","kk","sq","sw","gl","mr","pa","si","km","sn","yo","so","af","oc","ka","be","tg","sd","gu","am","yi","lo","uz","fo","ht","ps","tk","nn","mt","sa","lb","my","bo","tl","mg","as","tt","haw","ln","ha","ba","jw","su","yue"]
+    supported_devices      = ["cpu", "cuda"]
+    estimated_vram_bytes   = 10737418240
+    processing_interval_ms = 5000
+
+    [[models.files]]
+        source   = "huggingface"
+        repo     = "openai/whisper-large"
+        revision = "main"
+        files    = ["config.json", "tokenizer.json", "model.safetensors"]
+        dest     = "models/whisper-large"

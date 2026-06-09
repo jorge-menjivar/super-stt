@@ -29,22 +29,22 @@ impl SuperSTTDaemon {
             return early_return;
         }
 
+        // No model is loaded → nothing to reload. Record the preference so the
+        // next model load picks it up, and return. This makes the GPU toggle
+        // usable in the active-backend card before a model has been selected.
+        if self.model.read().await.is_none() {
+            return self.update_device_preference_only(&device).await;
+        }
+
         // Get context for the device switch
         let (current_preferred, model_to_reload, provider, source) =
             self.get_device_switch_context(&device).await;
 
-        // Online models don't use local GPU — just update the preference
+        // Online models don't use local GPU — just update the preference; no
+        // reload is needed since the model runs on a remote service.
         if matches!(provider, Provider::Online(_)) {
             info!("Current model uses online provider, updating device preference only");
-            *self.preferred_device.write().await = device.clone();
-            {
-                let mut config = self.config.write().await;
-                config.update_preferred_device(device.clone());
-            }
-            let _ = self.persist_config().await;
-            return DaemonResponse::success()
-                .with_device(device)
-                .with_message("Device preference updated (online model unaffected)".to_string());
+            return self.update_device_preference_only(&device).await;
         }
 
         info!(
@@ -64,7 +64,7 @@ impl SuperSTTDaemon {
 
         // Try to reload model with the requested device, but cancel if shutdown occurs
         let load_result = tokio::select! {
-            result = self.load_model_with_target_device(&model_to_reload, provider, source, &device) => {
+            result = self.load_model_with_target_device(&model_to_reload, provider, &source, &device) => {
                 result
             }
             _ = shutdown_rx.recv() => {
@@ -80,7 +80,7 @@ impl SuperSTTDaemon {
                     &device,
                     &model_to_reload,
                     provider,
-                    source,
+                    &source,
                     &current_preferred,
                 )
                 .await
@@ -91,12 +91,34 @@ impl SuperSTTDaemon {
                     &device,
                     &model_to_reload,
                     provider,
-                    source,
+                    &source,
                     &current_preferred,
                 )
                 .await
             }
         }
+    }
+
+    /// Record a new device preference without reloading anything — used for
+    /// the idle case (no model loaded) and for the online-model case (no
+    /// local device anyway). Updates the runtime locks + persisted config,
+    /// then returns a 200-shaped response carrying the new device.
+    async fn update_device_preference_only(&self, device: &str) -> DaemonResponse {
+        *self.preferred_device.write().await = device.to_string();
+        *self.actual_device.write().await = device.to_string();
+        {
+            let mut config = self.config.write().await;
+            config.update_preferred_device(device.to_string());
+        }
+        if let Err(e) = self.persist_config().await {
+            warn!("Failed to persist config after device preference update: {e}");
+        }
+        info!("Device preference updated to {device} (no model loaded — nothing to reload)");
+        DaemonResponse::success()
+            .with_device(device.to_string())
+            .with_message(format!(
+                "Device preference set to {device}. The next model load will use it."
+            ))
     }
 
     /// Validate device switch request and return early response if validation fails
@@ -130,8 +152,8 @@ impl SuperSTTDaemon {
 
         // Security check: prevent device switching during active recording
         {
-            let is_recording_guard = self.is_recording.read().await;
-            if *is_recording_guard {
+            let busy_guard = self.busy.read().await;
+            if *busy_guard {
                 warn!("Device switch rejected - recording in progress");
                 return Some(DaemonResponse::error(
                     "Cannot switch devices during active recording. Please wait for recording to complete.",
@@ -153,16 +175,6 @@ impl SuperSTTDaemon {
             )));
         }
 
-        // Check if a model is currently loaded - we'll need to reload it
-        let model_loaded = self.model.read().await.is_some();
-
-        if !model_loaded {
-            warn!("Device switch rejected - no model loaded");
-            return Some(DaemonResponse::error(
-                "Cannot switch devices when no model is loaded. Load a model first.",
-            ));
-        }
-
         None
     }
 
@@ -174,7 +186,7 @@ impl SuperSTTDaemon {
         String,
         String,
         super_stt_shared::models::provider::Provider,
-        super_stt_shared::models::registry::SourceKind,
+        String,
     ) {
         // Get the model that needs to be reloaded (validated to exist already)
         let (model_to_reload, provider, source) = {
@@ -183,9 +195,9 @@ impl SuperSTTDaemon {
                 .as_ref()
                 .map(|loaded| {
                     (
-                        loaded.definition.name.to_string(),
+                        loaded.definition.name.clone(),
                         loaded.definition.provider,
-                        loaded.definition.source.kind(),
+                        loaded.definition.source.clone(),
                     )
                 })
                 .expect("Model existence already validated")
@@ -221,17 +233,10 @@ impl SuperSTTDaemon {
         device: &str,
         model_to_reload: &str,
         provider: super_stt_shared::models::provider::Provider,
-        source: super_stt_shared::models::registry::SourceKind,
+        source: &str,
         previous_device: &str,
     ) -> DaemonResponse {
-        let actual_device = {
-            let actual_device_str = match model_instance.device() {
-                candle_core::Device::Cpu => "cpu",
-                candle_core::Device::Cuda(_) => "cuda",
-                candle_core::Device::Metal(_) => "metal",
-            };
-            actual_device_str.to_string()
-        };
+        let actual_device = crate::daemon::types::normalize_device(&model_instance.device());
 
         // Store the reloaded model
         let definition = self
@@ -296,7 +301,7 @@ impl SuperSTTDaemon {
         device: &str,
         model_to_reload: &str,
         provider: super_stt_shared::models::provider::Provider,
-        source: super_stt_shared::models::registry::SourceKind,
+        source: &str,
         previous_device: &str,
     ) -> DaemonResponse {
         error!("Failed to reload model on new device: {error}");
@@ -329,12 +334,8 @@ impl SuperSTTDaemon {
         {
             Ok(model_instance) => {
                 // Update both preferred and actual device after successful recovery
-                let recovery_actual_device = match model_instance.device() {
-                    candle_core::Device::Cpu => "cpu",
-                    candle_core::Device::Cuda(_) => "cuda",
-                    candle_core::Device::Metal(_) => "metal",
-                }
-                .to_string();
+                let recovery_actual_device =
+                    crate::daemon::types::normalize_device(&model_instance.device());
 
                 let definition = self
                     .resolve_definition(model_to_reload, provider, source)
@@ -399,8 +400,10 @@ impl SuperSTTDaemon {
 
         info!("Device status requested - preferred: {preferred_device}, actual: {actual_device}");
 
-        // Determine available devices based on build features
-        let available_devices = super_stt_shared::device_options!();
+        // The daemon offers both device preferences; whether CUDA is actually
+        // usable is decided by the GPU-resident backend at load time (it falls
+        // back to CPU if not).
+        let available_devices = vec!["cpu".to_string(), "cuda".to_string()];
 
         let message = if preferred_device != actual_device && preferred_device == "cuda" {
             format!(
@@ -430,18 +433,47 @@ impl SuperSTTDaemon {
         response
     }
 
-    #[cfg(feature = "cuda")]
+    /// GPU memory reporting now lives in the GPU-resident backends, not the
+    /// daemon (which no longer links a CUDA runtime). Always unavailable here.
     fn get_gpu_memory_info() -> Result<(u64, u64), anyhow::Error> {
-        use candle_core::cuda_backend::cudarc::driver::{result, safe::CudaContext};
-        let _ctx =
-            CudaContext::new(0).map_err(|e| anyhow::anyhow!("CUDA context init failed: {e}"))?;
-        let (free, total) =
-            result::mem_get_info().map_err(|e| anyhow::anyhow!("CUDA mem_get_info: {e}"))?;
-        Ok((free as u64, total as u64))
+        Err(anyhow::anyhow!(
+            "GPU memory info is reported by the backend, not the daemon"
+        ))
     }
 
-    #[cfg(not(feature = "cuda"))]
-    fn get_gpu_memory_info() -> Result<(u64, u64), anyhow::Error> {
-        Err(anyhow::anyhow!("CUDA not available"))
+    /// Read-only GPU inventory for `GET /gpu_info`. Hardware detection runs on a
+    /// blocking thread (NVML / sysfs / `system_profiler`) so it never stalls the
+    /// async runtime. Best-effort: an empty list when no GPU is found.
+    pub async fn handle_get_gpu_info() -> DaemonResponse {
+        let gpus = tokio::task::spawn_blocking(|| {
+            gpu_probe::detect()
+                .into_iter()
+                .map(gpu_to_wire)
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+        let value = serde_json::to_value(&gpus).unwrap_or(serde_json::Value::Null);
+        DaemonResponse::success().with_gpu_info(value)
+    }
+}
+
+/// Map a [`gpu_probe::GpuInfo`] to the wire payload, normalizing the vendor to
+/// its `snake_case` tag (`nvidia` / `amd` / `intel` / `apple` / `unknown`).
+fn gpu_to_wire(gpu: gpu_probe::GpuInfo) -> super_stt_shared::models::protocol::GpuInfo {
+    let vendor = match gpu.vendor {
+        gpu_probe::Vendor::Nvidia => "nvidia",
+        gpu_probe::Vendor::Amd => "amd",
+        gpu_probe::Vendor::Intel => "intel",
+        gpu_probe::Vendor::Apple => "apple",
+        _ => "unknown",
+    }
+    .to_string();
+    super_stt_shared::models::protocol::GpuInfo {
+        name: gpu.name,
+        vendor,
+        total_bytes: gpu.total_bytes,
+        free_bytes: gpu.free_bytes,
+        used_bytes: gpu.used_bytes,
     }
 }

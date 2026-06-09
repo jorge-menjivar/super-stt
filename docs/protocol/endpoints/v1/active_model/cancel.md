@@ -12,7 +12,7 @@ The active model state itself is read and written via
 
 - **Required scope:** `settings`.
 - `Authorization: Bearer <session_token>` is required.
-- `client` / `widget` tokens get `403 scope_denied`.
+- Tokens without the `settings` scope get `403 scope_denied`.
 
 ## `POST /active_model/cancel`
 
@@ -49,6 +49,6 @@ attempt).
 | HTTP | `message`               | Meaning                                                              |
 |------|-------------------------|----------------------------------------------------------------------|
 | 401  | `invalid_session`       | Token unknown / expired / `exe_changed`                              |
-| 403  | `scope_denied`          | Not a `settings` token                                               |
+| 403  | `scope_denied`          | Token lacks the `settings` scope                                     |
 | 409  | `no_switch_in_progress` | Nothing to cancel                                                    |
 | 409  | `switch_finalizing`     | The switch has already passed the cancellable window — wait or kick off a new switch instead |

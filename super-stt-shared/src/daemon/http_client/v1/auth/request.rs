@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: GPL-3.0-only
+use super::super::super::internal::error::{HttpError, HttpResult};
+use super::super::super::internal::transport;
+use serde::Deserialize;
+use std::path::PathBuf;
+
+/// Successful `POST /auth/request` payload.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthOk {
+    pub session_token: String,
+    pub scopes: Vec<String>,
+    pub expires_at: String,
+}
+
+/// `POST /auth/request` — always runs the consent popup and mints a
+/// fresh session token. Used by clients that have no cached token (or
+/// whose cached token was invalidated by `401 invalid_session`).
+/// Clients with a valid cached token never call this; they go
+/// straight to `/ping`/`/events`/etc. with the bearer header.
+///
+/// # Errors
+/// Returns an error if the daemon HTTP listener isn't reachable, the
+/// user denies the request, or the popup is dismissed.
+pub async fn auth_request(
+    socket_path: PathBuf,
+    app_name: &str,
+    scopes: &[&str],
+) -> HttpResult<AuthOk> {
+    let body = serde_json::json!({
+        "app_name": app_name,
+        "scopes":   scopes,
+        "version":  env!("CARGO_PKG_VERSION"),
+    });
+    let req = transport::build_post_json("/auth/request", &body, None)?;
+
+    // /auth/request returns its own JSON shape (not a `DaemonResponse`),
+    // so we issue the request directly here and parse on top of the raw
+    // body.
+    let response = transport::open(&socket_path, req).await?;
+
+    let status = response.status();
+    let body = transport::collect_body(response).await?;
+
+    if !status.is_success() {
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+        let reason = parsed
+            .get("data")
+            .and_then(|d| d.get("reason"))
+            .and_then(|r| r.as_str())
+            .unwrap_or("auth_denied")
+            .to_string();
+        return Err(HttpError::AuthDenied { reason });
+    }
+
+    serde_json::from_slice::<AuthOk>(&body)
+        .map_err(|e| HttpError::Other(format!("Failed to parse auth_ok: {e}")))
+}

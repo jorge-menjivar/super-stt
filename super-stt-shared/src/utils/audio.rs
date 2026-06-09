@@ -24,7 +24,6 @@ pub fn apply_pre_emphasis(audio: &mut [f32]) {
 /// # Errors
 ///
 /// Returns an error if the audio data is invalid.
-#[allow(clippy::cast_precision_loss)]
 pub fn validate_audio(audio_data: &[f32], sample_rate: u32) -> Result<()> {
     if audio_data.is_empty() {
         return Err(anyhow::anyhow!("Audio data is empty"));
@@ -47,7 +46,8 @@ pub fn validate_audio(audio_data: &[f32], sample_rate: u32) -> Result<()> {
         ));
     }
 
-    let duration_seconds = audio_data.len() as f64 / f64::from(sample_rate);
+    let len = u32::try_from(audio_data.len()).unwrap_or(u32::MAX);
+    let duration_seconds = f64::from(len) / f64::from(sample_rate);
     if duration_seconds > 300.0 {
         return Err(anyhow::anyhow!(
             "Audio too long: {duration_seconds:.1}s (max 300s)"
@@ -94,11 +94,6 @@ pub enum ResampleQuality {
 /// # Panics
 ///
 /// Panics if the resampler returns no output frames (unexpected).
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_precision_loss,
-    clippy::cast_sign_loss
-)]
 pub fn resample(
     samples: &[f32],
     from_sr: u32,

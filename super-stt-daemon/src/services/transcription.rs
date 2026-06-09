@@ -85,9 +85,9 @@ impl RealTimeSession {
         self.buffered_pcm.extend_from_slice(audio_data);
 
         // Calculate RMS energy for this chunk
-        #[allow(clippy::cast_precision_loss)]
-        let rms: f32 =
-            (audio_data.iter().map(|&x| x * x).sum::<f32>() / audio_data.len() as f32).sqrt();
+        let rms: f32 = (audio_data.iter().map(|&x| x * x).sum::<f32>()
+            / crate::num_cast::usize_to_f32(audio_data.len()))
+        .sqrt();
 
         // Update recent levels for adaptive thresholding
         if self.recent_levels.len() >= 200 {

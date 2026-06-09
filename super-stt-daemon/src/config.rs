@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use log::{debug, error, warn};
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-use super_stt_shared::models::registry::{self, SourceKind};
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
 
@@ -37,6 +37,18 @@ pub struct DaemonConfig {
     pub transcription: TranscriptionConfig,
     #[serde(default)]
     pub online: OnlineConfig,
+    #[serde(default)]
+    pub backends: BackendsConfig,
+}
+
+/// User-set configuration for installed backends. Secrets live in the keyring;
+/// only non-sensitive **options** are stored here (plaintext).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BackendsConfig {
+    /// Per-backend option overrides: backend `source` → (option name → value).
+    /// An absent entry means "use the manifest default".
+    #[serde(default)]
+    pub options: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,11 +77,15 @@ pub struct OnlineConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionConfig {
+    #[serde(default)]
     pub preferred_model: String,
     #[serde(default, deserialize_with = "deserialize_or_default")]
     pub preferred_provider: Provider,
-    #[serde(default, deserialize_with = "deserialize_or_default")]
-    pub preferred_source: SourceKind,
+    /// Repo id of the backend that serves the preferred model. Empty means the
+    /// daemon picks the first installed backend serving `(model, provider)`.
+    #[serde(default)]
+    pub preferred_source: String,
+    #[serde(default)]
     pub write_mode: bool, // Auto-type transcriptions
     #[serde(default)] // For backwards compatibility with existing configs
     pub preview_typing_enabled: bool, // Beta feature: show preview while typing
@@ -77,8 +93,20 @@ pub struct TranscriptionConfig {
     pub recording_stop_mode: RecordingStopMode,
     #[serde(default)]
     pub write_method: WriteMethod,
+    /// Vestigial: retained for config compatibility. Custom models are now
+    /// provided as backends discovered under [`backends_dir`].
     #[serde(default)]
     pub custom_models_dir: Option<String>,
+    /// Directory scanned for installed backends. `None` uses the default
+    /// (`<data_dir>/super-stt/backends`).
+    #[serde(default)]
+    pub backends_dir: Option<String>,
+    /// Relative install dir (subdir of [`backends_dir`]) of the selected active
+    /// backend, or `None` when idle. Metadata (name/source/models) is read from
+    /// that dir's `backend.toml`. An active backend with an empty
+    /// `preferred_model` means "backend selected, no model loaded".
+    #[serde(default)]
+    pub active_backend: Option<String>,
 }
 
 impl Default for DaemonConfig {
@@ -92,16 +120,21 @@ impl Default for DaemonConfig {
                 volume: default_volume(),
             },
             transcription: TranscriptionConfig {
-                preferred_model: registry::default_definition().name.to_string(),
-                preferred_provider: registry::default_definition().provider,
-                preferred_source: registry::default_definition().source.kind(),
+                // Empty preference: the daemon loads the first usable model from
+                // whatever backends are discovered on disk.
+                preferred_model: String::new(),
+                preferred_provider: Provider::default(),
+                preferred_source: String::new(),
                 write_mode: false,             // Default to not auto-typing
                 preview_typing_enabled: false, // Default to disabled (beta feature)
                 recording_stop_mode: RecordingStopMode::default(),
                 write_method: WriteMethod::default(),
                 custom_models_dir: None,
+                backends_dir: None,
+                active_backend: None,
             },
             online: OnlineConfig::default(),
+            backends: BackendsConfig::default(),
         }
     }
 }
@@ -195,17 +228,32 @@ impl DaemonConfig {
     }
 
     /// Update preferred model + provider + source and save to disk.
-    pub fn update_preferred_model(
-        &mut self,
-        model: String,
-        provider: Provider,
-        source: SourceKind,
-    ) {
+    pub fn update_preferred_model(&mut self, model: String, provider: Provider, source: String) {
         self.transcription.preferred_model = model;
         self.transcription.preferred_provider = provider;
         self.transcription.preferred_source = source;
         if let Err(e) = self.save() {
             error!("Failed to save config after model update: {e}");
+        }
+    }
+
+    /// Set the active backend (its relative install dir) and drop the loaded
+    /// model preference — selecting a backend does not load a model. Saves.
+    pub fn update_active_backend(&mut self, dir: String) {
+        self.transcription.active_backend = Some(dir);
+        self.transcription.preferred_model = String::new();
+        if let Err(e) = self.save() {
+            error!("Failed to save config after active backend update: {e}");
+        }
+    }
+
+    /// Clear the active backend and the loaded-model preference (→ idle). Saves.
+    pub fn clear_active_backend(&mut self) {
+        self.transcription.active_backend = None;
+        self.transcription.preferred_model = String::new();
+        self.transcription.preferred_source = String::new();
+        if let Err(e) = self.save() {
+            error!("Failed to save config after clearing active backend: {e}");
         }
     }
 
@@ -256,203 +304,41 @@ impl DaemonConfig {
             error!("Failed to save config after custom models dir update: {e}");
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_config_has_online_models_disabled() {
-        let config = DaemonConfig::default();
-        assert!(!config.online.allow_online_models);
-    }
-
-    #[test]
-    fn config_without_online_section_deserializes() {
-        let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "Classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-tiny"
-write_mode = false
-preview_typing_enabled = false
-recording_stop_mode = "SilenceAndManual"
-write_method = "Auto"
-"#;
-        let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
-        assert!(!config.online.allow_online_models);
-    }
-
-    #[test]
-    fn config_with_online_section_round_trips() {
-        let mut config = DaemonConfig::default();
-        config.online.allow_online_models = true;
-
-        let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-        let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
-        assert!(parsed.online.allow_online_models);
-    }
-
-    #[test]
-    fn config_with_online_model_preferred_round_trips() {
-        let mut config = DaemonConfig::default();
-        config.online.allow_online_models = true;
-        config.transcription.preferred_model = "whisper-1".to_string();
-
-        let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-        let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
-        assert!(parsed.online.allow_online_models);
-        assert_eq!(parsed.transcription.preferred_model, "whisper-1");
-    }
-
-    #[test]
-    fn config_preserves_all_online_model_variants() {
-        for name in [
-            "whisper-1",
-            "gpt-4o-transcribe",
-            "gpt-4o-mini-transcribe",
-            "voxtral-mini-transcribe-v2",
-            "nova-3",
-        ] {
-            let model = name.to_string();
-            let mut config = DaemonConfig::default();
-            config.transcription.preferred_model = model.clone();
-
-            let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-            let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
-            assert_eq!(parsed.transcription.preferred_model, model);
+    /// Set or clear a backend option override and save to disk. An empty
+    /// `value` clears the override (the backend falls back to its manifest
+    /// default).
+    pub fn update_backend_option(&mut self, source: String, name: String, value: String) {
+        if value.is_empty() {
+            if let Some(opts) = self.backends.options.get_mut(&source) {
+                opts.remove(&name);
+                if opts.is_empty() {
+                    self.backends.options.remove(&source);
+                }
+            }
+        } else {
+            self.backends
+                .options
+                .entry(source)
+                .or_default()
+                .insert(name, value);
+        }
+        if let Err(e) = self.save() {
+            error!("Failed to save config after backend option update: {e}");
         }
     }
 
-    #[test]
-    fn online_config_default_is_disabled() {
-        let online = OnlineConfig::default();
-        assert!(!online.allow_online_models);
-    }
-
-    #[test]
-    fn default_config_has_no_custom_models_dir() {
-        let config = DaemonConfig::default();
-        assert!(config.transcription.custom_models_dir.is_none());
-    }
-
-    #[test]
-    fn config_without_custom_models_dir_deserializes() {
-        let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "Classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-tiny"
-write_mode = false
-preview_typing_enabled = false
-recording_stop_mode = "SilenceAndManual"
-write_method = "Auto"
-"#;
-        let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
-        assert!(config.transcription.custom_models_dir.is_none());
-    }
-
-    #[test]
-    fn config_with_custom_models_dir_round_trips() {
-        let mut config = DaemonConfig::default();
-        config.transcription.custom_models_dir = Some("/tmp/models".to_string());
-
-        let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-        let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
-        assert_eq!(
-            parsed.transcription.custom_models_dir.as_deref(),
-            Some("/tmp/models")
-        );
-    }
-
-    #[test]
-    fn config_with_none_custom_models_dir_round_trips() {
-        let config = DaemonConfig::default();
-
-        let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-        let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
-        assert!(parsed.transcription.custom_models_dir.is_none());
-    }
-
-    /// A pre-existing TOML config carrying a stale provider/source string
-    /// (e.g. PascalCase variant names from a prior build) must keep loading
-    /// — falling back to the type's `Default` rather than failing the whole
-    /// `[transcription]` section. The user's other settings have to survive.
-    #[test]
-    fn config_with_legacy_provider_string_falls_back() {
-        let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "Silent"
-volume = 75
-
-[transcription]
-preferred_model = "whisper-tiny"
-preferred_provider = "LocalWhisper"
-preferred_source = "BadValue"
-write_mode = false
-preview_typing_enabled = true
-recording_stop_mode = "SilenceAndManual"
-write_method = "Auto"
-
-[online]
-allow_online_models = true
-"#;
-        let config: DaemonConfig = toml::from_str(toml_str)
-            .expect("legacy provider string should not fail the whole config");
-        assert_eq!(config.transcription.preferred_provider, Provider::default());
-        assert_eq!(config.transcription.preferred_source, SourceKind::default());
-        // Other fields must survive the field-level fallback.
-        assert_eq!(config.transcription.preferred_model, "whisper-tiny");
-        assert!(config.transcription.preview_typing_enabled);
-        assert_eq!(config.audio.theme, AudioTheme::Silent);
-        assert_eq!(config.audio.volume, 75);
-        assert!(config.online.allow_online_models);
-    }
-
-    #[test]
-    fn config_with_canonical_snake_case_provider_round_trips() {
-        let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "Classic"
-volume = 100
-
-[transcription]
-preferred_model = "whisper-base"
-preferred_provider = "local_voxtral"
-preferred_source = "builtin"
-write_mode = false
-preview_typing_enabled = false
-recording_stop_mode = "SilenceAndManual"
-write_method = "Auto"
-"#;
-        let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
-        assert_eq!(
-            config.transcription.preferred_provider,
-            Provider::LocalVoxtral
-        );
-        assert_eq!(config.transcription.preferred_source, SourceKind::Builtin);
-
-        let serialized = toml::to_string_pretty(&config).expect("should serialize");
-        assert!(
-            serialized.contains("preferred_provider = \"local_voxtral\""),
-            "serialized form: {serialized}"
-        );
+    /// The configured override for a backend option, if any.
+    #[must_use]
+    pub fn backend_option(&self, source: &str, name: &str) -> Option<&str> {
+        self.backends
+            .options
+            .get(source)
+            .and_then(|opts| opts.get(name))
+            .map(String::as_str)
     }
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;

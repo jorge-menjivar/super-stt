@@ -243,7 +243,6 @@ impl Typer {
     }
 
     /// Update the full session text using stabilized text as base
-    #[allow(clippy::cast_sign_loss)]
     fn update_full_session_text(&mut self, new_preview_text: &str) {
         // If we have stabilized text, use it as our base
         if !self.state.stabilized_text.is_empty()
@@ -301,7 +300,7 @@ impl Typer {
             let extended = format!(
                 "{}{}",
                 self.state.full_session_text,
-                &new_preview_text[matching_pos as usize..]
+                &new_preview_text[usize::try_from(matching_pos).unwrap_or(0)..]
             );
             if extended.len() > self.state.full_session_text.len() {
                 self.state.full_session_text = extended;
@@ -319,7 +318,6 @@ impl Typer {
     }
 
     /// Build the display text (Phase 2) - what actually shows on screen
-    #[allow(clippy::cast_sign_loss)]
     fn build_display_text(&mut self, preview_text: &str) -> String {
         // Use stabilized text as base, but be smart about it
 
@@ -337,7 +335,7 @@ impl Typer {
             let combined = format!(
                 "{}{}",
                 self.state.stabilized_text,
-                &preview_text[matching_pos as usize..]
+                &preview_text[usize::try_from(matching_pos).unwrap_or(0)..]
             );
             return combined;
         }
@@ -532,67 +530,5 @@ impl Typer {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_preprocess_text() {
-        // Basic functionality
-        assert_eq!(Typer::preprocess_text("hello world", true), "Hello world");
-        assert_eq!(Typer::preprocess_text("hello world", false), "Hello world.");
-        assert_eq!(Typer::preprocess_text("", true), "");
-
-        assert_eq!(
-            Typer::preprocess_text("...hello world", true),
-            "Hello world"
-        );
-        assert_eq!(
-            Typer::preprocess_text("  ...  hello world  ", true),
-            "Hello world"
-        );
-        assert_eq!(
-            Typer::preprocess_text("  multiple   spaces  ", true),
-            "Multiple spaces"
-        );
-    }
-
-    #[test]
-    fn test_is_simple_extension() {
-        assert!(Typer::is_simple_extension("hello", "hello world"));
-        assert!(Typer::is_simple_extension("", "hello"));
-        assert!(!Typer::is_simple_extension("hello", "hi world"));
-        assert!(!Typer::is_simple_extension("hello", "hello"));
-        assert!(!Typer::is_simple_extension("hello world", "hello"));
-    }
-
-    #[test]
-    fn test_find_tail_match_in_text() {
-        // Test the key case: "engi" should match with "engineer"
-        assert_eq!(
-            Typer::find_tail_match_in_text("hello engi", "engineer is good", 4),
-            4
-        );
-
-        // Test basic tail matching
-        assert_eq!(
-            Typer::find_tail_match_in_text("hello world", "world is nice", 5),
-            5
-        );
-
-        // Test no match
-        assert_eq!(Typer::find_tail_match_in_text("hello", "goodbye", 3), -1);
-
-        // Test short strings
-        assert_eq!(Typer::find_tail_match_in_text("hi", "hello", 3), -1);
-
-        // Test exact match at end
-        assert_eq!(Typer::find_tail_match_in_text("abc", "xyzabc", 3), 6);
-    }
-
-    #[test]
-    fn test_find_common_prefix() {
-        assert_eq!(Typer::find_common_prefix("hello world", "hello there"), 6);
-        assert_eq!(Typer::find_common_prefix("abc", "def"), 0);
-        assert_eq!(Typer::find_common_prefix("same text", "same text"), 9);
-    }
-}
+#[path = "preview_tests.rs"]
+mod tests;

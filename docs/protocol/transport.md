@@ -7,10 +7,9 @@ Sent Events.
 
 It is the protocol-wide companion to:
 
-- [auth.md](./auth.md) — authentication handshake
-- [client.md](./scopes/client.md) — client-scope endpoints
-- [settings.md](./scopes/settings.md) — settings-scope endpoints
-- [widget.md](./scopes/widget.md) — widget-scope endpoints
+- [auth.md](./auth.md) — authentication handshake and the full scope catalog
+- the per-scope docs under [`scopes/`](./scopes/) — what each scope unlocks
+- [`/events`](./endpoints/v1/events.md) — the SSE topic reference
 
 The wire shape is HTTP/1.1 over a Unix domain socket. A future config
 flag will let the daemon bind a TCP listener with the same HTTP API
@@ -166,15 +165,17 @@ Conventions:
 
 - The first frame is always `event: subscribed` with the assigned
   subscriber `client_id` and the resolved topic list. Topics the
-  client requested but isn't allowed to see (e.g. a widget asking
-  for `daemon_status_changed`) cause a `403 scope_denied` before the
-  stream opens; partial subscriptions aren't supported.
+  client requested but isn't allowed to see (e.g. a token without
+  `daemon_status` asking for `daemon_status_changed`) cause a
+  `403 scope_denied` before the stream opens; partial subscriptions
+  aren't supported.
 - Each subsequent frame's `event:` field is the topic name. The
   `data:` field is one JSON line carrying the topic-specific payload
   directly (no wrapper envelope). For example, `recording_state` is
   `{"is_recording":true}`; `daemon_status_changed` is
-  `{"status":"…", …, "timestamp":"…"}`. See [widget.md](./scopes/widget.md)
-  and [settings.md](./scopes/settings.md) for per-topic shapes.
+  `{"status":"…", …, "timestamp":"…"}`. See
+  [`/events`](./endpoints/v1/events.md) for per-topic shapes and the
+  scope each topic requires.
 - Multi-line `data:` is permitted by SSE; events arrive as a single
   line per event.
 - An SSE comment (line starting with `:`) arrives every 30 seconds
@@ -189,14 +190,16 @@ The `topics` query parameter is comma-separated. Repeating it
 
 ### Audio fan-out is on the same stream
 
-The widget scope's audio fan-out — recording state, raw PCM samples,
-frequency bands, partial / final STT — is just additional topics on
-the same SSE stream. There is no separate UDP socket. See
-[widget.md](./scopes/widget.md) for the audio-specific topic payloads.
+The audio fan-out — recording state, frequency bands, partial /
+final STT — is just additional topics on the same SSE stream. There
+is no separate UDP socket. Raw PCM is not exposed; the daemon
+computes the frequency bands and broadcasts only those. See
+[`/events`](./endpoints/v1/events.md) for the audio-specific topic
+payloads.
 
-For binary efficiency, audio sample payloads use base64 inside the
-JSON `data` field (`samples_b64`, `bands_b64`). At ~30 KB/s the
-encoding overhead (~33 %) is negligible on a local socket.
+For binary efficiency, frequency-band payloads use base64 inside the
+JSON `data` field (`bands_b64`). The encoding overhead (~33 %) is
+negligible on a local socket.
 
 ### Slow consumers
 
@@ -218,7 +221,7 @@ which case the last frame the client receives identifies why:
 - `event: revoked` / `data: { "reason": "..." }` — the session is no
   longer accepted. Reasons include `expired`, `exe_changed` (the
   client's binary identity changed, see
-  [auth.md](./auth.md#widget-anti-replacement)), and any other
+  [auth.md](./auth.md#anti-replacement)), and any other
   revocation cause. The client must re-issue `/auth/request` before
   reopening the stream.
 
@@ -272,13 +275,13 @@ The minimal recipe for a fresh client of any scope:
    curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt-http.sock" \
         -X POST http://stt.local/auth/request \
         -H 'Content-Type: application/json' \
-        -d '{"app_name":"My App","scope":"client","version":"0.1"}'
+        -d '{"app_name":"My App","scopes":["transcribe","status"],"version":"0.1"}'
    ```
    ```python
    import requests_unixsocket
    s = requests_unixsocket.Session()
    r = s.post("http+unix://%2Frun%2Fuser%2F1000%2Fstt%2Fsuper-stt-http.sock/auth/request",
-              json={"app_name": "My App", "scope": "client", "version": "0.1"})
+              json={"app_name": "My App", "scopes": ["transcribe", "status"], "version": "0.1"})
    token = r.json()["session_token"]
    ```
    ```javascript

@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Super STT · Models — redesign mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ════════════════════════════════════════════════════════════════════
+   COSMIC-flavoured design tokens (dark, Pop!_OS amber accent)
+   ════════════════════════════════════════════════════════════════════ */
+:root{
+  --bg:#161519;
+  --bg-2:#1c1b20;
+  --window:#1f1e23;
+  --surface:#27262c;
+  --surface-2:#2d2c33;
+  --surface-hi:#34333b;
+  --border:rgba(255,255,255,.085);
+  --border-2:rgba(255,255,255,.14);
+  --divider:rgba(255,255,255,.07);
+
+  --text:#ecebef;
+  --muted:rgba(236,235,239,.60);
+  --faint:rgba(236,235,239,.40);
+
+  --accent:#ff7e33;
+  --accent-2:#ff9a5c;
+  --accent-ink:#1a0f06;
+  --accent-soft:rgba(255,126,51,.15);
+  --accent-edge:rgba(255,126,51,.42);
+
+  --green:#5ec98a;  --green-soft:rgba(94,201,138,.14);
+  --yellow:#e7b649; --yellow-soft:rgba(231,182,73,.14);
+  --red:#e8645f;    --red-soft:rgba(232,100,95,.14);
+  --cloud:#8fb8e6;
+
+  --r-s:8px; --r-m:12px; --r-l:16px; --r-pill:999px;
+  --sp-xxs:4px; --sp-xs:8px; --sp-s:12px; --sp-m:16px; --sp-l:24px; --sp-xl:32px;
+
+  --shadow-card:0 1px 4px rgba(0,0,0,.28);
+  --shadow-pop:0 18px 50px -12px rgba(0,0,0,.6), 0 4px 14px rgba(0,0,0,.35);
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  font-family:"Fira Sans",sans-serif;
+  background:
+    radial-gradient(1100px 520px at 78% -8%, rgba(255,126,51,.10), transparent 60%),
+    radial-gradient(900px 600px at 8% 110%, rgba(120,140,255,.06), transparent 55%),
+    var(--bg);
+  color:var(--text);
+  -webkit-font-smoothing:antialiased;
+  display:flex; align-items:center; justify-content:center;
+  padding:34px 22px;
+  min-height:100vh;
+}
+.mono{font-family:"Fira Code",monospace;font-feature-settings:"ss01"}
+
+/* faint grain overlay */
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:.025;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ════════════════════════════ Window chrome ════════════════════════ */
+.window{
+  width:min(1240px,100%);
+  height:min(860px,calc(100vh - 64px));
+  background:var(--window);
+  border:1px solid var(--border);
+  border-radius:18px;
+  box-shadow:0 40px 120px -30px rgba(0,0,0,.75), 0 0 0 1px rgba(0,0,0,.4);
+  display:flex; flex-direction:column; overflow:hidden;
+  position:relative;
+}
+.titlebar{
+  height:46px; flex:0 0 46px;
+  display:flex; align-items:center; gap:10px;
+  padding:0 16px;
+  background:linear-gradient(var(--bg-2),var(--window));
+  border-bottom:1px solid var(--divider);
+}
+.lights{display:flex;gap:8px}
+.lights i{width:12px;height:12px;border-radius:50%;display:block}
+.lights i:nth-child(1){background:#ef6b5e}
+.lights i:nth-child(2){background:#f4be4f}
+.lights i:nth-child(3){background:#62c554}
+.titlebar .ttl{font-size:13px;color:var(--muted);font-weight:500;letter-spacing:.2px}
+.titlebar .spacer{flex:1}
+.demo-controls{display:flex;align-items:center;gap:8px}
+.demo-btn{
+  font:inherit;font-size:11.5px;font-weight:500;color:var(--muted);
+  background:var(--surface);border:1px solid var(--border);
+  padding:5px 10px;border-radius:var(--r-pill);cursor:pointer;display:flex;gap:6px;align-items:center;
+  transition:.18s var(--ease);
+}
+.demo-btn:hover{color:var(--text);border-color:var(--border-2)}
+.demo-btn.on{color:var(--accent-2);border-color:var(--accent-edge);background:var(--accent-soft)}
+.demo-btn .dotled{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.demo-btn.off .dotled{background:var(--faint)}
+
+.body{flex:1;display:flex;min-height:0}
+
+/* ════════════════════════════ Nav rail ════════════════════════════ */
+.nav{
+  width:208px;flex:0 0 208px;
+  background:var(--bg-2);
+  border-right:1px solid var(--divider);
+  padding:14px 10px;display:flex;flex-direction:column;gap:2px;
+}
+.nav .brand{
+  display:flex;align-items:center;gap:10px;padding:8px 10px 16px;
+}
+.nav .brand .logo{
+  width:30px;height:30px;border-radius:9px;display:grid;place-items:center;
+  background:linear-gradient(140deg,var(--accent),#ff5f7a);
+  box-shadow:0 4px 12px rgba(255,126,51,.35);
+  color:#fff;
+}
+.nav .brand b{font-size:14.5px;font-weight:700;letter-spacing:.2px}
+.nav .brand span{display:block;font-size:10.5px;color:var(--faint);font-weight:500;margin-top:-1px}
+.navitem{
+  display:flex;align-items:center;gap:11px;
+  padding:9px 11px;border-radius:9px;cursor:pointer;
+  color:var(--muted);font-size:13px;font-weight:500;
+  border:1px solid transparent;transition:.16s var(--ease);
+}
+.navitem svg{width:17px;height:17px;opacity:.85;flex:0 0 17px}
+.navitem:hover{background:var(--surface);color:var(--text)}
+.navitem.active{
+  background:var(--accent-soft);color:var(--accent-2);
+  border-color:var(--accent-edge);
+}
+.navitem.active svg{opacity:1}
+.nav .sep{flex:1}
+.nav .footversion{font-size:10.5px;color:var(--faint);padding:8px 11px}
+
+/* ════════════════════════════ Main area ════════════════════════════ */
+.main-wrap{flex:1;min-width:0;position:relative;display:flex;flex-direction:column}
+.main{flex:1;min-height:0;display:flex;flex-direction:column;padding:22px 26px 0;overflow:hidden}
+
+/* page header */
+.page-head{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.page-head h1{font-size:23px;font-weight:700;letter-spacing:-.2px;margin:0;flex:1}
+.gpu-meter{
+  display:flex;align-items:center;gap:10px;
+  background:var(--surface);border:1px solid var(--border);
+  padding:7px 12px;border-radius:var(--r-pill);
+  font-size:11.5px;color:var(--muted);
+}
+.gpu-meter b{color:var(--text);font-weight:600}
+.gpu-bar{width:60px;height:6px;border-radius:999px;background:rgba(255,255,255,.10);overflow:hidden}
+.gpu-bar i{display:block;height:100%;width:13%;background:linear-gradient(90deg,var(--green),#7fe0a6);border-radius:999px}
+.status-dot{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);
+  background:var(--surface);border:1px solid var(--border);padding:7px 12px;border-radius:var(--r-pill)}
+.status-dot .d{width:11px;height:11px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-soft)}
+.status-dot.gray .d{background:var(--faint);box-shadow:0 0 0 4px rgba(255,255,255,.06)}
+.status-dot.gray{color:var(--faint)}
+
+/* active backend card */
+.active-card{
+  background:linear-gradient(180deg,rgba(255,126,51,.05),transparent 60%),var(--surface);
+  border:1px solid var(--accent-edge);
+  border-radius:var(--r-m);
+  padding:16px;
+  box-shadow:var(--shadow-card), 0 0 0 3px rgba(255,126,51,.05);
+  margin-bottom:16px;
+}
+.bk-head{display:flex;align-items:center;gap:13px}
+.tile{
+  width:42px;height:42px;flex:0 0 42px;border-radius:10px;display:grid;place-items:center;
+  background:var(--accent-soft);color:var(--accent-2);
+}
+.tile.neutral{background:rgba(255,255,255,.06);color:var(--muted)}
+.bk-id{flex:1;min-width:0}
+.bk-id .nm{font-size:16px;font-weight:600;display:flex;align-items:center;gap:9px}
+.bk-id .src{font-size:11.5px;color:var(--muted);margin-top:2px}
+.bk-actions{display:flex;gap:8px;align-items:center}
+
+/* chips */
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.chip{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:4px 9px;border-radius:var(--r-pill);
+  font-size:11px;font-weight:500;
+  background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--muted);
+}
+.chip svg{width:13px;height:13px}
+.chip.cloud{color:#9dc0f0;border-color:rgba(157,192,240,.3);background:rgba(157,192,240,.10)}
+.chip.gpu{color:#8fdcb0;border-color:rgba(143,220,176,.28);background:rgba(143,220,176,.10)}
+.chip.cpu{color:#cdb5e8;border-color:rgba(205,181,232,.28);background:rgba(205,181,232,.10)}
+.chip.size{color:var(--muted)}
+
+/* launch row (model + device picker) */
+.launch{
+  display:flex;gap:10px;align-items:center;margin-top:14px;
+  padding-top:14px;border-top:1px solid var(--divider);
+}
+.field{
+  position:relative;flex:1;
+}
+.select{
+  appearance:none;width:100%;font:inherit;font-size:13px;color:var(--text);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-s);
+  padding:9px 32px 9px 12px;cursor:pointer;transition:.16s var(--ease);
+}
+.select:hover{border-color:var(--border-2)}
+.field::after{content:"";position:absolute;right:12px;top:50%;width:8px;height:8px;
+  border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);
+  transform:translateY(-65%) rotate(45deg);pointer-events:none}
+.field .vram-hint{position:absolute;right:34px;top:50%;transform:translateY(-50%);
+  font-size:10.5px;color:var(--faint);pointer-events:none}
+
+/* buttons */
+.btn{
+  font:inherit;font-size:13px;font-weight:500;cursor:pointer;
+  padding:9px 16px;border-radius:var(--r-s);border:1px solid var(--border);
+  background:var(--surface-2);color:var(--text);transition:.16s var(--ease);
+  display:inline-flex;align-items:center;gap:7px;white-space:nowrap;
+}
+.btn:hover{background:var(--surface-hi);border-color:var(--border-2)}
+.btn.suggested{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+.btn.suggested:hover{background:var(--accent-2)}
+.btn.suggested:disabled{background:rgba(255,126,51,.25);color:rgba(26,15,6,.5);cursor:not-allowed}
+.btn.text{background:transparent;border-color:transparent;color:var(--muted);padding:9px 10px}
+.btn.text:hover{color:var(--text);background:var(--surface)}
+.btn.danger{color:var(--red);background:transparent;border-color:transparent}
+.btn.danger:hover{background:var(--red-soft)}
+.btn.sm{padding:6px 12px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* tabs */
+.tabbar{display:flex;gap:4px;margin:2px 0 14px;border-bottom:1px solid var(--divider)}
+.tab{
+  font:inherit;font-size:13.5px;font-weight:500;color:var(--muted);
+  background:none;border:none;cursor:pointer;padding:10px 14px;position:relative;
+  border-radius:8px 8px 0 0;transition:.16s var(--ease);
+}
+.tab:hover{color:var(--text);background:var(--surface)}
+.tab.active{color:var(--accent-2)}
+.tab.active::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;
+  background:var(--accent);border-radius:2px}
+.tab .badge{font-size:10.5px;color:var(--faint);margin-left:6px;font-weight:500}
+
+/* ──────────── search + filter toolbar (the headline improvement) ──── */
+.toolbar{margin-bottom:14px;display:flex;flex-direction:column;gap:11px}
+.searchrow{display:flex;gap:10px;align-items:center}
+.searchbox{
+  flex:1;display:flex;align-items:center;gap:10px;
+  background:var(--surface-2);border:1px solid var(--border);
+  border-radius:10px;padding:0 12px;height:42px;transition:.16s var(--ease);
+}
+.searchbox:focus-within{border-color:var(--accent-edge);box-shadow:0 0 0 3px var(--accent-soft)}
+.searchbox svg.s{width:17px;height:17px;color:var(--muted);flex:0 0 17px}
+.searchbox input{
+  flex:1;background:none;border:none;outline:none;font:inherit;font-size:13.5px;color:var(--text);height:100%;
+}
+.searchbox input::placeholder{color:var(--faint)}
+.searchbox .kbd{font-size:10.5px;color:var(--faint);border:1px solid var(--border);border-radius:5px;
+  padding:1px 6px;font-family:"Fira Code",monospace}
+.searchbox .clear{display:none;cursor:pointer;color:var(--muted);width:18px;height:18px;align-items:center;justify-content:center;border-radius:50%}
+.searchbox .clear:hover{background:rgba(255,255,255,.10);color:var(--text)}
+.searchbox.has-text .clear{display:flex}
+.searchbox.has-text .kbd{display:none}
+
+.count{font-size:12px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.count b{color:var(--text);font-weight:600}
+
+.filterrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fgroup{display:flex;gap:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-pill);padding:3px}
+.fchip{
+  font:inherit;font-size:11.5px;font-weight:500;color:var(--muted);
+  background:none;border:none;cursor:pointer;padding:5px 12px;border-radius:var(--r-pill);transition:.14s var(--ease);
+  display:flex;align-items:center;gap:6px;
+}
+.fchip:hover{color:var(--text)}
+.fchip.active{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.fgroup.neutral .fchip.active{background:var(--surface-hi);color:var(--text)}
+.flabel{font-size:11px;color:var(--faint);margin-right:2px;font-weight:500;text-transform:uppercase;letter-spacing:.4px}
+.toggle-chip{
+  font:inherit;font-size:11.5px;font-weight:500;color:var(--muted);
+  background:var(--surface);border:1px solid var(--border);cursor:pointer;
+  padding:6px 12px;border-radius:var(--r-pill);display:flex;align-items:center;gap:7px;transition:.14s var(--ease);
+}
+.toggle-chip:hover{color:var(--text);border-color:var(--border-2)}
+.toggle-chip.on{color:var(--text);border-color:var(--border-2)}
+.toggle-chip .sw{width:26px;height:15px;border-radius:999px;background:rgba(255,255,255,.14);position:relative;transition:.16s var(--ease)}
+.toggle-chip .sw::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:#cfcfd6;transition:.16s var(--ease)}
+.toggle-chip.on .sw{background:var(--accent)}
+.toggle-chip.on .sw::after{left:13px;background:#fff}
+.spacer{flex:1}
+.clearfilters{font-size:11.5px;color:var(--accent-2);cursor:pointer;background:none;border:none;font:inherit;font-weight:500;display:none}
+.clearfilters.show{display:inline}
+
+/* scroll list */
+.scroll{
+  flex:1;min-height:0;overflow-y:auto;
+  border:1px solid var(--divider);border-radius:var(--r-m);
+  padding:14px;margin-bottom:0;
+}
+.scroll::-webkit-scrollbar{width:10px}
+.scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:999px;border:3px solid var(--window)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* backend card (download/installed) */
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r-m);
+  padding:14px;box-shadow:var(--shadow-card);transition:.18s var(--ease);
+  animation:rise .5s var(--ease) both;
+}
+.card:hover{border-color:var(--border-2);transform:translateY(-2px);box-shadow:0 8px 22px -8px rgba(0,0,0,.5)}
+.card.incompatible{opacity:.55;filter:grayscale(.3)}
+.card .desc{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.45}
+.card .models-line{font-size:11px;color:var(--faint);margin-top:8px;font-family:"Fira Code",monospace}
+.card .foot{display:flex;align-items:center;gap:8px;margin-top:13px;padding-top:12px;border-top:1px solid var(--divider)}
+.card .foot .spacer{flex:1}
+.update-pill{font-size:10.5px;font-weight:600;color:var(--yellow);background:var(--yellow-soft);
+  border:1px solid rgba(231,182,73,.3);padding:3px 8px;border-radius:var(--r-pill);display:inline-flex;gap:5px;align-items:center}
+.notcompat{font-size:11px;color:var(--red);display:flex;gap:6px;align-items:center}
+mark{background:rgba(255,126,51,.30);color:var(--accent-2);border-radius:3px;padding:0 1px}
+
+/* overflow menu */
+.ovf{position:relative}
+.ovf-btn{width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);
+  color:var(--muted);cursor:pointer;display:grid;place-items:center;transition:.16s var(--ease)}
+.ovf-btn:hover{color:var(--text);border-color:var(--border-2)}
+.ovf-menu{position:absolute;right:0;bottom:calc(100% + 6px);background:var(--surface-hi);
+  border:1px solid var(--border-2);border-radius:10px;box-shadow:var(--shadow-pop);padding:5px;min-width:150px;
+  display:none;z-index:20}
+.ovf-menu.open{display:block;animation:rise .14s var(--ease) both}
+.ovf-menu button{display:flex;width:100%;gap:9px;align-items:center;font:inherit;font-size:12.5px;color:var(--text);
+  background:none;border:none;cursor:pointer;padding:8px 10px;border-radius:7px;text-align:left}
+.ovf-menu button:hover{background:rgba(255,255,255,.07)}
+.ovf-menu button.danger{color:var(--red)}
+.ovf-menu .msep{height:1px;background:var(--divider);margin:4px 2px}
+
+/* empty state */
+.empty{display:none;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:46px 20px;color:var(--muted);grid-column:1/-1}
+.empty.show{display:flex}
+.empty svg{width:40px;height:40px;color:var(--faint);margin-bottom:14px}
+.empty h4{margin:0 0 6px;font-size:15px;color:var(--text);font-weight:600}
+.empty p{margin:0 0 16px;font-size:12.5px;max-width:340px;line-height:1.5}
+
+/* ════════════════════════════ Right sheet ════════════════════════════ */
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.42);opacity:0;pointer-events:none;
+  transition:.28s var(--ease);z-index:40;backdrop-filter:blur(1.5px)}
+.scrim.show{opacity:1;pointer-events:auto}
+.sheet{
+  position:absolute;top:0;right:0;bottom:0;width:430px;max-width:88%;
+  background:var(--bg-2);border-left:1px solid var(--border-2);
+  box-shadow:var(--shadow-pop);
+  transform:translateX(102%);transition:transform .32s var(--ease);
+  z-index:50;display:flex;flex-direction:column;
+}
+.sheet.open{transform:translateX(0)}
+.sheet-head{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--divider)}
+.sheet-head .tile{width:38px;height:38px;flex:0 0 38px}
+.sheet-head h3{margin:0;font-size:16px;font-weight:600}
+.sheet-head p{margin:1px 0 0;font-size:11.5px;color:var(--muted)}
+.sheet-head .x{margin-left:auto;width:32px;height:32px;border-radius:8px;border:1px solid var(--border);
+  background:var(--surface);color:var(--muted);cursor:pointer;display:grid;place-items:center;transition:.16s var(--ease)}
+.sheet-head .x:hover{color:var(--text);border-color:var(--border-2);background:var(--surface-hi)}
+.sheet-body{flex:1;overflow-y:auto;padding:18px 20px;display:flex;flex-direction:column;gap:18px}
+.sheet-body::-webkit-scrollbar{width:10px}
+.sheet-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:999px;border:3px solid var(--bg-2)}
+
+.method{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-m);padding:16px}
+.method h4{margin:0 0 3px;font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:9px}
+.method h4 svg{width:16px;height:16px;color:var(--accent-2)}
+.method .sub{font-size:11.5px;color:var(--muted);margin:0 0 13px;line-height:1.5}
+.input{width:100%;font:inherit;font-size:13px;color:var(--text);background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--r-s);padding:10px 12px;transition:.16s var(--ease)}
+.input:focus{outline:none;border-color:var(--accent-edge);box-shadow:0 0 0 3px var(--accent-soft)}
+.input.mono{font-family:"Fira Code",monospace;font-size:12px}
+.method .row2{display:flex;gap:8px;margin-top:10px}
+.method .row2 .input{flex:1}
+
+.notice{display:flex;gap:9px;align-items:flex-start;font-size:11px;color:var(--yellow);
+  background:var(--yellow-soft);border:1px solid rgba(231,182,73,.28);border-radius:var(--r-s);
+  padding:9px 11px;margin-top:11px;line-height:1.45}
+.notice svg{width:15px;height:15px;flex:0 0 15px;margin-top:1px}
+
+.dropzone{border:1.5px dashed var(--border-2);border-radius:var(--r-m);padding:24px 16px;text-align:center;
+  transition:.16s var(--ease);cursor:pointer;background:rgba(255,255,255,.015)}
+.dropzone:hover{border-color:var(--accent-edge);background:var(--accent-soft)}
+.dropzone svg{width:30px;height:30px;color:var(--muted);margin-bottom:9px}
+.dropzone .big{font-size:13px;color:var(--text);font-weight:500}
+.dropzone .small{font-size:11px;color:var(--faint);margin-top:4px}
+.method .hint-list{margin:12px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+.method .hint-list li{font-size:11px;color:var(--muted);display:flex;gap:8px;align-items:flex-start;line-height:1.4}
+.method .hint-list code{font-family:"Fira Code",monospace;font-size:10.5px;background:rgba(255,255,255,.06);
+  padding:1px 5px;border-radius:4px;color:var(--accent-2)}
+.method .hint-list svg{width:13px;height:13px;color:var(--green);flex:0 0 13px;margin-top:2px}
+
+.sheet-note{font-size:10.5px;color:var(--faint);line-height:1.5;display:flex;gap:8px;align-items:flex-start;
+  padding:0 2px}
+.sheet-note svg{width:14px;height:14px;flex:0 0 14px;margin-top:1px;color:var(--muted)}
+
+/* ════════════════════════════ Design notes ════════════════════════════ */
+.note{
+  position:absolute;z-index:30;max-width:230px;
+  background:rgba(20,19,24,.94);border:1px dashed var(--accent-edge);border-radius:10px;
+  padding:9px 11px;font-size:11px;line-height:1.45;color:var(--text);
+  box-shadow:var(--shadow-pop);display:none;backdrop-filter:blur(6px);
+}
+.note b{color:var(--accent-2)}
+.note::before{content:"◆ design note";display:block;font-size:9px;letter-spacing:.6px;
+  color:var(--accent);text-transform:uppercase;margin-bottom:4px;font-weight:600}
+body.notes-on .note{display:block;animation:rise .3s var(--ease) both}
+.note.n1{top:78px;right:36px}
+.note.n2{top:300px;left:236px}
+.note.n3{top:386px;right:470px}
+.note.n4{bottom:120px;left:250px}
+
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.toast{
+  position:absolute;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:var(--surface-hi);border:1px solid var(--border-2);border-radius:var(--r-pill);
+  padding:9px 18px;font-size:12px;color:var(--text);box-shadow:var(--shadow-pop);
+  opacity:0;pointer-events:none;transition:.25s var(--ease);z-index:60;display:flex;gap:9px;align-items:center;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast .d{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+
+/* disconnected dim */
+.window.disconnected .active-card,
+.window.disconnected .scroll,
+.window.disconnected .toolbar{opacity:.5;pointer-events:none;filter:saturate(.5)}
+</style>
+</head>
+<body>
+<div class="window" id="win">
+  <!-- titlebar -->
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="ttl">Super STT — Settings</div>
+    <div class="spacer"></div>
+    <div class="demo-controls">
+      <button class="demo-btn" id="notesToggle" title="Toggle the annotated design rationale">◆ Design notes</button>
+      <button class="demo-btn on" id="daemonToggle" title="Simulate the daemon connection dropping"><span class="dotled"></span><span id="daemonLbl">Daemon connected</span></button>
+    </div>
+  </div>
+
+  <div class="body">
+    <!-- nav rail -->
+    <nav class="nav">
+      <div class="brand">
+        <div class="logo"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg></div>
+        <div><b>Super STT</b><span>v0.1.4-beta.2</span></div>
+      </div>
+      <div class="navitem nav-x" data-name="Connection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>Connection</div>
+      <div class="navitem nav-x" data-name="Customization"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Customization</div>
+      <div class="navitem nav-x" data-name="Recording"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>Recording</div>
+      <div class="navitem nav-x" data-name="Input Simulation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg>Input Simulation</div>
+      <div class="navitem active nav-x" data-name="Models"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4 4 4 0 0 0-2 7 4 4 0 0 0 2 7 4 4 0 0 0 8 0 4 4 0 0 0 2-7 4 4 0 0 0-2-7 4 4 0 0 0-4-4z"/><path d="M12 6v14M8 13h8"/></svg>Models</div>
+      <div class="sep"></div>
+      <div class="navitem nav-x" data-name="About"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>About</div>
+    </nav>
+
+    <!-- main -->
+    <div class="main-wrap">
+      <div class="main">
+        <!-- page header -->
+        <div class="page-head">
+          <h1>Models</h1>
+          <div class="gpu-meter" title="NVIDIA GeForce RTX 4090">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="8" cy="12" r="2"/><circle cx="15" cy="12" r="2"/></svg>
+            <span><b>RTX 4090</b> · 3.2 / 24.0 GiB</span>
+            <span class="gpu-bar"><i></i></span>
+          </div>
+          <div class="status-dot" id="statusDot" title="Model loaded and ready"><span class="d"></span><span id="statusLbl">Ready</span></div>
+        </div>
+
+        <!-- active backend card -->
+        <div class="active-card">
+          <div class="bk-head">
+            <div class="tile"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 0-4 4 4 4 0 0 0-2 7 4 4 0 0 0 2 7 4 4 0 0 0 8 0 4 4 0 0 0 2-7 4 4 0 0 0-2-7 4 4 0 0 0-4-4z"/></svg></div>
+            <div class="bk-id">
+              <div class="nm">OpenAI</div>
+              <div class="src mono">github.com/super-stt/openai</div>
+            </div>
+            <div class="bk-actions">
+              <button class="btn sm" onclick="openSheet('configure')">Configure</button>
+              <button class="btn danger sm">Deselect</button>
+            </div>
+          </div>
+          <div class="chips">
+            <span class="chip cloud"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>Cloud</span>
+            <span class="chip size"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>2 models</span>
+          </div>
+          <!-- launch row: model + device + load, with inline VRAM hint -->
+          <div class="launch">
+            <div class="field" style="flex:2">
+              <select class="select"><option>whisper-1</option><option>gpt-4o-transcribe</option></select>
+            </div>
+            <div class="field" style="flex:1">
+              <select class="select"><option>Cloud (no device)</option></select>
+            </div>
+            <button class="btn suggested">▶ Load model</button>
+          </div>
+        </div>
+
+        <!-- tabs -->
+        <div class="tabbar">
+          <button class="tab" data-tab="installed">Installed<span class="badge">3</span></button>
+          <button class="tab active" data-tab="browse">Browse<span class="badge">available</span></button>
+          <div class="spacer"></div>
+        </div>
+
+        <!-- ───── BROWSE tab ───── -->
+        <div class="tab-panel" id="panel-browse">
+          <div class="toolbar">
+            <div class="searchrow">
+              <div class="searchbox" id="searchbox">
+                <svg class="s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input id="search" type="text" placeholder="Search backends, models, or providers…" autocomplete="off"/>
+                <span class="kbd">/</span>
+                <span class="clear" id="searchClear">✕</span>
+              </div>
+              <button class="btn suggested" onclick="openSheet('add')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add backend</button>
+              <button class="btn sm" title="Refresh registry"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+            </div>
+            <div class="filterrow">
+              <span class="flabel">Runs on</span>
+              <div class="fgroup" data-filter="source">
+                <button class="fchip active" data-val="all">All</button>
+                <button class="fchip" data-val="local">Local</button>
+                <button class="fchip" data-val="cloud">Cloud</button>
+              </div>
+              <span class="flabel" style="margin-left:6px">Format</span>
+              <div class="fgroup neutral" data-filter="format">
+                <button class="fchip active" data-val="all">All</button>
+                <button class="fchip" data-val="wasm">wasm</button>
+                <button class="fchip" data-val="subprocess">subprocess</button>
+              </div>
+              <button class="toggle-chip" id="incompatToggle"><span class="sw"></span>Show incompatible</button>
+              <div class="spacer"></div>
+              <button class="clearfilters" id="clearFilters">Clear filters</button>
+              <span class="count"><b id="resultCount">5</b> <span id="resultTotal">of 5</span></span>
+            </div>
+          </div>
+
+          <div class="scroll">
+            <div class="grid" id="grid">
+
+              <div class="card" data-name="Mistral" data-desc="Voxtral transcription via the Mistral platform API" data-models="voxtral-mini-latest voxtral-small" data-source="cloud" data-format="wasm" data-compat="yes">
+                <div class="bk-head">
+                  <div class="tile neutral"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+                  <div class="bk-id"><div class="nm cardname">Mistral</div><div class="src mono">github.com/super-stt/mistral</div></div>
+                </div>
+                <div class="chips"><span class="chip cloud">☁ Cloud</span></div>
+                <div class="desc">Voxtral transcription via the Mistral platform API. Multilingual, fast, no local compute.</div>
+                <div class="models-line">voxtral-mini-latest · voxtral-small</div>
+                <div class="foot"><span class="chip size">API key required</span><span class="spacer"></span><button class="btn suggested sm">Install</button></div>
+              </div>
+
+              <div class="card" data-name="Voxtral" data-desc="Local Voxtral models running on your own GPU or CPU" data-models="voxtral-mini voxtral-small-3b" data-source="local" data-format="subprocess" data-compat="yes">
+                <div class="bk-head">
+                  <div class="tile neutral"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9h6v6H9z"/></svg></div>
+                  <div class="bk-id"><div class="nm cardname">Voxtral</div><div class="src mono">github.com/super-stt/voxtral</div></div>
+                </div>
+                <div class="chips"><span class="chip gpu">⚡ GPU</span><span class="chip cpu">▣ CPU</span><span class="chip size">~9.4 GiB</span></div>
+                <div class="desc">Run Voxtral locally — audio never leaves your machine. Best with a CUDA GPU.</div>
+                <div class="models-line">voxtral-mini · voxtral-small-3b</div>
+                <div class="foot"><span class="spacer"></span><button class="btn suggested sm">Install</button></div>
+              </div>
+
+              <div class="card" data-name="Whisper" data-desc="OpenAI Whisper running locally on CPU or GPU" data-models="whisper-large-v3 whisper-medium whisper-base" data-source="local" data-format="subprocess" data-compat="yes">
+                <div class="bk-head">
+                  <div class="tile neutral"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h3l3-9 6 18 3-9h3"/></svg></div>
+                  <div class="bk-id"><div class="nm cardname">Whisper</div><div class="src mono">github.com/super-stt/whisper</div></div>
+                </div>
+                <div class="chips"><span class="chip gpu">⚡ GPU</span><span class="chip cpu">▣ CPU</span><span class="chip size">~3.1 GiB</span></div>
+                <div class="desc">The classic. Local Whisper inference with selectable model sizes.</div>
+                <div class="models-line">whisper-large-v3 · whisper-medium · whisper-base</div>
+                <div class="foot"><span class="update-pill">↑ Update 1.2.0</span><span class="spacer"></span><button class="btn suggested sm">Install</button></div>
+              </div>
+
+              <div class="card" data-name="Deepgram" data-desc="Deepgram Nova streaming speech-to-text cloud API" data-models="nova-2 nova-2-general" data-source="cloud" data-format="wasm" data-compat="yes">
+                <div class="bk-head">
+                  <div class="tile neutral"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 12h4l2-7 4 14 3-10 2 5h5"/></svg></div>
+                  <div class="bk-id"><div class="nm cardname">Deepgram</div><div class="src mono">github.com/super-stt/deepgram</div></div>
+                </div>
+                <div class="chips"><span class="chip cloud">☁ Cloud</span></div>
+                <div class="desc">Low-latency streaming transcription with Deepgram Nova. Great for realtime.</div>
+                <div class="models-line">nova-2 · nova-2-general</div>
+                <div class="foot"><span class="chip size">API key required</span><span class="spacer"></span><button class="btn suggested sm">Install</button></div>
+              </div>
+
+              <div class="card incompatible" data-name="Parakeet" data-desc="NVIDIA NeMo Parakeet CUDA-only transcription" data-models="parakeet-tdt-1.1b" data-source="local" data-format="subprocess" data-compat="no" hidden>
+                <div class="bk-head">
+                  <div class="tile neutral"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 2 7v10l10 5 10-5V7L12 2z"/></svg></div>
+                  <div class="bk-id"><div class="nm cardname">Parakeet</div><div class="src mono">github.com/super-stt/parakeet</div></div>
+                </div>
+                <div class="chips"><span class="chip gpu">⚡ GPU</span><span class="chip size">~4.6 GiB</span></div>
+                <div class="desc">NVIDIA NeMo Parakeet. Requires CUDA 12 + compute capability ≥ 8.0.</div>
+                <div class="foot"><span class="notcompat"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>Not compatible · needs CUDA</span><span class="spacer"></span></div>
+              </div>
+
+              <!-- empty state -->
+              <div class="empty" id="emptyState">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <h4>No backends match your search</h4>
+                <p>Try a different term, clear your filters, or add a backend manually from a repository or folder.</p>
+                <div style="display:flex;gap:9px"><button class="btn sm" onclick="resetSearch()">Clear search &amp; filters</button><button class="btn suggested sm" onclick="openSheet('add')">+ Add backend</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ───── INSTALLED tab ───── -->
+        <div class="tab-panel" id="panel-installed" style="display:none">
+          <div class="scroll" style="margin-top:0">
+            <div style="display:flex;flex-direction:column;gap:12px">
+
+              <div class="card" style="animation:none">
+                <div class="bk-head">
+                  <div class="tile neutral"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div>
+                  <div class="bk-id"><div class="nm">Mistral <span class="update-pill">↑ Update 0.4.1</span></div><div class="src mono">github.com/super-stt/mistral</div></div>
+                  <div class="bk-actions">
+                    <span class="chip cloud">☁ Cloud</span>
+                    <button class="btn suggested sm">Activate</button>
+                    <div class="ovf">
+                      <button class="ovf-btn" onclick="toggleOvf(this)"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
+                      <div class="ovf-menu">
+                        <button onclick="openSheet('configure')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82M4.6 9a1.65 1.65 0 0 0 .33 1.82"/></svg>Configure</button>
+                        <button><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg>Update to 0.4.1</button>
+                        <div class="msep"></div>
+                        <button class="danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>Uninstall</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card" style="animation:none">
+                <div class="bk-head">
+                  <div class="tile neutral"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h3l3-9 6 18 3-9h3"/></svg></div>
+                  <div class="bk-id"><div class="nm">Whisper</div><div class="src mono">github.com/super-stt/whisper</div></div>
+                  <div class="bk-actions">
+                    <span class="chip gpu">⚡ GPU</span><span class="chip cpu">▣ CPU</span>
+                    <button class="btn suggested sm">Activate</button>
+                    <div class="ovf">
+                      <button class="ovf-btn" onclick="toggleOvf(this)"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
+                      <div class="ovf-menu">
+                        <button onclick="openSheet('configure')">⚙ Configure</button>
+                        <div class="msep"></div>
+                        <button class="danger">🗑 Uninstall</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p style="font-size:12px;color:var(--faint);text-align:center;padding:6px 0 2px">OpenAI is active — shown in the card above.</p>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /main -->
+
+      <!-- design notes -->
+      <div class="note n1">Live <b>used / total VRAM meter</b> + a 4-state readiness dot give the page a real status at a glance.</div>
+      <div class="note n2">The crowded <b>actions card is gone</b>. Import now lives behind one <b>“Add backend”</b> button → opens the right sheet.</div>
+      <div class="note n3">Search now matches <b>name, description, models &amp; provider</b>, with live count and inline highlight. Low-cardinality filters became <b>one-tap chips</b>, not dropdowns.</div>
+      <div class="note n4">Installed rows: one primary <b>Activate</b>, everything else folded into a <b>⋯ overflow</b>. Updates show as a quiet badge.</div>
+
+      <!-- scrim + right sheet -->
+      <div class="scrim" id="scrim" onclick="closeSheet()"></div>
+
+      <aside class="sheet" id="sheet">
+        <!-- ADD content -->
+        <div class="sheet-content" id="sheet-add">
+          <div class="sheet-head">
+            <div class="tile"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+            <div><h3>Add a backend</h3><p>Install from a source the registry doesn’t list</p></div>
+            <button class="x" onclick="closeSheet()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
+          <div class="sheet-body">
+            <div class="method">
+              <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>From a repository</h4>
+              <p class="sub">Paste a Git repository URL. Super STT resolves the latest release, verifies its manifest, and installs it.</p>
+              <div class="row2">
+                <input class="input mono" type="text" placeholder="https://github.com/owner/backend" />
+                <button class="btn suggested">Install</button>
+              </div>
+              <div class="notice">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <span>Unverified source — only HTTPS protects this download. Install backends you trust.</span>
+              </div>
+            </div>
+
+            <div class="method">
+              <h4><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>From a folder</h4>
+              <p class="sub">Point Super STT at a directory you’ve already built or cloned locally.</p>
+              <div class="dropzone">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <div class="big">Choose a folder…</div>
+                <div class="small">or drop a backend directory here</div>
+              </div>
+              <ul class="hint-list">
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>Must contain a <code>backend.toml</code> manifest</li>
+                <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>A built <code>.wasm</code> component or a <code>subprocess</code> binary</li>
+              </ul>
+            </div>
+
+            <div class="sheet-note">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span>This panel closes automatically when you leave the Models section or if the daemon disconnects. Try the controls in the title bar.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONFIGURE content (bonus: same sheet pattern reused) -->
+        <div class="sheet-content" id="sheet-configure" style="display:none">
+          <div class="sheet-head">
+            <div class="tile"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9z"/></svg></div>
+            <div><h3>OpenAI · Configuration</h3><p>Secrets are stored in your system keyring</p></div>
+            <button class="x" onclick="closeSheet()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
+          <div class="sheet-body">
+            <div class="method">
+              <h4>OpenAI API key <span class="chip" style="margin-left:auto;color:var(--green);border-color:rgba(94,201,138,.3);background:var(--green-soft)">● Configured</span></h4>
+              <p class="sub">Used to authenticate transcription requests to api.openai.com.</p>
+              <div class="row2"><input class="input" type="password" value="sk-••••••••••••••••" /><button class="btn danger">Remove</button></div>
+            </div>
+            <div class="method">
+              <h4>Base URL <span style="font-size:10.5px;color:var(--faint);font-weight:400;margin-left:auto">optional</span></h4>
+              <p class="sub">Override for OpenAI-compatible gateways. Default: <span class="mono" style="color:var(--accent-2)">https://api.openai.com/v1</span></p>
+              <div class="row2"><input class="input mono" type="text" placeholder="https://api.openai.com/v1" /><button class="btn">Save</button></div>
+            </div>
+            <div class="sheet-note">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span>Bonus idea: Configure used to take over the whole page. Reusing this sheet keeps you in context with the backend list behind it.</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <div class="toast" id="toast"><span class="d"></span><span id="toastMsg"></span></div>
+    </div><!-- /main-wrap -->
+  </div><!-- /body -->
+</div>
+
+<script>
+/* ───────────── Sheet open/close ───────────── */
+const sheet=document.getElementById('sheet'), scrim=document.getElementById('scrim'), win=document.getElementById('win');
+function openSheet(which){
+  if(win.classList.contains('disconnected')) return;
+  document.querySelectorAll('.sheet-content').forEach(s=>s.style.display='none');
+  document.getElementById('sheet-'+which).style.display='block';
+  sheet.classList.add('open'); scrim.classList.add('show');
+}
+function closeSheet(){ sheet.classList.remove('open'); scrim.classList.remove('show'); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeSheet(); });
+
+/* ───────────── Nav: leaving Models closes the sheet ───────────── */
+document.querySelectorAll('.nav-x').forEach(n=>{
+  n.addEventListener('click',()=>{
+    document.querySelectorAll('.navitem').forEach(x=>x.classList.remove('active'));
+    n.classList.add('active');
+    if(n.dataset.name!=='Models' && sheet.classList.contains('open')){
+      closeSheet(); toast('Sheet closed — left the Models section');
+    }
+  });
+});
+
+/* ───────────── Daemon connect / disconnect ───────────── */
+const dt=document.getElementById('daemonToggle'), dl=document.getElementById('daemonLbl');
+const sd=document.getElementById('statusDot'), sl=document.getElementById('statusLbl');
+let connected=true;
+dt.addEventListener('click',()=>{
+  connected=!connected;
+  dt.classList.toggle('off',!connected); dt.classList.toggle('on',connected);
+  dl.textContent=connected?'Daemon connected':'Daemon disconnected';
+  win.classList.toggle('disconnected',!connected);
+  sd.classList.toggle('gray',!connected); sl.textContent=connected?'Ready':'Offline';
+  sd.title=connected?'Model loaded and ready':'Daemon not connected';
+  if(!connected && sheet.classList.contains('open')){ closeSheet(); toast('Sheet closed — daemon disconnected'); }
+});
+
+/* ───────────── Design notes ───────────── */
+document.getElementById('notesToggle').addEventListener('click',function(){
+  document.body.classList.toggle('notes-on'); this.classList.toggle('on');
+});
+
+/* ───────────── Tabs ───────────── */
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const which=t.dataset.tab;
+    document.getElementById('panel-browse').style.display = which==='browse'?'':'none';
+    document.getElementById('panel-installed').style.display = which==='installed'?'':'none';
+  });
+});
+
+/* ───────────── Overflow menus ───────────── */
+function toggleOvf(btn){
+  const m=btn.nextElementSibling, isOpen=m.classList.contains('open');
+  document.querySelectorAll('.ovf-menu').forEach(x=>x.classList.remove('open'));
+  if(!isOpen) m.classList.add('open');
+}
+document.addEventListener('click',e=>{ if(!e.target.closest('.ovf')) document.querySelectorAll('.ovf-menu').forEach(x=>x.classList.remove('open')); });
+
+/* ───────────── Search + filters (the headline) ───────────── */
+const search=document.getElementById('search'), sbox=document.getElementById('searchbox'),
+      sclear=document.getElementById('searchClear'), grid=document.getElementById('grid'),
+      empty=document.getElementById('emptyState'), countEl=document.getElementById('resultCount'),
+      totalEl=document.getElementById('resultTotal'),
+      clearFiltersBtn=document.getElementById('clearFilters'), incompat=document.getElementById('incompatToggle');
+let filters={source:'all',format:'all',incompat:false};
+
+document.querySelectorAll('.fgroup').forEach(g=>{
+  g.querySelectorAll('.fchip').forEach(c=>{
+    c.addEventListener('click',()=>{
+      g.querySelectorAll('.fchip').forEach(x=>x.classList.remove('active'));
+      c.classList.add('active'); filters[g.dataset.filter]=c.dataset.val; apply();
+    });
+  });
+});
+incompat.addEventListener('click',()=>{ filters.incompat=!filters.incompat; incompat.classList.toggle('on',filters.incompat); apply(); });
+search.addEventListener('input',()=>{ sbox.classList.toggle('has-text',search.value.length>0); apply(); });
+sclear.addEventListener('click',()=>{ search.value=''; sbox.classList.remove('has-text'); apply(); search.focus(); });
+clearFiltersBtn.addEventListener('click',resetSearch);
+document.addEventListener('keydown',e=>{ if(e.key==='/' && document.activeElement!==search){ e.preventDefault(); search.focus(); } });
+
+function resetSearch(){
+  search.value=''; sbox.classList.remove('has-text');
+  filters={source:'all',format:'all',incompat:false};
+  document.querySelectorAll('.fgroup').forEach(g=>g.querySelectorAll('.fchip').forEach((c,i)=>c.classList.toggle('active',i===0)));
+  incompat.classList.remove('on'); apply();
+}
+function hl(el,q){
+  const nameEl=el.querySelector('.cardname'); if(!nameEl) return;
+  const raw=nameEl.getAttribute('data-raw')||nameEl.textContent;
+  nameEl.setAttribute('data-raw',raw);
+  if(!q){ nameEl.textContent=raw; return; }
+  const i=raw.toLowerCase().indexOf(q.toLowerCase());
+  nameEl.innerHTML = i<0 ? raw : raw.slice(0,i)+'<mark>'+raw.slice(i,i+q.length)+'</mark>'+raw.slice(i+q.length);
+}
+function apply(){
+  const q=search.value.trim().toLowerCase();
+  const cards=[...grid.querySelectorAll('.card')];
+  let shown=0;
+  cards.forEach(c=>{
+    const hay=(c.dataset.name+' '+c.dataset.desc+' '+c.dataset.models+' '+c.dataset.source).toLowerCase();
+    let ok=true;
+    if(q && !hay.includes(q)) ok=false;
+    if(filters.source!=='all' && c.dataset.source!==filters.source) ok=false;
+    if(filters.format!=='all' && c.dataset.format!==filters.format) ok=false;
+    if(c.dataset.compat==='no' && !filters.incompat) ok=false;
+    c.hidden=!ok; if(ok){ shown++; hl(c,q); }
+  });
+  const total = cards.filter(c=>!(c.dataset.compat==='no'&&!filters.incompat)).length;
+  countEl.textContent=shown;
+  totalEl.textContent='of '+total;
+  empty.classList.toggle('show',shown===0);
+  const dirty = q || filters.source!=='all' || filters.format!=='all' || filters.incompat;
+  clearFiltersBtn.classList.toggle('show',!!dirty);
+  // stagger animation
+  let d=0; grid.querySelectorAll('.card:not([hidden])').forEach(c=>{ c.style.animationDelay=(d++*40)+'ms'; });
+}
+
+/* ───────────── Toast ───────────── */
+let toastT;
+function toast(msg){
+  const t=document.getElementById('toast'); document.getElementById('toastMsg').textContent=msg;
+  t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600);
+}
+
+apply();
+</script>
+</body>
+</html>

@@ -1,5 +1,11 @@
 # `POST /transcribe`
 
+> **Realtime models** — models with `realtime = true` in their backend
+> configuration — are driven over
+> [`GET /v1/transcribe/realtime`](../../backend/contract.md#consumer-facing-endpoint)
+> (a WebSocket endpoint) rather than this route. `POST /v1/transcribe` is for
+> non-realtime models only.
+
 Start a transcription. The same endpoint covers four use cases,
 dispatched on the request body:
 
@@ -15,9 +21,9 @@ To stop an in-flight daemon-mic capture, see
 
 ## Auth
 
-- **Required scope:** `client` (also satisfied by `settings`).
+- **Required scope:** `transcribe`.
 - `Authorization: Bearer <session_token>` is required.
-- Widget tokens get `403 scope_denied`.
+- Tokens without the `transcribe` scope get `403 scope_denied`.
 
 ## `POST /transcribe`
 
@@ -96,7 +102,7 @@ recording use [`POST /transcribe/stop`](./transcribe/stop.md).
 **`POST /transcribe` never doubles as a stop signal.** Issuing it
 while a daemon-mic capture is already running returns
 `409 recording_in_progress`. To implement toggle behavior, clients
-should consult `is_recording` on [`GET /status`](./status.md) and
+should consult `busy` on [`GET /status`](./status.md) and
 route the request to [`POST /transcribe/stop`](./transcribe/stop.md)
 when a capture is already in progress.
 
@@ -106,8 +112,8 @@ when a capture is already in progress.
 |------|------------------------------------|------------------------------------------------------------------------|
 | 400  | `stream_realtime_with_audio_data`  | Request carried both `audio_data` and `stream_realtime: true`           |
 | 401  | `invalid_session`                  | Token unknown / expired / `exe_changed` — re-auth and retry             |
-| 403  | `scope_denied`                     | Widget token tried to call this endpoint                                |
-| 409  | `recording_in_progress`            | A daemon-mic capture was already running; check `is_recording` on `/status` and call `/transcribe/stop` instead |
+| 403  | `scope_denied`                     | Token lacks the `transcribe` scope                                      |
+| 409  | `recording_in_progress`            | A daemon-mic capture was already running; check `busy` on `/status` and call `/transcribe/stop` instead |
 | 429  | `rate_limited`                     | Per-client rate limit hit; back off and retry                           |
 | 503  | `connection_rejected`              | Server refused the connection                                           |
 

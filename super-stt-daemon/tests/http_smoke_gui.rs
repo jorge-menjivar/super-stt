@@ -32,7 +32,7 @@ use tokio::time::sleep;
 
 const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 const APP_NAME: &str = "super-stt gui smoke test";
-const SCOPE: &str = "client";
+const SCOPES: &[&str] = &["transcribe", "status"];
 
 fn skip_if_no_display() -> Option<&'static str> {
     let has_x11 = std::env::var_os("DISPLAY").is_some();
@@ -181,7 +181,7 @@ async fn auth_request_dismissed_returns_user_dismissed() {
     let socket_for_task = http_socket.clone();
     let auth_task =
         tokio::spawn(
-            async move { http_client::auth_request(socket_for_task, APP_NAME, SCOPE).await },
+            async move { http_client::auth_request(socket_for_task, APP_NAME, SCOPES).await },
         );
 
     // Poll for the consent helper subprocess to appear.

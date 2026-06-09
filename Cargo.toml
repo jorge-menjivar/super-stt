@@ -8,6 +8,16 @@
         "super-stt-daemon",
         "super-stt-shared",
     ]
+    # WASM backends build for wasm32-wasip2, not the host target — keep them
+    # out of the default workspace build. Built via `just build-openai-backend`.
+    exclude = [
+        "backends/deepgram",
+        "backends/mistral",
+        "backends/openai",
+        "backends/voxtral",
+        "backends/whisper",
+        "registry/scripts/build_index",
+    ]
 
     [workspace.package]
         version = "0.1.4-beta.2"
@@ -16,13 +26,6 @@
 
     [workspace.dependencies]
         anyhow = "1.0.100"
-        # Daemon specific
-        byteorder = "1.5"
-        # Shared dependencies with common versions
-        # Candle ML framework (for daemon)
-        candle-core = { git = "https://github.com/huggingface/candle.git", branch = "main" }
-        candle-nn = { git = "https://github.com/huggingface/candle.git", branch = "main" }
-        candle-transformers = { git = "https://github.com/huggingface/candle.git", branch = "main" }
         chrono = { version = "0.4", features = ["serde"] }
         clap = { version = "4.5.54", features = ["cargo", "derive"] }
         cpal = "0.17.3"
@@ -67,17 +70,12 @@
         ] }
         rubato = "0.16"
         rust-embed = "8.11.0"
-        rustfft = "6.4.1"
         serde = { version = "1.0.219", features = ["derive"] }
         serde_json = "1.0.149"
         spectrum-analyzer = "1.7.0"
         strum = { version = "0.28.0", features = ["derive"] }
         strum_macros = "0.27"
-        symphonia = { version = "0.5", features = ["all"] }
-        tekken-rs = "0.1.1"
         thiserror = "2.0"
-        # Tokenizers (for daemon)
-        tokenizers = "0.22.2"
         tokio = { version = "1.49.0", features = [
             "full",
             "macros",

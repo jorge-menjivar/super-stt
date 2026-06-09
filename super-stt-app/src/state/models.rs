@@ -38,7 +38,6 @@ pub enum Page {
     Recording,
     InputSimulation,
     Models,
-    OnlineModels,
 }
 
 /// The context page to display in the context drawer
@@ -46,7 +45,25 @@ pub enum Page {
 pub enum ContextPage {
     #[default]
     About,
-    ModelSelection,
+    /// Right-side sheet for adding a backend from a Git repo URL or a local
+    /// directory. Scoped to the Models page — it closes on navigation away or
+    /// daemon disconnect (see `AppModel::context_drawer`).
+    AddBackend,
+    /// Right-side sheet for editing the active/selected backend's secrets and
+    /// options. Reuses the drawer instead of a full-page takeover so the
+    /// backend list stays visible behind it. The backend is identified by
+    /// `AppModel::configure_backend`; also Models-scoped.
+    ConfigureBackend,
+}
+
+/// Which tab of the Models page is active.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum ModelsTab {
+    /// Backends already installed and discovered by the daemon.
+    #[default]
+    Installed,
+    /// Official backends the user can install.
+    Download,
 }
 
 /// Menu actions

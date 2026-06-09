@@ -23,6 +23,7 @@ pub enum DaemonConnectionState {
 pub enum IsOpen {
     None,
     VisualizationTheme,
+    WorkingAnimation,
     VisualizationColors,
     AppletSettings,
 }

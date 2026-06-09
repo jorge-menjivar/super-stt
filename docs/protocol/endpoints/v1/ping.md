@@ -9,8 +9,7 @@ a popup on failure), prefer [`GET /auth/status`](./auth/status.md)
 
 ## Auth
 
-- **Required scope:** any authenticated (`client`, `settings`, or
-  `widget`).
+- **Required scope:** any authenticated (any valid token, regardless of scopes).
 - `Authorization: Bearer <session_token>` is required.
 
 ## `GET /ping`

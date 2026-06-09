@@ -36,7 +36,7 @@ use tokio::time::sleep;
 
 const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 const APP_NAME: &str = "super-stt full smoke test";
-const SCOPE: &str = "client";
+const SCOPES: &[&str] = &["transcribe", "status"];
 const AUTO_APPROVE_MS: u64 = 5_000;
 
 fn skip_if_no_display() -> Option<&'static str> {
@@ -187,7 +187,7 @@ async fn auth_request_real_helper_returns_working_token() {
     let started = Instant::now();
     let auth = tokio::time::timeout(
         Duration::from_secs(30),
-        http_client::auth_request(http_socket.clone(), APP_NAME, SCOPE),
+        http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES),
     )
     .await
     .expect("auth_request did not finish within 30s")
@@ -202,7 +202,11 @@ async fn auth_request_real_helper_returns_working_token() {
         !auth.session_token.is_empty(),
         "session token should not be empty"
     );
-    assert_eq!(auth.scope, SCOPE);
+    assert!(
+        SCOPES.iter().all(|s| auth.scopes.iter().any(|g| g.as_str() == *s)),
+        "granted scopes {:?} should cover requested {SCOPES:?}",
+        auth.scopes
+    );
 
     let token = auth.session_token;
 

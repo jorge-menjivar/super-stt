@@ -3,7 +3,7 @@ use cosmic::{iced::window, widget::segmented_button::Entity};
 
 use crate::models::{
     state::{IsOpen, RecordingState},
-    theme::{VisualizationColor, VisualizationTheme},
+    theme::{VisualizationColor, VisualizationTheme, WorkingAnimationTheme},
 };
 
 #[derive(Debug, Clone)]
@@ -25,12 +25,10 @@ pub enum Message {
         sample_rate: f32,
         total_energy: f32,
     },
-    /// `audio_samples` event — raw PCM for in-applet analysis.
-    WidgetAudioSamples {
-        samples: Vec<f32>,
-        sample_rate: f32,
-        channels: u16,
-    },
+    /// `transcribing_started` event — the daemon began decoding captured audio.
+    WidgetTranscribingStarted,
+    /// `transcribing_stopped` event — decode + typing finished; cycle is idle.
+    WidgetTranscribingStopped,
     /// `revoked` event — daemon dropped the session. Reason is the
     /// value of the SSE event's `reason` field (e.g. `"exe_changed"`).
     WidgetRevoked(String),
@@ -59,10 +57,14 @@ pub enum Message {
     LaunchApp,
     RevealerToggle(IsOpen),
     SetVisualizationTheme(VisualizationTheme),
+    /// Pick the working/transcribing animation style.
+    SetWorkingAnimation(WorkingAnimationTheme),
     SetAppletWidth(u32),
     SetShowIcon(bool),
     SetIconAlignmentEntity(Entity),
     SetShowVisualizations(bool),
     SetVisualizationColor(VisualizationColor, bool), // Color and is_dark flag
     SetColorThemeEntity(Entity),                     // Theme selector for color configuration
+    /// Animation frame tick while transcribing (drives the working animation).
+    WorkingAnimationTick,
 }

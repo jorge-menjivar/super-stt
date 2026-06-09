@@ -4,28 +4,40 @@
 
 const SERVICE_NAME: &str = "super-stt";
 
-pub fn set_api_key(provider: &str, key: &str) -> Result<(), String> {
-    let key_name = format!("{provider}-api-key");
-    let entry = keyring::Entry::new(SERVICE_NAME, &key_name)
-        .map_err(|e| format!("Failed to access keyring: {e}"))?;
-    entry
-        .set_password(key)
-        .map_err(|e| format!("Failed to store API key: {e}"))
+/// Account string for a backend secret in the system keyring.
+///
+/// The daemon reads the same `(service, account)` pair at model-load
+/// time, so this format must stay in lockstep with the daemon side:
+/// service `"super-stt"`, account `"backend:{source}:{name}"`.
+fn backend_account(source: &str, name: &str) -> String {
+    format!("backend:{source}:{name}")
 }
 
-pub fn delete_api_key(provider: &str) -> Result<(), String> {
-    let key_name = format!("{provider}-api-key");
-    let entry = keyring::Entry::new(SERVICE_NAME, &key_name)
+/// Store a backend-declared secret (e.g. an API key) in the system keyring.
+pub fn set_backend_secret(source: &str, name: &str, value: &str) -> Result<(), String> {
+    let account = backend_account(source, name);
+    let entry = keyring::Entry::new(SERVICE_NAME, &account)
+        .map_err(|e| format!("Failed to access keyring: {e}"))?;
+    entry
+        .set_password(value)
+        .map_err(|e| format!("Failed to store secret: {e}"))
+}
+
+/// Delete a stored backend secret. Missing entries are treated as success.
+pub fn delete_backend_secret(source: &str, name: &str) -> Result<(), String> {
+    let account = backend_account(source, name);
+    let entry = keyring::Entry::new(SERVICE_NAME, &account)
         .map_err(|e| format!("Failed to access keyring: {e}"))?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("Failed to delete API key: {e}")),
+        Err(e) => Err(format!("Failed to delete secret: {e}")),
     }
 }
 
-pub fn has_api_key(provider: &str) -> Result<bool, String> {
-    let key_name = format!("{provider}-api-key");
-    let entry = keyring::Entry::new(SERVICE_NAME, &key_name)
+/// Check whether a backend secret is currently stored.
+pub fn has_backend_secret(source: &str, name: &str) -> Result<bool, String> {
+    let account = backend_account(source, name);
+    let entry = keyring::Entry::new(SERVICE_NAME, &account)
         .map_err(|e| format!("Failed to access keyring: {e}"))?;
     match entry.get_password() {
         Ok(_) => Ok(true),

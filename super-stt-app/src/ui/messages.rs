@@ -4,16 +4,17 @@
 
 use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-use super_stt_shared::models::registry::SourceKind;
 use super_stt_shared::models::write_method::WriteMethod;
 
+use cosmic::widget::segmented_button;
+
+use crate::daemon::backends::BackendInfo;
 use crate::state::{AudioTheme, ContextPage};
 
 /// Messages emitted by the application and its widgets
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum Message {
-    // Original template messages
     OpenRepositoryUrl,
     ToggleContextPage(ContextPage),
     LaunchUrl(String),
@@ -68,40 +69,134 @@ pub enum Message {
 
     // Model management messages
     LoadInitialData, // Load models + device info at startup
-    ModelSearchChanged(String),
+    /// Activate a Models-page tab (Installed / Download) in the tab bar.
+    ModelsTabActivated(segmented_button::Entity),
+    /// User picked a model in the active-backend card's model dropdown.
+    /// Stages it for the Load button — does *not* call the daemon. Resets
+    /// the staged device to the model's first supported device.
+    StageActiveModel(String),
+    /// User picked a device in the active-backend card's device dropdown.
+    /// Stages it for the Load button — does *not* call the daemon.
+    StageActiveDevice(String),
+    /// User clicked the Load button. Fires `set_device(staged_device)` then
+    /// `set_model(staged_model)` for the active backend. No-op when nothing
+    /// is staged or a load is already in progress.
+    LoadStagedModel,
+    /// User clicked the Unload button. `DELETE /active_model` drops the
+    /// model but keeps the active backend selected.
+    UnloadActiveModel,
+    /// Open the per-backend configuration sub-view for `source`.
+    OpenBackendConfig(String),
+    /// Leave the configuration sub-view and return to the backend list.
+    CloseBackendConfig,
+    /// Select a backend as active without loading a model — the card moves to
+    /// the top, any model from a different backend is unloaded.
+    SelectBackend(String),
+    /// Deselect the active backend (unload its model → daemon idle).
+    DeselectBackend,
+    /// Active backend `source` loaded from the daemon (None = idle).
+    ActiveBackendLoaded(Option<String>),
+    /// Periodic tick that re-fetches GPU inventory + memory so the header
+    /// readout stays live. No-op when disconnected; on success it emits
+    /// [`Message::GpuInfoLoaded`].
+    RefreshGpuInfo,
+    /// GPU inventory + memory loaded from the daemon (empty when none detected).
+    GpuInfoLoaded(Vec<super_stt_shared::models::protocol::GpuInfo>),
+    // Registry / Download-tab messages
+    /// User clicked Install on a Download-tab card.
+    InstallBackend(String),
+    /// User clicked Install on the Custom-repo input.
+    InstallBackendFromRepoUrl(String),
+    /// Daemon accepted the install request.
+    InstallAccepted {
+        source: String,
+        install_id: String,
+        warning: Option<String>,
+    },
+    /// Install POST failed (couldn't start).
+    InstallFailedToStart {
+        source: String,
+        error: String,
+    },
+    /// SSE: registry.install.progress
+    InstallProgress {
+        install_id: String,
+        source: String,
+        phase: super_stt_shared::registry::events::InstallPhase,
+        bytes_done: Option<u64>,
+        bytes_total: Option<u64>,
+    },
+    /// SSE: registry.install.completed
+    InstallCompleted {
+        install_id: String,
+        source: String,
+        version: String,
+    },
+    /// SSE: registry.install.failed
+    InstallFailed {
+        install_id: String,
+        source: String,
+        phase: super_stt_shared::registry::events::InstallPhase,
+        error: super_stt_shared::registry::events::InstallError,
+    },
+    /// User clicked Update on an Installed-tab card.
+    UpdateBackend(String),
+    /// User clicked Uninstall.
+    UninstallBackend(String),
+    /// User clicked Retry on the Download-tab empty state, or any other refresh trigger.
+    RefreshRegistry,
+    /// Initial fetch of /registry/backends succeeded.
+    RegistryListLoaded(super_stt_shared::registry::RegistryListResponse),
+    /// Initial fetch of /registry/backends failed.
+    RegistryListFailed(String),
+    /// User typed in the search box.
+    RegistrySearchChanged(String),
+    /// User toggled "show incompatible".
+    RegistryIncludeIncompatible(bool),
+    /// User chose an online filter.
+    RegistryOnlineFilter(Option<bool>),
+    /// Toggle the per-row overflow ("⋯") menu on an installed-backend card,
+    /// keyed by backend `source`. Opening one closes any other.
+    ToggleInstalledMenu(String),
+    /// Dismiss any open installed-backend overflow menu (click-outside).
+    CloseInstalledMenu,
+    /// User clicked "+ Import from dir" on the Download tab. Opens an async
+    /// folder picker; if the user picks one, the path comes back as
+    /// [`Message::ImportBackendFromDirPicked`].
+    ImportBackendFromDir,
+    /// Async folder picker resolved. `None` means the user cancelled — no-op.
+    ImportBackendFromDirPicked(Option<String>),
+    /// User typed in the Custom-repo URL field in the Download tab.
+    RegistryCustomRepoInputChanged(String),
     ModelSelected {
         model: String,
         provider: Provider,
-        source: SourceKind,
+        source: String,
     },
     ModelsLoaded {
         current_model: String,
         current_provider: Provider,
-        current_source: SourceKind,
-        available: Vec<(String, Provider, SourceKind)>,
+        current_source: String,
+        available: Vec<(String, Provider, String)>,
     },
-    AvailableModelsLoaded(Vec<(String, Provider, SourceKind)>),
+    AvailableModelsLoaded(Vec<(String, Provider, String)>),
     CurrentModelLoaded {
         model: String,
         provider: Provider,
-        source: SourceKind,
+        source: String,
     },
     ModelChanged {
         model: String,
         provider: Provider,
-        source: SourceKind,
+        source: String,
     },
     ModelError(String),
 
     // Device management messages
     DeviceSelected(String), // "cpu" or "cuda"
     DeviceLoaded(String),   // Current device from daemon
-    DeviceInfoLoaded(
-        String,
-        Vec<String>,
-        super_stt_shared::daemon::http_client::GpuMemoryInfo,
-    ), // Current device, available devices, GPU memory (free, total)
-    DeviceError(String),    // Device switching error
+    DeviceInfoLoaded(String, Vec<String>, crate::daemon::client::GpuMemoryInfo), // Current device, available devices, GPU memory (free, total)
+    DeviceError(String), // Device switching error
 
     // Download progress messages
     DownloadProgressUpdate(super_stt_shared::models::protocol::DownloadProgress),
@@ -139,23 +234,34 @@ pub enum Message {
     CustomModelsDirEdit(bool),
     CustomModelsDirError(String),
 
-    // Online models messages
-    AllowOnlineModelsToggled(bool),
-    AllowOnlineModelsLoaded(bool),
-    AllowOnlineModelsError(String),
-    OpenAIApiKeyChanged(String),
-    OpenAIApiKeySaved,
-    OpenAIApiKeyRemoved,
-    OpenAIApiKeyError(String),
-    OpenAIApiKeyStatusLoaded(bool),
-    MistralApiKeyChanged(String),
-    MistralApiKeySaved,
-    MistralApiKeyRemoved,
-    MistralApiKeyError(String),
-    MistralApiKeyStatusLoaded(bool),
-    DeepgramApiKeyChanged(String),
-    DeepgramApiKeySaved,
-    DeepgramApiKeyRemoved,
-    DeepgramApiKeyError(String),
-    DeepgramApiKeyStatusLoaded(bool),
+    // Backend catalog + per-backend secret/option configuration.
+    // Secrets live in the system keyring (written directly by this
+    // app); options go to the daemon config via the client.
+    BackendsLoaded(Vec<BackendInfo>),
+    /// Re-fetch the backend catalog (e.g. after an option save) so the
+    /// UI reflects the new effective option values.
+    BackendsReload,
+    BackendsError(String),
+    BackendSecretInputChanged {
+        source: String,
+        name: String,
+        value: String,
+    },
+    BackendSecretSaved {
+        source: String,
+        name: String,
+    },
+    BackendSecretRemoved {
+        source: String,
+        name: String,
+    },
+    BackendOptionInputChanged {
+        source: String,
+        name: String,
+        value: String,
+    },
+    BackendOptionSaved {
+        source: String,
+        name: String,
+    },
 }

@@ -42,6 +42,47 @@ impl VisualizationTheme {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum WorkingAnimationTheme {
+    /// Damped water-droplet ripple radiating from the center.
+    #[default]
+    Droplet,
+    /// Glowing dot tracing a sine path with a fading trail.
+    Comet,
+    /// Three dots pulsing in sequence — a compact loading indicator. Exempt
+    /// from the side split: renders centred in full on every applet.
+    Dots,
+}
+
+impl std::fmt::Display for WorkingAnimationTheme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WorkingAnimationTheme::Droplet => write!(f, "droplet"),
+            WorkingAnimationTheme::Comet => write!(f, "comet"),
+            WorkingAnimationTheme::Dots => write!(f, "dots"),
+        }
+    }
+}
+
+impl WorkingAnimationTheme {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "droplet" => WorkingAnimationTheme::Droplet,
+            "comet" => WorkingAnimationTheme::Comet,
+            "dots" => WorkingAnimationTheme::Dots,
+            _ => WorkingAnimationTheme::default(),
+        }
+    }
+
+    pub fn pretty_name(self) -> String {
+        match self {
+            WorkingAnimationTheme::Droplet => "Droplet".to_string(),
+            WorkingAnimationTheme::Comet => "Comet".to_string(),
+            WorkingAnimationTheme::Dots => "Dots".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum VisualizationSide {
     #[default]
@@ -297,4 +338,26 @@ impl VisualizationColorConfig {
 pub struct ThemeConfig {
     pub visualization_theme: VisualizationTheme,
     pub visualization_color_config: VisualizationColorConfig,
+}
+
+#[cfg(test)]
+mod working_animation_theme_tests {
+    use super::WorkingAnimationTheme;
+
+    #[test]
+    fn display_from_str_round_trip() {
+        for t in [
+            WorkingAnimationTheme::Droplet,
+            WorkingAnimationTheme::Comet,
+            WorkingAnimationTheme::Dots,
+        ] {
+            assert_eq!(WorkingAnimationTheme::from_str(&t.to_string()), t);
+        }
+    }
+
+    #[test]
+    fn unknown_falls_back_to_default() {
+        assert_eq!(WorkingAnimationTheme::from_str("nope"), WorkingAnimationTheme::default());
+        assert_eq!(WorkingAnimationTheme::default(), WorkingAnimationTheme::Droplet);
+    }
 }

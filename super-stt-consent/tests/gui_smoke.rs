@@ -23,7 +23,7 @@
 //!   This validates:
 //!     - `cosmic::app::run` boots without panicking against the real
 //!       compositor;
-//!     - the env-var contract (`STT_AUTH_APP_NAME` / `STT_AUTH_SCOPE` /
+//!     - the env-var contract (`STT_AUTH_APP_NAME` / `STT_AUTH_SCOPES` /
 //!       `STT_AUTH_EXE_PATH`) is wired up;
 //!     - all three decision paths (Allow / Deny / dismissed) write a
 //!       recognizable line to stdout.
@@ -56,7 +56,7 @@ fn renders_and_decides() {
 
     let mut child = Command::new(HELPER_BIN)
         .env("STT_AUTH_APP_NAME", "Smoke Test App")
-        .env("STT_AUTH_SCOPE", "client")
+        .env("STT_AUTH_SCOPES", "transcribe status")
         .env("STT_AUTH_EXE_PATH", "/usr/bin/smoke-test")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

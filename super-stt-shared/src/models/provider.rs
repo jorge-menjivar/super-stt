@@ -73,10 +73,8 @@ impl<'de> Deserialize<'de> for OnlineProvider {
 /// What kind of inference engine a model uses.
 ///
 /// `Provider` carries both the architecture family (Whisper / Voxtral /
-/// Online API) and the routing target. The storage location (HF cache,
-/// local disk, no files) is separate — see [`crate::models::registry::ModelSource`].
-/// Custom user-provided models use whichever local variant matches the
-/// architecture detected from their `config.json`.
+/// Online API) and the routing target. Which backend serves the model is a
+/// separate axis — see [`ModelDefinition::source`](crate::models::registry::ModelDefinition).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Provider {
     /// Whisper engine, served from local files (HF cache or `custom_models_dir`).

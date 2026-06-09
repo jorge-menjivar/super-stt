@@ -69,7 +69,7 @@ async fn spawn_http_listener(daemon: &SuperSTTDaemon) -> Result<tokio::task::Joi
         super_stt_shared::validation::get_http_socket_path,
         PathBuf::from,
     );
-    crate::daemon::http_server::start_http_server(
+    crate::daemon::http::start_http_server(
         std::sync::Arc::new(daemon.clone()),
         http_socket_path,
         daemon.shutdown_tx.clone(),
@@ -125,6 +125,14 @@ pub async fn run() -> Result<()> {
 
     info!("Daemon initialized successfully");
 
+    // Defensive: stop any `super-stt-backend-*` --user units left behind by
+    // a previous daemon that exited ungracefully (SIGKILL / panic / a
+    // skipped `Drop`). The transient unit's name embeds the spawning
+    // daemon's PID, so a restarted daemon can't reach it via the regular
+    // unload path — sweeping at startup is the only deterministic way to
+    // recover from that.
+    crate::stt_models::subprocess::cleanup_orphan_units().await;
+
     // Set up Ctrl+C handler
     let shutdown_tx = daemon.shutdown_tx.clone();
     tokio::spawn(async move {
@@ -177,6 +185,13 @@ pub async fn run() -> Result<()> {
     }
 
     info!("Daemon stopped gracefully");
+
+    // `std::process::exit` below skips every `Drop` destructor — without
+    // this explicit unload the `systemd-run --user` subprocess backend
+    // (e.g. Voxtral) would be orphaned. Call the daemon's shutdown unload
+    // path so `Transcribe::shutdown()` runs in an async context and stops
+    // the unit cleanly.
+    daemon.shutdown_unload().await;
 
     // Give a brief moment for any remaining cleanup, then force exit if needed
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;

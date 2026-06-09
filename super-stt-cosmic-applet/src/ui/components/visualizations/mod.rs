@@ -64,18 +64,28 @@ impl VisualizationConfig {
     }
 }
 
-/// Common trait for all visualization renderers
+/// Per-frame inputs shared by every [`VisualizationRenderer`]. Bundled
+/// into one context so renderers take a single argument instead of a
+/// long positional parameter list. All fields are `Copy`, so a renderer
+/// can destructure `*ctx` directly.
+#[derive(Clone, Copy)]
+pub struct DrawContext<'a> {
+    /// Canvas bounds to draw within.
+    pub bounds: Rectangle,
+    /// Frequency analysis data for the current frame.
+    pub frequency_data: &'a FrequencyData,
+    /// Which portion of the spectrum this applet instance renders.
+    pub side: &'a VisualizationSide,
+    /// User-configured colors.
+    pub color_config: &'a VisualizationColorConfig,
+    /// Whether the active COSMIC theme is dark.
+    pub is_dark: bool,
+    /// Active COSMIC theme, for resolving system colors.
+    pub cosmic_theme: &'a cosmic::cosmic_theme::Theme,
+}
+
+/// Common trait for all visualization renderers.
 pub trait VisualizationRenderer {
-    /// Draw visualization using frequency analysis data
-    #[allow(clippy::too_many_arguments)]
-    fn draw(
-        &self,
-        frame: &mut Frame<Renderer>,
-        bounds: Rectangle,
-        frequency_data: &FrequencyData,
-        side: &VisualizationSide,
-        color_config: &VisualizationColorConfig,
-        is_dark: bool,
-        cosmic_theme: &cosmic::cosmic_theme::Theme,
-    );
+    /// Draw the visualization using the per-frame [`DrawContext`].
+    fn draw(&self, frame: &mut Frame<Renderer>, ctx: &DrawContext);
 }
