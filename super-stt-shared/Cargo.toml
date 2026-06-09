@@ -30,6 +30,7 @@ keyring.workspace = true
     spectrum-analyzer = { workspace = true, optional = true }
     strum.workspace = true
     strum_macros.workspace = true
+super-stt-registry-types = { path = "../super-stt-registry-types" }
     thiserror.workspace = true
     tokio = { workspace = true, features = [
         "macros",

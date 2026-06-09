@@ -145,6 +145,10 @@ Declares the binary artifacts a release publishes, so the registry indexer and
 the daemon's installer can find them without guessing. The shape depends on the
 backend's `kind`.
 
+`[assets]` is required for registry publication (the indexer rejects a release
+without the table matching the backend's `kind`) and optional for backends
+installed locally — an imported directory has no release artifacts to declare.
+
 Wasm backends declare a single file:
 
 ```toml
@@ -267,7 +271,7 @@ dest     = "models/whisper-tiny"
 
 | Field      | Type            | Required | Notes                                                              |
 |------------|-----------------|----------|--------------------------------------------------------------------|
-| `source`   | string          | yes      | `huggingface` or `url`.                                            |
+| `source`   | string          | no       | `huggingface` (default) or `url`.                                  |
 | `repo`     | string          | for `huggingface` | Hugging Face repo id, e.g. `openai/whisper-tiny`.         |
 | `revision` | string          | no       | Hugging Face revision; default `main`.                             |
 | `url`      | string          | for `url` | Direct download URL for a single file.                            |

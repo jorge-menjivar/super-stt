@@ -6,6 +6,7 @@
         "super-stt-consent",
         "super-stt-cosmic-applet",
         "super-stt-daemon",
+        "super-stt-registry-types",
         "super-stt-shared",
     ]
     # WASM backends build for wasm32-wasip2, not the host target — keep them
