@@ -255,6 +255,13 @@ build-voxtral-backend *args:
 build-whisper-backend *args:
     cargo build --manifest-path backends/whisper/Cargo.toml --release {{ args }}
 
+# Build the standalone Qwen3-ASR Python subprocess backend bundle.
+# Pure wheel assembly (no compilation); produces a self-contained relocatable
+# tarball under backends/qwen3-asr/target/. The cuda13 bundle is large.
+# Usage: just build-qwen3-asr-backend [cpu|cuda13]
+build-qwen3-asr-backend accel="cpu":
+    backends/qwen3-asr/scripts/build_bundle.sh {{ accel }} backends/qwen3-asr/target
+
 # Serve a local offline registry for testing the Download/Install flow without
 # any GitHub release or Pages setup. Builds the OpenAI + Mistral wasm
 # components, stages them with their asset filenames, generates an index.json
@@ -281,9 +288,11 @@ serve-test-registry port="8787": build-openai-backend build-mistral-backend
     cd "$out" && exec python3 -m http.server {{ port }}
 
 # Install built backends into the daemon's discovery directory
-# (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI
-# and Mistral components; the Voxtral binary is installed only if already built
-# (run `just build-{voxtral,whisper}-backend [--features cuda]` first for GPU support).
+# (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI,
+# Mistral, and Deepgram WASM components; the Voxtral/Whisper binaries and the
+# Qwen3-ASR Python bundle are installed only if already built (run
+# `just build-{voxtral,whisper}-backend [--features cuda]` or
+# `just build-qwen3-asr-backend [cpu|cuda13]` first).
 install-backends: build-openai-backend build-mistral-backend build-deepgram-backend
     #!/usr/bin/env bash
     set -euo pipefail
@@ -335,6 +344,33 @@ install-backends: build-openai-backend build-mistral-backend build-deepgram-back
         echo "Installed Whisper backend -> $whisper_dir"
     else
         echo "Whisper backend not built; run 'just build-whisper-backend [--features cuda]' to enable it." >&2
+    fi
+
+    # Qwen3-ASR (Python subprocess bundle). Installed only if a bundle has been
+    # built; prefers the cuda13 bundle when present. Extracts over any existing
+    # install so downloaded model weights under models/ are preserved.
+    qwen_tarball=""
+    for accel in cuda13 cpu; do
+        cand="backends/qwen3-asr/target/qwen3-asr-x86_64-unknown-linux-gnu-$accel.tar.gz"
+        if [ -f "$cand" ]; then qwen_tarball="$cand"; break; fi
+    done
+    if [ -n "$qwen_tarball" ]; then
+        qwen_dir="$backends_dir/qwen3-asr"
+        mkdir -p "$qwen_dir"
+        # The tarball provides the heavy, relocatable runtime/. The launcher,
+        # app/, and manifest are small source files — copy the current ones over
+        # the extracted copies so a launcher/app tweak needs no bundle rebuild.
+        # `install -m 0755` sets the executable bit the daemon requires to exec
+        # the launcher; it is part of the recipe, never a manual step.
+        tar -C "$qwen_dir" -xzf "$qwen_tarball"
+        rm -rf "$qwen_dir/app"
+        cp -r backends/qwen3-asr/app "$qwen_dir/app"
+        mkdir -p "$qwen_dir/bin"
+        install -m 0755 backends/qwen3-asr/bin/qwen3-asr "$qwen_dir/bin/qwen3-asr"
+        cp backends/qwen3-asr/backend.toml "$qwen_dir/backend.toml"
+        echo "Installed Qwen3-ASR backend ($(basename "$qwen_tarball")) -> $qwen_dir"
+    else
+        echo "Qwen3-ASR backend not built; run 'just build-qwen3-asr-backend [cpu|cuda13]' to enable it." >&2
     fi
     echo "Done. Restart the daemon (systemctl --user restart super-stt) to discover backends."
 

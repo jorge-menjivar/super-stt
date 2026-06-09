@@ -105,7 +105,9 @@ fn validate_tarball(file: &str, entrypoint: &str, bytes: &[u8]) -> Result<(), As
             // Reject symlinks outright; the daemon's installer also rejects.
             return Err(AssetError::TarEscape { file: file.into(), entry: s.into() });
         }
-        if s == format!("bin/{entrypoint}") { found_entrypoint = true; }
+        // Accept the entrypoint at its declared path (e.g. `bin/qwen3-asr`),
+        // or the legacy bare-name-under-bin form (`bin/<entrypoint>`).
+        if s == entrypoint || s == format!("bin/{entrypoint}") { found_entrypoint = true; }
     }
     if !found_entrypoint {
         return Err(AssetError::TarMissingEntrypoint { file: file.into(), entrypoint: entrypoint.into() });
@@ -135,6 +137,16 @@ mod tests {
             tb.append_data(&mut h, "bin/voxtral", &b"abc"[..]).unwrap();
         });
         validate_tarball("v.tar.gz", "voxtral", &bytes).unwrap();
+    }
+
+    #[test]
+    fn accepts_tarball_with_path_entrypoint() {
+        let bytes = make_tarball(|tb| {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(3); h.set_mode(0o755); h.set_cksum();
+            tb.append_data(&mut h, "bin/qwen3-asr", &b"abc"[..]).unwrap();
+        });
+        validate_tarball("q.tar.gz", "bin/qwen3-asr", &bytes).unwrap();
     }
 
     #[test]

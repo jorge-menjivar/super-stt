@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Qwen3-ASR (local, GPU) subprocess backend. See docs/protocol/backend/.
+
+[backend]
+    source = "github.com/jorge-menjivar/super-stt-qwen-asr"
+    name = "Qwen3-ASR"
+    version = "0.1.0"
+    kind = "subprocess"
+    entrypoint = "bin/qwen3-asr"
+    contract = "v1"
+
+[network]
+    allowed_hosts = []
+
+[[assets.subprocess]]
+    file = "qwen3-asr-x86_64-unknown-linux-gnu-cpu.tar.gz"
+    target = "x86_64-unknown-linux-gnu"
+    accel = "cpu"
+
+# One CUDA build serves every GPU family: the bundled PyTorch wheel is
+# multi-architecture, so cuda_sm is omitted (wildcard).
+[[assets.subprocess]]
+    file = "qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz"
+    target = "x86_64-unknown-linux-gnu"
+    accel = "cuda"
+    cuda_major = 13
+
+[[models]]
+    name = "qwen3-asr-0.6b"
+    provider = "local_qwen3_asr"
+    multilingual = true
+    primary_language = "en"
+    supported_languages = [
+        "zh",
+        "en",
+        "yue",
+        "ar",
+        "de",
+        "fr",
+        "es",
+        "pt",
+        "id",
+        "it",
+        "ko",
+        "ru",
+        "th",
+        "vi",
+        "ja",
+        "tr",
+        "hi",
+        "ms",
+        "nl",
+        "sv",
+        "da",
+        "fi",
+        "pl",
+        "cs",
+        "fil",
+        "fa",
+        "el",
+        "hu",
+        "mk",
+        "ro",
+    ]
+    supported_devices = ["cpu", "cuda"]
+    estimated_vram_bytes = 2500000000
+    processing_interval_ms = 1000
+
+    [[models.files]]
+        source = "huggingface"
+        repo = "Qwen/Qwen3-ASR-0.6B"
+        revision = "main"
+        files = [
+            "config.json",
+            "generation_config.json",
+            "preprocessor_config.json",
+            "chat_template.json",
+            "tokenizer_config.json",
+            "vocab.json",
+            "merges.txt",
+            "model.safetensors",
+        ]
+        dest = "models/qwen3-asr-0.6b"
+
+[[models]]
+    name = "qwen3-asr-1.7b"
+    provider = "local_qwen3_asr"
+    multilingual = true
+    primary_language = "en"
+    supported_languages = [
+        "zh",
+        "en",
+        "yue",
+        "ar",
+        "de",
+        "fr",
+        "es",
+        "pt",
+        "id",
+        "it",
+        "ko",
+        "ru",
+        "th",
+        "vi",
+        "ja",
+        "tr",
+        "hi",
+        "ms",
+        "nl",
+        "sv",
+        "da",
+        "fi",
+        "pl",
+        "cs",
+        "fil",
+        "fa",
+        "el",
+        "hu",
+        "mk",
+        "ro",
+    ]
+    supported_devices = ["cpu", "cuda"]
+    estimated_vram_bytes = 6000000000
+    processing_interval_ms = 1500
+
+    [[models.files]]
+        source = "huggingface"
+        repo = "Qwen/Qwen3-ASR-1.7B"
+        revision = "main"
+        files = [
+            "config.json",
+            "generation_config.json",
+            "preprocessor_config.json",
+            "chat_template.json",
+            "tokenizer_config.json",
+            "vocab.json",
+            "merges.txt",
+            "model.safetensors.index.json",
+            "model-00001-of-00002.safetensors",
+            "model-00002-of-00002.safetensors",
+        ]
+        dest = "models/qwen3-asr-1.7b"

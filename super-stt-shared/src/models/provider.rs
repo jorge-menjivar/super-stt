@@ -82,6 +82,8 @@ pub enum Provider {
     LocalWhisper,
     /// Voxtral engine, served from local files (HF cache or `custom_models_dir`).
     LocalVoxtral,
+    /// Qwen3-ASR engine, served from local files by the qwen3-asr backend.
+    LocalQwen3Asr,
     /// Served by an external API.
     Online(OnlineProvider),
 }
@@ -108,6 +110,7 @@ impl fmt::Display for Provider {
         match self {
             Self::LocalWhisper => write!(f, "local_whisper"),
             Self::LocalVoxtral => write!(f, "local_voxtral"),
+            Self::LocalQwen3Asr => write!(f, "local_qwen3_asr"),
             Self::Online(p) => write!(f, "{p}"),
         }
     }
@@ -120,6 +123,7 @@ impl FromStr for Provider {
         match s {
             "local_whisper" => Ok(Self::LocalWhisper),
             "local_voxtral" => Ok(Self::LocalVoxtral),
+            "local_qwen3_asr" => Ok(Self::LocalQwen3Asr),
             other => OnlineProvider::from_str(other).map(Self::Online),
         }
     }
@@ -150,6 +154,7 @@ mod tests {
         ));
         assert!(!matches!(Provider::LocalWhisper, Provider::Online(_)));
         assert!(!matches!(Provider::LocalVoxtral, Provider::Online(_)));
+        assert!(!matches!(Provider::LocalQwen3Asr, Provider::Online(_)));
     }
 
     #[test]
@@ -170,6 +175,7 @@ mod tests {
         for provider in [
             Provider::LocalWhisper,
             Provider::LocalVoxtral,
+            Provider::LocalQwen3Asr,
             Provider::Online(OnlineProvider::OpenAI),
             Provider::Online(OnlineProvider::Mistral),
             Provider::Online(OnlineProvider::Deepgram),
@@ -226,6 +232,10 @@ mod tests {
             "\"local_voxtral\""
         );
         assert_eq!(
+            serde_json::to_string(&Provider::LocalQwen3Asr).unwrap(),
+            "\"local_qwen3_asr\""
+        );
+        assert_eq!(
             serde_json::to_string(&Provider::Online(OnlineProvider::OpenAI)).unwrap(),
             "\"openai\""
         );
@@ -244,6 +254,7 @@ mod tests {
         for (json, expected) in [
             ("\"local_whisper\"", Provider::LocalWhisper),
             ("\"local_voxtral\"", Provider::LocalVoxtral),
+            ("\"local_qwen3_asr\"", Provider::LocalQwen3Asr),
             ("\"openai\"", Provider::Online(OnlineProvider::OpenAI)),
             ("\"mistral\"", Provider::Online(OnlineProvider::Mistral)),
             ("\"deepgram\"", Provider::Online(OnlineProvider::Deepgram)),
@@ -260,6 +271,8 @@ mod tests {
             "\"LocalVoxtral\"",
             "\"local-whisper\"",
             "\"local-voxtral\"",
+            "\"local-qwen3-asr\"",
+            "\"LocalQwen3Asr\"",
             "\"local\"",
             "\"OpenAI\"",
         ] {

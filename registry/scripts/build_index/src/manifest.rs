@@ -100,7 +100,7 @@ pub enum ManifestError {
     VersionMismatch(String, Version),
     #[error("`backend.source = {0:?}` does not match registry entry repo `{1}`")]
     SourceMismatch(String, String),
-    #[error("`backend.entrypoint = {0:?}` is not a safe relative path component")]
+    #[error("`backend.entrypoint = {0:?}` is not a safe relative path")]
     UnsafeEntrypoint(String),
     #[error("`backend.kind = {0:?}` requires `[assets.wasm]` but it is missing")]
     MissingWasmAsset(String),
@@ -126,17 +126,23 @@ pub enum ManifestError {
 
 const ALLOWED_ACCEL: &[&str] = &["cpu", "cuda", "metal", "rocm", "vulkan"];
 
-/// A backend `entrypoint` must be a single, relative, non-traversing path
-/// component — the daemon joins it onto the install dir, so an absolute path
-/// or a `..` would escape. Mirrors `super_stt_shared::registry::is_safe_component`
-/// (the indexer is a standalone crate and cannot depend on the daemon's crates).
-fn is_safe_component(s: &str) -> bool {
-    !s.is_empty()
-        && s != "."
-        && s != ".."
-        && !s.contains('/')
-        && !s.contains('\\')
-        && !s.contains('\0')
+/// A backend `entrypoint` is a relative path the daemon joins onto the install
+/// dir; it may be nested (e.g. `bin/launcher`) but must not escape it. Reject
+/// empty, absolute, any empty / `.` / `..` component, backslash, and NUL.
+/// Mirrors `super_stt_shared::registry::is_safe_relative_path` (the indexer is
+/// a standalone crate and cannot depend on the daemon's crates).
+fn is_safe_relative_path(s: &str) -> bool {
+    if s.is_empty() || s.starts_with('/') || s.contains('\\') || s.contains('\0') {
+        return false;
+    }
+    let mut saw = false;
+    for c in s.split('/') {
+        if c.is_empty() || c == "." || c == ".." {
+            return false;
+        }
+        saw = true;
+    }
+    saw
 }
 
 pub async fn fetch(gh: &GitHub, owner_repo: &str, subdir: Option<&str>, tag: &str) -> Result<Manifest, ManifestError> {
@@ -166,7 +172,7 @@ pub fn validate(m: &Manifest, expected_version: &Version, expected_source: &str)
     if m.backend.source != expected_source && !under_repo {
         return Err(ManifestError::SourceMismatch(m.backend.source.clone(), expected_source.into()));
     }
-    if !is_safe_component(&m.backend.entrypoint) {
+    if !is_safe_relative_path(&m.backend.entrypoint) {
         return Err(ManifestError::UnsafeEntrypoint(m.backend.entrypoint.clone()));
     }
     match m.backend.kind.as_str() {
@@ -254,7 +260,7 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_entrypoint() {
-        for bad in ["../escape", "/usr/bin/python3", "..", "a/b"] {
+        for bad in ["../escape", "/usr/bin/python3", "..", "bin/../../escape", "a//b", "bin/"] {
             let t = VALID.replace(r#"entrypoint = "y.wasm""#, &format!("entrypoint = \"{bad}\""));
             let m: Manifest = toml::from_str(&t).unwrap();
             let err = validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap_err();

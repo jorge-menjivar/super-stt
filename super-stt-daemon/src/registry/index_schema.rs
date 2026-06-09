@@ -22,9 +22,9 @@ impl Index {
     /// backend, so a stray one — e.g. from a poisoned `SUPER_STT_REGISTRY_URL`
     /// — is dropped with a warning rather than failing the whole index.
     pub fn retain_safe_backends(&mut self) {
-        use super_stt_shared::registry::is_safe_component;
+        use super_stt_shared::registry::{is_safe_component, is_safe_relative_path};
         self.backends.retain(|b| {
-            let ok = is_safe_component(&b.id) && is_safe_component(&b.entrypoint);
+            let ok = is_safe_component(&b.id) && is_safe_relative_path(&b.entrypoint);
             if !ok {
                 log::warn!(
                     "registry: dropping backend `{}` with unsafe id/entrypoint (entrypoint={:?})",

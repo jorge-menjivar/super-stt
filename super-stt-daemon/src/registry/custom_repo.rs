@@ -103,9 +103,9 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
     // the indexer's source-vs-repo check. Enforce it here (see
     // `ensure_source_matches_repo`).
     ensure_source_matches_repo(&manifest.backend.source, &owner_repo)?;
-    // `entrypoint` is joined onto the install dir, and `id` becomes that dir's
-    // name — both must be safe single components.
-    if !super_stt_shared::registry::is_safe_component(&manifest.backend.entrypoint) {
+    // `entrypoint` is joined onto the install dir (it may be nested, e.g.
+    // `bin/launcher`), and `id` becomes that dir's name (a single component).
+    if !super_stt_shared::registry::is_safe_relative_path(&manifest.backend.entrypoint) {
         return Err(ResolveError::UnsafeComponent {
             field: "entrypoint",
             value: manifest.backend.entrypoint,

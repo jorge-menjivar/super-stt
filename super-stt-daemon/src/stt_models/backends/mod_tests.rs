@@ -379,6 +379,66 @@ fn duplicate_sources_are_deduplicated() {
     assert_eq!(matches.len(), 1);
 }
 
+/// The qwen3-asr subprocess backend is discovered and both of its models
+/// resolve with the new `local_qwen3_asr` provider.
+#[test]
+fn discovers_qwen3_asr_backend() {
+    let root = scratch("qwen3");
+    let dir = root.join("qwen3-asr");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("backend.toml"),
+        r#"
+[backend]
+source = "github.com/jorge-menjivar/super-stt/qwen3-asr"
+name = "Qwen3-ASR"
+version = "0.1.0"
+kind = "subprocess"
+entrypoint = "qwen3-asr"
+contract = "v1"
+
+[[models]]
+name = "qwen3-asr-0.6b"
+provider = "local_qwen3_asr"
+multilingual = true
+supported_devices = ["cpu", "cuda"]
+estimated_vram_bytes = 2500000000
+processing_interval_ms = 1000
+
+[[models]]
+name = "qwen3-asr-1.7b"
+provider = "local_qwen3_asr"
+multilingual = true
+supported_devices = ["cpu", "cuda"]
+estimated_vram_bytes = 6000000000
+processing_interval_ms = 1500
+"#,
+    )
+    .unwrap();
+
+    let backends = discover(&root);
+    assert_eq!(backends.len(), 1);
+
+    let (b, def) = find_model(
+        &backends,
+        "qwen3-asr-0.6b",
+        Provider::LocalQwen3Asr,
+        "github.com/jorge-menjivar/super-stt/qwen3-asr",
+    )
+    .expect("resolve qwen3-asr-0.6b");
+    assert_eq!(b.kind, "subprocess");
+    assert_eq!(b.entrypoint, "qwen3-asr");
+    assert_eq!(
+        def.supported_devices,
+        vec!["cpu".to_string(), "cuda".to_string()]
+    );
+
+    let (_, big) = find_model(&backends, "qwen3-asr-1.7b", Provider::LocalQwen3Asr, "")
+        .expect("resolve qwen3-asr-1.7b with empty source");
+    assert_eq!(big.estimated_vram_bytes, 6_000_000_000);
+    assert_eq!(big.processing_interval, Duration::from_millis(1500));
+}
+
 /// `dedup_sources` keeps first-seen order and drops later duplicates.
 #[test]
 fn dedup_sources_keeps_first_occurrence() {

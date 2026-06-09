@@ -150,8 +150,8 @@ impl Manifest {
         // backend; an absolute or traversing value would escape it. Reject at
         // the single canonical loader so every host inherits the guard.
         anyhow::ensure!(
-            super_stt_shared::registry::is_safe_component(&m.backend.entrypoint),
-            "backend.toml entrypoint {:?} is not a safe relative path component",
+            super_stt_shared::registry::is_safe_relative_path(&m.backend.entrypoint),
+            "backend.toml entrypoint {:?} is not a safe relative path",
             m.backend.entrypoint
         );
         Ok(m)

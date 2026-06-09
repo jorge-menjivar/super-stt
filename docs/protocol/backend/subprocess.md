@@ -81,6 +81,13 @@ Two consequences worth stating plainly:
   it is the reason untrusted, network-facing backends belong on the WASM
   transport instead.
 
+A subprocess backend whose CUDA kernels are multi-architecture (for example a
+bundled PyTorch wheel) may publish a single CUDA asset that omits `cuda_sm`;
+the daemon then matches it against any GPU compute capability whose runtime
+major is `>=` the asset's `cuda_major`. Backends that AOT-compile per
+architecture (e.g. candle) keep one asset per `cuda_sm`; an exact-SM asset is
+preferred over a wildcard when both match.
+
 ## Authentication
 
 The daemon creates the socket in a directory it owns, with permissions that

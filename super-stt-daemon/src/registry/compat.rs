@@ -57,14 +57,15 @@ pub fn select(host: &Host, entry: &IndexBackend, prefs: &Prefs) -> Selection {
             .iter()
             .filter(|(_, a)| {
                 a.accel == "cuda"
-                    && a.cuda_sm == Some(cuda.compute_capability)
+                    && (a.cuda_sm.is_none() || a.cuda_sm == Some(cuda.compute_capability))
                     && a.cuda_major.is_some_and(|m| m <= cuda.runtime_major)
             })
             .collect();
-        // Preference: highest cuda_major; cudnn if host has it.
+        // Preference: highest cuda_major; then exact-SM over wildcard; then cudnn.
         let best = cuda_matches.iter().max_by_key(|(_, a)| {
             (
                 a.cuda_major.unwrap_or(0),
+                u8::from(a.cuda_sm.is_some()),
                 u8::from(a.cudnn && cuda.cudnn_present),
             )
         });
@@ -288,6 +289,75 @@ mod tests {
         // Host has CUDA 12 runtime — must not pick the cuda_major=13 build.
         let sel = select(&host_cuda(86, 12, false), &e, &Prefs { prefer_gpu: true });
         assert_eq!(sel, Selection::Subprocess { index: 0 });
+    }
+
+    #[test]
+    fn wildcard_cuda_sm_matches_any_compute_capability() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                // No cuda_sm -> wildcard.
+                sp("x86_64-unknown-linux-gnu", "cuda", None, Some(13), false),
+            ],
+        );
+        // Host is sm_120 with a CUDA 13 runtime; the wildcard must match.
+        let sel = select(&host_cuda(120, 13, false), &e, &Prefs { prefer_gpu: true });
+        assert_eq!(sel, Selection::Subprocess { index: 1 });
+    }
+
+    #[test]
+    fn exact_cuda_sm_is_preferred_over_wildcard() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cuda", None, Some(13), false),
+                sp("x86_64-unknown-linux-gnu", "cuda", Some(90), Some(13), false),
+            ],
+        );
+        let sel = select(&host_cuda(90, 13, false), &e, &Prefs { prefer_gpu: true });
+        assert_eq!(
+            sel,
+            Selection::Subprocess { index: 1 },
+            "an exact-SM asset must win over a wildcard"
+        );
+    }
+
+    #[test]
+    fn wildcard_cuda_still_respects_runtime_major() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                // Wildcard SM but cuda_major=13 — must NOT match a CUDA 12 host.
+                sp("x86_64-unknown-linux-gnu", "cuda", None, Some(13), false),
+            ],
+        );
+        let sel = select(&host_cuda(86, 12, false), &e, &Prefs { prefer_gpu: true });
+        assert_eq!(
+            sel,
+            Selection::Subprocess { index: 0 },
+            "cuda_major>runtime_major must fall back to CPU"
+        );
+    }
+
+    #[test]
+    fn cuda_asset_without_cuda_major_falls_back_to_cpu() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                // Malformed: cuda accel with neither cuda_sm nor cuda_major.
+                // Must not match any host — the cuda_major guard excludes it.
+                sp("x86_64-unknown-linux-gnu", "cuda", None, None, false),
+            ],
+        );
+        let sel = select(&host_cuda(86, 12, false), &e, &Prefs { prefer_gpu: true });
+        assert_eq!(
+            sel,
+            Selection::Subprocess { index: 0 },
+            "a cuda asset with no cuda_major must be ignored, not match every host"
+        );
     }
 
     #[test]

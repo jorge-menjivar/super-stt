@@ -1,0 +1,34 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-only
+# Entry point the daemon spawns: backend.toml's `entrypoint = "bin/qwen3-asr"`
+# resolves to <backend dir>/bin/qwen3-asr. Hand-written launcher (source, not a
+# build artifact). It resolves its own location, points every framework cache
+# at a writable tmp dir, forces offline mode, then execs the bundled
+# interpreter — the host needs no Python.
+set -eu
+
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+
+# The daemon mounts the backend dir READ-ONLY (ReadOnlyPaths) and $HOME
+# read-only (ProtectHome=read-only); the only writable tree is the unit's
+# private /tmp (PrivateTmp=yes). Point all caches there — none of these are
+# needed across runs (weights are pre-provisioned and read from the backend
+# dir), so an ephemeral location is fine.
+CACHE="${TMPDIR:-/tmp}/qwen3-asr-cache"
+export CUDA_CACHE_PATH="$CACHE/nv"
+export HF_HOME="$CACHE/hf"
+export TORCH_HOME="$CACHE/torch"
+export XDG_CACHE_HOME="$CACHE/xdg"
+export TRITON_CACHE_DIR="$CACHE/triton"
+export MPLCONFIGDIR="$CACHE/mpl"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+
+# Dependencies live in runtime/site (installed there by build_bundle.sh with
+# `uv pip install --target`); put them on the import path.
+export PYTHONPATH="$HERE/runtime/site${PYTHONPATH:+:$PYTHONPATH}"
+
+mkdir -p "$CUDA_CACHE_PATH" "$HF_HOME" "$TORCH_HOME" "$XDG_CACHE_HOME" \
+         "$TRITON_CACHE_DIR" "$MPLCONFIGDIR"
+
+exec "$HERE/runtime/python/bin/python3" "$HERE/app/server.py"

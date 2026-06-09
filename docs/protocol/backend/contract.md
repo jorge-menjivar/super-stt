@@ -31,7 +31,7 @@ triple external clients use on
 | Field      | Type   | Notes                                                                       |
 |------------|--------|-----------------------------------------------------------------------------|
 | `name`     | string | Wire model name, e.g. `whisper-tiny`, `voxtral-mini`, `nova-3`.             |
-| `provider` | string | Engine family + routing class: `local_whisper`, `local_voxtral`, `openai`, `mistral`, `deepgram`. |
+| `provider` | string | Engine family + routing class: `local_whisper`, `local_voxtral`, `local_qwen3_asr`, `openai`, `mistral`, `deepgram`. |
 | `source`   | string | The **backend repository** that provides the model — a canonical repo id declared in the backend's configuration. |
 
 `source` names *which backend* a model comes from. Two backends may both

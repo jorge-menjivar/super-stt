@@ -183,7 +183,7 @@ cudnn      = true
 | `target` | string | yes | Rust target triple. Tier-1/2 only; indexer rejects unknown. |
 | `accel` | string | yes | One of `"cpu"`, `"cuda"`, `"metal"`, `"rocm"`, `"vulkan"`. |
 | `cuda_major` | integer | for `accel = "cuda"` | CUDA major version this build targets. |
-| `cuda_sm` | integer | for `accel = "cuda"` | Compute capability (e.g. `75`, `86`, `90`). |
+| `cuda_sm` | integer | no | Compute capability (e.g. `75`, `86`, `90`). Omit to match **any** compute capability — use this for framework builds (e.g. a PyTorch wheel) whose kernels are multi-architecture. When both an exact-SM and a wildcard asset match a host, the exact-SM asset is preferred. |
 | `cudnn` | bool | no | Defaults `false`. Allowed only when `accel = "cuda"`. |
 
 ### Subprocess archive contents
@@ -229,7 +229,7 @@ processing_interval_ms = 1000
 | Field                    | Type            | Required | Notes                                                            |
 |--------------------------|-----------------|----------|------------------------------------------------------------------|
 | `name`                   | string          | yes      | Wire model name.                                                 |
-| `provider`               | string          | yes      | `local_whisper`, `local_voxtral`, `openai`, `mistral`, or `deepgram`. |
+| `provider`               | string          | yes      | `local_whisper`, `local_voxtral`, `local_qwen3_asr`, `openai`, `mistral`, or `deepgram`. |
 | `multilingual`           | bool            | no       | Whether the model accepts more than one language. Default `true`. When `true`, `POST /v1/transcribe` accepts a `language` from `supported_languages`. |
 | `primary_language`       | string          | yes      | Default language code (e.g. `en`); used when `language` is omitted. |
 | `supported_languages`    | array of string | yes      | Language codes the model accepts; must include `primary_language`. When `multilingual` is `false`, it is exactly `[primary_language]`. |
