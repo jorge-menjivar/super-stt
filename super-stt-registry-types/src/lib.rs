@@ -7,5 +7,7 @@ pub mod entry;
 pub mod manifest;
 pub mod provider;
 mod safe_path;
+#[cfg(feature = "schema")]
+pub mod schema;
 
 pub use safe_path::{is_safe_component, is_safe_relative_path};

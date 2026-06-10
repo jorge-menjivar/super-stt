@@ -262,6 +262,12 @@ build-whisper-backend *args:
 build-qwen3-asr-backend accel="cpu":
     backends/qwen3-asr/scripts/build_bundle.sh {{ accel }} backends/qwen3-asr/target
 
+# Regenerate the JSON Schemas for backend.toml and registry.toml from the
+# canonical Rust types in super-stt-registry-types. CI fails when the
+# committed schemas are stale, so run this after changing those types.
+gen-schemas:
+    cargo run -p super-stt-registry-types --features schema --bin gen_schemas
+
 # Serve a local offline registry for testing the Download/Install flow without
 # any GitHub release or Pages setup. Builds the OpenAI + Mistral wasm
 # components, stages them with their asset filenames, generates an index.json

@@ -11,6 +11,14 @@ This document is part of the [backend protocol](./contract.md); see also
 [wasm.md](./wasm.md) and [subprocess.md](./subprocess.md) for how the
 configuration's fields are honored per transport.
 
+A JSON Schema for this file is generated from the daemon's canonical manifest
+types and committed at `docs/protocol/backend/backend.schema.json` (it will
+also be published at
+`https://jorge-menjivar.github.io/super-stt/backend.schema.json` once the
+registry's GitHub Pages site is live). Add `#:schema <path-or-url>` as a
+comment line at the top of a `backend.toml` to get autocomplete and
+validation in taplo-based editors.
+
 ## Discovery
 
 A backend is a directory whose root contains `backend.toml`. The daemon scans

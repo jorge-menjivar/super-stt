@@ -675,7 +675,12 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("backend.toml"), "not [ valid toml").unwrap();
         let err = Manifest::load(&dir).unwrap_err();
-        let chain = format!("{err}: {}", std::error::Error::source(&err).map(ToString::to_string).unwrap_or_default());
+        let chain = format!(
+            "{err}: {}",
+            std::error::Error::source(&err)
+                .map(ToString::to_string)
+                .unwrap_or_default()
+        );
         assert!(chain.contains("backend.toml"), "got: {chain}");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -707,7 +712,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(m.options[0].default, Some(OptionDefault::Bool(true)));
-        assert_eq!(m.options[1].default, Some(OptionDefault::String("30".into())));
+        assert_eq!(
+            m.options[1].default,
+            Some(OptionDefault::String("30".into()))
+        );
     }
 
     /// Unknown fields and tables are ignored — older daemons must tolerate

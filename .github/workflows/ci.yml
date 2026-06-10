@@ -65,6 +65,9 @@ jobs:
       - name: Run doctests
         run: cargo test --doc --verbose
 
+      - name: Check generated TOML schemas are current
+        run: cargo test -p super-stt-registry-types --features schema
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest

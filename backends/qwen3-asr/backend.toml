@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
+#:schema ../../docs/protocol/backend/backend.schema.json
 # Qwen3-ASR (local, GPU) subprocess backend. See docs/protocol/backend/.
 
 [backend]

@@ -8,6 +8,10 @@ validates the release's `backend.toml` and assets, and publishes a single
 
 End users do not interact with this directory.
 
+`registry.toml` carries a `#:schema` directive pointing at
+`registry.schema.json` (generated — run `just gen-schemas` after changing the
+entry types; do not edit the schema by hand).
+
 ## Submitting a backend
 
 1. Build and host your backend in your own GitHub repo. It must include a
