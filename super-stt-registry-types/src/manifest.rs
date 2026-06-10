@@ -357,6 +357,20 @@ impl fmt::Display for Device {
     }
 }
 
+impl std::str::FromStr for Device {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "cpu" => Ok(Self::Cpu),
+            "cuda" => Ok(Self::Cuda),
+            "metal" => Ok(Self::Metal),
+            "none" => Ok(Self::None),
+            _ => Err(format!("Unknown device: {s}")),
+        }
+    }
+}
+
 /// One `[[models.files]]` download group.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -766,5 +780,26 @@ mod tests {
         assert_eq!(a.cuda_major, Some(13));
         assert_eq!(a.cuda_sm, None);
         assert!(!a.cudnn);
+    }
+
+    #[test]
+    fn device_from_str_round_trips_canonical_forms() {
+        for device in [Device::Cpu, Device::Cuda, Device::Metal, Device::None] {
+            let s = device.to_string();
+            let parsed: Device = s.parse().unwrap();
+            assert_eq!(device, parsed, "round-trip failed for {s}");
+        }
+    }
+
+    #[test]
+    fn device_from_str_rejects_non_canonical_strings() {
+        // `rocm` is an `Accel` build axis, never a model `Device`; non-snake_case
+        // and unknown strings must error so callers don't accept stale forms.
+        for bad in ["rocm", "Cpu", "CUDA", "gpu", "metal_gpu", ""] {
+            assert!(
+                bad.parse::<Device>().is_err(),
+                "{bad:?} should fail to parse as a Device"
+            );
+        }
     }
 }

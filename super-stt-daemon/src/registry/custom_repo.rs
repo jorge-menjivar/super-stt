@@ -10,7 +10,11 @@
 //! `unverified_source` warning surfaced to clients (see
 //! `docs/protocol/endpoints/v1/registry/install.md`) reflects this.
 
+use std::str::FromStr;
+
 use serde::Deserialize;
+use super_stt_registry_types::manifest::Device;
+use super_stt_registry_types::provider::Provider;
 use thiserror::Error;
 
 use crate::registry::github::{GitHub, GitHubError, ReleaseAsset};
@@ -114,18 +118,11 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
 
     let assets = synthesize_assets(&manifest, &release.assets)?;
 
-    let online_providers: &[&str] = &["openai", "mistral", "deepgram", "anthropic"];
-    let online = manifest
-        .models
-        .iter()
-        .any(|m| online_providers.contains(&m.provider.as_str()));
-    let device_match = |needles: &[&str]| {
-        manifest.models.iter().any(|m| {
-            m.supported_devices
-                .iter()
-                .any(|d| needles.contains(&d.as_str()))
-        })
-    };
+    let ModelSupport {
+        online,
+        supports_gpu,
+        supports_cpu,
+    } = classify_models(&manifest.models);
 
     let id = id_from_source(&manifest.backend.source);
     if !super_stt_shared::registry::is_safe_component(&id) {
@@ -148,8 +145,8 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
         entrypoint: manifest.backend.entrypoint,
         allowed_hosts: manifest.network.allowed_hosts,
         online,
-        supports_gpu: device_match(&["cuda", "metal", "rocm"]),
-        supports_cpu: device_match(&["cpu"]),
+        supports_gpu,
+        supports_cpu,
         models: manifest
             .models
             .into_iter()
@@ -188,6 +185,36 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
 /// is intentional — installing the same backend twice writes the same dir.
 fn id_from_source(source: &str) -> String {
     source.rsplit('/').next().unwrap_or(source).to_string()
+}
+
+/// Index-level capability flags derived from a manifest's declared models.
+struct ModelSupport {
+    online: bool,
+    supports_gpu: bool,
+    supports_cpu: bool,
+}
+
+/// Classify a manifest's models through the canonical [`Provider`]/[`Device`]
+/// types so the custom-repo path agrees with the registry indexer on what
+/// counts as online / GPU / CPU. Provider/device strings that aren't canonical
+/// simply don't match — the lenient parser still records them in the index, and
+/// the canonical layer rejects them downstream.
+fn classify_models(models: &[Model]) -> ModelSupport {
+    let online = models
+        .iter()
+        .any(|m| Provider::from_str(&m.provider).is_ok_and(|p| p.as_online().is_some()));
+    let any_device = |pred: fn(Device) -> bool| {
+        models.iter().any(|m| {
+            m.supported_devices
+                .iter()
+                .any(|d| Device::from_str(d).is_ok_and(pred))
+        })
+    };
+    ModelSupport {
+        online,
+        supports_gpu: any_device(|d| matches!(d, Device::Cuda | Device::Metal)),
+        supports_cpu: any_device(|d| matches!(d, Device::Cpu)),
+    }
 }
 
 /// The declared `source` must be the repo the user pointed at
@@ -261,8 +288,12 @@ fn synthesize_assets(
 //
 // custom_repo vets a remote repository's manifest before install; it needs
 // only the asset-selection subset of the full manifest schema.  A minimal,
-// lenient local parser is kept here deliberately rather than depending on the
-// canonical super-stt-registry-types, which owns the installed-backend shape.
+// lenient local parser is kept here deliberately rather than parsing the whole
+// thing through the canonical super-stt-registry-types, which owns the
+// installed-backend shape.  The provider/device fields stay `String` here, but
+// their *classification* (online / GPU / CPU) runs through the canonical
+// `Provider`/`Device` types — see `classify_models` — so this path agrees with
+// the registry indexer instead of using ad-hoc string lists.
 
 #[derive(Debug, Deserialize)]
 struct Manifest {
@@ -350,6 +381,42 @@ struct SubprocessAsset {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn model(name: &str, provider: &str, devices: &[&str]) -> Model {
+        Model {
+            name: name.into(),
+            provider: provider.into(),
+            supported_devices: devices.iter().map(|s| (*s).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn classify_marks_online_only_for_canonical_online_providers() {
+        assert!(classify_models(&[model("m", "openai", &[])]).online);
+        assert!(classify_models(&[model("m", "mistral", &[])]).online);
+        assert!(classify_models(&[model("m", "deepgram", &[])]).online);
+        assert!(!classify_models(&[model("m", "local_whisper", &[])]).online);
+        // `anthropic` is not a canonical OnlineProvider — no longer online.
+        assert!(!classify_models(&[model("m", "anthropic", &[])]).online);
+        // An unknown provider string never counts as online.
+        assert!(!classify_models(&[model("m", "totally_bogus", &[])]).online);
+    }
+
+    #[test]
+    fn classify_marks_gpu_for_cuda_or_metal_not_rocm() {
+        assert!(classify_models(&[model("m", "local_whisper", &["cuda"])]).supports_gpu);
+        assert!(classify_models(&[model("m", "local_whisper", &["metal"])]).supports_gpu);
+        // `rocm` is an Accel build axis, never a model Device — not GPU here.
+        assert!(!classify_models(&[model("m", "local_whisper", &["rocm"])]).supports_gpu);
+        assert!(!classify_models(&[model("m", "local_whisper", &["cpu"])]).supports_gpu);
+    }
+
+    #[test]
+    fn classify_marks_cpu_only_for_cpu_device() {
+        assert!(classify_models(&[model("m", "local_whisper", &["cpu"])]).supports_cpu);
+        assert!(!classify_models(&[model("m", "openai", &["none"])]).supports_cpu);
+        assert!(!classify_models(&[model("m", "local_whisper", &["cuda"])]).supports_cpu);
+    }
 
     #[test]
     fn parses_owner_repo_from_various_url_shapes() {

@@ -11,14 +11,38 @@ pub use super_stt_registry_types::manifest::*;
 ///
 /// # Errors
 /// Returns an error if a subprocess backend declares the wasm-only
-/// `websocket` capability, or a model sets `realtime` without it.
+/// `websocket` capability or a non-empty `allowed_hosts` (the transport
+/// provides no network), if a model's `primary_language` is absent from its
+/// `supported_languages`, if a non-multilingual model's `supported_languages`
+/// is not exactly `[primary_language]`, or if a model sets `realtime` without
+/// the `websocket` capability.
 pub fn validate_runtime(m: &Manifest) -> Result<()> {
     if m.backend.kind == Kind::Subprocess && m.capabilities.websocket {
         anyhow::bail!(
             "[capabilities].websocket is wasm-only; subprocess backends cannot declare it"
         );
     }
+    if m.backend.kind == Kind::Subprocess && !m.network.allowed_hosts.is_empty() {
+        anyhow::bail!(
+            "[network].allowed_hosts must be empty for subprocess backends; the transport provides no network"
+        );
+    }
     for model in &m.models {
+        if !model.supported_languages.contains(&model.primary_language) {
+            anyhow::bail!(
+                "model `{}` primary_language `{}` is not in supported_languages",
+                model.name,
+                model.primary_language
+            );
+        }
+        if !model.multilingual
+            && model.supported_languages.as_slice() != [model.primary_language.clone()]
+        {
+            anyhow::bail!(
+                "model `{}` has multilingual = false but supported_languages is not exactly [primary_language]",
+                model.name
+            );
+        }
         if model.realtime && !m.capabilities.websocket {
             anyhow::bail!(
                 "model `{}` has realtime = true but capabilities.websocket is not set",
@@ -183,6 +207,117 @@ websocket = true
         let m = Manifest::parse(toml_src).expect("parse");
         let err = validate_runtime(&m).expect_err("subprocess + websocket must fail");
         assert!(err.to_string().contains("wasm-only"), "got: {err}");
+    }
+
+    #[test]
+    fn subprocess_with_allowed_hosts_is_rejected() {
+        let toml_src = r#"
+[backend]
+source = "github.com/super-stt/whisper"
+name = "Whisper"
+version = "0.1.0"
+kind = "subprocess"
+entrypoint = "whisper-backend"
+contract = "v1"
+
+[network]
+allowed_hosts = ["api.example.com"]
+"#;
+        let m = Manifest::parse(toml_src).expect("parse");
+        let err = validate_runtime(&m).expect_err("subprocess + allowed_hosts must fail");
+        assert!(err.to_string().contains("allowed_hosts"), "got: {err}");
+    }
+
+    #[test]
+    fn wasm_with_allowed_hosts_is_accepted() {
+        let toml_src = r#"
+[backend]
+source = "github.com/super-stt/openai"
+name = "OpenAI"
+version = "0.1.0"
+kind = "wasm"
+entrypoint = "openai.wasm"
+contract = "v1"
+
+[network]
+allowed_hosts = ["api.openai.com"]
+"#;
+        let m = Manifest::parse(toml_src).expect("parse");
+        validate_runtime(&m).expect("wasm + allowed_hosts is permitted");
+    }
+
+    #[test]
+    fn primary_language_not_in_supported_is_rejected() {
+        let toml_src = r#"
+[backend]
+source = "github.com/super-stt/whisper"
+name = "Whisper"
+version = "0.1.0"
+kind = "subprocess"
+entrypoint = "whisper-backend"
+contract = "v1"
+
+[[models]]
+name = "whisper-tiny"
+provider = "local_whisper"
+multilingual = true
+primary_language = "en"
+supported_languages = ["es", "fr"]
+supported_devices = ["cpu"]
+"#;
+        let m = Manifest::parse(toml_src).expect("parse");
+        let err = validate_runtime(&m)
+            .expect_err("primary_language outside supported_languages must fail");
+        assert!(err.to_string().contains("primary_language"), "got: {err}");
+    }
+
+    #[test]
+    fn multilingual_false_with_extra_languages_is_rejected() {
+        let toml_src = r#"
+[backend]
+source = "github.com/super-stt/whisper"
+name = "Whisper"
+version = "0.1.0"
+kind = "subprocess"
+entrypoint = "whisper-backend"
+contract = "v1"
+
+[[models]]
+name = "whisper-en"
+provider = "local_whisper"
+multilingual = false
+primary_language = "en"
+supported_languages = ["en", "es"]
+supported_devices = ["cpu"]
+"#;
+        let m = Manifest::parse(toml_src).expect("parse");
+        let err =
+            validate_runtime(&m).expect_err("multilingual = false with extra languages must fail");
+        assert!(err.to_string().contains("multilingual"), "got: {err}");
+    }
+
+    #[test]
+    fn multilingual_false_with_exact_primary_language_is_accepted() {
+        let toml_src = r#"
+[backend]
+source = "github.com/super-stt/whisper"
+name = "Whisper"
+version = "0.1.0"
+kind = "subprocess"
+entrypoint = "whisper-backend"
+contract = "v1"
+
+[[models]]
+name = "whisper-en"
+provider = "local_whisper"
+multilingual = false
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu"]
+"#;
+        let m = Manifest::parse(toml_src).expect("parse");
+        validate_runtime(&m)
+            .expect("multilingual = false with exactly [primary_language] is valid");
     }
 
     #[test]
