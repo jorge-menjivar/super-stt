@@ -47,7 +47,8 @@ fn validate_entry(id: &str, e: &Entry) -> Result<(), ParseError> {
         return Err(ParseError::Entry { id: id.into(), reason: "`repo` is required".into() });
     }
     if let Some(sd) = &e.subdir
-        && (sd.contains("..") || sd.starts_with('/') || sd.contains('\\')) {
+        && !super_stt_registry_types::is_safe_relative_path(sd)
+    {
         return Err(ParseError::Entry {
             id: id.into(),
             reason: format!("`subdir = {sd:?}` is not a safe relative path"),
@@ -120,6 +121,25 @@ mod tests {
             subdir = "../escape"
         "#).unwrap_err();
         assert!(matches!(err, ParseError::Entry { .. }));
+    }
+
+    #[test]
+    fn subdir_uses_the_canonical_path_guard() {
+        // The shared `is_safe_relative_path` is stricter than the old
+        // substring check: it rejects empty components, `.`, and trailing
+        // slashes, and accepts a benign `..`-containing filename.
+        for bad in ["a//b", "./x", "models/", "a/../b"] {
+            let err = Registry::parse(&format!(
+                "[bad]\nrepo = \"github.com/x/y\"\nsubdir = \"{bad}\"\n"
+            ))
+            .unwrap_err();
+            assert!(matches!(err, ParseError::Entry { .. }), "{bad:?} should be rejected");
+        }
+        let ok = Registry::parse(
+            "[good]\nrepo = \"github.com/x/y\"\nsubdir = \"my..backend/v2\"\n",
+        )
+        .unwrap();
+        assert_eq!(ok.0.get("good").unwrap().subdir.as_deref(), Some("my..backend/v2"));
     }
 
     #[test]
