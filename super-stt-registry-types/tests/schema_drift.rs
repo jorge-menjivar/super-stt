@@ -13,11 +13,11 @@ fn repo_root() -> std::path::PathBuf {
 fn committed_schemas_are_current() {
     let cases = [
         (
-            "docs/protocol/backend/backend.schema.json",
+            "schemas/backend.schema.json",
             super_stt_registry_types::schema::backend_schema_pretty(),
         ),
         (
-            "registry/registry.schema.json",
+            "schemas/registry.schema.json",
             super_stt_registry_types::schema::registry_schema_pretty(),
         ),
     ];
