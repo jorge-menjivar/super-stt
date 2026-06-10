@@ -3,23 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct Entry {
-    pub repo: String,
-    #[serde(default)]
-    pub subdir: Option<String>,
-    #[serde(default)]
-    pub tag_prefix: Option<String>,
-    #[serde(default)]
-    pub max_version: Option<String>,
-    #[serde(default)]
-    pub removed: bool,
-    #[serde(default)]
-    pub removed_reason: Option<String>,
-}
+pub use super_stt_registry_types::entry::Entry;
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -60,13 +46,12 @@ fn validate_entry(id: &str, e: &Entry) -> Result<(), ParseError> {
     if e.repo.is_empty() {
         return Err(ParseError::Entry { id: id.into(), reason: "`repo` is required".into() });
     }
-    if let Some(sd) = &e.subdir {
-        if sd.contains("..") || sd.starts_with('/') || sd.contains('\\') {
-            return Err(ParseError::Entry {
-                id: id.into(),
-                reason: format!("`subdir = {sd:?}` is not a safe relative path"),
-            });
-        }
+    if let Some(sd) = &e.subdir
+        && (sd.contains("..") || sd.starts_with('/') || sd.contains('\\')) {
+        return Err(ParseError::Entry {
+            id: id.into(),
+            reason: format!("`subdir = {sd:?}` is not a safe relative path"),
+        });
     }
     Ok(())
 }

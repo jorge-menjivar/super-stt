@@ -7,6 +7,8 @@ use anyhow::Context;
 use clap::Parser;
 use log::{error, info, warn};
 
+use crate::manifest::{Device, Provider};
+
 mod assets;
 mod carryforward;
 mod github;
@@ -139,16 +141,13 @@ async fn build_entry(
             attempted_tag: attempted_tag.clone(),
         })?;
 
-    // Decide online from any model with a non-local provider. Conservative
-    // default: if any model has a provider whose name is "openai" / "mistral"
-    // / "deepgram" / "anthropic", flag online.
-    let online_providers: &[&str] = &["openai", "mistral", "deepgram", "anthropic"];
-    let online = m.models.iter().any(|md| online_providers.contains(&md.provider.as_str()));
+    // Decide online from any model with an online provider.
+    let online = m.models.iter().any(|md| matches!(md.provider, Provider::Online(_)));
 
     let supports_gpu = m.models.iter().any(|md|
-        md.supported_devices.iter().any(|d| d == "cuda" || d == "metal" || d == "rocm"));
+        md.supported_devices.iter().any(|d| matches!(d, Device::Cuda | Device::Metal)));
     let supports_cpu = m.models.iter().any(|md|
-        md.supported_devices.iter().any(|d| d == "cpu"));
+        md.supported_devices.contains(&Device::Cpu));
 
     // Resolve and hash assets. Any error here is wrapped with the now-known
     // attempted version + tag so the carry-forward path records them.
@@ -169,7 +168,7 @@ async fn build_entry(
         let sha = assets::fetch_and_validate(http, &url,
             assets::AssetExpect::Subprocess { file: &sa.file, entrypoint: &m.backend.entrypoint }).await.map_err(|e| wrap(e.into()))?;
         idx_assets.subprocess.push(index_json::IndexSubprocessAsset {
-            target: sa.target.clone(), accel: sa.accel.clone(),
+            target: sa.target.clone(), accel: sa.accel.to_string(),
             cuda_major: sa.cuda_major, cuda_sm: sa.cuda_sm, cudnn: sa.cudnn,
             url, size, sha256: sha,
         });
@@ -183,19 +182,28 @@ async fn build_entry(
         name: m.backend.name,
         description: m.backend.description,
         license: m.backend.license.unwrap_or_default(),
-        kind: m.backend.kind,
-        contract: m.backend.contract,
+        kind: m.backend.kind.to_string(),
+        contract: m.backend.contract.to_string(),
         entrypoint: m.backend.entrypoint,
         allowed_hosts: m.network.allowed_hosts,
         online, supports_gpu, supports_cpu,
         models: m.models.into_iter().map(|md| index_json::IndexModel {
-            name: md.name, provider: md.provider, supported_devices: md.supported_devices,
+            name: md.name,
+            provider: md.provider.to_string(),
+            supported_devices: md.supported_devices.iter().map(ToString::to_string).collect(),
         }).collect(),
         secrets: m.secrets.into_iter().map(|s| index_json::IndexSecret {
-            name: s.name, label: s.label, required: s.required,
+            label: s.label.unwrap_or_else(|| s.name.clone()),
+            name: s.name,
+            required: s.required,
         }).collect(),
         options: m.options.into_iter().map(|o| index_json::IndexOption {
-            name: o.name, label: o.label, r#type: o.r#type, default: o.default,
+            label: o.label.unwrap_or_else(|| o.name.clone()),
+            name: o.name,
+            r#type: o.r#type.map_or_else(|| "string".to_string(), |t| t.to_string()),
+            // Untagged serialize yields the plain JSON value (string/number/bool),
+            // exactly what the old serde_json::Value field carried.
+            default: o.default.map(|d| serde_json::to_value(d).expect("plain value")),
         }).collect(),
         assets: idx_assets,
         index_stale: None,

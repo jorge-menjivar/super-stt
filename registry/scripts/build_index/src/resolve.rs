@@ -54,9 +54,8 @@ fn select_release(releases: Vec<Release>, entry: &Entry) -> Result<Resolved, Res
             Ok(v) => v,
             Err(_) => continue,    // unparseable tags are ignored, not errors
         };
-        if let Some(cap) = &max_cap {
-            if &v > cap { continue; }
-        }
+        if let Some(cap) = &max_cap
+            && &v > cap { continue; }
         match &best {
             Some((cur, _)) if cur >= &v => {}
             _ => best = Some((v, r)),

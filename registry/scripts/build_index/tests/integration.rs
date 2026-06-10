@@ -22,6 +22,22 @@ license = "Apache-2.0"
 
 [assets]
 wasm = "y.wasm"
+
+[[secrets]]
+name = "y_api_key"
+description = "Key."
+
+[[options]]
+name = "base_url"
+description = "Override."
+default = "https://api.y.example"
+
+[[models]]
+name = "y-1"
+provider = "openai"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
 "#;
 
 const WASM_BYTES: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
@@ -74,4 +90,13 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
     assert_eq!(v["backends"][0]["assets"]["wasm"]["sha256"], WASM_SHA256);
     assert_eq!(v["backends"][0]["kind"], "wasm");
     assert_eq!(v["backends"][0]["license"], "Apache-2.0");
+    // Relaxation fallbacks: a secret without `label` falls back to `name`;
+    // an option without `label`/`type` falls back to `name`/"string".
+    assert_eq!(v["backends"][0]["secrets"][0]["label"], "y_api_key");
+    assert_eq!(v["backends"][0]["options"][0]["label"], "base_url");
+    assert_eq!(v["backends"][0]["options"][0]["type"], "string");
+    assert_eq!(v["backends"][0]["options"][0]["default"], "https://api.y.example");
+    // The fixture's only model is served by an online provider ("openai") —
+    // pins the Provider::Online → `online: true` mapping.
+    assert_eq!(v["backends"][0]["online"], true);
 }
