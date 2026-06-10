@@ -131,6 +131,13 @@ fn rejects_contract_violations() {
             d["frobnicate"] = json!(true);
             d
         }),
+        ("model with empty supported_devices", {
+            let mut d = wasm_base();
+            d["models"] = json!([{ "name": "m", "provider": "openai",
+                "primary_language": "en", "supported_languages": ["en"],
+                "supported_devices": [] }]);
+            d
+        }),
     ];
     for (label, doc) in cases {
         assert!(!v.is_valid(&doc), "{label}: should have failed validation");
@@ -221,6 +228,13 @@ fn conditional_property_names_exist() {
     for key in ["wasm", "subprocess"] {
         assert!(assets_props.contains_key(key), "Assets missing `{key}`");
     }
+    let model_entry_props = defs["ModelEntry"]["properties"]
+        .as_object()
+        .expect("ModelEntry properties");
+    assert!(
+        model_entry_props.contains_key("supported_devices"),
+        "ModelEntry missing `supported_devices`"
+    );
 }
 
 #[test]

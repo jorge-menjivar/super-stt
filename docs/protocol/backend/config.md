@@ -11,8 +11,8 @@ This document is part of the [backend protocol](./contract.md); see also
 [wasm.md](./wasm.md) and [subprocess.md](./subprocess.md) for how the
 configuration's fields are honored per transport.
 
-A JSON Schema for this file is generated from the daemon's canonical manifest
-types and committed at `docs/protocol/backend/backend.schema.json` (it will
+A JSON Schema for this file is generated from the canonical manifest types in
+`super-stt-registry-types` and committed at `docs/protocol/backend/backend.schema.json` (it will
 also be published at
 `https://jorge-menjivar.github.io/super-stt/backend.schema.json` once the
 registry's GitHub Pages site is live). Add `#:schema <path-or-url>` as a
@@ -63,7 +63,7 @@ contract   = "v1"
 | `version`    | string | yes      | Backend version (semver).                                            |
 | `kind`       | string | yes      | `subprocess` or `wasm` — selects the transport.                       |
 | `entrypoint` | string | yes      | Path, relative to the backend directory, to the executable (`subprocess`) or the `.wasm` component (`wasm`). |
-| `contract`   | string | yes      | The contract version the backend implements. Currently `v1`.          |
+| `contract`   | string | yes      | The contract version the backend implements. Must be `v1`; unknown versions are rejected. |
 
 ## `[network]`
 

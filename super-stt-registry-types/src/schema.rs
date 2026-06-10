@@ -141,6 +141,14 @@ pub fn backend_schema() -> Value {
         }),
     );
 
+    // `supported_devices` must be non-empty (discovery rejects an empty
+    // list); serde can't express minItems, so inject it here.
+    let model = defs.get_mut("ModelEntry").expect("ModelEntry def");
+    model["properties"]["supported_devices"]
+        .as_object_mut()
+        .expect("supported_devices property")
+        .insert("minItems".into(), serde_json::json!(1));
+
     close_objects(&mut root);
     root
 }

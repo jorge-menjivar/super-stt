@@ -376,6 +376,7 @@
           "items": {
             "$ref": "#/definitions/Device"
           },
+          "minItems": 1,
           "type": "array"
         },
         "supported_languages": {

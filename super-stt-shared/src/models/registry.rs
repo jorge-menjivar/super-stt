@@ -43,19 +43,11 @@ pub struct ModelDefinition {
     pub estimated_vram_bytes: u64,
     /// Suggested minimum interval between real-time processing chunks.
     pub processing_interval: Duration,
-    /// Devices the model can be loaded onto. `snake_case` values from the
-    /// closed set [`SUPPORTED_DEVICES`]; the sentinel `"none"` marks a
-    /// remote/online model with no local compute (and must be the only entry
-    /// when present). Non-empty and validated at discovery — a manifest that
-    /// omits this field or declares an invalid value causes the backend to
-    /// be rejected.
+    /// Devices the model can be loaded onto, in wire form (`cpu`, `cuda`,
+    /// `metal`, or the sentinel `none` for remote/online models, which must be
+    /// the only entry when present). Non-empty and validated at discovery.
     pub supported_devices: Vec<String>,
     /// Whether this model is reached over the realtime WebSocket path
     /// (`/v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`.
     pub realtime: bool,
 }
-
-/// The closed set of values accepted in a model's `supported_devices`. Local
-/// devices and one sentinel for online/remote models. The wire form is
-/// `snake_case`.
-pub const SUPPORTED_DEVICES: &[&str] = &["cpu", "cuda", "metal", "none"];
