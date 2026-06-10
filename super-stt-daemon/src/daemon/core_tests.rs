@@ -507,7 +507,7 @@ async fn set_model_local_works_without_online_toggle() {
 #[tokio::test]
 async fn list_backends_catalog_and_option_override() {
     use crate::stt_models::backends::DiscoveredBackend;
-    use crate::stt_models::backends::manifest::{Opt, Secret};
+    use crate::stt_models::backends::manifest::{Opt, OptionDefault, OptionType, Secret};
     use std::time::Duration;
     use super_stt_shared::models::provider::{OnlineProvider, Provider};
     use super_stt_shared::models::registry::ModelDefinition;
@@ -531,8 +531,8 @@ async fn list_backends_catalog_and_option_override() {
             name: "base_url".to_string(),
             label: Some("API base URL".to_string()),
             description: "Base URL".to_string(),
-            kind: Some("string".to_string()),
-            default: Some(toml::Value::String("https://api.openai.com".to_string())),
+            r#type: Some(OptionType::String),
+            default: Some(OptionDefault::String("https://api.openai.com".to_string())),
             required: false,
         }],
         models: vec![ModelDefinition {

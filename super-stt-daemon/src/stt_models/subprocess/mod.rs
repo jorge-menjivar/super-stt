@@ -10,7 +10,6 @@
 //! no code with the daemon.
 
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,10 +21,9 @@ use hyper_util::rt::TokioIo;
 use log::{info, warn};
 use tokio::net::UnixStream;
 
-use super_stt_shared::models::provider::Provider;
 use super_stt_shared::utils::audio::{ResampleQuality, resample};
 
-use crate::stt_models::backends::manifest::Manifest;
+use crate::stt_models::backends::manifest::{FileSource, Manifest};
 use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
 
 const SAMPLE_RATE: u32 = 16000;
@@ -71,6 +69,12 @@ impl SubprocessBackend {
         // counter stays monotonic across blocks.
         let mut file_offset = 0usize;
         for spec in &model.files {
+            match spec.source {
+                FileSource::Url => anyhow::bail!(
+                    "model {model_name}: [[models.files]] source = \"url\" is not supported yet"
+                ),
+                FileSource::Huggingface => {}
+            }
             let dest_dir = backend_dir.join(&spec.dest);
             info!(
                 "provisioning {model_name}: {} files -> {}",
@@ -123,13 +127,12 @@ impl SubprocessBackend {
 
         spawn_systemd_unit(&unit, &binary, backend_dir, &socket_dir, &socket).await?;
 
-        let provider = Provider::from_str(&model.provider).unwrap_or(Provider::LocalVoxtral);
         let interval = model
             .processing_interval_ms
             .map_or_else(|| Duration::from_secs(2), Duration::from_millis);
         let info = ModelInfoData::new(
             model_name,
-            provider,
+            model.provider,
             manifest.backend.source.clone(),
             model.multilingual,
             interval,
@@ -143,10 +146,9 @@ impl SubprocessBackend {
             device: "unknown".to_string(),
         };
 
+        let provider_str = model.provider.to_string();
         backend.wait_for_ping(Duration::from_secs(30)).await?;
-        backend
-            .load(model_name, &model.provider, device_pref)
-            .await?;
+        backend.load(model_name, &provider_str, device_pref).await?;
         Ok(backend)
     }
 

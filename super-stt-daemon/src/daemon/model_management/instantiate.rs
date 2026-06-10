@@ -201,22 +201,11 @@ impl SuperSTTDaemon {
             let value = config
                 .backend_option(&backend.source, &opt.name)
                 .map(str::to_string)
-                .or_else(|| opt.default.as_ref().map(toml_value_string));
+                .or_else(|| opt.default.as_ref().map(ToString::to_string));
             if let Some(v) = value {
                 headers.push((format!("x-stt-option-{}", opt.name), v));
             }
         }
         Ok(headers)
-    }
-}
-
-/// Render a TOML option default as the string value injected via
-/// `x-stt-option-*`. String values pass through unquoted; everything else uses
-/// its TOML display form.
-#[cfg(feature = "wasm-backends")]
-fn toml_value_string(value: &toml::Value) -> String {
-    match value {
-        toml::Value::String(s) => s.clone(),
-        other => other.to_string(),
     }
 }

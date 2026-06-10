@@ -11,7 +11,6 @@ pub mod manifest;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::time::Duration;
 
 use log::{error, info, warn};
@@ -19,8 +18,7 @@ use log::{error, info, warn};
 use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::registry::ModelDefinition;
 
-use manifest::{Manifest, ModelEntry, Opt, Secret};
-use super_stt_shared::models::registry::SUPPORTED_DEVICES;
+use manifest::{Device, Manifest, ModelEntry, Opt, Secret};
 
 /// A backend discovered on disk, with the models it serves resolved into
 /// [`ModelDefinition`]s keyed by `(name, provider, source)`.
@@ -112,24 +110,18 @@ fn dedup_sources(backends: Vec<DiscoveredBackend>) -> Vec<DiscoveredBackend> {
 
 /// Parse one backend directory into a [`DiscoveredBackend`].
 ///
-/// Per-model errors (unknown provider, missing/invalid `supported_devices`)
-/// are fatal for the *whole* backend: discovery skips it rather than expose
-/// a half-defined model. The hard fail is the user-facing rule for the
-/// `supported_devices` field — see [`validate_supported_devices`].
+/// Per-model errors (missing/invalid `supported_devices`) are fatal for the
+/// *whole* backend: discovery skips it rather than expose a half-defined
+/// model. Unknown providers and devices are rejected at parse time by the
+/// typed manifest; this function enforces the cross-field device rules via
+/// [`validate_supported_devices`].
 fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
     let m = Manifest::load(dir)?;
-    m.validate()?;
+    manifest::validate_runtime(&m)?;
     let source = m.backend.source.clone();
 
     let mut models = Vec::new();
     for entry in &m.models {
-        let provider = Provider::from_str(&entry.provider).map_err(|e| {
-            anyhow::anyhow!(
-                "model '{}' has unknown provider '{}' ({e})",
-                entry.name,
-                entry.provider
-            )
-        })?;
         let supported_devices = validate_supported_devices(entry)
             .map_err(|e| anyhow::anyhow!("model '{}': {e}", entry.name))?;
         let interval = entry
@@ -137,7 +129,7 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
             .map_or_else(|| Duration::from_secs(2), Duration::from_millis);
         models.push(ModelDefinition {
             name: entry.name.clone(),
-            provider,
+            provider: entry.provider,
             source: source.clone(),
             is_multilingual: entry.multilingual,
             estimated_vram_bytes: entry.estimated_vram_bytes,
@@ -151,7 +143,7 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
         dir: dir.to_path_buf(),
         source,
         name: m.backend.name,
-        kind: m.backend.kind,
+        kind: m.backend.kind.to_string(),
         entrypoint: m.backend.entrypoint,
         allowed_hosts: m.network.allowed_hosts,
         secrets: m.secrets,
@@ -161,41 +153,31 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
 }
 
 /// Validate a model's declared `supported_devices`. Returns the de-duplicated
-/// device list on success.
+/// wire-form device list on success.
 ///
 /// Rules (hard-fail at discovery on any violation):
-/// - Field is required: an empty / absent list is rejected.
-/// - Each entry is one of [`SUPPORTED_DEVICES`] (`"cpu"`, `"cuda"`, `"metal"`,
-///   `"none"`); unknown values are rejected.
+/// - Field is required: an empty list is rejected. (Unknown device names are
+///   already rejected at parse by the `Device` enum.)
 /// - The sentinel `"none"` (online/remote model with no local compute) must
 ///   be the only entry when present — mixing it with local devices is a
 ///   contradiction.
 fn validate_supported_devices(entry: &ModelEntry) -> anyhow::Result<Vec<String>> {
     if entry.supported_devices.is_empty() {
-        anyhow::bail!(
-            "missing or empty 'supported_devices' — declare at least one of {SUPPORTED_DEVICES:?}"
-        );
+        anyhow::bail!("empty 'supported_devices' — declare at least one device");
     }
-    for d in &entry.supported_devices {
-        if !SUPPORTED_DEVICES.contains(&d.as_str()) {
-            anyhow::bail!(
-                "unknown device '{d}' in supported_devices; allowed: {SUPPORTED_DEVICES:?}"
-            );
-        }
-    }
-    if entry.supported_devices.iter().any(|d| d == "none") && entry.supported_devices.len() > 1 {
+    if entry.supported_devices.contains(&Device::None) && entry.supported_devices.len() > 1 {
         anyhow::bail!(
             "'none' (remote/online) must be the only entry in supported_devices when present"
         );
     }
     // Stable de-dup preserving declaration order.
-    let mut seen = Vec::with_capacity(entry.supported_devices.len());
+    let mut seen: Vec<Device> = Vec::with_capacity(entry.supported_devices.len());
     for d in &entry.supported_devices {
         if !seen.contains(d) {
-            seen.push(d.clone());
+            seen.push(*d);
         }
     }
-    Ok(seen)
+    Ok(seen.iter().map(ToString::to_string).collect())
 }
 
 /// Locate the backend and model definition matching `(name, provider, source)`.

@@ -259,11 +259,10 @@ fn synthesize_assets(
 
 // ---------- Manifest types (local to this module) ----------
 //
-// The daemon's installed-backend manifest parser
-// (`stt_models/backends/manifest.rs`) intentionally ignores `[assets]`
-// because installed backends already have their files on disk. The
-// Custom-repo path is the one place that needs to read `[assets]` from a
-// remote manifest, so the relevant subset lives here.
+// custom_repo vets a remote repository's manifest before install; it needs
+// only the asset-selection subset of the full manifest schema.  A minimal,
+// lenient local parser is kept here deliberately rather than depending on the
+// canonical super-stt-registry-types, which owns the installed-backend shape.
 
 #[derive(Debug, Deserialize)]
 struct Manifest {

@@ -14,7 +14,8 @@ use std::path::Path;
 use thiserror::Error;
 
 use crate::registry::index_schema::{IndexAssets, IndexBackend, IndexModel};
-use crate::stt_models::backends::manifest::Manifest;
+use crate::stt_models::backends::manifest::{Device, Manifest};
+use super_stt_shared::models::provider::Provider;
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
@@ -26,7 +27,7 @@ pub enum ResolveError {
     NotADirectory(String),
     #[error("local_path `{0}` has no backend.toml")]
     NoManifest(String),
-    #[error("backend.toml: {0}")]
+    #[error("backend.toml: {0:#}")]
     Manifest(#[from] anyhow::Error),
     #[error("backend.toml `source = {0:?}` yields an unsafe install id")]
     UnsafeId(String),
@@ -54,21 +55,13 @@ pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
     if !local_path.join("backend.toml").exists() {
         return Err(ResolveError::NoManifest(local_path.display().to_string()));
     }
-    let m = Manifest::load(local_path)?;
-    m.validate()?;
+    let m = Manifest::load(local_path).map_err(anyhow::Error::from)?;
+    crate::stt_models::backends::manifest::validate_runtime(&m)?;
 
-    let online_providers: &[&str] = &["openai", "mistral", "deepgram", "anthropic"];
     let online = m
         .models
         .iter()
-        .any(|md| online_providers.contains(&md.provider.as_str()));
-    let device_match = |needles: &[&str]| {
-        m.models.iter().any(|md| {
-            md.supported_devices
-                .iter()
-                .any(|d| needles.contains(&d.as_str()))
-        })
-    };
+        .any(|md| matches!(md.provider, Provider::Online(_)));
 
     let id = id_from_source(&m.backend.source);
     if !super_stt_shared::registry::is_safe_component(&id) {
@@ -85,20 +78,31 @@ pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
         name: m.backend.name.clone(),
         description: None,
         license: String::new(),
-        kind: m.backend.kind.clone(),
-        contract: m.backend.contract.clone(),
+        kind: m.backend.kind.to_string(),
+        contract: m.backend.contract.to_string(),
         entrypoint: m.backend.entrypoint.clone(),
         allowed_hosts: m.network.allowed_hosts.clone(),
         online,
-        supports_gpu: device_match(&["cuda", "metal", "rocm"]),
-        supports_cpu: device_match(&["cpu"]),
+        supports_gpu: m.models.iter().any(|md| {
+            md.supported_devices
+                .iter()
+                .any(|d| matches!(d, Device::Cuda | Device::Metal))
+        }),
+        supports_cpu: m
+            .models
+            .iter()
+            .any(|md| md.supported_devices.contains(&Device::Cpu)),
         models: m
             .models
             .iter()
             .map(|md| IndexModel {
                 name: md.name.clone(),
-                provider: md.provider.clone(),
-                supported_devices: md.supported_devices.clone(),
+                provider: md.provider.to_string(),
+                supported_devices: md
+                    .supported_devices
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
             })
             .collect(),
         secrets: Vec::new(),

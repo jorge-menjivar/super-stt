@@ -36,10 +36,12 @@ allowed_hosts = ["api.openai.com"]
 
 [[secrets]]
 name = "OPENAI_API_KEY"
+description = "OpenAI API key."
 required = true
 
 [[options]]
 name = "base_url"
+description = "Base URL."
 type = "string"
 default = "https://api.openai.com"
 
@@ -47,6 +49,8 @@ default = "https://api.openai.com"
 name = "whisper-1"
 provider = "openai"
 multilingual = true
+primary_language = "en"
+supported_languages = ["en"]
 supported_devices = ["none"]
 "#,
     )
@@ -69,6 +73,8 @@ contract = "v1"
 name = "voxtral-mini"
 provider = "local_voxtral"
 multilingual = true
+primary_language = "en"
+supported_languages = ["en"]
 supported_devices = ["cpu", "cuda"]
 estimated_vram_bytes = 8589934592
 processing_interval_ms = 2000
@@ -182,6 +188,42 @@ multilingual = true
     );
 }
 
+/// A backend whose manifest has an explicit empty `supported_devices = []` on a
+/// model is rejected at discovery — the empty-list bail in
+/// `validate_supported_devices` must be reached even when the field is present.
+#[test]
+fn empty_supported_devices_skips_backend() {
+    let root = scratch("empty_devices");
+    let openai = root.join("openai");
+    fs::create_dir_all(&openai).unwrap();
+    fs::write(
+        openai.join("backend.toml"),
+        r#"
+[backend]
+source = "github.com/super-stt/openai"
+name = "OpenAI"
+version = "0.1.0"
+kind = "wasm"
+entrypoint = "openai.wasm"
+contract = "v1"
+
+[[models]]
+name = "whisper-1"
+provider = "openai"
+multilingual = true
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = []
+"#,
+    )
+    .unwrap();
+
+    assert!(
+        discover(&root).is_empty(),
+        "a manifest with supported_devices = [] must be rejected"
+    );
+}
+
 /// Unknown device strings (`xpu`) cause the whole backend to be skipped.
 #[test]
 fn unknown_device_skips_backend() {
@@ -203,6 +245,8 @@ contract = "v1"
 name = "whisper-1"
 provider = "openai"
 multilingual = true
+primary_language = "en"
+supported_languages = ["en"]
 supported_devices = ["xpu"]
 "#,
     )
@@ -233,6 +277,8 @@ contract = "v1"
 name = "whisper-1"
 provider = "openai"
 multilingual = true
+primary_language = "en"
+supported_languages = ["en"]
 supported_devices = ["none", "cpu"]
 "#,
     )
@@ -300,6 +346,8 @@ contract = "v1"
 name = "{dir}-base"
 provider = "openai"
 multilingual = true
+primary_language = "en"
+supported_languages = ["en"]
 supported_devices = ["none"]
 "#
         ),
@@ -401,6 +449,8 @@ contract = "v1"
 name = "qwen3-asr-0.6b"
 provider = "local_qwen3_asr"
 multilingual = true
+primary_language = "en"
+supported_languages = ["en"]
 supported_devices = ["cpu", "cuda"]
 estimated_vram_bytes = 2500000000
 processing_interval_ms = 1000
@@ -409,6 +459,8 @@ processing_interval_ms = 1000
 name = "qwen3-asr-1.7b"
 provider = "local_qwen3_asr"
 multilingual = true
+primary_language = "en"
+supported_languages = ["en"]
 supported_devices = ["cpu", "cuda"]
 estimated_vram_bytes = 6000000000
 processing_interval_ms = 1500

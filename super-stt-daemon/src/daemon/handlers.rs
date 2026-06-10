@@ -372,7 +372,7 @@ impl SuperSTTDaemon {
                     .options
                     .iter()
                     .map(|o| {
-                        let default = o.default.as_ref().map(toml_value_to_string);
+                        let default = o.default.as_ref().map(ToString::to_string);
                         let value = config
                             .backend_option(&b.source, &o.name)
                             .map(str::to_string)
@@ -381,7 +381,7 @@ impl SuperSTTDaemon {
                             "name": o.name,
                             "label": o.label,
                             "description": o.description,
-                            "type": o.kind,
+                            "type": o.r#type,
                             "default": default,
                             "required": o.required,
                             "value": value,
@@ -464,14 +464,5 @@ impl SuperSTTDaemon {
         } else {
             DaemonResponse::success().with_message("No download in progress".to_string())
         }
-    }
-}
-
-/// Render a TOML option default for the backends catalog: strings pass through
-/// unquoted, everything else uses its TOML display form.
-fn toml_value_to_string(value: &toml::Value) -> String {
-    match value {
-        toml::Value::String(s) => s.clone(),
-        other => other.to_string(),
     }
 }
