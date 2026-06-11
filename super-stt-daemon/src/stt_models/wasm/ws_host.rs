@@ -135,7 +135,12 @@ impl self::super_stt::realtime::ws::Host for Host {
         });
 
         // Same egress allowlist + SSRF guard the HTTP host enforces.
-        if let Err(msg) = check_host_allowed(&self.hooks.allowed_hosts, host, port) {
+        if let Err(msg) = check_host_allowed(
+            &self.hooks.allowed_hosts,
+            host,
+            port,
+            self.hooks.allow_loopback,
+        ) {
             return Ok(Err(WsError::HostNotAllowed(msg)));
         }
 

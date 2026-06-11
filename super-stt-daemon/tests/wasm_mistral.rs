@@ -16,15 +16,27 @@ use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Path to the prebuilt component (`just build-mistral-backend`).
-fn component_path() -> PathBuf {
+fn component_path() -> Option<PathBuf> {
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../backends/mistral/target/wasm32-wasip2/release/super_stt_backend_mistral.wasm");
-    assert!(
-        p.exists(),
-        "component not built at {} — run `just build-mistral-backend`",
-        p.display()
-    );
-    p
+    p.exists().then_some(p)
+}
+
+/// Yield the component path, or skip the test (print + early return) when it
+/// isn't built — CI doesn't build backends, and a backend may have moved to
+/// its own repo. Build locally with `just build-mistral-backend`.
+macro_rules! component_or_skip {
+    () => {
+        match component_path() {
+            Some(p) => p,
+            None => {
+                eprintln!(
+                    "skipping: WASM component not built (run the matching `just build-*-backend`)"
+                );
+                return;
+            }
+        }
+    };
 }
 
 const SECRET: &str = "x-stt-secret-mistral_api_key";
@@ -49,7 +61,7 @@ async fn transcribe_round_trip() {
 
     let authority = server.address().to_string();
     let mut backend = WasmBackend::new_realtime(
-        &component_path(),
+        &component_or_skip!(),
         vec![authority.clone()],
         "voxtral-mini-latest".to_string(),
         vec![
@@ -57,7 +69,9 @@ async fn transcribe_round_trip() {
             (BASE_URL.to_string(), format!("http://{authority}")),
         ],
     )
-    .expect("load backend");
+    .expect("load backend")
+    // Mock upstream on loopback; the SSRF guard blocks loopback otherwise.
+    .permit_loopback_egress();
 
     let audio = vec![0.0_f32; 1600];
     let text = backend
@@ -80,7 +94,7 @@ async fn allowlist_blocks_disallowed_host() {
         .await;
 
     let mut backend = WasmBackend::new_realtime(
-        &component_path(),
+        &component_or_skip!(),
         // Allowlist a different host than the mock is listening on.
         vec!["api.mistral.ai".to_string()],
         "voxtral-mini-latest".to_string(),
@@ -112,7 +126,7 @@ async fn ssrf_blocks_hostname_resolving_to_loopback() {
 
     let port = server.address().port();
     let mut backend = WasmBackend::new_realtime(
-        &component_path(),
+        &component_or_skip!(),
         // `localhost` is allowlisted by name, but resolves to 127.0.0.1 / ::1.
         vec!["localhost".to_string()],
         "voxtral-mini-latest".to_string(),
@@ -134,7 +148,7 @@ async fn ssrf_blocks_hostname_resolving_to_loopback() {
 #[tokio::test]
 async fn ping_and_status() {
     let backend = WasmBackend::new_realtime(
-        &component_path(),
+        &component_or_skip!(),
         Vec::new(),
         "voxtral-mini-latest".to_string(),
         Vec::new(),
@@ -165,7 +179,7 @@ async fn live_mistral() {
     let (samples, sample_rate) = read_wav_mono_f32(&audio_path);
 
     let mut backend = WasmBackend::new_realtime(
-        &component_path(),
+        &component_or_skip!(),
         vec!["api.mistral.ai".to_string()],
         "voxtral-mini-latest".to_string(),
         vec![(SECRET.to_string(), key)],

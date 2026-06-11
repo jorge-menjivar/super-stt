@@ -23,6 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -57,24 +61,78 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests
-        run: cargo test --verbose
+        run: just test --verbose
 
       - name: Run doctests
-        run: cargo test --doc --verbose
+        run: just doctest --verbose
 
       - name: Check generated TOML schemas are current
-        run: cargo test -p super-stt-registry-types --features schema
+        run: just schema-check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      # `just check` lints the workspace, which includes the COSMIC/iced GUI
+      # crates — those need the Wayland/xkbcommon/GTK system libraries to build.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libegl1-mesa-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libglib2.0-dev \
+            libgtk-4-dev \
+            libspeechd-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libasound2-dev \
+            libdbus-1-dev \
+            pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run clippy
+        run: just check
 
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: just fmt-check

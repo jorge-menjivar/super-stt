@@ -18,15 +18,27 @@ use super_stt_daemon::stt_models::transcribe::Transcribe;
 use super_stt_daemon::stt_models::wasm::WasmBackend;
 use super_stt_daemon::stt_models::wasm::ws_host::{ConsumerStreamTransport, WsFrame};
 
-fn component_path() -> PathBuf {
+fn component_path() -> Option<PathBuf> {
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../backends/mistral/target/wasm32-wasip2/release/super_stt_backend_mistral.wasm");
-    assert!(
-        p.exists(),
-        "component not built at {} — run `just build-mistral-backend`",
-        p.display()
-    );
-    p
+    p.exists().then_some(p)
+}
+
+/// Yield the component path, or skip the test (print + early return) when it
+/// isn't built — CI doesn't build backends, and a backend may have moved to
+/// its own repo. Build locally with `just build-mistral-backend`.
+macro_rules! component_or_skip {
+    () => {
+        match component_path() {
+            Some(p) => p,
+            None => {
+                eprintln!(
+                    "skipping: WASM component not built (run the matching `just build-*-backend`)"
+                );
+                return;
+            }
+        }
+    };
 }
 
 /// Mock Mistral realtime upstream. Accepts the WS upgrade, consumes
@@ -80,11 +92,11 @@ async fn realtime_round_trip() {
     let (authority, _mock) = start_mock_upstream().await;
 
     // The guest builds the upstream URL from x-stt-option-base_url. Point it at
-    // the mock over plaintext ws:// (http:// -> ws:// in the guest). The mock's
-    // host is an IP literal, so the daemon's allowlist trusts it as-is (the
-    // SSRF resolver only rejects DNS names that resolve to loopback).
+    // the mock over plaintext ws:// (http:// -> ws:// in the guest). The mock is
+    // on loopback, which the SSRF guard blocks for untrusted backends, so the
+    // test opts in via `permit_loopback_egress` below.
     let backend = WasmBackend::new_realtime(
-        &component_path(),
+        &component_or_skip!(),
         vec![authority.clone()],
         "voxtral-mini-transcribe-realtime-2602".to_string(),
         vec![
@@ -98,7 +110,8 @@ async fn realtime_round_trip() {
             ),
         ],
     )
-    .expect("load backend");
+    .expect("load backend")
+    .permit_loopback_egress();
 
     // Channels: consumer_tx -> guest (incoming); guest -> guest_rx (outgoing).
     let (consumer_tx, consumer_rx) = tokio::sync::mpsc::unbounded_channel::<WsFrame>();

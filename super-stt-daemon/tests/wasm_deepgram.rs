@@ -16,15 +16,27 @@ use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Path to the prebuilt component (`just build-deepgram-backend`).
-fn component_path() -> PathBuf {
+fn component_path() -> Option<PathBuf> {
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../backends/deepgram/target/wasm32-wasip2/release/super_stt_backend_deepgram.wasm");
-    assert!(
-        p.exists(),
-        "component not built at {} — run `just build-deepgram-backend`",
-        p.display()
-    );
-    p
+    p.exists().then_some(p)
+}
+
+/// Yield the component path, or skip the test (print + early return) when it
+/// isn't built — CI doesn't build backends, and a backend may have moved to
+/// its own repo. Build locally with `just build-deepgram-backend`.
+macro_rules! component_or_skip {
+    () => {
+        match component_path() {
+            Some(p) => p,
+            None => {
+                eprintln!(
+                    "skipping: WASM component not built (run the matching `just build-*-backend`)"
+                );
+                return;
+            }
+        }
+    };
 }
 
 const SECRET: &str = "x-stt-secret-deepgram_api_key";
@@ -55,8 +67,10 @@ async fn transcribe_round_trip() {
         .await;
 
     let authority = server.address().to_string();
+    // The mock upstream is on loopback (wiremock binds 127.0.0.1); the SSRF
+    // guard blocks loopback for untrusted backends, so opt in for the test.
     let mut backend = WasmBackend::new(
-        &component_path(),
+        &component_or_skip!(),
         vec![authority.clone()],
         "nova-3".to_string(),
         vec![
@@ -64,7 +78,8 @@ async fn transcribe_round_trip() {
             (BASE_URL.to_string(), format!("http://{authority}")),
         ],
     )
-    .expect("load backend");
+    .expect("load backend")
+    .permit_loopback_egress();
 
     let audio = vec![0.0_f32; 1600];
     let text = backend
@@ -87,7 +102,7 @@ async fn allowlist_blocks_disallowed_host() {
         .await;
 
     let mut backend = WasmBackend::new(
-        &component_path(),
+        &component_or_skip!(),
         // Allowlist a different host than the mock is listening on.
         vec!["api.deepgram.com".to_string()],
         "nova-3".to_string(),
@@ -119,7 +134,7 @@ async fn ssrf_blocks_hostname_resolving_to_loopback() {
 
     let port = server.address().port();
     let mut backend = WasmBackend::new(
-        &component_path(),
+        &component_or_skip!(),
         // `localhost` is allowlisted by name, but resolves to 127.0.0.1 / ::1.
         vec!["localhost".to_string()],
         "nova-3".to_string(),
@@ -141,7 +156,7 @@ async fn ssrf_blocks_hostname_resolving_to_loopback() {
 #[tokio::test]
 async fn ping_and_status() {
     let backend = WasmBackend::new(
-        &component_path(),
+        &component_or_skip!(),
         Vec::new(),
         "nova-3".to_string(),
         Vec::new(),
@@ -173,7 +188,7 @@ async fn live_deepgram() {
     let (samples, sample_rate) = read_wav_mono_f32(&audio_path);
 
     let mut backend = WasmBackend::new(
-        &component_path(),
+        &component_or_skip!(),
         vec!["api.deepgram.com".to_string()],
         "nova-3".to_string(),
         vec![(SECRET.to_string(), key)],

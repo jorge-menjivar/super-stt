@@ -92,6 +92,29 @@ check *args:
 # Runs a clippy check with JSON message format
 check-json: (check '--message-format=json')
 
+# Check formatting without modifying files
+fmt-check:
+    cargo fmt --all -- --check
+
+# Apply rustfmt to the whole workspace
+fmt:
+    cargo fmt --all
+
+# Run the test suite. Usage: just test [--verbose]
+test *args:
+    cargo test {{ args }}
+
+# Run doctests
+doctest *args:
+    cargo test --doc {{ args }}
+
+# Verify the generated TOML schemas are current
+schema-check:
+    cargo test -p super-stt-registry-types --features schema
+
+# Full local CI gate: format, lint, tests, doctests, schemas
+ci: fmt-check check test doctest schema-check
+
 # Run the app for testing purposes
 run-app *args:
     env RUST_BACKTRACE=full RUST_LOG=super_stt_app=debug,super_stt_shared=debug cargo run --bin {{ app_name }} {{ args }}

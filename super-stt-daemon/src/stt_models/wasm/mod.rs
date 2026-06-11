@@ -46,6 +46,7 @@ pub struct WasmBackend {
     engine: Engine,
     pre: BackendPre,
     allowed_hosts: Vec<String>,
+    allow_loopback: bool,
     transcribe_headers: Vec<(String, String)>,
     model_id: String,
     info: ModelInfoData,
@@ -96,10 +97,24 @@ impl WasmBackend {
             engine,
             pre,
             allowed_hosts,
+            allow_loopback: false,
             transcribe_headers,
             model_id,
             info,
         })
+    }
+
+    /// Permit this backend's egress to loopback addresses (`127.0.0.1`, `::1`).
+    ///
+    /// The SSRF guard blocks loopback by default so an untrusted backend can't
+    /// reach a service bound to localhost. Enable this ONLY for tests or local
+    /// development that point the backend at a mock upstream on loopback —
+    /// never for an installed/untrusted backend. Only loopback is relaxed;
+    /// link-local, private, and the cloud-metadata endpoint stay blocked.
+    #[must_use]
+    pub fn permit_loopback_egress(mut self) -> Self {
+        self.allow_loopback = true;
+        self
     }
 
     /// Convenience constructor used by the `OpenAI` test harness: synthesizes
@@ -201,6 +216,7 @@ impl WasmBackend {
             http: WasiHttpCtx::new(),
             hooks: AllowlistHooks {
                 allowed_hosts: self.allowed_hosts.clone(),
+                allow_loopback: self.allow_loopback,
             },
         };
         let mut store = Store::new(&self.engine, host);
@@ -336,6 +352,7 @@ impl Transcribe for WasmBackend {
             http: WasiHttpCtx::new(),
             hooks: AllowlistHooks {
                 allowed_hosts: self.allowed_hosts.clone(),
+                allow_loopback: self.allow_loopback,
             },
         };
         let mut store = Store::new(&self.engine, host);

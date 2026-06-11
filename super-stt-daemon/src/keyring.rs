@@ -14,6 +14,22 @@ use log::{debug, warn};
 
 const SERVICE_NAME: &str = "super-stt";
 
+/// When `SUPER_STT_KEYRING_MOCK` is set, route all keyring access to an
+/// in-memory mock store instead of the system secret service.
+///
+/// The integration tests spawn the daemon as a subprocess and CI runs
+/// headless, where there is no unlocked system keyring — touching the real
+/// secret service there blocks on an unlock prompt or fails. This must be
+/// called once at daemon startup, before any keyring access, as it sets the
+/// process-wide default credential builder.
+pub fn install_mock_if_requested() {
+    if std::env::var_os("SUPER_STT_KEYRING_MOCK").is_some() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        // Runs before the logger is initialized, so use stderr directly.
+        eprintln!("SUPER_STT_KEYRING_MOCK set — using an in-memory keyring (test/CI only)");
+    }
+}
+
 /// Keyring user (key name) under which the daemon stores all HTTP session
 /// metadata as a single JSON blob. See `TokenStore::load_persisted` for
 /// the schema. The blob is a single secret rather than one entry per

@@ -20,8 +20,15 @@ fn accepts_every_in_repo_backend_toml() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
-    let mut count = 0;
-    for entry in std::fs::read_dir(root.join("backends")).unwrap().flatten() {
+    // Backends are migrating to their own repos, so the in-repo set shrinks
+    // over time (and `backends/` may eventually disappear) — validate whatever
+    // manifests remain rather than asserting a fixed count. The schema's
+    // acceptance of a valid manifest is also covered by the inline cases in
+    // `allows_documented_optionals` / `rejects_contract_violations`.
+    let Ok(dir) = std::fs::read_dir(root.join("backends")) else {
+        return;
+    };
+    for entry in dir.flatten() {
         let path = entry.path().join("backend.toml");
         if !path.exists() {
             continue;
@@ -33,10 +40,7 @@ fn accepts_every_in_repo_backend_toml() {
             "{} schema errors: {errors:#?}",
             path.display()
         );
-        count += 1;
     }
-    // Tripwire: bump when adding/removing in-repo backends.
-    assert!(count >= 6, "expected the 6 in-repo backends, found {count}");
 }
 
 #[test]

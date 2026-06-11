@@ -68,6 +68,7 @@ async fn start_daemon_with_registry(registry_url: &str) -> (DaemonGuard, PathBuf
     std::fs::create_dir_all(&data_home).expect("create test data dir");
 
     let child = Command::new(DAEMON_BIN)
+        .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
         .env("SUPER_STT_AUTO_APPROVE", "1")
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("SUPER_STT_REGISTRY_URL", registry_url)
