@@ -17,8 +17,14 @@ impl WorkingAnimationRenderer for CometAnimation {
     #[allow(clippy::cast_precision_loss)] // trail index is a tiny loop counter
     #[allow(clippy::many_single_char_names)] // math variables: w, h, k, a are standard notation
     fn draw(&self, frame: &mut Frame<Renderer>, ctx: &WorkingDrawContext) {
-        let WorkingDrawContext { bounds, elapsed_ms, color_config, is_dark, cosmic_theme, side } =
-            *ctx;
+        let WorkingDrawContext {
+            bounds,
+            elapsed_ms,
+            color_config,
+            is_dark,
+            cosmic_theme,
+            side,
+        } = *ctx;
         let (w, h) = (bounds.width, bounds.height);
         if w <= 0.0 {
             return;
@@ -49,11 +55,19 @@ impl WorkingAnimationRenderer for CometAnimation {
             }
             local += 3.0;
         }
-        frame.stroke(&gb.build(), stroke::Stroke {
-            style: stroke::Style::Solid(Color::from_rgba(base.r, base.g, base.b, base.a * 0.18)),
-            width: 1.4,
-            ..Default::default()
-        });
+        frame.stroke(
+            &gb.build(),
+            stroke::Stroke {
+                style: stroke::Style::Solid(Color::from_rgba(
+                    base.r,
+                    base.g,
+                    base.b,
+                    base.a * 0.18,
+                )),
+                width: 1.4,
+                ..Default::default()
+            },
+        );
 
         // Comet head + fading trail, positioned in logical space and clipped to
         // this applet's slice.
@@ -69,11 +83,17 @@ impl WorkingAnimationRenderer for CometAnimation {
             let a = 1.0 - (i as f32) / (trail as f32);
             if i == 0 {
                 let glow = path::Path::circle(Point::new(sx, yy), 7.0);
-                frame.fill(&glow, Color::from_rgba(base.r, base.g, base.b, base.a * 0.3));
+                frame.fill(
+                    &glow,
+                    Color::from_rgba(base.r, base.g, base.b, base.a * 0.3),
+                );
             }
             let r = if i == 0 { 4.0 } else { 2.0 * a + 0.6 };
             let dot = path::Path::circle(Point::new(sx, yy), r);
-            frame.fill(&dot, Color::from_rgba(base.r, base.g, base.b, base.a * a * a * 0.9));
+            frame.fill(
+                &dot,
+                Color::from_rgba(base.r, base.g, base.b, base.a * a * a * 0.9),
+            );
         }
     }
 }

@@ -202,10 +202,7 @@ impl SuperSttApplet {
         cosmic_app::Task::none()
     }
 
-    fn set_working_animation(
-        &mut self,
-        theme: WorkingAnimationTheme,
-    ) -> cosmic_app::Task<Message> {
+    fn set_working_animation(&mut self, theme: WorkingAnimationTheme) -> cosmic_app::Task<Message> {
         self.config
             .update_working_animation(theme, &self.variant_name);
         self.working_animation.update_theme(theme);

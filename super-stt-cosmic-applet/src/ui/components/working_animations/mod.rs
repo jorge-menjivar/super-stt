@@ -72,6 +72,9 @@ mod tests {
         // Left: left half of a double-width animation (origin/seam at its right edge).
         assert_eq!(logical_span(&VisualizationSide::Left, 100.0), (200.0, 0.0));
         // Right: right half (its left edge sits at the logical middle = the seam).
-        assert_eq!(logical_span(&VisualizationSide::Right, 100.0), (200.0, 100.0));
+        assert_eq!(
+            logical_span(&VisualizationSide::Right, 100.0),
+            (200.0, 100.0)
+        );
     }
 }

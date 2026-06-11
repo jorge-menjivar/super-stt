@@ -45,10 +45,11 @@ impl SuperSttApplet {
                 .autosize_window(visualization_element)
                 .into()
         } else if self.daemon_state == DaemonConnectionState::Connected && should_show_working {
-            let working_element =
-                container(mouse_area(self.working_animation.clone()).on_press(Message::TogglePopup))
-                    .width(Length::Fixed(visualization_size.width))
-                    .height(Length::Fixed(visualization_size.height));
+            let working_element = container(
+                mouse_area(self.working_animation.clone()).on_press(Message::TogglePopup),
+            )
+            .width(Length::Fixed(visualization_size.width))
+            .height(Length::Fixed(visualization_size.height));
 
             self.core.applet.autosize_window(working_element).into()
         } else {

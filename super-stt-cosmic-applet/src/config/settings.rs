@@ -180,7 +180,10 @@ mod working_animation_config_tests {
 
     #[test]
     fn default_working_animation_is_droplet() {
-        assert_eq!(AppletConfig::default().visualization.working_animation, WorkingAnimationTheme::Droplet);
+        assert_eq!(
+            AppletConfig::default().visualization.working_animation,
+            WorkingAnimationTheme::Droplet
+        );
     }
 
     #[test]
@@ -189,7 +192,10 @@ mod working_animation_config_tests {
         cfg.visualization.working_animation = WorkingAnimationTheme::Comet;
         let s = toml::to_string_pretty(&cfg).expect("serialize");
         let back: AppletConfig = toml::from_str(&s).expect("deserialize");
-        assert_eq!(back.visualization.working_animation, WorkingAnimationTheme::Comet);
+        assert_eq!(
+            back.visualization.working_animation,
+            WorkingAnimationTheme::Comet
+        );
     }
 
     #[test]
@@ -204,8 +210,14 @@ mod working_animation_config_tests {
             .filter(|l| !l.trim_start().starts_with("working_animation"))
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(!without.contains("working_animation"), "test setup: line not removed");
+        assert!(
+            !without.contains("working_animation"),
+            "test setup: line not removed"
+        );
         let cfg: AppletConfig = toml::from_str(&without).expect("old config must still parse");
-        assert_eq!(cfg.visualization.working_animation, WorkingAnimationTheme::Droplet);
+        assert_eq!(
+            cfg.visualization.working_animation,
+            WorkingAnimationTheme::Droplet
+        );
     }
 }

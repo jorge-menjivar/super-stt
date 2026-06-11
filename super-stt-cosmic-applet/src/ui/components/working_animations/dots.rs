@@ -21,8 +21,14 @@ impl WorkingAnimationRenderer for DotsAnimation {
     #[allow(clippy::many_single_char_names)] // math variables: w, h, r are standard notation
     fn draw(&self, frame: &mut Frame<Renderer>, ctx: &WorkingDrawContext) {
         // `side` is intentionally unused — this loader is exempt from the split.
-        let WorkingDrawContext { bounds, elapsed_ms, color_config, is_dark, cosmic_theme, .. } =
-            *ctx;
+        let WorkingDrawContext {
+            bounds,
+            elapsed_ms,
+            color_config,
+            is_dark,
+            cosmic_theme,
+            ..
+        } = *ctx;
         let (w, h) = (bounds.width, bounds.height);
         if w <= 0.0 {
             return;
@@ -43,9 +49,15 @@ impl WorkingAnimationRenderer for DotsAnimation {
 
             // Soft glow under-dot (iced has no shadow-blur).
             let glow = path::Path::circle(Point::new(x, cy), radius + 2.0);
-            frame.fill(&glow, Color::from_rgba(base.r, base.g, base.b, base.a * alpha * 0.3));
+            frame.fill(
+                &glow,
+                Color::from_rgba(base.r, base.g, base.b, base.a * alpha * 0.3),
+            );
             let dot = path::Path::circle(Point::new(x, cy), radius);
-            frame.fill(&dot, Color::from_rgba(base.r, base.g, base.b, base.a * alpha));
+            frame.fill(
+                &dot,
+                Color::from_rgba(base.r, base.g, base.b, base.a * alpha),
+            );
         }
     }
 }

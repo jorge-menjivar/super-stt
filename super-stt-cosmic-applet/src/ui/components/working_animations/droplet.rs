@@ -37,7 +37,10 @@ pub(crate) fn droplet_offset(d: f32, half_width: f32, elapsed_ms: f32, h: f32) -
         if la <= 0.0 {
             return 0.0;
         }
-        a0 * (-d * spatial).exp() * (-la * tdecay).exp() * smoothstep(0.0, RAMP_MS, la) * (omega * la).sin()
+        a0 * (-d * spatial).exp()
+            * (-la * tdecay).exp()
+            * smoothstep(0.0, RAMP_MS, la)
+            * (omega * la).sin()
     };
     let age_now = elapsed_ms % PERIOD_MS;
     drop(age_now) + drop(age_now + PERIOD_MS)
@@ -48,8 +51,14 @@ pub struct DropletAnimation;
 impl WorkingAnimationRenderer for DropletAnimation {
     #[allow(clippy::many_single_char_names)] // math variables: x, y, w, h are standard notation
     fn draw(&self, frame: &mut Frame<Renderer>, ctx: &WorkingDrawContext) {
-        let WorkingDrawContext { bounds, elapsed_ms, color_config, is_dark, cosmic_theme, side } =
-            *ctx;
+        let WorkingDrawContext {
+            bounds,
+            elapsed_ms,
+            color_config,
+            is_dark,
+            cosmic_theme,
+            side,
+        } = *ctx;
         let (w, h) = (bounds.width, bounds.height);
         let mid_y = bounds.y + h / 2.0;
         let base = color_config.get_color_with_theme(is_dark, cosmic_theme);
@@ -79,20 +88,31 @@ impl WorkingAnimationRenderer for DropletAnimation {
         let line = builder.build();
 
         // Glow approximation: a wide, faint under-stroke beneath the line.
-        frame.stroke(&line, stroke::Stroke {
-            style: stroke::Style::Solid(Color::from_rgba(base.r, base.g, base.b, base.a * 0.25)),
-            width: 5.0,
-            line_cap: cosmic::iced::widget::canvas::LineCap::Round,
-            line_join: cosmic::iced::widget::canvas::LineJoin::Round,
-            ..Default::default()
-        });
-        frame.stroke(&line, stroke::Stroke {
-            style: stroke::Style::Solid(base),
-            width: 2.4,
-            line_cap: cosmic::iced::widget::canvas::LineCap::Round,
-            line_join: cosmic::iced::widget::canvas::LineJoin::Round,
-            ..Default::default()
-        });
+        frame.stroke(
+            &line,
+            stroke::Stroke {
+                style: stroke::Style::Solid(Color::from_rgba(
+                    base.r,
+                    base.g,
+                    base.b,
+                    base.a * 0.25,
+                )),
+                width: 5.0,
+                line_cap: cosmic::iced::widget::canvas::LineCap::Round,
+                line_join: cosmic::iced::widget::canvas::LineJoin::Round,
+                ..Default::default()
+            },
+        );
+        frame.stroke(
+            &line,
+            stroke::Stroke {
+                style: stroke::Style::Solid(base),
+                width: 2.4,
+                line_cap: cosmic::iced::widget::canvas::LineCap::Round,
+                line_join: cosmic::iced::widget::canvas::LineJoin::Round,
+                ..Default::default()
+            },
+        );
 
         // Impact flash at the ripple origin (the logical centre) for the first
         // ~180ms of each droplet. On a side applet that origin maps to the inner
@@ -101,7 +121,10 @@ impl WorkingAnimationRenderer for DropletAnimation {
         if impact > 0.0 {
             let origin_x = bounds.x + (half_width - x_lo);
             let dot = path::Path::circle(Point::new(origin_x, mid_y), 2.4 + 3.0 * impact);
-            frame.fill(&dot, Color::from_rgba(base.r, base.g, base.b, base.a * 0.8 * impact));
+            frame.fill(
+                &dot,
+                Color::from_rgba(base.r, base.g, base.b, base.a * 0.8 * impact),
+            );
         }
     }
 }
@@ -134,6 +157,9 @@ mod tests {
             let d = (i as f32 * 2.0 - hw).abs();
             max = max.max(droplet_offset(d, hw, 400.0, h).abs());
         }
-        assert!(max > 0.05 * h, "expected visible motion mid-cycle, got {max}");
+        assert!(
+            max > 0.05 * h,
+            "expected visible motion mid-cycle, got {max}"
+        );
     }
 }

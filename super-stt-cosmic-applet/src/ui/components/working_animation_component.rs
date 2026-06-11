@@ -34,7 +34,12 @@ impl WorkingAnimationComponent {
         side: VisualizationSide,
         colors: VisualizationColorConfig,
     ) -> Self {
-        Self { theme, colors, side, elapsed_ms: 0.0 }
+        Self {
+            theme,
+            colors,
+            side,
+            elapsed_ms: 0.0,
+        }
     }
 
     pub fn set_elapsed(&mut self, elapsed_ms: f32) {

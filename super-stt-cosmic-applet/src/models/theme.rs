@@ -357,7 +357,13 @@ mod working_animation_theme_tests {
 
     #[test]
     fn unknown_falls_back_to_default() {
-        assert_eq!(WorkingAnimationTheme::from_str("nope"), WorkingAnimationTheme::default());
-        assert_eq!(WorkingAnimationTheme::default(), WorkingAnimationTheme::Droplet);
+        assert_eq!(
+            WorkingAnimationTheme::from_str("nope"),
+            WorkingAnimationTheme::default()
+        );
+        assert_eq!(
+            WorkingAnimationTheme::default(),
+            WorkingAnimationTheme::Droplet
+        );
     }
 }
