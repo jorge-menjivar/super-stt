@@ -91,6 +91,8 @@ super-stt-registry-types = { path = "../super-stt-registry-types" }
         "dep:bytes",
         "dep:http-body",
     ]
+    # Build the mock_backend test fixture binary (used by tests/subprocess_mock.rs).
+    test-fixtures = ["hyper-util/service"]
 
 [dev-dependencies]
 futures-util.workspace = true
@@ -102,3 +104,8 @@ libc.workspace = true
 mockito = "1.7.2"
 tempfile = "3.27.0"
 wiremock = "0.6.5"
+
+[[bin]]
+    name = "mock_backend"
+    path = "src/bin/mock_backend.rs"
+    required-features = ["test-fixtures"]

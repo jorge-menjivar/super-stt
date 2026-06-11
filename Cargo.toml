@@ -15,7 +15,6 @@
         "backends/deepgram",
         "backends/mistral",
         "backends/openai",
-        "backends/voxtral",
         "backends/whisper",
         "registry/scripts/build_index",
     ]

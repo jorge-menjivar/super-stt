@@ -174,17 +174,23 @@ async fn settings_scope_endpoints() {
     let (_guard, http_socket) = start_daemon().await;
 
     // Mint a settings-scope token.
-    let settings_auth =
-        http_client::auth_request(http_socket.clone(), "super-stt settings smoke", &["settings"])
-            .await
-            .expect("auth_request settings");
+    let settings_auth = http_client::auth_request(
+        http_socket.clone(),
+        "super-stt settings smoke",
+        &["settings"],
+    )
+    .await
+    .expect("auth_request settings");
     let settings_token = settings_auth.session_token;
 
     // Mint a client-scope token (for the rejection check at the end).
-    let client_auth =
-        http_client::auth_request(http_socket.clone(), "super-stt client smoke", &["transcribe", "status"])
-            .await
-            .expect("auth_request client");
+    let client_auth = http_client::auth_request(
+        http_socket.clone(),
+        "super-stt client smoke",
+        &["transcribe", "status"],
+    )
+    .await
+    .expect("auth_request client");
     let client_token = client_auth.session_token;
 
     // --- GET /audio_theme ---

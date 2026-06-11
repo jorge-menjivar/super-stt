@@ -203,7 +203,9 @@ async fn auth_request_real_helper_returns_working_token() {
         "session token should not be empty"
     );
     assert!(
-        SCOPES.iter().all(|s| auth.scopes.iter().any(|g| g.as_str() == *s)),
+        SCOPES
+            .iter()
+            .all(|s| auth.scopes.iter().any(|g| g.as_str() == *s)),
         "granted scopes {:?} should cover requested {SCOPES:?}",
         auth.scopes
     );

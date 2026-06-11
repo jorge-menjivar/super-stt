@@ -245,11 +245,6 @@ check-wit-sync:
     done
     [ "$fail" -eq 0 ]
 
-# Build the standalone Voxtral subprocess backend.
-# Usage: just build-voxtral-backend [--features cuda]
-build-voxtral-backend *args:
-    cargo build --manifest-path backends/voxtral/Cargo.toml --release {{ args }}
-
 # Build the standalone Whisper subprocess backend.
 # Usage: just build-whisper-backend [--features cuda]
 build-whisper-backend *args:
@@ -295,9 +290,9 @@ serve-test-registry port="8787": build-openai-backend build-mistral-backend
 
 # Install built backends into the daemon's discovery directory
 # (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI,
-# Mistral, and Deepgram WASM components; the Voxtral/Whisper binaries and the
-# Qwen3-ASR Python bundle are installed only if already built (run
-# `just build-{voxtral,whisper}-backend [--features cuda]` or
+# Mistral, and Deepgram WASM components; the Whisper binary and the Qwen3-ASR
+# Python bundle are installed only if already built (run
+# `just build-whisper-backend [--features cuda]` or
 # `just build-qwen3-asr-backend [cpu|cuda13]` first).
 install-backends: build-openai-backend build-mistral-backend build-deepgram-backend
     #!/usr/bin/env bash
@@ -327,18 +322,6 @@ install-backends: build-openai-backend build-mistral-backend build-deepgram-back
     cp backends/deepgram/target/wasm32-wasip2/release/super_stt_backend_deepgram.wasm \
         "$deepgram_dir/deepgram.wasm"
     echo "Installed Deepgram backend -> $deepgram_dir"
-
-    # Voxtral (subprocess). Installed only if the binary has been built.
-    vox_bin="backends/voxtral/target/release/super-stt-backend-voxtral"
-    if [ -f "$vox_bin" ]; then
-        vox_dir="$backends_dir/voxtral"
-        mkdir -p "$vox_dir"
-        cp backends/voxtral/backend.toml "$vox_dir/backend.toml"
-        cp "$vox_bin" "$vox_dir/super-stt-backend-voxtral"
-        echo "Installed Voxtral backend -> $vox_dir"
-    else
-        echo "Voxtral backend not built; run 'just build-voxtral-backend [--features cuda]' to enable it." >&2
-    fi
 
     # Whisper (subprocess). Installed only if the binary has been built.
     whisper_bin="backends/whisper/target/release/super-stt-backend-whisper"

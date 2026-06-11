@@ -120,7 +120,9 @@ async fn http_endpoints_respond() {
         .expect("auth_request should succeed under SUPER_STT_AUTO_APPROVE=1");
     assert!(!auth.session_token.is_empty(), "token should not be empty");
     assert!(
-        SCOPES.iter().all(|s| auth.scopes.iter().any(|g| g.as_str() == *s)),
+        SCOPES
+            .iter()
+            .all(|s| auth.scopes.iter().any(|g| g.as_str() == *s)),
         "granted scopes {:?} should cover requested {SCOPES:?}",
         auth.scopes
     );
@@ -142,7 +144,9 @@ async fn http_endpoints_respond() {
         .expect("auth_status should succeed");
     assert_eq!(status_info.status, "success");
     assert!(
-        SCOPES.iter().all(|s| status_info.scopes.iter().any(|g| g.as_str() == *s)),
+        SCOPES
+            .iter()
+            .all(|s| status_info.scopes.iter().any(|g| g.as_str() == *s)),
         "auth_status scopes {:?} should cover {SCOPES:?}",
         status_info.scopes
     );

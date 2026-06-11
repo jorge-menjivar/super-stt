@@ -18,8 +18,8 @@ async-stream = "0.3"
     axum = { version = "0.8", default-features = false, features = ["json", "tokio"] }
     byteorder = "1.5"
 bytes = "1"
-    # Pinned to the same candle revision the voxtral backend uses, so the
-    # candle_transformers Whisper API matches.
+    # Pinned to a specific candle revision so the candle_transformers Whisper
+    # API stays stable across builds.
     candle-core = { git = "https://github.com/huggingface/candle.git", rev = "bf9e950cd300493b8768d77baec1a23ad6d44d94" }
     candle-nn = { git = "https://github.com/huggingface/candle.git", rev = "bf9e950cd300493b8768d77baec1a23ad6d44d94" }
     candle-transformers = { git = "https://github.com/huggingface/candle.git", rev = "bf9e950cd300493b8768d77baec1a23ad6d44d94" }
