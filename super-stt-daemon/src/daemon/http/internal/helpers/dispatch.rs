@@ -56,6 +56,10 @@ const BAD_REQUEST_PHRASES: &[&str] = &[
     "Online models are disabled",
     "not a valid",
     "Invalid ",
+    // `POST /active_model` `invalid_model` and `POST /active_backend`
+    // `invalid_backend` — the client named a model/source no installed
+    // backend serves (docs/protocol/endpoints/v1/{active_model,active_backend}.md).
+    "No installed backend",
 ];
 
 /// Phrases (matched as substrings) that map an error `message` to
@@ -112,4 +116,57 @@ pub(crate) async fn dispatch_command(
 ) -> (StatusCode, [(&'static str, &'static str); 1], String) {
     let resp = dispatch(daemon, build_request(command, data)).await;
     json_response(&resp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::status_code_for_response;
+    use axum::http::StatusCode;
+    use super_stt_shared::models::protocol::DaemonResponse;
+
+    /// A request naming a model/backend that no installed backend serves is a
+    /// client error, documented as `400 invalid_model` / `400 invalid_backend`
+    /// (docs/protocol/endpoints/v1/{active_model,active_backend}.md) — not 500.
+    #[test]
+    fn no_installed_backend_messages_are_bad_request() {
+        let unknown_model = DaemonResponse::error(
+            "No installed backend serves whisper-tiny via local_whisper. \
+             Install the backend or check the model name.",
+        );
+        assert_eq!(
+            status_code_for_response(&unknown_model),
+            StatusCode::BAD_REQUEST
+        );
+
+        let unknown_backend = DaemonResponse::error(
+            "No installed backend with source github.com/x/y (or its files are missing)",
+        );
+        assert_eq!(
+            status_code_for_response(&unknown_backend),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[test]
+    fn state_conflict_maps_to_conflict() {
+        let resp = DaemonResponse::error("No download in progress");
+        assert_eq!(status_code_for_response(&resp), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn unclassified_error_stays_internal() {
+        let resp = DaemonResponse::error("something unexpected blew up");
+        assert_eq!(
+            status_code_for_response(&resp),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn success_is_ok() {
+        assert_eq!(
+            status_code_for_response(&DaemonResponse::success()),
+            StatusCode::OK
+        );
+    }
 }

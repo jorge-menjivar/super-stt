@@ -594,7 +594,10 @@ mod tests {
         assert_eq!(topic, "transcribing_stopped");
         assert_eq!(payload["client_id"], serde_json::json!("test-client"));
         assert_eq!(payload["transcription_success"], serde_json::json!(true));
-        assert!(payload.get("error").is_none(), "None fields must be omitted");
+        assert!(
+            payload.get("error").is_none(),
+            "None fields must be omitted"
+        );
     }
 
     #[test]
@@ -613,9 +616,18 @@ mod tests {
         assert_eq!(Topic::RecordingStarted.required_scope(), "recording_events");
         assert_eq!(Topic::RecordingStopped.required_scope(), "recording_events");
         assert_eq!(Topic::RecordingState.required_scope(), "recording_events");
-        assert_eq!(Topic::TranscribingStarted.required_scope(), "recording_events");
-        assert_eq!(Topic::TranscribingStopped.required_scope(), "recording_events");
-        assert_eq!(Topic::FrequencyBands.required_scope(), "audio_visualization");
+        assert_eq!(
+            Topic::TranscribingStarted.required_scope(),
+            "recording_events"
+        );
+        assert_eq!(
+            Topic::TranscribingStopped.required_scope(),
+            "recording_events"
+        );
+        assert_eq!(
+            Topic::FrequencyBands.required_scope(),
+            "audio_visualization"
+        );
         assert_eq!(Topic::PartialStt.required_scope(), "global_transcriptions");
         assert_eq!(Topic::FinalStt.required_scope(), "global_transcriptions");
         assert_eq!(Topic::DaemonStatusChanged.required_scope(), "daemon_status");

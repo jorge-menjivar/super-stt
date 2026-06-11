@@ -27,7 +27,6 @@ pub struct CatalogBackend {
 const MANIFESTS: &[&str] = &[
     include_str!("../../../backends/openai/backend.toml"),
     include_str!("../../../backends/mistral/backend.toml"),
-    include_str!("../../../backends/voxtral/backend.toml"),
 ];
 
 /// Subset of `backend.toml` the catalog needs; unknown fields are ignored.

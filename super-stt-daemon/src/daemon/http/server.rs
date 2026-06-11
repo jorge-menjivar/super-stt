@@ -314,7 +314,10 @@ mod tests {
         assert_eq!(back.version, SESSIONS_SCHEMA_VERSION);
         assert_eq!(back.sessions.len(), 2);
         assert_eq!(back.sessions["tok-a"].app_name, "App A");
-        assert_eq!(back.sessions["tok-b"].scopes, vec!["transcribe".to_string()]);
+        assert_eq!(
+            back.sessions["tok-b"].scopes,
+            vec!["transcribe".to_string()]
+        );
     }
 
     /// `auth_request` always runs the consent flow now (no

@@ -312,7 +312,13 @@ mod tests {
             "subprocess",
             vec![
                 sp("x86_64-unknown-linux-gnu", "cuda", None, Some(13), false),
-                sp("x86_64-unknown-linux-gnu", "cuda", Some(90), Some(13), false),
+                sp(
+                    "x86_64-unknown-linux-gnu",
+                    "cuda",
+                    Some(90),
+                    Some(13),
+                    false,
+                ),
             ],
         );
         let sel = select(&host_cuda(90, 13, false), &e, &Prefs { prefer_gpu: true });
