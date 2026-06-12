@@ -162,7 +162,10 @@ impl SuperSTTDaemon {
         source: String,
     ) -> DaemonResponse {
         info!("Model switch requested: {model} via {provider} (source={source:?})");
-        if let Some(resp) = self.preflight_model_switch(&model, &provider, &source).await {
+        if let Some(resp) = self
+            .preflight_model_switch(&model, &provider, &source)
+            .await
+        {
             return resp;
         }
 

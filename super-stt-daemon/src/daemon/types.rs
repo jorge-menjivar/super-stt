@@ -255,9 +255,13 @@ impl SuperSTTDaemon {
         if let Some((name, provider, source)) = self.pick_startup_model().await {
             let bg = self.clone();
             tokio::spawn(async move {
-                if let Err(e) =
-                    Self::load_initial_model_and_broadcast(&bg, name.clone(), provider.clone(), source)
-                        .await
+                if let Err(e) = Self::load_initial_model_and_broadcast(
+                    &bg,
+                    name.clone(),
+                    provider.clone(),
+                    source,
+                )
+                .await
                 {
                     warn!(
                         "Failed to load startup model {name} via {provider}: {e}; daemon is idle"

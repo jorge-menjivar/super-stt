@@ -105,7 +105,14 @@ mod tests {
 
     #[test]
     fn accepts_any_snake_case_identifier() {
-        for s in ["local_whisper", "openai", "groq", "my_custom_engine", "x", "a1_b2"] {
+        for s in [
+            "local_whisper",
+            "openai",
+            "groq",
+            "my_custom_engine",
+            "x",
+            "a1_b2",
+        ] {
             assert_eq!(s.parse::<Provider>().unwrap().as_str(), s);
         }
     }
@@ -113,8 +120,18 @@ mod tests {
     #[test]
     fn rejects_malformed_non_empty_values() {
         // Uppercase, hyphens, a leading digit/underscore, spaces, non-ASCII.
-        for bad in ["OpenAI", "local-whisper", "1foo", "has space", "_lead", "Café"] {
-            assert!(bad.parse::<Provider>().is_err(), "{bad:?} should be rejected");
+        for bad in [
+            "OpenAI",
+            "local-whisper",
+            "1foo",
+            "has space",
+            "_lead",
+            "Café",
+        ] {
+            assert!(
+                bad.parse::<Provider>().is_err(),
+                "{bad:?} should be rejected"
+            );
         }
     }
 

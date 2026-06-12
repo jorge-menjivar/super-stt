@@ -210,7 +210,11 @@ mod tests {
             return;
         };
         let dummy = repo_root().join("registry/scripts/fixtures/dummy-backend.toml");
-        assert!(dummy.exists(), "dummy manifest missing at {}", dummy.display());
+        assert!(
+            dummy.exists(),
+            "dummy manifest missing at {}",
+            dummy.display()
+        );
 
         let out = tempfile::tempdir().unwrap();
         let status = Command::new(&indexer)

@@ -206,7 +206,13 @@ impl SuperSTTDaemon {
                 .expect("Model existence already validated")
         };
         let current_preferred = self.preferred_device.read().await.clone();
-        (current_preferred, model_to_reload, provider, source, is_online)
+        (
+            current_preferred,
+            model_to_reload,
+            provider,
+            source,
+            is_online,
+        )
     }
 
     /// Prepare for device switch by broadcasting status and unloading current model

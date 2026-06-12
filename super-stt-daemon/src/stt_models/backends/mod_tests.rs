@@ -113,8 +113,13 @@ processing_interval_ms = 2000
     );
 
     // Empty source matches the first backend serving (name, provider).
-    let (_, vox) = find_model(&backends, "voxtral-mini", &Provider::from("local_voxtral"), "")
-        .expect("resolve voxtral-mini with empty source");
+    let (_, vox) = find_model(
+        &backends,
+        "voxtral-mini",
+        &Provider::from("local_voxtral"),
+        "",
+    )
+    .expect("resolve voxtral-mini with empty source");
     assert_eq!(vox.source, "github.com/super-stt/voxtral");
     assert_eq!(vox.estimated_vram_bytes, 8_589_934_592);
     assert_eq!(vox.processing_interval, Duration::from_millis(2000));
@@ -484,8 +489,13 @@ processing_interval_ms = 1500
         vec!["cpu".to_string(), "cuda".to_string()]
     );
 
-    let (_, big) = find_model(&backends, "qwen3-asr-1.7b", &Provider::from("local_qwen3_asr"), "")
-        .expect("resolve qwen3-asr-1.7b with empty source");
+    let (_, big) = find_model(
+        &backends,
+        "qwen3-asr-1.7b",
+        &Provider::from("local_qwen3_asr"),
+        "",
+    )
+    .expect("resolve qwen3-asr-1.7b with empty source");
     assert_eq!(big.estimated_vram_bytes, 6_000_000_000);
     assert_eq!(big.processing_interval, Duration::from_millis(1500));
 }
