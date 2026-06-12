@@ -6709,34 +6709,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-stt-build-index"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "chrono",
- "clap",
- "env_logger",
- "flate2",
- "futures",
- "hex",
- "log",
- "mockito",
- "reqwest 0.12.28",
- "ring",
- "semver",
- "serde",
- "serde_json",
- "super-stt-registry-types",
- "tar",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml 1.1.0+spec-1.1.0",
- "url",
-]
-
-[[package]]
 name = "super-stt-cli"
 version = "0.1.4-beta.2"
 dependencies = [
@@ -6839,6 +6811,34 @@ dependencies = [
  "wasmtime-wasi-http",
  "wiremock",
  "zbus",
+]
+
+[[package]]
+name = "super-stt-indexer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chrono",
+ "clap",
+ "env_logger",
+ "flate2",
+ "futures",
+ "hex",
+ "log",
+ "mockito",
+ "reqwest 0.12.28",
+ "ring",
+ "semver",
+ "serde",
+ "serde_json",
+ "super-stt-registry-types",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 1.1.0+spec-1.1.0",
+ "url",
 ]
 
 [[package]]

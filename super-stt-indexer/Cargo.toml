@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
-name = "super-stt-build-index"
+name = "super-stt-indexer"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-only"
@@ -26,7 +26,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 toml = "1"
 url = "2"
-super-stt-registry-types = { path = "../../../super-stt-registry-types" }
+super-stt-registry-types = { path = "../super-stt-registry-types" }
 
 [dev-dependencies]
 mockito = "1"

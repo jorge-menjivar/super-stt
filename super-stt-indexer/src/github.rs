@@ -53,7 +53,7 @@ impl GitHub {
         let mut b = self
             .http
             .request(method, format!("{}{path}", self.base))
-            .header("User-Agent", "super-stt-build-index/0.1")
+            .header("User-Agent", "super-stt-indexer/0.1")
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28");
         if let Some(t) = &self.token {

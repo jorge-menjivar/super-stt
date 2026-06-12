@@ -8,7 +8,7 @@
         "super-stt-daemon",
         "super-stt-registry-types",
         "super-stt-shared",
-        "registry/scripts/build_index",
+        "super-stt-indexer",
     ]
     # The indexer is a host binary, so it's a workspace member — `--workspace`
     # lints and tests it like everything else. But it's a CI-only tool with

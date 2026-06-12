@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `super-stt-build-index` — top-level orchestration.
+//! `super-stt-indexer` — top-level orchestration.
 
 use std::path::PathBuf;
 

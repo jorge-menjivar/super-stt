@@ -45,14 +45,14 @@ jobs:
 
       - name: Build indexer
         working-directory: src
-        run: cargo build --release -p super-stt-build-index
+        run: cargo build --release -p super-stt-indexer
 
       - name: Run indexer
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p out
-          src/target/release/super-stt-build-index \
+          src/target/release/super-stt-indexer \
             --registry src/registry/registry.toml \
             --prior-index pages/index.json \
             --out out/index.json

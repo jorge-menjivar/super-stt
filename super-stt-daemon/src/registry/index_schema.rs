@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Deserialization shape for `index.json` as published by the Phase 1 indexer.
-//! Kept in sync with `registry/scripts/build_index/src/index_json.rs`. The
+//! Kept in sync with `super-stt-indexer/src/index_json.rs`. The
 //! daemon side does not need every field — those it ignores are skipped via
 //! `serde(default)`.
 
@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn current_client_meets_the_published_floor() {
         // The value pinned in the indexer
-        // (`registry/scripts/build_index/src/index_json.rs`). The running
+        // (`super-stt-indexer/src/index_json.rs`). The running
         // daemon must satisfy it, or every install would warn against its own
         // registry.
         assert_eq!(

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Minimal GitHub REST client for the Custom-repo install path.
 //!
-//! Mirrors `registry/scripts/build_index/src/github.rs` shape-wise, but uses
+//! Mirrors `super-stt-indexer/src/github.rs` shape-wise, but uses
 //! `thiserror` so failures map cleanly to install-pipeline errors. Auth is
 //! optional and only used to lift rate limits when `GITHUB_TOKEN` is set on
 //! the daemon's environment.
