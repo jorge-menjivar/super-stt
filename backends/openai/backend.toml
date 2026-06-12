@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-#:schema ../../schemas/backend.schema.json
+#:schema https://jorge-menjivar.github.io/super-stt/backend.schema.json
 # OpenAI backend configuration. See docs/protocol/backend/config.md.
 
 [backend]

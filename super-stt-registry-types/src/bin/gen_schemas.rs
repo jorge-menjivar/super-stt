@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Writes the generated JSON Schemas into the repo. Run via
-//! `just gen-schemas`; CI fails if the committed files are stale.
+//! Writes the generated JSON Schemas to a gitignored `target/schemas/` for
+//! local inspection. The schemas are not committed: CI regenerates them and
+//! publishes to the gh-pages branch alongside `index.json`.
 
 use std::path::Path;
 
@@ -10,11 +11,11 @@ fn main() {
         .expect("crate lives one level under the repo root");
     let targets = [
         (
-            root.join("schemas/backend.schema.json"),
+            root.join("target/schemas/backend.schema.json"),
             super_stt_registry_types::schema::backend_schema_pretty(),
         ),
         (
-            root.join("schemas/registry.schema.json"),
+            root.join("target/schemas/registry.schema.json"),
             super_stt_registry_types::schema::registry_schema_pretty(),
         ),
     ];

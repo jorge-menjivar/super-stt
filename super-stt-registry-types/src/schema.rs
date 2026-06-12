@@ -10,10 +10,8 @@
 
 use serde_json::{Value, json};
 
-const BACKEND_SCHEMA_ID: &str =
-    "https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/schemas/backend.schema.json";
-const REGISTRY_SCHEMA_ID: &str =
-    "https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/schemas/registry.schema.json";
+const BACKEND_SCHEMA_ID: &str = "https://jorge-menjivar.github.io/super-stt/backend.schema.json";
+const REGISTRY_SCHEMA_ID: &str = "https://jorge-menjivar.github.io/super-stt/registry.schema.json";
 const SPDX: &str = "SPDX-License-Identifier: GPL-3.0-only";
 
 fn draft07_value<T: schemars::JsonSchema>() -> Value {

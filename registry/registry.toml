@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-#:schema ../schemas/registry.schema.json
+#:schema https://jorge-menjivar.github.io/super-stt/registry.schema.json
 # Super STT backend registry. One entry per installable backend, alphabetically
 # sorted. See registry/README.md for the submission rules.
 

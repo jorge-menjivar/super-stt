@@ -8,9 +8,10 @@ validates the release's `backend.toml` and assets, and publishes a single
 
 End users do not interact with this directory.
 
-`registry.toml` carries a `#:schema` directive pointing at
-`../schemas/registry.schema.json` (generated — run `just gen-schemas` after
-changing the entry types; do not edit the schema by hand).
+`registry.toml` carries a `#:schema` directive pointing at the registry schema
+published on GitHub Pages. The schema is generated from the entry types — run
+`just gen-schemas` to produce it locally (written to a gitignored
+`target/schemas/`); CI regenerates and publishes it. Do not edit it by hand.
 
 ## Submitting a backend
 

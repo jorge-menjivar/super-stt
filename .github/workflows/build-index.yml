@@ -6,7 +6,7 @@ on:
     - cron: '0 */6 * * *'    # every 6 hours
   push:
     branches: [main]
-    paths: ['registry/registry.toml']
+    paths: ['registry/registry.toml', 'super-stt-registry-types/**']
   workflow_dispatch:
 
 permissions:
@@ -57,6 +57,10 @@ jobs:
             --prior-index pages/index.json \
             --out out/index.json
 
+      - name: Generate schemas
+        working-directory: src
+        run: cargo run -p super-stt-registry-types --features schema --bin gen_schemas
+
       - name: Publish to gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -76,11 +80,12 @@ jobs:
             git reset --hard -q FETCH_HEAD
           fi
           cp ../out/index.json index.json
+          cp ../src/target/schemas/*.json .
           git add -A
           if git diff --cached --quiet; then
-            echo "index.json unchanged; nothing to publish"
+            echo "index.json and schemas unchanged; nothing to publish"
             exit 0
           fi
           git -c user.name=actions -c user.email=actions@github.com \
-              commit -q -m "Update index.json ($GITHUB_SHA)"
+              commit -q -m "Update index.json + schemas ($GITHUB_SHA)"
           git push origin gh-pages

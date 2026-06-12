@@ -12,11 +12,12 @@ This document is part of the [backend protocol](./contract.md); see also
 configuration's fields are honored per transport.
 
 A JSON Schema for this file is generated from the canonical manifest types in
-`super-stt-registry-types` and committed at `schemas/backend.schema.json`.
-Backends in other repositories can reference it directly at
-`https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/schemas/backend.schema.json`.
-Add that URL (or a relative path) as a `#:schema` comment line at the top of a
-`backend.toml` to get autocomplete and validation in taplo-based editors.
+`super-stt-registry-types` and published to GitHub Pages by CI (it is not
+committed to the repo). Backends in other repositories reference it at
+`https://jorge-menjivar.github.io/super-stt/backend.schema.json`.
+Add that URL as a `#:schema` comment line at the top of a `backend.toml` to get
+autocomplete and validation in taplo-based editors. Generate it locally with
+`just gen-schemas`, which writes to a gitignored `target/schemas/`.
 
 ## Discovery
 
