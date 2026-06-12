@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
-use crate::models::provider::Provider;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use serde_json::{Value, json};
 
@@ -192,7 +191,7 @@ fn set_model_parses_online_models() {
                 source,
             } => {
                 assert_eq!(model.to_string(), *model_name);
-                assert!(matches!(provider, Provider::Online(_)), "{model_name}");
+                assert_eq!(provider.as_str(), *provider_str, "{model_name}");
                 // No source supplied → empty (daemon picks the backend).
                 assert_eq!(source, "");
             }
@@ -215,7 +214,7 @@ fn set_model_parses_local_name() {
             source,
         } => {
             assert_eq!(model, "whisper-tiny");
-            assert_eq!(provider, crate::models::provider::Provider::LocalWhisper);
+            assert_eq!(provider.as_str(), "local_whisper");
             assert_eq!(source, "");
         }
         _ => panic!("expected Command::SetModel"),

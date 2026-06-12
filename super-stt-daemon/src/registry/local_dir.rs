@@ -15,7 +15,6 @@ use thiserror::Error;
 
 use crate::registry::index_schema::{IndexAssets, IndexBackend, IndexModel};
 use crate::stt_models::backends::manifest::{Device, Manifest};
-use super_stt_shared::models::provider::Provider;
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
@@ -58,10 +57,7 @@ pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
     let m = Manifest::load(local_path).map_err(anyhow::Error::from)?;
     crate::stt_models::backends::manifest::validate_runtime(&m)?;
 
-    let online = m
-        .models
-        .iter()
-        .any(|md| matches!(md.provider, Provider::Online(_)));
+    let online = m.models.iter().any(super_stt_registry_types::manifest::ModelEntry::is_online);
 
     let id = id_from_source(&m.backend.source);
     if !super_stt_shared::registry::is_safe_component(&id) {

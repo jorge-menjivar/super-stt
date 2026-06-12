@@ -256,7 +256,7 @@ impl SuperSTTDaemon {
             let bg = self.clone();
             tokio::spawn(async move {
                 if let Err(e) =
-                    Self::load_initial_model_and_broadcast(&bg, name.clone(), provider, source)
+                    Self::load_initial_model_and_broadcast(&bg, name.clone(), provider.clone(), source)
                         .await
                 {
                     warn!(
@@ -326,7 +326,7 @@ impl SuperSTTDaemon {
 
         let device_pref = daemon.preferred_device.read().await.clone();
         let (instance, definition) = daemon
-            .instantiate_backend(&name, provider, &source, &device_pref)
+            .instantiate_backend(&name, &provider, &source, &device_pref)
             .await?;
 
         info!("model {name} via {provider} loaded successfully");
@@ -358,7 +358,7 @@ impl SuperSTTDaemon {
     pub async fn resolve_definition(
         &self,
         name: &str,
-        provider: Provider,
+        provider: &Provider,
         source: &str,
     ) -> Option<super_stt_shared::models::registry::ModelDefinition> {
         let backends = self.backends.read().await;

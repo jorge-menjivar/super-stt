@@ -32,7 +32,7 @@ impl SuperSTTDaemon {
             let c = self.config.read().await;
             (
                 c.transcription.preferred_model.clone(),
-                c.transcription.preferred_provider,
+                c.transcription.preferred_provider.clone(),
                 c.transcription.preferred_source.clone(),
                 c.online.allow_online_models,
             )
@@ -41,9 +41,11 @@ impl SuperSTTDaemon {
             return None;
         }
         let backends = self.backends.read().await;
-        let (_, def) = backends::find_model(&backends, &pref_model, pref_provider, &pref_source)?;
-        Self::provider_usable(def.provider, allow_online)
-            .then(|| (def.name.clone(), def.provider, def.source.clone()))
+        let (_, def) = backends::find_model(&backends, &pref_model, &pref_provider, &pref_source)?;
+        // Online models need the online gate on to be usable; local models are
+        // always usable (the required secret is enforced at load).
+        let usable = !def.is_online() || allow_online;
+        usable.then(|| (def.name.clone(), def.provider.clone(), def.source.clone()))
     }
 
     /// First discovered local (non-online) model, if any. Used as the safe
@@ -52,20 +54,11 @@ impl SuperSTTDaemon {
         let backends = self.backends.read().await;
         for backend in backends.iter() {
             for def in &backend.models {
-                if !matches!(def.provider, Provider::Online(_)) {
-                    return Some((def.name.clone(), def.provider, def.source.clone()));
+                if !def.is_online() {
+                    return Some((def.name.clone(), def.provider.clone(), def.source.clone()));
                 }
             }
         }
         None
-    }
-
-    fn provider_usable(provider: Provider, allow_online: bool) -> bool {
-        match provider {
-            // Online backends only need the online gate to be usable; whether
-            // the required secret is set is enforced at load (`backend_headers`).
-            Provider::Online(_) => allow_online,
-            _ => true,
-        }
     }
 }

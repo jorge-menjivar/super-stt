@@ -375,6 +375,16 @@ async fn set_model_online_rejected_when_disabled() {
         assert!(!config.online.allow_online_models);
     }
 
+    // Online-ness is now resolved from the model's `supported_devices` (`none`),
+    // so the online gate only fires once the model resolves. Register an online
+    // backend serving `whisper-1` so resolution succeeds and the gate engages.
+    *daemon.backends.write().await = vec![fixture_backend(
+        "openai",
+        "github.com/super-stt/openai",
+        "OpenAI",
+        "whisper-1",
+    )];
+
     let request = DaemonRequest {
         command: "set_model".to_string(),
         audio_data: None,
@@ -509,7 +519,7 @@ async fn list_backends_catalog_and_option_override() {
     use crate::stt_models::backends::DiscoveredBackend;
     use crate::stt_models::backends::manifest::{Opt, OptionDefault, OptionType, Secret};
     use std::time::Duration;
-    use super_stt_shared::models::provider::{OnlineProvider, Provider};
+    use super_stt_shared::models::provider::Provider;
     use super_stt_shared::models::registry::ModelDefinition;
 
     let daemon = test_daemon().await;
@@ -537,7 +547,7 @@ async fn list_backends_catalog_and_option_override() {
         }],
         models: vec![ModelDefinition {
             name: "whisper-1".to_string(),
-            provider: Provider::Online(OnlineProvider::OpenAI),
+            provider: Provider::from("openai"),
             source: source.to_string(),
             is_multilingual: true,
             estimated_vram_bytes: 0,
@@ -587,7 +597,7 @@ fn fixture_backend(
 ) -> crate::stt_models::backends::DiscoveredBackend {
     use crate::stt_models::backends::DiscoveredBackend;
     use std::time::Duration;
-    use super_stt_shared::models::provider::{OnlineProvider, Provider};
+    use super_stt_shared::models::provider::Provider;
     use super_stt_shared::models::registry::ModelDefinition;
 
     DiscoveredBackend {
@@ -601,7 +611,7 @@ fn fixture_backend(
         options: Vec::new(),
         models: vec![ModelDefinition {
             name: model_name.to_string(),
-            provider: Provider::Online(OnlineProvider::OpenAI),
+            provider: Provider::from("openai"),
             source: source.to_string(),
             is_multilingual: true,
             estimated_vram_bytes: 0,
@@ -850,13 +860,13 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
     use crate::daemon::types::LoadedModel;
     use crate::stt_models::transcribe::ModelInfoData;
     use std::time::Duration;
-    use super_stt_shared::models::provider::{OnlineProvider, Provider};
+    use super_stt_shared::models::provider::Provider;
     use super_stt_shared::models::registry::ModelDefinition;
 
-    let provider = Provider::Online(OnlineProvider::OpenAI);
+    let provider = Provider::from("openai");
     let definition = ModelDefinition {
         name: name.to_string(),
-        provider,
+        provider: provider.clone(),
         source: source.to_string(),
         is_multilingual: true,
         estimated_vram_bytes: 0,
@@ -864,7 +874,7 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
         supported_devices: vec!["none".to_string()],
         realtime: false,
     };
-    let info = ModelInfoData::new(name, provider, source, true, Duration::from_secs(1));
+    let info = ModelInfoData::new(name, provider, source, true, true, Duration::from_secs(1));
     *daemon.model.write().await = Some(LoadedModel {
         definition,
         instance: Box::new(MockTranscribe { info }),

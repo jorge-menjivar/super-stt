@@ -301,7 +301,9 @@ impl fmt::Display for OptionDefault {
 pub struct ModelEntry {
     /// Wire model name.
     pub name: String,
-    /// Engine that serves the model.
+    /// Engine that serves the model — a free-form `snake_case` identity label
+    /// (any backend may define its own). Online vs local is determined by
+    /// [`ModelEntry::is_online`] (the `none` device sentinel), not by this.
     pub provider: Provider,
     /// Whether the model accepts more than one language. Default `true`.
     /// When `false`, `supported_languages` must be exactly
@@ -333,6 +335,18 @@ pub struct ModelEntry {
     /// `POST /v1/load`. Cloud models declare none.
     #[serde(default)]
     pub files: Vec<FilesSpec>,
+}
+
+impl ModelEntry {
+    /// Whether the model is served by a remote API with no local compute —
+    /// encoded by the `none` sentinel in `supported_devices` (which validation
+    /// requires to be the sole entry when present). This is the single source
+    /// of the online/local distinction; the `provider` string is free-form and
+    /// carries no such meaning.
+    #[must_use]
+    pub fn is_online(&self) -> bool {
+        self.supported_devices.contains(&Device::None)
+    }
 }
 
 /// A device a model can be loaded onto.
@@ -597,28 +611,38 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_provider_at_parse() {
-        let err = Manifest::parse(
-            r#"
-            [backend]
-            source = "github.com/x/y"
-            name = "Y"
-            version = "1.0.0"
-            kind = "wasm"
-            entrypoint = "y.wasm"
-            contract = "v1"
+    fn provider_is_free_form_but_must_be_snake_case() {
+        let manifest = |provider: &str| {
+            format!(
+                r#"
+                [backend]
+                source = "github.com/x/y"
+                name = "Y"
+                version = "1.0.0"
+                kind = "wasm"
+                entrypoint = "y.wasm"
+                contract = "v1"
 
-            [[models]]
-            name = "m"
-            provider = "anthropic"
-            primary_language = "en"
-            supported_languages = ["en"]
-            supported_devices = ["none"]
-            "#,
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("anthropic"), "got: {err}");
+                [[models]]
+                name = "m"
+                provider = "{provider}"
+                primary_language = "en"
+                supported_languages = ["en"]
+                supported_devices = ["none"]
+                "#
+            )
+        };
+        // Any well-formed identifier is accepted — a backend may serve any
+        // provider, not only a fixed set.
+        for ok in ["anthropic", "groq", "local_whisper", "my_custom_engine"] {
+            let m = Manifest::parse(&manifest(ok)).unwrap_or_else(|e| panic!("{ok}: {e}"));
+            assert_eq!(m.models[0].provider.as_str(), ok);
+        }
+        // A malformed value (uppercase / hyphen) is rejected at parse.
+        for bad in ["Anthropic", "local-whisper"] {
+            let err = Manifest::parse(&manifest(bad)).unwrap_err().to_string();
+            assert!(err.contains("provider"), "{bad}: got {err}");
+        }
     }
 
     #[test]

@@ -15,7 +15,7 @@ impl SuperSTTDaemon {
     pub async fn load_model_with_target_device(
         &self,
         name: &str,
-        provider: Provider,
+        provider: &Provider,
         source: &str,
         target_device: &str,
     ) -> Result<Box<dyn Transcribe>> {
@@ -47,7 +47,7 @@ impl SuperSTTDaemon {
         let current = self.model.read().await.as_ref().map(|l| {
             (
                 l.definition.name.clone(),
-                l.definition.provider,
+                l.definition.provider.clone(),
                 l.definition.source.clone(),
             )
         });
@@ -60,7 +60,7 @@ impl SuperSTTDaemon {
         self.unload_current_model().await;
         let device_pref = self.preferred_device.read().await.clone();
         match self
-            .instantiate_backend(&name, provider, &source, &device_pref)
+            .instantiate_backend(&name, &provider, &source, &device_pref)
             .await
         {
             Ok((instance, definition)) => {

@@ -117,9 +117,11 @@ fn rejects_contract_violations() {
             ]);
             d
         }),
-        ("unknown provider", {
+        ("malformed provider (not snake_case)", {
+            // The provider is free-form, but must be snake_case — uppercase is
+            // rejected by the pattern.
             let mut d = wasm_base();
-            d["models"] = json!([{ "name": "m", "provider": "anthropic",
+            d["models"] = json!([{ "name": "m", "provider": "Anthropic",
                 "primary_language": "en", "supported_languages": ["en"],
                 "supported_devices": ["none"] }]);
             d

@@ -51,3 +51,14 @@ pub struct ModelDefinition {
     /// (`/v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`.
     pub realtime: bool,
 }
+
+impl ModelDefinition {
+    /// Whether the model is served by a remote API with no local compute —
+    /// encoded by the `none` sentinel in `supported_devices` (the only entry
+    /// when present). This is the single source of the online/local
+    /// distinction; `provider` is a free-form label and carries no such meaning.
+    #[must_use]
+    pub fn is_online(&self) -> bool {
+        self.supported_devices.iter().any(|d| d == "none")
+    }
+}

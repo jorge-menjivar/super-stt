@@ -14,7 +14,6 @@ use std::str::FromStr;
 
 use serde::Deserialize;
 use super_stt_registry_types::manifest::Device;
-use super_stt_registry_types::provider::Provider;
 use thiserror::Error;
 
 use crate::registry::github::{GitHub, GitHubError, ReleaseAsset};
@@ -194,15 +193,16 @@ struct ModelSupport {
     supports_cpu: bool,
 }
 
-/// Classify a manifest's models through the canonical [`Provider`]/[`Device`]
-/// types so the custom-repo path agrees with the registry indexer on what
-/// counts as online / GPU / CPU. Provider/device strings that aren't canonical
-/// simply don't match — the lenient parser still records them in the index, and
-/// the canonical layer rejects them downstream.
+/// Classify a manifest's models through the canonical [`Device`] type (and the
+/// `none` device sentinel for online/remote models) so the custom-repo path
+/// agrees with the registry indexer on what counts as online / GPU / CPU.
+/// Device strings that aren't canonical simply don't match — the lenient parser
+/// still records them in the index, and the canonical layer rejects them
+/// downstream.
 fn classify_models(models: &[Model]) -> ModelSupport {
     let online = models
         .iter()
-        .any(|m| Provider::from_str(&m.provider).is_ok_and(|p| p.as_online().is_some()));
+        .any(|m| m.supported_devices.iter().any(|d| d == "none"));
     let any_device = |pred: fn(Device) -> bool| {
         models.iter().any(|m| {
             m.supported_devices
@@ -391,15 +391,19 @@ mod tests {
     }
 
     #[test]
-    fn classify_marks_online_only_for_canonical_online_providers() {
-        assert!(classify_models(&[model("m", "openai", &[])]).online);
-        assert!(classify_models(&[model("m", "mistral", &[])]).online);
-        assert!(classify_models(&[model("m", "deepgram", &[])]).online);
-        assert!(!classify_models(&[model("m", "local_whisper", &[])]).online);
-        // `anthropic` is not a canonical OnlineProvider — no longer online.
-        assert!(!classify_models(&[model("m", "anthropic", &[])]).online);
-        // An unknown provider string never counts as online.
-        assert!(!classify_models(&[model("m", "totally_bogus", &[])]).online);
+    fn classify_marks_online_from_none_device_not_provider() {
+        // Online-ness is derived from the `none` device sentinel, not the
+        // (now free-form) provider string.
+        assert!(classify_models(&[model("m", "openai", &["none"])]).online);
+        assert!(classify_models(&[model("m", "mistral", &["none"])]).online);
+        assert!(classify_models(&[model("m", "deepgram", &["none"])]).online);
+        // A made-up provider is still online if it declares the `none` device.
+        assert!(classify_models(&[model("m", "anthropic", &["none"])]).online);
+        assert!(classify_models(&[model("m", "totally_bogus", &["none"])]).online);
+        // No `none` device → not online, regardless of provider.
+        assert!(!classify_models(&[model("m", "openai", &["cpu"])]).online);
+        assert!(!classify_models(&[model("m", "local_whisper", &["cpu"])]).online);
+        assert!(!classify_models(&[model("m", "openai", &[])]).online);
     }
 
     #[test]

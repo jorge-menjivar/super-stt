@@ -7,7 +7,7 @@ use anyhow::Context;
 use clap::Parser;
 use log::{error, info, warn};
 
-use crate::manifest::{Device, Provider};
+use crate::manifest::Device;
 
 mod assets;
 mod carryforward;
@@ -219,7 +219,7 @@ fn into_index_backend(
     let online = m
         .models
         .iter()
-        .any(|md| matches!(md.provider, Provider::Online(_)));
+        .any(super_stt_registry_types::manifest::ModelEntry::is_online);
     let supports_gpu = m.models.iter().any(|md| {
         md.supported_devices
             .iter()

@@ -167,8 +167,14 @@ impl AppModel {
         }
 
         // For online models the staged device is `"none"` (the sentinel)
-        // and no `set_device` call is needed.
-        let online = matches!(provider, Provider::Online(_));
+        // and no `set_device` call is needed. Online-ness is derived from the
+        // model's `supported_devices` (the `none` sentinel), not the provider.
+        let online = self
+            .backends
+            .iter()
+            .find(|b| b.source == source)
+            .and_then(|b| b.models.iter().find(|m| m.name == model))
+            .is_some_and(|m| m.supported_devices.iter().any(|d| d == "none"));
         let device_to_set = if online {
             None
         } else {
@@ -184,6 +190,7 @@ impl AppModel {
 
         let model_label = model.clone();
         let source_label = source.clone();
+        let provider_label = provider.clone();
         Task::batch([
             Task::perform(
                 async move {
@@ -195,7 +202,7 @@ impl AppModel {
                 move |result| match result {
                     Ok(()) => cosmic::Action::App(Message::ModelChanged {
                         model: model_label.clone(),
-                        provider,
+                        provider: provider_label.clone(),
                         source: source_label.clone(),
                     }),
                     Err(e) => cosmic::Action::App(Message::ModelError(e)),

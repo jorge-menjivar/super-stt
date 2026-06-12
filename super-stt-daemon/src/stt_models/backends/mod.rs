@@ -129,7 +129,7 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
             .map_or_else(|| Duration::from_secs(2), Duration::from_millis);
         models.push(ModelDefinition {
             name: entry.name.clone(),
-            provider: entry.provider,
+            provider: entry.provider.clone(),
             source: source.clone(),
             is_multilingual: entry.multilingual,
             estimated_vram_bytes: entry.estimated_vram_bytes,
@@ -187,7 +187,7 @@ fn validate_supported_devices(entry: &ModelEntry) -> anyhow::Result<Vec<String>>
 pub fn find_model<'a>(
     backends: &'a [DiscoveredBackend],
     name: &str,
-    provider: Provider,
+    provider: &Provider,
     source: &str,
 ) -> Option<(&'a DiscoveredBackend, &'a ModelDefinition)> {
     for backend in backends {
@@ -197,7 +197,7 @@ pub fn find_model<'a>(
         if let Some(def) = backend
             .models
             .iter()
-            .find(|d| d.name == name && d.provider == provider)
+            .find(|d| d.name == name && d.provider == *provider)
         {
             return Some((backend, def));
         }
@@ -223,7 +223,7 @@ pub fn list_models(backends: &[DiscoveredBackend]) -> Vec<(String, Provider, Str
         .flat_map(|b| {
             b.models
                 .iter()
-                .map(|d| (d.name.clone(), d.provider, d.source.clone()))
+                .map(|d| (d.name.clone(), d.provider.clone(), d.source.clone()))
         })
         .collect()
 }

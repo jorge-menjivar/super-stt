@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
 use std::fs;
-use super_stt_shared::models::provider::OnlineProvider;
 
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir()
@@ -97,11 +96,11 @@ processing_interval_ms = 2000
     assert!(oai.secrets[0].required);
     assert_eq!(oai.options.len(), 1);
 
-    // find_model resolves the triple; provider parses to the enum.
+    // find_model resolves the triple; provider parses to the newtype.
     let (b, def) = find_model(
         &backends,
         "whisper-1",
-        Provider::Online(OnlineProvider::OpenAI),
+        &Provider::from("openai"),
         "github.com/super-stt/openai",
     )
     .expect("resolve whisper-1");
@@ -114,7 +113,7 @@ processing_interval_ms = 2000
     );
 
     // Empty source matches the first backend serving (name, provider).
-    let (_, vox) = find_model(&backends, "voxtral-mini", Provider::LocalVoxtral, "")
+    let (_, vox) = find_model(&backends, "voxtral-mini", &Provider::from("local_voxtral"), "")
         .expect("resolve voxtral-mini with empty source");
     assert_eq!(vox.source, "github.com/super-stt/voxtral");
     assert_eq!(vox.estimated_vram_bytes, 8_589_934_592);
@@ -474,7 +473,7 @@ processing_interval_ms = 1500
     let (b, def) = find_model(
         &backends,
         "qwen3-asr-0.6b",
-        Provider::LocalQwen3Asr,
+        &Provider::from("local_qwen3_asr"),
         "github.com/jorge-menjivar/super-stt/qwen3-asr",
     )
     .expect("resolve qwen3-asr-0.6b");
@@ -485,7 +484,7 @@ processing_interval_ms = 1500
         vec!["cpu".to_string(), "cuda".to_string()]
     );
 
-    let (_, big) = find_model(&backends, "qwen3-asr-1.7b", Provider::LocalQwen3Asr, "")
+    let (_, big) = find_model(&backends, "qwen3-asr-1.7b", &Provider::from("local_qwen3_asr"), "")
         .expect("resolve qwen3-asr-1.7b with empty source");
     assert_eq!(big.estimated_vram_bytes, 6_000_000_000);
     assert_eq!(big.processing_interval, Duration::from_millis(1500));

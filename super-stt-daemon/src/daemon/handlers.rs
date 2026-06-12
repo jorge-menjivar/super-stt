@@ -4,7 +4,6 @@ use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::backends;
 use log::{error, info, warn};
 use super_stt_shared::models::protocol::DaemonResponse;
-use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
@@ -78,7 +77,7 @@ impl SuperSTTDaemon {
             .map(|b| {
                 b.models
                     .iter()
-                    .map(|d| (d.name.clone(), d.provider, d.source.clone()))
+                    .map(|d| (d.name.clone(), d.provider.clone(), d.source.clone()))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -241,7 +240,7 @@ impl SuperSTTDaemon {
                 let guard = self.model.read().await;
                 guard
                     .as_ref()
-                    .is_some_and(|loaded| matches!(loaded.definition.provider, Provider::Online(_)))
+                    .is_some_and(|loaded| loaded.definition.is_online())
             };
             if current_is_online {
                 info!("Online models disabled; reverting to a local model");

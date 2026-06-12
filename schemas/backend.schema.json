@@ -565,7 +565,7 @@
               "$ref": "#/definitions/Provider"
             }
           ],
-          "description": "Engine that serves the model."
+          "description": "Engine that serves the model — a free-form `snake_case` identity label\n(any backend may define its own). Online vs local is determined by\n[`ModelEntry::is_online`] (the `none` device sentinel), not by this."
         },
         "realtime": {
           "default": false,
@@ -693,15 +693,8 @@
       "type": "string"
     },
     "Provider": {
-      "description": "Engine that serves the model. The wire form is snake_case.",
-      "enum": [
-        "local_whisper",
-        "local_voxtral",
-        "local_qwen3_asr",
-        "openai",
-        "mistral",
-        "deepgram"
-      ],
+      "description": "Engine that serves the model — a free-form snake_case identifier (e.g. `local_whisper`, `openai`, `groq`). Any backend may define its own; online vs local is determined by the model's `supported_devices`, not by this value.",
+      "pattern": "^[a-z][a-z0-9_]*$",
       "type": "string"
     },
     "Secret": {

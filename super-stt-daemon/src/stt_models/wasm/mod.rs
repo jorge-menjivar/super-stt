@@ -25,7 +25,7 @@ use wasmtime_wasi_http::p2::WasiHttpView;
 use wasmtime_wasi_http::p2::bindings::ProxyPre;
 use wasmtime_wasi_http::p2::bindings::http::types::{ErrorCode, Scheme};
 
-use super_stt_shared::models::provider::{OnlineProvider, Provider};
+use super_stt_shared::models::provider::Provider;
 
 use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
 use host::{AllowlistHooks, Host};
@@ -130,8 +130,9 @@ impl WasmBackend {
     ) -> Result<Self> {
         let info = ModelInfoData::new(
             model_id,
-            Provider::Online(OnlineProvider::OpenAI),
+            Provider::from("openai"),
             "github.com/super-stt/openai",
+            true,
             true,
             Duration::from_secs(1),
         );
@@ -158,8 +159,9 @@ impl WasmBackend {
     ) -> Result<Self> {
         let info = ModelInfoData::new(
             model_id,
-            Provider::Online(OnlineProvider::Mistral),
+            Provider::from("mistral"),
             "github.com/super-stt/mistral",
+            true,
             true,
             Duration::from_secs(1),
         );

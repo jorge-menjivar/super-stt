@@ -18,7 +18,7 @@ impl SuperSTTDaemon {
             info!("Current model requested: {name}");
             DaemonResponse::success()
                 .with_current_model(name.clone())
-                .with_current_provider(loaded.definition.provider)
+                .with_current_provider(loaded.definition.provider.clone())
                 .with_current_source(loaded.definition.source.clone())
                 .with_message(format!("Current model: {name}"))
         } else {
@@ -162,34 +162,33 @@ impl SuperSTTDaemon {
         source: String,
     ) -> DaemonResponse {
         info!("Model switch requested: {model} via {provider} (source={source:?})");
-        if let Some(resp) = self.preflight_model_switch(&model, provider, &source).await {
+        if let Some(resp) = self.preflight_model_switch(&model, &provider, &source).await {
             return resp;
-        }
-
-        // Online models must be explicitly enabled — checked before resolution
-        // so a disabled online request is rejected with a clear message.
-        if matches!(provider, Provider::Online(_))
-            && !self.config.read().await.online.allow_online_models
-        {
-            return DaemonResponse::error(
-                "Online models are disabled. Enable 'Allow Online Models' in settings first.",
-            );
         }
 
         // Resolve against discovered backends; capture the concrete source +
         // install dir so the backend is recorded even when the request left
-        // `source` empty.
+        // `source` empty. Online-ness is only knowable from the resolved model
+        // (the `provider` string no longer encodes it), so capture it here.
         let resolved = {
             let backends = self.backends.read().await;
-            backends::find_model(&backends, &model, provider, &source)
-                .map(|(b, _)| (b.source.clone(), backends::dir_name(b)))
+            backends::find_model(&backends, &model, &provider, &source)
+                .map(|(b, d)| (b.source.clone(), backends::dir_name(b), d.is_online()))
         };
-        let Some((backend_source, backend_dir)) = resolved else {
+        let Some((backend_source, backend_dir, is_online)) = resolved else {
             return DaemonResponse::error(&format!(
                 "No installed backend serves {model} via {provider}. \
                  Install the backend or check the model name."
             ));
         };
+
+        // Online models must be explicitly enabled — gated after resolution
+        // since online-ness is a property of the resolved model.
+        if is_online && !self.config.read().await.online.allow_online_models {
+            return DaemonResponse::error(
+                "Online models are disabled. Enable 'Allow Online Models' in settings first.",
+            );
+        }
 
         // Selecting a model makes its backend the active one — record this
         // before the load so a load failure leaves the backend selected with no
@@ -204,7 +203,7 @@ impl SuperSTTDaemon {
         let device_pref = self.preferred_device.read().await.clone();
 
         match self
-            .instantiate_backend(&model, provider, &backend_source, &device_pref)
+            .instantiate_backend(&model, &provider, &backend_source, &device_pref)
             .await
         {
             Ok((instance, definition)) => {
@@ -240,7 +239,7 @@ impl SuperSTTDaemon {
         });
         {
             let mut config_guard = self.config.write().await;
-            config_guard.update_preferred_model(model.clone(), provider, source.clone());
+            config_guard.update_preferred_model(model.clone(), provider.clone(), source.clone());
         }
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after model switch: {e}");
@@ -271,7 +270,7 @@ impl SuperSTTDaemon {
     async fn preflight_model_switch(
         &self,
         model: &str,
-        provider: Provider,
+        provider: &Provider,
         source: &str,
     ) -> Option<DaemonResponse> {
         if *self.busy.read().await {
@@ -294,7 +293,7 @@ impl SuperSTTDaemon {
         }
         if let Some(loaded) = self.model.read().await.as_ref()
             && loaded.definition.name == model
-            && loaded.definition.provider == provider
+            && loaded.definition.provider == *provider
             && (source.is_empty() || loaded.definition.source == source)
         {
             info!("Model switch skipped - already using {model} via {provider}");
@@ -302,7 +301,7 @@ impl SuperSTTDaemon {
                 DaemonResponse::success()
                     .with_message(format!("Already using model: {model}"))
                     .with_current_model(loaded.definition.name.clone())
-                    .with_current_provider(loaded.definition.provider)
+                    .with_current_provider(loaded.definition.provider.clone())
                     .with_current_source(loaded.definition.source.clone()),
             );
         }

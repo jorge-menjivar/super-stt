@@ -30,6 +30,11 @@ pub struct ModelInfoData {
     pub source: String,
     /// Whether the model supports multiple languages.
     pub is_multilingual: bool,
+    /// Whether the model is served by a remote API with no local compute.
+    /// Derived from the model's `supported_devices` (`none` sentinel) at
+    /// construction — the `provider` string is free-form and carries no such
+    /// meaning.
+    pub online: bool,
     /// Suggested minimum interval between real-time processing chunks.
     pub processing_interval: Duration,
 }
@@ -42,6 +47,7 @@ impl ModelInfoData {
         provider: Provider,
         source: impl Into<String>,
         is_multilingual: bool,
+        online: bool,
         processing_interval: Duration,
     ) -> Self {
         Self {
@@ -49,6 +55,7 @@ impl ModelInfoData {
             provider,
             source: source.into(),
             is_multilingual,
+            online,
             processing_interval,
         }
     }
@@ -61,7 +68,7 @@ pub trait ModelInfo: Send + Sync {
 
     /// Engine family + routing class.
     fn provider(&self) -> Provider {
-        self.info().provider
+        self.info().provider.clone()
     }
 
     /// Wire-level name.
@@ -76,7 +83,7 @@ pub trait ModelInfo: Send + Sync {
 
     /// Whether this model sends audio to an external API.
     fn is_online(&self) -> bool {
-        matches!(self.info().provider, Provider::Online(_))
+        self.info().online
     }
 
     /// Suggested minimum interval between real-time processing chunks.

@@ -108,13 +108,14 @@ impl AppModel {
 
                     let selected_model = model.clone();
                     let selected_source = source.clone();
+                    let selected_provider = provider.clone();
                     Task::batch([
                         Task::perform(
                             set_model(model, provider, source),
                             move |result| match result {
                                 Ok(_) => cosmic::Action::App(Message::ModelChanged {
                                     model: selected_model.clone(),
-                                    provider,
+                                    provider: selected_provider.clone(),
                                     source: selected_source.clone(),
                                 }),
                                 Err(e) => cosmic::Action::App(Message::ModelError(e)),

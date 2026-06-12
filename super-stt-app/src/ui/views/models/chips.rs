@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use std::str::FromStr;
-
 use cosmic::iced::Alignment;
 use cosmic::iced_widget::row;
 use cosmic::widget::{self, text};
 use cosmic::{Apply, Element};
-use super_stt_shared::models::provider::Provider;
 
 use crate::ui::icons;
 use crate::ui::messages::Message;
@@ -18,7 +15,7 @@ pub(super) fn backend_is_online(backend: &crate::daemon::backends::BackendInfo) 
     backend
         .models
         .iter()
-        .any(|m| matches!(Provider::from_str(&m.provider), Ok(Provider::Online(_))))
+        .any(|m| m.supported_devices.iter().any(|d| d == "none"))
 }
 
 /// Whether any model this backend serves can run on a GPU (CUDA or Metal).

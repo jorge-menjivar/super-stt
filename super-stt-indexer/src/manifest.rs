@@ -8,7 +8,6 @@ use thiserror::Error;
 pub use super_stt_registry_types::manifest::{
     Accel, Device, Kind, Manifest, ManifestError as ParseError,
 };
-pub use super_stt_registry_types::provider::Provider;
 
 use crate::github::GitHub;
 

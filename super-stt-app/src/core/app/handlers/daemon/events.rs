@@ -161,7 +161,7 @@ impl AppModel {
                 .get("provider")
                 .and_then(|p| p.as_str())
                 .and_then(|s| s.parse::<Provider>().ok())
-                .unwrap_or(self.current_provider);
+                .unwrap_or_else(|| self.current_provider.clone());
             let source = event
                 .data
                 .get("source")

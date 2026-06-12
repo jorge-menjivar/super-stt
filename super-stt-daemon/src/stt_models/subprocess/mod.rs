@@ -132,9 +132,10 @@ impl SubprocessBackend {
             .map_or_else(|| Duration::from_secs(2), Duration::from_millis);
         let info = ModelInfoData::new(
             model_name,
-            model.provider,
+            model.provider.clone(),
             manifest.backend.source.clone(),
             model.multilingual,
+            model.is_online(),
             interval,
         );
 

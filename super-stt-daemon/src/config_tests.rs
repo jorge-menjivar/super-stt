@@ -244,7 +244,7 @@ write_method = "Auto"
     let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
     assert_eq!(
         config.transcription.preferred_provider,
-        Provider::LocalVoxtral
+        Provider::from("local_voxtral")
     );
     assert_eq!(
         config.transcription.preferred_source,

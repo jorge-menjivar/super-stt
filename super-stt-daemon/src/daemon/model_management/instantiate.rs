@@ -17,7 +17,7 @@ impl SuperSTTDaemon {
     pub async fn instantiate_backend(
         &self,
         name: &str,
-        provider: Provider,
+        provider: &Provider,
         source: &str,
         device_pref: &str,
     ) -> Result<(Box<dyn Transcribe>, ModelDefinition)> {
@@ -50,9 +50,10 @@ impl SuperSTTDaemon {
         let component = backend.dir.join(&backend.entrypoint);
         let info = ModelInfoData::new(
             def.name.clone(),
-            def.provider,
+            def.provider.clone(),
             def.source.clone(),
             def.is_multilingual,
+            def.is_online(),
             def.processing_interval,
         );
         // Websocket capability is a per-backend flag (every model the backend

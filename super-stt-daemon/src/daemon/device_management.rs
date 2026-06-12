@@ -5,7 +5,6 @@ use crate::stt_models::transcribe::Transcribe;
 use chrono::Utc;
 use log::{error, info, warn};
 use super_stt_shared::models::protocol::DaemonResponse;
-use super_stt_shared::models::provider::Provider;
 
 impl SuperSTTDaemon {
     /// Handle set device command - switch between CPU and CUDA
@@ -37,13 +36,13 @@ impl SuperSTTDaemon {
         }
 
         // Get context for the device switch
-        let (current_preferred, model_to_reload, provider, source) =
+        let (current_preferred, model_to_reload, provider, source, is_online) =
             self.get_device_switch_context(&device).await;
 
         // Online models don't use local GPU — just update the preference; no
         // reload is needed since the model runs on a remote service.
-        if matches!(provider, Provider::Online(_)) {
-            info!("Current model uses online provider, updating device preference only");
+        if is_online {
+            info!("Current model is online, updating device preference only");
             return self.update_device_preference_only(&device).await;
         }
 
@@ -64,7 +63,7 @@ impl SuperSTTDaemon {
 
         // Try to reload model with the requested device, but cancel if shutdown occurs
         let load_result = tokio::select! {
-            result = self.load_model_with_target_device(&model_to_reload, provider, &source, &device) => {
+            result = self.load_model_with_target_device(&model_to_reload, &provider, &source, &device) => {
                 result
             }
             _ = shutdown_rx.recv() => {
@@ -79,7 +78,7 @@ impl SuperSTTDaemon {
                     model_instance,
                     &device,
                     &model_to_reload,
-                    provider,
+                    &provider,
                     &source,
                     &current_preferred,
                 )
@@ -90,7 +89,7 @@ impl SuperSTTDaemon {
                     e,
                     &device,
                     &model_to_reload,
-                    provider,
+                    &provider,
                     &source,
                     &current_preferred,
                 )
@@ -187,23 +186,27 @@ impl SuperSTTDaemon {
         String,
         super_stt_shared::models::provider::Provider,
         String,
+        bool,
     ) {
-        // Get the model that needs to be reloaded (validated to exist already)
-        let (model_to_reload, provider, source) = {
+        // Get the model that needs to be reloaded (validated to exist already).
+        // Online-ness is read from the loaded model (which implements
+        // `ModelInfo`) — the `provider` string no longer encodes it.
+        let (model_to_reload, provider, source, is_online) = {
             let guard = self.model.read().await;
             guard
                 .as_ref()
                 .map(|loaded| {
                     (
                         loaded.definition.name.clone(),
-                        loaded.definition.provider,
+                        loaded.definition.provider.clone(),
                         loaded.definition.source.clone(),
+                        loaded.definition.is_online(),
                     )
                 })
                 .expect("Model existence already validated")
         };
         let current_preferred = self.preferred_device.read().await.clone();
-        (current_preferred, model_to_reload, provider, source)
+        (current_preferred, model_to_reload, provider, source, is_online)
     }
 
     /// Prepare for device switch by broadcasting status and unloading current model
@@ -232,7 +235,7 @@ impl SuperSTTDaemon {
         model_instance: Box<dyn Transcribe>,
         device: &str,
         model_to_reload: &str,
-        provider: super_stt_shared::models::provider::Provider,
+        provider: &super_stt_shared::models::provider::Provider,
         source: &str,
         previous_device: &str,
     ) -> DaemonResponse {
@@ -300,7 +303,7 @@ impl SuperSTTDaemon {
         error: anyhow::Error,
         device: &str,
         model_to_reload: &str,
-        provider: super_stt_shared::models::provider::Provider,
+        provider: &super_stt_shared::models::provider::Provider,
         source: &str,
         previous_device: &str,
     ) -> DaemonResponse {
