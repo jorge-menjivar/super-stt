@@ -52,7 +52,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p out
-          src/target/release/super-stt-indexer \
+          src/target/release/super-stt-indexer build \
             --registry src/registry/registry.toml \
             --prior-index pages/index.json \
             --out out/index.json

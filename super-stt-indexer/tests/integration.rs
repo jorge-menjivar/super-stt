@@ -89,6 +89,7 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
     let bin = env!("CARGO_BIN_EXE_super-stt-indexer");
     let status = Command::new(bin)
         .env("GITHUB_API_BASE", &base)
+        .arg("build")
         .arg("--registry")
         .arg(&registry_path)
         .arg("--out")

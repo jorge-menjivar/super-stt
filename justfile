@@ -292,7 +292,8 @@ gen-schemas:
 # with real SHA-256 hashes, and serves the directory over HTTP. In the daemon's
 # environment set `SUPER_STT_REGISTRY_URL=http://localhost:8787/index.json`
 # before starting it, then open the app's Models > Download tab.
-# Requires: `rustup target add wasm32-wasip2` and Python 3.11+.
+# Requires: `rustup target add wasm32-wasip2` (Python 3 is used only as the
+# static file server at the end).
 serve-test-registry port="8787": build-openai-backend build-mistral-backend
     #!/usr/bin/env bash
     set -euo pipefail
@@ -301,7 +302,7 @@ serve-test-registry port="8787": build-openai-backend build-mistral-backend
     mkdir -p "$out"
     cp backends/openai/target/wasm32-wasip2/release/super_stt_backend_openai.wasm "$out/openai.wasm"
     cp backends/mistral/target/wasm32-wasip2/release/super_stt_backend_mistral.wasm "$out/mistral.wasm"
-    python3 registry/scripts/gen_test_index.py --out "$out" --base-url "$base" \
+    cargo run -q -p super-stt-indexer -- local --out "$out" --base-url "$base" \
         backends/openai/backend.toml backends/mistral/backend.toml
     echo ""
     echo "Test registry ready. In the daemon's environment, run:"

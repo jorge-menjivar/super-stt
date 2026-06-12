@@ -14,6 +14,7 @@ mod carryforward;
 mod github;
 mod index_json;
 mod license;
+mod local;
 mod manifest;
 mod registry_toml;
 mod resolve;
@@ -21,6 +22,22 @@ mod resolve;
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+    /// Build the published index from `registry.toml` + GitHub releases.
+    Build(BuildArgs),
+    /// Build a local index from staged backends — offline, no GitHub. For
+    /// testing the daemon's download/install pipeline against a localhost
+    /// static server (see `just serve-test-registry`).
+    Local(local::LocalArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct BuildArgs {
     /// Path to `registry.toml` to read.
     #[arg(long, default_value = "registry/registry.toml")]
     registry: PathBuf,
@@ -42,8 +59,14 @@ pub struct BuildFailure {
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let args = Args::parse();
+    match Args::parse().command {
+        Command::Build(args) => run_build(args).await,
+        Command::Local(args) => local::run(&args),
+    }
+}
 
+/// Build the published index from `registry.toml` + GitHub releases.
+async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
     let registry_text = std::fs::read_to_string(&args.registry)
         .with_context(|| format!("reading {}", args.registry.display()))?;
     let registry = registry_toml::Registry::parse(&registry_text)?;
@@ -158,7 +181,13 @@ async fn build_entry(
         .await
         .map_err(|e| fail(&e))?;
 
-    Ok(into_index_backend(id, m, resolved, idx_assets))
+    Ok(into_index_backend(
+        id,
+        m,
+        resolved.version.to_string(),
+        resolved.tag,
+        idx_assets,
+    ))
 }
 
 /// Resolve and hash the binary artifacts a release declares — the wasm
@@ -206,14 +235,16 @@ async fn resolve_index_assets(
     Ok(idx_assets)
 }
 
-/// Assemble the published `IndexBackend` from a validated manifest, its resolved
-/// release, and the hashed assets. `online` / `supports_gpu` / `supports_cpu`
-/// are derived from the manifest's models.
+/// Assemble the published `IndexBackend` from a validated manifest, its
+/// resolved `version` + `tag`, and the hashed assets. `online` / `supports_gpu`
+/// / `supports_cpu` are derived from the manifest's models. Shared by the
+/// GitHub-release path and the offline `local` path.
 #[allow(clippy::similar_names)] // supports_gpu / supports_cpu mirror the output fields
-fn into_index_backend(
+pub(crate) fn into_index_backend(
     id: &str,
     m: manifest::Manifest,
-    resolved: resolve::Resolved,
+    version: String,
+    tag: String,
     assets: index_json::IndexAssets,
 ) -> index_json::IndexBackend {
     let online = m
@@ -232,8 +263,8 @@ fn into_index_backend(
     index_json::IndexBackend {
         id: id.into(),
         source: m.backend.source,
-        version: resolved.version.to_string(),
-        tag: resolved.tag,
+        version,
+        tag,
         name: m.backend.name,
         description: m.backend.description,
         license: m.backend.license.unwrap_or_default(),

@@ -178,11 +178,13 @@ pub struct IndexStale {
 
 #[cfg(test)]
 mod tests {
-    //! End-to-end check that the offline test-index generator
-    //! (`registry/scripts/gen_test_index.py`) produces JSON the daemon can
-    //! read. Generates an index from the committed dummy manifest, then
-    //! deserializes it with the real `Index` type the registry client uses.
-    //! Skips gracefully if `python3` isn't on PATH.
+    //! End-to-end check that the indexer's offline `local` mode produces JSON
+    //! the daemon can read — guarding drift between the indexer's `index_json`
+    //! output and this module's `Index` input. Generates an index from the
+    //! committed dummy manifest with the real binary, then deserializes it with
+    //! the `Index` type the registry client uses. Skips gracefully when the
+    //! indexer binary hasn't been built (e.g. `cargo test -p super-stt-daemon`
+    //! on its own); `cargo test --workspace` builds it and runs this.
     use super::*;
     use std::path::PathBuf;
     use std::process::Command;
@@ -192,36 +194,27 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
     }
 
-    fn python_available() -> bool {
-        Command::new("python3")
-            .arg("--version")
-            .output()
-            .is_ok_and(|o| o.status.success())
+    /// The `super-stt-indexer` binary sibling to this test binary
+    /// (`target/<profile>/super-stt-indexer`), if it has been built.
+    fn indexer_bin() -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        // .../target/<profile>/deps/<testbin> -> .../target/<profile>
+        let bin = exe.parent()?.parent()?.join("super-stt-indexer");
+        bin.exists().then_some(bin)
     }
 
     #[test]
     fn reads_generated_test_index_end_to_end() {
-        if !python_available() {
-            eprintln!("skipping: python3 not available");
+        let Some(indexer) = indexer_bin() else {
+            eprintln!("skipping: super-stt-indexer binary not built");
             return;
-        }
-        let root = repo_root();
-        let script = root.join("registry/scripts/gen_test_index.py");
-        let dummy = root.join("registry/scripts/fixtures/dummy-backend.toml");
-        assert!(
-            script.exists(),
-            "generator script missing at {}",
-            script.display()
-        );
-        assert!(
-            dummy.exists(),
-            "dummy manifest missing at {}",
-            dummy.display()
-        );
+        };
+        let dummy = repo_root().join("registry/scripts/fixtures/dummy-backend.toml");
+        assert!(dummy.exists(), "dummy manifest missing at {}", dummy.display());
 
         let out = tempfile::tempdir().unwrap();
-        let status = Command::new("python3")
-            .arg(&script)
+        let status = Command::new(&indexer)
+            .arg("local")
             .arg("--out")
             .arg(out.path())
             .arg("--base-url")
@@ -229,8 +222,8 @@ mod tests {
             .arg("--allow-missing-assets")
             .arg(&dummy)
             .status()
-            .expect("run generator");
-        assert!(status.success(), "generator exited with failure");
+            .expect("run indexer");
+        assert!(status.success(), "indexer exited with failure");
 
         let json = std::fs::read_to_string(out.path().join("index.json")).unwrap();
         // The real reader: the exact type the registry client uses to parse
