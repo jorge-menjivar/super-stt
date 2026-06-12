@@ -152,6 +152,9 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
             .map(|m| IndexModel {
                 name: m.name,
                 provider: m.provider,
+                multilingual: m.multilingual,
+                primary_language: m.primary_language,
+                supported_languages: m.supported_languages,
                 supported_devices: m.supported_devices,
             })
             .collect(),
@@ -333,8 +336,18 @@ struct Network {
 struct Model {
     name: String,
     provider: String,
+    #[serde(default = "default_true")]
+    multilingual: bool,
+    #[serde(default)]
+    primary_language: String,
+    #[serde(default)]
+    supported_languages: Vec<String>,
     #[serde(default)]
     supported_devices: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -386,6 +399,9 @@ mod tests {
         Model {
             name: name.into(),
             provider: provider.into(),
+            multilingual: true,
+            primary_language: "en".into(),
+            supported_languages: vec!["en".into()],
             supported_devices: devices.iter().map(|s| (*s).to_string()).collect(),
         }
     }

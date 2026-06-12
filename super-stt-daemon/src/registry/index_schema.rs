@@ -119,7 +119,22 @@ pub struct IndexBackend {
 pub struct IndexModel {
     pub name: String,
     pub provider: String,
+    /// Whether the model accepts more than one language. Default `true`.
+    /// Defaulted when reading an index published before this field existed.
+    #[serde(default = "default_true")]
+    pub multilingual: bool,
+    /// Default language code; must appear in `supported_languages`. Empty when
+    /// an older index omitted it — the installer falls back to a valid default.
+    #[serde(default)]
+    pub primary_language: String,
+    /// Language codes the model accepts; must include `primary_language`.
+    #[serde(default)]
+    pub supported_languages: Vec<String>,
     pub supported_devices: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]

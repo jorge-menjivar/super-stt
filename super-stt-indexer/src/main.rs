@@ -281,6 +281,9 @@ pub(crate) fn into_index_backend(
             .map(|md| index_json::IndexModel {
                 name: md.name,
                 provider: md.provider.to_string(),
+                multilingual: md.multilingual,
+                primary_language: md.primary_language,
+                supported_languages: md.supported_languages,
                 supported_devices: md
                     .supported_devices
                     .iter()

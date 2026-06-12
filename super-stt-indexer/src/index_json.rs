@@ -48,7 +48,21 @@ pub struct IndexBackend {
 pub struct IndexModel {
     pub name: String,
     pub provider: String,
+    /// Whether the model accepts more than one language. Default `true`.
+    #[serde(default = "default_true")]
+    pub multilingual: bool,
+    /// Default language code; must appear in `supported_languages`. Defaulted
+    /// (empty) when reading an older index that predates this field.
+    #[serde(default)]
+    pub primary_language: String,
+    /// Language codes the model accepts; must include `primary_language`.
+    #[serde(default)]
+    pub supported_languages: Vec<String>,
     pub supported_devices: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,5 +162,32 @@ mod tests {
         let back: Index = serde_json::from_str(&s).unwrap();
         assert_eq!(back.backends.len(), 1);
         assert_eq!(back.backends[0].id, "openai");
+    }
+
+    #[test]
+    fn model_roundtrips_language_fields_and_tolerates_old_index() {
+        let m = IndexModel {
+            name: "m".into(),
+            provider: "local_x".into(),
+            multilingual: false,
+            primary_language: "en".into(),
+            supported_languages: vec!["en".into()],
+            supported_devices: vec!["cpu".into()],
+        };
+        let s = serde_json::to_string(&m).unwrap();
+        assert!(s.contains("primary_language"));
+        let back: IndexModel = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.supported_languages, vec!["en".to_string()]);
+        assert!(!back.multilingual);
+
+        // An index published before these fields existed still deserializes,
+        // defaulting `multilingual` to true and leaving the rest empty.
+        let old: IndexModel = serde_json::from_str(
+            r#"{"name":"m","provider":"local_x","supported_devices":["cpu"]}"#,
+        )
+        .unwrap();
+        assert!(old.multilingual);
+        assert!(old.primary_language.is_empty());
+        assert!(old.supported_languages.is_empty());
     }
 }

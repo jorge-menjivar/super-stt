@@ -451,6 +451,34 @@ fn synthesize_backend_toml(entry: &IndexBackend) -> String {
         out.push_str("\n[[models]]\n");
         let _ = writeln!(out, "name = \"{}\"", toml_escape(&md.name));
         let _ = writeln!(out, "provider = \"{}\"", toml_escape(&md.provider));
+        // Language metadata is required by the manifest parser and cross-checked
+        // by the daemon's runtime validation (`primary_language` must be in
+        // `supported_languages`; a non-multilingual model lists exactly its
+        // primary language). Reconstruct an always-consistent block, falling
+        // back to English-only when an older index omitted these fields.
+        let primary = if md.primary_language.is_empty() {
+            "en".to_string()
+        } else {
+            md.primary_language.clone()
+        };
+        let langs = if md.multilingual {
+            let mut l = md.supported_languages.clone();
+            if l.is_empty() {
+                l.push(primary.clone());
+            } else if !l.contains(&primary) {
+                l.insert(0, primary.clone());
+            }
+            l
+        } else {
+            vec![primary.clone()]
+        };
+        let _ = writeln!(out, "multilingual = {}", md.multilingual);
+        let _ = writeln!(out, "primary_language = \"{}\"", toml_escape(&primary));
+        let langs_lit: Vec<String> = langs
+            .iter()
+            .map(|l| format!("\"{}\"", toml_escape(l)))
+            .collect();
+        let _ = writeln!(out, "supported_languages = [{}]", langs_lit.join(", "));
         let devs: Vec<String> = md
             .supported_devices
             .iter()
@@ -524,6 +552,74 @@ mod tests {
         assert!(s.contains("source = \"github.com/x/y\""));
         assert!(s.contains("kind = \"wasm\""));
         assert!(s.contains("api.openai.com"));
+    }
+
+    /// The synthesized `backend.toml` must parse with the same canonical
+    /// manifest type discovery uses and pass the daemon's runtime validation —
+    /// the loop that previously broke (a synthesized manifest missing the
+    /// required `primary_language` / `supported_languages` was rejected by the
+    /// very daemon that wrote it).
+    #[test]
+    fn synthesized_model_block_parses_and_validates() {
+        use crate::stt_models::backends::manifest::{Manifest, validate_runtime};
+        let mut entry = minimal_entry();
+        entry.models = vec![IndexModel {
+            name: "m1".into(),
+            provider: "local_x".into(),
+            multilingual: true,
+            primary_language: "en".into(),
+            supported_languages: vec!["en".into(), "es".into()],
+            supported_devices: vec!["cuda".into()],
+        }];
+        let text = synthesize_backend_toml(&entry);
+        let m: Manifest = toml::from_str(&text).expect("synthesized backend.toml must parse");
+        validate_runtime(&m).expect("synthesized backend.toml must pass runtime validation");
+        assert_eq!(m.models[0].primary_language, "en");
+        assert_eq!(m.models[0].supported_languages, vec!["en", "es"]);
+        assert!(m.models[0].multilingual);
+    }
+
+    /// An index published before the language fields existed deserializes with
+    /// empty defaults; the synthesizer must still emit a valid English-only
+    /// block rather than an unparseable manifest.
+    #[test]
+    fn synthesized_model_falls_back_when_index_omits_language() {
+        use crate::stt_models::backends::manifest::{Manifest, validate_runtime};
+        let mut entry = minimal_entry();
+        entry.models = vec![IndexModel {
+            name: "m1".into(),
+            provider: "local_x".into(),
+            multilingual: true,
+            primary_language: String::new(),
+            supported_languages: vec![],
+            supported_devices: vec!["cpu".into()],
+        }];
+        let text = synthesize_backend_toml(&entry);
+        let m: Manifest = toml::from_str(&text).expect("synthesized backend.toml must parse");
+        validate_runtime(&m).expect("synthesized backend.toml must pass runtime validation");
+        assert_eq!(m.models[0].primary_language, "en");
+        assert_eq!(m.models[0].supported_languages, vec!["en"]);
+    }
+
+    /// A non-multilingual model must serialize exactly `[primary_language]` so
+    /// runtime validation accepts it even if the index over-declares languages.
+    #[test]
+    fn synthesized_non_multilingual_model_is_primary_only() {
+        use crate::stt_models::backends::manifest::{Manifest, validate_runtime};
+        let mut entry = minimal_entry();
+        entry.models = vec![IndexModel {
+            name: "m1".into(),
+            provider: "local_x".into(),
+            multilingual: false,
+            primary_language: "en".into(),
+            supported_languages: vec!["en".into(), "es".into()],
+            supported_devices: vec!["cpu".into()],
+        }];
+        let text = synthesize_backend_toml(&entry);
+        let m: Manifest = toml::from_str(&text).expect("parses");
+        validate_runtime(&m).expect("validates");
+        assert!(!m.models[0].multilingual);
+        assert_eq!(m.models[0].supported_languages, vec!["en"]);
     }
 
     fn minimal_entry() -> IndexBackend {
