@@ -35,8 +35,11 @@ pub async fn auth_request(
 
     // /auth/request returns its own JSON shape (not a `DaemonResponse`),
     // so we issue the request directly here and parse on top of the raw
-    // body.
-    let response = transport::open(&socket_path, req).await?;
+    // body. No timeout: the daemon holds this request open while the user
+    // responds to the consent popup (and may type a keyring password), so
+    // a machine timer must not race human input — bounding it would cut
+    // the user off mid-decision.
+    let response = transport::open(&socket_path, req, None).await?;
 
     let status = response.status();
     let body = transport::collect_body(response).await?;

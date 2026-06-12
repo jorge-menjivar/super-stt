@@ -114,15 +114,42 @@ pub async fn start_http_server(
     socket_path: PathBuf,
     shutdown_tx: broadcast::Sender<()>,
 ) -> Result<tokio::task::JoinHandle<()>> {
+    // Build the application state first. This loads the persisted session
+    // store from the system keyring; if the keyring is unavailable the
+    // daemon refuses to start (see `TokenStore::load_persisted`). Doing it
+    // before binding the listener guarantees we never leave a
+    // listening-but-unserviced socket behind on a keyring failure.
+    //
+    // That keyring read is a *blocking* secret-service call: on a locked
+    // keyring it waits on the D-Bus unlock prompt for as long as the user
+    // takes. Run it on the blocking pool and race it against the shutdown
+    // signal so the wait stays interruptible — otherwise a Ctrl+C during
+    // the unlock wait is swallowed (the supervision `select!` is only
+    // reached once startup finishes) and the daemon can't be stopped.
+    let state = {
+        let daemon = Arc::clone(&daemon);
+        let mut shutdown_rx = shutdown_tx.subscribe();
+        let load = tokio::task::spawn_blocking(move || AppState::new(daemon));
+        tokio::select! {
+            biased;
+            _ = shutdown_rx.recv() => {
+                // The blocking load is still parked on the keyring prompt;
+                // a dropped runtime would join (and hang on) it, so exit
+                // the process directly. Nothing is bound or in flight yet.
+                info!("Shutdown requested during session-store load; exiting");
+                std::process::exit(130);
+            }
+            res = load => res.context("session-store load task panicked")??,
+        }
+    };
+    let app = crate::daemon::http::v1::router(state);
+
     let listener = bind_listener(&socket_path).await?;
 
     info!(
         "HTTP daemon listening on socket: {} (side-by-side with legacy listener)",
         socket_path.display()
     );
-
-    let state = AppState::new(Arc::clone(&daemon));
-    let app = crate::daemon::http::v1::router(state);
 
     let cleanup_path = socket_path.clone();
     let handle = tokio::spawn(async move {

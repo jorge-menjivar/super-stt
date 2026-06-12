@@ -49,14 +49,19 @@ pub(crate) struct AppState {
 impl AppState {
     /// Construct the default application state from a daemon handle.
     /// The registry client is configured from environment variables.
-    pub(crate) fn new(daemon: Arc<SuperSTTDaemon>) -> Self {
-        Self {
+    ///
+    /// # Errors
+    /// Returns an error if the system keyring is unavailable while loading
+    /// the persisted session store, so the daemon refuses to start. See
+    /// [`TokenStore::load_persisted`].
+    pub(crate) fn new(daemon: Arc<SuperSTTDaemon>) -> anyhow::Result<Self> {
+        Ok(Self {
             daemon,
-            tokens: TokenStore::load_persisted(),
+            tokens: TokenStore::load_persisted()?,
             consent_locks: ConsentLocks::default(),
             deny_cache: DenyCache::default(),
             registry_client: Arc::new(crate::registry::client::Client::from_env()),
             install_inflight: Arc::new(ParkingRwLock::new(HashSet::new())),
-        }
+        })
     }
 }

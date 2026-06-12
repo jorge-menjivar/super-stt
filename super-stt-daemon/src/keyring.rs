@@ -10,7 +10,7 @@
 //! `(super-stt, stt-sessions)` — see `daemon::http::internal::auth::tokens::TokenStore` and
 //! `get_sessions_blob`/`set_sessions_blob` below.
 
-use log::{debug, warn};
+use log::{debug, info, warn};
 
 const SERVICE_NAME: &str = "super-stt";
 
@@ -78,6 +78,15 @@ pub fn get_sessions_blob() -> Result<Option<String>, String> {
     let entry = keyring::Entry::new(SERVICE_NAME, SESSIONS_KEY)
         .map_err(|e| format!("Failed to access keyring entry for sessions: {e}"))?;
 
+    // Surface the read before it happens: on a *locked* keyring this call
+    // blocks on the secret-service unlock prompt, potentially for a long
+    // time. Logging first means a stalled startup is explained in the
+    // journal ("waiting on keyring unlock") instead of looking like a
+    // silent hang.
+    info!(
+        "Reading the persisted session store from the system keyring; if the keyring \
+         is locked, the daemon will wait here until it is unlocked"
+    );
     match entry.get_password() {
         Ok(blob) => {
             debug!("Loaded persisted session blob from keyring");

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use log::{info, warn};
+use log::{error, info, warn};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -40,6 +40,18 @@ pub(crate) fn clear_keyring_failure_flag() {
     *KEYRING_LAST_FAILURE.lock().unwrap() = None;
 }
 
+/// When set to `1`, the daemon starts even if the system keyring is
+/// unavailable, falling back to an ephemeral in-memory session store that
+/// does not survive a restart. Intended for headless / CI hosts that have
+/// no secret service. Without it, an unavailable keyring is fatal: the
+/// daemon refuses to start rather than silently run without session
+/// persistence.
+pub(crate) const ALLOW_NO_KEYRING_ENV: &str = "SUPER_STT_ALLOW_NO_KEYRING";
+
+fn allow_no_keyring() -> bool {
+    std::env::var(ALLOW_NO_KEYRING_ENV).is_ok_and(|v| v == "1")
+}
+
 /// Persistent store of issued session tokens. The in-memory `HashMap`
 /// is the hot lookup path; every mutation also writes the whole map
 /// back to the system keyring under `(super-stt, stt-sessions)` so a
@@ -70,22 +82,44 @@ pub(crate) struct SessionsFile {
 impl TokenStore {
     /// Load any persisted sessions from the keyring, prune anything
     /// already past its `expires_at`, and write the cleaned set back if
-    /// pruning removed entries. Failure at any step (missing entry,
-    /// keyring unavailable, parse error, version mismatch) yields an
-    /// empty store — the daemon must not refuse to start because the
-    /// keyring is unhappy.
-    pub(crate) fn load_persisted() -> Self {
+    /// pruning removed entries.
+    ///
+    /// A *missing entry*, parse error, or version mismatch is recoverable
+    /// and yields an empty store — those are data conditions, not keyring
+    /// faults. An *unavailable keyring* (no secret service, or a locked
+    /// keyring whose unlock prompt was dismissed), however, is fatal: the
+    /// daemon refuses to start so it never runs unable to persist or
+    /// validate sessions. Set [`ALLOW_NO_KEYRING_ENV`] to downgrade that
+    /// to an ephemeral in-memory store for headless / CI hosts.
+    ///
+    /// # Errors
+    /// Returns an error when the system keyring is unavailable and
+    /// [`ALLOW_NO_KEYRING_ENV`] is not set, so the daemon aborts startup.
+    pub(crate) fn load_persisted() -> anyhow::Result<Self> {
         let store = Self::default();
 
         let blob = match crate::keyring::get_sessions_blob() {
             Ok(Some(b)) => b,
             Ok(None) => {
                 info!("No persisted sessions found; starting with empty store");
-                return store;
+                return Ok(store);
+            }
+            Err(e) if allow_no_keyring() => {
+                warn!(
+                    "System keyring unavailable ({e}); {ALLOW_NO_KEYRING_ENV}=1 set — \
+                     starting with an ephemeral in-memory session store (sessions will \
+                     not survive a daemon restart)"
+                );
+                return Ok(store);
             }
             Err(e) => {
-                warn!("Failed to read persisted sessions ({e}); starting with empty store");
-                return store;
+                error!(
+                    "System keyring is unavailable or missing ({e}). Super STT requires \
+                     an accessible secret-service keyring to persist sessions and will \
+                     not start without one. Unlock or enable your keyring, or set \
+                     {ALLOW_NO_KEYRING_ENV}=1 to start without persistence (headless/CI)."
+                );
+                return Err(anyhow::anyhow!("keyring unavailable: {e}"));
             }
         };
 
@@ -93,7 +127,7 @@ impl TokenStore {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to parse persisted sessions ({e}); starting with empty store");
-                return store;
+                return Ok(store);
             }
         };
 
@@ -102,7 +136,7 @@ impl TokenStore {
                 "Persisted sessions schema version {} != expected {}; ignoring",
                 parsed.version, SESSIONS_SCHEMA_VERSION
             );
-            return store;
+            return Ok(store);
         }
 
         let now = Utc::now();
@@ -133,7 +167,7 @@ impl TokenStore {
         }
 
         *store.inner.lock().unwrap() = live;
-        store
+        Ok(store)
     }
 
     /// Persist the current sessions map to the keyring. Callers must

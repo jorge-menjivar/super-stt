@@ -42,7 +42,10 @@ pub async fn events_stream(
         ));
     }
     let req = build_events_request(token, topics)?;
-    let response = transport::open(&socket_path, req).await?;
+    // Machine-to-machine: bound the wait for response headers so a wedged
+    // daemon surfaces a Disconnected (and the subscription reconnects)
+    // instead of hanging the stream open forever.
+    let response = transport::open(&socket_path, req, Some(transport::REQUEST_TIMEOUT)).await?;
     transport::check_subscribe_status(response)
         .await
         .map(parse_widget_event_stream)

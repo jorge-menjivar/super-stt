@@ -127,11 +127,33 @@ pub(crate) async fn check_subscribe_status(
     )))
 }
 
+/// Upper bound on how long a **non-interactive** request waits for the
+/// daemon's response headers. A daemon that accepts the connection but
+/// never answers — e.g. wedged mid-startup, before its accept loop is
+/// serving — would otherwise hang the caller forever. That is exactly how
+/// a stuck daemon used to freeze the app's startup probe with no error.
+///
+/// Deliberately *not* applied to the consent-bearing `/auth/request`
+/// (see [`open`]'s `timeout` param): that call is held open while a human
+/// clicks Allow/Deny and may type a keyring password, so a machine timer
+/// must never race it. Sized generously even for the machine calls so a
+/// slow model reload still completes; a daemon that is simply *down*
+/// fails fast at `connect()` and never reaches this bound.
+pub(crate) const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
 /// Open an HTTP/1.1 connection over a fresh Unix socket, run one request,
 /// and return the streaming response. Shared by every call path.
+///
+/// `timeout` bounds the wait for the daemon's response headers. Pass
+/// `Some(_)` for machine-to-machine calls so a wedged daemon can't hang
+/// the caller forever. Pass `None` for `/auth/request`, which the daemon
+/// legitimately holds open while the user responds to the consent popup
+/// (and possibly a keyring-unlock prompt) — bounding it would cut the user
+/// off mid-decision.
 pub(crate) async fn open(
     socket_path: &std::path::PathBuf,
     req: hyper::Request<RequestBody>,
+    timeout: Option<std::time::Duration>,
 ) -> HttpResult<hyper::Response<hyper::body::Incoming>> {
     let stream = tokio::net::UnixStream::connect(socket_path)
         .await
@@ -144,19 +166,32 @@ pub(crate) async fn open(
             _ => HttpError::Other(format!("Connection failed: {e}")),
         })?;
     let io = hyper_util::rt::TokioIo::new(stream);
-    let (sender, conn) = hyper::client::conn::http1::handshake(io)
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
         .await
         .map_err(|e| HttpError::Other(format!("HTTP handshake failed: {e}")))?;
-    let mut sender = sender;
-    tokio::spawn(async move {
+    let conn_task = tokio::spawn(async move {
         if let Err(e) = conn.await {
             log::debug!("http connection ended: {e}");
         }
     });
-    sender
-        .send_request(req)
-        .await
-        .map_err(|e| HttpError::Other(format!("Request failed: {e}")))
+    // On success `conn_task` keeps driving the connection so the body
+    // (incl. long-lived `/events` streams) can be read; on timeout we abort
+    // it so a dead connection doesn't leak a background task.
+    let send = sender.send_request(req);
+    let result = match timeout {
+        Some(dur) => match tokio::time::timeout(dur, send).await {
+            Ok(result) => result,
+            Err(_elapsed) => {
+                conn_task.abort();
+                return Err(HttpError::Other(format!(
+                    "Daemon did not respond within {}s (it may be stuck or still starting up)",
+                    dur.as_secs()
+                )));
+            }
+        },
+        None => send.await,
+    };
+    result.map_err(|e| HttpError::Other(format!("Request failed: {e}")))
 }
 
 /// Collect a response body to bytes.
@@ -177,7 +212,7 @@ pub(crate) async fn send_request<T: DeserializeOwned>(
     socket_path: &std::path::PathBuf,
     req: hyper::Request<RequestBody>,
 ) -> HttpResult<T> {
-    let response = open(socket_path, req).await?;
+    let response = open(socket_path, req, Some(REQUEST_TIMEOUT)).await?;
     let status = response.status();
     let body = collect_body(response).await?;
     if status == hyper::StatusCode::UNAUTHORIZED {

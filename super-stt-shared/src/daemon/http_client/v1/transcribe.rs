@@ -98,7 +98,7 @@ pub async fn transcribe_stream(
     }
     let req = transport::build_post_json("/transcribe", &data, Some(token))?;
 
-    let response = transport::open(&socket_path, req).await?;
+    let response = transport::open(&socket_path, req, Some(transport::REQUEST_TIMEOUT)).await?;
 
     let status = response.status();
     if status == hyper::StatusCode::UNAUTHORIZED {
