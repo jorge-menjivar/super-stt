@@ -10,6 +10,7 @@ description = "Canonical types for backend.toml manifests and registry.toml entr
 schemars = { version = "1", optional = true }
 serde.workspace = true
 serde_json = { workspace = true, optional = true }
+spdx = { version = "0.13.4", default-features = false }
 thiserror.workspace = true
 toml.workspace = true
 

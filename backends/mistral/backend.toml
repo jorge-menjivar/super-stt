@@ -9,6 +9,7 @@
     kind = "wasm"
     entrypoint = "mistral.wasm"
     contract = "v1"
+    license = "GPL-3.0-only"
 
 [network]
     allowed_hosts = ["api.mistral.ai"]

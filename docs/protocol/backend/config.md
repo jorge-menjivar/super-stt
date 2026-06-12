@@ -53,16 +53,26 @@ version    = "0.1.0"
 kind       = "subprocess"
 entrypoint = "whisper-backend"
 contract   = "v1"
+license    = "Apache-2.0"
 ```
 
-| Field        | Type   | Required | Notes                                                                 |
-|--------------|--------|----------|-----------------------------------------------------------------------|
-| `source`     | string | yes      | Canonical repository id for this backend. Becomes the `source` of every model it provides (see [identity](./contract.md#model-identity)). Must be unique across installed backends. |
-| `name`       | string | yes      | Human-readable display name.                                          |
-| `version`    | string | yes      | Backend version (semver).                                            |
-| `kind`       | string | yes      | `subprocess` or `wasm` — selects the transport.                       |
-| `entrypoint` | string | yes      | Path, relative to the backend directory, to the executable (`subprocess`) or the `.wasm` component (`wasm`). |
-| `contract`   | string | yes      | The contract version the backend implements. Must be `v1`; unknown versions are rejected. |
+| Field        | Type   | Required        | Notes                                                                 |
+|--------------|--------|-----------------|-----------------------------------------------------------------------|
+| `source`     | string | yes             | Canonical repository id for this backend. Becomes the `source` of every model it provides (see [identity](./contract.md#model-identity)). Must be unique across installed backends. |
+| `name`       | string | yes             | Human-readable display name.                                          |
+| `version`    | string | yes             | Backend version (semver).                                            |
+| `kind`       | string | yes             | `subprocess` or `wasm` — selects the transport.                       |
+| `entrypoint` | string | yes             | Path, relative to the backend directory, to the executable (`subprocess`) or the `.wasm` component (`wasm`). |
+| `contract`   | string | yes             | The contract version the backend implements. Must be `v1`; unknown versions are rejected. |
+| `license`    | string | for publication | SPDX identifier of a current OSI-approved or FSF Free/Libre license (e.g. `Apache-2.0`, `MIT`, `GPL-3.0-only`), or the literal `other` for a license outside that set. Required for registry publication; optional for locally installed backends. |
+
+`license` is checked against the SPDX license list embedded in the registry
+indexer — no network access — and must be a single, current (non-deprecated)
+SPDX identifier that the list marks OSI-approved or FSF Free/Libre, or the
+literal `other`. License *expressions* (`MIT OR Apache-2.0`) are not accepted;
+declare a single identifier or `other`. A backend declaring `other` is still
+published — the app surfaces its license as "Other" — so the value is a
+conscious declaration, not an omission.
 
 ## `[network]`
 
@@ -300,6 +310,7 @@ version    = "0.1.0"
 kind       = "subprocess"
 entrypoint = "whisper-backend"
 contract   = "v1"
+license    = "Apache-2.0"
 
 [network]
 allowed_hosts = []
@@ -358,6 +369,7 @@ version    = "0.1.0"
 kind       = "wasm"
 entrypoint = "openai.wasm"
 contract   = "v1"
+license    = "Apache-2.0"
 
 [network]
 allowed_hosts = ["api.openai.com"]
@@ -405,6 +417,10 @@ supported_devices   = ["none"]
   plaintext.
 - `[backend].source` must be unique across installed backends; a collision
   is a discovery error for the later backend.
+- `[backend].license` is required for registry publication: a current
+  OSI-approved or FSF Free/Libre SPDX identifier, or the literal `other`. The
+  indexer rejects a release whose manifest omits the field or declares an
+  unrecognized value. Locally installed backends may omit it.
 - A `subprocess` backend with a non-empty `allowed_hosts` is rejected — the
   transport provides no network.
 - `primary_language` must appear in `supported_languages`. When

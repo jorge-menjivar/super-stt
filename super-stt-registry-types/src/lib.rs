@@ -4,6 +4,7 @@
 //! See `docs/protocol/backend/config.md`.
 
 pub mod entry;
+pub mod license;
 pub mod manifest;
 pub mod provider;
 mod safe_path;

@@ -17,7 +17,9 @@ changing the entry types; do not edit the schema by hand).
 1. Build and host your backend in your own GitHub repo. It must include a
    `backend.toml` at the chosen subdirectory (default: repo root), declaring
    `[assets.wasm]` (for wasm backends) or `[[assets.subprocess]]` (for
-   subprocess backends) — see `docs/protocol/backend/config.md`.
+   subprocess backends), and a `[backend].license` — a recognized open-source
+   SPDX identifier (OSI-approved or FSF Free/Libre) or the literal `other`.
+   See `docs/protocol/backend/config.md`.
 2. Open a PR adding a new entry to `registry.toml` in **alphabetical order**:
 
    ```toml

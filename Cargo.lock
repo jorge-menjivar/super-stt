@@ -6469,6 +6469,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "spdx"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8da593e30beb790fc9424502eb898320b44e5eb30367dbda1c1edde8e2f32d7"
+dependencies = [
+ "smallvec",
+]
+
+[[package]]
 name = "spectrum-analyzer"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6706,6 +6715,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "spdx",
  "thiserror 2.0.18",
  "toml 1.1.0+spec-1.1.0",
 ]

@@ -34,9 +34,13 @@ pub enum ManifestError {
     CudaForbiddenFields { file: String },
     #[error("subprocess asset `{file}`: `cudnn = true` requires `accel = \"cuda\"`")]
     CudnnRequiresCuda { file: String },
-    #[error("missing license; declare `[backend].license`")]
+    #[error("missing license; declare `[backend].license` (a recognized SPDX id or \"other\")")]
     MissingLicense,
-    #[error("license `{0}` is not on the allowlist")]
+    #[error(
+        "license `{0}` is not a recognized open-source license; use a current \
+         OSI-approved or FSF Free/Libre SPDX identifier (e.g. Apache-2.0, MIT, \
+         GPL-3.0-only) or \"other\""
+    )]
     LicenseNotAllowed(String),
     #[error(transparent)]
     Http(#[from] anyhow::Error),

@@ -61,7 +61,8 @@ fn accepts_registry_toml() {
 fn wasm_base() -> Value {
     json!({
         "backend": { "source": "github.com/x/y", "name": "Y", "version": "1.0.0",
-                      "kind": "wasm", "entrypoint": "y.wasm", "contract": "v1" },
+                      "kind": "wasm", "entrypoint": "y.wasm", "contract": "v1",
+                      "license": "Apache-2.0" },
         "assets": { "wasm": "y.wasm" }
     })
 }
@@ -69,7 +70,8 @@ fn wasm_base() -> Value {
 fn sub_base() -> Value {
     json!({
         "backend": { "source": "github.com/x/y", "name": "Y", "version": "1.0.0",
-                      "kind": "subprocess", "entrypoint": "y", "contract": "v1" },
+                      "kind": "subprocess", "entrypoint": "y", "contract": "v1",
+                      "license": "Apache-2.0" },
         "assets": { "subprocess": [
             { "file": "y.tgz", "target": "x86_64-unknown-linux-gnu", "accel": "cpu" }
         ] }
@@ -140,6 +142,16 @@ fn rejects_contract_violations() {
             d["models"] = json!([{ "name": "m", "provider": "openai",
                 "primary_language": "en", "supported_languages": ["en"],
                 "supported_devices": [] }]);
+            d
+        }),
+        ("assets present but license missing", {
+            let mut d = wasm_base();
+            d["backend"].as_object_mut().unwrap().remove("license");
+            d
+        }),
+        ("unrecognized license value", {
+            let mut d = wasm_base();
+            d["backend"]["license"] = json!("Definitely-Not-A-License");
             d
         }),
     ];
@@ -222,9 +234,18 @@ fn conditional_property_names_exist() {
     let backend_props = defs["BackendMeta"]["properties"]
         .as_object()
         .expect("BackendMeta properties");
+    for key in ["kind", "license"] {
+        assert!(backend_props.contains_key(key), "BackendMeta missing `{key}`");
+    }
+    // The license value-set is injected as an enum; a rename or a dropped
+    // injection would silently stop constraining it.
+    let license_enum = backend_props["license"]["enum"]
+        .as_array()
+        .expect("license property must carry an injected enum");
     assert!(
-        backend_props.contains_key("kind"),
-        "BackendMeta missing `kind`"
+        license_enum.iter().any(|v| v == "Apache-2.0")
+            && license_enum.iter().any(|v| v == "other"),
+        "license enum must include known SPDX ids and `other`"
     );
     let assets_props = defs["Assets"]["properties"]
         .as_object()
@@ -244,13 +265,22 @@ fn conditional_property_names_exist() {
 #[test]
 fn allows_documented_optionals() {
     let v = backend_validator();
-    // No [assets] at all — legitimate for locally installed backends.
+    // No [assets] at all — legitimate for locally installed backends, which may
+    // also omit the license (only publication requires it).
     let mut local = wasm_base();
-    local.as_object_mut().unwrap().remove("assets");
+    {
+        let obj = local.as_object_mut().unwrap();
+        obj.remove("assets");
+        obj["backend"].as_object_mut().unwrap().remove("license");
+    }
     assert!(
         v.is_valid(&local),
-        "manifest without [assets] must validate"
+        "manifest without [assets] or license must validate"
     );
+    // The explicit `other` escape is an accepted license value.
+    let mut other = wasm_base();
+    other["backend"]["license"] = json!("other");
+    assert!(v.is_valid(&other), "license = \"other\" must validate");
     // cuda_major without cuda_sm — the wildcard-SM build.
     let mut wildcard = sub_base();
     wildcard["assets"]["subprocess"] = json!([

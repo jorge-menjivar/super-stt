@@ -105,6 +105,18 @@ pub fn backend_schema() -> Value {
         }),
     );
 
+    // Publication intent ⇒ [assets] present ⇒ license must be declared. Mirrors
+    // the kind→assets rule above: a locally installed backend legitimately omits
+    // both [assets] and the license; a release that declares assets must name a
+    // license. `license`'s *value* is constrained by the enum injected below.
+    push_all_of(
+        &mut root,
+        json!({
+            "if": { "required": ["assets"] },
+            "then": { "properties": { "backend": { "required": ["license"] } } }
+        }),
+    );
+
     // Per-definition conditionals.
     let defs = root
         .get_mut("definitions")
@@ -150,6 +162,21 @@ pub fn backend_schema() -> Value {
         .as_object_mut()
         .expect("supported_devices property")
         .insert("minItems".into(), serde_json::json!(1));
+
+    // Embed the accepted license values (recognized FOSS SPDX ids + `other`) as
+    // an enum so editors offer them and reject anything else — a self-contained
+    // snapshot of the FOSS subset of the SPDX list, requiring no external fetch
+    // by the editor. Built from the same predicate the indexer validates with
+    // (`crate::license`), so the schema and the indexer never disagree.
+    let licenses: Vec<Value> = crate::license::accepted_schema_values()
+        .into_iter()
+        .map(|s| json!(s))
+        .collect();
+    let backend = defs.get_mut("BackendMeta").expect("BackendMeta def");
+    backend["properties"]["license"]
+        .as_object_mut()
+        .expect("license property")
+        .insert("enum".into(), json!(licenses));
 
     close_objects(&mut root);
     root

@@ -1402,6 +1402,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "spdx"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8da593e30beb790fc9424502eb898320b44e5eb30367dbda1c1edde8e2f32d7"
+dependencies = [
+ "smallvec",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1452,6 +1461,7 @@ name = "super-stt-registry-types"
 version = "0.1.4-beta.2"
 dependencies = [
  "serde",
+ "spdx",
  "thiserror",
  "toml",
 ]

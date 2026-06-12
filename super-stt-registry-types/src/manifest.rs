@@ -67,9 +67,11 @@ pub struct BackendMeta {
     pub entrypoint: String,
     /// The backend-protocol contract version implemented.
     pub contract: Contract,
-    /// SPDX license id. Optional for local installs, required for registry
-    /// publication — the indexer rejects manifests without an allowlisted
-    /// license.
+    /// License of the backend: a current SPDX identifier that is OSI-approved
+    /// or FSF Free/Libre (e.g. `Apache-2.0`, `MIT`, `GPL-3.0-only`), or the
+    /// literal `other` for a license outside that set. Optional for local
+    /// installs; required for registry publication, where the indexer rejects
+    /// a manifest that omits the field or declares an unrecognized value.
     #[serde(default)]
     pub license: Option<String>,
     /// One-line summary shown in the registry/Browse listing.
