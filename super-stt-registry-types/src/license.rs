@@ -58,7 +58,13 @@ mod tests {
 
     #[test]
     fn accepts_common_foss_identifiers() {
-        for id in ["Apache-2.0", "MIT", "GPL-3.0-only", "MPL-2.0", "BSD-3-Clause"] {
+        for id in [
+            "Apache-2.0",
+            "MIT",
+            "GPL-3.0-only",
+            "MPL-2.0",
+            "BSD-3-Clause",
+        ] {
             assert!(is_acceptable(id), "{id} should be acceptable");
         }
     }
@@ -89,7 +95,10 @@ mod tests {
         // Real SPDX identifiers that are neither OSI-approved nor FSF-libre:
         // a non-commercial Creative Commons license and a deprecated id.
         assert!(!is_acceptable("CC-BY-NC-4.0"));
-        assert!(!is_acceptable("GPL-3.0"), "the bare deprecated form must fail");
+        assert!(
+            !is_acceptable("GPL-3.0"),
+            "the bare deprecated form must fail"
+        );
     }
 
     #[test]
@@ -106,6 +115,10 @@ mod tests {
         }
         // Sanity: the FOSS subset is a few hundred ids, not the whole SPDX list
         // and not a near-empty list.
-        assert!(values.len() > 100, "suspiciously few values: {}", values.len());
+        assert!(
+            values.len() > 100,
+            "suspiciously few values: {}",
+            values.len()
+        );
     }
 }

@@ -8,15 +8,28 @@
         "super-stt-daemon",
         "super-stt-registry-types",
         "super-stt-shared",
+        "registry/scripts/build_index",
     ]
-    # WASM backends build for wasm32-wasip2, not the host target — keep them
-    # out of the default workspace build. Built via `just build-openai-backend`.
+    # The indexer is a host binary, so it's a workspace member — `--workspace`
+    # lints and tests it like everything else. But it's a CI-only tool with
+    # heavy deps, so keep it out of `default-members`: the everyday
+    # `cargo build`/`run`/`test` (no `--workspace`) stays lean.
+    default-members = [
+        "super-stt-app",
+        "super-stt-cli",
+        "super-stt-consent",
+        "super-stt-cosmic-applet",
+        "super-stt-daemon",
+        "super-stt-registry-types",
+        "super-stt-shared",
+    ]
+    # WASM backends build for wasm32-wasip2, not the host target — keep them out
+    # of the workspace entirely. Built via `just build-openai-backend`.
     exclude = [
         "backends/deepgram",
         "backends/mistral",
         "backends/openai",
         "backends/whisper",
-        "registry/scripts/build_index",
     ]
 
     [workspace.package]

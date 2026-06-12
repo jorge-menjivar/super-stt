@@ -46,22 +46,37 @@ pub enum ManifestError {
     Http(#[from] anyhow::Error),
 }
 
-pub async fn fetch(gh: &GitHub, owner_repo: &str, subdir: Option<&str>, tag: &str) -> Result<Manifest, ManifestError> {
+pub async fn fetch(
+    gh: &GitHub,
+    owner_repo: &str,
+    subdir: Option<&str>,
+    tag: &str,
+) -> Result<Manifest, ManifestError> {
     let path = match subdir {
         Some(sd) => format!("{}/backend.toml", sd.trim_end_matches('/')),
         None => "backend.toml".to_string(),
     };
     let bytes = gh.fetch_file(owner_repo, &path, tag).await?;
-    if bytes.len() > MAX_MANIFEST_BYTES { return Err(ManifestError::TooLarge); }
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(ManifestError::TooLarge);
+    }
     let text = String::from_utf8(bytes).map_err(|e| anyhow::anyhow!("manifest not UTF-8: {e}"))?;
     Ok(Manifest::parse(&text)?)
 }
 
-pub fn validate(m: &Manifest, expected_version: &Version, expected_source: &str) -> Result<(), ManifestError> {
-    let v = Version::parse(m.backend.version.trim_start_matches('v'))
-        .map_err(|_| ManifestError::VersionMismatch(m.backend.version.clone(), expected_version.clone()))?;
+pub fn validate(
+    m: &Manifest,
+    expected_version: &Version,
+    expected_source: &str,
+) -> Result<(), ManifestError> {
+    let v = Version::parse(m.backend.version.trim_start_matches('v')).map_err(|_| {
+        ManifestError::VersionMismatch(m.backend.version.clone(), expected_version.clone())
+    })?;
     if &v != expected_version {
-        return Err(ManifestError::VersionMismatch(m.backend.version.clone(), expected_version.clone()));
+        return Err(ManifestError::VersionMismatch(
+            m.backend.version.clone(),
+            expected_version.clone(),
+        ));
     }
     // The backend's `source` is its unique identity and must be controlled by
     // whoever controls the release `repo`: either it equals the repo (a
@@ -70,25 +85,42 @@ pub fn validate(m: &Manifest, expected_version: &Version, expected_source: &str)
     // source pointing outside the repo is rejected as spoofing.
     let under_repo = m.backend.source.starts_with(&format!("{expected_source}/"));
     if m.backend.source != expected_source && !under_repo {
-        return Err(ManifestError::SourceMismatch(m.backend.source.clone(), expected_source.into()));
+        return Err(ManifestError::SourceMismatch(
+            m.backend.source.clone(),
+            expected_source.into(),
+        ));
     }
     match m.backend.kind {
-        Kind::Wasm => { if m.assets.wasm.is_none() { return Err(ManifestError::MissingWasmAsset); } }
-        Kind::Subprocess => { if m.assets.subprocess.is_empty() { return Err(ManifestError::MissingSubprocessAssets); } }
+        Kind::Wasm => {
+            if m.assets.wasm.is_none() {
+                return Err(ManifestError::MissingWasmAsset);
+            }
+        }
+        Kind::Subprocess => {
+            if m.assets.subprocess.is_empty() {
+                return Err(ManifestError::MissingSubprocessAssets);
+            }
+        }
     }
     for a in &m.assets.subprocess {
         if a.accel == Accel::Cuda {
             // `cuda_sm` stays optional: omitted means the build matches any
             // compute capability (multi-architecture framework builds).
             if a.cuda_major.is_none() {
-                return Err(ManifestError::CudaMissingMajor { file: a.file.clone() });
+                return Err(ManifestError::CudaMissingMajor {
+                    file: a.file.clone(),
+                });
             }
         } else {
             if a.cuda_major.is_some() || a.cuda_sm.is_some() {
-                return Err(ManifestError::CudaForbiddenFields { file: a.file.clone() });
+                return Err(ManifestError::CudaForbiddenFields {
+                    file: a.file.clone(),
+                });
             }
             if a.cudnn {
-                return Err(ManifestError::CudnnRequiresCuda { file: a.file.clone() });
+                return Err(ManifestError::CudnnRequiresCuda {
+                    file: a.file.clone(),
+                });
             }
         }
     }
@@ -164,7 +196,10 @@ mod tests {
             contract = "v1"
         "#;
         let err: ManifestError = Manifest::parse(t).unwrap_err().into();
-        assert!(matches!(err, ManifestError::Parse(ParseError::UnsafeEntrypoint(_))));
+        assert!(matches!(
+            err,
+            ManifestError::Parse(ParseError::UnsafeEntrypoint(_))
+        ));
     }
 
     #[test]

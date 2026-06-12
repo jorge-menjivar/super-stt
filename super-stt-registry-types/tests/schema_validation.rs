@@ -235,7 +235,10 @@ fn conditional_property_names_exist() {
         .as_object()
         .expect("BackendMeta properties");
     for key in ["kind", "license"] {
-        assert!(backend_props.contains_key(key), "BackendMeta missing `{key}`");
+        assert!(
+            backend_props.contains_key(key),
+            "BackendMeta missing `{key}`"
+        );
     }
     // The license value-set is injected as an enum; a rename or a dropped
     // injection would silently stop constraining it.
@@ -243,8 +246,7 @@ fn conditional_property_names_exist() {
         .as_array()
         .expect("license property must carry an injected enum");
     assert!(
-        license_enum.iter().any(|v| v == "Apache-2.0")
-            && license_enum.iter().any(|v| v == "other"),
+        license_enum.iter().any(|v| v == "Apache-2.0") && license_enum.iter().any(|v| v == "other"),
         "license enum must include known SPDX ids and `other`"
     );
     let assets_props = defs["Assets"]["properties"]

@@ -30,10 +30,15 @@ pub fn resolve_url(
     file: &str,
     release_assets: &[crate::github::ReleaseAsset],
 ) -> Result<(String, u64), AssetError> {
-    let a = release_assets.iter().find(|a| a.name == file)
+    let a = release_assets
+        .iter()
+        .find(|a| a.name == file)
         .ok_or_else(|| AssetError::Missing(file.into()))?;
     if a.size > MAX_ASSET_BYTES {
-        return Err(AssetError::TooLarge { file: file.into(), size: a.size });
+        return Err(AssetError::TooLarge {
+            file: file.into(),
+            size: a.size,
+        });
     }
     Ok((a.browser_download_url.clone(), a.size))
 }
@@ -45,8 +50,13 @@ pub async fn fetch_and_validate(
     expected: AssetExpect<'_>,
 ) -> Result<String, AssetError> {
     use futures::StreamExt;
-    let mut resp = http.get(url).send().await.map_err(|e| AssetError::Http(e.into()))?
-        .error_for_status().map_err(|e| AssetError::Http(e.into()))?
+    let mut resp = http
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| AssetError::Http(e.into()))?
+        .error_for_status()
+        .map_err(|e| AssetError::Http(e.into()))?
         .bytes_stream();
     let mut ctx = Context::new(&SHA256);
     let mut buf: Vec<u8> = Vec::new();
@@ -56,13 +66,15 @@ pub async fn fetch_and_validate(
         let chunk = chunk.map_err(|e| AssetError::Http(e.into()))?;
         total_streamed += chunk.len() as u64;
         if total_streamed > MAX_ASSET_BYTES {
-            return Err(AssetError::TooLarge { file: expected.file().into(), size: total_streamed });
+            return Err(AssetError::TooLarge {
+                file: expected.file().into(),
+                size: total_streamed,
+            });
         }
         ctx.update(&chunk);
         if first_chunk.len() < 4 {
-            for b in chunk.iter() {
-                if first_chunk.len() < 4 { first_chunk.push(*b); }
-            }
+            let need = 4 - first_chunk.len();
+            first_chunk.extend_from_slice(&chunk[..need.min(chunk.len())]);
         }
         if matches!(expected, AssetExpect::Subprocess { .. }) {
             buf.extend_from_slice(&chunk);
@@ -70,7 +82,9 @@ pub async fn fetch_and_validate(
     }
     match expected {
         AssetExpect::Wasm { file } => {
-            if first_chunk != WASM_MAGIC { return Err(AssetError::NotWasm(file.into())); }
+            if first_chunk != WASM_MAGIC {
+                return Err(AssetError::NotWasm(file.into()));
+            }
         }
         AssetExpect::Subprocess { file, entrypoint } => {
             validate_tarball(file, entrypoint, &buf)?;
@@ -84,9 +98,11 @@ pub enum AssetExpect<'a> {
     Subprocess { file: &'a str, entrypoint: &'a str },
 }
 
-impl<'a> AssetExpect<'a> {
+impl AssetExpect<'_> {
     fn file(&self) -> &str {
-        match self { AssetExpect::Wasm { file } | AssetExpect::Subprocess { file, .. } => file }
+        match self {
+            AssetExpect::Wasm { file } | AssetExpect::Subprocess { file, .. } => file,
+        }
     }
 }
 
@@ -99,18 +115,29 @@ fn validate_tarball(file: &str, entrypoint: &str, bytes: &[u8]) -> Result<(), As
         let path = entry.path()?;
         let s = path.to_string_lossy();
         if s.starts_with('/') || s.contains("..") {
-            return Err(AssetError::TarEscape { file: file.into(), entry: s.into() });
+            return Err(AssetError::TarEscape {
+                file: file.into(),
+                entry: s.into(),
+            });
         }
         if entry.header().entry_type().is_symlink() {
             // Reject symlinks outright; the daemon's installer also rejects.
-            return Err(AssetError::TarEscape { file: file.into(), entry: s.into() });
+            return Err(AssetError::TarEscape {
+                file: file.into(),
+                entry: s.into(),
+            });
         }
         // Accept the entrypoint at its declared path (e.g. `bin/qwen3-asr`),
         // or the legacy bare-name-under-bin form (`bin/<entrypoint>`).
-        if s == entrypoint || s == format!("bin/{entrypoint}") { found_entrypoint = true; }
+        if s == entrypoint || s == format!("bin/{entrypoint}") {
+            found_entrypoint = true;
+        }
     }
     if !found_entrypoint {
-        return Err(AssetError::TarMissingEntrypoint { file: file.into(), entrypoint: entrypoint.into() });
+        return Err(AssetError::TarMissingEntrypoint {
+            file: file.into(),
+            entrypoint: entrypoint.into(),
+        });
     }
     Ok(())
 }
@@ -133,7 +160,9 @@ mod tests {
     fn accepts_tarball_with_bin_entrypoint() {
         let bytes = make_tarball(|tb| {
             let mut h = tar::Header::new_gnu();
-            h.set_size(3); h.set_mode(0o755); h.set_cksum();
+            h.set_size(3);
+            h.set_mode(0o755);
+            h.set_cksum();
             tb.append_data(&mut h, "bin/voxtral", &b"abc"[..]).unwrap();
         });
         validate_tarball("v.tar.gz", "voxtral", &bytes).unwrap();
@@ -143,8 +172,11 @@ mod tests {
     fn accepts_tarball_with_path_entrypoint() {
         let bytes = make_tarball(|tb| {
             let mut h = tar::Header::new_gnu();
-            h.set_size(3); h.set_mode(0o755); h.set_cksum();
-            tb.append_data(&mut h, "bin/qwen3-asr", &b"abc"[..]).unwrap();
+            h.set_size(3);
+            h.set_mode(0o755);
+            h.set_cksum();
+            tb.append_data(&mut h, "bin/qwen3-asr", &b"abc"[..])
+                .unwrap();
         });
         validate_tarball("q.tar.gz", "bin/qwen3-asr", &bytes).unwrap();
     }
@@ -153,7 +185,9 @@ mod tests {
     fn rejects_tarball_without_entrypoint() {
         let bytes = make_tarball(|tb| {
             let mut h = tar::Header::new_gnu();
-            h.set_size(3); h.set_mode(0o644); h.set_cksum();
+            h.set_size(3);
+            h.set_mode(0o644);
+            h.set_cksum();
             tb.append_data(&mut h, "README", &b"abc"[..]).unwrap();
         });
         let err = validate_tarball("v.tar.gz", "voxtral", &bytes).unwrap_err();
@@ -184,7 +218,7 @@ mod tests {
         header[263..265].copy_from_slice(b"00");
         // Compute checksum (sum of bytes with checksum field as spaces).
         header[148..156].copy_from_slice(b"        ");
-        let sum: u32 = header.iter().map(|&b| b as u32).sum();
+        let sum: u32 = header.iter().map(|&b| u32::from(b)).sum();
         let cksum = format!("{sum:06o}\0 ");
         header[148..156].copy_from_slice(cksum.as_bytes());
         // Two 512-byte zero blocks mark end-of-archive.
@@ -194,7 +228,6 @@ mod tests {
         // Compress.
         let gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         let mut enc = gz;
-        use std::io::Write;
         enc.write_all(&tar_bytes).unwrap();
         enc.finish().unwrap()
     }

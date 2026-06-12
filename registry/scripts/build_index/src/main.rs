@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut out_backends: Vec<index_json::IndexBackend> = Vec::new();
 
-    for (id, entry) in registry.0.iter() {
+    for (id, entry) in &registry.0 {
         if entry.removed {
             info!("skip `{id}` — removed");
             continue;
@@ -72,16 +72,22 @@ async fn main() -> anyhow::Result<()> {
             Ok(b) => out_backends.push(b),
             Err(failure) => {
                 error!("entry `{id}` failed: {}", failure.error);
-                let prior_entry = prior.as_ref()
+                let prior_entry = prior
+                    .as_ref()
                     .and_then(|p| p.backends.iter().find(|b| b.id == *id));
                 if let Some(carried) = carryforward::maybe_carry_forward(
-                    id, prior_entry, &failure.error,
+                    id,
+                    prior_entry,
+                    &failure.error,
                     failure.attempted_version.as_deref().unwrap_or(""),
                     failure.attempted_tag.as_deref().unwrap_or(""),
                     &now_iso,
                     carryforward::MAX_STALENESS_DAYS,
                 ) {
-                    warn!("entry `{id}` — carrying forward last-known-good (v{})", carried.version);
+                    warn!(
+                        "entry `{id}` — carrying forward last-known-good (v{})",
+                        carried.version
+                    );
                     out_backends.push(carried);
                 }
             }
@@ -99,17 +105,24 @@ async fn main() -> anyhow::Result<()> {
     let text = serde_json::to_string_pretty(&index)?;
     std::fs::write(&args.out, text.as_bytes())
         .with_context(|| format!("writing {}", args.out.display()))?;
-    info!("wrote {} ({} backends)", args.out.display(), index.backends.len());
+    info!(
+        "wrote {} ({} backends)",
+        args.out.display(),
+        index.backends.len()
+    );
     Ok(())
 }
 
 fn owner_repo_from(repo: &str) -> anyhow::Result<String> {
     // "github.com/jorge-menjivar/super-stt" -> "jorge-menjivar/super-stt"
-    let rest = repo.strip_prefix("github.com/")
+    let rest = repo
+        .strip_prefix("github.com/")
         .ok_or_else(|| anyhow::anyhow!("repo `{repo}` must start with `github.com/`"))?;
     let segments: Vec<&str> = rest.split('/').collect();
-    anyhow::ensure!(segments.len() == 2 && !segments[0].is_empty() && !segments[1].is_empty(),
-        "repo `{repo}` must be `github.com/<owner>/<repo>`");
+    anyhow::ensure!(
+        segments.len() == 2 && !segments[0].is_empty() && !segments[1].is_empty(),
+        "repo `{repo}` must be `github.com/<owner>/<repo>`"
+    );
     Ok(rest.to_string())
 }
 
@@ -120,61 +133,103 @@ async fn build_entry(
     entry: &registry_toml::Entry,
     owner_repo: &str,
 ) -> Result<index_json::IndexBackend, BuildFailure> {
-    let resolved = resolve::resolve(gh, owner_repo, entry).await
+    let resolved = resolve::resolve(gh, owner_repo, entry)
+        .await
         .map_err(|e| BuildFailure {
             error: format!("{e:#}"),
             attempted_version: None,
             attempted_tag: None,
         })?;
+    // From here the version + tag are known; record them on every later failure
+    // so the carry-forward path can report what it tried to build.
     let attempted_version = Some(resolved.version.to_string());
     let attempted_tag = Some(resolved.tag.clone());
-    let m = manifest::fetch(gh, owner_repo, entry.subdir.as_deref(), &resolved.tag).await
-        .map_err(|e| BuildFailure {
-            error: format!("{e:#}"),
-            attempted_version: attempted_version.clone(),
-            attempted_tag: attempted_tag.clone(),
-        })?;
-    manifest::validate(&m, &resolved.version, &entry.repo)
-        .map_err(|e| BuildFailure {
-            error: format!("{e:#}"),
-            attempted_version: attempted_version.clone(),
-            attempted_tag: attempted_tag.clone(),
-        })?;
-
-    // Decide online from any model with an online provider.
-    let online = m.models.iter().any(|md| matches!(md.provider, Provider::Online(_)));
-
-    let supports_gpu = m.models.iter().any(|md|
-        md.supported_devices.iter().any(|d| matches!(d, Device::Cuda | Device::Metal)));
-    let supports_cpu = m.models.iter().any(|md|
-        md.supported_devices.contains(&Device::Cpu));
-
-    // Resolve and hash assets. Any error here is wrapped with the now-known
-    // attempted version + tag so the carry-forward path records them.
-    let wrap = |e: anyhow::Error| BuildFailure {
+    let fail = |e: &dyn std::fmt::Display| BuildFailure {
         error: format!("{e:#}"),
         attempted_version: attempted_version.clone(),
         attempted_tag: attempted_tag.clone(),
     };
+
+    let m = manifest::fetch(gh, owner_repo, entry.subdir.as_deref(), &resolved.tag)
+        .await
+        .map_err(|e| fail(&e))?;
+    manifest::validate(&m, &resolved.version, &entry.repo).map_err(|e| fail(&e))?;
+    let idx_assets = resolve_index_assets(http, &m, &resolved.release.assets)
+        .await
+        .map_err(|e| fail(&e))?;
+
+    Ok(into_index_backend(id, m, resolved, idx_assets))
+}
+
+/// Resolve and hash the binary artifacts a release declares — the wasm
+/// component or each subprocess variant — into the index's asset block.
+async fn resolve_index_assets(
+    http: &reqwest::Client,
+    m: &manifest::Manifest,
+    release_assets: &[github::ReleaseAsset],
+) -> anyhow::Result<index_json::IndexAssets> {
     let mut idx_assets = index_json::IndexAssets::default();
     if let Some(wasm) = &m.assets.wasm {
-        let (url, size) = assets::resolve_url(wasm, &resolved.release.assets).map_err(|e| wrap(e.into()))?;
-        let sha = assets::fetch_and_validate(http, &url,
-            assets::AssetExpect::Wasm { file: wasm }).await.map_err(|e| wrap(e.into()))?;
-        idx_assets.wasm = Some(index_json::IndexAsset { url, size, sha256: sha });
-    }
-    for sa in &m.assets.subprocess {
-        let (url, size) = assets::resolve_url(&sa.file, &resolved.release.assets).map_err(|e| wrap(e.into()))?;
-        let sha = assets::fetch_and_validate(http, &url,
-            assets::AssetExpect::Subprocess { file: &sa.file, entrypoint: &m.backend.entrypoint }).await.map_err(|e| wrap(e.into()))?;
-        idx_assets.subprocess.push(index_json::IndexSubprocessAsset {
-            target: sa.target.clone(), accel: sa.accel.to_string(),
-            cuda_major: sa.cuda_major, cuda_sm: sa.cuda_sm, cudnn: sa.cudnn,
-            url, size, sha256: sha,
+        let (url, size) = assets::resolve_url(wasm, release_assets)?;
+        let sha = assets::fetch_and_validate(http, &url, assets::AssetExpect::Wasm { file: wasm })
+            .await?;
+        idx_assets.wasm = Some(index_json::IndexAsset {
+            url,
+            size,
+            sha256: sha,
         });
     }
+    for sa in &m.assets.subprocess {
+        let (url, size) = assets::resolve_url(&sa.file, release_assets)?;
+        let sha = assets::fetch_and_validate(
+            http,
+            &url,
+            assets::AssetExpect::Subprocess {
+                file: &sa.file,
+                entrypoint: &m.backend.entrypoint,
+            },
+        )
+        .await?;
+        idx_assets
+            .subprocess
+            .push(index_json::IndexSubprocessAsset {
+                target: sa.target.clone(),
+                accel: sa.accel.to_string(),
+                cuda_major: sa.cuda_major,
+                cuda_sm: sa.cuda_sm,
+                cudnn: sa.cudnn,
+                url,
+                size,
+                sha256: sha,
+            });
+    }
+    Ok(idx_assets)
+}
 
-    Ok(index_json::IndexBackend {
+/// Assemble the published `IndexBackend` from a validated manifest, its resolved
+/// release, and the hashed assets. `online` / `supports_gpu` / `supports_cpu`
+/// are derived from the manifest's models.
+#[allow(clippy::similar_names)] // supports_gpu / supports_cpu mirror the output fields
+fn into_index_backend(
+    id: &str,
+    m: manifest::Manifest,
+    resolved: resolve::Resolved,
+    assets: index_json::IndexAssets,
+) -> index_json::IndexBackend {
+    let online = m
+        .models
+        .iter()
+        .any(|md| matches!(md.provider, Provider::Online(_)));
+    let supports_gpu = m.models.iter().any(|md| {
+        md.supported_devices
+            .iter()
+            .any(|d| matches!(d, Device::Cuda | Device::Metal))
+    });
+    let supports_cpu = m
+        .models
+        .iter()
+        .any(|md| md.supported_devices.contains(&Device::Cpu));
+    index_json::IndexBackend {
         id: id.into(),
         source: m.backend.source,
         version: resolved.version.to_string(),
@@ -186,28 +241,50 @@ async fn build_entry(
         contract: m.backend.contract.to_string(),
         entrypoint: m.backend.entrypoint,
         allowed_hosts: m.network.allowed_hosts,
-        online, supports_gpu, supports_cpu,
-        models: m.models.into_iter().map(|md| index_json::IndexModel {
-            name: md.name,
-            provider: md.provider.to_string(),
-            supported_devices: md.supported_devices.iter().map(ToString::to_string).collect(),
-        }).collect(),
-        secrets: m.secrets.into_iter().map(|s| index_json::IndexSecret {
-            label: s.label.unwrap_or_else(|| s.name.clone()),
-            name: s.name,
-            required: s.required,
-        }).collect(),
-        options: m.options.into_iter().map(|o| index_json::IndexOption {
-            label: o.label.unwrap_or_else(|| o.name.clone()),
-            name: o.name,
-            r#type: o.r#type.map_or_else(|| "string".to_string(), |t| t.to_string()),
-            // Untagged serialize yields the plain JSON value (string/number/bool),
-            // exactly what the old serde_json::Value field carried.
-            default: o.default.map(|d| serde_json::to_value(d).expect("plain value")),
-        }).collect(),
-        assets: idx_assets,
+        online,
+        supports_gpu,
+        supports_cpu,
+        models: m
+            .models
+            .into_iter()
+            .map(|md| index_json::IndexModel {
+                name: md.name,
+                provider: md.provider.to_string(),
+                supported_devices: md
+                    .supported_devices
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            })
+            .collect(),
+        secrets: m
+            .secrets
+            .into_iter()
+            .map(|s| index_json::IndexSecret {
+                label: s.label.unwrap_or_else(|| s.name.clone()),
+                name: s.name,
+                required: s.required,
+            })
+            .collect(),
+        options: m
+            .options
+            .into_iter()
+            .map(|o| index_json::IndexOption {
+                label: o.label.unwrap_or_else(|| o.name.clone()),
+                name: o.name,
+                r#type: o
+                    .r#type
+                    .map_or_else(|| "string".to_string(), |t| t.to_string()),
+                // Untagged serialize yields the plain JSON value (string/number/bool),
+                // exactly what the old serde_json::Value field carried.
+                default: o
+                    .default
+                    .map(|d| serde_json::to_value(d).expect("plain value")),
+            })
+            .collect(),
+        assets,
         index_stale: None,
-    })
+    }
 }
 
 /// A backend's `source` is its unique identity. Two distinct entries that
@@ -220,7 +297,9 @@ fn ensure_unique_sources(backends: &[index_json::IndexBackend]) -> anyhow::Resul
         if let Some(prev_id) = seen.insert(b.source.as_str(), b.id.as_str()) {
             anyhow::bail!(
                 "duplicate source `{}` shared by entries `{}` and `{}`; each backend must have a distinct source",
-                b.source, prev_id, b.id,
+                b.source,
+                prev_id,
+                b.id,
             );
         }
     }

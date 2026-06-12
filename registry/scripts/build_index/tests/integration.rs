@@ -52,32 +52,49 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
         r#"{{"tag_name":"v1.0.0","assets":[{{"name":"y.wasm","browser_download_url":"{base}/dl/y.wasm","size":4}}]}}"#
     );
     s.mock("GET", "/repos/x/y/releases/latest")
-        .with_status(200).with_body(releases_body)
-        .create_async().await;
+        .with_status(200)
+        .with_body(releases_body)
+        .create_async()
+        .await;
 
     let content = base64::engine::general_purpose::STANDARD.encode(MANIFEST_OK);
     let contents_body = format!(r#"{{"content":"{content}","encoding":"base64"}}"#);
-    s.mock("GET", mockito::Matcher::Regex(r"^/repos/x/y/contents/backend\.toml.*".into()))
-        .with_status(200).with_body(contents_body)
-        .create_async().await;
+    s.mock(
+        "GET",
+        mockito::Matcher::Regex(r"^/repos/x/y/contents/backend\.toml.*".into()),
+    )
+    .with_status(200)
+    .with_body(contents_body)
+    .create_async()
+    .await;
 
-    s.mock("GET", "/dl/y.wasm").with_status(200)
-        .with_body(WASM_BYTES.as_slice()).create_async().await;
+    s.mock("GET", "/dl/y.wasm")
+        .with_status(200)
+        .with_body(WASM_BYTES.as_slice())
+        .create_async()
+        .await;
 
     let tmp = tempfile::tempdir().unwrap();
     let registry_path = tmp.path().join("registry.toml");
-    std::fs::write(&registry_path, r#"
+    std::fs::write(
+        &registry_path,
+        r#"
         [x-y]
         repo = "github.com/x/y"
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let out_path = tmp.path().join("index.json");
     let bin = env!("CARGO_BIN_EXE_super-stt-build-index");
     let status = Command::new(bin)
         .env("GITHUB_API_BASE", &base)
-        .arg("--registry").arg(&registry_path)
-        .arg("--out").arg(&out_path)
-        .status().expect("run binary");
+        .arg("--registry")
+        .arg(&registry_path)
+        .arg("--out")
+        .arg(&out_path)
+        .status()
+        .expect("run binary");
     assert!(status.success(), "indexer binary failed");
 
     let text = std::fs::read_to_string(&out_path).unwrap();
@@ -95,7 +112,10 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
     assert_eq!(v["backends"][0]["secrets"][0]["label"], "y_api_key");
     assert_eq!(v["backends"][0]["options"][0]["label"], "base_url");
     assert_eq!(v["backends"][0]["options"][0]["type"], "string");
-    assert_eq!(v["backends"][0]["options"][0]["default"], "https://api.y.example");
+    assert_eq!(
+        v["backends"][0]["options"][0]["default"],
+        "https://api.y.example"
+    );
     // The fixture's only model is served by an online provider ("openai") —
     // pins the Provider::Online → `online: true` mapping.
     assert_eq!(v["backends"][0]["online"], true);

@@ -19,7 +19,9 @@ pub fn maybe_carry_forward(
     max_staleness_days: i64,
 ) -> Option<IndexBackend> {
     let prior = prior?;
-    if prior.id != id { return None; }
+    if prior.id != id {
+        return None;
+    }
 
     // Measure staleness from when the entry *first* went stale, not from this
     // build — so the window doesn't reset on every consecutive failed build.
@@ -56,12 +58,23 @@ mod tests {
 
     fn dummy(id: &str) -> IndexBackend {
         IndexBackend {
-            id: id.into(), source: "x".into(), version: "1.0.0".into(),
-            tag: "v1.0.0".into(), name: id.into(), description: None,
-            license: "Apache-2.0".into(), kind: "wasm".into(),
-            contract: "v1".into(), entrypoint: format!("{id}.wasm"),
-            allowed_hosts: vec![], online: false, supports_gpu: false, supports_cpu: false,
-            models: vec![], secrets: vec![], options: vec![],
+            id: id.into(),
+            source: "x".into(),
+            version: "1.0.0".into(),
+            tag: "v1.0.0".into(),
+            name: id.into(),
+            description: None,
+            license: "Apache-2.0".into(),
+            kind: "wasm".into(),
+            contract: "v1".into(),
+            entrypoint: format!("{id}.wasm"),
+            allowed_hosts: vec![],
+            online: false,
+            supports_gpu: false,
+            supports_cpu: false,
+            models: vec![],
+            secrets: vec![],
+            options: vec![],
             assets: IndexAssets::default(),
             index_stale: None,
         }
@@ -70,8 +83,16 @@ mod tests {
     #[test]
     fn carries_forward_with_index_stale_marker() {
         let prior = dummy("openai");
-        let carried = maybe_carry_forward("openai", Some(&prior),
-            "asset missing", "1.5.0", "v1.5.0", "2026-05-29T18:00:00Z", 30).unwrap();
+        let carried = maybe_carry_forward(
+            "openai",
+            Some(&prior),
+            "asset missing",
+            "1.5.0",
+            "v1.5.0",
+            "2026-05-29T18:00:00Z",
+            30,
+        )
+        .unwrap();
         assert_eq!(carried.version, "1.0.0");
         let stale = carried.index_stale.unwrap();
         assert_eq!(stale.latest_attempted, "1.5.0");
@@ -85,16 +106,36 @@ mod tests {
         // Already stale since an old date.
         let mut prior = dummy("openai");
         prior.index_stale = Some(IndexStale {
-            latest_attempted: "1.4.0".into(), tag: "v1.4.0".into(),
-            error: "broke".into(), since: "2026-01-01T00:00:00Z".into(),
+            latest_attempted: "1.4.0".into(),
+            tag: "v1.4.0".into(),
+            error: "broke".into(),
+            since: "2026-01-01T00:00:00Z".into(),
         });
         // Within window: carried, and the original `since` is preserved.
-        let carried = maybe_carry_forward("openai", Some(&prior),
-            "still broke", "1.5.0", "v1.5.0", "2026-01-20T00:00:00Z", 30).unwrap();
+        let carried = maybe_carry_forward(
+            "openai",
+            Some(&prior),
+            "still broke",
+            "1.5.0",
+            "v1.5.0",
+            "2026-01-20T00:00:00Z",
+            30,
+        )
+        .unwrap();
         assert_eq!(carried.index_stale.unwrap().since, "2026-01-01T00:00:00Z");
         // Past the window: dropped.
-        assert!(maybe_carry_forward("openai", Some(&prior),
-            "still broke", "1.5.0", "v1.5.0", "2026-06-01T00:00:00Z", 30).is_none());
+        assert!(
+            maybe_carry_forward(
+                "openai",
+                Some(&prior),
+                "still broke",
+                "1.5.0",
+                "v1.5.0",
+                "2026-06-01T00:00:00Z",
+                30
+            )
+            .is_none()
+        );
     }
 
     #[test]

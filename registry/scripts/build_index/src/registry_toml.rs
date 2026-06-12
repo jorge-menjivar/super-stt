@@ -16,8 +16,15 @@ pub enum ParseError {
     #[error("entries `{a}` and `{b}` share repo `{repo}` but at least one has no `tag_prefix`")]
     MonorepoMissingPrefix { a: String, b: String, repo: String },
     #[error("entries `{a}` and `{b}` share repo `{repo}` and the same `tag_prefix = {prefix:?}`")]
-    PrefixCollision { a: String, b: String, repo: String, prefix: String },
-    #[error("entries `{a}` and `{b}` share repo `{repo}` and one `tag_prefix` is a prefix of the other")]
+    PrefixCollision {
+        a: String,
+        b: String,
+        repo: String,
+        prefix: String,
+    },
+    #[error(
+        "entries `{a}` and `{b}` share repo `{repo}` and one `tag_prefix` is a prefix of the other"
+    )]
     PrefixOverlap { a: String, b: String, repo: String },
 }
 
@@ -37,14 +44,20 @@ impl Registry {
 }
 
 fn validate_entry(id: &str, e: &Entry) -> Result<(), ParseError> {
-    if !id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_') {
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+    {
         return Err(ParseError::Entry {
             id: id.into(),
             reason: "id must be ascii lowercase, digits, `-`, `_`".into(),
         });
     }
     if e.repo.is_empty() {
-        return Err(ParseError::Entry { id: id.into(), reason: "`repo` is required".into() });
+        return Err(ParseError::Entry {
+            id: id.into(),
+            reason: "`repo` is required".into(),
+        });
     }
     if let Some(sd) = &e.subdir
         && !super_stt_registry_types::is_safe_relative_path(sd)
@@ -60,22 +73,32 @@ fn validate_entry(id: &str, e: &Entry) -> Result<(), ParseError> {
 fn validate_monorepo_groups(raw: &BTreeMap<String, Entry>) -> Result<(), ParseError> {
     let mut by_repo: BTreeMap<&str, Vec<(&str, Option<&str>)>> = BTreeMap::new();
     for (id, e) in raw {
-        if e.removed { continue; }
-        by_repo.entry(e.repo.as_str()).or_default().push((id, e.tag_prefix.as_deref()));
+        if e.removed {
+            continue;
+        }
+        by_repo
+            .entry(e.repo.as_str())
+            .or_default()
+            .push((id, e.tag_prefix.as_deref()));
     }
     for (repo, members) in &by_repo {
-        if members.len() < 2 { continue; }
+        if members.len() < 2 {
+            continue;
+        }
         for (i, (a, prefix_a)) in members.iter().enumerate() {
             if prefix_a.is_none() {
                 let (b, _) = members.iter().find(|(b, _)| b != a).unwrap();
                 return Err(ParseError::MonorepoMissingPrefix {
-                    a: (*a).into(), b: (*b).into(), repo: (*repo).into(),
+                    a: (*a).into(),
+                    b: (*b).into(),
+                    repo: (*repo).into(),
                 });
             }
-            for (b, prefix_b) in &members[i+1..] {
+            for (b, prefix_b) in &members[i + 1..] {
                 if prefix_a == prefix_b {
                     return Err(ParseError::PrefixCollision {
-                        a: (*a).into(), b: (*b).into(),
+                        a: (*a).into(),
+                        b: (*b).into(),
                         repo: (*repo).into(),
                         prefix: prefix_a.unwrap_or_default().into(),
                     });
@@ -86,7 +109,9 @@ fn validate_monorepo_groups(raw: &BTreeMap<String, Entry>) -> Result<(), ParseEr
                     && (pa.starts_with(pb) || pb.starts_with(pa))
                 {
                     return Err(ParseError::PrefixOverlap {
-                        a: (*a).into(), b: (*b).into(), repo: (*repo).into(),
+                        a: (*a).into(),
+                        b: (*b).into(),
+                        repo: (*repo).into(),
                     });
                 }
             }
@@ -101,12 +126,15 @@ mod tests {
 
     #[test]
     fn parses_minimal_entry() {
-        let r = Registry::parse(r#"
+        let r = Registry::parse(
+            r#"
             [openai]
             repo = "github.com/jorge-menjivar/super-stt"
             subdir = "backends/openai"
             tag_prefix = "openai-"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         let e = r.0.get("openai").unwrap();
         assert_eq!(e.repo, "github.com/jorge-menjivar/super-stt");
         assert_eq!(e.subdir.as_deref(), Some("backends/openai"));
@@ -115,11 +143,14 @@ mod tests {
 
     #[test]
     fn rejects_path_traversal_in_subdir() {
-        let err = Registry::parse(r#"
+        let err = Registry::parse(
+            r#"
             [bad]
             repo = "github.com/x/y"
             subdir = "../escape"
-        "#).unwrap_err();
+        "#,
+        )
+        .unwrap_err();
         assert!(matches!(err, ParseError::Entry { .. }));
     }
 
@@ -133,75 +164,95 @@ mod tests {
                 "[bad]\nrepo = \"github.com/x/y\"\nsubdir = \"{bad}\"\n"
             ))
             .unwrap_err();
-            assert!(matches!(err, ParseError::Entry { .. }), "{bad:?} should be rejected");
+            assert!(
+                matches!(err, ParseError::Entry { .. }),
+                "{bad:?} should be rejected"
+            );
         }
-        let ok = Registry::parse(
-            "[good]\nrepo = \"github.com/x/y\"\nsubdir = \"my..backend/v2\"\n",
-        )
-        .unwrap();
-        assert_eq!(ok.0.get("good").unwrap().subdir.as_deref(), Some("my..backend/v2"));
+        let ok =
+            Registry::parse("[good]\nrepo = \"github.com/x/y\"\nsubdir = \"my..backend/v2\"\n")
+                .unwrap();
+        assert_eq!(
+            ok.0.get("good").unwrap().subdir.as_deref(),
+            Some("my..backend/v2")
+        );
     }
 
     #[test]
     fn rejects_monorepo_without_tag_prefix() {
-        let err = Registry::parse(r#"
+        let err = Registry::parse(
+            r#"
             [a]
             repo = "github.com/x/mono"
             [b]
             repo = "github.com/x/mono"
-        "#).unwrap_err();
+        "#,
+        )
+        .unwrap_err();
         assert!(matches!(err, ParseError::MonorepoMissingPrefix { .. }));
     }
 
     #[test]
     fn rejects_tag_prefix_collision() {
-        let err = Registry::parse(r#"
+        let err = Registry::parse(
+            r#"
             [a]
             repo = "github.com/x/mono"
             tag_prefix = "v"
             [b]
             repo = "github.com/x/mono"
             tag_prefix = "v"
-        "#).unwrap_err();
+        "#,
+        )
+        .unwrap_err();
         assert!(matches!(err, ParseError::PrefixCollision { .. }));
     }
 
     #[test]
     fn rejects_prefix_that_is_a_prefix_of_another() {
-        let err = Registry::parse(r#"
+        let err = Registry::parse(
+            r#"
             [a]
             repo = "github.com/x/mono"
             tag_prefix = "voxtral-"
             [b]
             repo = "github.com/x/mono"
             tag_prefix = "voxtral-mini-"
-        "#).unwrap_err();
+        "#,
+        )
+        .unwrap_err();
         assert!(matches!(err, ParseError::PrefixOverlap { .. }));
     }
 
     #[test]
     fn allows_two_distinct_prefixes_on_same_repo() {
-        let r = Registry::parse(r#"
+        let r = Registry::parse(
+            r#"
             [a]
             repo = "github.com/x/mono"
             tag_prefix = "a-"
             [b]
             repo = "github.com/x/mono"
             tag_prefix = "b-"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(r.0.len(), 2);
     }
 
     #[test]
     fn removed_entries_dont_count_for_collision() {
         // Two entries on the same repo, one removed → no collision.
-        let r = Registry::parse(r#"
+        let r = Registry::parse(
+            r#"
             [a]
             repo = "github.com/x/mono"
             [b]
             repo = "github.com/x/mono"
             removed = true
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(r.0.len(), 2);
     }
 }

@@ -40,19 +40,19 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src/registry/scripts/build_index/target
-          key: build-index-${{ hashFiles('src/registry/scripts/build_index/Cargo.lock') }}
+            src/target
+          key: build-index-${{ hashFiles('src/Cargo.lock') }}
 
       - name: Build indexer
-        working-directory: src/registry/scripts/build_index
-        run: cargo build --release
+        working-directory: src
+        run: cargo build --release -p super-stt-build-index
 
       - name: Run indexer
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p out
-          src/registry/scripts/build_index/target/release/super-stt-build-index \
+          src/target/release/super-stt-build-index \
             --registry src/registry/registry.toml \
             --prior-index pages/index.json \
             --out out/index.json
