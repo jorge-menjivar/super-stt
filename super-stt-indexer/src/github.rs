@@ -28,12 +28,6 @@ pub struct ReleaseAsset {
     pub size: u64,
 }
 
-#[derive(Debug, Deserialize)]
-struct ContentResponse {
-    content: String, // base64-encoded
-    encoding: String,
-}
-
 impl GitHub {
     pub fn new(base: impl Into<String>, token: Option<String>) -> Self {
         Self {
@@ -87,37 +81,11 @@ impl GitHub {
             .error_for_status()?;
         Ok(r.json().await?)
     }
-
-    pub async fn fetch_file(
-        &self,
-        owner_repo: &str,
-        path: &str,
-        r#ref: &str,
-    ) -> anyhow::Result<Vec<u8>> {
-        use base64::Engine;
-        // GET /repos/{owner_repo}/contents/{path}?ref={ref}
-        let r = self
-            .req(
-                reqwest::Method::GET,
-                &format!("/repos/{owner_repo}/contents/{path}?ref={ref}"),
-            )
-            .send()
-            .await?
-            .error_for_status()?;
-        let body: ContentResponse = r.json().await?;
-        anyhow::ensure!(
-            body.encoding == "base64",
-            "unexpected encoding `{}`",
-            body.encoding
-        );
-        Ok(base64::engine::general_purpose::STANDARD.decode(body.content.replace('\n', ""))?)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockito::Matcher;
 
     #[tokio::test]
     async fn latest_release_returns_tag() {
@@ -130,24 +98,5 @@ mod tests {
         let gh = GitHub::new(s.url(), None);
         let r = gh.latest_release("x/y").await.unwrap();
         assert_eq!(r.tag_name, "v1.2.3");
-    }
-
-    #[tokio::test]
-    async fn fetch_file_decodes_base64() {
-        let mut s = mockito::Server::new_async().await;
-        s.mock(
-            "GET",
-            Matcher::Regex(r"^/repos/x/y/contents/backend\.toml.*".into()),
-        )
-        .with_status(200)
-        .with_body(r#"{"content":"aGVsbG8=","encoding":"base64"}"#)
-        .create_async()
-        .await;
-        let gh = GitHub::new(s.url(), None);
-        let bytes = gh
-            .fetch_file("x/y", "backend.toml", "v1.2.3")
-            .await
-            .unwrap();
-        assert_eq!(&bytes, b"hello");
     }
 }

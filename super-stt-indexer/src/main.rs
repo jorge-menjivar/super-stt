@@ -173,9 +173,19 @@ async fn build_entry(
         attempted_tag: attempted_tag.clone(),
     };
 
-    let m = manifest::fetch(gh, owner_repo, entry.subdir.as_deref(), &resolved.tag)
+    // The manifest is the `backend.toml` release asset: parse + validate the
+    // exact bytes that get hashed, so reviewed == pinned == installed. A release
+    // without the asset is not installable (no synthesize fallback) — fail the
+    // entry.
+    let (url, _declared_size) =
+        assets::resolve_url("backend.toml", &resolved.release.assets).map_err(|e| fail(&e))?;
+    let (bytes, sha256) = assets::fetch_manifest_asset(http, &url)
         .await
         .map_err(|e| fail(&e))?;
+    let size = bytes.len() as u64;
+    let text = String::from_utf8(bytes).map_err(|e| fail(&e))?;
+    let m = manifest::Manifest::parse(&text).map_err(|e| fail(&e))?;
+    let manifest_pin = Some(index_json::IndexAsset { url, size, sha256 });
     manifest::validate(&m, &resolved.version, &entry.repo).map_err(|e| fail(&e))?;
     let idx_assets = resolve_index_assets(http, &m, &resolved.release.assets)
         .await
@@ -187,6 +197,7 @@ async fn build_entry(
         resolved.version.to_string(),
         resolved.tag,
         idx_assets,
+        manifest_pin,
     ))
 }
 
@@ -246,6 +257,7 @@ pub(crate) fn into_index_backend(
     version: String,
     tag: String,
     assets: index_json::IndexAssets,
+    manifest: Option<index_json::IndexAsset>,
 ) -> index_json::IndexBackend {
     let online = m
         .models
@@ -281,9 +293,6 @@ pub(crate) fn into_index_backend(
             .map(|md| index_json::IndexModel {
                 name: md.name,
                 provider: md.provider.to_string(),
-                multilingual: md.multilingual,
-                primary_language: md.primary_language,
-                supported_languages: md.supported_languages,
                 supported_devices: md
                     .supported_devices
                     .iter()
@@ -318,6 +327,7 @@ pub(crate) fn into_index_backend(
             .collect(),
         assets,
         index_stale: None,
+        manifest,
     }
 }
 
@@ -369,6 +379,7 @@ mod tests {
             options: Vec::new(),
             assets: index_json::IndexAssets::default(),
             index_stale: None,
+            manifest: None,
         }
     }
 

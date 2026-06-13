@@ -5,6 +5,9 @@ use ring::digest::{Context, SHA256};
 use thiserror::Error;
 
 pub const MAX_ASSET_BYTES: u64 = 200 * 1024 * 1024;
+/// Ceiling for a `backend.toml` manifest asset — manifests are tiny; this only
+/// bounds a hostile or mistaken upload.
+pub const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
 
 #[derive(Debug, Error)]
@@ -91,6 +94,39 @@ pub async fn fetch_and_validate(
         }
     }
     Ok(hex::encode(ctx.finish().as_ref()))
+}
+
+/// Download the `backend.toml` manifest asset, returning its raw bytes and
+/// SHA-256. The indexer parses + validates these exact bytes and records the
+/// hash so the daemon can verify it installs the same bytes. Capped at
+/// [`MAX_MANIFEST_BYTES`].
+pub async fn fetch_manifest_asset(
+    http: &reqwest::Client,
+    url: &str,
+) -> Result<(Vec<u8>, String), AssetError> {
+    use futures::StreamExt;
+    let mut resp = http
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| AssetError::Http(e.into()))?
+        .error_for_status()
+        .map_err(|e| AssetError::Http(e.into()))?
+        .bytes_stream();
+    let mut ctx = Context::new(&SHA256);
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp.next().await {
+        let chunk = chunk.map_err(|e| AssetError::Http(e.into()))?;
+        if buf.len() as u64 + chunk.len() as u64 > MAX_MANIFEST_BYTES {
+            return Err(AssetError::TooLarge {
+                file: "backend.toml".into(),
+                size: buf.len() as u64 + chunk.len() as u64,
+            });
+        }
+        ctx.update(&chunk);
+        buf.extend_from_slice(&chunk);
+    }
+    Ok((buf, hex::encode(ctx.finish().as_ref())))
 }
 
 pub enum AssetExpect<'a> {

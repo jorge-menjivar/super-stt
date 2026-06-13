@@ -13,11 +13,14 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 use crate::registry::compat::Selection;
-use crate::registry::index_schema::{IndexBackend, IndexSubprocessAsset};
+use crate::registry::index_schema::{IndexAsset, IndexBackend, IndexSubprocessAsset};
 
 /// Absolute ceiling on a single downloaded asset when its size is not declared
 /// in the index. Declared sizes are honored directly (plus a small margin).
 const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// Ceiling for the `backend.toml` manifest asset — manifests are tiny; this
+/// only bounds a hostile or mistaken upload.
+const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 /// Slack allowed over a declared asset size before a download is rejected.
 const DOWNLOAD_SIZE_MARGIN: u64 = 1024 * 1024;
 /// Per-file ceiling when unpacking a subprocess tarball.
@@ -33,31 +36,6 @@ fn download_cap(expected_size: u64) -> u64 {
     } else {
         expected_size.saturating_add(DOWNLOAD_SIZE_MARGIN)
     }
-}
-
-/// Escape a string for embedding as a TOML basic string literal.
-/// Handles backslash, double-quote, and the four required control chars
-/// (backspace, tab, newline, carriage return, form feed). Other control
-/// characters are emitted as `\u00XX` per the TOML grammar.
-fn toml_escape(s: &str) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::with_capacity(s.len() + 2);
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{0008}' => out.push_str("\\b"),
-            '\u{000C}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04X}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 #[derive(Debug, Error)]
@@ -189,9 +167,15 @@ where
             .map_err(|e| PipelineError::Io(e).as_typed(P::Extracting))?;
     }
 
-    // Write the index-recorded backend.toml. We do not trust whatever may
-    // have been packed inside the tarball.
-    let toml_text = synthesize_backend_toml(entry);
+    // Install the backend's own manifest — the exact bytes pinned in the index,
+    // verified here and written verbatim. Every installable entry carries a
+    // pinned manifest asset; an entry without one is not installable. We never
+    // trust whatever may have been packed inside the tarball.
+    let pin = entry
+        .manifest
+        .as_ref()
+        .ok_or((P::Installing, InstallError::ManifestInvalid))?;
+    let toml_text = fetch_verified_manifest(&p.http, entry, pin).await?;
     fs::write(staging.join("backend.toml"), toml_text)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
@@ -404,89 +388,96 @@ fn extract_tarball(src: &Path, dest_dir: &Path) -> Result<(), PipelineError> {
     Ok(())
 }
 
-fn synthesize_backend_toml(entry: &IndexBackend) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::new();
-    out.push_str("# SPDX-License-Identifier: GPL-3.0-only\n");
-    out.push_str("# Synthesized by daemon's registry installer from index.json.\n\n");
-    out.push_str("[backend]\n");
-    let _ = writeln!(out, "source = \"{}\"", toml_escape(&entry.source));
-    let _ = writeln!(out, "name = \"{}\"", toml_escape(&entry.name));
-    let _ = writeln!(out, "version = \"{}\"", toml_escape(&entry.version));
-    let _ = writeln!(out, "kind = \"{}\"", toml_escape(&entry.kind));
-    let _ = writeln!(out, "entrypoint = \"{}\"", toml_escape(&entry.entrypoint));
-    let _ = writeln!(out, "contract = \"{}\"", toml_escape(&entry.contract));
-    if !entry.license.is_empty() {
-        let _ = writeln!(out, "license = \"{}\"", toml_escape(&entry.license));
-    }
-    if !entry.allowed_hosts.is_empty() {
-        out.push_str("\n[network]\n");
-        let hosts: Vec<String> = entry
-            .allowed_hosts
-            .iter()
-            .map(|h| format!("\"{}\"", toml_escape(h)))
-            .collect();
-        let _ = writeln!(out, "allowed_hosts = [{}]", hosts.join(", "));
-    }
-    for s in &entry.secrets {
-        out.push_str("\n[[secrets]]\n");
-        let _ = writeln!(out, "name = \"{}\"", toml_escape(&s.name));
-        let _ = writeln!(out, "label = \"{}\"", toml_escape(&s.label));
-        let _ = writeln!(out, "required = {}", s.required);
-    }
-    for o in &entry.options {
-        out.push_str("\n[[options]]\n");
-        let _ = writeln!(out, "name = \"{}\"", toml_escape(&o.name));
-        let _ = writeln!(out, "label = \"{}\"", toml_escape(&o.label));
-        let _ = writeln!(out, "type = \"{}\"", toml_escape(&o.r#type));
-        if let Some(d) = &o.default {
-            let _ = writeln!(
-                out,
-                "default = {}",
-                serde_json::to_string(d).unwrap_or_default()
-            );
+/// Download, verify, and validate the pinned `backend.toml` manifest asset,
+/// returning the verified text to install verbatim.
+///
+/// The pinned hash already guarantees the bytes match what the indexer
+/// validated; the remaining checks are defense in depth and enforce the
+/// daemon's own invariants — the manifest must parse, pass runtime validation,
+/// and declare a `source` and `entrypoint` consistent with the index entry, so
+/// a backend cannot pin a manifest that claims another backend's identity or a
+/// path that escapes its install dir.
+async fn fetch_verified_manifest(
+    http: &reqwest::Client,
+    entry: &IndexBackend,
+    pin: &IndexAsset,
+) -> Result<String, (InstallPhase, InstallError)> {
+    let bytes = download_manifest_bytes(http, &pin.url)
+        .await
+        .map_err(|e| e.as_typed(InstallPhase::Downloading))?;
+    verify_manifest_bytes(&bytes, &pin.sha256, entry)
+}
+
+/// The pure verify step (no I/O): hash-check the bytes against the pin, then
+/// parse, validate, and enforce identity/entrypoint consistency with the index
+/// entry. Returns the verified manifest text.
+fn verify_manifest_bytes(
+    bytes: &[u8],
+    pin_sha256: &str,
+    entry: &IndexBackend,
+) -> Result<String, (InstallPhase, InstallError)> {
+    use crate::stt_models::backends::manifest::{Manifest, validate_runtime};
+    use InstallPhase as P;
+
+    // An empty pin sha is the Custom-repo "unverified source" case (no index
+    // pre-computed a hash): TLS to the origin is the only integrity guarantee,
+    // mirroring the binary-asset path. The validation below still runs.
+    if pin_sha256.is_empty() {
+        log::warn!(
+            "install({}): no manifest sha256; skipping hash verification (unverified source)",
+            entry.source
+        );
+    } else {
+        let actual = hex::encode(ring::digest::digest(&SHA256, bytes).as_ref());
+        if actual != pin_sha256 {
+            return Err((P::Verifying, InstallError::AssetHashMismatch));
         }
     }
-    for md in &entry.models {
-        out.push_str("\n[[models]]\n");
-        let _ = writeln!(out, "name = \"{}\"", toml_escape(&md.name));
-        let _ = writeln!(out, "provider = \"{}\"", toml_escape(&md.provider));
-        // Language metadata is required by the manifest parser and cross-checked
-        // by the daemon's runtime validation (`primary_language` must be in
-        // `supported_languages`; a non-multilingual model lists exactly its
-        // primary language). Reconstruct an always-consistent block, falling
-        // back to English-only when an older index omitted these fields.
-        let primary = if md.primary_language.is_empty() {
-            "en".to_string()
-        } else {
-            md.primary_language.clone()
-        };
-        let langs = if md.multilingual {
-            let mut l = md.supported_languages.clone();
-            if l.is_empty() {
-                l.push(primary.clone());
-            } else if !l.contains(&primary) {
-                l.insert(0, primary.clone());
-            }
-            l
-        } else {
-            vec![primary.clone()]
-        };
-        let _ = writeln!(out, "multilingual = {}", md.multilingual);
-        let _ = writeln!(out, "primary_language = \"{}\"", toml_escape(&primary));
-        let langs_lit: Vec<String> = langs
-            .iter()
-            .map(|l| format!("\"{}\"", toml_escape(l)))
-            .collect();
-        let _ = writeln!(out, "supported_languages = [{}]", langs_lit.join(", "));
-        let devs: Vec<String> = md
-            .supported_devices
-            .iter()
-            .map(|d| format!("\"{}\"", toml_escape(d)))
-            .collect();
-        let _ = writeln!(out, "supported_devices = [{}]", devs.join(", "));
+
+    let reject = |reason: &str| {
+        log::warn!(
+            "install({}): pinned manifest rejected: {reason}",
+            entry.source
+        );
+        (P::Installing, InstallError::ManifestInvalid)
+    };
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| reject("not valid UTF-8"))?
+        .to_string();
+    let m: Manifest = toml::from_str(&text).map_err(|e| reject(&format!("parse: {e}")))?;
+    validate_runtime(&m).map_err(|e| reject(&format!("validation: {e}")))?;
+    if m.backend.source != entry.source {
+        return Err(reject(&format!(
+            "manifest source `{}` != index source `{}`",
+            m.backend.source, entry.source
+        )));
     }
-    out
+    if m.backend.entrypoint != entry.entrypoint
+        || !super_stt_shared::registry::is_safe_relative_path(&m.backend.entrypoint)
+    {
+        return Err(reject("entrypoint inconsistent or unsafe"));
+    }
+    Ok(text)
+}
+
+/// Stream the manifest asset into memory, capped at [`MAX_MANIFEST_BYTES`].
+async fn download_manifest_bytes(
+    http: &reqwest::Client,
+    url: &str,
+) -> Result<Vec<u8>, PipelineError> {
+    let resp = http.get(url).send().await?.error_for_status()?;
+    let mut stream = resp.bytes_stream();
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        if buf.len() as u64 + chunk.len() as u64 > MAX_MANIFEST_BYTES {
+            return Err(PipelineError::TooLarge {
+                limit: MAX_MANIFEST_BYTES,
+            });
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
 }
 
 #[cfg(test)]
@@ -494,132 +485,61 @@ mod tests {
     use super::*;
     use crate::registry::index_schema::*;
 
-    #[test]
-    fn synthesizes_toml_with_special_chars_in_name() {
-        let entry = IndexBackend {
-            id: "weird".into(),
-            source: "github.com/x/y".into(),
-            version: "1.0.0".into(),
-            tag: "v1.0.0".into(),
-            name: "He said \"hi\"\nthen left".into(),
-            description: None,
-            license: "Apache-2.0".into(),
-            kind: "wasm".into(),
-            contract: "v1".into(),
-            entrypoint: "x.wasm".into(),
-            allowed_hosts: vec![],
-            online: false,
-            supports_gpu: false,
-            supports_cpu: false,
-            models: vec![],
-            secrets: vec![],
-            options: vec![],
-            assets: IndexAssets::default(),
-            index_stale: None,
-        };
-        let s = synthesize_backend_toml(&entry);
-        let parsed: toml::Value = toml::from_str(&s).unwrap();
-        assert_eq!(
-            parsed["backend"]["name"].as_str().unwrap(),
-            "He said \"hi\"\nthen left"
-        );
+    const PINNED_MANIFEST: &str = r#"
+[backend]
+source = "github.com/x/y"
+name = "X"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "x"
+contract = "v1"
+
+[[models]]
+name = "m"
+provider = "local_x"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu"]
+"#;
+
+    fn sha_hex(bytes: &[u8]) -> String {
+        hex::encode(ring::digest::digest(&SHA256, bytes).as_ref())
     }
 
     #[test]
-    fn synthesizes_minimal_backend_toml() {
-        let entry = IndexBackend {
-            id: "openai".into(),
-            source: "github.com/x/y".into(),
-            version: "1.0.0".into(),
-            tag: "v1.0.0".into(),
-            name: "OpenAI".into(),
-            description: None,
-            license: "Apache-2.0".into(),
-            kind: "wasm".into(),
-            contract: "v1".into(),
-            entrypoint: "openai.wasm".into(),
-            allowed_hosts: vec!["api.openai.com".into()],
-            online: true,
-            supports_gpu: false,
-            supports_cpu: false,
-            models: vec![],
-            secrets: vec![],
-            options: vec![],
-            assets: IndexAssets::default(),
-            index_stale: None,
-        };
-        let s = synthesize_backend_toml(&entry);
-        assert!(s.contains("source = \"github.com/x/y\""));
-        assert!(s.contains("kind = \"wasm\""));
-        assert!(s.contains("api.openai.com"));
+    fn pinned_manifest_verifies_and_installs_verbatim() {
+        let entry = minimal_entry(); // source github.com/x/y, entrypoint "x"
+        let bytes = PINNED_MANIFEST.as_bytes();
+        let out = verify_manifest_bytes(bytes, &sha_hex(bytes), &entry).expect("valid manifest");
+        // The exact bytes are installed — no re-encoding.
+        assert_eq!(out, PINNED_MANIFEST);
     }
 
-    /// The synthesized `backend.toml` must parse with the same canonical
-    /// manifest type discovery uses and pass the daemon's runtime validation —
-    /// the loop that previously broke (a synthesized manifest missing the
-    /// required `primary_language` / `supported_languages` was rejected by the
-    /// very daemon that wrote it).
     #[test]
-    fn synthesized_model_block_parses_and_validates() {
-        use crate::stt_models::backends::manifest::{Manifest, validate_runtime};
-        let mut entry = minimal_entry();
-        entry.models = vec![IndexModel {
-            name: "m1".into(),
-            provider: "local_x".into(),
-            multilingual: true,
-            primary_language: "en".into(),
-            supported_languages: vec!["en".into(), "es".into()],
-            supported_devices: vec!["cuda".into()],
-        }];
-        let text = synthesize_backend_toml(&entry);
-        let m: Manifest = toml::from_str(&text).expect("synthesized backend.toml must parse");
-        validate_runtime(&m).expect("synthesized backend.toml must pass runtime validation");
-        assert_eq!(m.models[0].primary_language, "en");
-        assert_eq!(m.models[0].supported_languages, vec!["en", "es"]);
-        assert!(m.models[0].multilingual);
+    fn pinned_manifest_hash_mismatch_is_rejected() {
+        let entry = minimal_entry();
+        let err =
+            verify_manifest_bytes(PINNED_MANIFEST.as_bytes(), "deadbeef", &entry).unwrap_err();
+        assert_eq!(err.1, InstallError::AssetHashMismatch);
     }
 
-    /// An index published before the language fields existed deserializes with
-    /// empty defaults; the synthesizer must still emit a valid English-only
-    /// block rather than an unparseable manifest.
     #[test]
-    fn synthesized_model_falls_back_when_index_omits_language() {
-        use crate::stt_models::backends::manifest::{Manifest, validate_runtime};
-        let mut entry = minimal_entry();
-        entry.models = vec![IndexModel {
-            name: "m1".into(),
-            provider: "local_x".into(),
-            multilingual: true,
-            primary_language: String::new(),
-            supported_languages: vec![],
-            supported_devices: vec!["cpu".into()],
-        }];
-        let text = synthesize_backend_toml(&entry);
-        let m: Manifest = toml::from_str(&text).expect("synthesized backend.toml must parse");
-        validate_runtime(&m).expect("synthesized backend.toml must pass runtime validation");
-        assert_eq!(m.models[0].primary_language, "en");
-        assert_eq!(m.models[0].supported_languages, vec!["en"]);
+    fn pinned_manifest_identity_spoof_is_rejected() {
+        let entry = minimal_entry(); // index says source github.com/x/y
+        // A correctly-hashed manifest that claims a different identity must not
+        // be installed under this entry's id.
+        let spoofed = PINNED_MANIFEST.replace("github.com/x/y", "github.com/evil/z");
+        let bytes = spoofed.as_bytes();
+        let err = verify_manifest_bytes(bytes, &sha_hex(bytes), &entry).unwrap_err();
+        assert_eq!(err.1, InstallError::ManifestInvalid);
     }
 
-    /// A non-multilingual model must serialize exactly `[primary_language]` so
-    /// runtime validation accepts it even if the index over-declares languages.
     #[test]
-    fn synthesized_non_multilingual_model_is_primary_only() {
-        use crate::stt_models::backends::manifest::{Manifest, validate_runtime};
-        let mut entry = minimal_entry();
-        entry.models = vec![IndexModel {
-            name: "m1".into(),
-            provider: "local_x".into(),
-            multilingual: false,
-            primary_language: "en".into(),
-            supported_languages: vec!["en".into(), "es".into()],
-            supported_devices: vec!["cpu".into()],
-        }];
-        let text = synthesize_backend_toml(&entry);
-        let m: Manifest = toml::from_str(&text).expect("parses");
-        validate_runtime(&m).expect("validates");
-        assert!(!m.models[0].multilingual);
-        assert_eq!(m.models[0].supported_languages, vec!["en"]);
+    fn pinned_manifest_unparseable_is_rejected() {
+        let entry = minimal_entry();
+        let bytes = b"this is not toml = = =";
+        let err = verify_manifest_bytes(bytes, &sha_hex(bytes), &entry).unwrap_err();
+        assert_eq!(err.1, InstallError::ManifestInvalid);
     }
 
     fn minimal_entry() -> IndexBackend {
@@ -643,6 +563,7 @@ mod tests {
             options: vec![],
             assets: IndexAssets::default(),
             index_stale: None,
+            manifest: None,
         }
     }
 

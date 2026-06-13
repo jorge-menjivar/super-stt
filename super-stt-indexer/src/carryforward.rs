@@ -77,6 +77,7 @@ mod tests {
             options: vec![],
             assets: IndexAssets::default(),
             index_stale: None,
+            manifest: None,
         }
     }
 

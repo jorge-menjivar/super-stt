@@ -142,6 +142,7 @@ mod tests {
                 subprocess,
             },
             index_stale: None,
+            manifest: None,
         }
     }
 

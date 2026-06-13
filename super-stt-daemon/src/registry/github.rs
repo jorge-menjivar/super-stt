@@ -110,6 +110,16 @@ impl GitHub {
         Ok(r.json().await?)
     }
 
+    /// Download an arbitrary asset URL (e.g. a release asset's
+    /// `browser_download_url`) and return its raw bytes.
+    ///
+    /// # Errors
+    /// Network failure or a non-2xx response.
+    pub async fn download(&self, url: &str) -> Result<Vec<u8>, GitHubError> {
+        let r = self.http.get(url).send().await?.error_for_status()?;
+        Ok(r.bytes().await?.to_vec())
+    }
+
     /// `GET /repos/{owner_repo}/contents/{path}?ref={ref}`, base64-decoded.
     ///
     /// # Errors

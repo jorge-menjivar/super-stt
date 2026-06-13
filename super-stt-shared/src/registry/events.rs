@@ -57,4 +57,9 @@ pub enum InstallError {
     AssetHashMismatch,
     TarballUnsafe,
     InstallIoError,
+    /// The `backend.toml` manifest asset was absent or failed verification: no
+    /// `manifest` pin on the entry, unparseable bytes, failed runtime
+    /// validation, over the size cap, or an identity/entrypoint inconsistent
+    /// with the index entry.
+    ManifestInvalid,
 }

@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! End-to-end test: mock GitHub for `latest_release` + `contents` + asset
-//! download; run the indexer binary as a subprocess via the
-//! `GITHUB_API_BASE` env override.
+//! End-to-end test: mock GitHub for `latest_release` + the `backend.toml`
+//! manifest asset + the binary asset download; run the indexer binary as a
+//! subprocess via the `GITHUB_API_BASE` env override.
 //!
 //! This is one happy-path test. Pure-unit tests cover failure cases in each
 //! module's `#[cfg(test)]` block.
 
 use std::process::Command;
-
-use base64::Engine;
 
 const MANIFEST_OK: &str = r#"
 [backend]
@@ -49,7 +47,8 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
     let base = s.url();
 
     let releases_body = format!(
-        r#"{{"tag_name":"v1.0.0","assets":[{{"name":"y.wasm","browser_download_url":"{base}/dl/y.wasm","size":4}}]}}"#
+        r#"{{"tag_name":"v1.0.0","assets":[{{"name":"y.wasm","browser_download_url":"{base}/dl/y.wasm","size":4}},{{"name":"backend.toml","browser_download_url":"{base}/dl/backend.toml","size":{}}}]}}"#,
+        MANIFEST_OK.len()
     );
     s.mock("GET", "/repos/x/y/releases/latest")
         .with_status(200)
@@ -57,16 +56,13 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
         .create_async()
         .await;
 
-    let content = base64::engine::general_purpose::STANDARD.encode(MANIFEST_OK);
-    let contents_body = format!(r#"{{"content":"{content}","encoding":"base64"}}"#);
-    s.mock(
-        "GET",
-        mockito::Matcher::Regex(r"^/repos/x/y/contents/backend\.toml.*".into()),
-    )
-    .with_status(200)
-    .with_body(contents_body)
-    .create_async()
-    .await;
+    // The manifest is downloaded from the release asset (raw bytes), parsed,
+    // validated, and pinned.
+    s.mock("GET", "/dl/backend.toml")
+        .with_status(200)
+        .with_body(MANIFEST_OK)
+        .create_async()
+        .await;
 
     s.mock("GET", "/dl/y.wasm")
         .with_status(200)
@@ -120,4 +116,14 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
     // The fixture's only model is served by an online provider ("openai") —
     // pins the Provider::Online → `online: true` mapping.
     assert_eq!(v["backends"][0]["online"], true);
+    // The manifest is pinned to the `backend.toml` release asset with a hash,
+    // so the daemon installs those exact bytes.
+    let manifest = &v["backends"][0]["manifest"];
+    assert!(
+        manifest["url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/dl/backend.toml")
+    );
+    assert_eq!(manifest["sha256"].as_str().unwrap().len(), 64);
 }

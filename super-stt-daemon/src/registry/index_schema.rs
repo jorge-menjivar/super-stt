@@ -113,28 +113,21 @@ pub struct IndexBackend {
     pub assets: IndexAssets,
     #[serde(default)]
     pub index_stale: Option<IndexStale>,
+    /// Pinned `backend.toml` release asset. When present, the installer fetches
+    /// these exact bytes, verifies them against `sha256`, and installs them
+    /// verbatim instead of synthesizing a manifest from the fields above.
+    #[serde(default)]
+    pub manifest: Option<IndexAsset>,
 }
 
+/// The browse-only model subset the catalog and host-compatibility filter need.
+/// The authoritative manifest ships as the pinned `manifest` asset and is
+/// installed verbatim — it is not re-encoded here.
 #[derive(Debug, Clone, Deserialize)]
 pub struct IndexModel {
     pub name: String,
     pub provider: String,
-    /// Whether the model accepts more than one language. Default `true`.
-    /// Defaulted when reading an index published before this field existed.
-    #[serde(default = "default_true")]
-    pub multilingual: bool,
-    /// Default language code; must appear in `supported_languages`. Empty when
-    /// an older index omitted it — the installer falls back to a valid default.
-    #[serde(default)]
-    pub primary_language: String,
-    /// Language codes the model accepts; must include `primary_language`.
-    #[serde(default)]
-    pub supported_languages: Vec<String>,
     pub supported_devices: Vec<String>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -196,18 +189,13 @@ mod tests {
     //! End-to-end check that the indexer's offline `local` mode produces JSON
     //! the daemon can read — guarding drift between the indexer's `index_json`
     //! output and this module's `Index` input. Generates an index from the
-    //! committed dummy manifest with the real binary, then deserializes it with
-    //! the `Index` type the registry client uses. Skips gracefully when the
-    //! indexer binary hasn't been built (e.g. `cargo test -p super-stt-daemon`
+    //! `tests/fixtures` dummy manifest with the real binary, then deserializes
+    //! it with the `Index` type the registry client uses. Skips gracefully when
+    //! the indexer binary hasn't been built (e.g. `cargo test -p super-stt-daemon`
     //! on its own); `cargo test --workspace` builds it and runs this.
     use super::*;
     use std::path::PathBuf;
     use std::process::Command;
-
-    fn repo_root() -> PathBuf {
-        // CARGO_MANIFEST_DIR is `<repo>/super-stt-daemon`.
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
-    }
 
     /// The `super-stt-indexer` binary sibling to this test binary
     /// (`target/<profile>/super-stt-indexer`), if it has been built.
@@ -224,7 +212,8 @@ mod tests {
             eprintln!("skipping: super-stt-indexer binary not built");
             return;
         };
-        let dummy = repo_root().join("registry/scripts/fixtures/dummy-backend.toml");
+        let dummy =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dummy-backend.toml");
         assert!(
             dummy.exists(),
             "dummy manifest missing at {}",

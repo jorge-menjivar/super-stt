@@ -25,16 +25,26 @@ The daemon looks up the entry whose `source` matches and installs its
 selected asset. If the entry is not in the cached index, the daemon does a
 single inline refresh before failing.
 
+The installed `backend.toml` is the backend's own manifest, published as a
+pinned release asset (the `manifest` field on every index entry). The daemon
+downloads it, verifies its SHA-256 against the pin, confirms it parses, passes
+runtime validation, and declares a `source` and `entrypoint` matching the index
+entry — then installs those exact bytes (a backend cannot pin a manifest that
+claims another backend's identity). There is no synthesized-manifest fallback: a
+registry entry without a `manifest` pin is not installable.
+
 **Custom-repo install:**
 ```json
 { "repo_url": "github.com/your-name/your-backend" }
 ```
 
-The daemon queries the GitHub REST API for the repo's latest release, fetches
-its `backend.toml`, runs the same selection algorithm, and downloads the
-chosen asset. **The asset is not hash-verified against any registry** — TLS
-to GitHub is the only integrity guarantee. The synchronous response carries
-`warning: "unverified_source"`; clients should surface this in the UI.
+The daemon queries the GitHub REST API for the repo's latest release, downloads
+its `backend.toml` release asset, runs the same selection algorithm over the
+declared binary assets, and installs the manifest verbatim. **The manifest and
+assets are not hash-verified against any registry** — TLS to GitHub is the only
+integrity guarantee (the daemon still parses, validates, and identity-checks the
+manifest). The synchronous response carries `warning: "unverified_source"`;
+clients should surface this in the UI.
 
 **Import-from-dir install:**
 ```json
@@ -117,6 +127,9 @@ Typed `error` values:
 - `asset_hash_mismatch` — SHA-256 from the index didn't match
 - `tarball_unsafe` — path-traversal or symlink-escape entry
 - `install_io_error` — extraction or rename failed; details in `message`
+- `manifest_invalid` — the `backend.toml` asset was absent or failed
+  verification: no `manifest` pin, unparseable, failed runtime validation, over
+  the size cap, or a `source`/`entrypoint` inconsistent with the index entry
 
 ## Failure modes (synchronous)
 

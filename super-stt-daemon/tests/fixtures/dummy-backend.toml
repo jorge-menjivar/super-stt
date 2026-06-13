@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Dummy backend manifest — fixture for the indexer→daemon index round-trip test
+# (`super-stt-daemon/src/registry/index_schema.rs`). Not a real backend.
+
+[backend]
+source = "github.com/jorge-menjivar/dummy"
+name = "Dummy"
+version = "1.2.3"
+kind = "wasm"
+entrypoint = "dummy.wasm"
+contract = "v1"
+license = "Apache-2.0"
+
+[network]
+allowed_hosts = ["api.example.com"]
+
+[assets]
+wasm = "dummy.wasm"
+
+[[secrets]]
+name = "dummy_api_key"
+description = "API key for the dummy backend."
+required = true
+
+[[models]]
+name = "dummy-online"
+provider = "openai"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
+
+[[models]]
+name = "dummy-local"
+provider = "local_dummy"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu", "cuda"]

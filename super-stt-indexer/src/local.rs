@@ -89,7 +89,31 @@ fn build_entry(
     let version = m.backend.version.clone();
     let tag = format!("v{version}");
     let id = local_id(&m.backend.source);
-    Ok(crate::into_index_backend(&id, m, version, tag, assets))
+    // Stage the manifest as a served asset and pin it, so the offline index
+    // exercises the daemon's verified-manifest install path end to end. Named
+    // per id to avoid collisions when several backends share one output dir.
+    let manifest = stage_manifest(&id, &text, out_dir, base)?;
+    Ok(crate::into_index_backend(
+        &id, m, version, tag, assets, manifest,
+    ))
+}
+
+/// Write `<out>/<id>.backend.toml` and pin it as the manifest asset.
+fn stage_manifest(
+    id: &str,
+    text: &str,
+    out_dir: &Path,
+    base: &str,
+) -> anyhow::Result<Option<IndexAsset>> {
+    let file = format!("{id}.backend.toml");
+    let staged = out_dir.join(&file);
+    std::fs::write(&staged, text).with_context(|| format!("writing {}", staged.display()))?;
+    let sha256 = hex::encode(ring::digest::digest(&ring::digest::SHA256, text.as_bytes()));
+    Ok(Some(IndexAsset {
+        url: format!("{base}/{file}"),
+        size: text.len() as u64,
+        sha256,
+    }))
 }
 
 /// The registry keys entries by the last path segment of `source`; mirror that
@@ -240,6 +264,10 @@ mod tests {
         let wasm = b.assets.wasm.as_ref().expect("wasm asset");
         assert_eq!(wasm.url, "http://localhost:8787/dummy.wasm");
         assert_eq!(wasm.sha256.len(), 64);
+        let manifest = b.manifest.as_ref().expect("manifest is pinned");
+        assert_eq!(manifest.url, "http://localhost:8787/dummy.backend.toml");
+        assert_eq!(manifest.sha256.len(), 64);
+        assert!(dir.path().join("dummy.backend.toml").exists());
     }
 
     #[test]

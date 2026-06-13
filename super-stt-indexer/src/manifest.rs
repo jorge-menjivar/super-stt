@@ -9,14 +9,8 @@ pub use super_stt_registry_types::manifest::{
     Accel, Device, Kind, Manifest, ManifestError as ParseError,
 };
 
-use crate::github::GitHub;
-
-pub const MAX_MANIFEST_BYTES: usize = 256 * 1024;
-
 #[derive(Debug, Error)]
 pub enum ManifestError {
-    #[error("manifest exceeds {MAX_MANIFEST_BYTES} bytes")]
-    TooLarge,
     #[error(transparent)]
     Parse(#[from] ParseError),
     #[error("`backend.version = {0:?}` does not match tag version `{1}`")]
@@ -41,26 +35,6 @@ pub enum ManifestError {
          GPL-3.0-only) or \"other\""
     )]
     LicenseNotAllowed(String),
-    #[error(transparent)]
-    Http(#[from] anyhow::Error),
-}
-
-pub async fn fetch(
-    gh: &GitHub,
-    owner_repo: &str,
-    subdir: Option<&str>,
-    tag: &str,
-) -> Result<Manifest, ManifestError> {
-    let path = match subdir {
-        Some(sd) => format!("{}/backend.toml", sd.trim_end_matches('/')),
-        None => "backend.toml".to_string(),
-    };
-    let bytes = gh.fetch_file(owner_repo, &path, tag).await?;
-    if bytes.len() > MAX_MANIFEST_BYTES {
-        return Err(ManifestError::TooLarge);
-    }
-    let text = String::from_utf8(bytes).map_err(|e| anyhow::anyhow!("manifest not UTF-8: {e}"))?;
-    Ok(Manifest::parse(&text)?)
 }
 
 pub fn validate(

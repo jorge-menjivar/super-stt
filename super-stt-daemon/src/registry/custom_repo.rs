@@ -2,11 +2,12 @@
 //! Resolve an arbitrary GitHub repo into an [`IndexBackend`] for the
 //! Custom-repo install path.
 //!
-//! Flow: parse `repo_url` -> ask GitHub for the latest release -> fetch the
-//! repo's `backend.toml` at that tag -> map each declared asset to a release
-//! download URL -> synthesize an [`IndexBackend`] with **empty `sha256`
-//! strings**. The install pipeline treats an empty `expected_sha` as
-//! "skip verification" so TLS to GitHub is the only integrity guarantee — the
+//! Flow: parse `repo_url` -> ask GitHub for the latest release -> download the
+//! `backend.toml` release asset -> map each declared binary asset to a release
+//! download URL -> build an [`IndexBackend`] whose `manifest` pin points at the
+//! `backend.toml` asset with an **empty `sha256`**. The install pipeline treats
+//! an empty pin sha as "skip verification" (TLS to GitHub is the only integrity
+//! guarantee) but still validates the manifest and installs it verbatim — the
 //! `unverified_source` warning surfaced to clients (see
 //! `docs/protocol/endpoints/v1/registry/install.md`) reflects this.
 
@@ -93,9 +94,22 @@ pub fn parse_owner_repo(repo_url: &str) -> Result<String, ResolveError> {
 pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, ResolveError> {
     let owner_repo = parse_owner_repo(repo_url)?;
     let release = gh.latest_release(&owner_repo).await?;
-    let manifest_bytes = gh
-        .fetch_file(&owner_repo, "backend.toml", &release.tag_name)
-        .await?;
+
+    // The manifest is the `backend.toml` release asset — the exact bytes the
+    // daemon installs verbatim. Read and validate those, and pin the asset
+    // (empty sha: unverified, TLS-only — there is no index to pre-compute a
+    // hash).
+    let manifest_asset = release
+        .assets
+        .iter()
+        .find(|a| a.name == "backend.toml")
+        .ok_or_else(|| ResolveError::AssetMissing("backend.toml".into()))?;
+    if manifest_asset.size > MAX_MANIFEST_BYTES as u64 {
+        return Err(ResolveError::ManifestTooLarge);
+    }
+    let manifest_url = manifest_asset.browser_download_url.clone();
+    let manifest_size = manifest_asset.size;
+    let manifest_bytes = gh.download(&manifest_url).await?;
     if manifest_bytes.len() > MAX_MANIFEST_BYTES {
         return Err(ResolveError::ManifestTooLarge);
     }
@@ -152,9 +166,6 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
             .map(|m| IndexModel {
                 name: m.name,
                 provider: m.provider,
-                multilingual: m.multilingual,
-                primary_language: m.primary_language,
-                supported_languages: m.supported_languages,
                 supported_devices: m.supported_devices,
             })
             .collect(),
@@ -179,6 +190,11 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
             .collect(),
         assets,
         index_stale: None,
+        manifest: Some(IndexAsset {
+            url: manifest_url,
+            size: manifest_size,
+            sha256: String::new(),
+        }),
     })
 }
 
@@ -336,18 +352,8 @@ struct Network {
 struct Model {
     name: String,
     provider: String,
-    #[serde(default = "default_true")]
-    multilingual: bool,
-    #[serde(default)]
-    primary_language: String,
-    #[serde(default)]
-    supported_languages: Vec<String>,
     #[serde(default)]
     supported_devices: Vec<String>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -399,9 +405,6 @@ mod tests {
         Model {
             name: name.into(),
             provider: provider.into(),
-            multilingual: true,
-            primary_language: "en".into(),
-            supported_languages: vec!["en".into()],
             supported_devices: devices.iter().map(|s| (*s).to_string()).collect(),
         }
     }

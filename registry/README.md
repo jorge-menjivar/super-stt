@@ -40,6 +40,13 @@ published on GitHub Pages. The schema is generated from the entry types — run
 4. After merge, the indexer auto-discovers releases on your repo. You
    ship new versions by tagging releases — no further PRs to this repo.
 
+   **Attach `backend.toml` as a release asset**, alongside your binaries. The
+   indexer pins its SHA-256, and the daemon installs those exact bytes after
+   verifying the hash — so every field your manifest declares (languages, model
+   files, …) reaches the daemon without re-encoding. This is **required**: a
+   release without the `backend.toml` asset is not installable and the indexer
+   fails that entry.
+
 ## Reserved ids
 
 These ids are reserved for the upstream maintainers and may not be claimed

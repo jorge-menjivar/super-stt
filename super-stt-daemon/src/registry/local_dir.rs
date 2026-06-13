@@ -97,9 +97,6 @@ pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
             .map(|md| IndexModel {
                 name: md.name.clone(),
                 provider: md.provider.to_string(),
-                multilingual: md.multilingual,
-                primary_language: md.primary_language.clone(),
-                supported_languages: md.supported_languages.clone(),
                 supported_devices: md
                     .supported_devices
                     .iter()
@@ -111,6 +108,7 @@ pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
         options: Vec::new(),
         assets: IndexAssets::default(),
         index_stale: None,
+        manifest: None,
     })
 }
 
