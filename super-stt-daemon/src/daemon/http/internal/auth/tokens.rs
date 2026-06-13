@@ -309,3 +309,141 @@ pub(crate) fn generate_token() -> String {
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    //! Session-token security semantics: expiry + eviction, the
+    //! unknown-token path, mint correctness, and revocation. `validate`
+    //! and `revoke` are the gates every authenticated request and the
+    //! `/events` exe-watch path rely on, so they're exercised directly
+    //! here. `flush_snapshot` is a no-op under `cfg!(test)` (see its
+    //! doc comment), so none of these touch the system keyring.
+    use super::{TokenMeta, TokenStore};
+    use chrono::{Duration as ChronoDuration, Utc};
+    use std::path::PathBuf;
+
+    /// Insert a token straight into the in-memory map with an arbitrary
+    /// `expires_at`, bypassing `mint`'s fixed 30-day TTL so we can pin
+    /// the expiry boundary.
+    fn insert_with_expiry(store: &TokenStore, token: &str, expires_at: chrono::DateTime<Utc>) {
+        let meta = TokenMeta {
+            app_name: "test-app".to_string(),
+            scopes: vec!["status".to_string()],
+            exe_path: PathBuf::from("/usr/bin/test-client"),
+            issued_at: Utc::now() - ChronoDuration::days(1),
+            expires_at,
+        };
+        store.inner.lock().unwrap().insert(token.to_string(), meta);
+    }
+
+    /// A freshly minted token validates, carries the scopes + exe it was
+    /// minted with, gets a ~30-day expiry, and is a 64-char hex string.
+    /// Distinct mints never collide.
+    #[test]
+    fn mint_then_validate_roundtrips() {
+        let store = TokenStore::default();
+        let scopes = vec!["transcribe".to_string(), "status".to_string()];
+        let exe = PathBuf::from("/usr/bin/super-stt-cli");
+
+        let (token, expires_at) = store.mint("Super STT CLI", &scopes, &exe);
+        assert_eq!(token.len(), 64, "token is 32 random bytes hex-encoded");
+        assert!(
+            token.chars().all(|c| c.is_ascii_hexdigit()),
+            "token must be lowercase hex: {token}"
+        );
+
+        // ~30 days out (allow a day of slack on each side for clock/runtime).
+        let now = Utc::now();
+        assert!(
+            expires_at > now + ChronoDuration::days(29)
+                && expires_at < now + ChronoDuration::days(31),
+            "mint should set a ~30-day expiry, got {expires_at}"
+        );
+
+        let meta = store.validate(&token).expect("live token must validate");
+        assert_eq!(meta.scopes, scopes, "validated scopes match minted scopes");
+        assert_eq!(meta.exe_path, exe, "validated exe matches minted exe");
+
+        // A second mint yields a different token.
+        let (token2, _) = store.mint("Super STT CLI", &scopes, &exe);
+        assert_ne!(token, token2, "each mint produces a unique token");
+    }
+
+    /// A token unknown to the store is rejected with the `unknown`
+    /// reason (this becomes `401 invalid_session (unknown)` on the wire).
+    #[test]
+    fn validate_unknown_token_is_unknown() {
+        let store = TokenStore::default();
+        assert!(
+            matches!(store.validate("never-minted"), Err("unknown")),
+            "an unknown token must be rejected as `unknown`"
+        );
+    }
+
+    /// An expired token is rejected with `expired` AND evicted from the
+    /// store, so a second presentation reports `unknown` rather than
+    /// `expired` — the daemon never keeps a dead token around.
+    #[test]
+    fn expired_token_is_rejected_and_evicted() {
+        let store = TokenStore::default();
+        insert_with_expiry(&store, "stale", Utc::now() - ChronoDuration::seconds(1));
+
+        assert!(
+            matches!(store.validate("stale"), Err("expired")),
+            "a token past its expiry must be rejected as `expired`"
+        );
+        assert!(
+            !store.inner.lock().unwrap().contains_key("stale"),
+            "an expired token must be evicted on validation"
+        );
+        assert!(
+            matches!(store.validate("stale"), Err("unknown")),
+            "the evicted token is now simply unknown"
+        );
+    }
+
+    /// A token whose expiry is still in the future validates cleanly —
+    /// the expiry check is strictly `expires_at < now`.
+    #[test]
+    fn not_yet_expired_token_validates() {
+        let store = TokenStore::default();
+        insert_with_expiry(&store, "fresh", Utc::now() + ChronoDuration::minutes(1));
+        assert!(
+            store.validate("fresh").is_ok(),
+            "a token with a future expiry must validate"
+        );
+    }
+
+    /// `revoke` immediately invalidates a live token. This is the
+    /// primitive the `/events` exe-watch task calls on `exe_changed`
+    /// (a binary swap during a long-lived widget connection), so after
+    /// revocation the session is gone and any further use is `unknown`.
+    #[test]
+    fn revoke_invalidates_a_live_token() {
+        let store = TokenStore::default();
+        let (token, _) = store.mint(
+            "widget",
+            &["status".to_string()],
+            &PathBuf::from("/usr/bin/w"),
+        );
+        assert!(store.validate(&token).is_ok(), "token valid before revoke");
+
+        store.revoke(&token);
+        assert!(
+            matches!(store.validate(&token), Err("unknown")),
+            "a revoked token must no longer validate"
+        );
+    }
+
+    /// `revoke` is idempotent: revoking an unknown token (or the same
+    /// token twice) is a harmless no-op.
+    #[test]
+    fn revoke_is_idempotent() {
+        let store = TokenStore::default();
+        store.revoke("never-existed"); // must not panic
+        let (token, _) = store.mint("app", &["status".to_string()], &PathBuf::from("/bin/a"));
+        store.revoke(&token);
+        store.revoke(&token); // second revoke is still a no-op
+        assert!(matches!(store.validate(&token), Err("unknown")));
+    }
+}

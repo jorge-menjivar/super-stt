@@ -151,3 +151,52 @@ pub(crate) async fn require_rate_limit(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! Deny-cache identity. The cache short-circuits `/auth/request` to
+    //! `403 auth_denied (user_denied_cached)` so a binary the user
+    //! already rejected can't re-trigger the consent popup. Its key is
+    //! the `(exe_path, scopes)` pair — the same identity the consent
+    //! flow is verified against — so denial must be scoped to that exact
+    //! binary and that exact scope set, nothing broader.
+    use super::DenyCache;
+    use crate::daemon::http::internal::auth::consent::ConsentKey;
+    use std::path::PathBuf;
+
+    #[test]
+    fn deny_cache_remembers_a_denied_pair() {
+        let cache = DenyCache::default();
+        let key: ConsentKey = (
+            PathBuf::from("/usr/bin/evil"),
+            vec!["settings".to_string(), "transcribe".to_string()],
+        );
+        assert!(!cache.contains(&key), "a fresh cache denies nothing");
+        cache.insert(key.clone());
+        assert!(
+            cache.contains(&key),
+            "a denied (exe, scopes) pair must be remembered"
+        );
+    }
+
+    #[test]
+    fn deny_cache_is_scoped_to_exe_and_scope_set() {
+        let cache = DenyCache::default();
+        let denied: ConsentKey = (PathBuf::from("/usr/bin/evil"), vec!["settings".to_string()]);
+        cache.insert(denied.clone());
+
+        // Same scopes, different binary → not denied (a fresh consent prompt).
+        let other_exe: ConsentKey = (PathBuf::from("/usr/bin/other"), denied.1.clone());
+        assert!(
+            !cache.contains(&other_exe),
+            "denial must not leak across binaries"
+        );
+
+        // Same binary, different scope set → not denied.
+        let other_scopes: ConsentKey = (denied.0.clone(), vec!["status".to_string()]);
+        assert!(
+            !cache.contains(&other_scopes),
+            "denial must not leak across scope sets"
+        );
+    }
+}

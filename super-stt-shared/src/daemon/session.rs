@@ -67,6 +67,23 @@ fn cache_clear(app_id: AppId) {
     TOKEN_CACHE.lock().unwrap().remove(app_id.0);
 }
 
+/// When `SUPER_STT_KEYRING_MOCK` is set, route all client-side keyring
+/// access (the session-token store this module manages) to an in-memory
+/// mock instead of the system secret service.
+///
+/// This is the client-side twin of the daemon's
+/// `install_mock_if_requested`: the CLI / settings app / applet reach the
+/// keyring through this module's `load`/`save`/`forget`, and an automated
+/// shell or CI run has no unlocked secret service — touching the real one
+/// there blocks on an unlock prompt or fails. Call this once at process
+/// startup, before any keyring access, as it sets the process-wide default
+/// credential builder.
+pub fn install_mock_keyring_if_requested() {
+    if std::env::var_os("SUPER_STT_KEYRING_MOCK").is_some() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+    }
+}
+
 /// Read the cached token for `app_id`, or None if no token is stored.
 #[must_use]
 pub fn load(app_id: AppId) -> Option<String> {

@@ -28,6 +28,11 @@ const SCOPES: &[&str] = &["transcribe", "status"];
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Honor SUPER_STT_KEYRING_MOCK before any session-token access so
+    // automated shells / CI (and our own integration tests) don't block on
+    // the system secret service. No-op when the env var is unset.
+    session::install_mock_keyring_if_requested();
+
     let matches = Command::new("super-stt-cli")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Super STT command-line client (HTTP protocol)")
