@@ -116,8 +116,20 @@ pub(super) fn installed_card<'a>(
     actions.push(overflow.into());
 
     let card = backend_header(backend.name.clone(), backend.source.clone(), actions);
+    let surface = card_surface(card, false);
 
-    card_surface(card, false)
+    // Surface a failed uninstall directly under its card until the user
+    // retries (or it succeeds and the backend leaves the catalog).
+    match app.registry.uninstall_errors.get(source.as_str()) {
+        Some(err) => column(vec![
+            surface,
+            text::caption(format!("Uninstall failed: {err}")).into(),
+        ])
+        .spacing(cosmic::theme::spacing().space_xxxs)
+        .width(Length::Fill)
+        .into(),
+        None => surface,
+    }
 }
 
 /// The popup body for an installed card's "⋯" overflow menu: Configure, an

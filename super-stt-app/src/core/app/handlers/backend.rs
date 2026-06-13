@@ -52,6 +52,12 @@ impl AppModel {
                             .insert((backend.source.clone(), secret.name.clone()), configured);
                     }
                 }
+                // Drop uninstall errors for backends no longer present — a
+                // backend that left the catalog is one whose uninstall
+                // ultimately succeeded, so its stale error must not linger.
+                self.registry
+                    .uninstall_errors
+                    .retain(|src, _| backends.iter().any(|b| &b.source == src));
                 self.backends = backends;
                 Task::none()
             }

@@ -12,6 +12,10 @@ pub struct RegistryState {
     pub generated_at: Option<String>,
     pub filters: Filters,
     pub installs: HashMap<String, InstallStatus>,
+    /// Uninstall failures keyed by `source`, surfaced on the installed card.
+    /// Cleared when the user retries that backend or it disappears from the
+    /// reloaded catalog (i.e. the uninstall ultimately succeeded).
+    pub uninstall_errors: HashMap<String, String>,
     pub last_refresh: Option<RefreshOutcome>,
     /// In-progress URL text for the Custom-repo input in the Download tab.
     pub custom_repo_input: String,

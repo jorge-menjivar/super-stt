@@ -42,8 +42,11 @@ impl AppModel {
             | Message::InstallBackendFromRepoUrl(_)
             | Message::InstallAccepted { .. }
             | Message::InstallFailedToStart { .. }
-            | Message::UpdateBackend(_)
-            | Message::UninstallBackend(_) => self.handle_models_install_lifecycle(message),
+            | Message::UpdateBackend(_) => self.handle_models_install_lifecycle(message),
+
+            Message::UninstallBackend(_) | Message::UninstallFailed { .. } => {
+                self.handle_models_uninstall(message)
+            }
 
             Message::InstallProgress { .. }
             | Message::InstallCompleted { .. }

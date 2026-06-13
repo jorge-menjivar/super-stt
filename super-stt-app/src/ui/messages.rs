@@ -143,6 +143,12 @@ pub enum Message {
     UpdateBackend(String),
     /// User clicked Uninstall.
     UninstallBackend(String),
+    /// An uninstall request failed; carries the backend `source` and a
+    /// human-readable error to surface on the installed card.
+    UninstallFailed {
+        source: String,
+        error: String,
+    },
     /// User clicked Retry on the Download-tab empty state, or any other refresh trigger.
     RefreshRegistry,
     /// Initial fetch of /registry/backends succeeded.

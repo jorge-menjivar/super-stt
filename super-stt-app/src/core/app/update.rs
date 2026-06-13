@@ -79,6 +79,7 @@ impl AppModel {
                 | Message::InstallFailed { .. }
                 | Message::UpdateBackend(_)
                 | Message::UninstallBackend(_)
+                | Message::UninstallFailed { .. }
                 | Message::RefreshRegistry
                 | Message::RegistryListLoaded(_)
                 | Message::RegistryListFailed(_)

@@ -103,12 +103,38 @@ impl AppModel {
                 )
             }
 
+            _ => Task::none(),
+        }
+    }
+
+    /// Uninstall lifecycle: kick off the request and surface its failure.
+    pub(in crate::core::app) fn handle_models_uninstall(
+        &mut self,
+        message: Message,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
             Message::UninstallBackend(source) => {
+                // Clear any stale failure so the row reads "in progress" on retry.
+                self.registry.uninstall_errors.remove(&source);
                 let s = source.clone();
                 Task::perform(
                     async move { crate::daemon::registry::uninstall(&s).await },
-                    |_| cosmic::Action::App(Message::BackendsReload),
+                    move |res| {
+                        cosmic::Action::App(match res {
+                            Ok(_) => Message::BackendsReload,
+                            Err(error) => Message::UninstallFailed {
+                                source: source.clone(),
+                                error,
+                            },
+                        })
+                    },
                 )
+            }
+
+            Message::UninstallFailed { source, error } => {
+                log::error!("uninstall({source}) failed: {error}");
+                self.registry.uninstall_errors.insert(source, error);
+                Task::none()
             }
 
             _ => Task::none(),
