@@ -57,10 +57,21 @@ impl ResourceManager {
         Self::with_limits(ResourceLimits::production())
     }
 
-    /// Register a new connection and check connection limits
+    /// Register a connection for `client_id`, enforcing the connection cap.
+    ///
+    /// **Idempotent per `client_id`.** A client (keyed by `uid:pid`) may
+    /// open several connections over its lifetime — a long-lived
+    /// `/v1/events` stream alongside short `/v1/ping` calls, or simply a
+    /// fresh connection per request. Re-registering an existing client is a
+    /// no-op: its [`ConnectionInfo`] — and crucially its rolling
+    /// `request_history` — is preserved, so the rate-limit window spans all
+    /// of that client's connections rather than being reset by each new one.
+    /// Only a genuinely new `client_id` allocates an entry and is subject to
+    /// the connection cap (an existing client is already counted).
     ///
     /// # Errors
-    /// Returns an error if the connection limit is exceeded.
+    /// Returns an error if registering a *new* client would exceed
+    /// `max_connections`.
     pub async fn register_connection(
         &self,
         client_id: String,
@@ -68,7 +79,12 @@ impl ResourceManager {
     ) -> Result<(), ResourceError> {
         let mut connections = self.connections.write().await;
 
-        // Check connection limit
+        // Existing client → keep its accumulated state untouched.
+        if connections.contains_key(&client_id) {
+            return Ok(());
+        }
+
+        // New client → enforce the cap before allocating its entry.
         if connections.len() >= self.limits.max_connections {
             return Err(ResourceError::ConnectionLimitExceeded {
                 current: connections.len(),
@@ -76,9 +92,8 @@ impl ResourceManager {
             });
         }
 
-        // Register the connection
         let conn_info = ConnectionInfo::new(client_id.clone(), client_addr);
-        connections.insert(client_id.clone(), conn_info);
+        connections.insert(client_id, conn_info);
 
         Ok(())
     }
@@ -267,6 +282,79 @@ mod tests {
 
         // Fourth request should fail (rate limit exceeded)
         assert!(manager.record_request("client1").await.is_err());
+    }
+
+    /// Re-registering an existing client (e.g. it opened a second
+    /// connection, or reconnected for the next request) must NOT reset its
+    /// rolling request window. Regression guard: when `register_connection`
+    /// overwrote the entry, a client could defeat the rate limit entirely by
+    /// reconnecting between requests, and a sibling connection would wipe the
+    /// accumulated history of an open one.
+    #[tokio::test]
+    async fn reregistering_a_client_preserves_its_rate_window() {
+        let limits = ResourceLimits {
+            max_requests_per_minute: 3,
+            max_requests_per_hour: 10,
+            ..Default::default()
+        };
+        let manager = ResourceManager::with_limits(limits);
+
+        manager
+            .register_connection("client1".to_string(), None)
+            .await
+            .unwrap();
+
+        // Consume the whole per-minute budget on the first connection.
+        for _ in 0..3 {
+            assert!(manager.record_request("client1").await.is_ok());
+        }
+
+        // A second connection for the same client_id (re-registration) must
+        // be a no-op that keeps the existing window — not a fresh start.
+        manager
+            .register_connection("client1".to_string(), None)
+            .await
+            .unwrap();
+
+        // So the next request is still over quota. Before the fix this
+        // reset the count and erroneously returned Ok.
+        assert!(
+            manager.record_request("client1").await.is_err(),
+            "re-registration must not hand the client a fresh rate-limit budget"
+        );
+    }
+
+    /// Re-registration is also exempt from the connection cap: an existing
+    /// client that reconnects while the table is full is still allowed,
+    /// since it's already counted. (A genuinely new client at the cap is
+    /// rejected — covered by `test_connection_limiting`.)
+    #[tokio::test]
+    async fn reregistering_at_capacity_is_allowed() {
+        let limits = ResourceLimits {
+            max_connections: 1,
+            ..Default::default()
+        };
+        let manager = ResourceManager::with_limits(limits);
+
+        manager
+            .register_connection("client1".to_string(), None)
+            .await
+            .unwrap();
+        // Table is full, but re-registering the SAME client must succeed.
+        assert!(
+            manager
+                .register_connection("client1".to_string(), None)
+                .await
+                .is_ok(),
+            "an already-registered client must not be rejected by the cap"
+        );
+        // A different client at capacity is still rejected.
+        assert!(
+            manager
+                .register_connection("client2".to_string(), None)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
