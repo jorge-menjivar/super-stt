@@ -4,7 +4,7 @@
 //! Structure, field names, requiredness, enums, and descriptions are derived
 //! from the Rust types. Two things are injected here because no struct can
 //! express them: cross-field conditionals (kind→assets shape, accel→cuda
-//! fields, files.source→repo/url) and `additionalProperties: false` (the
+//! fields) and `additionalProperties: false` (the
 //! parsers stay lenient for forward compatibility; the editor schema is
 //! strict to catch typos). Draft-07 output for taplo compatibility.
 
@@ -138,20 +138,8 @@ pub fn backend_schema() -> Value {
             } }
         }),
     );
-    let files = defs.get_mut("FilesSpec").expect("FilesSpec def");
-    push_all_of(
-        files,
-        json!({
-            "if": {
-                "required": ["source"],
-                "properties": { "source": { "const": "url" } }
-            },
-            "then": { "required": ["url"] },
-            // source omitted defaults to huggingface, so the hf requirements
-            // can't hinge on the key's presence — they're the else branch.
-            "else": { "required": ["repo", "files"] }
-        }),
-    );
+    // `FileSpec` is flat — `url` and `destination` are required by serde and
+    // `sha256` is optional, so no cross-field conditional is needed here.
 
     // `supported_devices` must be non-empty (discovery rejects an empty
     // list); serde can't express minItems, so inject it here.

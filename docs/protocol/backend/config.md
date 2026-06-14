@@ -274,28 +274,39 @@ contradiction and the manifest is rejected.
 
 ### `[[models.files]]`
 
-Files a model needs, and where to place them. Each entry is one download
-group. The daemon fetches the files into `dest` (relative to the backend
-directory) before calling `POST /v1/load`. Cloud models declare no files.
+The files a model needs, and where to place them. `files` is an array in which
+each entry describes **one file**: a download URL and the path to write it to.
+The daemon fetches every file before calling `POST /v1/load`. Files are fetched
+the same way regardless of host — no source is given special treatment. Cloud
+models declare no files.
+
+Written compactly as an inline-table array on the model:
+
+```toml
+files = [
+    { url = "https://huggingface.co/openai/whisper-tiny/resolve/main/config.json",
+      destination = "models/whisper-tiny/config.json" },
+    { url = "https://huggingface.co/openai/whisper-tiny/resolve/main/model.safetensors",
+      destination = "models/whisper-tiny/model.safetensors", sha256 = "9f86d0…" },
+]
+```
+
+The block form is identical TOML and may be used instead:
 
 ```toml
 [[models.files]]
-source   = "huggingface"
-repo     = "openai/whisper-tiny"
-revision = "main"
-files    = ["config.json", "tokenizer.json", "model.safetensors"]
-dest     = "models/whisper-tiny"
+url         = "https://huggingface.co/openai/whisper-tiny/resolve/main/config.json"
+destination = "models/whisper-tiny/config.json"
 ```
 
-| Field      | Type            | Required | Notes                                                              |
-|------------|-----------------|----------|--------------------------------------------------------------------|
-| `source`   | string          | no       | `huggingface` (default) or `url`.                                  |
-| `repo`     | string          | for `huggingface` | Hugging Face repo id, e.g. `openai/whisper-tiny`.         |
-| `revision` | string          | no       | Hugging Face revision; default `main`.                             |
-| `url`      | string          | for `url` | Direct download URL for a single file.                            |
-| `files`    | array of string | for `huggingface` | Filenames to fetch from the repo.                         |
-| `dest`     | string          | yes      | Directory, relative to the backend dir, to place the files in.     |
-| `sha256`   | string          | no       | Expected SHA-256 for integrity verification.                       |
+| Field         | Type   | Required | Notes                                                                |
+|---------------|--------|----------|---------------------------------------------------------------------|
+| `url`         | string | yes      | Full download URL for the file. Any host.                            |
+| `destination` | string | yes      | Relative file path (including filename) under the backend directory. |
+| `sha256`      | string | no       | Expected SHA-256, hex-encoded; verified after download.              |
+
+`destination` must be a relative path that stays inside the backend directory:
+absolute paths, `..` traversal, and backslashes are rejected.
 
 ## Example: local backend (subprocess)
 
@@ -325,13 +336,14 @@ supported_languages    = ["en", "es", "fr", "de", "zh"]  # abbreviated
 supported_devices      = ["cpu", "cuda"]
 estimated_vram_bytes   = 262144000
 processing_interval_ms = 1000
-
-[[models.files]]
-source   = "huggingface"
-repo     = "openai/whisper-tiny"
-revision = "main"
-files    = ["config.json", "tokenizer.json", "model.safetensors"]
-dest     = "models/whisper-tiny"
+files = [
+    { url = "https://huggingface.co/openai/whisper-tiny/resolve/main/config.json",
+      destination = "models/whisper-tiny/config.json" },
+    { url = "https://huggingface.co/openai/whisper-tiny/resolve/main/tokenizer.json",
+      destination = "models/whisper-tiny/tokenizer.json" },
+    { url = "https://huggingface.co/openai/whisper-tiny/resolve/main/model.safetensors",
+      destination = "models/whisper-tiny/model.safetensors" },
+]
 
 [[models]]
 name                   = "voxtral-mini"
@@ -345,17 +357,16 @@ processing_interval_ms = 2000
 
 # Voxtral ships tekken.json instead of tokenizer.json, and multi-shard
 # weights.
-[[models.files]]
-source   = "huggingface"
-repo     = "mistralai/Voxtral-Mini-3B-2507"
-revision = "main"
-files    = [
-    "config.json",
-    "tekken.json",
-    "model-00001-of-00002.safetensors",
-    "model-00002-of-00002.safetensors",
+files = [
+    { url = "https://huggingface.co/mistralai/Voxtral-Mini-3B-2507/resolve/main/config.json",
+      destination = "models/voxtral-mini/config.json" },
+    { url = "https://huggingface.co/mistralai/Voxtral-Mini-3B-2507/resolve/main/tekken.json",
+      destination = "models/voxtral-mini/tekken.json" },
+    { url = "https://huggingface.co/mistralai/Voxtral-Mini-3B-2507/resolve/main/model-00001-of-00002.safetensors",
+      destination = "models/voxtral-mini/model-00001-of-00002.safetensors" },
+    { url = "https://huggingface.co/mistralai/Voxtral-Mini-3B-2507/resolve/main/model-00002-of-00002.safetensors",
+      destination = "models/voxtral-mini/model-00002-of-00002.safetensors" },
 ]
-dest     = "models/voxtral-mini"
 ```
 
 ## Example: cloud backend (WASM)

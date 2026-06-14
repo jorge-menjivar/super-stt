@@ -93,15 +93,15 @@ impl SuperSTTDaemon {
         device_pref: &str,
     ) -> Result<Box<dyn Transcribe>> {
         // Count the files we'll provision so the tracker's denominator is
-        // accurate from the first broadcast (vs. growing as we discover more
-        // `[[models.files]]` blocks). Empty-files models (cloud-only) skip
-        // the tracker entirely — there is nothing to download.
+        // accurate from the first broadcast. Each `[[models.files]]` entry is
+        // one file. Empty-files models (cloud-only) skip the tracker entirely —
+        // there is nothing to download.
         let manifest = crate::stt_models::backends::manifest::Manifest::load(&backend.dir)?;
         let total_files = manifest
             .models
             .iter()
             .find(|m| m.name == name)
-            .map_or(0, |m| m.files.iter().map(|s| s.files.len()).sum::<usize>());
+            .map_or(0, |m| m.files.len());
 
         let tracker = if total_files == 0 {
             None

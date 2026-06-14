@@ -23,13 +23,11 @@
     supported_devices      = ["cpu", "cuda"]
     estimated_vram_bytes   = 1073741824
     processing_interval_ms = 1000
-
-    [[models.files]]
-        source   = "huggingface"
-        repo     = "openai/whisper-tiny"
-        revision = "main"
-        files    = ["config.json", "tokenizer.json", "model.safetensors"]
-        dest     = "models/whisper-tiny"
+    files = [
+        { url = "https://huggingface.co/openai/whisper-tiny/resolve/main/config.json", destination = "models/whisper-tiny/config.json" },
+        { url = "https://huggingface.co/openai/whisper-tiny/resolve/main/tokenizer.json", destination = "models/whisper-tiny/tokenizer.json" },
+        { url = "https://huggingface.co/openai/whisper-tiny/resolve/main/model.safetensors", destination = "models/whisper-tiny/model.safetensors" },
+    ]
 
 [[models]]
     name                   = "whisper-tiny.en"
@@ -40,13 +38,11 @@
     supported_devices      = ["cpu", "cuda"]
     estimated_vram_bytes   = 1073741824
     processing_interval_ms = 1000
-
-    [[models.files]]
-        source   = "huggingface"
-        repo     = "openai/whisper-tiny.en"
-        revision = "main"
-        files    = ["config.json", "tokenizer.json", "model.safetensors"]
-        dest     = "models/whisper-tiny.en"
+    files = [
+        { url = "https://huggingface.co/openai/whisper-tiny.en/resolve/main/config.json", destination = "models/whisper-tiny.en/config.json" },
+        { url = "https://huggingface.co/openai/whisper-tiny.en/resolve/main/tokenizer.json", destination = "models/whisper-tiny.en/tokenizer.json" },
+        { url = "https://huggingface.co/openai/whisper-tiny.en/resolve/main/model.safetensors", destination = "models/whisper-tiny.en/model.safetensors" },
+    ]
 
 [[models]]
     name                   = "whisper-base"
@@ -57,13 +53,11 @@
     supported_devices      = ["cpu", "cuda"]
     estimated_vram_bytes   = 1073741824
     processing_interval_ms = 1500
-
-    [[models.files]]
-        source   = "huggingface"
-        repo     = "openai/whisper-base"
-        revision = "main"
-        files    = ["config.json", "tokenizer.json", "model.safetensors"]
-        dest     = "models/whisper-base"
+    files = [
+        { url = "https://huggingface.co/openai/whisper-base/resolve/main/config.json", destination = "models/whisper-base/config.json" },
+        { url = "https://huggingface.co/openai/whisper-base/resolve/main/tokenizer.json", destination = "models/whisper-base/tokenizer.json" },
+        { url = "https://huggingface.co/openai/whisper-base/resolve/main/model.safetensors", destination = "models/whisper-base/model.safetensors" },
+    ]
 
 [[models]]
     name                   = "whisper-base.en"
@@ -74,13 +68,11 @@
     supported_devices      = ["cpu", "cuda"]
     estimated_vram_bytes   = 1073741824
     processing_interval_ms = 1500
-
-    [[models.files]]
-        source   = "huggingface"
-        repo     = "openai/whisper-base.en"
-        revision = "main"
-        files    = ["config.json", "tokenizer.json", "model.safetensors"]
-        dest     = "models/whisper-base.en"
+    files = [
+        { url = "https://huggingface.co/openai/whisper-base.en/resolve/main/config.json", destination = "models/whisper-base.en/config.json" },
+        { url = "https://huggingface.co/openai/whisper-base.en/resolve/main/tokenizer.json", destination = "models/whisper-base.en/tokenizer.json" },
+        { url = "https://huggingface.co/openai/whisper-base.en/resolve/main/model.safetensors", destination = "models/whisper-base.en/model.safetensors" },
+    ]
 
 [[models]]
     name                   = "whisper-small"
@@ -91,13 +83,11 @@
     supported_devices      = ["cpu", "cuda"]
     estimated_vram_bytes   = 2147483648
     processing_interval_ms = 2000
-
-    [[models.files]]
-        source   = "huggingface"
-        repo     = "openai/whisper-small"
-        revision = "main"
-        files    = ["config.json", "tokenizer.json", "model.safetensors"]
-        dest     = "models/whisper-small"
+    files = [
+        { url = "https://huggingface.co/openai/whisper-small/resolve/main/config.json", destination = "models/whisper-small/config.json" },
+        { url = "https://huggingface.co/openai/whisper-small/resolve/main/tokenizer.json", destination = "models/whisper-small/tokenizer.json" },
+        { url = "https://huggingface.co/openai/whisper-small/resolve/main/model.safetensors", destination = "models/whisper-small/model.safetensors" },
+    ]
 
 [[models]]
     name                   = "whisper-small.en"
@@ -108,13 +98,11 @@
     supported_devices      = ["cpu", "cuda"]
     estimated_vram_bytes   = 2147483648
     processing_interval_ms = 2000
-
-    [[models.files]]
-        source   = "huggingface"
-        repo     = "openai/whisper-small.en"
-        revision = "main"
-        files    = ["config.json", "tokenizer.json", "model.safetensors"]
-        dest     = "models/whisper-small.en"
+    files = [
+        { url = "https://huggingface.co/openai/whisper-small.en/resolve/main/config.json", destination = "models/whisper-small.en/config.json" },
+        { url = "https://huggingface.co/openai/whisper-small.en/resolve/main/tokenizer.json", destination = "models/whisper-small.en/tokenizer.json" },
+        { url = "https://huggingface.co/openai/whisper-small.en/resolve/main/model.safetensors", destination = "models/whisper-small.en/model.safetensors" },
+    ]
 
 [[models]]
     name                   = "whisper-medium"
@@ -125,13 +113,11 @@
     supported_devices      = ["cpu", "cuda"]
     estimated_vram_bytes   = 5368709120
     processing_interval_ms = 2000
-
-    [[models.files]]
-        source   = "huggingface"
-        repo     = "openai/whisper-medium"
-        revision = "main"
-        files    = ["config.json", "tokenizer.json", "model.safetensors"]
-        dest     = "models/whisper-medium"
+    files = [
+        { url = "https://huggingface.co/openai/whisper-medium/resolve/main/config.json", destination = "models/whisper-medium/config.json" },
+        { url = "https://huggingface.co/openai/whisper-medium/resolve/main/tokenizer.json", destination = "models/whisper-medium/tokenizer.json" },
+        { url = "https://huggingface.co/openai/whisper-medium/resolve/main/model.safetensors", destination = "models/whisper-medium/model.safetensors" },
+    ]
 
 [[models]]
     name                   = "whisper-medium.en"
@@ -142,13 +128,11 @@
     supported_devices      = ["cpu", "cuda"]
     estimated_vram_bytes   = 5368709120
     processing_interval_ms = 2000
-
-    [[models.files]]
-        source   = "huggingface"
-        repo     = "openai/whisper-medium.en"
-        revision = "main"
-        files    = ["config.json", "tokenizer.json", "model.safetensors"]
-        dest     = "models/whisper-medium.en"
+    files = [
+        { url = "https://huggingface.co/openai/whisper-medium.en/resolve/main/config.json", destination = "models/whisper-medium.en/config.json" },
+        { url = "https://huggingface.co/openai/whisper-medium.en/resolve/main/tokenizer.json", destination = "models/whisper-medium.en/tokenizer.json" },
+        { url = "https://huggingface.co/openai/whisper-medium.en/resolve/main/model.safetensors", destination = "models/whisper-medium.en/model.safetensors" },
+    ]
 
 [[models]]
     name                   = "whisper-large"
@@ -159,10 +143,8 @@
     supported_devices      = ["cpu", "cuda"]
     estimated_vram_bytes   = 10737418240
     processing_interval_ms = 5000
-
-    [[models.files]]
-        source   = "huggingface"
-        repo     = "openai/whisper-large"
-        revision = "main"
-        files    = ["config.json", "tokenizer.json", "model.safetensors"]
-        dest     = "models/whisper-large"
+    files = [
+        { url = "https://huggingface.co/openai/whisper-large/resolve/main/config.json", destination = "models/whisper-large/config.json" },
+        { url = "https://huggingface.co/openai/whisper-large/resolve/main/tokenizer.json", destination = "models/whisper-large/tokenizer.json" },
+        { url = "https://huggingface.co/openai/whisper-large/resolve/main/model.safetensors", destination = "models/whisper-large/model.safetensors" },
+    ]

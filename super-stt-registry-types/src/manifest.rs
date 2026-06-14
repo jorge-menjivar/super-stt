@@ -331,10 +331,10 @@ pub struct ModelEntry {
     /// `[capabilities] websocket = true`. Default `false`.
     #[serde(default)]
     pub realtime: bool,
-    /// Files the model needs, provisioned into `dest` before
-    /// `POST /v1/load`. Cloud models declare none.
+    /// Files the model needs, each provisioned to its own `destination`
+    /// before `POST /v1/load`. Cloud models declare none.
     #[serde(default)]
-    pub files: Vec<FilesSpec>,
+    pub files: Vec<FileSpec>,
 }
 
 impl ModelEntry {
@@ -387,54 +387,28 @@ impl std::str::FromStr for Device {
     }
 }
 
-/// One `[[models.files]]` download group.
+/// One `[[models.files]]` entry: a single file to download and where to put it.
+///
+/// Source-agnostic — a file is just a URL, fetched the same way regardless of
+/// host. Hugging Face is reached by writing its plain resolve URL, with no
+/// special treatment.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct FilesSpec {
-    /// Where the files come from. Default `huggingface`.
-    #[serde(default)]
-    pub source: FileSource,
-    /// Hugging Face repo id, e.g. `openai/whisper-tiny`. Required when
-    /// `source = "huggingface"`.
-    #[serde(default)]
-    pub repo: String,
-    /// Hugging Face revision. Default `main`.
-    #[serde(default = "default_revision")]
-    pub revision: String,
-    /// Filenames to fetch from the repo. Required when
-    /// `source = "huggingface"`.
-    #[serde(default)]
-    pub files: Vec<String>,
-    /// Direct download URL for a single file. Required when
-    /// `source = "url"`.
-    #[serde(default)]
-    pub url: Option<String>,
-    /// Directory, relative to the backend dir, to place the files in
-    /// (e.g. `models/whisper-tiny`).
-    pub dest: String,
-    /// Expected SHA-256 of the downloaded file, for integrity verification.
+pub struct FileSpec {
+    /// Full download URL for this file, e.g.
+    /// `https://huggingface.co/openai/whisper-tiny/resolve/main/config.json`.
+    pub url: String,
+    /// Relative file path (including filename) under the backend directory to
+    /// write the download to, e.g. `models/whisper-tiny/config.json`.
+    /// Validated as a safe relative path so it cannot escape the backend dir.
+    pub destination: String,
+    /// Expected SHA-256 of the file, hex-encoded, for integrity verification.
     #[serde(default)]
     pub sha256: Option<String>,
 }
 
-/// Source of a `[[models.files]]` download group.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum FileSource {
-    /// Fetch `files` from the Hugging Face repo `repo` at `revision`.
-    #[default]
-    Huggingface,
-    /// Fetch a single file from `url`.
-    Url,
-}
-
 fn default_true() -> bool {
     true
-}
-
-fn default_revision() -> String {
-    "main".to_string()
 }
 
 /// Errors from reading/parsing a `backend.toml`.
@@ -463,6 +437,9 @@ pub enum ManifestError {
     /// The `entrypoint` field is not a safe relative path.
     #[error("backend.toml entrypoint {0:?} is not a safe relative path")]
     UnsafeEntrypoint(String),
+    /// A `[[models.files]]` `destination` is not a safe relative path.
+    #[error("backend.toml file destination {0:?} is not a safe relative path")]
+    UnsafeDestination(String),
 }
 
 impl Manifest {
@@ -478,6 +455,16 @@ impl Manifest {
         let m: Self = toml::from_str(text)?;
         if !crate::is_safe_relative_path(&m.backend.entrypoint) {
             return Err(ManifestError::UnsafeEntrypoint(m.backend.entrypoint));
+        }
+        // Each file's `destination` is joined onto the backend dir before the
+        // daemon writes the download; reject any value that would escape it.
+        // The guard lives in the canonical parser so every consumer inherits it.
+        for model in &m.models {
+            for file in &model.files {
+                if !crate::is_safe_relative_path(&file.destination) {
+                    return Err(ManifestError::UnsafeDestination(file.destination.clone()));
+                }
+            }
         }
         Ok(m)
     }
@@ -670,7 +657,10 @@ mod tests {
     }
 
     #[test]
-    fn files_spec_defaults_and_url_fields() {
+    fn file_spec_parses_inline_and_block_forms() {
+        // The inline-table array and the `[[models.files]]` block form are the
+        // same TOML structure; exercise both (on separate models — TOML forbids
+        // mixing the two for one key).
         let m = Manifest::parse(
             r#"
             [backend]
@@ -682,31 +672,70 @@ mod tests {
             contract = "v1"
 
             [[models]]
-            name = "m"
+            name = "m1"
+            provider = "local_whisper"
+            primary_language = "en"
+            supported_languages = ["en"]
+            supported_devices = ["cpu"]
+            files = [
+                { url = "https://example.com/config.json", destination = "models/m1/config.json" },
+            ]
+
+            [[models]]
+            name = "m2"
             provider = "local_whisper"
             primary_language = "en"
             supported_languages = ["en"]
             supported_devices = ["cpu"]
 
             [[models.files]]
-            repo = "openai/whisper-tiny"
-            files = ["model.safetensors"]
-            dest = "models/m"
-
-            [[models.files]]
-            source = "url"
-            url = "https://example.com/extra.bin"
-            sha256 = "ab"
-            dest = "models/m"
+            url = "https://huggingface.co/openai/whisper-tiny/resolve/main/model.safetensors"
+            destination = "models/m2/model.safetensors"
+            sha256 = "abc123"
             "#,
         )
         .unwrap();
-        let f = &m.models[0].files[0];
-        assert_eq!(f.source, FileSource::Huggingface);
-        assert_eq!(f.revision, "main");
-        let g = &m.models[0].files[1];
-        assert_eq!(g.source, FileSource::Url);
-        assert_eq!(g.url.as_deref(), Some("https://example.com/extra.bin"));
+        let inline = &m.models[0].files[0];
+        assert_eq!(inline.url, "https://example.com/config.json");
+        assert_eq!(inline.destination, "models/m1/config.json");
+        assert!(inline.sha256.is_none());
+        let block = &m.models[1].files[0];
+        assert_eq!(block.destination, "models/m2/model.safetensors");
+        assert_eq!(block.sha256.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn rejects_unsafe_destination() {
+        let manifest = |dest: &str| {
+            format!(
+                r#"
+                [backend]
+                source = "github.com/x/y"
+                name = "Y"
+                version = "1.0.0"
+                kind = "subprocess"
+                entrypoint = "y"
+                contract = "v1"
+
+                [[models]]
+                name = "m"
+                provider = "local_whisper"
+                primary_language = "en"
+                supported_languages = ["en"]
+                supported_devices = ["cpu"]
+                files = [{{ url = "https://example.com/x", destination = "{dest}" }}]
+                "#
+            )
+        };
+        for bad in ["../escape", "/abs/path", "a/../b", "models/"] {
+            let err = Manifest::parse(&manifest(bad)).unwrap_err();
+            assert!(
+                matches!(err, ManifestError::UnsafeDestination(_)),
+                "destination {bad:?} should be rejected, got {err}"
+            );
+        }
+        // A nested relative path is accepted.
+        Manifest::parse(&manifest("models/m/model.safetensors")).expect("safe nested path");
     }
 
     #[test]

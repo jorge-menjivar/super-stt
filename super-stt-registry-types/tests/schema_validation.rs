@@ -126,12 +126,20 @@ fn rejects_contract_violations() {
                 "supported_devices": ["none"] }]);
             d
         }),
-        ("huggingface files without repo/files", {
+        ("file missing url", {
             let mut d = wasm_base();
             d["models"] = json!([{ "name": "m", "provider": "openai",
                 "primary_language": "en", "supported_languages": ["en"],
                 "supported_devices": ["none"],
-                "files": [{ "source": "huggingface", "dest": "models/m" }] }]);
+                "files": [{ "destination": "models/m/config.json" }] }]);
+            d
+        }),
+        ("file missing destination", {
+            let mut d = wasm_base();
+            d["models"] = json!([{ "name": "m", "provider": "openai",
+                "primary_language": "en", "supported_languages": ["en"],
+                "supported_devices": ["none"],
+                "files": [{ "url": "https://example.com/config.json" }] }]);
             d
         }),
         ("unknown top-level table", {
@@ -227,11 +235,11 @@ fn conditional_property_names_exist() {
             "SubprocessAsset missing `{key}`"
         );
     }
-    let files_props = defs["FilesSpec"]["properties"]
+    let files_props = defs["FileSpec"]["properties"]
         .as_object()
-        .expect("FilesSpec properties");
-    for key in ["source", "url", "repo", "files", "dest"] {
-        assert!(files_props.contains_key(key), "FilesSpec missing `{key}`");
+        .expect("FileSpec properties");
+    for key in ["url", "destination", "sha256"] {
+        assert!(files_props.contains_key(key), "FileSpec missing `{key}`");
     }
     let backend_props = defs["BackendMeta"]["properties"]
         .as_object()
@@ -291,4 +299,18 @@ fn allows_documented_optionals() {
         { "file": "y.tgz", "target": "t", "accel": "cuda", "cuda_major": 13 }
     ]);
     assert!(v.is_valid(&wildcard), "wildcard cuda_sm must validate");
+    // Model files: each entry is url + destination, with an optional sha256.
+    let mut with_files = sub_base();
+    with_files["models"] = json!([{ "name": "m", "provider": "local_whisper",
+        "primary_language": "en", "supported_languages": ["en"],
+        "supported_devices": ["cpu"],
+        "files": [
+            { "url": "https://example.com/config.json", "destination": "models/m/config.json" },
+            { "url": "https://example.com/model.safetensors",
+              "destination": "models/m/model.safetensors", "sha256": "abc123" }
+        ] }]);
+    assert!(
+        v.is_valid(&with_files),
+        "model files with url/destination/sha256 must validate"
+    );
 }

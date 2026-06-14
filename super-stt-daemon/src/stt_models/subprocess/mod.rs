@@ -23,7 +23,7 @@ use tokio::net::UnixStream;
 
 use super_stt_shared::utils::audio::{ResampleQuality, resample};
 
-use crate::stt_models::backends::manifest::{FileSource, Manifest};
+use crate::stt_models::backends::manifest::Manifest;
 use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
 
 const SAMPLE_RATE: u32 = 16000;
@@ -62,37 +62,28 @@ impl SubprocessBackend {
             .ok_or_else(|| anyhow!("model {model_name} not declared in backend.toml"))?;
 
         // Provision ONLY the selected model's files (lazy per model). The
-        // tracker (when present) reports per-file and per-byte progress
-        // through `DownloadStateManager` so the settings app's progress bar
-        // updates in real time. A shared file-index counter spans multiple
-        // `[[models.files]]` blocks; pass it as `starting_file_index` so the
-        // counter stays monotonic across blocks.
-        let mut file_offset = 0usize;
-        for spec in &model.files {
-            match spec.source {
-                FileSource::Url => anyhow::bail!(
-                    "model {model_name}: [[models.files]] source = \"url\" is not supported yet"
-                ),
-                FileSource::Huggingface => {}
-            }
-            let dest_dir = backend_dir.join(&spec.dest);
-            info!(
-                "provisioning {model_name}: {} files -> {}",
-                spec.files.len(),
-                dest_dir.display()
-            );
-            crate::stt_models::download::download_files_to_dir(
-                &spec.repo,
-                &spec.revision,
-                &spec.files,
-                &dest_dir,
-                tracker,
-                file_offset,
-            )
+        // tracker (when present) reports per-file and per-byte progress through
+        // `DownloadStateManager` so the settings app's progress bar updates in
+        // real time. Each file carries its own URL and destination; `parse`
+        // already validated every `destination` as a safe relative path, so the
+        // join below cannot escape the backend dir.
+        let items: Vec<_> = model
+            .files
+            .iter()
+            .map(|spec| crate::stt_models::download::DownloadItem {
+                url: spec.url.clone(),
+                destination: backend_dir.join(&spec.destination),
+                sha256: spec.sha256.clone(),
+            })
+            .collect();
+        info!(
+            "provisioning {model_name}: {} files into {}",
+            items.len(),
+            backend_dir.display()
+        );
+        crate::stt_models::download::download_files(&items, tracker, 0)
             .await
             .with_context(|| format!("provisioning {model_name}"))?;
-            file_offset += spec.files.len();
-        }
 
         // All files are on disk. Spawning the sandboxed unit and loading
         // weights onto the device is the slow tail (tens of seconds for a
