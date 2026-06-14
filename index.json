@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-14T18:30:53Z",
+  "generated_at": "2026-06-14T20:23:40Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -160,6 +160,12 @@
             "sha256": "1784e6e9337a7516da11bc197c1d5913883911ee109307aeac6e4b7d76341943"
           }
         ]
+      },
+      "index_stale": {
+        "latest_attempted": "0.1.0",
+        "tag": "v0.1.0",
+        "error": "TOML parse error: TOML parse error at line 122, column 9\n    |\n122 |         { url = \"https://huggingface.co/mistralai/Voxtral-Mini-3B-2507/resolve/main/config.json\", destination = \"models/voxtral-mini/config.json\" },\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nmissing field `dest`\n",
+        "since": "2026-06-14T20:23:40Z"
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/backend.toml",
