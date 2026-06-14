@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-13T18:30:48Z",
+  "generated_at": "2026-06-14T00:47:44Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -41,8 +41,8 @@
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cpu",
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 3321436,
-            "sha256": "b79d1cf127d0a8b21f5dea7e488a04ae9e2a0810a132a4897cb141a819479fa9"
+            "size": 3321407,
+            "sha256": "82ec2522832b6dc2461a81e24429cb5e46c988d584217b04b0d06744cf855286"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -50,8 +50,8 @@
             "cuda_major": 12,
             "cuda_sm": 75,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda12-sm75.tar.gz",
-            "size": 5152714,
-            "sha256": "a853f79a334f3301f32ba052195b116decdfe6f2e69f958713b9c63e77743c71"
+            "size": 5151991,
+            "sha256": "30742384705381ba2b0626c3c074022af63ea0329640137311fc5ba0f87e8f32"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -59,8 +59,8 @@
             "cuda_major": 12,
             "cuda_sm": 80,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda12-sm80.tar.gz",
-            "size": 5850350,
-            "sha256": "e67f7240be23df7eacc080d2a33607a8fd9c79ddfc674526096867bf899255fa"
+            "size": 5849721,
+            "sha256": "5da35a0801c8cff2cf975485b0755e385db2a346cb0e404608950f7f974895a9"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -68,8 +68,8 @@
             "cuda_major": 12,
             "cuda_sm": 86,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda12-sm86.tar.gz",
-            "size": 5869908,
-            "sha256": "07bb059c05e5d78df1e5523f3fc4781fcc6bafc5590fe811cf3eb724ee1d322d"
+            "size": 5869802,
+            "sha256": "65b7d39164f9525a7744addd4458f4d66169b497aa2c07bab35b69da2a814293"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -77,8 +77,8 @@
             "cuda_major": 12,
             "cuda_sm": 89,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda12-sm89.tar.gz",
-            "size": 5645177,
-            "sha256": "15e9ffd767ff12b4dcc5fd0bb6cca84e3b0d06a9bd98139a596e322f8882d191"
+            "size": 5644956,
+            "sha256": "90c90e1af38fb31b50725ee5e16d2254b6de2ed64cd866203e71992c2bc7a04d"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -86,8 +86,8 @@
             "cuda_major": 12,
             "cuda_sm": 90,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda12-sm90.tar.gz",
-            "size": 5616490,
-            "sha256": "a00ed3f5d488e020197c5ad1989e90c0b508d2ecb8dc086aad035e310481edff"
+            "size": 5616488,
+            "sha256": "ef93050ce9be405e006c11020a8bbd346c6ca85d662995c91b7446f883c57eb4"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -95,8 +95,8 @@
             "cuda_major": 13,
             "cuda_sm": 75,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda13-sm75.tar.gz",
-            "size": 5150753,
-            "sha256": "fb5308651734a04cfa8f7e37347709676ab4a594236db2c140b599ab44f6a231"
+            "size": 5150638,
+            "sha256": "b06b7f77bbc0d94f52806d5d0953f18b74c94ee94c62a4b574694e27e08284c4"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -104,8 +104,8 @@
             "cuda_major": 13,
             "cuda_sm": 80,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda13-sm80.tar.gz",
-            "size": 5846449,
-            "sha256": "c3f951d20c0324dc4a0c0ad36f37e961d4ade5045366d1c08692ff7eddc07cab"
+            "size": 5845849,
+            "sha256": "3f4da0c09e77fb0efd00e49962f3dc874b848d6af2164e97d19295744816b1c7"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -113,8 +113,8 @@
             "cuda_major": 13,
             "cuda_sm": 86,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda13-sm86.tar.gz",
-            "size": 5866671,
-            "sha256": "f41f4ccd09d03fdf03ab00bb455faffb9c81502b4a4feb58cc9ef43d7f67ffc0"
+            "size": 5866432,
+            "sha256": "5ebce40625a11c88ae27487a0b0863db19aba321a2c99d3139f9445104f3b3a2"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -122,8 +122,8 @@
             "cuda_major": 13,
             "cuda_sm": 89,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda13-sm89.tar.gz",
-            "size": 5640626,
-            "sha256": "511e08b097c565f143f746e4f7d0f5bfbf5285f1d8cf8f8651ed74892f132459"
+            "size": 5640170,
+            "sha256": "14fb2e53b07cc2f234125e67f5d5af7547533ecd12d0f98d8bbfbb021521001b"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -131,8 +131,8 @@
             "cuda_major": 13,
             "cuda_sm": 90,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda13-sm90.tar.gz",
-            "size": 5616426,
-            "sha256": "99a98935275560737d450bd4a3d337e95357bff7fd12c35cdd121219cb56834e"
+            "size": 5615743,
+            "sha256": "33c0c8d9d166ea068d71d7144e1dca5993b54993937887eb7f3cd5075f23e4ad"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -140,8 +140,8 @@
             "cuda_major": 13,
             "cuda_sm": 100,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda13-sm100.tar.gz",
-            "size": 8449116,
-            "sha256": "222481e2a3429d71a24c87d2c0855ef2f9dd3397b16c8b6df0b2c0628a400c6b"
+            "size": 8448519,
+            "sha256": "7000248ceeed935cfc6cb786982e8b54b10bb4bc6bf5a72d8477eb7ee80e2c64"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -149,17 +149,22 @@
             "cuda_major": 13,
             "cuda_sm": 120,
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-x86_64-unknown-linux-gnu-cuda13-sm120.tar.gz",
-            "size": 8448677,
-            "sha256": "aae8eb70e8f2cd1dfe4abbbd522a9a8e5fb3473bc1e865f7b6e93bf7e368b79a"
+            "size": 8448641,
+            "sha256": "64c1e13b8a7793122d560731303699b7c032e85163a18eb3725932ce6acc8f2e"
           },
           {
             "target": "aarch64-unknown-linux-gnu",
             "accel": "cpu",
             "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/voxtral-aarch64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 2781215,
-            "sha256": "cef58ecf6202af0c3ee1192d84c1a0c0e316c5d120cd32c95054e1132486ad56"
+            "size": 2780155,
+            "sha256": "1784e6e9337a7516da11bc197c1d5913883911ee109307aeac6e4b7d76341943"
           }
         ]
+      },
+      "manifest": {
+        "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/backend.toml",
+        "size": 4842,
+        "sha256": "0c51abb8210713ce92f79c454996e2007d09a8fd170afb472de109327c8a8d1e"
       }
     }
   ]
