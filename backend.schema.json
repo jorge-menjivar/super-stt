@@ -406,100 +406,30 @@
         }
       ]
     },
-    "FileSource": {
-      "description": "Source of a `[[models.files]]` download group.",
-      "oneOf": [
-        {
-          "const": "huggingface",
-          "description": "Fetch `files` from the Hugging Face repo `repo` at `revision`.",
-          "type": "string"
-        },
-        {
-          "const": "url",
-          "description": "Fetch a single file from `url`.",
-          "type": "string"
-        }
-      ]
-    },
-    "FilesSpec": {
+    "FileSpec": {
       "additionalProperties": false,
-      "allOf": [
-        {
-          "else": {
-            "required": [
-              "repo",
-              "files"
-            ]
-          },
-          "if": {
-            "properties": {
-              "source": {
-                "const": "url"
-              }
-            },
-            "required": [
-              "source"
-            ]
-          },
-          "then": {
-            "required": [
-              "url"
-            ]
-          }
-        }
-      ],
-      "description": "One `[[models.files]]` download group.",
+      "description": "One `[[models.files]]` entry: a single file to download and where to put it.\n\nSource-agnostic — a file is just a URL, fetched the same way regardless of\nhost. Hugging Face is reached by writing its plain resolve URL, with no\nspecial treatment.",
       "properties": {
-        "dest": {
-          "description": "Directory, relative to the backend dir, to place the files in\n(e.g. `models/whisper-tiny`).",
-          "type": "string"
-        },
-        "files": {
-          "default": [],
-          "description": "Filenames to fetch from the repo. Required when\n`source = \"huggingface\"`.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "repo": {
-          "default": "",
-          "description": "Hugging Face repo id, e.g. `openai/whisper-tiny`. Required when\n`source = \"huggingface\"`.",
-          "type": "string"
-        },
-        "revision": {
-          "default": "main",
-          "description": "Hugging Face revision. Default `main`.",
+        "destination": {
+          "description": "Relative file path (including filename) under the backend directory to\nwrite the download to, e.g. `models/whisper-tiny/config.json`.\nValidated as a safe relative path so it cannot escape the backend dir.",
           "type": "string"
         },
         "sha256": {
           "default": null,
-          "description": "Expected SHA-256 of the downloaded file, for integrity verification.",
+          "description": "Expected SHA-256 of the file, hex-encoded, for integrity verification.",
           "type": [
             "string",
             "null"
           ]
-        },
-        "source": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/FileSource"
-            }
-          ],
-          "default": "huggingface",
-          "description": "Where the files come from. Default `huggingface`."
         },
         "url": {
-          "default": null,
-          "description": "Direct download URL for a single file. Required when\n`source = \"url\"`.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "Full download URL for this file, e.g.\n`https://huggingface.co/openai/whisper-tiny/resolve/main/config.json`.",
+          "type": "string"
         }
       },
       "required": [
-        "dest"
+        "url",
+        "destination"
       ],
       "type": "object"
     },
@@ -530,9 +460,9 @@
           "type": "integer"
         },
         "files": {
-          "description": "Files the model needs, provisioned into `dest` before\n`POST /v1/load`. Cloud models declare none.",
+          "description": "Files the model needs, each provisioned to its own `destination`\nbefore `POST /v1/load`. Cloud models declare none.",
           "items": {
-            "$ref": "#/definitions/FilesSpec"
+            "$ref": "#/definitions/FileSpec"
           },
           "type": "array"
         },
