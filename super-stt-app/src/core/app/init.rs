@@ -132,6 +132,7 @@ impl AppModel {
             gpu_info: Vec::new(),
             device_state: DeviceState::Ready,
             last_device_switch: None,
+            last_switch_progress_at: None,
             last_event_timestamp: None,
 
             // Initialize preview typing state (disabled by default as beta feature)

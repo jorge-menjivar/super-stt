@@ -112,6 +112,9 @@ pub async fn get_download_status()
             status: switch.phase,
             started_at: switch.started_at.unwrap_or_default(),
             eta_seconds: download.eta_seconds,
+            // The polled `/active_model.switch` shape carries no error detail;
+            // failure text arrives on the `download_progress` SSE event.
+            error: None,
         };
         Ok(Some(progress))
     })
@@ -133,7 +136,12 @@ pub async fn set_model(
         async move {
             let mut body = serde_json::json!({ "model": model, "provider": provider_str });
             body["source"] = serde_json::Value::String(source_str);
-            let resp = transport::settings_post(socket, &token, "/active_model", &body).await?;
+            // No header timeout: the daemon only responds once the switch
+            // finishes (provisioning may stream multi-GB weights first), and
+            // the fixed timeout would drop the connection and cancel the load.
+            // Progress/outcome is observed via the `download_progress` SSE topic.
+            let resp =
+                transport::settings_post_no_timeout(socket, &token, "/active_model", &body).await?;
             require_message(resp, "set_model")
         }
     })
@@ -172,7 +180,9 @@ pub async fn cancel_download() -> Result<String, String> {
 /// secret/option for its backend takes effect immediately.
 pub async fn reload_active_model() -> Result<String, String> {
     with_settings_token(|socket, token| async move {
-        let resp = transport::settings_post(
+        // No header timeout — a reload re-runs provisioning + load, same as a
+        // switch; see `set_model` for why the fixed timeout is unsafe here.
+        let resp = transport::settings_post_no_timeout(
             socket,
             &token,
             "/active_model/reload",

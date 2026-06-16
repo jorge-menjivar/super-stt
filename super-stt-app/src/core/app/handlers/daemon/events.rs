@@ -197,7 +197,11 @@ impl AppModel {
         );
         self.apply_download_progress(&progress);
 
-        // Handle download completion/failure
+        // Handle download completion/failure. The `error` case is fully
+        // handled by `apply_download_progress` above (it sets the Error banner
+        // with the daemon's failure detail and clears the selection), so it
+        // needs no follow-up message here — emitting a generic `DownloadError`
+        // would only reset the state and overwrite the detailed message.
         if progress.status == "completed" {
             // Send download completed message; model_switched event from the daemon
             // will update state if needed — no explicit reload required.
@@ -208,12 +212,6 @@ impl AppModel {
             return Some(Task::perform(async move { progress.model_name }, |model| {
                 cosmic::Action::App(Message::DownloadCancelled(model))
             }));
-        } else if progress.status == "error" {
-            let error_msg = format!("Download failed for {}", progress.model_name);
-            return Some(Task::perform(
-                async move { (progress.model_name, error_msg) },
-                |(model, error)| cosmic::Action::App(Message::DownloadError { model, error }),
-            ));
         }
         None
     }

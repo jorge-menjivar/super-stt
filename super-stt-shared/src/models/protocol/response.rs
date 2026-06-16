@@ -124,9 +124,14 @@ pub struct DownloadProgress {
     pub bytes_downloaded: u64,
     pub total_bytes: u64,
     pub percentage: f32,
-    pub status: String, // "downloading", "cancelled", "completed", "error"
+    pub status: String, // "downloading", "loading_model", "cancelled", "completed", "error"
     pub started_at: String,
     pub eta_seconds: Option<u64>,
+    /// Failure detail, present only when `status == "error"`. Lets a client
+    /// surface why a model switch failed without a second request. Omitted
+    /// from the wire on every non-error tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

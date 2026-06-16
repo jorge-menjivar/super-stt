@@ -18,7 +18,7 @@ Settings UI also shows. Scopes are composable — see [auth.md](../auth.md).
 | Topic                   | Carries                                                                                                                                                                          |
 |-------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `daemon_status_changed` | Heterogeneous; the `status` field discriminates (`loading_model`, `ready`, `model_switched`, `switching_device`, `device_switch_error`, …). Always includes `timestamp`.         |
-| `download_progress`     | Per-file model-download tick — `{ model_name, current_file, file_index, total_files, percentage, status, eta_seconds, timestamp, … }`.                                            |
+| `download_progress`     | Per-file model-download tick — `{ model_name, current_file, file_index, total_files, percentage, status, eta_seconds, timestamp, error?, … }`. `error` carries the failure detail on the terminal `status` = `"error"` tick (omitted otherwise).                                            |
 | `registry_install`      | Backend-registry install / refresh progress — a serialized registry event (`install.progress` / `install.completed` / `install.failed` / `refresh.completed` / `refresh.failed`). |
 
 Full payload semantics and the SSE framing rules live on

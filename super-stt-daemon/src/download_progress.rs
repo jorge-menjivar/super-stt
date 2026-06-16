@@ -19,6 +19,9 @@ pub struct DownloadProgressTracker {
     pub bytes_downloaded: AtomicU64,
     pub total_bytes: AtomicU64,
     pub status: Arc<RwLock<String>>,
+    /// Failure detail set by [`Self::mark_error`]; included in the
+    /// `download_progress` payload so a client can show why a switch failed.
+    pub error: Arc<RwLock<Option<String>>>,
     pub started_at: Instant,
     pub started_at_str: String,
     pub cancelled: Arc<AtomicBool>,
@@ -62,6 +65,7 @@ impl DownloadProgressTracker {
             bytes_downloaded: AtomicU64::new(0),
             total_bytes: AtomicU64::new(0),
             status: Arc::new(RwLock::new("downloading".to_string())),
+            error: Arc::new(RwLock::new(None)),
             started_at: Instant::now(),
             started_at_str: Utc::now().to_rfc3339(),
             cancelled,
@@ -144,6 +148,7 @@ impl DownloadProgressTracker {
             status: self.status.read().clone(),
             started_at: self.started_at_str.clone(),
             eta_seconds,
+            error: self.error.read().clone(),
         }
     }
 
@@ -265,6 +270,7 @@ impl DownloadProgressTracker {
 
     pub fn mark_error(&self, error: &str) {
         *self.status.write() = "error".to_string();
+        *self.error.write() = Some(error.to_string());
         warn!("Download error for model {}: {}", self.model_name, error);
     }
 }

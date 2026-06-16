@@ -212,7 +212,21 @@ pub(crate) async fn send_request<T: DeserializeOwned>(
     socket_path: &std::path::PathBuf,
     req: hyper::Request<RequestBody>,
 ) -> HttpResult<T> {
-    let response = open(socket_path, req, Some(REQUEST_TIMEOUT)).await?;
+    send_request_with_timeout(socket_path, req, Some(REQUEST_TIMEOUT)).await
+}
+
+/// Like [`send_request`] but with a caller-chosen header timeout. Pass
+/// `None` for a long-running call whose response the daemon only sends once
+/// the work finishes — e.g. a model switch that streams multi-GB weights
+/// first. The fixed [`REQUEST_TIMEOUT`] would otherwise abort the connection
+/// mid-switch and cancel the daemon-side load; progress is observed
+/// out-of-band via the `download_progress` SSE topic instead.
+pub(crate) async fn send_request_with_timeout<T: DeserializeOwned>(
+    socket_path: &std::path::PathBuf,
+    req: hyper::Request<RequestBody>,
+    timeout: Option<std::time::Duration>,
+) -> HttpResult<T> {
+    let response = open(socket_path, req, timeout).await?;
     let status = response.status();
     let body = collect_body(response).await?;
     if status == hyper::StatusCode::UNAUTHORIZED {
@@ -249,6 +263,26 @@ pub async fn settings_post(
     body: &serde_json::Value,
 ) -> HttpResult<DaemonResponse> {
     post_json::<DaemonResponse>(socket_path, token, path, body).await
+}
+
+/// Like [`settings_post`] but without the fixed header timeout — for a
+/// long-running write whose response the daemon only sends once the work
+/// completes (notably `POST /active_model`, a model switch that may stream
+/// multi-GB weights first). Bounding it with [`REQUEST_TIMEOUT`] would drop
+/// the connection mid-switch and cancel the daemon-side load; callers track
+/// progress via the `download_progress` SSE topic instead.
+///
+/// # Errors
+/// Returns [`HttpError::InvalidSession`] on `401`; [`HttpError::Other`] on
+/// connection, HTTP, body encoding, or parse failure.
+pub async fn settings_post_no_timeout(
+    socket_path: std::path::PathBuf,
+    token: &str,
+    path: &str,
+    body: &serde_json::Value,
+) -> HttpResult<DaemonResponse> {
+    let req = build_post_json(path, body, Some(token))?;
+    send_request_with_timeout::<DaemonResponse>(&socket_path, req, None).await
 }
 
 /// `DELETE <path>` → `DaemonResponse`.

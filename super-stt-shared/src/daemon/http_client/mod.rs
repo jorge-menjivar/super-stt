@@ -32,5 +32,6 @@ pub use v1::transcribe::{
 pub mod transport {
     pub use super::internal::transport::{
         delete_json, get_json, post_json, settings_delete, settings_get, settings_post,
+        settings_post_no_timeout,
     };
 }

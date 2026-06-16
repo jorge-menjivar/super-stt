@@ -71,6 +71,9 @@ impl AppModel {
             }),
 
             Message::PingTimeout => {
+                // Surface a stalled model switch (no progress for too long)
+                // rather than letting the UI spin on the now-untimed POST.
+                self.check_switch_stall();
                 if self.daemon_status == DaemonStatus::Connected {
                     Task::perform(ping_daemon(), |result| {
                         cosmic::Action::App(match result {

@@ -111,6 +111,11 @@ pub struct AppModel {
     pub device_state: DeviceState,
     /// Timestamp of last device switch to avoid polling too soon
     pub last_device_switch: Option<std::time::Instant>,
+    /// Timestamp of the last model-switch progress signal (switch start or any
+    /// `download_progress` tick). Drives the stall watchdog in the
+    /// `PingTimeout` handler so a switch that stops making progress surfaces an
+    /// error instead of spinning forever. `None` when no switch is in flight.
+    pub last_switch_progress_at: Option<std::time::Instant>,
     /// Last event timestamp for polling daemon events
     pub last_event_timestamp: Option<String>,
 
