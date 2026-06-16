@@ -93,8 +93,7 @@ impl AppModel {
                 // so the UI doesn't show a model that isn't loaded (mirrors the
                 // `ModelError` handler).
                 self.current_model.clear();
-                self.current_provider =
-                    super_stt_shared::models::provider::Provider::default();
+                self.current_provider = super_stt_shared::models::provider::Provider::default();
                 self.current_source.clear();
             }
             "completed" | "cancelled" => {
