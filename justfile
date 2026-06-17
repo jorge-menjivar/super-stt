@@ -268,11 +268,6 @@ check-wit-sync:
     done
     [ "$fail" -eq 0 ]
 
-# Build the standalone Whisper subprocess backend.
-# Usage: just build-whisper-backend [--features cuda]
-build-whisper-backend *args:
-    cargo build --manifest-path backends/whisper/Cargo.toml --release {{ args }}
-
 # Build the standalone Qwen3-ASR Python subprocess backend bundle.
 # Pure wheel assembly (no compilation); produces a self-contained relocatable
 # tarball under backends/qwen3-asr/target/. The cuda13 bundle is large.
@@ -314,9 +309,8 @@ serve-test-registry port="8787": build-openai-backend build-mistral-backend
 
 # Install built backends into the daemon's discovery directory
 # (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI,
-# Mistral, and Deepgram WASM components; the Whisper binary and the Qwen3-ASR
-# Python bundle are installed only if already built (run
-# `just build-whisper-backend [--features cuda]` or
+# Mistral, and Deepgram WASM components; the Qwen3-ASR Python bundle is
+# installed only if already built (run
 # `just build-qwen3-asr-backend [cpu|cuda13]` first).
 install-backends: build-openai-backend build-mistral-backend build-deepgram-backend
     #!/usr/bin/env bash
@@ -346,18 +340,6 @@ install-backends: build-openai-backend build-mistral-backend build-deepgram-back
     cp backends/deepgram/target/wasm32-wasip2/release/super_stt_backend_deepgram.wasm \
         "$deepgram_dir/deepgram.wasm"
     echo "Installed Deepgram backend -> $deepgram_dir"
-
-    # Whisper (subprocess). Installed only if the binary has been built.
-    whisper_bin="backends/whisper/target/release/super-stt-backend-whisper"
-    if [ -f "$whisper_bin" ]; then
-        whisper_dir="$backends_dir/whisper"
-        mkdir -p "$whisper_dir"
-        cp backends/whisper/backend.toml "$whisper_dir/backend.toml"
-        cp "$whisper_bin" "$whisper_dir/super-stt-backend-whisper"
-        echo "Installed Whisper backend -> $whisper_dir"
-    else
-        echo "Whisper backend not built; run 'just build-whisper-backend [--features cuda]' to enable it." >&2
-    fi
 
     # Qwen3-ASR (Python subprocess bundle). Installed only if a bundle has been
     # built; prefers the cuda13 bundle when present. Extracts over any existing

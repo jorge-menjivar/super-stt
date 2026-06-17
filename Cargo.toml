@@ -29,7 +29,6 @@
         "backends/deepgram",
         "backends/mistral",
         "backends/openai",
-        "backends/whisper",
     ]
 
     [workspace.package]
