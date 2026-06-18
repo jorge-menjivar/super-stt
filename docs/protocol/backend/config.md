@@ -176,6 +176,8 @@ wasm = "openai.wasm"   # filename on the release; must be a `wasm32` component
 
 Subprocess backends declare one entry per built variant. Selection axes are
 `target`, `accel`, and (when `accel = "cuda"`) `cuda_major`, `cuda_sm`, `cudnn`.
+Each variant names its archive with `file`, or with `parts` when the `.tar.gz`
+exceeds the 2 GiB release-asset limit (see [Multi-part assets](#multi-part-assets)).
 
 ```toml
 [[assets.subprocess]]
@@ -201,16 +203,47 @@ cudnn      = true
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `file` | string | yes | Filename on the GitHub release. Subprocess: `.tar.gz`; wasm: `.wasm`. |
+| `file` | string | one of `file`/`parts` | Filename on the GitHub release. Subprocess: `.tar.gz`; wasm: `.wasm`. |
+| `parts` | array of strings | one of `file`/`parts` | **Subprocess only.** Ordered release filenames whose byte-for-byte concatenation is the variant's `.tar.gz`. Use instead of `file` when the archive would exceed the 2 GiB release-asset limit. See [Multi-part assets](#multi-part-assets). |
 | `target` | string | yes | Rust target triple. Tier-1/2 only; indexer rejects unknown. |
 | `accel` | string | yes | One of `"cpu"`, `"cuda"`, `"metal"`, `"rocm"`, `"vulkan"`. |
 | `cuda_major` | integer | for `accel = "cuda"` | CUDA major version this build targets. |
 | `cuda_sm` | integer | no | Compute capability (e.g. `75`, `86`, `90`). Omit to match **any** compute capability — use this for framework builds (e.g. a PyTorch wheel) whose kernels are multi-architecture. When both an exact-SM and a wildcard asset match a host, the exact-SM asset is preferred. |
 | `cudnn` | bool | no | Defaults `false`. Allowed only when `accel = "cuda"`. |
 
+A variant gives `file` **or** `parts`, never both (and `wasm` always uses a
+single `file`).
+
+### Multi-part assets
+
+A single GitHub release asset may not exceed **2 GiB**. A build whose `.tar.gz`
+is larger — typically a CUDA framework bundle (PyTorch ships ~2.5 GiB of CUDA
+libraries) — is split into ordered parts, each a separate release asset under
+the limit, and listed in `parts` instead of `file`:
+
+```toml
+[[assets.subprocess]]
+parts      = [
+    "qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part00",
+    "qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part01",
+]
+target     = "x86_64-unknown-linux-gnu"
+accel      = "cuda"
+cuda_major = 13
+```
+
+The parts' **byte-for-byte concatenation, in the order listed**, reconstitutes
+the original `.tar.gz`. The daemon downloads each part, verifies it, concatenates
+them in order, then extracts the result. The registry indexer pins every part
+independently (`{url, size, sha256}`), so every delivered byte is hash-verified —
+there is no separate whole-archive digest. Splitting is purely a delivery
+detail: the reassembled archive obeys the same archive-contents rules below, and
+host selection (`target`/`accel`/`cuda_*`) is unaffected.
+
 ### Subprocess archive contents
 
-A subprocess `.tar.gz` MUST contain `bin/<entrypoint>` (the path that the
+A subprocess `.tar.gz` (the reassembled archive, when delivered as
+[parts](#multi-part-assets)) MUST contain `bin/<entrypoint>` (the path that the
 backend's `[backend].entrypoint` resolves to after extraction). Tarballs
 containing path-traversal entries (`..`, absolute paths) or symlinks that
 escape the archive root are rejected by the registry indexer and by the
@@ -437,6 +470,11 @@ supported_devices   = ["none"]
   OSI-approved or FSF Free/Libre SPDX identifier, or the literal `other`. The
   indexer rejects a release whose manifest omits the field or declares an
   unrecognized value. Locally installed backends may omit it.
+- Each `[[assets.subprocess]]` variant declares exactly one of `file` or
+  `parts`; `parts`, when used, must be non-empty and its filenames are
+  concatenated in the listed order. The indexer rejects any single release
+  asset — a `file` or an individual part — larger than 2 GiB (the GitHub
+  release-asset limit).
 - A `subprocess` backend with a non-empty `allowed_hosts` is rejected — the
   transport provides no network.
 - `primary_language` must appear in `supported_languages`. When

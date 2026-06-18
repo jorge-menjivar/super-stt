@@ -154,12 +154,25 @@ pub struct Assets {
 }
 
 /// One `[[assets.subprocess]]` build variant.
+///
+/// The variant's `.tar.gz` is named by `file`, or — when it would exceed the
+/// 2 GiB GitHub release-asset limit — by `parts`, whose byte-for-byte
+/// concatenation in order is the archive. Exactly one of the two is set
+/// (enforced by [`Manifest::parse`]).
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SubprocessAsset {
-    /// Filename on the GitHub release (`.tar.gz`). The archive must contain
+    /// Single-file archive: the filename on the GitHub release (`.tar.gz`).
+    /// Mutually exclusive with `parts`. The archive must contain
     /// `bin/<entrypoint>`.
-    pub file: String,
+    #[serde(default)]
+    pub file: Option<String>,
+    /// Multi-part archive: ordered release filenames whose byte-for-byte
+    /// concatenation is the `.tar.gz`. Mutually exclusive with `file`; use when
+    /// the archive exceeds the 2 GiB release-asset limit. The indexer pins each
+    /// part independently.
+    #[serde(default)]
+    pub parts: Vec<String>,
     /// Rust target triple, e.g. `x86_64-unknown-linux-gnu`. Tier-1/2 only;
     /// the indexer rejects unknown triples.
     pub target: String,
@@ -179,6 +192,34 @@ pub struct SubprocessAsset {
     /// Default `false`.
     #[serde(default)]
     pub cudnn: bool,
+}
+
+impl SubprocessAsset {
+    /// The release filenames composing this variant's archive: the single
+    /// `file`, or the ordered `parts`. Exactly one source is populated once the
+    /// manifest has passed [`Manifest::parse`].
+    #[must_use]
+    pub fn release_files(&self) -> Vec<&str> {
+        match &self.file {
+            Some(f) => vec![f.as_str()],
+            None => self.parts.iter().map(String::as_str).collect(),
+        }
+    }
+
+    /// Whether the archive is delivered as multiple concatenated parts.
+    #[must_use]
+    pub fn is_multipart(&self) -> bool {
+        self.file.is_none()
+    }
+
+    /// A short label for diagnostics (the `file`, else the first part).
+    #[must_use]
+    pub fn label(&self) -> String {
+        self.file
+            .clone()
+            .or_else(|| self.parts.first().cloned())
+            .unwrap_or_else(|| "<unnamed subprocess asset>".into())
+    }
 }
 
 /// Acceleration backend of a subprocess build.
@@ -440,6 +481,12 @@ pub enum ManifestError {
     /// A `[[models.files]]` `destination` is not a safe relative path.
     #[error("backend.toml file destination {0:?} is not a safe relative path")]
     UnsafeDestination(String),
+    /// A `[[assets.subprocess]]` entry set neither or both of `file`/`parts`.
+    #[error(
+        "backend.toml subprocess asset for target {0:?} must set exactly one of \
+         `file` or `parts`"
+    )]
+    AssetFileXorParts(String),
 }
 
 impl Manifest {
@@ -464,6 +511,17 @@ impl Manifest {
                 if !crate::is_safe_relative_path(&file.destination) {
                     return Err(ManifestError::UnsafeDestination(file.destination.clone()));
                 }
+            }
+        }
+        // A subprocess build variant names its archive with exactly one of
+        // `file` (single) or `parts` (split across release assets, concatenated
+        // in order). The guard lives in the canonical parser so the daemon and
+        // the indexer agree on the contract.
+        for a in &m.assets.subprocess {
+            let has_file = a.file.as_deref().is_some_and(|f| !f.is_empty());
+            let has_parts = !a.parts.is_empty() && a.parts.iter().all(|p| !p.is_empty());
+            if has_file == has_parts {
+                return Err(ManifestError::AssetFileXorParts(a.target.clone()));
             }
         }
         Ok(m)
@@ -835,6 +893,79 @@ mod tests {
         assert_eq!(a.cuda_major, Some(13));
         assert_eq!(a.cuda_sm, None);
         assert!(!a.cudnn);
+    }
+
+    #[test]
+    fn parses_multipart_subprocess_asset() {
+        let m = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "subprocess"
+            entrypoint = "y"
+            contract = "v1"
+
+            [[assets.subprocess]]
+            parts = ["y-cuda13.tar.gz.part00", "y-cuda13.tar.gz.part01"]
+            target = "x86_64-unknown-linux-gnu"
+            accel = "cuda"
+            cuda_major = 13
+            "#,
+        )
+        .unwrap();
+        let a = &m.assets.subprocess[0];
+        assert!(a.is_multipart());
+        assert_eq!(a.file, None);
+        assert_eq!(
+            a.release_files(),
+            vec!["y-cuda13.tar.gz.part00", "y-cuda13.tar.gz.part01"]
+        );
+    }
+
+    #[test]
+    fn rejects_subprocess_asset_with_both_file_and_parts() {
+        let err = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "subprocess"
+            entrypoint = "y"
+            contract = "v1"
+
+            [[assets.subprocess]]
+            file = "y.tar.gz"
+            parts = ["y.tar.gz.part00"]
+            target = "x86_64-unknown-linux-gnu"
+            accel = "cpu"
+            "#,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ManifestError::AssetFileXorParts(_)));
+    }
+
+    #[test]
+    fn rejects_subprocess_asset_with_neither_file_nor_parts() {
+        let err = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "subprocess"
+            entrypoint = "y"
+            contract = "v1"
+
+            [[assets.subprocess]]
+            target = "x86_64-unknown-linux-gnu"
+            accel = "cpu"
+            "#,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ManifestError::AssetFileXorParts(_)));
     }
 
     #[test]

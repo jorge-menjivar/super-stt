@@ -1,10 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Per-asset validation + SHA-256 over streamed downloads.
+//!
+//! A subprocess variant's archive is one release asset (`file`) or several
+//! (`parts`, concatenated in order). Each release asset is capped at 2 GiB (the
+//! GitHub limit) and pinned independently; the reassembled tar is validated by
+//! streaming the parts in order, so a multi-GB archive is never held in memory.
+
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use ring::digest::{Context, SHA256};
 use thiserror::Error;
 
-pub const MAX_ASSET_BYTES: u64 = 200 * 1024 * 1024;
+/// Ceiling for a single release asset — a `file` or one part of a multi-part
+/// archive. Matches GitHub's 2 GiB per-asset release limit; a larger archive
+/// must be split into `parts`.
+pub const MAX_ASSET_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// Ceiling for a `backend.toml` manifest asset — manifests are tiny; this only
 /// bounds a hostile or mistaken upload.
 pub const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
@@ -28,7 +39,8 @@ pub enum AssetError {
     Io(#[from] std::io::Error),
 }
 
-/// Resolve a declared asset's URL via the release manifest, refusing if missing.
+/// Resolve a declared asset's URL via the release manifest, refusing if missing
+/// or larger than [`MAX_ASSET_BYTES`].
 pub fn resolve_url(
     file: &str,
     release_assets: &[super_stt_forge::ReleaseAsset],
@@ -46,11 +58,12 @@ pub fn resolve_url(
     Ok((a.download_url.clone(), a.size))
 }
 
-/// Stream the asset, compute SHA-256, and dispatch validation based on kind.
-pub async fn fetch_and_validate(
+/// Stream a wasm component, verify the `wasm32` magic header, and return its
+/// SHA-256. Components are small, so this does not touch disk.
+pub async fn fetch_wasm_and_hash(
     http: &reqwest::Client,
     url: &str,
-    expected: AssetExpect<'_>,
+    file: &str,
 ) -> Result<String, AssetError> {
     use futures::StreamExt;
     let mut resp = http
@@ -62,16 +75,15 @@ pub async fn fetch_and_validate(
         .map_err(|e| AssetError::Http(e.into()))?
         .bytes_stream();
     let mut ctx = Context::new(&SHA256);
-    let mut buf: Vec<u8> = Vec::new();
     let mut first_chunk: Vec<u8> = Vec::new();
-    let mut total_streamed: u64 = 0;
+    let mut total: u64 = 0;
     while let Some(chunk) = resp.next().await {
         let chunk = chunk.map_err(|e| AssetError::Http(e.into()))?;
-        total_streamed += chunk.len() as u64;
-        if total_streamed > MAX_ASSET_BYTES {
+        total += chunk.len() as u64;
+        if total > MAX_ASSET_BYTES {
             return Err(AssetError::TooLarge {
-                file: expected.file().into(),
-                size: total_streamed,
+                file: file.into(),
+                size: total,
             });
         }
         ctx.update(&chunk);
@@ -79,21 +91,50 @@ pub async fn fetch_and_validate(
             let need = 4 - first_chunk.len();
             first_chunk.extend_from_slice(&chunk[..need.min(chunk.len())]);
         }
-        if matches!(expected, AssetExpect::Subprocess { .. }) {
-            buf.extend_from_slice(&chunk);
-        }
     }
-    match expected {
-        AssetExpect::Wasm { file } => {
-            if first_chunk != WASM_MAGIC {
-                return Err(AssetError::NotWasm(file.into()));
-            }
-        }
-        AssetExpect::Subprocess { file, entrypoint } => {
-            validate_tarball(file, entrypoint, &buf)?;
-        }
+    if first_chunk != WASM_MAGIC {
+        return Err(AssetError::NotWasm(file.into()));
     }
     Ok(hex::encode(ctx.finish().as_ref()))
+}
+
+/// Stream a release asset (a `file`, or one part of a multi-part archive) to
+/// `dest`, computing its size and SHA-256 and enforcing [`MAX_ASSET_BYTES`].
+/// Writing to disk keeps a multi-GB part out of memory; the caller validates
+/// the reassembled archive with [`validate_subprocess_parts`].
+pub async fn download_to_file(
+    http: &reqwest::Client,
+    url: &str,
+    file: &str,
+    dest: &Path,
+) -> Result<(u64, String), AssetError> {
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    let mut resp = http
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| AssetError::Http(e.into()))?
+        .error_for_status()
+        .map_err(|e| AssetError::Http(e.into()))?
+        .bytes_stream();
+    let mut out = tokio::fs::File::create(dest).await?;
+    let mut ctx = Context::new(&SHA256);
+    let mut total: u64 = 0;
+    while let Some(chunk) = resp.next().await {
+        let chunk = chunk.map_err(|e| AssetError::Http(e.into()))?;
+        total += chunk.len() as u64;
+        if total > MAX_ASSET_BYTES {
+            return Err(AssetError::TooLarge {
+                file: file.into(),
+                size: total,
+            });
+        }
+        ctx.update(&chunk);
+        out.write_all(&chunk).await?;
+    }
+    out.flush().await?;
+    Ok((total, hex::encode(ctx.finish().as_ref())))
 }
 
 /// Download the `backend.toml` manifest asset, returning its raw bytes and
@@ -129,21 +170,28 @@ pub async fn fetch_manifest_asset(
     Ok((buf, hex::encode(ctx.finish().as_ref())))
 }
 
-pub enum AssetExpect<'a> {
-    Wasm { file: &'a str },
-    Subprocess { file: &'a str, entrypoint: &'a str },
-}
-
-impl AssetExpect<'_> {
-    fn file(&self) -> &str {
-        match self {
-            AssetExpect::Wasm { file } | AssetExpect::Subprocess { file, .. } => file,
-        }
+/// Validate that the reassembled subprocess archive — the in-order
+/// concatenation of `parts` (one entry for a single-file asset) — is a
+/// `.tar.gz` containing `bin/<entrypoint>` with no path-escaping or symlink
+/// entries. Streams the parts through the decoder so a multi-GB archive is
+/// never held in memory.
+pub fn validate_subprocess_parts(
+    parts: &[PathBuf],
+    file: &str,
+    entrypoint: &str,
+) -> Result<(), AssetError> {
+    let mut chained: Box<dyn Read> = Box::new(std::io::empty());
+    for p in parts {
+        let f = std::fs::File::open(p)?;
+        chained = Box::new(chained.chain(f));
     }
+    validate_tarball_read(file, entrypoint, chained)
 }
 
-fn validate_tarball(file: &str, entrypoint: &str, bytes: &[u8]) -> Result<(), AssetError> {
-    let gz = flate2::read::GzDecoder::new(bytes);
+/// The tar-content checks, over any reader: rejects path-traversal and symlink
+/// entries and requires `bin/<entrypoint>` (or the bare entrypoint path).
+fn validate_tarball_read<R: Read>(file: &str, entrypoint: &str, r: R) -> Result<(), AssetError> {
+    let gz = flate2::read::GzDecoder::new(r);
     let mut archive = tar::Archive::new(gz);
     let mut found_entrypoint = false;
     for entry in archive.entries()? {
@@ -176,6 +224,11 @@ fn validate_tarball(file: &str, entrypoint: &str, bytes: &[u8]) -> Result<(), As
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+fn validate_tarball(file: &str, entrypoint: &str, bytes: &[u8]) -> Result<(), AssetError> {
+    validate_tarball_read(file, entrypoint, bytes)
 }
 
 #[cfg(test)]
@@ -273,5 +326,47 @@ mod tests {
         let bytes = make_raw_tar_gz_with_path("../escape");
         let err = validate_tarball("v.tar.gz", "voxtral", &bytes).unwrap_err();
         assert!(matches!(err, AssetError::TarEscape { .. }));
+    }
+
+    /// A tarball split into parts validates when the parts are concatenated in
+    /// order — the multi-part reassembly path.
+    #[test]
+    fn validates_tarball_reassembled_from_parts() {
+        let bytes = make_tarball(|tb| {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(3);
+            h.set_mode(0o755);
+            h.set_cksum();
+            tb.append_data(&mut h, "bin/qwen3-asr", &b"abc"[..])
+                .unwrap();
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let mid = bytes.len() / 2;
+        let p0 = dir.path().join("a.part00");
+        let p1 = dir.path().join("a.part01");
+        std::fs::write(&p0, &bytes[..mid]).unwrap();
+        std::fs::write(&p1, &bytes[mid..]).unwrap();
+        validate_subprocess_parts(&[p0, p1], "q.tar.gz", "bin/qwen3-asr").unwrap();
+    }
+
+    /// Parts concatenated out of order do not reassemble into a valid archive.
+    #[test]
+    fn rejects_parts_in_wrong_order() {
+        let bytes = make_tarball(|tb| {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(3);
+            h.set_mode(0o755);
+            h.set_cksum();
+            tb.append_data(&mut h, "bin/qwen3-asr", &b"abc"[..])
+                .unwrap();
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let mid = bytes.len() / 2;
+        let p0 = dir.path().join("a.part00");
+        let p1 = dir.path().join("a.part01");
+        std::fs::write(&p0, &bytes[..mid]).unwrap();
+        std::fs::write(&p1, &bytes[mid..]).unwrap();
+        // Swapped order → corrupt gzip → an error (not a clean archive).
+        assert!(validate_subprocess_parts(&[p1, p0], "q.tar.gz", "bin/qwen3-asr").is_err());
     }
 }

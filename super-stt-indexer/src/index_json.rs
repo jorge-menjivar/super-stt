@@ -101,9 +101,19 @@ pub struct IndexSubprocessAsset {
     pub cuda_sm: Option<u32>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cudnn: bool,
-    pub url: String,
-    pub size: u64,
-    pub sha256: String,
+    /// Single-file archive pin. Present for a single-file variant; omitted when
+    /// the archive is delivered as `parts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    /// Multi-part archive: ordered part pins whose byte-for-byte concatenation
+    /// is the `.tar.gz`. Present for a multi-part variant; omitted for
+    /// single-file. Each part is hash-verified independently.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<IndexAsset>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

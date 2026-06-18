@@ -6,7 +6,7 @@ use semver::Version;
 use thiserror::Error;
 
 pub use super_stt_registry_types::manifest::{
-    Accel, Device, Kind, Manifest, ManifestError as ParseError,
+    Accel, Device, Kind, Manifest, ManifestError as ParseError, SubprocessAsset,
 };
 
 #[derive(Debug, Error)]
@@ -80,20 +80,14 @@ pub fn validate(
             // `cuda_sm` stays optional: omitted means the build matches any
             // compute capability (multi-architecture framework builds).
             if a.cuda_major.is_none() {
-                return Err(ManifestError::CudaMissingMajor {
-                    file: a.file.clone(),
-                });
+                return Err(ManifestError::CudaMissingMajor { file: a.label() });
             }
         } else {
             if a.cuda_major.is_some() || a.cuda_sm.is_some() {
-                return Err(ManifestError::CudaForbiddenFields {
-                    file: a.file.clone(),
-                });
+                return Err(ManifestError::CudaForbiddenFields { file: a.label() });
             }
             if a.cudnn {
-                return Err(ManifestError::CudnnRequiresCuda {
-                    file: a.file.clone(),
-                });
+                return Err(ManifestError::CudnnRequiresCuda { file: a.label() });
             }
         }
     }

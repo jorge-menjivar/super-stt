@@ -171,9 +171,19 @@ pub struct IndexSubprocessAsset {
     pub cuda_sm: Option<u32>,
     #[serde(default)]
     pub cudnn: bool,
-    pub url: String,
-    pub size: u64,
-    pub sha256: String,
+    /// Single-file archive pin: present for a single-file variant, absent for
+    /// multi-part.
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub sha256: Option<String>,
+    /// Multi-part archive: ordered part pins whose byte-for-byte concatenation
+    /// is the `.tar.gz`. Present for a multi-part variant, absent for
+    /// single-file. Each part is hash-verified independently on download.
+    #[serde(default)]
+    pub parts: Vec<IndexAsset>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

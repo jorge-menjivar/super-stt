@@ -191,6 +191,39 @@ async fn build_entry(
     ))
 }
 
+/// A unique temp path for staging one downloaded asset part during validation.
+fn temp_part_path() -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("stt-idx-{}-{n}.part", std::process::id()))
+}
+
+/// Build the index entry for one subprocess variant from its downloaded part
+/// pins: a single-file pin (`url`/`size`/`sha256`) or a multi-part pin.
+fn subprocess_index_entry(
+    sa: &manifest::SubprocessAsset,
+    mut pins: Vec<index_json::IndexAsset>,
+) -> index_json::IndexSubprocessAsset {
+    let (url, size, sha256, parts) = if sa.is_multipart() {
+        (None, None, None, pins)
+    } else {
+        let p = pins.remove(0);
+        (Some(p.url), Some(p.size), Some(p.sha256), Vec::new())
+    };
+    index_json::IndexSubprocessAsset {
+        target: sa.target.clone(),
+        accel: sa.accel.to_string(),
+        cuda_major: sa.cuda_major,
+        cuda_sm: sa.cuda_sm,
+        cudnn: sa.cudnn,
+        url,
+        size,
+        sha256,
+        parts,
+    }
+}
+
 /// Resolve and hash the binary artifacts a release declares — the wasm
 /// component or each subprocess variant — into the index's asset block.
 async fn resolve_index_assets(
@@ -201,8 +234,7 @@ async fn resolve_index_assets(
     let mut idx_assets = index_json::IndexAssets::default();
     if let Some(wasm) = &m.assets.wasm {
         let (url, size) = assets::resolve_url(wasm, release_assets)?;
-        let sha = assets::fetch_and_validate(http, &url, assets::AssetExpect::Wasm { file: wasm })
-            .await?;
+        let sha = assets::fetch_wasm_and_hash(http, &url, wasm).await?;
         idx_assets.wasm = Some(index_json::IndexAsset {
             url,
             size,
@@ -210,28 +242,25 @@ async fn resolve_index_assets(
         });
     }
     for sa in &m.assets.subprocess {
-        let (url, size) = assets::resolve_url(&sa.file, release_assets)?;
-        let sha = assets::fetch_and_validate(
-            http,
-            &url,
-            assets::AssetExpect::Subprocess {
-                file: &sa.file,
-                entrypoint: &m.backend.entrypoint,
-            },
-        )
-        .await?;
-        idx_assets
-            .subprocess
-            .push(index_json::IndexSubprocessAsset {
-                target: sa.target.clone(),
-                accel: sa.accel.to_string(),
-                cuda_major: sa.cuda_major,
-                cuda_sm: sa.cuda_sm,
-                cudnn: sa.cudnn,
-                url,
-                size,
-                sha256: sha,
-            });
+        // Download each part (a single-file variant has one) to a temp file,
+        // hashing it, then validate the reassembled archive before pinning.
+        let files = sa.release_files();
+        let mut tmp_paths: Vec<std::path::PathBuf> = Vec::with_capacity(files.len());
+        let mut pins: Vec<index_json::IndexAsset> = Vec::with_capacity(files.len());
+        for f in &files {
+            let (url, _) = assets::resolve_url(f, release_assets)?;
+            let dest = temp_part_path();
+            let (size, sha256) = assets::download_to_file(http, &url, f, &dest).await?;
+            tmp_paths.push(dest);
+            pins.push(index_json::IndexAsset { url, size, sha256 });
+        }
+        let validated =
+            assets::validate_subprocess_parts(&tmp_paths, &sa.label(), &m.backend.entrypoint);
+        for p in &tmp_paths {
+            let _ = std::fs::remove_file(p);
+        }
+        validated?;
+        idx_assets.subprocess.push(subprocess_index_entry(sa, pins));
     }
     Ok(idx_assets)
 }

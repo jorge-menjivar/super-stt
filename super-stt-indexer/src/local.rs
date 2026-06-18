@@ -15,7 +15,7 @@ use anyhow::{Context, bail};
 use clap::Args;
 use log::info;
 
-use crate::index_json::{self, Index, IndexAsset, IndexAssets, IndexBackend, IndexSubprocessAsset};
+use crate::index_json::{self, Index, IndexAsset, IndexAssets, IndexBackend};
 use crate::manifest::{Kind, Manifest};
 
 /// All-zero SHA-256, emitted for assets not staged on disk under
@@ -155,21 +155,28 @@ fn resolve_assets(
         }
         Kind::Subprocess => {
             for a in &m.assets.subprocess {
-                // A test box rarely has every CUDA build staged; skip variants
-                // whose artifact isn't present (unless placeholdering).
-                let Some((size, sha256)) = hash_staged(out_dir, &a.file, allow_missing)? else {
+                // A test box rarely has every CUDA build staged; skip a variant
+                // any of whose parts isn't present (unless placeholdering).
+                let files = a.release_files();
+                let mut pins: Vec<IndexAsset> = Vec::with_capacity(files.len());
+                let mut missing = false;
+                for f in &files {
+                    let Some((size, sha256)) = hash_staged(out_dir, f, allow_missing)? else {
+                        missing = true;
+                        break;
+                    };
+                    pins.push(IndexAsset {
+                        url: format!("{base}/{f}"),
+                        size,
+                        sha256,
+                    });
+                }
+                if missing {
                     continue;
-                };
-                assets.subprocess.push(IndexSubprocessAsset {
-                    target: a.target.clone(),
-                    accel: a.accel.to_string(),
-                    cuda_major: a.cuda_major,
-                    cuda_sm: a.cuda_sm,
-                    cudnn: a.cudnn,
-                    url: format!("{base}/{}", a.file),
-                    size,
-                    sha256,
-                });
+                }
+                assets
+                    .subprocess
+                    .push(crate::subprocess_index_entry(a, pins));
             }
             if assets.subprocess.is_empty() {
                 bail!(
@@ -203,9 +210,20 @@ fn hash_staged(
 }
 
 fn sha256_and_size(path: &Path) -> anyhow::Result<(u64, String)> {
-    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    let sha = hex::encode(ring::digest::digest(&ring::digest::SHA256, &bytes));
-    Ok((bytes.len() as u64, sha))
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut size: u64 = 0;
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        size += n as u64;
+        ctx.update(&buf[..n]);
+    }
+    Ok((size, hex::encode(ctx.finish().as_ref())))
 }
 
 #[cfg(test)]

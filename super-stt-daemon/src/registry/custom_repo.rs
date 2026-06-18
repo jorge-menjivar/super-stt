@@ -257,16 +257,41 @@ fn synthesize_assets(
                 return Err(ResolveError::MissingSubprocessAssets);
             }
             for sa in &manifest.assets.subprocess {
-                let a = find(&sa.file)?;
+                // A variant is one `file` or several concatenated `parts`. The
+                // custom-repo path has no pinned hash (TLS is the guarantee), so
+                // each synthesized pin carries an empty sha256.
+                let names: Vec<&str> = match &sa.file {
+                    Some(f) => vec![f.as_str()],
+                    None => sa.parts.iter().map(String::as_str).collect(),
+                };
+                if names.is_empty() {
+                    return Err(ResolveError::MissingSubprocessAssets);
+                }
+                let mut pins: Vec<IndexAsset> = Vec::with_capacity(names.len());
+                for n in &names {
+                    let a = find(n)?;
+                    pins.push(IndexAsset {
+                        url: a.download_url.clone(),
+                        size: a.size,
+                        sha256: String::new(),
+                    });
+                }
+                let (url, size, sha256, parts) = if sa.file.is_none() {
+                    (None, None, None, pins)
+                } else {
+                    let p = pins.remove(0);
+                    (Some(p.url), Some(p.size), Some(p.sha256), Vec::new())
+                };
                 out.subprocess.push(IndexSubprocessAsset {
                     target: sa.target.clone(),
                     accel: sa.accel.clone(),
                     cuda_major: sa.cuda_major,
                     cuda_sm: sa.cuda_sm,
                     cudnn: sa.cudnn,
-                    url: a.download_url.clone(),
-                    size: a.size,
-                    sha256: String::new(),
+                    url,
+                    size,
+                    sha256,
+                    parts,
                 });
             }
         }
@@ -358,7 +383,10 @@ struct Assets {
 
 #[derive(Debug, Deserialize)]
 struct SubprocessAsset {
-    file: String,
+    #[serde(default)]
+    file: Option<String>,
+    #[serde(default)]
+    parts: Vec<String>,
     target: String,
     accel: String,
     #[serde(default)]
@@ -519,6 +547,50 @@ mod tests {
         assert!(assets.wasm.is_none());
         assert_eq!(assets.subprocess.len(), 2);
         assert_eq!(assets.subprocess[1].cuda_sm, Some(86));
-        assert!(assets.subprocess[1].sha256.is_empty());
+        // Single-file custom-repo synth carries an empty (unverified) pin.
+        assert_eq!(assets.subprocess[1].sha256.as_deref(), Some(""));
+        assert!(assets.subprocess[1].parts.is_empty());
+    }
+
+    #[test]
+    fn synthesize_subprocess_maps_parts_to_a_multipart_entry() {
+        let manifest_text = r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "subprocess"
+            entrypoint = "y"
+            contract = "v1"
+
+            [[assets.subprocess]]
+            parts = ["y-cuda13.tar.gz.part00", "y-cuda13.tar.gz.part01"]
+            target = "x86_64-unknown-linux-gnu"
+            accel = "cuda"
+            cuda_major = 13
+        "#;
+        let m: Manifest = toml::from_str(manifest_text).unwrap();
+        let release_assets = vec![
+            ReleaseAsset {
+                name: "y-cuda13.tar.gz.part00".into(),
+                download_url: "https://example/p0".into(),
+                size: 10,
+            },
+            ReleaseAsset {
+                name: "y-cuda13.tar.gz.part01".into(),
+                download_url: "https://example/p1".into(),
+                size: 20,
+            },
+        ];
+        let assets = synthesize_assets(&m, &release_assets).unwrap();
+        assert_eq!(assets.subprocess.len(), 1);
+        let a = &assets.subprocess[0];
+        // Multi-part: no single-file pin, the parts carry the URLs in order.
+        assert!(a.url.is_none());
+        assert_eq!(a.parts.len(), 2);
+        assert_eq!(a.parts[0].url, "https://example/p0");
+        assert_eq!(a.parts[1].size, 20);
+        // Unverified custom-repo source → empty per-part pins.
+        assert!(a.parts.iter().all(|p| p.sha256.is_empty()));
     }
 }

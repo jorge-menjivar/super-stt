@@ -13,7 +13,7 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 use crate::registry::compat::Selection;
-use crate::registry::index_schema::{IndexAsset, IndexBackend, IndexSubprocessAsset};
+use crate::registry::index_schema::{IndexAsset, IndexBackend};
 
 /// Absolute ceiling on a single downloaded asset when its size is not declared
 /// in the index. Declared sizes are honored directly (plus a small margin).
@@ -23,10 +23,17 @@ const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 /// Slack allowed over a declared asset size before a download is rejected.
 const DOWNLOAD_SIZE_MARGIN: u64 = 1024 * 1024;
-/// Per-file ceiling when unpacking a subprocess tarball.
-const MAX_TARBALL_ENTRY_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-/// Total uncompressed-output ceiling for a subprocess tarball.
-const MAX_TARBALL_TOTAL_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// Per-file ceiling when unpacking a subprocess tarball. A single bundled
+/// library (e.g. a CUDA `.so`) can be large, so this is generous.
+const MAX_TARBALL_ENTRY_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// Floor for the total uncompressed-output ceiling. The actual cap scales with
+/// the compressed archive (see [`unpack_cap`]) so a large but legitimate bundle
+/// (a CUDA `PyTorch` tarball unpacks to several GiB) is allowed while a zip-bomb —
+/// a tiny archive with huge output — is still rejected.
+const MAX_TARBALL_TOTAL_FLOOR: u64 = 4 * 1024 * 1024 * 1024;
+/// Maximum unpacked-output-to-compressed-archive ratio. gzip over already-packed
+/// ML libraries stays far below this; a zip-bomb is far above it.
+const MAX_DECOMP_RATIO: u64 = 5;
 
 /// The byte ceiling for a download given the index-declared `expected_size`
 /// (0 when unknown).
@@ -36,6 +43,14 @@ fn download_cap(expected_size: u64) -> u64 {
     } else {
         expected_size.saturating_add(DOWNLOAD_SIZE_MARGIN)
     }
+}
+
+/// The uncompressed-output ceiling for an archive of `archive_size` compressed
+/// bytes: scales with the input but never drops below the floor.
+fn unpack_cap(archive_size: u64) -> u64 {
+    archive_size
+        .saturating_mul(MAX_DECOMP_RATIO)
+        .max(MAX_TARBALL_TOTAL_FLOOR)
 }
 
 #[derive(Debug, Error)]
@@ -94,23 +109,9 @@ where
 
     (p.on_progress)(P::Resolving, None);
 
-    let (url, expected_sha, expected_size, kind_subdir) = match selection {
-        Selection::Wasm => {
-            let a = entry
-                .assets
-                .wasm
-                .as_ref()
-                .ok_or((P::Resolving, InstallError::Incompatible))?;
-            (a.url.clone(), a.sha256.clone(), a.size, false)
-        }
-        Selection::Subprocess { index } => {
-            let a: &IndexSubprocessAsset = entry
-                .assets
-                .subprocess
-                .get(*index)
-                .ok_or((P::Resolving, InstallError::Incompatible))?;
-            (a.url.clone(), a.sha256.clone(), a.size, true)
-        }
+    let kind_subdir = match selection {
+        Selection::Wasm => false,
+        Selection::Subprocess { .. } => true,
         Selection::Incompatible { reason: _ } => {
             return Err((P::Resolving, InstallError::Incompatible));
         }
@@ -127,25 +128,10 @@ where
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Downloading))?;
 
-    (p.on_progress)(P::Downloading, Some((0, None)));
-    let actual_sha = stream_download(&p.http, &url, expected_size, &partial_path, &p.on_progress)
-        .await
-        .map_err(|e| e.as_typed(P::Downloading))?;
-
-    (p.on_progress)(P::Verifying, None);
-    if expected_sha.is_empty() {
-        // Custom-repo install path: the synthesized entry has no registry
-        // checksum (see `custom_repo::resolve`). TLS to the source is the
-        // only integrity guarantee — clients see `warning: "unverified_source"`.
-        log::warn!(
-            "install({}): no expected sha256; skipping asset verification (actual=`{}`)",
-            entry.source,
-            actual_sha
-        );
-    } else if actual_sha != expected_sha {
-        let _ = fs::remove_file(&partial_path).await;
-        return Err((P::Verifying, InstallError::AssetHashMismatch));
-    }
+    // Fetch the verified artifact into `partial_path`: a single download for a
+    // wasm or single-file subprocess asset, or a per-part download +
+    // concatenation for a multi-part subprocess archive.
+    download_and_verify(p, entry, selection, &partial_path).await?;
 
     (p.on_progress)(P::Extracting, None);
     let staging = p
@@ -189,6 +175,75 @@ where
 
     (p.on_progress)(P::Rescanning, None);
     Ok(entry.version.clone())
+}
+
+/// Download the artifact `selection` names into `partial_path` and verify its
+/// integrity: a single hashed download for a wasm or single-file subprocess
+/// asset, or a per-part download + concatenation for a multi-part archive.
+async fn download_and_verify<F>(
+    p: &Pipeline<F>,
+    entry: &IndexBackend,
+    selection: &Selection,
+    partial_path: &Path,
+) -> Result<(), (InstallPhase, InstallError)>
+where
+    F: Fn(InstallPhase, Option<(u64, Option<u64>)>) + Send + Sync,
+{
+    use InstallPhase as P;
+    (p.on_progress)(P::Downloading, Some((0, None)));
+    match selection {
+        Selection::Wasm => {
+            let a = entry
+                .assets
+                .wasm
+                .as_ref()
+                .ok_or((P::Resolving, InstallError::Incompatible))?;
+            let actual = stream_download(&p.http, &a.url, a.size, partial_path, &p.on_progress)
+                .await
+                .map_err(|e| e.as_typed(P::Downloading))?;
+            (p.on_progress)(P::Verifying, None);
+            verify_asset_sha(&actual, &a.sha256, &entry.source, partial_path).await
+        }
+        Selection::Subprocess { index } => {
+            let a = entry
+                .assets
+                .subprocess
+                .get(*index)
+                .ok_or((P::Resolving, InstallError::Incompatible))?;
+            if a.parts.is_empty() {
+                let url = a
+                    .url
+                    .as_deref()
+                    .ok_or((P::Resolving, InstallError::Incompatible))?;
+                let actual = stream_download(
+                    &p.http,
+                    url,
+                    a.size.unwrap_or(0),
+                    partial_path,
+                    &p.on_progress,
+                )
+                .await
+                .map_err(|e| e.as_typed(P::Downloading))?;
+                (p.on_progress)(P::Verifying, None);
+                verify_asset_sha(
+                    &actual,
+                    a.sha256.as_deref().unwrap_or(""),
+                    &entry.source,
+                    partial_path,
+                )
+                .await
+            } else {
+                // Multi-part: download each part, verify its SHA-256, and append
+                // it to the partial `.tar.gz` (verification is inline, per part).
+                download_verified_parts(&p.http, &a.parts, partial_path, &p.on_progress)
+                    .await
+                    .map_err(|e| e.as_typed(P::Downloading))?;
+                (p.on_progress)(P::Verifying, None);
+                Ok(())
+            }
+        }
+        Selection::Incompatible { reason: _ } => Err((P::Resolving, InstallError::Incompatible)),
+    }
 }
 
 /// Import-from-dir variant: the operator provided `src_dir`, so the
@@ -343,7 +398,85 @@ where
     Ok(hex::encode(hasher.finish().as_ref()))
 }
 
+/// Verify a downloaded asset's SHA-256 against the index pin. An empty pin is
+/// the custom-repo "unverified source" case (no index pre-computed a hash) —
+/// TLS to the origin is then the only integrity guarantee.
+async fn verify_asset_sha(
+    actual: &str,
+    expected: &str,
+    source: &str,
+    partial: &Path,
+) -> Result<(), (InstallPhase, InstallError)> {
+    if expected.is_empty() {
+        log::warn!(
+            "install({source}): no expected sha256; skipping asset verification (actual=`{actual}`)"
+        );
+        Ok(())
+    } else if actual == expected {
+        Ok(())
+    } else {
+        let _ = fs::remove_file(partial).await;
+        Err((InstallPhase::Verifying, InstallError::AssetHashMismatch))
+    }
+}
+
+/// Download each part in listed order, verifying its SHA-256, and append it to
+/// `dest` — reconstituting the multi-part `.tar.gz` byte-for-byte. A bad part
+/// removes the partial file and aborts. Progress spans the whole set.
+async fn download_verified_parts<F>(
+    http: &reqwest::Client,
+    parts: &[IndexAsset],
+    dest: &Path,
+    on_progress: &Arc<F>,
+) -> Result<(), PipelineError>
+where
+    F: Fn(InstallPhase, Option<(u64, Option<u64>)>) + Send + Sync,
+{
+    let total_expected: u64 = parts.iter().map(|p| p.size).sum();
+    let mut out = tokio::fs::File::create(dest).await?;
+    let mut overall: u64 = 0;
+    for part in parts {
+        let resp = http.get(&part.url).send().await?.error_for_status()?;
+        let cap = download_cap(part.size);
+        let mut hasher = Context::new(&SHA256);
+        let mut stream = resp.bytes_stream();
+        let mut part_done: u64 = 0;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            part_done += chunk.len() as u64;
+            if part_done > cap {
+                let _ = out.flush().await;
+                drop(out);
+                let _ = tokio::fs::remove_file(dest).await;
+                return Err(PipelineError::TooLarge { limit: cap });
+            }
+            out.write_all(&chunk).await?;
+            hasher.update(&chunk);
+            overall += chunk.len() as u64;
+            on_progress(
+                InstallPhase::Downloading,
+                Some((overall, Some(total_expected))),
+            );
+        }
+        let actual = hex::encode(hasher.finish().as_ref());
+        if !part.sha256.is_empty() && actual != part.sha256 {
+            let _ = out.flush().await;
+            drop(out);
+            let _ = tokio::fs::remove_file(dest).await;
+            return Err(PipelineError::HashMismatch {
+                expected: part.sha256.clone(),
+                actual,
+            });
+        }
+    }
+    out.flush().await?;
+    Ok(())
+}
+
 fn extract_tarball(src: &Path, dest_dir: &Path) -> Result<(), PipelineError> {
+    // Cap the uncompressed output relative to the (verified) compressed size so
+    // a legitimate multi-GB bundle is allowed but a zip-bomb is not.
+    let total_cap = unpack_cap(std::fs::metadata(src)?.len());
     // First pass: validate the archive (no unsafe entries) without unpacking.
     {
         let f = std::fs::File::open(src)?;
@@ -378,9 +511,9 @@ fn extract_tarball(src: &Path, dest_dir: &Path) -> Result<(), PipelineError> {
             )));
         }
         total = total.saturating_add(size);
-        if total > MAX_TARBALL_TOTAL_BYTES {
+        if total > total_cap {
             return Err(PipelineError::TarUnsafe(format!(
-                "archive output exceeds {MAX_TARBALL_TOTAL_BYTES} bytes"
+                "archive output exceeds {total_cap} bytes"
             )));
         }
         entry.unpack_in(dest_dir)?;

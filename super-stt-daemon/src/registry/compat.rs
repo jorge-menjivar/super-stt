@@ -159,9 +159,10 @@ mod tests {
             cuda_major: cm,
             cuda_sm: sm,
             cudnn,
-            url: "x".into(),
-            size: 1,
-            sha256: "x".into(),
+            url: Some("x".into()),
+            size: Some(1),
+            sha256: Some("x".into()),
+            parts: Vec::new(),
         }
     }
 

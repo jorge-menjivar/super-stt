@@ -138,6 +138,23 @@ pub fn backend_schema() -> Value {
             } }
         }),
     );
+    // Exactly one of `file` (single archive) or `parts` (multi-part). `oneOf`
+    // passes only when one branch matches: file-only or parts-only is valid;
+    // both or neither fails — the schema mirror of the parser's xor guard.
+    push_all_of(
+        asset,
+        json!({
+            "oneOf": [
+                { "required": ["file"] },
+                { "required": ["parts"] }
+            ]
+        }),
+    );
+    // A multi-part `parts` list must be non-empty (serde can't express minItems).
+    asset["properties"]["parts"]
+        .as_object_mut()
+        .expect("parts property")
+        .insert("minItems".into(), json!(1));
     // `FileSpec` is flat — `url` and `destination` are required by serde and
     // `sha256` is optional, so no cross-field conditional is needed here.
 
