@@ -509,7 +509,7 @@ mod tests {
             count += 1;
         }
         // Tripwire: bump when adding/removing in-repo backends.
-        assert!(count >= 4, "expected the 4 in-repo backends, found {count}");
+        assert!(count >= 3, "expected the 3 in-repo backends, found {count}");
     }
 
     #[test]

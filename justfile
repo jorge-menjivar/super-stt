@@ -236,11 +236,6 @@ build-openai-backend:
 build-mistral-backend:
     cargo build --manifest-path backends/mistral/Cargo.toml --target wasm32-wasip2 --release
 
-# Build the Deepgram WASM backend component (wasm32-wasip2).
-# Requires: rustup target add wasm32-wasip2
-build-deepgram-backend:
-    cargo build --manifest-path backends/deepgram/Cargo.toml --target wasm32-wasip2 --release
-
 # Build the generic mock WASM backend fixture (wasm32-wasip2) that
 # tests/wasm_mock.rs loads to exercise the daemon's WasmBackend orchestration.
 # Requires: rustup target add wasm32-wasip2
@@ -314,11 +309,10 @@ serve-test-registry port="8787": build-openai-backend build-mistral-backend
     cd "$out" && exec python3 -m http.server {{ port }}
 
 # Install built backends into the daemon's discovery directory
-# (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI,
-# Mistral, and Deepgram WASM components; the Qwen3-ASR Python bundle is
-# installed only if already built (run
-# `just build-qwen3-asr-backend [cpu|cuda13]` first).
-install-backends: build-openai-backend build-mistral-backend build-deepgram-backend
+# (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI and
+# Mistral WASM components; the Qwen3-ASR Python bundle is installed only if
+# already built (run `just build-qwen3-asr-backend [cpu|cuda13]` first).
+install-backends: build-openai-backend build-mistral-backend
     #!/usr/bin/env bash
     set -euo pipefail
     backends_dir="${XDG_DATA_HOME:-$HOME/.local/share}/super-stt/backends"
@@ -338,14 +332,6 @@ install-backends: build-openai-backend build-mistral-backend build-deepgram-back
     cp backends/mistral/target/wasm32-wasip2/release/super_stt_backend_mistral.wasm \
         "$mistral_dir/mistral.wasm"
     echo "Installed Mistral backend -> $mistral_dir"
-
-    # Deepgram (WASM component). backend.toml's entrypoint is "deepgram.wasm".
-    deepgram_dir="$backends_dir/deepgram"
-    mkdir -p "$deepgram_dir"
-    cp backends/deepgram/backend.toml "$deepgram_dir/backend.toml"
-    cp backends/deepgram/target/wasm32-wasip2/release/super_stt_backend_deepgram.wasm \
-        "$deepgram_dir/deepgram.wasm"
-    echo "Installed Deepgram backend -> $deepgram_dir"
 
     # Qwen3-ASR (Python subprocess bundle). Installed only if a bundle has been
     # built; prefers the cuda13 bundle when present. Extracts over any existing
