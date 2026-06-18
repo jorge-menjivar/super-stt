@@ -1,8 +1,61 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-18T13:10:42Z",
+  "generated_at": "2026-06-18T17:18:33Z",
   "min_client": "0.1.0",
   "backends": [
+    {
+      "id": "deepgram",
+      "source": "github.com/jorge-menjivar/super-stt-deepgram",
+      "version": "0.1.0",
+      "tag": "v0.1.0",
+      "name": "Deepgram",
+      "license": "GPL-3.0-only",
+      "kind": "wasm",
+      "contract": "v1",
+      "entrypoint": "deepgram.wasm",
+      "allowed_hosts": [
+        "api.deepgram.com"
+      ],
+      "online": true,
+      "supports_gpu": false,
+      "supports_cpu": false,
+      "models": [
+        {
+          "name": "nova-3",
+          "provider": "deepgram",
+          "supported_devices": [
+            "none"
+          ]
+        }
+      ],
+      "secrets": [
+        {
+          "name": "deepgram_api_key",
+          "label": "Deepgram API key",
+          "required": true
+        }
+      ],
+      "options": [
+        {
+          "name": "base_url",
+          "label": "API base URL",
+          "type": "string",
+          "default": "https://api.deepgram.com"
+        }
+      ],
+      "assets": {
+        "wasm": {
+          "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/deepgram.wasm",
+          "size": 208274,
+          "sha256": "c7d53322cd5c3f6d2b7a165b21fa389355c5ad69722c220b70d0c5693c21c580"
+        }
+      },
+      "manifest": {
+        "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/backend.toml",
+        "size": 1183,
+        "sha256": "7fdb85b9ee95f84b57c59188ab892231c5fec1cbe4602e01edbdd9ecc89b33a5"
+      }
+    },
     {
       "id": "voxtral",
       "source": "github.com/jorge-menjivar/super-stt-voxtral",
