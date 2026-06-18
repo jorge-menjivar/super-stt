@@ -35,11 +35,6 @@ jobs:
             libwayland-dev \
             libxkbcommon-x11-dev \
             libegl1-mesa-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libglib2.0-dev \
-            libgtk-4-dev \
-            libspeechd-dev \
             libxrandr-dev \
             libxinerama-dev \
             libxcursor-dev \
@@ -98,11 +93,6 @@ jobs:
             libwayland-dev \
             libxkbcommon-x11-dev \
             libegl1-mesa-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libglib2.0-dev \
-            libgtk-4-dev \
-            libspeechd-dev \
             libxrandr-dev \
             libxinerama-dev \
             libxcursor-dev \
