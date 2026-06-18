@@ -231,11 +231,6 @@ build-applet:
 build-openai-backend:
     cargo build --manifest-path backends/openai/Cargo.toml --target wasm32-wasip2 --release
 
-# Build the Mistral WASM backend component (wasm32-wasip2).
-# Requires: rustup target add wasm32-wasip2
-build-mistral-backend:
-    cargo build --manifest-path backends/mistral/Cargo.toml --target wasm32-wasip2 --release
-
 # Build the generic mock WASM backend fixture (wasm32-wasip2) that
 # tests/wasm_mock.rs loads to exercise the daemon's WasmBackend orchestration.
 # Requires: rustup target add wasm32-wasip2
@@ -252,6 +247,7 @@ build-mock-wasm-realtime-backend:
 sync-wit:
     #!/usr/bin/env bash
     set -euo pipefail
+    shopt -s nullglob # no in-tree backend bundles WIT after the relocations
     for dir in backends/*/wit; do
         cp docs/protocol/wit/realtime.wit "$dir/realtime.wit"
         rm -rf "$dir/deps"
@@ -265,6 +261,7 @@ check-wit-sync:
     #!/usr/bin/env bash
     set -euo pipefail
     fail=0
+    shopt -s nullglob # no in-tree backend bundles WIT after the relocations
     for dir in backends/*/wit; do
         if ! diff -q "$dir/realtime.wit" docs/protocol/wit/realtime.wit >/dev/null; then
             echo "WIT drift: $dir/realtime.wit" >&2; fail=1
@@ -289,23 +286,22 @@ gen-schemas:
     cargo run -p super-stt-registry-types --features schema --bin gen_schemas
 
 # Serve a local offline registry for testing the Download/Install flow without
-# any GitHub release or Pages setup. Builds the OpenAI + Mistral wasm
-# components, stages them with their asset filenames, generates an index.json
+# any GitHub release or Pages setup. Builds the OpenAI wasm
+# component, stages it with its asset filename, generates an index.json
 # with real SHA-256 hashes, and serves the directory over HTTP. In the daemon's
 # environment set `SUPER_STT_REGISTRY_URL=http://localhost:8787/index.json`
 # before starting it, then open the app's Models > Download tab.
 # Requires: `rustup target add wasm32-wasip2` (Python 3 is used only as the
 # static file server at the end).
-serve-test-registry port="8787": build-openai-backend build-mistral-backend
+serve-test-registry port="8787": build-openai-backend
     #!/usr/bin/env bash
     set -euo pipefail
     out="target/test-registry"
     base="http://localhost:{{ port }}"
     mkdir -p "$out"
     cp backends/openai/target/wasm32-wasip2/release/super_stt_backend_openai.wasm "$out/openai.wasm"
-    cp backends/mistral/target/wasm32-wasip2/release/super_stt_backend_mistral.wasm "$out/mistral.wasm"
     cargo run -q -p super-stt-indexer -- local --out "$out" --base-url "$base" \
-        backends/openai/backend.toml backends/mistral/backend.toml
+        backends/openai/backend.toml
     echo ""
     echo "Test registry ready. In the daemon's environment, run:"
     echo "    export SUPER_STT_REGISTRY_URL=$base/index.json"
@@ -315,10 +311,10 @@ serve-test-registry port="8787": build-openai-backend build-mistral-backend
     cd "$out" && exec python3 -m http.server {{ port }}
 
 # Install built backends into the daemon's discovery directory
-# (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI and
-# Mistral WASM components; the Qwen3-ASR Python bundle is installed only if
-# already built (run `just build-qwen3-asr-backend [cpu|cuda13]` first).
-install-backends: build-openai-backend build-mistral-backend
+# (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI
+# WASM component; the Qwen3-ASR Python bundle is installed only if already
+# built (run `just build-qwen3-asr-backend [cpu|cuda13]` first).
+install-backends: build-openai-backend
     #!/usr/bin/env bash
     set -euo pipefail
     backends_dir="${XDG_DATA_HOME:-$HOME/.local/share}/super-stt/backends"
@@ -330,14 +326,6 @@ install-backends: build-openai-backend build-mistral-backend
     cp backends/openai/target/wasm32-wasip2/release/super_stt_backend_openai.wasm \
         "$openai_dir/openai.wasm"
     echo "Installed OpenAI backend -> $openai_dir"
-
-    # Mistral (WASM component). backend.toml's entrypoint is "mistral.wasm".
-    mistral_dir="$backends_dir/mistral"
-    mkdir -p "$mistral_dir"
-    cp backends/mistral/backend.toml "$mistral_dir/backend.toml"
-    cp backends/mistral/target/wasm32-wasip2/release/super_stt_backend_mistral.wasm \
-        "$mistral_dir/mistral.wasm"
-    echo "Installed Mistral backend -> $mistral_dir"
 
     # Qwen3-ASR (Python subprocess bundle). Installed only if a bundle has been
     # built; prefers the cuda13 bundle when present. Extracts over any existing

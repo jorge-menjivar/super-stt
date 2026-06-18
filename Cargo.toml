@@ -27,7 +27,6 @@
     # of the workspace entirely. Built via `just build-openai-backend`. The mock
     # WASM backend fixture (tests/wasm_mock.rs) is wasm32 too — same treatment.
     exclude = [
-        "backends/mistral",
         "backends/openai",
         "super-stt-daemon/tests/fixtures/mock-wasm-backend",
         "super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend",

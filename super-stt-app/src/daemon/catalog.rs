@@ -24,10 +24,7 @@ pub struct CatalogBackend {
 }
 
 /// The embedded manifests. Add a line here when a new official backend ships.
-const MANIFESTS: &[&str] = &[
-    include_str!("../../../backends/openai/backend.toml"),
-    include_str!("../../../backends/mistral/backend.toml"),
-];
+const MANIFESTS: &[&str] = &[include_str!("../../../backends/openai/backend.toml")];
 
 /// Subset of `backend.toml` the catalog needs; unknown fields are ignored.
 #[derive(serde::Deserialize)]
