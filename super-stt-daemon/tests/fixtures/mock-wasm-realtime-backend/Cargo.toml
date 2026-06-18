@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Generic mock REALTIME WASM backend used by tests/wasm_mock_realtime.rs to
+# exercise the daemon's WasmBackend realtime orchestration (ws-server.handle via
+# realtime_session) against a canned session — the realtime analog of
+# mock-wasm-backend. Built for wasm32-wasip2 via
+# `just build-mock-wasm-realtime-backend`; excluded from the workspace (see the
+# root Cargo.toml). Contacts no upstream, so it needs no network (allowed_hosts
+# empty) and runs in hosted CI.
+[package]
+    name = "mock-wasm-realtime-backend"
+    version = "0.0.0"
+    edition = "2024"
+    license = "GPL-3.0-only"
+    publish = false
+
+# Own workspace root — it lives under a workspace member's directory, so without
+# this Cargo tries to absorb it into the super-stt workspace (and a wasm32 crate
+# breaks a host `--workspace` build).
+[workspace]
+
+[lib]
+    crate-type = ["cdylib"]
+
+[dependencies]
+    serde_json = "1"
+    wit-bindgen = "0.46"

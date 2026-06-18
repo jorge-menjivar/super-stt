@@ -242,6 +242,12 @@ build-mistral-backend:
 build-mock-wasm-backend:
     cargo build --manifest-path super-stt-daemon/tests/fixtures/mock-wasm-backend/Cargo.toml --target wasm32-wasip2 --release
 
+# Build the generic mock REALTIME WASM backend fixture (wasm32-wasip2) that
+# tests/wasm_mock_realtime.rs loads to exercise the daemon's realtime
+# orchestration (ws-server.handle). Requires: rustup target add wasm32-wasip2
+build-mock-wasm-realtime-backend:
+    cargo build --manifest-path super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend/Cargo.toml --target wasm32-wasip2 --release
+
 # Copy the canonical WIT (realtime.wit + deps) into every backend that bundles it.
 sync-wit:
     #!/usr/bin/env bash

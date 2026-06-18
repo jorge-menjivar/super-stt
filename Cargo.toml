@@ -30,6 +30,7 @@
         "backends/mistral",
         "backends/openai",
         "super-stt-daemon/tests/fixtures/mock-wasm-backend",
+        "super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend",
     ]
 
     [workspace.package]

@@ -59,10 +59,13 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
 
-      # Build the mock WASM backend so tests/wasm_mock.rs (the daemon's WASM
-      # transport coverage) runs instead of self-skipping.
-      - name: Build mock WASM backend
-        run: just build-mock-wasm-backend
+      # Build the mock WASM backends so tests/wasm_mock.rs and
+      # tests/wasm_mock_realtime.rs (the daemon's WASM transport coverage —
+      # batch + realtime) run instead of self-skipping.
+      - name: Build mock WASM backends
+        run: |
+          just build-mock-wasm-backend
+          just build-mock-wasm-realtime-backend
 
       - name: Run tests
         run: just test --verbose
