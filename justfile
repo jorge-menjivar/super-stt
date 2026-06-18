@@ -241,6 +241,12 @@ build-mistral-backend:
 build-deepgram-backend:
     cargo build --manifest-path backends/deepgram/Cargo.toml --target wasm32-wasip2 --release
 
+# Build the generic mock WASM backend fixture (wasm32-wasip2) that
+# tests/wasm_mock.rs loads to exercise the daemon's WasmBackend orchestration.
+# Requires: rustup target add wasm32-wasip2
+build-mock-wasm-backend:
+    cargo build --manifest-path super-stt-daemon/tests/fixtures/mock-wasm-backend/Cargo.toml --target wasm32-wasip2 --release
+
 # Copy the canonical WIT (realtime.wit + deps) into every backend that bundles it.
 sync-wit:
     #!/usr/bin/env bash

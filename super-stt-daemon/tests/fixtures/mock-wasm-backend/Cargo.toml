@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Generic mock WASM backend used by tests/wasm_mock.rs to exercise the daemon's
+# WasmBackend orchestration against canned /v1 responses — the WASM analog of
+# src/bin/mock_backend.rs. Built for wasm32-wasip2 via `just build-mock-wasm-backend`;
+# excluded from the workspace (see the root Cargo.toml). Serves no upstream, so it
+# needs no network (allowed_hosts empty).
+[package]
+    name = "mock-wasm-backend"
+    version = "0.0.0"
+    edition = "2024"
+    license = "GPL-3.0-only"
+    publish = false
+
+# Own workspace root — it lives under a workspace member's directory, so without
+# this Cargo tries to absorb it into the super-stt workspace (and a wasm32 crate
+# breaks a host `--workspace` build).
+[workspace]
+
+[lib]
+    crate-type = ["cdylib"]
+
+[dependencies]
+    serde_json = "1"
+    wasi = "0.14.7"

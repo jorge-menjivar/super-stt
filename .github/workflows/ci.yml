@@ -53,6 +53,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
+          targets: wasm32-wasip2
 
       - name: Cache dependencies
         uses: actions/cache@v5
@@ -62,6 +63,11 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+
+      # Build the mock WASM backend so tests/wasm_mock.rs (the daemon's WASM
+      # transport coverage) runs instead of self-skipping.
+      - name: Build mock WASM backend
+        run: just build-mock-wasm-backend
 
       - name: Run tests
         run: just test --verbose
