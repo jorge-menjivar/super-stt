@@ -100,8 +100,8 @@ fn parse_semver(s: &str) -> Result<Version, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super_stt_forge::Release;
     use crate::registry_toml::Entry;
+    use super_stt_forge::Release;
 
     fn rel(tag: &str) -> Release {
         Release {

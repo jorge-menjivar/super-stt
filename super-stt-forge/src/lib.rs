@@ -162,7 +162,11 @@ mod repo_ref_tests {
             "  https://github.com/a/b  ",
         ] {
             let r = RepoRef::parse(raw).unwrap();
-            assert_eq!((r.host.as_str(), r.owner.as_str(), r.repo.as_str()), ("github.com", "a", "b"), "{raw}");
+            assert_eq!(
+                (r.host.as_str(), r.owner.as_str(), r.repo.as_str()),
+                ("github.com", "a", "b"),
+                "{raw}"
+            );
         }
         let r = RepoRef::parse("git.example.com/a/b").unwrap();
         assert_eq!(r.canonical(), "git.example.com/a/b");
@@ -170,7 +174,13 @@ mod repo_ref_tests {
 
     #[test]
     fn rejects_wrong_segment_count_or_empty() {
-        for bad in ["github.com/a", "github.com/a/b/c", "github.com//b", "github.com/a/", "a/b"] {
+        for bad in [
+            "github.com/a",
+            "github.com/a/b/c",
+            "github.com//b",
+            "github.com/a/",
+            "a/b",
+        ] {
             assert!(RepoRef::parse(bad).is_err(), "{bad} should be rejected");
         }
     }
@@ -178,7 +188,7 @@ mod repo_ref_tests {
 
 #[cfg(test)]
 mod dispatch_tests {
-    use super::{client, Forge};
+    use super::{Forge, client};
 
     #[test]
     fn dispatches_github() {

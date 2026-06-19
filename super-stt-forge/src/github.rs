@@ -133,7 +133,11 @@ impl ForgeClient for Github {
             .send()
             .await?
             .error_for_status()?;
-        Ok(r.json::<Vec<GhRelease>>().await?.into_iter().map(Into::into).collect())
+        Ok(r.json::<Vec<GhRelease>>()
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 
     async fn download(&self, url: &str) -> Result<Vec<u8>, ForgeError> {

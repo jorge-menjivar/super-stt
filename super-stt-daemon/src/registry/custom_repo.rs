@@ -17,11 +17,11 @@ use serde::Deserialize;
 use super_stt_registry_types::manifest::Device;
 use thiserror::Error;
 
-use super_stt_forge::{ForgeClient, ReleaseAsset, RepoRef};
 use crate::registry::index_schema::{
     IndexAsset, IndexAssets, IndexBackend, IndexModel, IndexOption, IndexSecret,
     IndexSubprocessAsset,
 };
+use super_stt_forge::{ForgeClient, ReleaseAsset, RepoRef};
 
 const MAX_MANIFEST_BYTES: usize = 256 * 1024;
 
@@ -425,7 +425,8 @@ mod tests {
     fn source_under_a_different_repo_is_rejected_as_spoof() {
         let repo = RepoRef::parse("github.com/a/b").unwrap();
         // A repo at `a/b` claiming an identity owned by `jorge-menjivar/super-stt`.
-        let err = ensure_source_matches_repo("github.com/jorge-menjivar/super-stt/openai", &repo).unwrap_err();
+        let err = ensure_source_matches_repo("github.com/jorge-menjivar/super-stt/openai", &repo)
+            .unwrap_err();
         assert!(matches!(err, ResolveError::SourceSpoof { .. }));
         // Prefix-only overlap must not pass (requires a `/` boundary).
         let err = ensure_source_matches_repo("github.com/a/bbb", &repo).unwrap_err();

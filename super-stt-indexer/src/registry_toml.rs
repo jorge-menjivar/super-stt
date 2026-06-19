@@ -171,9 +171,10 @@ mod tests {
                 "{bad:?} should be rejected"
             );
         }
-        let ok =
-            Registry::parse("[good]\nrepo = \"github.com/x/y\"\nforge = \"github\"\nsubdir = \"my..backend/v2\"\n")
-                .unwrap();
+        let ok = Registry::parse(
+            "[good]\nrepo = \"github.com/x/y\"\nforge = \"github\"\nsubdir = \"my..backend/v2\"\n",
+        )
+        .unwrap();
         assert_eq!(
             ok.0.get("good").unwrap().subdir.as_deref(),
             Some("my..backend/v2")
