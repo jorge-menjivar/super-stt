@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-18T18:49:51Z",
+  "generated_at": "2026-06-19T00:49:09Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -54,6 +54,66 @@
         "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/backend.toml",
         "size": 1183,
         "sha256": "7fdb85b9ee95f84b57c59188ab892231c5fec1cbe4602e01edbdd9ecc89b33a5"
+      }
+    },
+    {
+      "id": "mistral",
+      "source": "github.com/jorge-menjivar/super-stt-mistral",
+      "version": "0.1.0",
+      "tag": "v0.1.0",
+      "name": "Mistral",
+      "license": "GPL-3.0-only",
+      "kind": "wasm",
+      "contract": "v1",
+      "entrypoint": "mistral.wasm",
+      "allowed_hosts": [
+        "api.mistral.ai"
+      ],
+      "online": true,
+      "supports_gpu": false,
+      "supports_cpu": false,
+      "models": [
+        {
+          "name": "voxtral-mini-latest",
+          "provider": "mistral",
+          "supported_devices": [
+            "none"
+          ]
+        },
+        {
+          "name": "voxtral-mini-transcribe-realtime-2602",
+          "provider": "mistral",
+          "supported_devices": [
+            "none"
+          ]
+        }
+      ],
+      "secrets": [
+        {
+          "name": "mistral_api_key",
+          "label": "Mistral API key",
+          "required": true
+        }
+      ],
+      "options": [
+        {
+          "name": "base_url",
+          "label": "API base URL",
+          "type": "string",
+          "default": "https://api.mistral.ai"
+        }
+      ],
+      "assets": {
+        "wasm": {
+          "url": "https://github.com/jorge-menjivar/super-stt-mistral/releases/download/v0.1.0/mistral.wasm",
+          "size": 272511,
+          "sha256": "4077983c47afd26e211237015d2236fcc6de47a5fcdbd801e34cfab2f440fe3a"
+        }
+      },
+      "manifest": {
+        "url": "https://github.com/jorge-menjivar/super-stt-mistral/releases/download/v0.1.0/backend.toml",
+        "size": 1280,
+        "sha256": "fa15e494b0b0f0c3671a71a70487bf54170821a80f9e0b4c1fc0f14564eea79a"
       }
     },
     {
