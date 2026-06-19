@@ -31,7 +31,7 @@ pub enum AssetError {
 /// Resolve a declared asset's URL via the release manifest, refusing if missing.
 pub fn resolve_url(
     file: &str,
-    release_assets: &[crate::github::ReleaseAsset],
+    release_assets: &[super_stt_forge::ReleaseAsset],
 ) -> Result<(String, u64), AssetError> {
     let a = release_assets
         .iter()
@@ -43,7 +43,7 @@ pub fn resolve_url(
             size: a.size,
         });
     }
-    Ok((a.browser_download_url.clone(), a.size))
+    Ok((a.download_url.clone(), a.size))
 }
 
 /// Stream the asset, compute SHA-256, and dispatch validation based on kind.

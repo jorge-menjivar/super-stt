@@ -7,11 +7,12 @@ use anyhow::Context;
 use clap::Parser;
 use log::{error, info, warn};
 
+use super_stt_forge::{ForgeClient, RepoRef};
+
 use crate::manifest::Device;
 
 mod assets;
 mod carryforward;
-mod github;
 mod index_json;
 mod license;
 mod local;
@@ -58,6 +59,8 @@ pub struct BuildFailure {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
+    // Workspace reqwest uses rustls without a bundled provider; install one.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match Args::parse().command {
         Command::Build(args) => run_build(args).await,
@@ -79,7 +82,6 @@ async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
         _ => None,
     };
 
-    let gh = github::GitHub::from_env();
     let http = reqwest::Client::new();
     let now_iso = chrono_now_iso();
 
@@ -90,8 +92,9 @@ async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
             info!("skip `{id}` — removed");
             continue;
         }
-        let owner_repo = owner_repo_from(&entry.repo)?;
-        match build_entry(&gh, &http, id, entry, &owner_repo).await {
+        let client = super_stt_forge::client(entry.forge);
+        let repo = RepoRef::parse(&entry.repo)?;
+        match build_entry(client.as_ref(), &http, id, entry, &repo).await {
             Ok(b) => out_backends.push(b),
             Err(failure) => {
                 error!("entry `{id}` failed: {}", failure.error);
@@ -136,27 +139,14 @@ async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn owner_repo_from(repo: &str) -> anyhow::Result<String> {
-    // "github.com/jorge-menjivar/super-stt" -> "jorge-menjivar/super-stt"
-    let rest = repo
-        .strip_prefix("github.com/")
-        .ok_or_else(|| anyhow::anyhow!("repo `{repo}` must start with `github.com/`"))?;
-    let segments: Vec<&str> = rest.split('/').collect();
-    anyhow::ensure!(
-        segments.len() == 2 && !segments[0].is_empty() && !segments[1].is_empty(),
-        "repo `{repo}` must be `github.com/<owner>/<repo>`"
-    );
-    Ok(rest.to_string())
-}
-
 async fn build_entry(
-    gh: &github::GitHub,
+    client: &dyn ForgeClient,
     http: &reqwest::Client,
     id: &str,
     entry: &registry_toml::Entry,
-    owner_repo: &str,
+    repo: &RepoRef,
 ) -> Result<index_json::IndexBackend, BuildFailure> {
-    let resolved = resolve::resolve(gh, owner_repo, entry)
+    let resolved = resolve::resolve(client, repo, entry)
         .await
         .map_err(|e| BuildFailure {
             error: format!("{e:#}"),
@@ -206,7 +196,7 @@ async fn build_entry(
 async fn resolve_index_assets(
     http: &reqwest::Client,
     m: &manifest::Manifest,
-    release_assets: &[github::ReleaseAsset],
+    release_assets: &[super_stt_forge::ReleaseAsset],
 ) -> anyhow::Result<index_json::IndexAssets> {
     let mut idx_assets = index_json::IndexAssets::default();
     if let Some(wasm) = &m.assets.wasm {
@@ -249,7 +239,7 @@ async fn resolve_index_assets(
 /// Assemble the published `IndexBackend` from a validated manifest, its
 /// resolved `version` + `tag`, and the hashed assets. `online` / `supports_gpu`
 /// / `supports_cpu` are derived from the manifest's models. Shared by the
-/// GitHub-release path and the offline `local` path.
+/// forge-release path and the offline `local` path.
 #[allow(clippy::similar_names)] // supports_gpu / supports_cpu mirror the output fields
 pub(crate) fn into_index_backend(
     id: &str,

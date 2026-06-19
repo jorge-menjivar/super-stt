@@ -4,7 +4,8 @@
 use semver::Version;
 use thiserror::Error;
 
-use crate::github::{GitHub, Release};
+use super_stt_forge::{ForgeClient, Release, RepoRef};
+
 use crate::registry_toml::Entry;
 
 #[derive(Debug, Clone)]
@@ -23,18 +24,18 @@ pub enum ResolveError {
     #[error("tag `{tag}` does not parse as semver after stripping prefix `{prefix:?}`")]
     BadSemver { tag: String, prefix: Option<String> },
     #[error(transparent)]
-    Http(#[from] anyhow::Error),
+    Forge(#[from] super_stt_forge::ForgeError),
 }
 
 pub async fn resolve(
-    gh: &GitHub,
-    owner_repo: &str,
+    client: &dyn ForgeClient,
+    repo: &RepoRef,
     entry: &Entry,
 ) -> Result<Resolved, ResolveError> {
     let releases = if entry.tag_prefix.is_some() {
-        gh.list_releases(owner_repo).await?
+        client.list_releases(repo).await?
     } else {
-        vec![gh.latest_release(owner_repo).await?]
+        vec![client.latest_release(repo).await?]
     };
     select_release(releases, entry)
 }
@@ -53,11 +54,11 @@ fn select_release(releases: Vec<Release>, entry: &Entry) -> Result<Resolved, Res
             continue;
         }
         let stripped = match &entry.tag_prefix {
-            Some(p) => match r.tag_name.strip_prefix(p.as_str()) {
+            Some(p) => match r.tag.strip_prefix(p.as_str()) {
                 Some(rest) => rest,
                 None => continue,
             },
-            None => r.tag_name.strip_prefix('v').unwrap_or(&r.tag_name),
+            None => r.tag.strip_prefix('v').unwrap_or(&r.tag),
         };
         // The remainder must begin a semver (a leading digit). This enforces a
         // separator boundary so a bare `"v"` prefix or a prefix-of-prefix can't
@@ -86,7 +87,7 @@ fn select_release(releases: Vec<Release>, entry: &Entry) -> Result<Resolved, Res
         },
     })?;
     Ok(Resolved {
-        tag: release.tag_name.clone(),
+        tag: release.tag.clone(),
         version,
         release,
     })
@@ -99,12 +100,12 @@ fn parse_semver(s: &str) -> Result<Version, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::github::Release;
+    use super_stt_forge::Release;
     use crate::registry_toml::Entry;
 
     fn rel(tag: &str) -> Release {
         Release {
-            tag_name: tag.into(),
+            tag: tag.into(),
             draft: false,
             prerelease: false,
             assets: vec![],

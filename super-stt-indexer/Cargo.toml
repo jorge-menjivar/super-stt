@@ -15,7 +15,7 @@ futures = "0.3"
 hex = "0.4"
 log = "0.4"
 env_logger = "0.11"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { workspace = true }
 ring = "0.17"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
@@ -26,6 +26,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util
 toml = "1"
 url = "2"
 super-stt-registry-types = { path = "../super-stt-registry-types" }
+super-stt-forge = { version = "0.1.4-beta.2", path = "../super-stt-forge" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [dev-dependencies]
 mockito = "1"
