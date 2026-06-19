@@ -15,7 +15,7 @@ version = "0.1.0"
 description = "Qwen3-ASR local speech-to-text backend for Super STT."
 requires-python = ">=3.11"
 dependencies = [
-    "starlette>=0.41",
+    "starlette>=1.3.1",
     "uvicorn>=0.30",
     "numpy>=1.26",
 ]
