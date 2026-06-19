@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-19T00:53:29Z",
+  "generated_at": "2026-06-19T07:53:33Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -106,8 +106,8 @@
       "assets": {
         "wasm": {
           "url": "https://github.com/jorge-menjivar/super-stt-mistral/releases/download/v0.1.0/mistral.wasm",
-          "size": 272511,
-          "sha256": "4077983c47afd26e211237015d2236fcc6de47a5fcdbd801e34cfab2f440fe3a"
+          "size": 270528,
+          "sha256": "5b4f3fb7944d1e91adb738637433a4f4e46cae9b6f4d5d317d6c7bc88e3b9f98"
         }
       },
       "manifest": {
