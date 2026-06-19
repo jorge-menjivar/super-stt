@@ -4,10 +4,28 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
+    "Forge": {
+      "description": "The forge hosting a backend's releases.",
+      "oneOf": [
+        {
+          "const": "github",
+          "description": "GitHub (`api.github.com`, or a GitHub Enterprise base via\n`GITHUB_API_BASE`). The only forge with an adapter today.",
+          "type": "string"
+        }
+      ]
+    },
     "entry": {
       "additionalProperties": false,
       "description": "A `registry.toml` entry: where a backend's releases live and how the\nindexer selects them.",
       "properties": {
+        "forge": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Forge"
+            }
+          ],
+          "description": "The forge (git host) that publishes this backend's releases. See\n[`Forge`] for accepted values and the required/explicit policy."
+        },
         "max_version": {
           "default": null,
           "description": "Version ceiling (yank). The indexer ignores any release whose resolved\nversion is greater than this value. Use it to pin away from a bad\nrelease without removing the entry.",
@@ -30,7 +48,7 @@
           ]
         },
         "repo": {
-          "description": "GitHub repository hosting the backend, as `github.com/<owner>/<repo>`.\nThe indexer queries this repo's releases to discover versions.",
+          "description": "Repository hosting the backend, as `<host>/<owner>/<repo>` (e.g.\n`github.com/<owner>/<repo>`). The indexer queries this repo's releases\nto discover versions.",
           "type": "string"
         },
         "subdir": {
@@ -51,7 +69,8 @@
         }
       },
       "required": [
-        "repo"
+        "repo",
+        "forge"
       ],
       "type": "object"
     }

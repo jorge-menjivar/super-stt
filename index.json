@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-19T18:38:17Z",
+  "generated_at": "2026-06-19T23:49:13Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -114,6 +114,73 @@
         "url": "https://github.com/jorge-menjivar/super-stt-mistral/releases/download/v0.1.0/backend.toml",
         "size": 1280,
         "sha256": "fa15e494b0b0f0c3671a71a70487bf54170821a80f9e0b4c1fc0f14564eea79a"
+      }
+    },
+    {
+      "id": "openai",
+      "source": "github.com/jorge-menjivar/super-stt-openai",
+      "version": "0.1.0",
+      "tag": "v0.1.0",
+      "name": "OpenAI",
+      "license": "GPL-3.0-only",
+      "kind": "wasm",
+      "contract": "v1",
+      "entrypoint": "openai.wasm",
+      "allowed_hosts": [
+        "api.openai.com"
+      ],
+      "online": true,
+      "supports_gpu": false,
+      "supports_cpu": false,
+      "models": [
+        {
+          "name": "whisper-1",
+          "provider": "openai",
+          "supported_devices": [
+            "none"
+          ]
+        },
+        {
+          "name": "gpt-4o-transcribe",
+          "provider": "openai",
+          "supported_devices": [
+            "none"
+          ]
+        },
+        {
+          "name": "gpt-4o-mini-transcribe",
+          "provider": "openai",
+          "supported_devices": [
+            "none"
+          ]
+        }
+      ],
+      "secrets": [
+        {
+          "name": "openai_api_key",
+          "label": "OpenAI API key",
+          "required": true
+        }
+      ],
+      "options": [
+        {
+          "name": "base_url",
+          "label": "API base URL",
+          "type": "string",
+          "default": "https://api.openai.com"
+        }
+      ],
+      "assets": {
+        "wasm": {
+          "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.0/openai.wasm",
+          "size": 210504,
+          "sha256": "ad502adfc6831c4c3b8d8fd7cedbe05fbaea67ef69c6000941a24bdbdb782b12"
+        }
+      },
+      "manifest": {
+        "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.0/backend.toml",
+        "size": 1539,
+        "sha256": "fe6f064be2c3b07085ea89acea24c5489f0b3a866816580bae716d69f6801a36"
       }
     },
     {
