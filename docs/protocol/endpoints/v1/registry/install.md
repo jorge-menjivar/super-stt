@@ -1,6 +1,6 @@
 # POST /registry/backends/install
 
-Installs a backend from the registry, from an arbitrary GitHub repository
+Installs a backend from the registry, from an arbitrary git-forge repository
 (Custom-repo path), or from a locally staged directory (Import-from-dir
 path). Returns immediately with an `install_id`; the actual install runs in
 the background. Progress is delivered on the `/events` stream as
@@ -35,16 +35,16 @@ registry entry without a `manifest` pin is not installable.
 
 **Custom-repo install:**
 ```json
-{ "repo_url": "github.com/your-name/your-backend" }
+{ "repo_url": "github.com/your-name/your-backend", "forge": "github" }
 ```
 
-The daemon queries the GitHub REST API for the repo's latest release, downloads
-its `backend.toml` release asset, runs the same selection algorithm over the
-declared binary assets, and installs the manifest verbatim. **The manifest and
-assets are not hash-verified against any registry** — TLS to GitHub is the only
-integrity guarantee (the daemon still parses, validates, and identity-checks the
-manifest). The synchronous response carries `warning: "unverified_source"`;
-clients should surface this in the UI.
+The daemon queries the declared forge's API for the repo's latest release,
+downloads its `backend.toml` release asset, runs the same selection algorithm
+over the declared binary assets, and installs the manifest verbatim. **The
+manifest and assets are not hash-verified against any registry** — TLS to the
+forge is the only integrity guarantee (the daemon still parses, validates, and
+identity-checks the manifest). The synchronous response carries
+`warning: "unverified_source"`; clients should surface this in the UI.
 
 **Import-from-dir install:**
 ```json
@@ -135,9 +135,9 @@ Typed `error` values:
 
 | Status | Cause |
 |---|---|
-| `400` | Body has zero or more than one of `source` / `repo_url` / `local_path`. Body: `{"error":"bad_request"}`. For Custom-repo, `repo_url` not a `github.com/<owner>/<repo>` reference: `{"error":"bad_repo_url"}`. For Import-from-dir, `local_path` not an absolute path: `{"error":"bad_local_path"}`. |
-| `404` | `source` not in the cached or refreshed index, or Custom-repo repo/release/`backend.toml` not found at GitHub: `{"error":"not_found"}`. For Import-from-dir, `<local_path>` or its `backend.toml` does not exist: `{"error":"not_found"}`. |
+| `400` | Body has zero or more than one of `source` / `repo_url` / `local_path`. Body: `{"error":"bad_request"}`. For Custom-repo, `repo_url` not a `<host>/<owner>/<repo>` reference: `{"error":"bad_repo_url"}`. Custom-repo `forge` missing: `{"error":"bad_request"}` (an unrecognized `forge` value is rejected earlier as a malformed body). For Import-from-dir, `local_path` not an absolute path: `{"error":"bad_local_path"}`. |
+| `404` | `source` not in the cached or refreshed index, or Custom-repo repo/release/`backend.toml` not found at the forge: `{"error":"not_found"}`. For Import-from-dir, `<local_path>` or its `backend.toml` does not exist: `{"error":"not_found"}`. |
 | `409` | An install for this `source` is already in flight. Body: `{"error":"install_in_progress"}`. |
 | `422` | No compatible asset on this host: `{"error":"incompatible"}`. For Custom-repo, `backend.toml` invalid: `{"error":"manifest_invalid"}` or `{"error":"manifest_too_large"}`; a declared asset is missing from the release: `{"error":"asset_missing"}`; the manifest's `source` is not the repo it was fetched from or namespaced under it (identity spoofing): `{"error":"source_mismatch"}`. For Import-from-dir, `<local_path>/backend.toml` failed to parse or yields an unsafe install id: `{"error":"manifest_invalid"}`. |
-| `502` | Custom-repo: GitHub API unreachable. Body: `{"error":"github_unavailable"}`. |
+| `502` | Custom-repo: forge API unreachable. Body: `{"error":"forge_unavailable"}`. |
 | `503` | Registry index unreachable and no cache. Body: `{"error":"registry_unavailable"}`. |

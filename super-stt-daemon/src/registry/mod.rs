@@ -4,7 +4,6 @@
 pub mod client;
 pub mod compat;
 pub mod custom_repo;
-pub mod github;
 pub mod host_detect;
 pub mod index_schema;
 pub mod install;

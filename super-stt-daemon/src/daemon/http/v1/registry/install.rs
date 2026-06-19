@@ -17,6 +17,7 @@ pub(crate) struct InstallBody {
     pub(crate) source: Option<String>,
     pub(crate) repo_url: Option<String>,
     pub(crate) local_path: Option<String>,
+    pub(crate) forge: Option<super_stt_registry_types::forge::Forge>,
 }
 
 /// Ensures a spawned install/update task always reaches a terminal state. On
@@ -82,7 +83,6 @@ fn custom_repo_error_response(
     e: &crate::registry::custom_repo::ResolveError,
 ) -> (StatusCode, &'static str) {
     use crate::registry::custom_repo::ResolveError;
-    use crate::registry::github::GitHubError;
     match e {
         ResolveError::BadRepoUrl(_) => (StatusCode::BAD_REQUEST, "bad_repo_url"),
         ResolveError::ManifestTooLarge => (StatusCode::UNPROCESSABLE_ENTITY, "manifest_too_large"),
@@ -96,16 +96,15 @@ fn custom_repo_error_response(
         }
         ResolveError::SourceSpoof { .. } => (StatusCode::UNPROCESSABLE_ENTITY, "source_mismatch"),
         ResolveError::AssetMissing(_) => (StatusCode::UNPROCESSABLE_ENTITY, "asset_missing"),
-        ResolveError::GitHub(GitHubError::Http(err)) => {
-            // 404 from GitHub means the repo, release, or backend.toml at the
+        ResolveError::Forge(err) => {
+            // 404 from the forge means the repo, release, or backend.toml at the
             // tag is missing — surface as not_found rather than a generic 502.
-            if err.status() == Some(reqwest::StatusCode::NOT_FOUND) {
+            if err.http_status() == Some(reqwest::StatusCode::NOT_FOUND) {
                 (StatusCode::NOT_FOUND, "not_found")
             } else {
-                (StatusCode::BAD_GATEWAY, "github_unavailable")
+                (StatusCode::BAD_GATEWAY, "forge_unavailable")
             }
         }
-        ResolveError::GitHub(_) => (StatusCode::BAD_GATEWAY, "github_unavailable"),
     }
 }
 
@@ -238,8 +237,19 @@ async fn resolve_install_entry(
         };
         Ok(found)
     } else if let Some(ref repo_url) = body.repo_url {
-        let gh = crate::registry::github::GitHub::from_env();
-        match crate::registry::custom_repo::resolve(&gh, repo_url).await {
+        let Some(forge) = body.forge else {
+            s.install_inflight.write().remove(source_key);
+            return Err(Box::new(
+                (
+                    StatusCode::BAD_REQUEST,
+                    [("content-type", "application/json")],
+                    serde_json::json!({"error": "bad_request", "message": "custom-repo install requires `forge`"}).to_string(),
+                )
+                    .into_response(),
+            ));
+        };
+        let client = super_stt_forge::client(forge);
+        match crate::registry::custom_repo::resolve(client.as_ref(), repo_url).await {
             Ok(entry) => Ok(entry),
             Err(e) => {
                 s.install_inflight.write().remove(source_key);

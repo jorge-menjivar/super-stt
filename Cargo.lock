@@ -6687,6 +6687,7 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros 0.27.2",
+ "super-stt-forge",
  "super-stt-registry-types",
  "super-stt-shared",
  "tar",

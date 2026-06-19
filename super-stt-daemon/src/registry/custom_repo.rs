@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Resolve an arbitrary GitHub repo into an [`IndexBackend`] for the
-//! Custom-repo install path.
+//! Resolve an arbitrary repo URL into an [`IndexBackend`] for the Custom-repo
+//! install path.
 //!
-//! Flow: parse `repo_url` -> ask GitHub for the latest release -> download the
-//! `backend.toml` release asset -> map each declared binary asset to a release
-//! download URL -> build an [`IndexBackend`] whose `manifest` pin points at the
-//! `backend.toml` asset with an **empty `sha256`**. The install pipeline treats
-//! an empty pin sha as "skip verification" (TLS to GitHub is the only integrity
-//! guarantee) but still validates the manifest and installs it verbatim — the
-//! `unverified_source` warning surfaced to clients (see
+//! Flow: parse `repo_url` -> ask the forge for the latest release -> download
+//! the `backend.toml` release asset -> map each declared binary asset to a
+//! release download URL -> build an [`IndexBackend`] whose `manifest` pin
+//! points at the `backend.toml` asset with an **empty `sha256`**. The install
+//! pipeline treats an empty pin sha as "skip verification" (TLS to the forge is
+//! the only integrity guarantee) but still validates the manifest and installs
+//! it verbatim — the `unverified_source` warning surfaced to clients (see
 //! `docs/protocol/endpoints/v1/registry/install.md`) reflects this.
 
 use std::str::FromStr;
@@ -17,7 +17,7 @@ use serde::Deserialize;
 use super_stt_registry_types::manifest::Device;
 use thiserror::Error;
 
-use crate::registry::github::{GitHub, GitHubError, ReleaseAsset};
+use super_stt_forge::{ForgeClient, ReleaseAsset, RepoRef};
 use crate::registry::index_schema::{
     IndexAsset, IndexAssets, IndexBackend, IndexModel, IndexOption, IndexSecret,
     IndexSubprocessAsset,
@@ -27,10 +27,10 @@ const MAX_MANIFEST_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
-    #[error("repo URL `{0}` is not a github.com/<owner>/<repo> reference")]
+    #[error("repo URL `{0}` is not a <host>/<owner>/<repo> reference")]
     BadRepoUrl(String),
-    #[error("github: {0}")]
-    GitHub(#[from] GitHubError),
+    #[error("forge: {0}")]
+    Forge(#[from] super_stt_forge::ForgeError),
     #[error("backend.toml exceeds {MAX_MANIFEST_BYTES} bytes")]
     ManifestTooLarge,
     #[error("backend.toml is not valid UTF-8: {0}")]
@@ -53,47 +53,19 @@ pub enum ResolveError {
     UnsafeComponent { field: &'static str, value: String },
 }
 
-/// Parse a repo URL into `owner/repo`.
-///
-/// Accepts:
-/// - `github.com/owner/repo`
-/// - `https://github.com/owner/repo`
-/// - `http://github.com/owner/repo`
-/// - any of the above with a trailing `.git`, `/`, query, or fragment
-///
-/// # Errors
-/// Returns [`ResolveError::BadRepoUrl`] if the input isn't a `github.com`
-/// reference with two non-empty path segments.
-pub fn parse_owner_repo(repo_url: &str) -> Result<String, ResolveError> {
-    let s = repo_url.trim();
-    let after_scheme = s
-        .strip_prefix("https://")
-        .or_else(|| s.strip_prefix("http://"))
-        .unwrap_or(s);
-    let rest = after_scheme
-        .strip_prefix("github.com/")
-        .ok_or_else(|| ResolveError::BadRepoUrl(repo_url.into()))?;
-    // Drop trailing fragment / query.
-    let rest = rest.split('#').next().unwrap_or(rest);
-    let rest = rest.split('?').next().unwrap_or(rest);
-    let rest = rest.trim_end_matches('/').trim_end_matches(".git");
-    let segments: Vec<&str> = rest.split('/').collect();
-    if segments.len() != 2 || segments[0].is_empty() || segments[1].is_empty() {
-        return Err(ResolveError::BadRepoUrl(repo_url.into()));
-    }
-    Ok(format!("{}/{}", segments[0], segments[1]))
-}
-
 /// Resolve a repo URL into an [`IndexBackend`] suitable for the install
 /// pipeline, with empty `sha256` strings (the pipeline skips verification).
 ///
 /// # Errors
-/// Returns a [`ResolveError`] when the URL is malformed, GitHub is
+/// Returns a [`ResolveError`] when the URL is malformed, the forge is
 /// unreachable, the manifest is missing/invalid, or a declared asset isn't
 /// present in the release.
-pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, ResolveError> {
-    let owner_repo = parse_owner_repo(repo_url)?;
-    let release = gh.latest_release(&owner_repo).await?;
+pub async fn resolve(
+    client: &dyn ForgeClient,
+    repo_url: &str,
+) -> Result<IndexBackend, ResolveError> {
+    let repo = RepoRef::parse(repo_url).map_err(|_| ResolveError::BadRepoUrl(repo_url.into()))?;
+    let release = client.latest_release(&repo).await?;
 
     // The manifest is the `backend.toml` release asset — the exact bytes the
     // daemon installs verbatim. Read and validate those, and pin the asset
@@ -107,9 +79,9 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
     if manifest_asset.size > MAX_MANIFEST_BYTES as u64 {
         return Err(ResolveError::ManifestTooLarge);
     }
-    let manifest_url = manifest_asset.browser_download_url.clone();
+    let manifest_url = manifest_asset.download_url.clone();
     let manifest_size = manifest_asset.size;
-    let manifest_bytes = gh.download(&manifest_url).await?;
+    let manifest_bytes = client.download(&manifest_url).await?;
     if manifest_bytes.len() > MAX_MANIFEST_BYTES {
         return Err(ResolveError::ManifestTooLarge);
     }
@@ -119,7 +91,7 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
     // Unlike the registry path, a custom repo's manifest is never run through
     // the indexer's source-vs-repo check. Enforce it here (see
     // `ensure_source_matches_repo`).
-    ensure_source_matches_repo(&manifest.backend.source, &owner_repo)?;
+    ensure_source_matches_repo(&manifest.backend.source, &repo)?;
     // `entrypoint` is joined onto the install dir (it may be nested, e.g.
     // `bin/launcher`), and `id` becomes that dir's name (a single component).
     if !super_stt_shared::registry::is_safe_relative_path(&manifest.backend.entrypoint) {
@@ -149,7 +121,7 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
         id,
         source: manifest.backend.source,
         version: manifest.backend.version.trim_start_matches('v').to_string(),
-        tag: release.tag_name,
+        tag: release.tag,
         name: manifest.backend.name,
         description: manifest.backend.description,
         license: manifest.backend.license.unwrap_or_default(),
@@ -198,7 +170,7 @@ pub async fn resolve(gh: &GitHub, repo_url: &str) -> Result<IndexBackend, Resolv
     })
 }
 
-/// `github.com/owner/repo` -> `repo`. Used as the install-dir name. Custom-
+/// `<host>/<owner>/<repo>` -> `<repo>`. Used as the install-dir name. Custom-
 /// repo installs collide-by-name with registry installs of the same repo; that
 /// is intentional — installing the same backend twice writes the same dir.
 fn id_from_source(source: &str) -> String {
@@ -237,18 +209,18 @@ fn classify_models(models: &[Model]) -> ModelSupport {
 }
 
 /// The declared `source` must be the repo the user pointed at
-/// (`github.com/<owner>/<repo>`) or namespaced under it. A `source` under a
+/// (`<host>/<owner>/<repo>`) or namespaced under it. A `source` under a
 /// *different* repo is identity spoofing — e.g. a malicious repo claiming
 /// `source = github.com/jorge-menjivar/super-stt/openai` to overwrite the
 /// official backend and make the daemon resolve that source to the attacker's
 /// install. Mirrors the indexer's `manifest::validate`.
-fn ensure_source_matches_repo(source: &str, owner_repo: &str) -> Result<(), ResolveError> {
-    let repo = format!("github.com/{owner_repo}");
-    let under_repo = source.starts_with(&format!("{repo}/"));
-    if source != repo && !under_repo {
+fn ensure_source_matches_repo(source: &str, repo: &RepoRef) -> Result<(), ResolveError> {
+    let canon = repo.canonical();
+    let under_repo = source.starts_with(&format!("{canon}/"));
+    if source != canon && !under_repo {
         return Err(ResolveError::SourceSpoof {
             declared: source.into(),
-            repo,
+            repo: canon,
         });
     }
     Ok(())
@@ -275,7 +247,7 @@ fn synthesize_assets(
                 .ok_or(ResolveError::MissingWasmAsset)?;
             let a = find(file)?;
             out.wasm = Some(IndexAsset {
-                url: a.browser_download_url.clone(),
+                url: a.download_url.clone(),
                 size: a.size,
                 sha256: String::new(),
             });
@@ -292,7 +264,7 @@ fn synthesize_assets(
                     cuda_major: sa.cuda_major,
                     cuda_sm: sa.cuda_sm,
                     cudnn: sa.cudnn,
-                    url: a.browser_download_url.clone(),
+                    url: a.download_url.clone(),
                     size: a.size,
                     sha256: String::new(),
                 });
@@ -400,6 +372,7 @@ struct SubprocessAsset {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super_stt_forge::RepoRef;
 
     fn model(name: &str, provider: &str, devices: &[&str]) -> Model {
         Model {
@@ -442,48 +415,20 @@ mod tests {
     }
 
     #[test]
-    fn parses_owner_repo_from_various_url_shapes() {
-        assert_eq!(parse_owner_repo("github.com/a/b").unwrap(), "a/b");
-        assert_eq!(parse_owner_repo("https://github.com/a/b").unwrap(), "a/b");
-        assert_eq!(parse_owner_repo("http://github.com/a/b").unwrap(), "a/b");
-        assert_eq!(
-            parse_owner_repo("https://github.com/a/b.git").unwrap(),
-            "a/b"
-        );
-        assert_eq!(parse_owner_repo("https://github.com/a/b/").unwrap(), "a/b");
-        assert_eq!(
-            parse_owner_repo("https://github.com/a/b?ref=main").unwrap(),
-            "a/b"
-        );
-        assert_eq!(
-            parse_owner_repo("  https://github.com/a/b  ").unwrap(),
-            "a/b"
-        );
-    }
-
-    #[test]
-    fn rejects_non_github_or_malformed_urls() {
-        assert!(parse_owner_repo("gitlab.com/a/b").is_err());
-        assert!(parse_owner_repo("github.com/a").is_err());
-        assert!(parse_owner_repo("github.com/a/b/c").is_err());
-        assert!(parse_owner_repo("github.com//b").is_err());
-        assert!(parse_owner_repo("github.com/a/").is_err());
-    }
-
-    #[test]
     fn source_matching_repo_or_namespaced_under_it_is_accepted() {
-        ensure_source_matches_repo("github.com/a/b", "a/b").unwrap();
-        ensure_source_matches_repo("github.com/a/b/openai", "a/b").unwrap();
+        let repo = RepoRef::parse("github.com/a/b").unwrap();
+        ensure_source_matches_repo("github.com/a/b", &repo).unwrap();
+        ensure_source_matches_repo("github.com/a/b/openai", &repo).unwrap();
     }
 
     #[test]
     fn source_under_a_different_repo_is_rejected_as_spoof() {
+        let repo = RepoRef::parse("github.com/a/b").unwrap();
         // A repo at `a/b` claiming an identity owned by `jorge-menjivar/super-stt`.
-        let err = ensure_source_matches_repo("github.com/jorge-menjivar/super-stt/openai", "a/b")
-            .unwrap_err();
+        let err = ensure_source_matches_repo("github.com/jorge-menjivar/super-stt/openai", &repo).unwrap_err();
         assert!(matches!(err, ResolveError::SourceSpoof { .. }));
         // Prefix-only overlap must not pass (requires a `/` boundary).
-        let err = ensure_source_matches_repo("github.com/a/bbb", "a/b").unwrap_err();
+        let err = ensure_source_matches_repo("github.com/a/bbb", &repo).unwrap_err();
         assert!(matches!(err, ResolveError::SourceSpoof { .. }));
     }
 
@@ -504,7 +449,7 @@ mod tests {
         let m: Manifest = toml::from_str(manifest_text).unwrap();
         let release_assets = vec![ReleaseAsset {
             name: "y.wasm".into(),
-            browser_download_url: "https://example/y.wasm".into(),
+            download_url: "https://example/y.wasm".into(),
             size: 42,
         }];
         let assets = synthesize_assets(&m, &release_assets).unwrap();
@@ -560,12 +505,12 @@ mod tests {
         let release_assets = vec![
             ReleaseAsset {
                 name: "y-cpu.tar.gz".into(),
-                browser_download_url: "https://example/cpu".into(),
+                download_url: "https://example/cpu".into(),
                 size: 1,
             },
             ReleaseAsset {
                 name: "y-cuda.tar.gz".into(),
-                browser_download_url: "https://example/cuda".into(),
+                download_url: "https://example/cuda".into(),
                 size: 2,
             },
         ];

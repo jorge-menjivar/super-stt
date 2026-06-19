@@ -75,6 +75,7 @@ hex = "0.4.3"
 ulid = "1.2.1"
 urlencoding = "2.1.3"
 super-stt-registry-types = { path = "../super-stt-registry-types" }
+super-stt-forge = { version = "0.1.4-beta.2", path = "../super-stt-forge" }
 
 [features]
     # Models are served by out-of-tree backends; both transports are on by
