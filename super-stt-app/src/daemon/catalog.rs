@@ -23,8 +23,9 @@ pub struct CatalogBackend {
     pub allowed_hosts: Vec<String>,
 }
 
-/// The embedded manifests. Add a line here when a new official backend ships.
-const MANIFESTS: &[&str] = &[include_str!("../../../backends/openai/backend.toml")];
+/// The embedded manifests. Empty now that every official backend lives in its
+/// own repo; add a line here if a backend is ever bundled in-tree again.
+const MANIFESTS: &[&str] = &[];
 
 /// Subset of `backend.toml` the catalog needs; unknown fields are ignored.
 #[derive(serde::Deserialize)]

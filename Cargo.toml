@@ -25,11 +25,10 @@
         "super-stt-shared",
         "super-stt-forge",
     ]
-    # WASM backends build for wasm32-wasip2, not the host target — keep them out
-    # of the workspace entirely. Built via `just build-openai-backend`. The mock
-    # WASM backend fixture (tests/wasm_mock.rs) is wasm32 too — same treatment.
+    # The mock WASM backend fixtures build for wasm32-wasip2, not the host target
+    # (the daemon's wasm_mock.rs / wasm_mock_realtime.rs load them) — keep them
+    # out of the workspace entirely.
     exclude = [
-        "backends/openai",
         "super-stt-daemon/tests/fixtures/mock-wasm-backend",
         "super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend",
     ]

@@ -33,7 +33,7 @@ enum Command {
     Build(BuildArgs),
     /// Build a local index from staged backends — offline, no GitHub. For
     /// testing the daemon's download/install pipeline against a localhost
-    /// static server (see `just serve-test-registry`).
+    /// static server.
     Local(local::LocalArgs),
 }
 

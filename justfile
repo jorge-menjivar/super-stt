@@ -226,11 +226,6 @@ build-applet:
     echo "🔧 Building COSMIC applet..."
     cargo build --release --bin {{ applet_name }}
 
-# Build the OpenAI WASM backend component (wasm32-wasip2).
-# Requires: rustup target add wasm32-wasip2
-build-openai-backend:
-    cargo build --manifest-path backends/openai/Cargo.toml --target wasm32-wasip2 --release
-
 # Build the generic mock WASM backend fixture (wasm32-wasip2) that
 # tests/wasm_mock.rs loads to exercise the daemon's WasmBackend orchestration.
 # Requires: rustup target add wasm32-wasip2
@@ -285,47 +280,14 @@ build-qwen3-asr-backend accel="cpu":
 gen-schemas:
     cargo run -p super-stt-registry-types --features schema --bin gen_schemas
 
-# Serve a local offline registry for testing the Download/Install flow without
-# any GitHub release or Pages setup. Builds the OpenAI wasm
-# component, stages it with its asset filename, generates an index.json
-# with real SHA-256 hashes, and serves the directory over HTTP. In the daemon's
-# environment set `SUPER_STT_REGISTRY_URL=http://localhost:8787/index.json`
-# before starting it, then open the app's Models > Download tab.
-# Requires: `rustup target add wasm32-wasip2` (Python 3 is used only as the
-# static file server at the end).
-serve-test-registry port="8787": build-openai-backend
-    #!/usr/bin/env bash
-    set -euo pipefail
-    out="target/test-registry"
-    base="http://localhost:{{ port }}"
-    mkdir -p "$out"
-    cp backends/openai/target/wasm32-wasip2/release/super_stt_backend_openai.wasm "$out/openai.wasm"
-    cargo run -q -p super-stt-indexer -- local --out "$out" --base-url "$base" \
-        backends/openai/backend.toml
-    echo ""
-    echo "Test registry ready. In the daemon's environment, run:"
-    echo "    export SUPER_STT_REGISTRY_URL=$base/index.json"
-    echo "then restart the daemon and open Models > Download."
-    echo ""
-    echo "Serving $out at $base (Ctrl-C to stop)…"
-    cd "$out" && exec python3 -m http.server {{ port }}
-
 # Install built backends into the daemon's discovery directory
-# (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). Builds the OpenAI
-# WASM component; the Qwen3-ASR Python bundle is installed only if already
-# built (run `just build-qwen3-asr-backend [cpu|cuda13]` first).
-install-backends: build-openai-backend
+# (<XDG_DATA_HOME or ~/.local/share>/super-stt/backends/). The Qwen3-ASR Python
+# bundle is installed only if already built (run `just build-qwen3-asr-backend
+# [cpu|cuda13]` first).
+install-backends:
     #!/usr/bin/env bash
     set -euo pipefail
     backends_dir="${XDG_DATA_HOME:-$HOME/.local/share}/super-stt/backends"
-
-    # OpenAI (WASM component). backend.toml's entrypoint is "openai.wasm".
-    openai_dir="$backends_dir/openai"
-    mkdir -p "$openai_dir"
-    cp backends/openai/backend.toml "$openai_dir/backend.toml"
-    cp backends/openai/target/wasm32-wasip2/release/super_stt_backend_openai.wasm \
-        "$openai_dir/openai.wasm"
-    echo "Installed OpenAI backend -> $openai_dir"
 
     # Qwen3-ASR (Python subprocess bundle). Installed only if a bundle has been
     # built; prefers the cuda13 bundle when present. Extracts over any existing
