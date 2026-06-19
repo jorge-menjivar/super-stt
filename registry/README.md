@@ -15,7 +15,7 @@ published on GitHub Pages. The schema is generated from the entry types — run
 
 ## Submitting a backend
 
-1. Build and host your backend in your own GitHub repo. It must include a
+1. Build and host your backend in your own git repo on a supported forge (currently GitHub). It must include a
    `backend.toml` at the chosen subdirectory (default: repo root), declaring
    `[assets.wasm]` (for wasm backends) or `[[assets.subprocess]]` (for
    subprocess backends), and a `[backend].license` — a recognized open-source
@@ -25,11 +25,14 @@ published on GitHub Pages. The schema is generated from the entry types — run
 
    ```toml
    [my-backend]
-   repo = "github.com/your-name/my-backend"
+   repo  = "github.com/your-name/my-backend"
+   forge = "github"
    ```
 
-   Optional fields: `subdir`, `tag_prefix`, `max_version`. See the comments
-   at the top of `registry.toml` and the spec at
+   `forge` is **required**: the git host that publishes your releases
+   (`github` is the only supported value today). Optional fields: `subdir`,
+   `tag_prefix`, `max_version`. See the comments at the top of
+   `registry.toml` and the spec at
    `docs/superpowers/specs/2026-05-29-backend-registry-design.md`.
 
 3. Reviewers check: id is not on the reserved list (below); your repo's

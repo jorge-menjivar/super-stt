@@ -5,14 +5,20 @@
 
 use serde::Deserialize;
 
+use crate::forge::Forge;
+
 /// A `registry.toml` entry: where a backend's releases live and how the
 /// indexer selects them.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Entry {
-    /// GitHub repository hosting the backend, as `github.com/<owner>/<repo>`.
-    /// The indexer queries this repo's releases to discover versions.
+    /// Repository hosting the backend, as `<host>/<owner>/<repo>` (e.g.
+    /// `github.com/<owner>/<repo>`). The indexer queries this repo's releases
+    /// to discover versions.
     pub repo: String,
+    /// The forge (git host) that publishes this backend's releases. See
+    /// [`Forge`] for accepted values and the required/explicit policy.
+    pub forge: Forge,
     /// Path within the repo to the directory containing the backend's
     /// `backend.toml` (default: repo root). Must be a safe relative path:
     /// no `..`, no leading `/`, no backslashes.

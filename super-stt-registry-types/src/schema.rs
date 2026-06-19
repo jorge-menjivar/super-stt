@@ -181,12 +181,26 @@ pub fn registry_schema() -> Value {
         obj.remove("$id");
         obj.remove("title");
     }
+
+    // Hoist any definitions that schemars embedded inside `Entry`'s schema
+    // (e.g. `Forge`) up to the root `definitions` map. JSON Schema `$ref`
+    // pointers are document-root-relative (`#/definitions/Forge`), so a nested
+    // type's definition must live at the root level for the pointer to resolve.
+    let mut hoisted: serde_json::Map<String, Value> = serde_json::Map::new();
+    if let Some(obj) = entry.as_object_mut()
+        && let Some(Value::Object(inner_defs)) = obj.remove("definitions")
+    {
+        for (k, mut v) in inner_defs {
+            close_objects(&mut v);
+            hoisted.insert(k, v);
+        }
+    }
+
     close_objects(&mut entry);
 
-    // `Entry` is all scalar fields today, so its schema embeds cleanly. If it
-    // ever gains a $ref'd nested type, that type's definition would need
-    // hoisting into this root's `definitions` — the validator_for() call in
-    // the tests fails loudly on the dangling ref if this assumption breaks.
+    let mut definitions = hoisted;
+    definitions.insert("entry".into(), entry);
+
     json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
         "$id": REGISTRY_SCHEMA_ID,
@@ -196,7 +210,7 @@ pub fn registry_schema() -> Value {
         "type": "object",
         "additionalProperties": false,
         "patternProperties": { "^[a-z0-9_-]+$": { "$ref": "#/definitions/entry" } },
-        "definitions": { "entry": entry }
+        "definitions": definitions
     })
 }
 

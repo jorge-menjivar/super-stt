@@ -114,6 +114,7 @@ mod tests {
     fn entry(prefix: Option<&str>, max: Option<&str>) -> Entry {
         Entry {
             repo: "github.com/x/y".into(),
+            forge: super_stt_registry_types::forge::Forge::Github,
             subdir: None,
             tag_prefix: prefix.map(String::from),
             max_version: max.map(String::from),

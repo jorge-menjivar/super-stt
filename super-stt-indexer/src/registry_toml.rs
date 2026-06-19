@@ -130,6 +130,7 @@ mod tests {
             r#"
             [openai]
             repo = "github.com/jorge-menjivar/super-stt"
+            forge = "github"
             subdir = "backends/openai"
             tag_prefix = "openai-"
         "#,
@@ -147,6 +148,7 @@ mod tests {
             r#"
             [bad]
             repo = "github.com/x/y"
+            forge = "github"
             subdir = "../escape"
         "#,
         )
@@ -161,7 +163,7 @@ mod tests {
         // slashes, and accepts a benign `..`-containing filename.
         for bad in ["a//b", "./x", "models/", "a/../b"] {
             let err = Registry::parse(&format!(
-                "[bad]\nrepo = \"github.com/x/y\"\nsubdir = \"{bad}\"\n"
+                "[bad]\nrepo = \"github.com/x/y\"\nforge = \"github\"\nsubdir = \"{bad}\"\n"
             ))
             .unwrap_err();
             assert!(
@@ -170,7 +172,7 @@ mod tests {
             );
         }
         let ok =
-            Registry::parse("[good]\nrepo = \"github.com/x/y\"\nsubdir = \"my..backend/v2\"\n")
+            Registry::parse("[good]\nrepo = \"github.com/x/y\"\nforge = \"github\"\nsubdir = \"my..backend/v2\"\n")
                 .unwrap();
         assert_eq!(
             ok.0.get("good").unwrap().subdir.as_deref(),
@@ -184,8 +186,10 @@ mod tests {
             r#"
             [a]
             repo = "github.com/x/mono"
+            forge = "github"
             [b]
             repo = "github.com/x/mono"
+            forge = "github"
         "#,
         )
         .unwrap_err();
@@ -198,9 +202,11 @@ mod tests {
             r#"
             [a]
             repo = "github.com/x/mono"
+            forge = "github"
             tag_prefix = "v"
             [b]
             repo = "github.com/x/mono"
+            forge = "github"
             tag_prefix = "v"
         "#,
         )
@@ -214,9 +220,11 @@ mod tests {
             r#"
             [a]
             repo = "github.com/x/mono"
+            forge = "github"
             tag_prefix = "voxtral-"
             [b]
             repo = "github.com/x/mono"
+            forge = "github"
             tag_prefix = "voxtral-mini-"
         "#,
         )
@@ -230,9 +238,11 @@ mod tests {
             r#"
             [a]
             repo = "github.com/x/mono"
+            forge = "github"
             tag_prefix = "a-"
             [b]
             repo = "github.com/x/mono"
+            forge = "github"
             tag_prefix = "b-"
         "#,
         )
@@ -247,8 +257,10 @@ mod tests {
             r#"
             [a]
             repo = "github.com/x/mono"
+            forge = "github"
             [b]
             repo = "github.com/x/mono"
+            forge = "github"
             removed = true
         "#,
         )

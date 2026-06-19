@@ -4,6 +4,7 @@
 //! See `docs/protocol/backend/config.md`.
 
 pub mod entry;
+pub mod forge;
 pub mod license;
 pub mod manifest;
 pub mod provider;

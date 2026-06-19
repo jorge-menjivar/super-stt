@@ -77,6 +77,7 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
         r#"
         [x-y]
         repo = "github.com/x/y"
+        forge = "github"
     "#,
     )
     .unwrap();
