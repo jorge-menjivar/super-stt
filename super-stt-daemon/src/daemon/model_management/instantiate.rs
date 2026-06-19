@@ -69,6 +69,7 @@ impl SuperSTTDaemon {
             info,
             headers,
             websocket_capability,
+            def.realtime,
         )?;
         Ok(Box::new(inst))
     }

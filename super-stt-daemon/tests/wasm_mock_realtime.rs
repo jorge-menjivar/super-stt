@@ -100,3 +100,28 @@ async fn realtime_orchestration_against_mock() {
         "done frame should carry the canned transcript; got {done}"
     );
 }
+
+/// A realtime model's batch `transcribe_audio` must route through an internal
+/// realtime session (the model's batch endpoint would reject it) and return
+/// only the final transcript. Loading the mock with `with_realtime()` flips the
+/// instance into that mode; the canned session emits a preview + done, and we
+/// assert `transcribe_audio` hands back just the `done` transcript.
+#[tokio::test]
+async fn realtime_model_transcribe_audio_returns_final_transcript() {
+    let Some(path) = mock_component() else {
+        eprintln!(
+            "skipping: mock realtime component not built (run `just build-mock-wasm-realtime-backend`)"
+        );
+        return;
+    };
+
+    let mut backend = WasmBackend::new_realtime(&path, Vec::new(), "mock".to_string(), Vec::new())
+        .expect("load mock realtime backend")
+        .with_realtime();
+
+    let text = backend
+        .transcribe_audio(&[0.0_f32; 1600], 16000)
+        .await
+        .expect("realtime-routed transcribe should succeed");
+    assert_eq!(text, "mock realtime transcription");
+}

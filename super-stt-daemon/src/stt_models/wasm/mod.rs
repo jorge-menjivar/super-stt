@@ -49,6 +49,10 @@ pub struct WasmBackend {
     allow_loopback: bool,
     transcribe_headers: Vec<(String, String)>,
     model_id: String,
+    /// Whether the active model is realtime-only (`[[models]] realtime = true`).
+    /// When set, the batch `transcribe_audio` path is served by an internal
+    /// one-shot realtime session — the model's batch endpoint rejects it.
+    realtime: bool,
     info: ModelInfoData,
 }
 
@@ -64,6 +68,7 @@ impl WasmBackend {
         info: ModelInfoData,
         transcribe_headers: Vec<(String, String)>,
         websocket_capability: bool,
+        realtime: bool,
     ) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true);
@@ -100,6 +105,7 @@ impl WasmBackend {
             allow_loopback: false,
             transcribe_headers,
             model_id,
+            realtime,
             info,
         })
     }
@@ -114,6 +120,15 @@ impl WasmBackend {
     #[must_use]
     pub fn permit_loopback_egress(mut self) -> Self {
         self.allow_loopback = true;
+        self
+    }
+
+    /// Mark this backend's active model as realtime-only, so batch
+    /// `transcribe_audio` is served via an internal realtime session. Test-only
+    /// opt-in; production sets this through [`Self::with_info`].
+    #[must_use]
+    pub fn with_realtime(mut self) -> Self {
+        self.realtime = true;
         self
     }
 
@@ -141,6 +156,7 @@ impl WasmBackend {
             allowed_hosts,
             info,
             transcribe_headers,
+            false,
             false,
         )
     }
@@ -171,6 +187,7 @@ impl WasmBackend {
             info,
             transcribe_headers,
             true,
+            false,
         )
     }
 
@@ -288,6 +305,81 @@ impl WasmBackend {
         let (_, body) = self.invoke("GET", "/v1/ping", &[], Vec::new()).await?;
         Ok(serde_json::from_slice(&body)?)
     }
+
+    /// Serve a one-shot transcription for a realtime-only model by driving an
+    /// internal realtime session over the buffered audio. The consumer channel
+    /// is unbounded and the guest reads all audio, commits, then drains the
+    /// upstream — so we pre-load `start` + PCM16 frames + `stop` *before*
+    /// invoking the session and collect only the final `done` transcript
+    /// *after* it returns. No concurrent feeder, so this is safe even from the
+    /// synchronous (`block_on`) `transcribe_audio` call sites.
+    #[cfg(feature = "wasm-backends")]
+    #[allow(clippy::cast_possible_truncation)] // intentional f32 -> i16 PCM clamp
+    async fn transcribe_via_realtime(&self, audio: &[f32], sample_rate: u32) -> Result<String> {
+        use ws_host::{ConsumerStreamTransport, WsFrame};
+
+        // 16-bit PCM, mono, LE. Mistral's `input_audio_buffer.append` caps a
+        // single message at 262144 raw bytes; 16384 samples (32768 bytes) per
+        // frame stays well under it.
+        const FRAME_SAMPLES: usize = 16384;
+
+        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::unbounded_channel::<WsFrame>();
+        let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::unbounded_channel::<WsFrame>();
+
+        // Pre-load the consumer side: start, the audio as PCM16 binary chunks,
+        // then stop. The guest breaks on `stop`, so no further consumer recv.
+        let send = |frame| {
+            incoming_tx
+                .send(frame)
+                .map_err(|_| anyhow!("realtime channel closed"))
+        };
+        send(WsFrame::Text(format!(
+            "{{\"type\":\"start\",\"sample_rate\":{sample_rate}}}"
+        )))?;
+        for chunk in audio.chunks(FRAME_SAMPLES) {
+            let mut pcm = Vec::with_capacity(chunk.len() * 2);
+            for &s in chunk {
+                let v = (s.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
+                pcm.extend_from_slice(&v.to_le_bytes());
+            }
+            send(WsFrame::Binary(pcm))?;
+        }
+        send(WsFrame::Text("{\"type\":\"stop\"}".to_string()))?;
+
+        let transport = ConsumerStreamTransport {
+            incoming: incoming_rx,
+            outgoing: outgoing_tx,
+        };
+        self.realtime_session(transport).await?;
+
+        // The session has returned, so every frame the guest emitted (previews
+        // plus the terminal `done`/`error`) is buffered. Return only the final
+        // transcription.
+        let mut done: Option<String> = None;
+        while let Ok(frame) = outgoing_rx.try_recv() {
+            let WsFrame::Text(s) = frame else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) else {
+                continue;
+            };
+            match v.get("type").and_then(serde_json::Value::as_str) {
+                Some("done") => {
+                    done = v
+                        .get("transcription")
+                        .and_then(serde_json::Value::as_str)
+                        .map(String::from);
+                }
+                Some("error") => {
+                    let msg = v
+                        .get("message")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("realtime transcription failed");
+                    bail!("{msg}");
+                }
+                _ => {} // ignore previews / unknown frames
+            }
+        }
+        done.ok_or_else(|| anyhow!("realtime session produced no final transcription"))
+    }
 }
 
 impl ModelInfo for WasmBackend {
@@ -306,6 +398,12 @@ impl ModelState for WasmBackend {
 #[async_trait]
 impl Transcribe for WasmBackend {
     async fn transcribe_audio(&mut self, audio: &[f32], sample_rate: u32) -> Result<String> {
+        // A realtime-only model is rejected by the batch endpoint, so serve the
+        // regular `/v1/transcribe` request through an internal one-shot realtime
+        // session and return only the final transcript.
+        if self.realtime {
+            return self.transcribe_via_realtime(audio, sample_rate).await;
+        }
         let body = serde_json::to_vec(&serde_json::json!({
             "audio_data": audio,
             "sample_rate": sample_rate,
