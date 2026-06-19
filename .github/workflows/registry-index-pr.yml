@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: GPL-3.0-only
+name: Registry index (PR preview)
+
+# When a PR changes the registry (or the types that shape the index), build the
+# index.json the same way build-index.yml does on `main` — but instead of
+# publishing to gh-pages, surface it for manual review: a job-summary table of
+# the indexed backends plus the full index.json as a downloadable artifact. This
+# lets a reviewer confirm a newly-added backend resolves from its release and
+# lands in the index *before* the change is merged or anything is published.
+
+on:
+  pull_request:
+    paths:
+      - 'registry/registry.toml'
+      - 'super-stt-registry-types/**'
+  workflow_dispatch: # manual run for testing on any branch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: registry-index-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: registry-index-pr-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build indexer
+        run: cargo build --release -p super-stt-indexer
+
+      # Build a fresh index from the PR's registry.toml against the backends'
+      # GitHub releases. No --prior-index: every non-removed entry must resolve
+      # from its own release, so a newly-added backend only appears if it is
+      # actually installable (release present, backend.toml asset valid, source
+      # matches). Entries with no resolvable release are logged and omitted; the
+      # indexer only exits non-zero on a real registry error (e.g. duplicate
+      # sources), which correctly fails this check.
+      - name: Build candidate index.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p out
+          target/release/super-stt-indexer build \
+            --registry registry/registry.toml \
+            --out out/index.json
+
+      - name: Summarize indexed backends
+        run: |
+          {
+            echo '## Candidate registry index'
+            echo
+            echo 'Built from `registry/registry.toml` against current GitHub releases — **not published**. Confirm a newly-added backend appears below before merging.'
+            echo
+            count=$(jq '.backends | length' out/index.json)
+            echo "### Indexed backends ($count)"
+            echo
+            echo '| id | source | version | tag | online |'
+            echo '| --- | --- | --- | --- | --- |'
+            jq -r '.backends[] | "| \(.id) | `\(.source)` | \(.version) | \(.tag) | \(.online) |"' out/index.json
+            echo
+
+            # Registry entries that did NOT make it into the index — no resolvable
+            # release yet, or marked `removed`. If a newly-added backend lands
+            # here, publish its release first.
+            comm -23 \
+              <(grep -oP '^\s*\[\K[^]]+' registry/registry.toml | sort -u) \
+              <(jq -r '.backends[].id' out/index.json | sort -u) > missing.txt || true
+            if [ -s missing.txt ]; then
+              echo '### Registry entries not in the index'
+              echo
+              echo 'No resolvable release yet, or marked `removed`:'
+              echo
+              sed 's/^/- `/; s/$/`/' missing.txt
+              echo
+            fi
+
+            echo '<details><summary>Full index.json</summary>'
+            echo
+            echo '```json'
+            cat out/index.json
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload index.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-index-json
+          path: out/index.json
+          if-no-files-found: error
