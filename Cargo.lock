@@ -6814,6 +6814,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "super-stt-forge"
+version = "0.1.4-beta.2"
+dependencies = [
+ "async-trait",
+ "log",
+ "mockito",
+ "reqwest 0.13.2",
+ "rustls",
+ "serde",
+ "super-stt-registry-types",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "super-stt-indexer"
 version = "0.1.0"
 dependencies = [

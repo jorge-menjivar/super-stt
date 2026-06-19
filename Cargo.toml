@@ -9,6 +9,7 @@
         "super-stt-registry-types",
         "super-stt-shared",
         "super-stt-indexer",
+        "super-stt-forge",
     ]
     # The indexer is a host binary, so it's a workspace member — `--workspace`
     # lints and tests it like everything else. But it's a CI-only tool with
@@ -22,6 +23,7 @@
         "super-stt-daemon",
         "super-stt-registry-types",
         "super-stt-shared",
+        "super-stt-forge",
     ]
     # WASM backends build for wasm32-wasip2, not the host target — keep them out
     # of the workspace entirely. Built via `just build-openai-backend`. The mock

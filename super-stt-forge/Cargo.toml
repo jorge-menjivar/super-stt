@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "super-stt-forge"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license = "GPL-3.0-only"
+description = "Pluggable git-forge clients (release discovery + asset download) for Super STT"
+
+[dependencies]
+async-trait = "0.1.89"
+log.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+super-stt-registry-types = { version = "0.1.4-beta.2", path = "../super-stt-registry-types" }
+thiserror.workspace = true
+
+[dev-dependencies]
+mockito = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
