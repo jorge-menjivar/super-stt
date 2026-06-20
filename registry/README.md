@@ -50,15 +50,6 @@ published on GitHub Pages. The schema is generated from the entry types — run
    release without the `backend.toml` asset is not installable and the indexer
    fails that entry.
 
-## Reserved ids
-
-These ids are reserved for the upstream maintainers and may not be claimed
-by third-party backends:
-
-- `openai`, `anthropic`, `mistral`, `deepgram`, `voxtral`, `whisper`
-- `azure`, `google`, `gcp`, `aws`, `bedrock`
-- `super-stt`, `super-stt-*`
-
 ## Removing or yanking
 
 - **Yank a specific bad version** without removing the backend: add
