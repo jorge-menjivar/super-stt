@@ -687,9 +687,23 @@
               "cuda_major"
             ]
           }
+        },
+        {
+          "oneOf": [
+            {
+              "required": [
+                "file"
+              ]
+            },
+            {
+              "required": [
+                "parts"
+              ]
+            }
+          ]
         }
       ],
-      "description": "One `[[assets.subprocess]]` build variant.",
+      "description": "One `[[assets.subprocess]]` build variant.\n\nThe variant's `.tar.gz` is named by `file`, or — when it would exceed the\n2 GiB GitHub release-asset limit — by `parts`, whose byte-for-byte\nconcatenation in order is the archive. Exactly one of the two is set\n(enforced by [`Manifest::parse`]).",
       "properties": {
         "accel": {
           "allOf": [
@@ -725,8 +739,21 @@
           "type": "boolean"
         },
         "file": {
-          "description": "Filename on the GitHub release (`.tar.gz`). The archive must contain\n`bin/<entrypoint>`.",
-          "type": "string"
+          "default": null,
+          "description": "Single-file archive: the filename on the GitHub release (`.tar.gz`).\nMutually exclusive with `parts`. The archive must contain\n`bin/<entrypoint>`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parts": {
+          "default": [],
+          "description": "Multi-part archive: ordered release filenames whose byte-for-byte\nconcatenation is the `.tar.gz`. Mutually exclusive with `file`; use when\nthe archive exceeds the 2 GiB release-asset limit. The indexer pins each\npart independently.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
         },
         "target": {
           "description": "Rust target triple, e.g. `x86_64-unknown-linux-gnu`. Tier-1/2 only;\nthe indexer rejects unknown triples.",
@@ -734,7 +761,6 @@
         }
       },
       "required": [
-        "file",
         "target",
         "accel"
       ],
