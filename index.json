@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-20T19:25:22Z",
+  "generated_at": "2026-06-20T21:09:41Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -35,25 +35,18 @@
           "required": true
         }
       ],
-      "options": [
-        {
-          "name": "base_url",
-          "label": "API base URL",
-          "type": "string",
-          "default": "https://api.deepgram.com"
-        }
-      ],
+      "options": [],
       "assets": {
         "wasm": {
           "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/deepgram.wasm",
           "size": 208274,
-          "sha256": "c7d53322cd5c3f6d2b7a165b21fa389355c5ad69722c220b70d0c5693c21c580"
+          "sha256": "6fd38bcd7ca03ae4e834f3bbe9ded008706631cb141ae0d6acdc016245629022"
         }
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/backend.toml",
-        "size": 1183,
-        "sha256": "7fdb85b9ee95f84b57c59188ab892231c5fec1cbe4602e01edbdd9ecc89b33a5"
+        "size": 993,
+        "sha256": "e8b2e4516d382e7fa857b1b7abf2272565fca4f4c4e1173b4d0eea2c060b4589"
       }
     },
     {
@@ -95,25 +88,18 @@
           "required": true
         }
       ],
-      "options": [
-        {
-          "name": "base_url",
-          "label": "API base URL",
-          "type": "string",
-          "default": "https://api.mistral.ai"
-        }
-      ],
+      "options": [],
       "assets": {
         "wasm": {
           "url": "https://github.com/jorge-menjivar/super-stt-mistral/releases/download/v0.1.0/mistral.wasm",
           "size": 270528,
-          "sha256": "5b4f3fb7944d1e91adb738637433a4f4e46cae9b6f4d5d317d6c7bc88e3b9f98"
+          "sha256": "2d01c89aec6bacc4aa5b1cb467705e2a997111a6974ecb6454914c29ebe048de"
         }
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-mistral/releases/download/v0.1.0/backend.toml",
-        "size": 1280,
-        "sha256": "fa15e494b0b0f0c3671a71a70487bf54170821a80f9e0b4c1fc0f14564eea79a"
+        "size": 1092,
+        "sha256": "8531572cb39e4971bbbb7a42112ada1da0e0cf2c4708b9b3bb7848291a125c99"
       }
     },
     {
@@ -162,25 +148,18 @@
           "required": true
         }
       ],
-      "options": [
-        {
-          "name": "base_url",
-          "label": "API base URL",
-          "type": "string",
-          "default": "https://api.openai.com"
-        }
-      ],
+      "options": [],
       "assets": {
         "wasm": {
           "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.0/openai.wasm",
           "size": 210504,
-          "sha256": "ad502adfc6831c4c3b8d8fd7cedbe05fbaea67ef69c6000941a24bdbdb782b12"
+          "sha256": "d4c90d16d6dbbeeeab92dc94506a3495ed9ed6ba401442f6b3c6113634e88c63"
         }
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.0/backend.toml",
-        "size": 1539,
-        "sha256": "fe6f064be2c3b07085ea89acea24c5489f0b3a866816580bae716d69f6801a36"
+        "size": 1351,
+        "sha256": "9978378583f1c897dd7ec8ecbc3ffaa13eb252e3d6aaffb8cf6eba67cf0f3ba6"
       }
     },
     {
