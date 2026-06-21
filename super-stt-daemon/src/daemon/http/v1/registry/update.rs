@@ -139,8 +139,7 @@ fn select_update_compat(
     use crate::registry::{compat, host_detect};
 
     let host = host_detect::detect();
-    let prefs = compat::Prefs::default();
-    let sel = compat::select(&host, entry, &prefs);
+    let sel = compat::select(&host, entry);
 
     if compat::to_selected_asset(entry, &sel).is_none() {
         s.install_inflight.write().remove(source);

@@ -321,8 +321,7 @@ fn select_install_compat(
     }
 
     let host = host_detect::detect();
-    let prefs = compat::Prefs::default();
-    let sel = compat::select(&host, entry, &prefs);
+    let sel = compat::select(&host, entry);
     let Some(asset) = compat::to_selected_asset(entry, &sel) else {
         s.install_inflight.write().remove(source_key);
         return Err(Box::new(

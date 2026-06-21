@@ -150,7 +150,6 @@ pub(crate) async fn list_registry_backends(
     };
 
     let host = host_detect::detect();
-    let prefs = compat::Prefs::default();
     let bdir = backends_dir(&s).await;
 
     let mut result = Vec::new();
@@ -159,7 +158,7 @@ pub(crate) async fn list_registry_backends(
             continue;
         }
 
-        let sel = compat::select(&host, entry, &prefs);
+        let sel = compat::select(&host, entry);
         let compatible = !matches!(sel, compat::Selection::Incompatible { .. });
 
         if !compatible && !q.include_incompatible {

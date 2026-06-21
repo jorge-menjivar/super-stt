@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `select(host, entry, prefs)` — pure: no I/O, no shared state.
+//! `select(host, entry)` — pure: no I/O, no shared state. Asset selection is
+//! driven solely by host capability (the most optimal asset the host can run);
+//! the runtime device preference is intentionally decoupled and never affects
+//! which asset is downloaded.
 
 use super_stt_shared::registry::SelectedAsset;
 
 use crate::registry::host_detect::Host;
 use crate::registry::index_schema::{IndexBackend, IndexSubprocessAsset};
-
-#[derive(Debug, Clone, Default)]
-pub struct Prefs {
-    /// User-asked to prefer GPU for this backend. Mirrors today's per-local-
-    /// model "Use GPU" checkbox.
-    pub prefer_gpu: bool,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
@@ -21,7 +17,7 @@ pub enum Selection {
 }
 
 #[must_use]
-pub fn select(host: &Host, entry: &IndexBackend, prefs: &Prefs) -> Selection {
+pub fn select(host: &Host, entry: &IndexBackend) -> Selection {
     if entry.kind == "wasm" {
         return if entry.assets.wasm.is_some() {
             Selection::Wasm
@@ -50,9 +46,10 @@ pub fn select(host: &Host, entry: &IndexBackend, prefs: &Prefs) -> Selection {
         };
     }
 
-    if prefs.prefer_gpu
-        && let Some(cuda) = &host.cuda
-    {
+    // Capability-driven: if the host has a usable CUDA GPU, install the best
+    // matching CUDA asset. Independent of the runtime device preference — a
+    // CUDA build still runs on CPU when the user selects that device.
+    if let Some(cuda) = &host.cuda {
         let cuda_matches: Vec<&(usize, &IndexSubprocessAsset)> = by_target
             .iter()
             .filter(|(_, a)| {
@@ -177,8 +174,36 @@ mod tests {
         }
     }
 
+    fn host_cpu() -> Host {
+        Host {
+            target_triple: "x86_64-unknown-linux-gnu".into(),
+            cuda: None,
+        }
+    }
+
     #[test]
-    fn picks_matching_cuda_when_gpu_preferred() {
+    fn cpu_host_without_gpu_picks_cpu() {
+        // Capability-driven: with no GPU on the host, the CPU asset is selected
+        // even though a matching CUDA asset exists.
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                sp(
+                    "x86_64-unknown-linux-gnu",
+                    "cuda",
+                    Some(86),
+                    Some(13),
+                    false,
+                ),
+            ],
+        );
+        let sel = select(&host_cpu(), &e);
+        assert_eq!(sel, Selection::Subprocess { index: 0 });
+    }
+
+    #[test]
+    fn picks_matching_cuda_on_capable_host() {
         let e = entry(
             "subprocess",
             vec![
@@ -199,7 +224,7 @@ mod tests {
                 ),
             ],
         );
-        let sel = select(&host_cuda(86, 12, false), &e, &Prefs { prefer_gpu: true });
+        let sel = select(&host_cuda(86, 12, false), &e);
         assert_eq!(sel, Selection::Subprocess { index: 1 });
     }
 
@@ -218,7 +243,7 @@ mod tests {
                 ),
             ],
         );
-        let sel = select(&host_cuda(86, 12, false), &e, &Prefs { prefer_gpu: true });
+        let sel = select(&host_cuda(86, 12, false), &e);
         assert_eq!(sel, Selection::Subprocess { index: 0 });
     }
 
@@ -237,7 +262,7 @@ mod tests {
                 sp("x86_64-unknown-linux-gnu", "cuda", Some(86), Some(12), true),
             ],
         );
-        let sel = select(&host_cuda(86, 12, true), &e, &Prefs { prefer_gpu: true });
+        let sel = select(&host_cuda(86, 12, true), &e);
         assert_eq!(sel, Selection::Subprocess { index: 1 });
     }
 
@@ -263,7 +288,7 @@ mod tests {
             ],
         );
         // Host has CUDA 13 runtime
-        let sel = select(&host_cuda(86, 13, false), &e, &Prefs { prefer_gpu: true });
+        let sel = select(&host_cuda(86, 13, false), &e);
         assert_eq!(sel, Selection::Subprocess { index: 1 });
     }
 
@@ -289,7 +314,7 @@ mod tests {
             ],
         );
         // Host has CUDA 12 runtime — must not pick the cuda_major=13 build.
-        let sel = select(&host_cuda(86, 12, false), &e, &Prefs { prefer_gpu: true });
+        let sel = select(&host_cuda(86, 12, false), &e);
         assert_eq!(sel, Selection::Subprocess { index: 0 });
     }
 
@@ -304,7 +329,7 @@ mod tests {
             ],
         );
         // Host is sm_120 with a CUDA 13 runtime; the wildcard must match.
-        let sel = select(&host_cuda(120, 13, false), &e, &Prefs { prefer_gpu: true });
+        let sel = select(&host_cuda(120, 13, false), &e);
         assert_eq!(sel, Selection::Subprocess { index: 1 });
     }
 
@@ -323,7 +348,7 @@ mod tests {
                 ),
             ],
         );
-        let sel = select(&host_cuda(90, 13, false), &e, &Prefs { prefer_gpu: true });
+        let sel = select(&host_cuda(90, 13, false), &e);
         assert_eq!(
             sel,
             Selection::Subprocess { index: 1 },
@@ -341,7 +366,7 @@ mod tests {
                 sp("x86_64-unknown-linux-gnu", "cuda", None, Some(13), false),
             ],
         );
-        let sel = select(&host_cuda(86, 12, false), &e, &Prefs { prefer_gpu: true });
+        let sel = select(&host_cuda(86, 12, false), &e);
         assert_eq!(
             sel,
             Selection::Subprocess { index: 0 },
@@ -360,7 +385,7 @@ mod tests {
                 sp("x86_64-unknown-linux-gnu", "cuda", None, None, false),
             ],
         );
-        let sel = select(&host_cuda(86, 12, false), &e, &Prefs { prefer_gpu: true });
+        let sel = select(&host_cuda(86, 12, false), &e);
         assert_eq!(
             sel,
             Selection::Subprocess { index: 0 },
@@ -374,7 +399,7 @@ mod tests {
             "subprocess",
             vec![sp("aarch64-unknown-linux-gnu", "cpu", None, None, false)],
         );
-        let sel = select(&host_cuda(86, 12, false), &e, &Prefs { prefer_gpu: false });
+        let sel = select(&host_cuda(86, 12, false), &e);
         assert!(matches!(sel, Selection::Incompatible { .. }));
     }
 }
