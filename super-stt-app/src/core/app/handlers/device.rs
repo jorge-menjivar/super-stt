@@ -60,11 +60,10 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::DeviceInfoLoaded(device, available_devices, gpu_memory) => {
+            Message::DeviceInfoLoaded(device, available_devices) => {
                 info!("DeviceInfoLoaded: device={device}, available_devices={available_devices:?}");
                 self.current_device.clone_from(&device);
                 self.available_devices.clone_from(&available_devices);
-                self.gpu_memory = gpu_memory;
 
                 if matches!(self.device_state, DeviceState::Switching { .. }) {
                     info!("Device switch completed to: {device}");

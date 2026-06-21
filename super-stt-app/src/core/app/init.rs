@@ -128,7 +128,6 @@ impl AppModel {
             // Initialize device state
             current_device: String::new(), // Empty until loaded from daemon
             available_devices: vec!["cpu".to_string()], // Default until loaded from daemon
-            gpu_memory: None,
             gpu_info: Vec::new(),
             device_state: DeviceState::Ready,
             last_device_switch: None,

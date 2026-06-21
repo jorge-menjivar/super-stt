@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/active_device` — compute device (CPU/CUDA) + GPU memory.
+//! `/active_device` — compute device (CPU/CUDA). GPU memory is served
+//! separately by `GET /gpu_info` (gpu-probe).
 
 use crate::daemon::client::internal::response::{require_success, require_unit};
 use crate::daemon::client::internal::session::with_settings_token;
 use super_stt_shared::daemon::http_client::transport;
 
-/// `(free_bytes, total_bytes)` for a CUDA device; `None` on CPU or when the
-/// driver couldn't be queried.
-pub type GpuMemoryInfo = Option<(u64, u64)>;
-
-/// Read current device + available devices + GPU memory (HTTP `GET /active_device`).
-pub async fn get_current_device() -> Result<(String, Vec<String>, GpuMemoryInfo), String> {
+/// Read current device + available devices (HTTP `GET /active_device`).
+pub async fn get_current_device() -> Result<(String, Vec<String>), String> {
     with_settings_token(|socket, token| async move {
         let resp = require_success(
             transport::settings_get(socket, &token, "/active_device").await?,
@@ -20,11 +17,7 @@ pub async fn get_current_device() -> Result<(String, Vec<String>, GpuMemoryInfo)
         let available_devices = resp
             .available_devices
             .unwrap_or_else(|| vec!["cpu".to_string()]);
-        let gpu_memory = match (resp.gpu_free_memory, resp.gpu_total_memory) {
-            (Some(free), Some(total)) => Some((free, total)),
-            _ => None,
-        };
-        Ok((device, available_devices, gpu_memory))
+        Ok((device, available_devices))
     })
     .await
 }

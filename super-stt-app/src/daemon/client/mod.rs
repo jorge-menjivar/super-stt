@@ -12,7 +12,7 @@ pub(crate) mod v1;
 pub use v1::health::{ping_daemon, test_daemon_connection};
 pub use v1::transcribe::{RecordEvent, record_command_stream, stop_record_command};
 
-pub use v1::settings::active_device::{GpuMemoryInfo, get_current_device, set_device};
+pub use v1::settings::active_device::{get_current_device, set_device};
 pub use v1::settings::active_model::{
     cancel_download, get_current_model, get_download_status, list_available_models,
     reload_active_model, set_model, unload_active_model,

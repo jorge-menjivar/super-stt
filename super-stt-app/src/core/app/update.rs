@@ -100,7 +100,7 @@ impl AppModel {
             message,
             Message::DeviceSelected(_)
                 | Message::DeviceLoaded(_)
-                | Message::DeviceInfoLoaded(_, _, _)
+                | Message::DeviceInfoLoaded(_, _)
                 | Message::DeviceError(_)
         ) {
             return Some(self.handle_device_messages(message));

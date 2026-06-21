@@ -103,8 +103,6 @@ pub struct AppModel {
     pub current_device: String,
     /// Available devices from daemon
     pub available_devices: Vec<String>,
-    /// GPU memory info: (free, total) in bytes. None if CUDA unavailable.
-    pub gpu_memory: crate::daemon::client::GpuMemoryInfo,
     /// GPU inventory + memory from the daemon's `GET /gpu_info` (gpu-probe).
     pub gpu_info: Vec<super_stt_shared::models::protocol::GpuInfo>,
     /// Device switching state

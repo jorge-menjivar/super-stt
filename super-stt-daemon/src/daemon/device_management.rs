@@ -422,32 +422,10 @@ impl SuperSTTDaemon {
             format!("Device: {actual_device} (preferred and actual match)")
         };
 
-        let mut response = DaemonResponse::success()
+        DaemonResponse::success()
             .with_device(actual_device)
             .with_available_devices(available_devices)
-            .with_message(message);
-
-        // Include GPU memory info when CUDA is available
-        match Self::get_gpu_memory_info() {
-            Ok((free, total)) => {
-                response = response
-                    .with_gpu_free_memory(free)
-                    .with_gpu_total_memory(total);
-            }
-            Err(e) => {
-                info!("GPU memory query unavailable: {e}");
-            }
-        }
-
-        response
-    }
-
-    /// GPU memory reporting now lives in the GPU-resident backends, not the
-    /// daemon (which no longer links a CUDA runtime). Always unavailable here.
-    fn get_gpu_memory_info() -> Result<(u64, u64), anyhow::Error> {
-        Err(anyhow::anyhow!(
-            "GPU memory info is reported by the backend, not the daemon"
-        ))
+            .with_message(message)
     }
 
     /// Read-only GPU inventory for `GET /gpu_info`. Hardware detection runs on a

@@ -26,14 +26,6 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_devices: Option<Vec<String>>,
 
-    /// Free GPU memory in bytes (only set when CUDA is available)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gpu_free_memory: Option<u64>,
-
-    /// Total GPU memory in bytes (only set when CUDA is available)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gpu_total_memory: Option<u64>,
-
     // Notification system fields
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subscribed_to: Option<Vec<String>>,
@@ -284,18 +276,6 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_available_devices(mut self, devices: Vec<String>) -> Self {
         self.available_devices = Some(devices);
-        self
-    }
-
-    #[must_use]
-    pub fn with_gpu_free_memory(mut self, bytes: u64) -> Self {
-        self.gpu_free_memory = Some(bytes);
-        self
-    }
-
-    #[must_use]
-    pub fn with_gpu_total_memory(mut self, bytes: u64) -> Self {
-        self.gpu_total_memory = Some(bytes);
         self
     }
 

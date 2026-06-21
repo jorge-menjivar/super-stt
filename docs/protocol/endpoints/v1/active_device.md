@@ -89,9 +89,7 @@ Content-Type: application/json
 {
   "status":            "success",
   "device":            "cuda",
-  "available_devices": ["cpu", "cuda"],
-  "gpu_free_memory":   8123456789,
-  "gpu_total_memory":  25395560448
+  "available_devices": ["cpu", "cuda"]
 }
 ```
 
@@ -99,8 +97,9 @@ Content-Type: application/json
 |---------------------|----------|----------------------------------------------------------------------------------|
 | `device`            | string   | The active device                                                                 |
 | `available_devices` | string[] | Devices reachable on this host                                                    |
-| `gpu_free_memory`   | u64?     | Free GPU memory in bytes (omitted on hosts with no GPU)                           |
-| `gpu_total_memory`  | u64?     | Total GPU memory in bytes (omitted on hosts with no GPU)                          |
+
+GPU memory (free / total / used per device) is reported by
+[`GET /gpu_info`](./gpu_info.md), not this endpoint.
 
 **Errors:**
 

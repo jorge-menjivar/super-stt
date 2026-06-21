@@ -54,14 +54,13 @@ impl AppModel {
                         Err(e) => cosmic::Action::App(Message::ModelError(e)),
                     }),
                     Task::perform(get_current_device(), |result| match result {
-                        Ok((device, available_devices, gpu_memory)) => {
+                        Ok((device, available_devices)) => {
                             info!(
                                 "Initial device load successful: device={device}, available_devices={available_devices:?}"
                             );
                             cosmic::Action::App(Message::DeviceInfoLoaded(
                                 device,
                                 available_devices,
-                                gpu_memory,
                             ))
                         }
                         Err(e) => {
