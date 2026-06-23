@@ -16,6 +16,7 @@ use super_stt_shared::validation::get_http_socket_path;
 /// meter, `daemon_status` for model-switch / download / install progress).
 pub(crate) const SETTINGS_SCOPES: &[&str] = &[
     "settings",
+    "secrets",
     "transcribe",
     "recording_events",
     "audio_visualization",

@@ -176,24 +176,6 @@ pub async fn cancel_download() -> Result<String, String> {
     .await
 }
 
-/// Reload the active model (HTTP `POST /active_model/reload`) so a changed
-/// secret/option for its backend takes effect immediately.
-pub async fn reload_active_model() -> Result<String, String> {
-    with_settings_token(|socket, token| async move {
-        // No header timeout — a reload re-runs provisioning + load, same as a
-        // switch; see `set_model` for why the fixed timeout is unsafe here.
-        let resp = transport::settings_post_no_timeout(
-            socket,
-            &token,
-            "/active_model/reload",
-            &serde_json::json!({}),
-        )
-        .await?;
-        require_message(resp, "reload_active_model")
-    })
-    .await
-}
-
 /// Unload the currently loaded model (HTTP `DELETE /active_model`). The
 /// active backend stays selected; the user can then pick another of its
 /// models. Use [`clear_active_backend`] to return the daemon to idle.

@@ -2,7 +2,6 @@
 mod core;
 mod daemon;
 mod i18n;
-mod keyring;
 mod state;
 mod ui;
 

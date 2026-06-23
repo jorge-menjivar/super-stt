@@ -2,7 +2,7 @@
 //! `/backends`, `/active_backend`, `/gpu_info` — backend catalog and selection.
 
 use crate::daemon::backends::BackendInfo;
-use crate::daemon::client::internal::response::{require_message, require_success, require_unit};
+use crate::daemon::client::internal::response::{require_success, require_unit};
 use crate::daemon::client::internal::session::with_settings_token;
 use super_stt_shared::daemon::http_client::transport;
 
@@ -25,26 +25,45 @@ pub async fn list_backends() -> Result<Vec<BackendInfo>, String> {
     .await
 }
 
-/// Set or clear a backend option (HTTP `POST /backends/option`). An
-/// empty `value` clears the override and reverts to the default.
+/// Set a backend option (HTTP `POST /backends/{source}/options/{name}`).
 pub async fn set_backend_option(
     source: String,
     name: String,
     value: String,
-) -> Result<String, String> {
+) -> Result<(), String> {
     with_settings_token(move |socket, token| {
-        let source = source.clone();
-        let name = name.clone();
-        let value = value.clone();
+        let (source, name, value) = (source.clone(), name.clone(), value.clone());
         async move {
+            let path = format!(
+                "/backends/{}/options/{}",
+                urlencoding::encode(&source),
+                urlencoding::encode(&name)
+            );
             let resp = transport::settings_post(
                 socket,
                 &token,
-                "/backends/option",
-                &serde_json::json!({ "source": source, "name": name, "value": value }),
+                &path,
+                &serde_json::json!({ "value": value }),
             )
             .await?;
-            require_message(resp, "set_backend_option")
+            require_unit(resp, "set_backend_option")
+        }
+    })
+    .await
+}
+
+/// Clear a backend option (HTTP `DELETE /backends/{source}/options/{name}`).
+pub async fn clear_backend_option(source: String, name: String) -> Result<(), String> {
+    with_settings_token(move |socket, token| {
+        let (source, name) = (source.clone(), name.clone());
+        async move {
+            let path = format!(
+                "/backends/{}/options/{}",
+                urlencoding::encode(&source),
+                urlencoding::encode(&name)
+            );
+            let resp = transport::settings_delete(socket, &token, &path).await?;
+            require_unit(resp, "clear_backend_option")
         }
     })
     .await

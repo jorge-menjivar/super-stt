@@ -6580,7 +6580,6 @@ dependencies = [
  "futures-util",
  "i18n-embed",
  "i18n-embed-fl",
- "keyring",
  "libc",
  "libcosmic",
  "log",

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::AppModel;
-use crate::daemon::client::{list_backends, reload_active_model, set_backend_option};
+use crate::daemon::client::{
+    clear_backend_option, clear_backend_secret, list_backend_secrets, list_backends,
+    set_backend_option, set_backend_secret,
+};
 use crate::ui::messages::Message;
 use cosmic::prelude::*;
 use super_stt_shared::models::provider::Provider;
@@ -14,12 +17,14 @@ impl AppModel {
         message: Message,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::BackendsLoaded(_) | Message::BackendsError(_) | Message::BackendsReload => {
-                self.handle_backend_catalog(message)
-            }
+            Message::BackendsLoaded(_)
+            | Message::BackendsError(_)
+            | Message::BackendsReload
+            | Message::BackendSecretsConfigured { .. } => self.handle_backend_catalog(message),
 
             Message::BackendSecretInputChanged { .. }
             | Message::BackendSecretSaved { .. }
+            | Message::BackendSecretStored { .. }
             | Message::BackendSecretRemoved { .. }
             | Message::BackendOptionInputChanged { .. }
             | Message::BackendOptionSaved { .. } => self.handle_backend_config(message),
@@ -28,13 +33,14 @@ impl AppModel {
         }
     }
 
-    /// Handle backend catalog messages: `BackendsLoaded`, `BackendsError`, `BackendsReload`.
+    /// Handle backend catalog messages: `BackendsLoaded`, `BackendsError`, `BackendsReload`,
+    /// `BackendSecretsConfigured`.
     fn handle_backend_catalog(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::BackendsLoaded(backends) => {
-                // Prefill option input buffers from each option's current
-                // value, and recompute which secrets are configured by
-                // probing the keyring. Both maps are keyed by (source, name).
+                // Prefill option input buffers from each option's current value.
+                // Secret configured-flags are now daemon-sourced: dispatch
+                // list_backend_secrets per backend and fold via BackendSecretsConfigured.
                 self.backend_option_inputs.clear();
                 self.backend_secret_configured.clear();
                 for backend in &backends {
@@ -44,21 +50,36 @@ impl AppModel {
                             option.value.clone().unwrap_or_default(),
                         );
                     }
-                    for secret in &backend.secrets {
-                        let configured =
-                            crate::keyring::has_backend_secret(&backend.source, &secret.name)
-                                .unwrap_or(false);
-                        self.backend_secret_configured
-                            .insert((backend.source.clone(), secret.name.clone()), configured);
-                    }
                 }
-                // Drop uninstall errors for backends no longer present — a
-                // backend that left the catalog is one whose uninstall
-                // ultimately succeeded, so its stale error must not linger.
+                // Drop uninstall errors for backends no longer present.
                 self.registry
                     .uninstall_errors
                     .retain(|src, _| backends.iter().any(|b| &b.source == src));
+                let tasks: Vec<_> = backends
+                    .iter()
+                    .map(|b| {
+                        let source = b.source.clone();
+                        Task::perform(
+                            list_backend_secrets(source.clone()),
+                            move |res| {
+                                let items = res.unwrap_or_default();
+                                cosmic::Action::App(Message::BackendSecretsConfigured {
+                                    source: source.clone(),
+                                    items,
+                                })
+                            },
+                        )
+                    })
+                    .collect();
                 self.backends = backends;
+                Task::batch(tasks)
+            }
+
+            Message::BackendSecretsConfigured { source, items } => {
+                for (name, configured) in items {
+                    self.backend_secret_configured
+                        .insert((source.clone(), name), configured);
+                }
                 Task::none()
             }
 
@@ -88,39 +109,50 @@ impl AppModel {
                 Task::none()
             }
 
-            // Keyring writes are synchronous and same-machine, so we
-            // perform them inline and update `backend_secret_configured`
-            // directly rather than round-tripping through another message.
+            // Send secret to daemon; the daemon reloads-if-active itself,
+            // so we only need to refresh the catalog to pick up the new
+            // configured flag.
+            // The input buffer is NOT cleared here — it is cleared only on
+            // success via BackendSecretStored, so a transient failure leaves
+            // the typed value intact for retry.
             Message::BackendSecretSaved { source, name } => {
                 let key = (source.clone(), name.clone());
-                let value = self
-                    .backend_secret_inputs
-                    .get(&key)
-                    .cloned()
-                    .unwrap_or_default();
+                let Some(value) = self.backend_secret_inputs.get(&key).cloned() else {
+                    return Task::none();
+                };
                 if value.is_empty() {
                     return Task::none();
                 }
-                match crate::keyring::set_backend_secret(&source, &name, &value) {
-                    Ok(()) => {
-                        self.backend_secret_configured.insert(key.clone(), true);
-                        self.backend_secret_inputs.remove(&key);
-                    }
-                    Err(e) => log::warn!("Failed to store secret {source}:{name}: {e}"),
-                }
-                self.reload_if_active_backend(&source)
+                Task::perform(
+                    set_backend_secret(source.clone(), name.clone(), value),
+                    move |res| match res {
+                        Ok(()) => cosmic::Action::App(Message::BackendSecretStored {
+                            source: source.clone(),
+                            name: name.clone(),
+                        }),
+                        Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                    },
+                )
             }
 
+            // Daemon confirmed the secret was written — clear the input buffer
+            // and refresh the catalog so the configured flag updates.
+            Message::BackendSecretStored { source, name } => {
+                self.backend_secret_inputs.remove(&(source, name));
+                self.handle_backend_catalog(Message::BackendsReload)
+            }
+
+            // Clear secret via daemon; daemon reloads-if-active itself.
             Message::BackendSecretRemoved { source, name } => {
-                let key = (source.clone(), name.clone());
-                match crate::keyring::delete_backend_secret(&source, &name) {
-                    Ok(()) => {
-                        self.backend_secret_configured.insert(key.clone(), false);
-                        self.backend_secret_inputs.remove(&key);
-                    }
-                    Err(e) => log::warn!("Failed to delete secret {source}:{name}: {e}"),
-                }
-                self.reload_if_active_backend(&source)
+                self.backend_secret_inputs
+                    .remove(&(source.clone(), name.clone()));
+                Task::perform(
+                    clear_backend_secret(source, name),
+                    move |res| match res {
+                        Ok(()) => cosmic::Action::App(Message::BackendsReload),
+                        Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                    },
+                )
             }
 
             Message::BackendOptionInputChanged {
@@ -132,42 +164,34 @@ impl AppModel {
                 Task::none()
             }
 
-            // Options live in the daemon config, so this dispatches an
-            // async client call and reloads the catalog on success to
-            // reflect the new effective value.
+            // Options go to the daemon config. If the input is empty, clear the
+            // override; otherwise set the new value. The daemon reloads-if-active.
             Message::BackendOptionSaved { source, name } => {
                 let value = self
                     .backend_option_inputs
                     .get(&(source.clone(), name.clone()))
                     .cloned()
                     .unwrap_or_default();
-                Task::perform(
-                    set_backend_option(source, name, value),
-                    |result| match result {
-                        Ok(_) => cosmic::Action::App(Message::BackendsReload),
-                        Err(e) => cosmic::Action::App(Message::BackendsError(e)),
-                    },
-                )
+                if value.is_empty() {
+                    Task::perform(
+                        clear_backend_option(source, name),
+                        |result| match result {
+                            Ok(()) => cosmic::Action::App(Message::BackendsReload),
+                            Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                        },
+                    )
+                } else {
+                    Task::perform(
+                        set_backend_option(source, name, value),
+                        |result| match result {
+                            Ok(()) => cosmic::Action::App(Message::BackendsReload),
+                            Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                        },
+                    )
+                }
             }
 
             _ => Task::none(),
-        }
-    }
-
-    /// If `source` serves the currently-active model, reload it so a
-    /// just-changed secret/option takes effect (secrets/options are read at
-    /// load time). Otherwise a no-op.
-    pub(in crate::core::app) fn reload_if_active_backend(
-        &self,
-        source: &str,
-    ) -> Task<cosmic::Action<Message>> {
-        if source == self.current_source {
-            Task::perform(reload_active_model(), |result| match result {
-                Ok(_) => cosmic::Action::App(Message::BackendsReload),
-                Err(e) => cosmic::Action::App(Message::BackendsError(e)),
-            })
-        } else {
-            Task::none()
         }
     }
 

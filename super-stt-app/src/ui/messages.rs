@@ -241,19 +241,31 @@ pub enum Message {
     CustomModelsDirError(String),
 
     // Backend catalog + per-backend secret/option configuration.
-    // Secrets live in the system keyring (written directly by this
-    // app); options go to the daemon config via the client.
+    // Secrets are managed via the daemon's secrets endpoints.
+    // Options go to the daemon config via the client.
     BackendsLoaded(Vec<BackendInfo>),
-    /// Re-fetch the backend catalog (e.g. after an option save) so the
-    /// UI reflects the new effective option values.
+    /// Re-fetch the backend catalog (e.g. after a secret/option save) so the
+    /// UI reflects the new effective values.
     BackendsReload,
     BackendsError(String),
+    /// Daemon-sourced configured flags for a backend's secrets, received after
+    /// `BackendsLoaded`. Folds `(name, configured)` into `backend_secret_configured`.
+    BackendSecretsConfigured {
+        source: String,
+        items: Vec<(String, bool)>,
+    },
     BackendSecretInputChanged {
         source: String,
         name: String,
         value: String,
     },
     BackendSecretSaved {
+        source: String,
+        name: String,
+    },
+    /// Daemon confirmed that a backend secret was written successfully.
+    /// Triggers input-buffer clearance and a catalog reload.
+    BackendSecretStored {
         source: String,
         name: String,
     },
