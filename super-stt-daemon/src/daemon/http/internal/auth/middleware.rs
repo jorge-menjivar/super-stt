@@ -108,7 +108,6 @@ pub(crate) async fn require_settings_scope(
     require_scope("settings", state, headers, request, next).await
 }
 
-#[expect(dead_code, reason = "wired to routes in Phase B")]
 pub(crate) async fn require_secrets_scope(
     State(state): State<AppState>,
     headers: HeaderMap,

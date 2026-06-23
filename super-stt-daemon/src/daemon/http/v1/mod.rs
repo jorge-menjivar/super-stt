@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 pub(crate) mod auth;
+pub(crate) mod backends;
 pub(crate) mod events;
 pub(crate) mod health;
 pub(crate) mod registry;
@@ -7,8 +8,8 @@ pub(crate) mod settings;
 pub(crate) mod transcribe;
 
 use crate::daemon::http::internal::auth::middleware::{
-    require_any_authenticated, require_rate_limit, require_settings_scope, require_status_scope,
-    require_transcribe_scope,
+    require_any_authenticated, require_rate_limit, require_secrets_scope, require_settings_scope,
+    require_status_scope, require_transcribe_scope,
 };
 use crate::daemon::http::state::AppState;
 use axum::Router;
@@ -71,11 +72,22 @@ pub(crate) fn router(state: AppState) -> Router {
             require_settings_scope,
         ));
 
+    let secrets_scope = backends::secrets::routes()
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_rate_limit,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_secrets_scope,
+        ));
+
     let v1 = Router::new()
         .merge(any_scope)
         .merge(status_scope)
         .merge(transcribe_scope)
         .merge(settings_scope)
+        .merge(secrets_scope)
         .route("/auth/request", post(auth::request::auth_request));
 
     Router::new().nest("/v1", v1).with_state(state)

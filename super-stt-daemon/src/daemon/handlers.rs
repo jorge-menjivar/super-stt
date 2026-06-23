@@ -404,6 +404,20 @@ impl SuperSTTDaemon {
             .with_message("Backends listed successfully".to_string())
     }
 
+    /// Reload the active model iff it is served by `source`, so a just-changed
+    /// option/secret takes effect immediately. Shared by option and secret writes.
+    async fn reload_if_source_active(&self, source: &str) {
+        let active_source = self
+            .model
+            .read()
+            .await
+            .as_ref()
+            .map(|l| l.definition.source.clone());
+        if active_source.as_deref() == Some(source) {
+            let _ = self.handle_reload_active_model().await;
+        }
+    }
+
     /// Handle set backend option command — store/clear a plaintext option
     /// override in config. Takes effect on the backend's next model load.
     pub async fn handle_set_backend_option(
@@ -417,17 +431,7 @@ impl SuperSTTDaemon {
             config.update_backend_option(source.clone(), name.clone(), value.clone());
         }
 
-        // If the active model is served by this backend, reload it so the new
-        // option value takes effect immediately (it's read at load time).
-        let active_source = self
-            .model
-            .read()
-            .await
-            .as_ref()
-            .map(|l| l.definition.source.clone());
-        if active_source.as_deref() == Some(source.as_str()) {
-            let _ = self.handle_reload_active_model().await;
-        }
+        self.reload_if_source_active(&source).await;
 
         if value.is_empty() {
             info!("Cleared backend option {name} for {source}");
@@ -436,6 +440,31 @@ impl SuperSTTDaemon {
             info!("Set backend option {name} for {source}");
             DaemonResponse::success().with_message(format!("Option {name} updated"))
         }
+    }
+
+    /// Store (or replace) a backend secret and reload the active model if needed.
+    pub async fn handle_set_backend_secret(
+        &self,
+        source: String,
+        name: String,
+        value: String,
+    ) -> DaemonResponse {
+        if let Err(e) = crate::keyring::set_backend_secret(&source, &name, &value) {
+            return DaemonResponse::error(&format!("keyring_unavailable: {e}"));
+        }
+        self.reload_if_source_active(&source).await;
+        info!("Set backend secret {name} for {source}");
+        DaemonResponse::success().with_message(format!("Secret {name} stored"))
+    }
+
+    /// Clear a backend secret (reset to unset) and reload the active model if needed.
+    pub async fn handle_clear_backend_secret(&self, source: String, name: String) -> DaemonResponse {
+        if let Err(e) = crate::keyring::delete_backend_secret(&source, &name) {
+            return DaemonResponse::error(&format!("keyring_unavailable: {e}"));
+        }
+        self.reload_if_source_active(&source).await;
+        info!("Cleared backend secret {name} for {source}");
+        DaemonResponse::success().with_message(format!("Secret {name} cleared"))
     }
 
     /// Handle cancel download command
