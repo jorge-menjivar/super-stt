@@ -379,7 +379,13 @@ pub(super) fn spawn_install_pipeline(
             backends_dir,
             cache_dir,
             http: reqwest::Client::builder()
-                .timeout(Duration::from_mins(5))
+                // Bundles can be multi-GB (e.g. a CUDA backend's multi-part
+                // archive), so allow a generous total timeout like the model
+                // download client; the connect timeout still fails fast on an
+                // unreachable host. A 5-minute total previously aborted large
+                // GPU-bundle downloads as `DownloadFailed`.
+                .timeout(Duration::from_hours(1))
+                .connect_timeout(Duration::from_secs(30))
                 .redirect(reqwest::redirect::Policy::limited(10))
                 .build()
                 .unwrap_or_default(),

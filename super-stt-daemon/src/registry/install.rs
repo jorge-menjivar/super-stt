@@ -373,7 +373,18 @@ async fn stream_download<F>(
 where
     F: Fn(InstallPhase, Option<(u64, Option<u64>)>) + Send + Sync,
 {
-    let resp = http.get(url).send().await?.error_for_status()?;
+    let resp = http
+        .get(url)
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|e| {
+            log::warn!(
+                "install: download request failed ({url}){}: {e}",
+                if e.is_timeout() { " [timeout]" } else { "" }
+            );
+            e
+        })?;
     let total = resp.content_length();
     let cap = download_cap(expected_size);
     let mut file = tokio::fs::File::create(dest).await?;
@@ -381,7 +392,13 @@ where
     let mut stream = resp.bytes_stream();
     let mut bytes_done: u64 = 0;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
+        let chunk = chunk.map_err(|e| {
+            log::warn!(
+                "install: stream error ({url}) after {bytes_done} bytes{}: {e}",
+                if e.is_timeout() { " [timeout]" } else { "" }
+            );
+            e
+        })?;
         bytes_done += chunk.len() as u64;
         // Bound a server that streams past the index-declared size (or forever
         // when no size was declared) before it fills the disk.
@@ -436,13 +453,33 @@ where
     let mut out = tokio::fs::File::create(dest).await?;
     let mut overall: u64 = 0;
     for part in parts {
-        let resp = http.get(&part.url).send().await?.error_for_status()?;
+        let resp = http
+            .get(&part.url)
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|e| {
+                log::warn!(
+                    "install: part request failed ({}){}: {e}",
+                    part.url,
+                    if e.is_timeout() { " [timeout]" } else { "" }
+                );
+                e
+            })?;
         let cap = download_cap(part.size);
         let mut hasher = Context::new(&SHA256);
         let mut stream = resp.bytes_stream();
         let mut part_done: u64 = 0;
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
+            let chunk = chunk.map_err(|e| {
+                log::warn!(
+                    "install: stream error on part {} after {part_done}/{} bytes{}: {e}",
+                    part.url,
+                    part.size,
+                    if e.is_timeout() { " [timeout]" } else { "" }
+                );
+                e
+            })?;
             part_done += chunk.len() as u64;
             if part_done > cap {
                 let _ = out.flush().await;
@@ -753,5 +790,93 @@ supported_devices = ["cpu"]
         let mut sidecar = final_path.as_os_str().to_owned();
         sidecar.push(".old");
         assert!(!Path::new(&sidecar).exists(), "sidecar must be cleaned up");
+    }
+
+    /// The multi-part path downloads each part in order, verifies its SHA-256,
+    /// and concatenates them byte-for-byte. Proves the multipart logic itself is
+    /// sound, so a real-world failure points elsewhere (network/timeout).
+    #[tokio::test]
+    async fn multipart_download_concatenates_and_verifies_parts() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut server = mockito::Server::new_async().await;
+        let p0 = vec![0xABu8; 4096];
+        let p1 = vec![0xCDu8; 2048];
+        let m0 = server
+            .mock("GET", "/p0")
+            .with_status(200)
+            .with_body(p0.as_slice())
+            .create_async()
+            .await;
+        let m1 = server
+            .mock("GET", "/p1")
+            .with_status(200)
+            .with_body(p1.as_slice())
+            .create_async()
+            .await;
+        let parts = vec![
+            IndexAsset {
+                url: format!("{}/p0", server.url()),
+                size: p0.len() as u64,
+                sha256: sha_hex(&p0),
+            },
+            IndexAsset {
+                url: format!("{}/p1", server.url()),
+                size: p1.len() as u64,
+                sha256: sha_hex(&p1),
+            },
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("out.tar.gz");
+        let http = reqwest::Client::new();
+        download_verified_parts(&http, &parts, &dest, &Arc::new(|_, _| {}))
+            .await
+            .expect("multipart download must succeed");
+        m0.assert_async().await;
+        m1.assert_async().await;
+        let got = std::fs::read(&dest).unwrap();
+        let mut want = p0.clone();
+        want.extend_from_slice(&p1);
+        assert_eq!(got, want, "reassembled bytes must be part0 || part1");
+    }
+
+    /// A download that can't finish within the client's request timeout surfaces
+    /// as `PipelineError::Network`, which the install handler flattens to the
+    /// user-visible `DownloadFailed`. This is the exact failure a multi-GB CUDA
+    /// bundle hits when the client timeout is shorter than the transfer takes.
+    #[tokio::test]
+    async fn download_exceeding_client_timeout_is_a_download_failure() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        // A server that accepts the connection but never replies.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _hang = tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                drop(stream);
+            }
+        });
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(300))
+            .build()
+            .unwrap();
+        let parts = vec![IndexAsset {
+            url: format!("http://{addr}/p0"),
+            size: 1024,
+            sha256: String::new(),
+        }];
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("out.tar.gz");
+        let err = download_verified_parts(&http, &parts, &dest, &Arc::new(|_, _| {}))
+            .await
+            .expect_err("a download that can't finish in time must fail");
+        assert!(
+            matches!(err, PipelineError::Network(_)),
+            "a timeout must surface as a network error, got {err:?}"
+        );
+        assert_eq!(
+            err.as_typed(InstallPhase::Downloading).1,
+            InstallError::DownloadFailed,
+            "network errors are the user-visible DownloadFailed"
+        );
     }
 }
