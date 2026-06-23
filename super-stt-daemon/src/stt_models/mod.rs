@@ -7,8 +7,8 @@
 //! [`subprocess`] are the two backend transports. [`download`] provisions a
 //! backend's model files before it is spawned.
 //!
-//! The previous in-tree Whisper/Voxtral/online implementations are archived
-//! under `reference/in-tree-models/` for future backend ports.
+//! The previous in-tree Whisper/Voxtral/online implementations now live in
+//! their own standalone backend repositories.
 pub mod backends;
 pub mod download;
 #[cfg(feature = "subprocess-backends")]

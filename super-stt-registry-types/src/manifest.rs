@@ -549,27 +549,6 @@ impl Manifest {
 mod tests {
     use super::*;
 
-    /// Every in-repo backend manifest must parse with the canonical types.
-    #[test]
-    fn parses_all_in_repo_manifests() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap();
-        let mut count = 0;
-        for entry in std::fs::read_dir(root.join("backends")).unwrap().flatten() {
-            let dir = entry.path();
-            if !dir.join("backend.toml").exists() {
-                continue;
-            }
-            let m = Manifest::load(&dir)
-                .unwrap_or_else(|e| panic!("{} must parse: {e}", dir.display()));
-            assert!(!m.backend.source.is_empty());
-            count += 1;
-        }
-        // Tripwire: bump when adding/removing in-repo backends.
-        assert!(count >= 1, "expected the 1 in-repo backend, found {count}");
-    }
-
     #[test]
     fn parses_wasm_manifest_with_secrets_and_options() {
         let m = Manifest::parse(
