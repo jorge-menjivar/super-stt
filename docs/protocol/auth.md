@@ -26,14 +26,15 @@ need, and the user approves that set.
 |-------------------------|-----------------------------------------------------------------------------|----------------------------------------------------|
 | `transcribe`            | Start / stop recording; read back your own transcription results            | [transcribe](./scopes/transcribe.md)               |
 | `status`                | Read the daemon's current model + device                                     | [status](./scopes/status.md)                       |
-| `settings`              | Read / write every configuration value and manage the backend registry      | [settings](./scopes/settings.md)                   |
+| `settings`              | Read / write every configuration value, backend options, and the registry   | [settings](./scopes/settings.md)                   |
+| `secrets`               | Store / check / clear backend credentials — **write-only**; never read back  | [secrets](./scopes/secrets.md)                     |
 | `recording_events`      | Subscribe to recording lifecycle events on `/events`                        | [recording_events](./scopes/recording_events.md)   |
 | `audio_visualization`   | Subscribe to frequency-band visualization data on `/events`                 | [audio_visualization](./scopes/audio_visualization.md) |
 | `global_transcriptions` | Subscribe to **every** app's live + final transcription text on `/events`   | [global_transcriptions](./scopes/global_transcriptions.md) |
 | `daemon_status`         | Subscribe to model/device/download/registry status on `/events`             | [daemon_status](./scopes/daemon_status.md)         |
 
 A Settings UI, for example, requests several at once
-(`["settings", "status", "transcribe", "recording_events", "audio_visualization", "daemon_status"]`),
+(`["settings", "secrets", "status", "transcribe", "recording_events", "audio_visualization", "daemon_status"]`),
 while a CLI that only dictates requests `["transcribe", "status"]`.
 
 ## Endpoints
@@ -275,7 +276,8 @@ docs — those are the source of truth, not duplicated here:
 
 - `transcribe` — `/transcribe`, `/transcribe/stop`, `/transcribe/realtime`; see [transcribe.md](./scopes/transcribe.md).
 - `status` — `GET /status`; see [status.md](./scopes/status.md).
-- `settings` — the configuration + registry surface; see [settings.md](./scopes/settings.md).
+- `settings` — the configuration + registry surface, including backend options; see [settings.md](./scopes/settings.md).
+- `secrets` — backend credential management: `GET/POST/DELETE /backends/{source}/secrets/*` (write-only; values never returned); see [secrets.md](./scopes/secrets.md).
 - `recording_events`, `audio_visualization`, `global_transcriptions`, `daemon_status` — topic sets on `GET /events`; see each scope doc and [`/events`](./endpoints/v1/events.md).
 
 Rules to remember:

@@ -406,7 +406,10 @@ reach:
   The daemon stores secrets encrypted in the keyring and options as plaintext,
   and injects both as request headers on every `/v1` request (see
   [request headers](#request-headers)). Backends never read them from
-  disk.
+  disk. Over the external client API, secret values are **write-only**: a
+  client sets or clears a secret but the daemon never returns a stored value
+  (see the [`secrets` scope](../scopes/secrets.md)); option values, being
+  non-sensitive, are returned.
 
 The daemon's own hardening and the threat model are described in
 [SECURITY.md](../../SECURITY.md).

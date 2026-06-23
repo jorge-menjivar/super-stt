@@ -1,6 +1,7 @@
 # `/backends`
 
-Inspect installed backends and configure their **options**. Each backend is
+Inspect installed backends and configure their **secrets** and **options**.
+Each backend is
 discovered from a `backend.toml` on disk (see
 [`docs/protocol/backend/config.md`](../../backend/config.md)) and declares the
 models it serves plus the **secrets** and **options** it accepts.
@@ -11,19 +12,22 @@ model is [`POST /active_model`](./active_model.md).
 
 ## Secrets vs. options
 
-A backend declares two kinds of user-provided configuration:
+A backend declares two kinds of user-provided configuration, each managed
+through its own sub-resource. The daemon owns storage for both — clients
+configure them only through these endpoints, never by touching storage
+directly.
 
-- **Secrets** (`[[secrets]]`) — sensitive values such as API keys. They are
-  stored in the **system keyring**, written directly by the settings app (the
-  same machine-local pattern used for the daemon's other credentials); they do
-  **not** pass through an HTTP endpoint. The daemon reads a secret from the
-  keyring only at model-load time and injects it as an `x-stt-secret-<name>`
-  request header (see [contract.md](../../backend/contract.md#request-headers)).
-  Whether a secret is configured is determined by the settings app from the
-  keyring; this endpoint never returns secret values.
-- **Options** (`[[options]]`) — non-sensitive configuration such as a base URL.
-  They are stored as plaintext in the daemon config and set via
-  [`POST /backends/option`](#post-backendsoption).
+- **Secrets** (`[[secrets]]`) — sensitive values such as API keys, managed
+  under [`/backends/{source}/secrets`](./backends/secrets.md) (the `secrets`
+  scope). The daemon stores them in the **system keyring** and reads them only
+  at model-load time, injecting each as an `x-stt-secret-<name>` request header
+  (see [contract.md](../../backend/contract.md#request-headers)). Values are
+  **write-only**: a client sets or clears a secret and can check whether one is
+  configured, but no endpoint ever returns a value.
+- **Options** (`[[options]]`) — non-sensitive configuration such as a base URL,
+  managed under [`/backends/{source}/options`](./backends/options.md) (the
+  `settings` scope). The daemon stores them as plaintext in its config, and
+  their values *are* returned.
 
 The keyring account for a backend secret is `backend:<source>:<name>` under the
 `super-stt` service, where `<source>` is the backend's repo id.
@@ -107,48 +111,21 @@ Authorization: Bearer stt_…64hex…
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`  |
 | 403  | `scope_denied`    | Token lacks the `settings` scope         |
 
-## `POST /backends/option`
+## Per-backend secrets and options
 
-Set or clear one option value for a backend. The value is stored as plaintext
-in the daemon config and takes effect the next time that backend's model is
-loaded.
+Setting a secret or option is done per item under the backend's sub-resources,
+not on `/backends` itself:
 
-**Request:**
+- **Secrets** — [`/backends/{source}/secrets`](./backends/secrets.md):
+  `GET …/secrets/list` and `GET`/`POST`/`DELETE …/secrets/{name}`. Requires the
+  `secrets` scope; values are write-only.
+- **Options** — [`/backends/{source}/options`](./backends/options.md):
+  `GET …/options/list` and `GET`/`POST`/`DELETE …/options/{name}`. Requires the
+  `settings` scope.
 
-```http
-POST /backends/option HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
-Content-Type: application/json
-
-{
-  "source": "github.com/super-stt/openai",
-  "name":   "base_url",
-  "value":  "https://gateway.example.com"
-}
-```
-
-| Field    | Type   | Required | Notes                                                              |
-|----------|--------|----------|--------------------------------------------------------------------|
-| `source` | string | yes      | Backend repo id (from `GET /backends`).                            |
-| `name`   | string | yes      | A declared option `name` for that backend.                         |
-| `value`  | string | yes      | New value. An empty string clears the override (reverts to the manifest default). |
-
-**Response (200):**
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{ "status": "success", "message": "Option base_url updated" }
-```
-
-**Errors:**
-
-| HTTP | `message`         | Meaning                                  |
-|------|-------------------|------------------------------------------|
-| 401  | `invalid_session` | Token unknown / expired / `exe_changed`  |
-| 403  | `scope_denied`    | Token lacks the `settings` scope         |
+For both, `POST` sets a value and `DELETE` resets it to its default — the
+manifest default for an option, the unset state for a secret. `GET` on a secret
+reports only whether it is configured; `GET` on an option returns its value.
 
 ## DELETE /backends/{source}
 

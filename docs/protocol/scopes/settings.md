@@ -5,7 +5,9 @@
 
 The `settings` scope is the configuration surface: a `settings` token can read
 every daemon configuration value, change any of them, persist the change to disk,
-and manage installed backends through the registry.
+and manage installed backends through the registry. It covers a backend's
+non-sensitive **options**; a backend's **secrets** (API keys) are managed
+separately under the [`secrets`](./secrets.md) scope and are never readable.
 
 It grants **only** that surface — scopes no longer imply one another. A Settings
 UI that also drives test recordings, shows daemon status, or renders a visualizer
@@ -48,7 +50,8 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/write_method`](../endpoints/v1/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg-desktop-portal / ydotool / wayland-protocol)                   |
 | [`/allow_online_models`](../endpoints/v1/allow_online_models.md) | POST, GET | Privacy gate for online providers (OpenAI / Mistral / Deepgram)                                       |
 | [`/custom_models_dir`](../endpoints/v1/custom_models_dir.md) | POST, GET | Where to scan for user-supplied models                                                                |
-| [`/backends`](../endpoints/v1/backends.md)                  | GET, POST, DELETE | List installed backends, set a backend option, uninstall a backend                            |
+| [`/backends`](../endpoints/v1/backends.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |
+| [`/backends/{source}/options`](../endpoints/v1/backends/options.md) | GET, POST, DELETE | List / read / set / reset a backend's non-sensitive options                          |
 | [`/active_backend`](../endpoints/v1/active_backend.md)      | GET, POST, DELETE | Read / set / clear the active backend                                                          |
 | [`/gpu_info`](../endpoints/v1/gpu_info.md)                  | GET        | GPU / VRAM information                                                                                 |
 | [`/registry/backends`](../endpoints/v1/registry/backends.md) | GET      | List backends available in the registry                                                               |
