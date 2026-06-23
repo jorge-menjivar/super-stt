@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+pub(crate) mod options;
 pub(crate) mod secrets;
 
 use crate::daemon::http::state::AppState;

@@ -7,32 +7,8 @@ use axum::response::IntoResponse;
 use log::{info, warn};
 use serde::Deserialize;
 
-#[derive(Deserialize)]
-pub(crate) struct BackendOptionBody {
-    pub(crate) source: String,
-    pub(crate) name: String,
-    #[serde(default)]
-    pub(crate) value: String,
-}
-
 pub(crate) async fn list_backends(State(s): State<AppState>) -> impl IntoResponse {
     dispatch_command(&s.daemon, "list_backends", None).await
-}
-
-pub(crate) async fn set_backend_option(
-    State(s): State<AppState>,
-    axum::Json(body): axum::Json<BackendOptionBody>,
-) -> impl IntoResponse {
-    dispatch_command(
-        &s.daemon,
-        "set_backend_option",
-        Some(serde_json::json!({
-            "source": body.source,
-            "name":   body.name,
-            "value":  body.value,
-        })),
-    )
-    .await
 }
 
 pub(crate) async fn uninstall_backend(

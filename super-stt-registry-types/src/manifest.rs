@@ -302,13 +302,21 @@ pub enum OptionType {
     Bool,
 }
 
+impl OptionType {
+    /// The canonical lowercase string form (e.g. for JSON responses).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::String => "string",
+            Self::Integer => "integer",
+            Self::Bool => "bool",
+        }
+    }
+}
+
 impl fmt::Display for OptionType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::String => write!(f, "string"),
-            Self::Integer => write!(f, "integer"),
-            Self::Bool => write!(f, "bool"),
-        }
+        f.write_str(self.as_str())
     }
 }
 

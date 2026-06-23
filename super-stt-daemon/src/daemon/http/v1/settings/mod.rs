@@ -68,7 +68,6 @@ pub(crate) fn routes() -> Router<AppState> {
                 .post(custom_models_dir::set_custom_models_dir),
         )
         .route("/backends", get(backends::list_backends))
-        .route("/backends/option", post(backends::set_backend_option))
         .route("/backends/{source}", delete(backends::uninstall_backend))
         .route(
             "/active_backend",
@@ -78,4 +77,5 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/gpu_info", get(backends::get_gpu_info))
         .merge(super::registry::routes())
+        .merge(super::backends::options::routes())
 }
