@@ -175,6 +175,8 @@ impl AppModel {
                 | Message::BackendSecretInputChanged { .. }
                 | Message::BackendSecretSaved { .. }
                 | Message::BackendSecretRemoved { .. }
+                | Message::BackendSecretStored { .. }
+                | Message::BackendSecretsConfigured { .. }
                 | Message::BackendOptionInputChanged { .. }
                 | Message::BackendOptionSaved { .. }
         ) {
