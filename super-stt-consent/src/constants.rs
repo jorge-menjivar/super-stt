@@ -41,6 +41,12 @@ pub const GLOBAL_TRANSCRIPTIONS_PERMISSIONS: &[&str] =
 pub const DAEMON_STATUS_PERMISSIONS: &[&str] =
     &["Monitor model changes, downloads, and backend installation progress"];
 
+/// Bullets for the `secrets` scope shown in the consent popup.
+pub const SECRETS_PERMISSIONS: &[&str] = &[
+    "Store, update, and clear this backend's API credentials",
+    "Cannot read or display any stored credential value",
+];
+
 /// Fallback bullets shown if the daemon spawns the popup with a scope
 /// the helper doesn't recognize. Should never appear in production.
 pub const UNKNOWN_SCOPE_PERMISSIONS: &[&str] = &[

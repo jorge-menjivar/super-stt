@@ -108,6 +108,16 @@ pub(crate) async fn require_settings_scope(
     require_scope("settings", state, headers, request, next).await
 }
 
+#[expect(dead_code, reason = "wired to routes in Phase B")]
+pub(crate) async fn require_secrets_scope(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    require_scope("secrets", state, headers, request, next).await
+}
+
 /// Accept any valid bearer token regardless of scope. Used for `/ping`
 /// — a no-info-leak liveness probe that all scopes legitimately need.
 pub(crate) async fn require_any_authenticated(

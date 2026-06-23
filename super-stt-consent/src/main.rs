@@ -206,6 +206,7 @@ fn permissions_for_scope(scope: &str) -> &'static [&'static str] {
         "audio_visualization" => constants::AUDIO_VISUALIZATION_PERMISSIONS,
         "global_transcriptions" => constants::GLOBAL_TRANSCRIPTIONS_PERMISSIONS,
         "daemon_status" => constants::DAEMON_STATUS_PERMISSIONS,
+        "secrets" => constants::SECRETS_PERMISSIONS,
         _ => constants::UNKNOWN_SCOPE_PERMISSIONS,
     }
 }

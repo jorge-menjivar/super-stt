@@ -95,8 +95,9 @@ pub(crate) fn auth_err(status: StatusCode, message: &str, reason: &str) -> Respo
 /// catalog in `docs/protocol/auth.md`.
 pub(crate) const KNOWN_SCOPES: &[&str] = &[
     "transcribe",
-    "status",
     "settings",
+    "secrets",
+    "status",
     "recording_events",
     "audio_visualization",
     "global_transcriptions",
@@ -124,5 +125,10 @@ mod tests {
         for s in ["client", "widget", "", "Settings", "transcribe ", "global"] {
             assert!(!is_known_scope(s), "{s:?} must not be a known scope");
         }
+    }
+
+    #[test]
+    fn secrets_is_a_known_scope() {
+        assert!(is_known_scope("secrets"), "secrets must be an accepted scope");
     }
 }

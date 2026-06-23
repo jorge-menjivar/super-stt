@@ -11,17 +11,22 @@
 //! `get_sessions_blob`/`set_sessions_blob` below.
 
 use log::{debug, info, warn};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 const SERVICE_NAME: &str = "super-stt";
 
-/// When `SUPER_STT_KEYRING_MOCK` is set, route all keyring access to an
-/// in-memory mock store instead of the system secret service.
+/// When `SUPER_STT_KEYRING_MOCK` is set, route session-blob keyring access to
+/// an in-memory mock store instead of the system secret service.
 ///
 /// The integration tests spawn the daemon as a subprocess and CI runs
 /// headless, where there is no unlocked system keyring — touching the real
 /// secret service there blocks on an unlock prompt or fails. This must be
 /// called once at daemon startup, before any keyring access, as it sets the
 /// process-wide default credential builder.
+///
+/// Backend-secret access uses `mock_store()` instead and does not go through
+/// this builder.
 pub fn install_mock_if_requested() {
     if std::env::var_os("SUPER_STT_KEYRING_MOCK").is_some() {
         keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
@@ -46,6 +51,84 @@ fn backend_secret_account(source: &str, name: &str) -> String {
     format!("backend:{source}:{name}")
 }
 
+/// Process-global in-memory secret store, used in place of the system keyring
+/// when running under tests or with `SUPER_STT_KEYRING_MOCK` set.
+///
+/// The `keyring` crate's mock backend returns a fresh, isolated credential per
+/// `Entry::new`, so a set-then-read round-trip across separate calls cannot
+/// share state — which makes the real secret behavior untestable headlessly.
+/// This map gives backend-secret access stable, process-wide persistence in
+/// tests (CI is headless; touching the real secret service hangs on an unlock
+/// prompt) while leaving production behavior on the real keyring untouched.
+///
+/// Under `cfg!(test)`, this store activates for the entire `--lib` test binary
+/// (all unit tests in the crate). The `OnceLock` persists process-wide for the
+/// lifetime of that binary, so tests sharing it must use unique account keys
+/// to avoid collisions.
+///
+/// Returns `None` in normal (non-test, non-mock) runs, in which case callers
+/// fall back to the system keyring.
+fn mock_store() -> Option<&'static Mutex<HashMap<String, String>>> {
+    static STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    if cfg!(test) || std::env::var_os("SUPER_STT_KEYRING_MOCK").is_some() {
+        Some(STORE.get_or_init(|| Mutex::new(HashMap::new())))
+    } else {
+        None
+    }
+}
+
+/// Read one keyring account (mock store under test/mock, else the real keyring).
+fn kv_get(account: &str) -> Result<Option<String>, String> {
+    if let Some(store) = mock_store() {
+        return Ok(store
+            .lock()
+            .expect("mock keyring store poisoned")
+            .get(account)
+            .cloned());
+    }
+    let entry = keyring::Entry::new(SERVICE_NAME, account)
+        .map_err(|e| format!("Failed to access keyring entry for {account}: {e}"))?;
+    match entry.get_password() {
+        Ok(p) => Ok(Some(p)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("Failed to read keyring entry {account}: {e}")),
+    }
+}
+
+/// Write one keyring account (mock store under test/mock, else the real keyring).
+fn kv_set(account: &str, value: &str) -> Result<(), String> {
+    if let Some(store) = mock_store() {
+        store
+            .lock()
+            .expect("mock keyring store poisoned")
+            .insert(account.to_string(), value.to_string());
+        return Ok(());
+    }
+    let entry = keyring::Entry::new(SERVICE_NAME, account)
+        .map_err(|e| format!("Failed to access keyring entry for {account}: {e}"))?;
+    entry
+        .set_password(value)
+        .map_err(|e| format!("Failed to store keyring entry {account}: {e}"))
+}
+
+/// Delete one keyring account; absent is success (mock store under test/mock,
+/// else the real keyring).
+fn kv_delete(account: &str) -> Result<(), String> {
+    if let Some(store) = mock_store() {
+        store
+            .lock()
+            .expect("mock keyring store poisoned")
+            .remove(account);
+        return Ok(());
+    }
+    let entry = keyring::Entry::new(SERVICE_NAME, account)
+        .map_err(|e| format!("Failed to access keyring entry for {account}: {e}"))?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("Failed to delete keyring entry {account}: {e}")),
+    }
+}
+
 /// Read a backend secret (e.g. `OPENAI_API_KEY` for a given backend) from the
 /// keyring. Returns `Ok(None)` if not set.
 ///
@@ -53,17 +136,14 @@ fn backend_secret_account(source: &str, name: &str) -> String {
 ///
 /// Returns an error if the keyring is unavailable or access fails.
 pub fn get_backend_secret(source: &str, name: &str) -> Result<Option<String>, String> {
-    let account = backend_secret_account(source, name);
-    let entry = keyring::Entry::new(SERVICE_NAME, &account)
-        .map_err(|e| format!("Failed to access keyring entry for {account}: {e}"))?;
-    match entry.get_password() {
-        Ok(password) => Ok(Some(password)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => {
-            warn!("Failed to read backend secret {account}: {e}");
-            Err(format!("Failed to read backend secret {name}: {e}"))
-        }
-    }
+    kv_get(&backend_secret_account(source, name)).map_err(|e| {
+        warn!(
+            "Failed to read backend secret {} ({}): {e}",
+            name,
+            backend_secret_account(source, name)
+        );
+        e
+    })
 }
 
 /// Read the daemon's persisted HTTP session blob from the keyring.
@@ -100,6 +180,50 @@ pub fn get_sessions_blob() -> Result<Option<String>, String> {
             warn!("Failed to read session blob from keyring: {e}");
             Err(format!("Failed to read session blob: {e}"))
         }
+    }
+}
+
+/// Store (or replace) a backend secret in the system keyring.
+///
+/// # Errors
+/// Returns an error if the keyring is unavailable or the write fails.
+pub fn set_backend_secret(source: &str, name: &str, value: &str) -> Result<(), String> {
+    kv_set(&backend_secret_account(source, name), value)
+}
+
+/// Delete a stored backend secret. Missing entries are treated as success.
+///
+/// # Errors
+/// Returns an error if the keyring is unavailable or the delete fails.
+pub fn delete_backend_secret(source: &str, name: &str) -> Result<(), String> {
+    kv_delete(&backend_secret_account(source, name))
+}
+
+/// Whether a backend secret currently has a stored value.
+///
+/// # Errors
+/// Returns an error if the keyring is unavailable or access fails.
+pub fn has_backend_secret(source: &str, name: &str) -> Result<bool, String> {
+    Ok(kv_get(&backend_secret_account(source, name))?.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Round-trips a backend secret through the in-memory store that
+    /// `mock_store()` activates under `cfg!(test)`. Uses a unique account so it
+    /// cannot collide with other tests sharing the process-global store.
+    #[test]
+    fn set_then_has_then_delete_roundtrips() {
+        let (src, name) = ("github.com/acme/phase-a", "roundtrip_api_key");
+        let _ = delete_backend_secret(src, name); // clean slate
+        assert!(!has_backend_secret(src, name).unwrap());
+        set_backend_secret(src, name, "sk-123").unwrap();
+        assert!(has_backend_secret(src, name).unwrap());
+        delete_backend_secret(src, name).unwrap();
+        assert!(!has_backend_secret(src, name).unwrap());
+        delete_backend_secret(src, name).unwrap(); // idempotent
     }
 }
 
