@@ -13,7 +13,8 @@
 #[derive(serde::Deserialize, Clone, Debug)]
 pub struct BackendInfo {
     /// Repo id the backend was installed from, e.g.
-    /// `github.com/super-stt/openai`. Used as the keyring/option key.
+    /// `github.com/super-stt/openai`. Used as the daemon's keyring account
+    /// key and option key.
     pub source: String,
     /// Human-readable backend name, e.g. `OpenAI`.
     pub name: String,

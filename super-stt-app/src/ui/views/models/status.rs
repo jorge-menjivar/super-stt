@@ -7,8 +7,8 @@ use crate::daemon::backends::BackendInfo;
 /// inline warnings are stable across renders. Drives both the inline
 /// "{label} must be set." rows and whether the Select button is enabled.
 ///
-/// Takes the keyring "is this secret configured?" map directly rather than the
-/// whole [`AppModel`] so the rule stays pure and unit-testable.
+/// Takes the daemon-reported "is this secret configured?" map directly rather
+/// than the whole [`AppModel`] so the rule stays pure and unit-testable.
 pub(super) fn unmet_requirements<'a>(
     secret_configured: &std::collections::HashMap<(String, String), bool>,
     backend: &'a BackendInfo,
@@ -41,8 +41,9 @@ pub(super) fn unmet_requirements<'a>(
 #[cfg(test)]
 mod unmet_requirements_tests {
     //! Pin the rule for which secrets/options gate the per-backend Select
-    //! button: only `required` ones, the keyring map decides per-secret, and
-    //! the human-readable `label` (not the wire `name`) is what surfaces.
+    //! button: only `required` ones, the daemon-reported configured map decides
+    //! per-secret, and the human-readable `label` (not the wire `name`) is what
+    //! surfaces.
     use super::*;
     use crate::daemon::backends::{BackendInfo, BackendModel, BackendOption, BackendSecret};
     use std::collections::HashMap;
@@ -113,8 +114,8 @@ mod unmet_requirements_tests {
         assert_eq!(missing, vec!["openai_api_key"]);
     }
 
-    /// A required secret that's marked configured in the keyring map is not
-    /// surfaced as unmet — Select must be enabled.
+    /// A required secret that's marked configured in the daemon-reported map is
+    /// not surfaced as unmet — Select must be enabled.
     #[test]
     fn configured_secret_is_not_unmet() {
         let bi = backend(

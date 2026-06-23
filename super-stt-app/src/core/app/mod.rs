@@ -162,8 +162,8 @@ pub struct AppModel {
     pub backends: Vec<BackendInfo>,
     /// In-progress text for each secret input, keyed by `(source, name)`.
     pub backend_secret_inputs: HashMap<(String, String), String>,
-    /// Whether each declared secret is currently stored in the keyring,
-    /// keyed by `(source, name)`. Recomputed when the catalog loads.
+    /// Whether each declared secret is currently configured, as reported by
+    /// the daemon, keyed by `(source, name)`. Refreshed on catalog load.
     pub backend_secret_configured: HashMap<(String, String), bool>,
     /// In-progress text for each option input, keyed by `(source, name)`.
     pub backend_option_inputs: HashMap<(String, String), String>,

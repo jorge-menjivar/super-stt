@@ -112,6 +112,11 @@ async fn declared_secret(s: &AppState, source: &str, name: &str) -> Guard {
     }
 }
 
+/// Maps a daemon response to an HTTP result for secret write/clear operations.
+///
+/// Precondition: only reached after all `unknown_backend`, `unknown_secret`,
+/// and empty-value guards have passed, so the sole remaining failure mode is a
+/// keyring write error — safely collapsed to `503 keyring_unavailable`.
 fn secret_result(
     resp: &super_stt_shared::models::protocol::DaemonResponse,
     configured: bool,
