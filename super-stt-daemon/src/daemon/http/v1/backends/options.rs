@@ -2,13 +2,13 @@
 use super::{decode_source, find_backend, json_error};
 use crate::daemon::http::internal::helpers::dispatch::dispatch_command;
 use crate::daemon::http::state::AppState;
-use crate::stt_models::backends::manifest::OptionType;
 use crate::stt_models::backends::DiscoveredBackend;
+use crate::stt_models::backends::manifest::OptionType;
+use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 use serde::Deserialize;
 
 pub(crate) fn routes() -> Router<AppState> {
@@ -36,9 +36,7 @@ fn effective(
 ) -> Option<serde_json::Value> {
     let opt = b.options.iter().find(|o| o.name == name)?;
     let default = opt.default.as_ref().map(ToString::to_string);
-    let value = cfg_value
-        .map(str::to_string)
-        .or_else(|| default.clone());
+    let value = cfg_value.map(str::to_string).or_else(|| default.clone());
     Some(serde_json::json!({
         "name":     opt.name,
         "label":    opt.label.clone().unwrap_or_else(|| opt.name.clone()),

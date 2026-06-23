@@ -129,6 +129,9 @@ mod tests {
 
     #[test]
     fn secrets_is_a_known_scope() {
-        assert!(is_known_scope("secrets"), "secrets must be an accepted scope");
+        assert!(
+            is_known_scope("secrets"),
+            "secrets must be an accepted scope"
+        );
     }
 }

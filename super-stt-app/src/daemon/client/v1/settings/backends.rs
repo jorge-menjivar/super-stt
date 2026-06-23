@@ -26,11 +26,7 @@ pub async fn list_backends() -> Result<Vec<BackendInfo>, String> {
 }
 
 /// Set a backend option (HTTP `POST /backends/{source}/options/{name}`).
-pub async fn set_backend_option(
-    source: String,
-    name: String,
-    value: String,
-) -> Result<(), String> {
+pub async fn set_backend_option(source: String, name: String, value: String) -> Result<(), String> {
     with_settings_token(move |socket, token| {
         let (source, name, value) = (source.clone(), name.clone(), value.clone());
         async move {

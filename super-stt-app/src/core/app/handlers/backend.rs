@@ -59,16 +59,13 @@ impl AppModel {
                     .iter()
                     .map(|b| {
                         let source = b.source.clone();
-                        Task::perform(
-                            list_backend_secrets(source.clone()),
-                            move |res| {
-                                let items = res.unwrap_or_default();
-                                cosmic::Action::App(Message::BackendSecretsConfigured {
-                                    source: source.clone(),
-                                    items,
-                                })
-                            },
-                        )
+                        Task::perform(list_backend_secrets(source.clone()), move |res| {
+                            let items = res.unwrap_or_default();
+                            cosmic::Action::App(Message::BackendSecretsConfigured {
+                                source: source.clone(),
+                                items,
+                            })
+                        })
                     })
                     .collect();
                 self.backends = backends;
@@ -146,13 +143,10 @@ impl AppModel {
             Message::BackendSecretRemoved { source, name } => {
                 self.backend_secret_inputs
                     .remove(&(source.clone(), name.clone()));
-                Task::perform(
-                    clear_backend_secret(source, name),
-                    move |res| match res {
-                        Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                        Err(e) => cosmic::Action::App(Message::BackendsError(e)),
-                    },
-                )
+                Task::perform(clear_backend_secret(source, name), move |res| match res {
+                    Ok(()) => cosmic::Action::App(Message::BackendsReload),
+                    Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                })
             }
 
             Message::BackendOptionInputChanged {
@@ -173,13 +167,10 @@ impl AppModel {
                     .cloned()
                     .unwrap_or_default();
                 if value.is_empty() {
-                    Task::perform(
-                        clear_backend_option(source, name),
-                        |result| match result {
-                            Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                            Err(e) => cosmic::Action::App(Message::BackendsError(e)),
-                        },
-                    )
+                    Task::perform(clear_backend_option(source, name), |result| match result {
+                        Ok(()) => cosmic::Action::App(Message::BackendsReload),
+                        Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                    })
                 } else {
                     Task::perform(
                         set_backend_option(source, name, value),

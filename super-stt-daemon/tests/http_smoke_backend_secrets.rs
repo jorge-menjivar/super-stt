@@ -90,19 +90,13 @@ primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]
 "#;
-    std::fs::write(backend_dir.join("backend.toml"), toml)
-        .expect("write fixture backend.toml");
+    std::fs::write(backend_dir.join("backend.toml"), toml).expect("write fixture backend.toml");
     // Create a placeholder entrypoint so the manifest can reference it.
-    std::fs::write(backend_dir.join("openai.wasm"), b"")
-        .expect("write placeholder entrypoint");
+    std::fs::write(backend_dir.join("openai.wasm"), b"").expect("write placeholder entrypoint");
 }
 
 async fn start_daemon(scopes: &[&str]) -> (DaemonGuard, PathBuf, String) {
-    let unique = format!(
-        "stt-secrets-{}-{}",
-        std::process::id(),
-        next_test_uniq()
-    );
+    let unique = format!("stt-secrets-{}-{}", std::process::id(), next_test_uniq());
     let tmp = std::env::temp_dir();
     let http_socket = tmp.join(format!("{unique}-http.sock"));
     let config_home = tmp.join(format!("{unique}-config"));
@@ -137,13 +131,9 @@ async fn start_daemon(scopes: &[&str]) -> (DaemonGuard, PathBuf, String) {
                 .is_ok()
         {
             // Mint the token with the caller-specified scopes.
-            let auth = http_client::auth_request(
-                http_socket.clone(),
-                "secrets-smoke",
-                scopes,
-            )
-            .await
-            .expect("auth_request for test scopes");
+            let auth = http_client::auth_request(http_socket.clone(), "secrets-smoke", scopes)
+                .await
+                .expect("auth_request for test scopes");
             let token = auth.session_token;
             return (
                 DaemonGuard {
@@ -200,16 +190,11 @@ async fn raw_request(
         .await
         .expect("collect")
         .to_bytes();
-    let json: serde_json::Value =
-        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, json)
 }
 
-async fn get(
-    p: &PathBuf,
-    path: &str,
-    token: &str,
-) -> (StatusCode, serde_json::Value) {
+async fn get(p: &PathBuf, path: &str, token: &str) -> (StatusCode, serde_json::Value) {
     raw_request(p, Method::GET, path, token, None).await
 }
 
@@ -222,11 +207,7 @@ async fn post(
     raw_request(p, Method::POST, path, token, Some(body)).await
 }
 
-async fn delete_req(
-    p: &PathBuf,
-    path: &str,
-    token: &str,
-) -> (StatusCode, serde_json::Value) {
+async fn delete_req(p: &PathBuf, path: &str, token: &str) -> (StatusCode, serde_json::Value) {
     raw_request(p, Method::DELETE, path, token, None).await
 }
 
@@ -240,7 +221,10 @@ async fn secret_set_then_listed_configured_then_cleared() {
     // Initially not configured.
     let (s, body) = get(&sock, &sec_path, &token).await;
     assert_eq!(s, StatusCode::OK, "GET secret before set: {body}");
-    assert_eq!(body["configured"], false, "should start unconfigured: {body}");
+    assert_eq!(
+        body["configured"], false,
+        "should start unconfigured: {body}"
+    );
 
     // Set the secret.
     let (s, body) = post(
@@ -270,7 +254,10 @@ async fn secret_set_then_listed_configured_then_cleared() {
     // Delete resets to unset.
     let (s, body) = delete_req(&sock, &sec_path, &token).await;
     assert_eq!(s, StatusCode::OK, "DELETE secret: {body}");
-    assert_eq!(body["configured"], false, "unconfigured after delete: {body}");
+    assert_eq!(
+        body["configured"], false,
+        "unconfigured after delete: {body}"
+    );
 }
 
 #[tokio::test]
@@ -280,13 +267,7 @@ async fn secret_endpoints_require_the_secrets_scope() {
 
     let path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/openai_api_key");
 
-    let (s, body) = post(
-        &sock,
-        &path,
-        &token,
-        serde_json::json!({ "value": "x" }),
-    )
-    .await;
+    let (s, body) = post(&sock, &path, &token, serde_json::json!({ "value": "x" })).await;
     assert_eq!(
         s,
         StatusCode::FORBIDDEN,
@@ -301,14 +282,12 @@ async fn undeclared_secret_is_404() {
 
     let path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/not_a_real_secret");
 
-    let (s, body) = post(
-        &sock,
-        &path,
-        &token,
-        serde_json::json!({ "value": "x" }),
-    )
-    .await;
-    assert_eq!(s, StatusCode::NOT_FOUND, "undeclared secret must be 404: {body}");
+    let (s, body) = post(&sock, &path, &token, serde_json::json!({ "value": "x" })).await;
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "undeclared secret must be 404: {body}"
+    );
     assert_eq!(
         body["message"], "unknown_secret",
         "error code for undeclared secret: {body}"

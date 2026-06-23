@@ -94,19 +94,13 @@ primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]
 "#;
-    std::fs::write(backend_dir.join("backend.toml"), toml)
-        .expect("write fixture backend.toml");
+    std::fs::write(backend_dir.join("backend.toml"), toml).expect("write fixture backend.toml");
     // Create a placeholder entrypoint so the manifest can reference it.
-    std::fs::write(backend_dir.join("openai.wasm"), b"")
-        .expect("write placeholder entrypoint");
+    std::fs::write(backend_dir.join("openai.wasm"), b"").expect("write placeholder entrypoint");
 }
 
 async fn start_daemon(scopes: &[&str]) -> (DaemonGuard, PathBuf, String) {
-    let unique = format!(
-        "stt-options-{}-{}",
-        std::process::id(),
-        next_test_uniq()
-    );
+    let unique = format!("stt-options-{}-{}", std::process::id(), next_test_uniq());
     let tmp = std::env::temp_dir();
     let http_socket = tmp.join(format!("{unique}-http.sock"));
     let config_home = tmp.join(format!("{unique}-config"));
@@ -141,13 +135,9 @@ async fn start_daemon(scopes: &[&str]) -> (DaemonGuard, PathBuf, String) {
                 .is_ok()
         {
             // Mint the token with the caller-specified scopes.
-            let auth = http_client::auth_request(
-                http_socket.clone(),
-                "options-smoke",
-                scopes,
-            )
-            .await
-            .expect("auth_request for test scopes");
+            let auth = http_client::auth_request(http_socket.clone(), "options-smoke", scopes)
+                .await
+                .expect("auth_request for test scopes");
             let token = auth.session_token;
             return (
                 DaemonGuard {
@@ -204,16 +194,11 @@ async fn raw_request(
         .await
         .expect("collect")
         .to_bytes();
-    let json: serde_json::Value =
-        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, json)
 }
 
-async fn get(
-    p: &PathBuf,
-    path: &str,
-    token: &str,
-) -> (StatusCode, serde_json::Value) {
+async fn get(p: &PathBuf, path: &str, token: &str) -> (StatusCode, serde_json::Value) {
     raw_request(p, Method::GET, path, token, None).await
 }
 
@@ -226,11 +211,7 @@ async fn post_req(
     raw_request(p, Method::POST, path, token, Some(body)).await
 }
 
-async fn delete_req(
-    p: &PathBuf,
-    path: &str,
-    token: &str,
-) -> (StatusCode, serde_json::Value) {
+async fn delete_req(p: &PathBuf, path: &str, token: &str) -> (StatusCode, serde_json::Value) {
     raw_request(p, Method::DELETE, path, token, None).await
 }
 
@@ -284,7 +265,10 @@ async fn option_list_returns_declared_options() {
     assert_eq!(options.len(), 1, "one declared option: {body}");
     let o0 = &options[0];
     assert_eq!(o0["name"], "base_url", "option name: {body}");
-    assert_eq!(o0["value"], "https://api.openai.com", "default value in list: {body}");
+    assert_eq!(
+        o0["value"], "https://api.openai.com",
+        "default value in list: {body}"
+    );
 }
 
 /// GET on an undeclared option name returns 404 `unknown_option`.
@@ -294,7 +278,11 @@ async fn undeclared_option_is_404() {
     let path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/not_a_real_option");
 
     let (s, body) = get(&sock, &path, &token).await;
-    assert_eq!(s, StatusCode::NOT_FOUND, "undeclared option must be 404: {body}");
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "undeclared option must be 404: {body}"
+    );
     assert_eq!(
         body["message"], "unknown_option",
         "error code for undeclared option: {body}"
@@ -307,14 +295,12 @@ async fn set_empty_value_is_400() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
     let opt_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/base_url");
 
-    let (s, body) = post_req(
-        &sock,
-        &opt_path,
-        &token,
-        serde_json::json!({ "value": "" }),
-    )
-    .await;
-    assert_eq!(s, StatusCode::BAD_REQUEST, "empty value must be 400: {body}");
+    let (s, body) = post_req(&sock, &opt_path, &token, serde_json::json!({ "value": "" })).await;
+    assert_eq!(
+        s,
+        StatusCode::BAD_REQUEST,
+        "empty value must be 400: {body}"
+    );
     assert_eq!(
         body["message"], "invalid_request",
         "error code for empty value: {body}"
@@ -328,7 +314,11 @@ async fn unknown_backend_is_404() {
     let path = "/backends/github.com%2Fnot%2Finstalled/options/base_url";
 
     let (s, body) = get(&sock, path, &token).await;
-    assert_eq!(s, StatusCode::NOT_FOUND, "unknown backend must be 404: {body}");
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "unknown backend must be 404: {body}"
+    );
     assert_eq!(
         body["message"], "unknown_backend",
         "error code for unknown backend: {body}"

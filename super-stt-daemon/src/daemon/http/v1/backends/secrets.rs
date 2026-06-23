@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{decode_source, find_backend, json_error};
 use crate::daemon::http::state::AppState;
+use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 use serde::Deserialize;
 
 pub(crate) fn routes() -> Router<AppState> {
@@ -52,8 +52,7 @@ async fn get_one(
         Guard::NoBackend => json_error(StatusCode::NOT_FOUND, "unknown_backend"),
         Guard::NoItem => json_error(StatusCode::NOT_FOUND, "unknown_secret"),
         Guard::Ok => {
-            let configured =
-                crate::keyring::has_backend_secret(&source, &name).unwrap_or(false);
+            let configured = crate::keyring::has_backend_secret(&source, &name).unwrap_or(false);
             ok(&serde_json::json!({ "status": "success", "name": name, "configured": configured }))
         }
     }
@@ -126,9 +125,7 @@ fn secret_result(
     } else {
         json_error(
             StatusCode::SERVICE_UNAVAILABLE,
-            resp.message
-                .as_deref()
-                .unwrap_or("keyring_unavailable"),
+            resp.message.as_deref().unwrap_or("keyring_unavailable"),
         )
     }
 }

@@ -10,11 +10,7 @@ fn enc(s: &str) -> String {
 }
 
 /// Store a backend secret via the daemon (HTTP `POST /backends/{source}/secrets/{name}`).
-pub async fn set_backend_secret(
-    source: String,
-    name: String,
-    value: String,
-) -> Result<(), String> {
+pub async fn set_backend_secret(source: String, name: String, value: String) -> Result<(), String> {
     with_settings_token(move |socket, token| {
         let (source, name, value) = (source.clone(), name.clone(), value.clone());
         async move {
@@ -52,12 +48,12 @@ pub async fn list_backend_secrets(source: String) -> Result<Vec<(String, bool)>,
         let source = source.clone();
         async move {
             let path = format!("/backends/{}/secrets/list", enc(&source));
-            let resp =
-                require_success(transport::settings_get(socket, &token, &path).await?,
-                                "list_backend_secrets")?;
+            let resp = require_success(
+                transport::settings_get(socket, &token, &path).await?,
+                "list_backend_secrets",
+            )?;
             let arr = resp.secrets.unwrap_or(serde_json::Value::Array(vec![]));
-            let parsed: Vec<serde_json::Value> =
-                serde_json::from_value(arr).unwrap_or_default();
+            let parsed: Vec<serde_json::Value> = serde_json::from_value(arr).unwrap_or_default();
             Ok(parsed
                 .into_iter()
                 .filter_map(|v| {

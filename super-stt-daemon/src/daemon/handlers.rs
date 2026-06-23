@@ -458,7 +458,11 @@ impl SuperSTTDaemon {
     }
 
     /// Clear a backend secret (reset to unset) and reload the active model if needed.
-    pub async fn handle_clear_backend_secret(&self, source: String, name: String) -> DaemonResponse {
+    pub async fn handle_clear_backend_secret(
+        &self,
+        source: String,
+        name: String,
+    ) -> DaemonResponse {
         if let Err(e) = crate::keyring::delete_backend_secret(&source, &name) {
             return DaemonResponse::error(&format!("keyring_unavailable: {e}"));
         }
