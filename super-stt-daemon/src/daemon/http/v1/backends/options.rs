@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::{decode_source, find_backend, json_error};
+use super::{decode_source, find_backend, json_error, ok};
 use crate::daemon::http::internal::helpers::dispatch::dispatch_command;
 use crate::daemon::http::state::AppState;
 use crate::stt_models::backends::DiscoveredBackend;
@@ -143,13 +143,4 @@ async fn guard_missing(s: &AppState, source: &str, name: &str) -> Option<Respons
         Some(b) if b.options.iter().any(|o| o.name == name) => None,
         Some(_) => Some(json_error(StatusCode::NOT_FOUND, "unknown_option")),
     }
-}
-
-fn ok(v: &serde_json::Value) -> Response {
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        v.to_string(),
-    )
-        .into_response()
 }

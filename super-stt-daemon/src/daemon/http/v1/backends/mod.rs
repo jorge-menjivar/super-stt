@@ -32,3 +32,13 @@ pub(crate) fn json_error(code: StatusCode, message: &str) -> Response {
     )
         .into_response()
 }
+
+/// House-style JSON success response with status 200.
+pub(crate) fn ok(v: &serde_json::Value) -> Response {
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        v.to_string(),
+    )
+        .into_response()
+}

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::{decode_source, find_backend, json_error};
+use super::{decode_source, find_backend, json_error, ok};
 use crate::daemon::http::state::AppState;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::routing::get;
 use serde::Deserialize;
 
@@ -128,13 +128,4 @@ fn secret_result(
             resp.message.as_deref().unwrap_or("keyring_unavailable"),
         )
     }
-}
-
-fn ok(v: &serde_json::Value) -> Response {
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        v.to_string(),
-    )
-        .into_response()
 }

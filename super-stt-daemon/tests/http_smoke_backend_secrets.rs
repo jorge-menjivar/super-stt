@@ -265,13 +265,46 @@ async fn secret_endpoints_require_the_secrets_scope() {
     // Only `settings` scope — no `secrets`.
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
-    let path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/openai_api_key");
+    let secret_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/openai_api_key");
+    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/list");
 
-    let (s, body) = post(&sock, &path, &token, serde_json::json!({ "value": "x" })).await;
+    let (s, body) = post(
+        &sock,
+        &secret_path,
+        &token,
+        serde_json::json!({ "value": "x" }),
+    )
+    .await;
     assert_eq!(
         s,
         StatusCode::FORBIDDEN,
         "settings-only token must be 403 on secret POST: {body}"
+    );
+    assert_eq!(body["message"], "scope_denied", "error code: {body}");
+
+    // The scope guard is a router-layer middleware — it must fire on GET too.
+    let (s, body) = get(&sock, &secret_path, &token).await;
+    assert_eq!(
+        s,
+        StatusCode::FORBIDDEN,
+        "settings-only token must be 403 on secret GET: {body}"
+    );
+    assert_eq!(body["message"], "scope_denied", "error code: {body}");
+
+    let (s, body) = get(&sock, &list_path, &token).await;
+    assert_eq!(
+        s,
+        StatusCode::FORBIDDEN,
+        "settings-only token must be 403 on secrets/list GET: {body}"
+    );
+    assert_eq!(body["message"], "scope_denied", "error code: {body}");
+
+    // And on DELETE.
+    let (s, body) = delete_req(&sock, &secret_path, &token).await;
+    assert_eq!(
+        s,
+        StatusCode::FORBIDDEN,
+        "settings-only token must be 403 on secret DELETE: {body}"
     );
     assert_eq!(body["message"], "scope_denied", "error code: {body}");
 }
