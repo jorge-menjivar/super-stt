@@ -179,6 +179,7 @@ impl AppModel {
                 | Message::BackendSecretsConfigured { .. }
                 | Message::BackendOptionInputChanged { .. }
                 | Message::BackendOptionSaved { .. }
+                | Message::BackendOptionReset { .. }
         ) {
             return Some(self.handle_backend_messages(message));
         }

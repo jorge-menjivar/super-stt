@@ -27,7 +27,8 @@ impl AppModel {
             | Message::BackendSecretStored { .. }
             | Message::BackendSecretRemoved { .. }
             | Message::BackendOptionInputChanged { .. }
-            | Message::BackendOptionSaved { .. } => self.handle_backend_config(message),
+            | Message::BackendOptionSaved { .. }
+            | Message::BackendOptionReset { .. } => self.handle_backend_config(message),
 
             _ => Task::none(),
         }
@@ -180,6 +181,15 @@ impl AppModel {
                         },
                     )
                 }
+            }
+
+            // Explicit reset: clear the stored override and reload so the
+            // option reverts to its daemon default.
+            Message::BackendOptionReset { source, name } => {
+                Task::perform(clear_backend_option(source, name), |result| match result {
+                    Ok(()) => cosmic::Action::App(Message::BackendsReload),
+                    Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                })
             }
 
             _ => Task::none(),

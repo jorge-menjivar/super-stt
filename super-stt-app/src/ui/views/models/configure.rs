@@ -55,9 +55,24 @@ pub fn configure_sheet<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Eleme
 
 /// A label + optional caption stacked vertically, used as the heading above a
 /// configuration row's control. The caption is dimmed so it reads as a hint.
-pub(super) fn config_label<'a>(title: String, hint: Option<String>) -> Element<'a, Message> {
+/// When `required` is true, an accent-colored asterisk follows the title to
+/// signal that the field must be filled.
+pub(super) fn config_label<'a>(
+    title: String,
+    hint: Option<String>,
+    required: bool,
+) -> Element<'a, Message> {
     let mut block = widget::column::with_capacity(2).spacing(cosmic::theme::spacing().space_xxxs);
-    block = block.push(text::body(title));
+    let title_row: Element<'a, Message> = if required {
+        row![
+            text::body(title),
+            text::body(" *").class(cosmic::theme::Text::Accent),
+        ]
+        .into()
+    } else {
+        text::body(title).into()
+    };
+    block = block.push(title_row);
     if let Some(hint) = hint.filter(|h| !h.is_empty()) {
         block =
             block.push(text::caption(hint).class(cosmic::theme::Text::Color(muted_text_color())));
@@ -80,7 +95,7 @@ pub(super) fn secret_row<'a>(
     // Show the backend's human label when set; fall back to the technical name.
     let display = secret.label.clone().unwrap_or_else(|| secret.name.clone());
     let description = (!secret.description.is_empty()).then(|| secret.description.clone());
-    let label = config_label(display, description);
+    let label = config_label(display, description, secret.required);
 
     let source_owned = source.to_string();
     let name_owned = secret.name.clone();
@@ -131,6 +146,9 @@ pub(super) fn secret_row<'a>(
 /// One option-entry row for a backend (e.g. `base_url`): the label/description
 /// over a full-width text field + Save on its own row beneath, so the input
 /// isn't squeezed to the right of the label in the narrow sheet.
+/// When an override is active (stored value differs from the default), a Reset
+/// button is shown alongside Save to clear the override and revert to the
+/// daemon default.
 pub(super) fn option_row<'a>(
     source: &'a str,
     option: &'a BackendOption,
@@ -149,7 +167,7 @@ pub(super) fn option_row<'a>(
         }
     }
 
-    let label = config_label(display, (!hint.is_empty()).then_some(hint));
+    let label = config_label(display, (!hint.is_empty()).then_some(hint), option.required);
 
     let input_source = source.to_string();
     let input_name = option.name.clone();
@@ -167,9 +185,26 @@ pub(super) fn option_row<'a>(
         source: save_source,
         name: save_name,
     });
-    let control = row![field, save]
-        .spacing(spacing.space_xs)
-        .align_y(Alignment::Center);
+
+    // Show Reset only when an override is stored (value differs from default).
+    let has_override = option.value.as_deref() != option.default.as_deref();
+    let control: Element<'a, Message> = if has_override {
+        let reset_source = source.to_string();
+        let reset_name = option.name.clone();
+        let reset = widget::button::standard("Reset").on_press(Message::BackendOptionReset {
+            source: reset_source,
+            name: reset_name,
+        });
+        row![field, save, reset]
+            .spacing(spacing.space_xs)
+            .align_y(Alignment::Center)
+            .into()
+    } else {
+        row![field, save]
+            .spacing(spacing.space_xs)
+            .align_y(Alignment::Center)
+            .into()
+    };
 
     settings::item_row(vec![
         column![label, control]

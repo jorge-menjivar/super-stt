@@ -282,4 +282,8 @@ pub enum Message {
         source: String,
         name: String,
     },
+    BackendOptionReset {
+        source: String,
+        name: String,
+    },
 }
