@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use anyhow::Result;
+use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
-    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+    Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+    WindowFunction,
 };
 
 /// Apply pre-emphasis filter to boost high frequencies
@@ -90,10 +92,6 @@ pub enum ResampleQuality {
 /// # Errors
 ///
 /// Returns an error if the resampler cannot be constructed or if processing fails.
-///
-/// # Panics
-///
-/// Panics if the resampler returns no output frames (unexpected).
 pub fn resample(
     samples: &[f32],
     from_sr: u32,
@@ -128,16 +126,22 @@ pub fn resample(
         },
     };
 
-    let mut resampler = SincFixedIn::<f32>::new(
+    let mut resampler = Async::<f32>::new_sinc(
         f64::from(to_sr) / f64::from(from_sr),
         2.0, // max relative ratio change
-        params,
+        &params,
         samples.len(),
         1, // channels
+        FixedAsync::Input,
     )?;
 
-    let waves_in = vec![samples.to_vec()];
-    let waves_out = resampler.process(&waves_in, None)?;
+    // Mono audio: an interleaved single-channel buffer is just the flat slice.
+    let input = InterleavedSlice::new(samples, 1, samples.len())?;
+    let out_frames = resampler.output_frames_next();
+    let mut waves_out = vec![0.0f32; out_frames];
+    let mut output = InterleavedSlice::new_mut(&mut waves_out, 1, out_frames)?;
+    let (_, written) = resampler.process_into_buffer(&input, &mut output, None)?;
+    waves_out.truncate(written);
 
-    Ok(waves_out.into_iter().next().unwrap())
+    Ok(waves_out)
 }

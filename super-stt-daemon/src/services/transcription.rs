@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use anyhow::Result;
 use log::{debug, error, info, warn};
-use rubato::{FastFixedIn, Resampler};
+use rubato::audioadapter_buffers::direct::InterleavedSlice;
+use rubato::{Async, FixedAsync, Resampler};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
@@ -16,7 +17,7 @@ use std::collections::VecDeque;
 pub struct RealTimeSession {
     pub client_id: String,
     pub buffered_pcm: Vec<f32>,
-    pub resampler: FastFixedIn<f32>,
+    pub resampler: Async<f32>,
     pub input_sample_rate: u32,
     pub language: Option<String>,
     pub language_token_set: bool,
@@ -46,12 +47,13 @@ impl RealTimeSession {
         model_min_interval: Duration,
     ) -> Result<Self> {
         let resample_ratio = 16000.0 / f64::from(input_sample_rate);
-        let resampler = FastFixedIn::new(
+        let resampler = Async::new_poly(
             resample_ratio,
             10.0,
             rubato::PolynomialDegree::Septic,
             1024,
             1,
+            FixedAsync::Input,
         )?;
 
         let (tx, _) = broadcast::channel(100);
@@ -149,11 +151,18 @@ impl RealTimeSession {
 
         // Resample this tail slice
         let mut resampled_pcm = Vec::new();
+        let out_max = self.resampler.output_frames_max();
+        let mut out_buf = vec![0.0f32; out_max];
         let full_chunks = slice.len() / 1024;
         for chunk in 0..full_chunks {
             let seg = &slice[chunk * 1024..(chunk + 1) * 1024];
-            let pcm = self.resampler.process(&[seg], None)?;
-            resampled_pcm.extend_from_slice(&pcm[0]);
+            // Mono audio: an interleaved single-channel buffer is just the flat slice.
+            let input = InterleavedSlice::new(seg, 1, 1024)?;
+            let mut output = InterleavedSlice::new_mut(&mut out_buf, 1, out_max)?;
+            let (_, written) = self
+                .resampler
+                .process_into_buffer(&input, &mut output, None)?;
+            resampled_pcm.extend_from_slice(&out_buf[..written]);
         }
         // Do not process the remainder (<1024). Keep it for the next cycle to avoid rubato errors.
 
