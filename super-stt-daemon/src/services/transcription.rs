@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use anyhow::Result;
 use log::{debug, error, info, warn};
+use parking_lot::Mutex;
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Async, FixedAsync, Resampler};
 use std::collections::HashMap;
@@ -17,7 +18,9 @@ use std::collections::VecDeque;
 pub struct RealTimeSession {
     pub client_id: String,
     pub buffered_pcm: Vec<f32>,
-    pub resampler: Async<f32>,
+    // rubato's `Async` is `Send` but not `Sync` (it holds a `Box<dyn InnerResampler>`),
+    // so wrap it to keep `RealTimeSession` `Sync` for the shared `Arc<RwLock<HashMap<..>>>`.
+    pub resampler: Mutex<Async<f32>>,
     pub input_sample_rate: u32,
     pub language: Option<String>,
     pub language_token_set: bool,
@@ -61,7 +64,7 @@ impl RealTimeSession {
         Ok(Self {
             client_id,
             buffered_pcm: Vec::new(),
-            resampler,
+            resampler: Mutex::new(resampler),
             input_sample_rate,
             language,
             language_token_set: false,
@@ -151,7 +154,8 @@ impl RealTimeSession {
 
         // Resample this tail slice
         let mut resampled_pcm = Vec::new();
-        let out_max = self.resampler.output_frames_max();
+        let mut resampler = self.resampler.lock();
+        let out_max = resampler.output_frames_max();
         let mut out_buf = vec![0.0f32; out_max];
         let full_chunks = slice.len() / 1024;
         for chunk in 0..full_chunks {
@@ -159,11 +163,10 @@ impl RealTimeSession {
             // Mono audio: an interleaved single-channel buffer is just the flat slice.
             let input = InterleavedSlice::new(seg, 1, 1024)?;
             let mut output = InterleavedSlice::new_mut(&mut out_buf, 1, out_max)?;
-            let (_, written) = self
-                .resampler
-                .process_into_buffer(&input, &mut output, None)?;
+            let (_, written) = resampler.process_into_buffer(&input, &mut output, None)?;
             resampled_pcm.extend_from_slice(&out_buf[..written]);
         }
+        drop(resampler);
         // Do not process the remainder (<1024). Keep it for the next cycle to avoid rubato errors.
 
         // Keep a larger buffer during speech to maintain context (30s)
