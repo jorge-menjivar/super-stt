@@ -90,7 +90,7 @@ pub fn page<'a>(
             .description("Default transcription language for models that support it")
             .control(
                 widget::button::standard(lang_label)
-                    .on_press(Message::OpenLanguagePicker { per_model: false }),
+                    .on_press(Message::OpenLanguagePicker { model: None }),
             ),
     );
 

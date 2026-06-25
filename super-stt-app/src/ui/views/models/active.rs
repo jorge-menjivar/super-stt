@@ -72,47 +72,76 @@ pub(super) fn backend_header(
         .into()
 }
 
-/// Language row for the active-backend card: shown only when `model_loaded` and
-/// the daemon's resolution block reports the model as multilingual. Returns `None`
-/// otherwise so the caller can skip `card.push(…)` entirely.
+/// Language trigger row for the active-backend card.
+///
+/// Renders whenever a model is **selected** (staged or loaded) for this backend
+/// and that model declares itself multilingual in the catalog. Returns `None`
+/// when no model is selected or the selected model is mono-lingual, so the
+/// caller can skip `card.push(…)` entirely.
+///
+/// The trigger label reflects the current per-model resolution block when
+/// `app.model_language_for` matches `(backend.source, selected_model)`;
+/// otherwise it falls back to a neutral `"Language"` label (block not yet
+/// fetched — stale-block guard).
 fn language_row<'a>(
+    backend: &'a BackendInfo,
     model_loaded: bool,
     app: &'a AppModel,
     spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Option<Element<'a, Message>> {
-    let block = app.active_model_language.as_ref()?;
-    if !model_loaded
-        || block
-            .get("multilingual")
-            .and_then(serde_json::Value::as_bool)
-            != Some(true)
-    {
+    // Determine the currently-selected model name: loaded takes priority,
+    // then the staged pick.
+    let selected_model: String = if model_loaded && !app.current_model.is_empty() {
+        app.current_model.clone()
+    } else {
+        app.staged_model.clone()?
+    };
+
+    // Gate: only render for multilingual models (per catalog).
+    let catalog_model = backend.models.iter().find(|m| m.name == selected_model)?;
+    if !catalog_model.multilingual {
         return None;
     }
-    let effective = block.get("effective").and_then(serde_json::Value::as_str);
-    let source_str = block
-        .get("source")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("default");
-    let primary = block
-        .get("primary")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    let label = match (effective, source_str) {
-        (Some(tag), "override") => crate::ui::languages::friendly_name(tag),
-        (Some(tag), "global") => {
-            format!("{} · global", crate::ui::languages::friendly_name(tag))
-        }
-        _ => format!("{} · default", crate::ui::languages::friendly_name(primary)),
-    };
+
+    let source = &backend.source;
+
+    // Build the trigger label from the resolution block — but only when the
+    // block belongs to this exact (source, model) pair (stale-block guard).
+    let label =
+        if app.model_language_for.as_ref() == Some(&(source.clone(), selected_model.clone())) {
+            if let Some(block) = &app.model_language {
+                let effective = block.get("effective").and_then(serde_json::Value::as_str);
+                let source_str = block
+                    .get("source")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("default");
+                let primary = block
+                    .get("primary")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                match (effective, source_str) {
+                    (Some(tag), "override") => crate::ui::languages::friendly_name(tag),
+                    (Some(tag), "global") => {
+                        format!("{} · global", crate::ui::languages::friendly_name(tag))
+                    }
+                    _ => format!("{} · default", crate::ui::languages::friendly_name(primary)),
+                }
+            } else {
+                "Language".to_string()
+            }
+        } else {
+            "Language".to_string()
+        };
+
     Some(
         widget::row::with_capacity(2)
             .spacing(spacing.space_s)
             .align_y(Alignment::Center)
             .push(text::body("Language").width(Length::Fill))
             .push(
-                widget::button::standard(label)
-                    .on_press(Message::OpenLanguagePicker { per_model: true }),
+                widget::button::standard(label).on_press(Message::OpenLanguagePicker {
+                    model: Some((source.clone(), selected_model)),
+                }),
             )
             .into(),
     )
@@ -186,12 +215,14 @@ pub(super) fn active_backend_card<'a>(
         } else {
             card = card.push(staged_model_picker(backend, app));
         }
-    }
 
-    // Per-model language trigger — only when this backend's model is active and
-    // the daemon reports it multilingual.
-    if let Some(row) = language_row(model_loaded, app, &spacing) {
-        card = card.push(row);
+        // Per-model language trigger — shown whenever a model is selected
+        // (staged or loaded) for this backend and the catalog marks it
+        // multilingual. Gated alongside the picker/summary it accompanies, so
+        // it stays hidden while requirements are unmet.
+        if let Some(row) = language_row(backend, model_loaded, app, &spacing) {
+            card = card.push(row);
+        }
     }
 
     // Unmet requirements are surfaced inline so the user fixes them in this

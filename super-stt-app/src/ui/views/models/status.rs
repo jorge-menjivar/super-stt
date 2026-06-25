@@ -57,6 +57,9 @@ mod unmet_requirements_tests {
                 provider: "openai".to_string(),
                 supported_devices: vec!["none".to_string()],
                 estimated_vram_bytes: 0,
+                multilingual: false,
+                supported_languages: Vec::new(),
+                primary_language: String::new(),
             }],
             secrets,
             options,
@@ -183,7 +186,7 @@ mod unmet_requirements_tests {
 
     /// Multiple unmet requirements are returned in declaration order
     /// (secrets first, then options) — keeps the inline warnings stable
-    /// across renders rather than depending on HashMap iteration order.
+    /// across renders rather than depending on `HashMap` iteration order.
     #[test]
     fn returns_in_declaration_order() {
         let bi = backend(
@@ -278,6 +281,9 @@ mod model_status_tests {
                 provider: "openai".to_string(),
                 supported_devices: vec!["none".to_string()],
                 estimated_vram_bytes: 0,
+                multilingual: false,
+                supported_languages: Vec::new(),
+                primary_language: String::new(),
             }],
             secrets: vec![BackendSecret {
                 name: "openai_api_key".to_string(),

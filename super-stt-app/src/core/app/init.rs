@@ -156,9 +156,10 @@ impl AppModel {
 
             // Transcription language state
             primary_language: None,
-            active_model_language: None,
+            model_language: None,
+            model_language_for: None,
+            language_picker_target: None,
             language_picker_query: String::new(),
-            language_picker_per_model: false,
 
             // Backend catalog + per-backend configuration state
             backends: Vec::new(),

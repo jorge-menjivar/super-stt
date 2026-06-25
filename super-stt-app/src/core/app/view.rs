@@ -78,7 +78,7 @@ impl AppModel {
             // Language picker sheet — a search-box + scrollable selectable list
             // for setting the global Primary Language or the active-model override.
             ContextPage::LanguagePicker => {
-                let title = if self.language_picker_per_model {
+                let title = if self.language_picker_target.is_some() {
                     "Model language"
                 } else {
                     "Primary Language"

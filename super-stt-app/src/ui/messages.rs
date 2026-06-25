@@ -288,10 +288,11 @@ pub enum Message {
     },
 
     // Transcription language (global Primary Language + per-model override).
-    /// Open the language search sheet. `per_model = true` configures the active
-    /// model; `false` sets the global Primary Language.
+    /// Open the language search sheet.
+    /// `model = None` → global Primary Language sheet.
+    /// `model = Some((source, model))` → per-model sheet for that specific model.
     OpenLanguagePicker {
-        per_model: bool,
+        model: Option<(String, String)>,
     },
     CloseLanguagePicker,
     LanguagePickerQueryChanged(String),
@@ -299,9 +300,21 @@ pub enum Message {
     PrimaryLanguageLoaded(Option<String>),
     /// User picked a global language (None = clear → DELETE).
     PrimaryLanguageSelected(Option<String>),
-    /// Per-model resolution block (`/active_model/language`) loaded from the daemon.
-    ActiveModelLanguageLoaded(serde_json::Value),
-    /// User picked a per-model override (None = Automatic → DELETE; Some("auto") = Detect).
-    ActiveModelLanguageSelected(Option<String>),
+    /// Per-model resolution block (`/backends/{source}/models/{model}/language`)
+    /// loaded from the daemon for `(source, model)`.
+    ModelLanguageLoaded {
+        source: String,
+        model: String,
+        block: serde_json::Value,
+    },
+    /// User picked a per-model override.
+    /// `choice = None` → Follow global (DELETE override);
+    /// `choice = Some("auto")` → Auto-detect;
+    /// `choice = Some(tag)` → explicit BCP-47 tag.
+    ModelLanguageSelected {
+        source: String,
+        model: String,
+        choice: Option<String>,
+    },
     LanguageError(String),
 }

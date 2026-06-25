@@ -156,12 +156,18 @@ pub struct AppModel {
     // Transcription language state.
     /// Global Primary Language from the daemon (None = unset). Display-only cache.
     pub primary_language: Option<String>,
-    /// Resolution block from `GET /active_model/language` for the active model.
-    pub active_model_language: Option<serde_json::Value>,
+    /// Resolution block from `GET /backends/{source}/models/{model}/language`
+    /// for the model identified by `model_language_for`.
+    pub model_language: Option<serde_json::Value>,
+    /// Which `(source, model)` pair `model_language` belongs to. Guards
+    /// stale-block display: only use `model_language` when this matches
+    /// the target `(source, model)`.
+    pub model_language_for: Option<(String, String)>,
+    /// The `(source, model)` pair the open per-model language sheet configures.
+    /// `None` when the sheet is in global mode.
+    pub language_picker_target: Option<(String, String)>,
     /// Live query text for the language search sheet.
     pub language_picker_query: String,
-    /// Whether the open language sheet targets the active model (vs the global).
-    pub language_picker_per_model: bool,
     /// `source` of the installed-backend card whose overflow ("⋯") menu is
     /// open, if any. Only one is open at a time.
     pub installed_menu_open: Option<String>,

@@ -33,7 +33,7 @@ pub const GLOBAL_LANGUAGES: &[(&str, &str)] = &[
 #[must_use]
 pub fn friendly_name(tag: &str) -> String {
     if tag == "auto" {
-        return "Detect language".to_string();
+        return "Auto-detect".to_string();
     }
     GLOBAL_LANGUAGES
         .iter()

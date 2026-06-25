@@ -11,8 +11,8 @@ impl AppModel {
         message: Message,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::OpenLanguagePicker { per_model } => {
-                self.language_picker_per_model = per_model;
+            Message::OpenLanguagePicker { model } => {
+                self.language_picker_target = model;
                 self.language_picker_query.clear();
                 self.context_page = ContextPage::LanguagePicker;
                 self.core.window.show_context = true;
@@ -46,21 +46,36 @@ impl AppModel {
                     },
                 )
             }
-            Message::ActiveModelLanguageLoaded(block) => {
-                self.active_model_language = Some(block);
+            Message::ModelLanguageLoaded {
+                source,
+                model,
+                block,
+            } => {
+                self.model_language = Some(block);
+                self.model_language_for = Some((source, model));
                 Task::none()
             }
-            Message::ActiveModelLanguageSelected(choice) => {
+            Message::ModelLanguageSelected {
+                source,
+                model,
+                choice,
+            } => {
                 self.core.window.show_context = false;
+                let src = source.clone();
+                let mdl = model.clone();
                 Task::perform(
                     async move {
                         match choice {
-                            Some(tag) => client::set_active_model_language(tag).await,
-                            None => client::clear_active_model_language().await,
+                            Some(tag) => client::set_model_language(source, model, tag).await,
+                            None => client::clear_model_language(source, model).await,
                         }
                     },
-                    |res| match res {
-                        Ok(block) => cosmic::Action::App(Message::ActiveModelLanguageLoaded(block)),
+                    move |res| match res {
+                        Ok(block) => cosmic::Action::App(Message::ModelLanguageLoaded {
+                            source: src.clone(),
+                            model: mdl.clone(),
+                            block,
+                        }),
                         Err(e) => cosmic::Action::App(Message::LanguageError(e)),
                     },
                 )
@@ -82,12 +97,27 @@ impl AppModel {
         })
     }
 
-    /// Fetch the active model's language resolution (call when a model becomes active).
+    /// Fetch a specific model's language resolution block from the daemon.
+    /// Call when a model becomes selected (staged or loaded) so the
+    /// active-backend card can populate its language control pre-load.
     #[allow(clippy::unused_self)]
-    pub(in crate::core::app) fn load_active_model_language(&self) -> Task<cosmic::Action<Message>> {
-        Task::perform(client::get_active_model_language(), |res| match res {
-            Ok(block) => cosmic::Action::App(Message::ActiveModelLanguageLoaded(block)),
-            Err(e) => cosmic::Action::App(Message::LanguageError(e)),
-        })
+    pub(in crate::core::app) fn load_model_language(
+        &self,
+        source: String,
+        model: String,
+    ) -> Task<cosmic::Action<Message>> {
+        let src = source.clone();
+        let mdl = model.clone();
+        Task::perform(
+            client::get_model_language(source, model),
+            move |res| match res {
+                Ok(block) => cosmic::Action::App(Message::ModelLanguageLoaded {
+                    source: src.clone(),
+                    model: mdl.clone(),
+                    block,
+                }),
+                Err(e) => cosmic::Action::App(Message::LanguageError(e)),
+            },
+        )
     }
 }

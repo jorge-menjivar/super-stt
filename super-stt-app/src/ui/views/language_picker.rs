@@ -10,14 +10,17 @@ use crate::ui::messages::Message;
 pub fn sheet(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let q = app.language_picker_query.to_lowercase();
-    let per_model = app.language_picker_per_model;
 
     // Build the candidate (tag, label) list for the active mode.
     let mut rows: Vec<(Option<String>, String)> = Vec::new();
-    if per_model {
-        rows.push((None, "Automatic".to_string())); // clear → DELETE
-        rows.push((Some("auto".to_string()), friendly_name("auto")));
-        if let Some(block) = &app.active_model_language
+    if let Some((ref src, ref mdl)) = app.language_picker_target {
+        // Per-model sheet.
+        rows.push((None, "Follow global".to_string())); // clear → DELETE
+        rows.push((Some("auto".to_string()), friendly_name("auto"))); // "Auto-detect"
+        // Supported languages from the resolution block — but only when the
+        // block belongs to this exact (source, model) pair (stale-block guard).
+        if app.model_language_for.as_ref() == Some(&(src.clone(), mdl.clone()))
+            && let Some(block) = &app.model_language
             && let Some(arr) = block.get("supported").and_then(|v| v.as_array())
         {
             for tag in arr.iter().filter_map(|v| v.as_str()) {
@@ -25,8 +28,9 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
             }
         }
     } else {
+        // Global sheet.
         rows.push((None, "No preference".to_string())); // clear → DELETE
-        rows.push((Some("auto".to_string()), friendly_name("auto")));
+        rows.push((Some("auto".to_string()), friendly_name("auto"))); // "Auto-detect"
         for (tag, name) in GLOBAL_LANGUAGES {
             rows.push((Some((*tag).to_string()), (*name).to_string()));
         }
@@ -43,8 +47,12 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
         if !q.is_empty() && !hay.contains(&q) {
             continue;
         }
-        let msg = if per_model {
-            Message::ActiveModelLanguageSelected(tag.clone())
+        let msg = if let Some((ref src, ref mdl)) = app.language_picker_target {
+            Message::ModelLanguageSelected {
+                source: src.clone(),
+                model: mdl.clone(),
+                choice: tag.clone(),
+            }
         } else {
             Message::PrimaryLanguageSelected(tag.clone())
         };

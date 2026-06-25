@@ -27,6 +27,9 @@ pub struct BackendInfo {
 }
 
 /// One model served by a backend.
+// reason: catalog fields are deserialized for future direct consumption; the
+// picker currently reads supported languages from the live resolution block.
+#[allow(dead_code)]
 #[derive(serde::Deserialize, Clone, Debug)]
 pub struct BackendModel {
     pub name: String,
@@ -45,6 +48,18 @@ pub struct BackendModel {
     /// warning when a CUDA load is staged against the detected GPU memory.
     #[serde(default)]
     pub estimated_vram_bytes: u64,
+    /// Whether this model supports multiple transcription languages (as
+    /// opposed to a mono-lingual model baked for a single language).
+    #[serde(default)]
+    pub multilingual: bool,
+    /// BCP-47 tags the model can transcribe, e.g. `["en", "es", "fr"]`.
+    /// Empty for mono-lingual models.
+    #[serde(default)]
+    pub supported_languages: Vec<String>,
+    /// The model's built-in default language (BCP-47 tag). Shown in the
+    /// language picker when no global or per-model override is set.
+    #[serde(default)]
+    pub primary_language: String,
 }
 
 /// A sensitive value the backend requires, stored in the system keyring.

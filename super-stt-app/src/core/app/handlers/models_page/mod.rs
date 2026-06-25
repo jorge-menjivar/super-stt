@@ -105,7 +105,8 @@ impl AppModel {
                 // device to the model's first supported entry (so a single-
                 // device model needs no extra click; multi-device models
                 // surface the dropdown).
-                let device = self.active_backend.as_ref().and_then(|src| {
+                let source = self.active_backend.clone();
+                let device = source.as_ref().and_then(|src| {
                     self.backends
                         .iter()
                         .find(|b| &b.source == src)?
@@ -116,9 +117,16 @@ impl AppModel {
                         .first()
                         .cloned()
                 });
-                self.staged_model = Some(model);
+                self.staged_model = Some(model.clone());
                 self.staged_device = device;
-                Task::none()
+                // Fetch the per-model language block at selection time so the
+                // active-backend card can show the language control before Load.
+                // Wire point 2: model staged (StageActiveModel).
+                if let Some(src) = source {
+                    self.load_model_language(src, model)
+                } else {
+                    Task::none()
+                }
             }
 
             Message::StageActiveDevice(device) => {

@@ -192,8 +192,8 @@ impl AppModel {
                 | Message::LanguagePickerQueryChanged(_)
                 | Message::PrimaryLanguageLoaded(_)
                 | Message::PrimaryLanguageSelected(_)
-                | Message::ActiveModelLanguageLoaded(_)
-                | Message::ActiveModelLanguageSelected(_)
+                | Message::ModelLanguageLoaded { .. }
+                | Message::ModelLanguageSelected { .. }
                 | Message::LanguageError(_)
         ) {
             return Some(self.handle_language_messages(message));

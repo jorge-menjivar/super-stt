@@ -171,11 +171,13 @@ impl AppModel {
                 provider,
                 source,
             } => {
-                self.current_model = model;
+                self.current_model.clone_from(&model);
                 self.current_provider = provider;
-                self.current_source = source;
+                self.current_source.clone_from(&source);
                 self.model_operation_state = ModelOperationState::Ready;
-                self.load_active_model_language()
+                // Fetch the per-model language block now that a model is loaded.
+                // Wire point 1: model loaded (CurrentModelLoaded / ModelChanged).
+                self.load_model_language(source, model)
             }
 
             Message::ModelError(err) => {

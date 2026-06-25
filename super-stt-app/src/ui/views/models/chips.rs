@@ -282,6 +282,9 @@ mod capability_tests {
                     provider: "local_test".to_string(),
                     supported_devices: devices.iter().map(|s| (*s).to_string()).collect(),
                     estimated_vram_bytes: 0,
+                    multilingual: false,
+                    supported_languages: Vec::new(),
+                    primary_language: String::new(),
                 })
                 .collect(),
             secrets: Vec::new(),
