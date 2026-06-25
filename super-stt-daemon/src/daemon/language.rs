@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Resolve the effective transcription language for the active model.
 
-// The public types and functions here are consumed by later phases (transcribe
-// path, endpoints); suppress dead_code until those callers are wired up.
-#![allow(dead_code)]
-
 /// Where the resolved language came from — surfaced to clients so the UI can
 /// label it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

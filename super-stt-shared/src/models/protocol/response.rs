@@ -111,6 +111,12 @@ pub struct DaemonResponse {
     // Custom models directory (None = no override, daemon uses default cache)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_models_dir: Option<Option<String>>,
+
+    // Transcription language: for GET /language a string|null; for
+    // GET /active_model/language the resolution block. See
+    // docs/protocol/endpoints/v1/{language,active_model/language}.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -300,6 +306,12 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_active_backend(mut self, active_backend: Value) -> Self {
         self.active_backend = Some(active_backend);
+        self
+    }
+
+    #[must_use]
+    pub fn with_language(mut self, language: Value) -> Self {
+        self.language = Some(language);
         self
     }
 

@@ -73,6 +73,16 @@ impl SuperSTTDaemon {
             Command::GetWriteMethod => self.handle_get_write_method().await,
             Command::SetVolume { volume } => self.handle_set_volume(volume),
             Command::GetVolume => self.handle_get_volume(),
+            Command::SetPrimaryLanguage { language } => {
+                self.handle_set_primary_language(language).await
+            }
+            Command::GetPrimaryLanguage => self.handle_get_primary_language().await,
+            Command::ClearPrimaryLanguage => self.handle_clear_primary_language().await,
+            Command::SetActiveModelLanguage { language } => {
+                self.handle_set_active_model_language(language).await
+            }
+            Command::GetActiveModelLanguage => self.handle_get_active_model_language().await,
+            Command::ClearActiveModelLanguage => self.handle_clear_active_model_language().await,
             Command::SetAllowOnlineModels { enabled } => {
                 self.handle_set_allow_online_models(enabled).await
             }
@@ -181,6 +191,10 @@ impl SuperSTTDaemon {
         sample_rate: Option<u32>,
         language: Option<String>,
     ) -> DaemonResponse {
+        let language = match language {
+            Some(l) => Some(l),
+            None => self.resolve_active_language().await,
+        };
         match self
             .realtime_manager
             .start_session(client_id.clone(), sample_rate, language)

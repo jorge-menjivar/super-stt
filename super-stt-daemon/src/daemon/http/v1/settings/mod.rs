@@ -5,6 +5,7 @@ pub(crate) mod allow_online_models;
 pub(crate) mod audio_theme;
 pub(crate) mod backends;
 pub(crate) mod custom_models_dir;
+pub(crate) mod language;
 pub(crate) mod preview_typing;
 pub(crate) mod recording_stop_mode;
 pub(crate) mod volume;
@@ -76,6 +77,18 @@ pub(crate) fn routes() -> Router<AppState> {
                 .delete(backends::clear_active_backend),
         )
         .route("/gpu_info", get(backends::get_gpu_info))
+        .route(
+            "/language",
+            get(language::get_language)
+                .post(language::set_language)
+                .delete(language::clear_language),
+        )
+        .route(
+            "/active_model/language",
+            get(language::get_active_model_language)
+                .post(language::set_active_model_language)
+                .delete(language::clear_active_model_language),
+        )
         .merge(super::registry::routes())
         .merge(super::backends::options::routes())
 }

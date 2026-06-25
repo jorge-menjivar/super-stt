@@ -43,7 +43,7 @@ async fn wasm_orchestration_against_mock() {
     assert_eq!(status["state"], "ready");
 
     let text = backend
-        .transcribe_audio(&[0.0_f32; 1600], 16000)
+        .transcribe_audio(&[0.0_f32; 1600], 16000, None)
         .await
         .expect("transcription should succeed");
     assert_eq!(text, "mock transcription");

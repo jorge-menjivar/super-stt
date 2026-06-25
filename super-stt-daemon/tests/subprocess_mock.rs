@@ -63,7 +63,7 @@ async fn subprocess_orchestration_against_mock() {
     // Transcribe drives /v1/transcribe → canned text.
     let samples = vec![0.0f32; 1600];
     let text = backend
-        .transcribe_audio(&samples, 16000)
+        .transcribe_audio(&samples, 16000, None)
         .await
         .expect("transcribe");
     assert_eq!(text, "mock transcription");

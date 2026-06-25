@@ -43,6 +43,12 @@ impl TryFrom<DaemonRequest> for Command {
             "get_write_method" => Ok(Command::GetWriteMethod),
             "set_volume" => cmd_set_volume(&request),
             "get_volume" => Ok(Command::GetVolume),
+            "set_primary_language" => cmd_set_primary_language(&request),
+            "get_primary_language" => Ok(Command::GetPrimaryLanguage),
+            "clear_primary_language" => Ok(Command::ClearPrimaryLanguage),
+            "set_active_model_language" => cmd_set_active_model_language(&request),
+            "get_active_model_language" => Ok(Command::GetActiveModelLanguage),
+            "clear_active_model_language" => Ok(Command::ClearActiveModelLanguage),
             "set_allow_online_models" => cmd_set_allow_online_models(&request),
             "get_allow_online_models" => Ok(Command::GetAllowOnlineModels),
             "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
@@ -320,4 +326,26 @@ fn cmd_set_active_backend(request: &DaemonRequest) -> Result<Command, String> {
         .ok_or("Missing source for set_active_backend")?
         .to_string();
     Ok(Command::SetActiveBackend { source })
+}
+
+fn cmd_set_primary_language(request: &DaemonRequest) -> Result<Command, String> {
+    let language = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("language"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing language for set_primary_language command")?
+        .to_string();
+    Ok(Command::SetPrimaryLanguage { language })
+}
+
+fn cmd_set_active_model_language(request: &DaemonRequest) -> Result<Command, String> {
+    let language = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("language"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing language for set_active_model_language command")?
+        .to_string();
+    Ok(Command::SetActiveModelLanguage { language })
 }

@@ -287,7 +287,8 @@ impl RealTimeTranscriptionManager {
         audio_processor: &Arc<AudioProcessor>,
     ) -> Result<()> {
         // Collect clients that have audio ready for processing
-        let mut ready_clients: Vec<(String, Vec<f32>, CancellationToken)> = Vec::new();
+        let mut ready_clients: Vec<(String, Vec<f32>, Option<String>, CancellationToken)> =
+            Vec::new();
 
         {
             let mut sessions_write = sessions.write().await;
@@ -300,6 +301,7 @@ impl RealTimeTranscriptionManager {
                     ready_clients.push((
                         client_id.clone(),
                         resampled_audio,
+                        session.language.clone(),
                         session.cancellation_token.clone(),
                     ));
                 }
@@ -307,7 +309,7 @@ impl RealTimeTranscriptionManager {
         }
 
         // Process each ready client in parallel
-        for (client_id, resampled_audio, cancellation_token) in ready_clients {
+        for (client_id, resampled_audio, language, cancellation_token) in ready_clients {
             let model_clone = Arc::clone(model);
             let proc_clone = Arc::clone(audio_processor);
             let sessions_clone = Arc::clone(sessions);
@@ -317,6 +319,7 @@ impl RealTimeTranscriptionManager {
                     result = Self::transcribe_audio_chunk(
                         &client_id,
                         resampled_audio,
+                        language.as_deref(),
                         &model_clone,
                         &proc_clone,
                         &sessions_clone,
@@ -344,6 +347,7 @@ impl RealTimeTranscriptionManager {
     async fn transcribe_audio_chunk(
         client_id: &str,
         audio_data: Vec<f32>,
+        language: Option<&str>,
         model: &SharedLoadedModel,
         audio_processor: &Arc<AudioProcessor>,
         sessions: &Arc<RwLock<HashMap<String, RealTimeSession>>>,
@@ -360,10 +364,15 @@ impl RealTimeTranscriptionManager {
                 .is_some_and(|loaded| loaded.instance.is_online())
         };
 
+        let language = language.map(str::to_string);
+
         let transcription_result = if is_online {
             let mut model_guard = model.write().await;
             if let Some(loaded) = model_guard.as_mut() {
-                Ok(loaded.instance.transcribe_audio(&processed, 16000).await)
+                Ok(loaded
+                    .instance
+                    .transcribe_audio(&processed, 16000, language.as_deref())
+                    .await)
             } else {
                 Ok(Err(anyhow::anyhow!("Model not loaded")))
             }
@@ -375,7 +384,11 @@ impl RealTimeTranscriptionManager {
                     let handle = tokio::runtime::Handle::current();
                     let mut model_guard = model_clone.blocking_write();
                     if let Some(loaded) = model_guard.as_mut() {
-                        handle.block_on(loaded.instance.transcribe_audio(&audio, 16000))
+                        handle.block_on(loaded.instance.transcribe_audio(
+                            &audio,
+                            16000,
+                            language.as_deref(),
+                        ))
                     } else {
                         Err(anyhow::anyhow!("Model not loaded"))
                     }

@@ -107,7 +107,15 @@ pub trait ModelState: ModelInfo {
 #[async_trait]
 pub trait Transcribe: ModelState {
     /// Transcribe audio samples to plain text.
-    async fn transcribe_audio(&mut self, audio: &[f32], sample_rate: u32) -> Result<String>;
+    ///
+    /// `language` is a resolved BCP-47 tag (`"es-MX"`, `"auto"`, …) or `None`
+    /// to omit the field and let the backend use its model's primary language.
+    async fn transcribe_audio(
+        &mut self,
+        audio: &[f32],
+        sample_rate: u32,
+        language: Option<&str>,
+    ) -> Result<String>;
 
     /// Run a realtime streaming session, pumping frames between the
     /// consumer and an upstream until the session ends. Default:

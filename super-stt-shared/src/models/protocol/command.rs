@@ -69,6 +69,16 @@ pub enum Command {
         volume: u8,
     },
     GetVolume,
+    SetPrimaryLanguage {
+        language: String,
+    },
+    GetPrimaryLanguage,
+    ClearPrimaryLanguage,
+    SetActiveModelLanguage {
+        language: String,
+    },
+    GetActiveModelLanguage,
+    ClearActiveModelLanguage,
     SetAllowOnlineModels {
         enabled: bool,
     },

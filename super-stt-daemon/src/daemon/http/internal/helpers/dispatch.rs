@@ -60,6 +60,9 @@ const BAD_REQUEST_PHRASES: &[&str] = &[
     // `invalid_backend` — the client named a model/source no installed
     // backend serves (docs/protocol/endpoints/v1/{active_model,active_backend}.md).
     "No installed backend",
+    // `POST /active_model/language` when the tag is not supported by (or the
+    // model is not) multilingual (docs/protocol/endpoints/v1/active_model/language.md).
+    "unsupported_language",
 ];
 
 /// Phrases (matched as substrings) that map an error `message` to
@@ -81,6 +84,8 @@ const CONFLICT_PHRASES: &[&str] = &[
     "A download is already in progress",
     "Another download is in progress",
     "Failed to register download",
+    // Per-model language endpoints when no model is active (409 not_ready).
+    "not_ready",
 ];
 
 pub(crate) fn status_code_for_response(resp: &DaemonResponse) -> StatusCode {

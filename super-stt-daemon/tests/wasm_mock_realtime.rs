@@ -120,7 +120,7 @@ async fn realtime_model_transcribe_audio_returns_final_transcript() {
         .with_realtime();
 
     let text = backend
-        .transcribe_audio(&[0.0_f32; 1600], 16000)
+        .transcribe_audio(&[0.0_f32; 1600], 16000, None)
         .await
         .expect("realtime-routed transcribe should succeed");
     assert_eq!(text, "mock realtime transcription");

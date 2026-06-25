@@ -318,13 +318,22 @@ impl Transcribe for SubprocessBackend {
         Ok(())
     }
 
-    async fn transcribe_audio(&mut self, audio: &[f32], sample_rate: u32) -> Result<String> {
+    async fn transcribe_audio(
+        &mut self,
+        audio: &[f32],
+        sample_rate: u32,
+        language: Option<&str>,
+    ) -> Result<String> {
         // The daemon owns resampling; backends receive 16 kHz.
         let audio16 = resample(audio, sample_rate, SAMPLE_RATE, ResampleQuality::Fast)?;
-        let body = serde_json::to_vec(&serde_json::json!({
+        let mut body_json = serde_json::json!({
             "audio_data": audio16,
             "sample_rate": SAMPLE_RATE,
-        }))?;
+        });
+        if let Some(lang) = language {
+            body_json["language"] = serde_json::Value::String(lang.to_string());
+        }
+        let body = serde_json::to_vec(&body_json)?;
         let mut headers = json_headers();
         headers.push(("x-stt-model".to_string(), self.model_id.clone()));
         let (status, resp) = self

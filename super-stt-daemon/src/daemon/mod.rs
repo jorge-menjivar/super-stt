@@ -6,6 +6,7 @@ pub mod events;
 pub mod handlers;
 pub mod http;
 pub(crate) mod language;
+pub mod language_handlers;
 pub mod model_management;
 pub mod recording;
 pub mod theme_handlers;

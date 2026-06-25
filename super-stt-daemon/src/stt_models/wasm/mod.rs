@@ -397,17 +397,26 @@ impl ModelState for WasmBackend {
 
 #[async_trait]
 impl Transcribe for WasmBackend {
-    async fn transcribe_audio(&mut self, audio: &[f32], sample_rate: u32) -> Result<String> {
+    async fn transcribe_audio(
+        &mut self,
+        audio: &[f32],
+        sample_rate: u32,
+        language: Option<&str>,
+    ) -> Result<String> {
         // A realtime-only model is rejected by the batch endpoint, so serve the
         // regular `/v1/transcribe` request through an internal one-shot realtime
         // session and return only the final transcript.
         if self.realtime {
             return self.transcribe_via_realtime(audio, sample_rate).await;
         }
-        let body = serde_json::to_vec(&serde_json::json!({
+        let mut body_json = serde_json::json!({
             "audio_data": audio,
             "sample_rate": sample_rate,
-        }))?;
+        });
+        if let Some(lang) = language {
+            body_json["language"] = serde_json::Value::String(lang.to_string());
+        }
+        let body = serde_json::to_vec(&body_json)?;
         let mut headers = self.transcribe_headers.clone();
         headers.push(("x-stt-model".to_string(), self.model_id.clone()));
         let (status, resp) = self

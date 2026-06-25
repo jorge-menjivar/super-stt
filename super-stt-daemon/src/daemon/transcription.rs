@@ -117,6 +117,23 @@ impl SuperSTTDaemon {
         }
     }
 
+    /// Resolve the effective language for the currently-loaded model from
+    /// config. `None` means "omit `language`" (model uses its primary).
+    pub(crate) async fn resolve_active_language(&self) -> Option<String> {
+        let def = {
+            let guard = self.model.read().await;
+            guard.as_ref().map(|loaded| loaded.definition.clone())?
+        };
+        let config = self.config.read().await;
+        crate::daemon::language::resolve_language(
+            def.is_multilingual,
+            config.model_language(&def.source, &def.name),
+            config.primary_language(),
+            &def.supported_languages,
+        )
+        .wire
+    }
+
     /// Run the model inference, dispatching to the async (online) or blocking
     /// (local) path based on whether the loaded model is an online API model.
     ///
@@ -126,6 +143,7 @@ impl SuperSTTDaemon {
         &self,
         processed_audio: Vec<f32>,
     ) -> Result<Result<(String, std::time::Duration), anyhow::Error>, tokio::task::JoinError> {
+        let language = self.resolve_active_language().await;
         let model_clone = Arc::clone(&self.model);
 
         let is_online = {
@@ -142,7 +160,7 @@ impl SuperSTTDaemon {
             if let Some(loaded) = model_guard.as_mut() {
                 match loaded
                     .instance
-                    .transcribe_audio(&processed_audio, 16000)
+                    .transcribe_audio(&processed_audio, 16000, language.as_deref())
                     .await
                 {
                     Ok(text) => {
@@ -168,8 +186,11 @@ impl SuperSTTDaemon {
                 let mut model_guard = model_clone.blocking_write();
 
                 if let Some(loaded) = model_guard.as_mut() {
-                    match handle.block_on(loaded.instance.transcribe_audio(&processed_audio, 16000))
-                    {
+                    match handle.block_on(loaded.instance.transcribe_audio(
+                        &processed_audio,
+                        16000,
+                        language.as_deref(),
+                    )) {
                         Ok(text) => {
                             let duration = start_time.elapsed();
                             info!("Transcription completed in {duration:?}: '{text}'");

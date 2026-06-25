@@ -50,12 +50,14 @@ impl SuperSTTDaemon {
                 .is_some_and(|loaded| loaded.instance.is_online())
         };
 
+        let language = self.resolve_active_language().await;
+
         if is_online {
             let mut model_guard = model_clone.write().await;
             if let Some(loaded) = model_guard.as_mut() {
                 match loaded
                     .instance
-                    .transcribe_audio(&processed_audio, 16000)
+                    .transcribe_audio(&processed_audio, 16000, language.as_deref())
                     .await
                 {
                     Ok(text) => Ok(text),
@@ -73,8 +75,11 @@ impl SuperSTTDaemon {
                 let handle = tokio::runtime::Handle::current();
                 let mut model_guard = model_clone.blocking_write();
                 if let Some(loaded) = model_guard.as_mut() {
-                    match handle.block_on(loaded.instance.transcribe_audio(&processed_audio, 16000))
-                    {
+                    match handle.block_on(loaded.instance.transcribe_audio(
+                        &processed_audio,
+                        16000,
+                        language.as_deref(),
+                    )) {
                         Ok(text) => text,
                         Err(e) => {
                             warn!("Preview transcription failed, continuing: {e}");
@@ -124,13 +129,15 @@ impl SuperSTTDaemon {
                 .is_some_and(|loaded| loaded.instance.is_online())
         };
 
+        let language = self.resolve_active_language().await;
+
         let transcription_result = if is_online {
             let start_time = std::time::Instant::now();
             let mut model_guard = model_clone.write().await;
             if let Some(loaded) = model_guard.as_mut() {
                 match loaded
                     .instance
-                    .transcribe_audio(&processed_audio, 16000)
+                    .transcribe_audio(&processed_audio, 16000, language.as_deref())
                     .await
                 {
                     Ok(text) => {
@@ -155,8 +162,11 @@ impl SuperSTTDaemon {
                 let start_time = std::time::Instant::now();
                 let mut model_guard = model_clone.blocking_write();
                 if let Some(loaded) = model_guard.as_mut() {
-                    match handle.block_on(loaded.instance.transcribe_audio(&processed_audio, 16000))
-                    {
+                    match handle.block_on(loaded.instance.transcribe_audio(
+                        &processed_audio,
+                        16000,
+                        language.as_deref(),
+                    )) {
                         Ok(text) => {
                             let duration = start_time.elapsed();
                             info!("Transcription completed in {duration:?}: '{text}'");

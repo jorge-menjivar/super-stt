@@ -852,6 +852,7 @@ impl crate::stt_models::transcribe::Transcribe for MockTranscribe {
         &mut self,
         _audio: &[f32],
         _sample_rate: u32,
+        _language: Option<&str>,
     ) -> anyhow::Result<String> {
         Ok(String::new())
     }
