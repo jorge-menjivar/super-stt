@@ -251,8 +251,13 @@ microphone; the daemon owns capture and always passes samples in
 |---------------|---------|----------|--------------------------------------------------------|
 | `audio_data`  | array   | yes      | f32 PCM samples.                                        |
 | `sample_rate` | number  | no       | Default `16000`.                                        |
-| `language`    | string  | no       | Transcription language code. Permitted only for multilingual models, and must be one of the model's `supported_languages`; when omitted, the model's `primary_language` is used. |
+| `language`    | string  | no       | BCP-47 transcription language tag (e.g. `en`, `es-MX`, `es-419`) **or** the reserved `auto` (auto-detect). Permitted only for multilingual models; a non-`auto` tag must be one of the model's `supported_languages`. When omitted, the model's `primary_language` is used. |
 | `options`     | object  | no       | Per-request options; currently `stream_realtime`.       |
+
+The reserved value `language: "auto"` requests auto-detection: the backend maps
+it to its native mechanism (e.g. Deepgram `multi`, Whisper detect-from-audio)
+and falls back to the model's `primary_language` if it cannot. Backends MUST
+accept `auto` without error; it is never rejected with `unsupported_language`.
 
 **Response — one-shot (200):**
 
