@@ -39,7 +39,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 |-------------------------------------------------------------|------------|------------------------------------------------------------------------------------------------------|
 | [`/active_model`](../endpoints/v1/active_model.md)          | POST, GET  | Switch the active STT model and read its current state + any in-flight switch                        |
 | [`/active_model/cancel`](../endpoints/v1/active_model/cancel.md) | POST  | Abort an in-flight model switch                                                                       |
-| [`/active_model/language`](../endpoints/v1/active_model/language.md) | GET, POST, DELETE | Per-model language override + the daemon's resolved effective language |
+| [`/backends/{source}/models/{model}/language`](../endpoints/v1/backends/model-language.md) | GET, POST, DELETE | Per-model language override + resolved effective language |
 | [`/models`](../endpoints/v1/models.md)                      | GET        | List built-in + custom models                                                                         |
 | [`/active_device`](../endpoints/v1/active_device.md)        | POST, GET  | Switch CPU vs CUDA; read current device + GPU memory                                                  |
 | [`/language`](../endpoints/v1/language.md)                  | GET, POST, DELETE | Global Primary Language (BCP-47 tag / `auto` / unset)                          |

@@ -66,6 +66,8 @@ Authorization: Bearer stt_…64hex…
           "name":                 "whisper-1",
           "provider":             "openai",
           "multilingual":         true,
+          "primary_language":     "en",           // model's default language (BCP-47 tag)
+          "supported_languages":  ["en", "es-419", "es-ES", "fr"],  // accepted BCP-47 tags
           "supported_devices":    ["none"],
           "estimated_vram_bytes": 0           // conservative GPU estimate; 0 = cloud/unknown
         }
@@ -100,7 +102,7 @@ Authorization: Bearer stt_…64hex…
 | `…[].source`      | string           | Backend repo id; the `source` of every model it serves.              |
 | `…[].name`        | string           | Human-readable backend name.                                         |
 | `…[].kind`        | string           | `wasm` or `subprocess`.                                              |
-| `…[].models`      | array            | Models served, as `{ name, provider, multilingual, supported_devices, estimated_vram_bytes }`. `supported_devices` is a non-empty array drawn from `["cpu", "cuda", "metal", "none"]`; `"none"` marks a remote/online model with no local compute. `estimated_vram_bytes` is a conservative GPU memory estimate (weights + KV cache + overhead); `0` when unknown or not GPU-resident. See [`GET /gpu_info`](./gpu_info.md) for the detected GPU memory it's weighed against. |
+| `…[].models`      | array            | Models served, as `{ name, provider, multilingual, primary_language, supported_languages, supported_devices, estimated_vram_bytes }`. `multilingual` is `true` when the model accepts a language tag. `primary_language` is the model's default BCP-47 tag (the fallback when no override or global setting applies). `supported_languages` is the non-empty array of BCP-47 tags the model accepts; these feed the per-model language picker and the [`/backends/{source}/models/{model}/language`](./backends/model-language.md) resolution. `supported_devices` is a non-empty array drawn from `["cpu", "cuda", "metal", "none"]`; `"none"` marks a remote/online model with no local compute. `estimated_vram_bytes` is a conservative GPU memory estimate (weights + KV cache + overhead); `0` when unknown or not GPU-resident. See [`GET /gpu_info`](./gpu_info.md) for the detected GPU memory it's weighed against. |
 | `…[].secrets`     | array            | Declared secrets: `{ name, label, description, required }`. `label` falls back to `name` when absent. Secret **values** are never returned. |
 | `…[].options`     | array            | Declared options: `{ name, label, description, type, default, required, value }`. `label` falls back to `name` when absent; `value` is the effective value (config override if set, else `default`). |
 
