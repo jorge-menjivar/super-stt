@@ -175,7 +175,7 @@ impl AppModel {
                 self.current_provider = provider;
                 self.current_source = source;
                 self.model_operation_state = ModelOperationState::Ready;
-                Task::none()
+                self.load_active_model_language()
             }
 
             Message::ModelError(err) => {

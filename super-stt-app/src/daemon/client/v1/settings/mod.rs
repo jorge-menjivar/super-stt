@@ -6,6 +6,7 @@ pub(crate) mod audio_theme;
 pub(crate) mod backend_secrets;
 pub(crate) mod backends;
 pub(crate) mod custom_models_dir;
+pub(crate) mod language;
 pub(crate) mod preview_typing;
 pub(crate) mod recording_stop_mode;
 pub(crate) mod volume;

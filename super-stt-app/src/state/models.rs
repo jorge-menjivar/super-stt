@@ -54,6 +54,9 @@ pub enum ContextPage {
     /// backend list stays visible behind it. The backend is identified by
     /// `AppModel::configure_backend`; also Models-scoped.
     ConfigureBackend,
+    /// Right-side search sheet for picking a transcription language. Scope
+    /// (global vs the active model) is carried by `AppModel::language_picker_per_model`.
+    LanguagePicker,
 }
 
 /// Which tab of the Models page is active.

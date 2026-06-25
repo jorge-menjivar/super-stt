@@ -128,14 +128,16 @@ impl AppModel {
         }
 
         let load_settings = build_load_settings_tasks();
+        let load_primary_language = self.load_primary_language();
 
         if was_disconnected {
             Task::batch([
                 self.handle_model_messages(Message::LoadInitialData),
                 load_settings,
+                load_primary_language,
             ])
         } else {
-            load_settings
+            Task::batch([load_settings, load_primary_language])
         }
     }
 

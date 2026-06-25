@@ -184,6 +184,21 @@ impl AppModel {
             return Some(self.handle_backend_messages(message));
         }
 
+        // Transcription language messages
+        if matches!(
+            message,
+            Message::OpenLanguagePicker { .. }
+                | Message::CloseLanguagePicker
+                | Message::LanguagePickerQueryChanged(_)
+                | Message::PrimaryLanguageLoaded(_)
+                | Message::PrimaryLanguageSelected(_)
+                | Message::ActiveModelLanguageLoaded(_)
+                | Message::ActiveModelLanguageSelected(_)
+                | Message::LanguageError(_)
+        ) {
+            return Some(self.handle_language_messages(message));
+        }
+
         // Template/shell messages
         if matches!(
             message,

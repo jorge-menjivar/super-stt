@@ -72,6 +72,52 @@ pub(super) fn backend_header(
         .into()
 }
 
+/// Language row for the active-backend card: shown only when `model_loaded` and
+/// the daemon's resolution block reports the model as multilingual. Returns `None`
+/// otherwise so the caller can skip `card.push(…)` entirely.
+fn language_row<'a>(
+    model_loaded: bool,
+    app: &'a AppModel,
+    spacing: &cosmic::cosmic_theme::Spacing,
+) -> Option<Element<'a, Message>> {
+    let block = app.active_model_language.as_ref()?;
+    if !model_loaded
+        || block
+            .get("multilingual")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+    {
+        return None;
+    }
+    let effective = block.get("effective").and_then(serde_json::Value::as_str);
+    let source_str = block
+        .get("source")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("default");
+    let primary = block
+        .get("primary")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let label = match (effective, source_str) {
+        (Some(tag), "override") => crate::ui::languages::friendly_name(tag),
+        (Some(tag), "global") => {
+            format!("{} · global", crate::ui::languages::friendly_name(tag))
+        }
+        _ => format!("{} · default", crate::ui::languages::friendly_name(primary)),
+    };
+    Some(
+        widget::row::with_capacity(2)
+            .spacing(spacing.space_s)
+            .align_y(Alignment::Center)
+            .push(text::body("Language").width(Length::Fill))
+            .push(
+                widget::button::standard(label)
+                    .on_press(Message::OpenLanguagePicker { per_model: true }),
+            )
+            .into(),
+    )
+}
+
 /// The selected backend, shown above the tabs: its model picker + Select, an
 /// in-card status line (loading / download progress / error), Configure, and
 /// Deselect.
@@ -140,6 +186,12 @@ pub(super) fn active_backend_card<'a>(
         } else {
             card = card.push(staged_model_picker(backend, app));
         }
+    }
+
+    // Per-model language trigger — only when this backend's model is active and
+    // the daemon reports it multilingual.
+    if let Some(row) = language_row(model_loaded, app, &spacing) {
+        card = card.push(row);
     }
 
     // Unmet requirements are surfaced inline so the user fixes them in this

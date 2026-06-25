@@ -154,6 +154,12 @@ impl AppModel {
             configure_backend: None,
             installed_menu_open: None,
 
+            // Transcription language state
+            primary_language: None,
+            active_model_language: None,
+            language_picker_query: String::new(),
+            language_picker_per_model: false,
+
             // Backend catalog + per-backend configuration state
             backends: Vec::new(),
             backend_secret_inputs: HashMap::new(),

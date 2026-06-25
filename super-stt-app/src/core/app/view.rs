@@ -75,6 +75,22 @@ impl AppModel {
                     .title("Add a backend")
                 })
             }
+            // Language picker sheet — a search-box + scrollable selectable list
+            // for setting the global Primary Language or the active-model override.
+            ContextPage::LanguagePicker => {
+                let title = if self.language_picker_per_model {
+                    "Model language"
+                } else {
+                    "Primary Language"
+                };
+                Some(
+                    context_drawer::context_drawer(
+                        views::language_picker::sheet(self),
+                        Message::CloseLanguagePicker,
+                    )
+                    .title(title),
+                )
+            }
             // Per-backend configuration sheet — also Models-scoped, and only
             // when a backend is actually selected for configuration.
             ContextPage::ConfigureBackend => {
@@ -119,6 +135,7 @@ impl AppModel {
                 &self.audio_themes,
                 &self.selected_audio_theme,
                 self.volume,
+                self.primary_language.as_deref(),
             ),
             Page::Recording => views::recording::page(
                 self.recording_stop_mode,

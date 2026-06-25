@@ -4,5 +4,6 @@ pub mod common;
 pub mod connection;
 pub mod customization;
 pub mod input_simulation;
+pub mod language_picker;
 pub mod models;
 pub mod recording;

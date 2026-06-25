@@ -152,6 +152,16 @@ pub struct AppModel {
     pub staged_device: Option<String>,
     /// The backend whose configuration sub-view is open, if any (`source`).
     pub configure_backend: Option<String>,
+
+    // Transcription language state.
+    /// Global Primary Language from the daemon (None = unset). Display-only cache.
+    pub primary_language: Option<String>,
+    /// Resolution block from `GET /active_model/language` for the active model.
+    pub active_model_language: Option<serde_json::Value>,
+    /// Live query text for the language search sheet.
+    pub language_picker_query: String,
+    /// Whether the open language sheet targets the active model (vs the global).
+    pub language_picker_per_model: bool,
     /// `source` of the installed-backend card whose overflow ("⋯") menu is
     /// open, if any. Only one is open at a time.
     pub installed_menu_open: Option<String>,

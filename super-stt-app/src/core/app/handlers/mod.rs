@@ -3,6 +3,7 @@ mod backend;
 mod daemon;
 mod device;
 mod download;
+mod language;
 mod model;
 mod models_page;
 mod recording;

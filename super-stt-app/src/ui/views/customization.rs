@@ -7,11 +7,12 @@ use super_stt_shared::theme::AudioTheme;
 use super::common::page_layout;
 use crate::ui::messages::Message;
 
-/// Customization page: audio feedback toggle, theme selection, and volume
+/// Customization page: audio feedback toggle, theme selection, volume, and language.
 pub fn page<'a>(
     audio_themes: &'a [AudioTheme],
     selected_audio_theme: &'a AudioTheme,
     volume: u8,
+    app_primary_language: Option<&'a str>,
 ) -> Element<'a, Message> {
     let audio_enabled = *selected_audio_theme != AudioTheme::Silent;
 
@@ -80,6 +81,19 @@ pub fn page<'a>(
             );
     }
 
-    let sections = settings::view_column(vec![section.into()]);
+    let lang_label = app_primary_language.map_or_else(
+        || "Automatic".to_string(),
+        crate::ui::languages::friendly_name,
+    );
+    let language_section = settings::section().title("Language").add(
+        settings::item::builder("Primary Language")
+            .description("Default transcription language for models that support it")
+            .control(
+                widget::button::standard(lang_label)
+                    .on_press(Message::OpenLanguagePicker { per_model: false }),
+            ),
+    );
+
+    let sections = settings::view_column(vec![section.into(), language_section.into()]);
     page_layout("Customization", sections)
 }

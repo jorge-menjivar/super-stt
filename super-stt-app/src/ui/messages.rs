@@ -286,4 +286,22 @@ pub enum Message {
         source: String,
         name: String,
     },
+
+    // Transcription language (global Primary Language + per-model override).
+    /// Open the language search sheet. `per_model = true` configures the active
+    /// model; `false` sets the global Primary Language.
+    OpenLanguagePicker {
+        per_model: bool,
+    },
+    CloseLanguagePicker,
+    LanguagePickerQueryChanged(String),
+    /// Global Primary Language loaded from the daemon (None = unset).
+    PrimaryLanguageLoaded(Option<String>),
+    /// User picked a global language (None = clear → DELETE).
+    PrimaryLanguageSelected(Option<String>),
+    /// Per-model resolution block (`/active_model/language`) loaded from the daemon.
+    ActiveModelLanguageLoaded(serde_json::Value),
+    /// User picked a per-model override (None = Automatic → DELETE; Some("auto") = Detect).
+    ActiveModelLanguageSelected(Option<String>),
+    LanguageError(String),
 }
