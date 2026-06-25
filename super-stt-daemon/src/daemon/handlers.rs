@@ -349,6 +349,8 @@ impl SuperSTTDaemon {
                             "name": m.name,
                             "provider": m.provider.to_string(),
                             "multilingual": m.is_multilingual,
+                            "primary_language": m.primary_language,
+                            "supported_languages": m.supported_languages,
                             "supported_devices": m.supported_devices,
                             "estimated_vram_bytes": m.estimated_vram_bytes,
                             "realtime": m.realtime,

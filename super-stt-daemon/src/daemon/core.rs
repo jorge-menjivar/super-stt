@@ -78,11 +78,9 @@ impl SuperSTTDaemon {
             }
             Command::GetPrimaryLanguage => self.handle_get_primary_language().await,
             Command::ClearPrimaryLanguage => self.handle_clear_primary_language().await,
-            Command::SetActiveModelLanguage { language } => {
-                self.handle_set_active_model_language(language).await
-            }
-            Command::GetActiveModelLanguage => self.handle_get_active_model_language().await,
-            Command::ClearActiveModelLanguage => self.handle_clear_active_model_language().await,
+            cmd @ (Command::SetModelLanguage { .. }
+            | Command::GetModelLanguage { .. }
+            | Command::ClearModelLanguage { .. }) => self.handle_model_language(cmd).await,
             Command::SetAllowOnlineModels { enabled } => {
                 self.handle_set_allow_online_models(enabled).await
             }

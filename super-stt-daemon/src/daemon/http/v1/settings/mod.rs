@@ -83,12 +83,7 @@ pub(crate) fn routes() -> Router<AppState> {
                 .post(language::set_language)
                 .delete(language::clear_language),
         )
-        .route(
-            "/active_model/language",
-            get(language::get_active_model_language)
-                .post(language::set_active_model_language)
-                .delete(language::clear_active_model_language),
-        )
         .merge(super::registry::routes())
         .merge(super::backends::options::routes())
+        .merge(super::backends::model_language::routes())
 }

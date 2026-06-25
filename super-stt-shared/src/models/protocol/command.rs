@@ -74,11 +74,22 @@ pub enum Command {
     },
     GetPrimaryLanguage,
     ClearPrimaryLanguage,
-    SetActiveModelLanguage {
+    /// Set the per-model language override for a specific `(source, model)`.
+    SetModelLanguage {
+        source: String,
+        model: String,
         language: String,
     },
-    GetActiveModelLanguage,
-    ClearActiveModelLanguage,
+    /// Read the resolved language block for a specific `(source, model)`.
+    GetModelLanguage {
+        source: String,
+        model: String,
+    },
+    /// Clear the per-model language override for a specific `(source, model)`.
+    ClearModelLanguage {
+        source: String,
+        model: String,
+    },
     SetAllowOnlineModels {
         enabled: bool,
     },

@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Language-settings HTTP smoke test: `/v1/language` + `/v1/active_model/language`
+//! Language-settings HTTP smoke test: `/v1/language` (global) +
+//! `/v1/backends/{source}/models/{model}/language` (per-model).
 //!
-//! Three test cases:
+//! Test cases:
 //! 1. Global round-trip: GET → null; POST `es-MX` → 200 + language; GET → `es-MX`; DELETE → null.
-//! 2. Idle per-model: no model loaded → `GET /v1/active_model/language` → 409 (`not_ready`).
-//! 3. Scope denial: a `status`-scoped token → GET/POST/GET → 403 on both language endpoints.
+//! 2. Per-model round-trip (no model loaded): GET fixture model → 200 + resolution
+//!    block (`multilingual: true`); POST a supported tag → 200; GET reflects it; DELETE → 200.
+//! 3. Per-model 404s: unknown model under fixture source → 404; unknown source → 404.
+//! 4. Per-model 400: POST an unsupported tag → 400 (`unsupported_language`).
+//! 5. Scope denial: a `status`-scoped token → 403 on both the global and per-model paths.
 //!
 //! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
 //! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend (`fixture-openai/backend.toml`) is seeded so the daemon
 //! discovers it on startup. Its model is multilingual and secret-gated, so the
-//! daemon comes up idle (no model auto-loaded).
+//! daemon comes up idle (no model auto-loaded) — the per-model language
+//! endpoint resolves against the discovered backend, so it works regardless.
 
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
@@ -249,31 +254,171 @@ async fn global_language_round_trips() {
     );
 }
 
-/// Case 2 — No model loaded → `GET /active_model/language` → 409.
-#[tokio::test]
-async fn active_model_language_is_not_ready_when_idle() {
-    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+/// The fixture backend's source, URL-percent-encoded for the path segment.
+const FIXTURE_SOURCE_ENC: &str = "github.com%2Fsuper-stt%2Fopenai";
 
-    let (st, body) = get(&sock, "/active_model/language", &token).await;
+/// Per-model language path for the fixture's `whisper-1` model.
+fn fixture_model_lang_path() -> String {
+    format!("/backends/{FIXTURE_SOURCE_ENC}/models/whisper-1/language")
+}
+
+/// Case 2 — Per-model round-trip without a loaded model.
+/// GET resolves the fixture model (multilingual: true); POST a supported tag →
+/// 200 + override reflected; GET reflects it; DELETE clears back to default.
+#[tokio::test]
+async fn per_model_language_round_trips_without_loaded_model() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let path = fixture_model_lang_path();
+
+    // GET resolves even though no model is loaded (resolves against discovery).
+    let (st, body) = get(&sock, &path, &token).await;
+    assert_eq!(st, StatusCode::OK, "initial per-model GET: {body}");
     assert_eq!(
-        st,
-        StatusCode::CONFLICT,
-        "per-model language must be 409 when idle: {body}"
+        body["language"]["multilingual"], true,
+        "fixture model is multilingual: {body}"
+    );
+    assert_eq!(
+        body["language"]["override"],
+        serde_json::Value::Null,
+        "no override before any POST: {body}"
+    );
+    assert_eq!(
+        body["language"]["primary"], "en",
+        "fixture model's primary_language is en: {body}"
+    );
+
+    // POST a supported tag.
+    let (st, body) = post_req(
+        &sock,
+        &path,
+        &token,
+        serde_json::json!({ "language": "es-MX" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "POST per-model language: {body}");
+    assert_eq!(
+        body["language"]["override"], "es-MX",
+        "POST must echo the stored override: {body}"
+    );
+    assert_eq!(
+        body["language"]["source"], "override",
+        "resolution source is override after POST: {body}"
+    );
+
+    // GET reflects the persisted override.
+    let (st, body) = get(&sock, &path, &token).await;
+    assert_eq!(st, StatusCode::OK, "GET after POST: {body}");
+    assert_eq!(
+        body["language"]["override"], "es-MX",
+        "GET must return the persisted override: {body}"
+    );
+
+    // DELETE clears back to default.
+    let (st, body) = delete_req(&sock, &path, &token).await;
+    assert_eq!(st, StatusCode::OK, "DELETE per-model language: {body}");
+    assert_eq!(
+        body["language"]["override"],
+        serde_json::Value::Null,
+        "DELETE clears the override: {body}"
+    );
+    assert_eq!(
+        body["language"]["source"], "default",
+        "resolution source is default after DELETE: {body}"
     );
 }
 
-/// Case 3 — A `status`-scoped token must be denied (403) on both language endpoints.
+/// Case 3 — Unknown model / unknown source under the per-model path → 404.
+#[tokio::test]
+async fn per_model_language_unknown_targets_are_404() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    // Unknown model under a known (fixture) source.
+    let unknown_model = format!("/backends/{FIXTURE_SOURCE_ENC}/models/does-not-exist/language");
+    let (st, body) = get(&sock, &unknown_model, &token).await;
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "GET unknown model must be 404: {body}"
+    );
+    assert_eq!(body["message"], "unknown_model", "{body}");
+
+    let (st, body) = post_req(
+        &sock,
+        &unknown_model,
+        &token,
+        serde_json::json!({ "language": "es" }),
+    )
+    .await;
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "POST unknown model must be 404: {body}"
+    );
+    assert_eq!(body["message"], "unknown_model", "{body}");
+
+    // Unknown source entirely.
+    let unknown_source = "/backends/github.com%2Fno%2Fsuch/models/whisper-1/language";
+    let (st, body) = get(&sock, unknown_source, &token).await;
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "GET unknown source must be 404: {body}"
+    );
+    assert_eq!(body["message"], "unknown_backend", "{body}");
+
+    let (st, body) = post_req(
+        &sock,
+        unknown_source,
+        &token,
+        serde_json::json!({ "language": "es" }),
+    )
+    .await;
+    assert_eq!(
+        st,
+        StatusCode::NOT_FOUND,
+        "POST unknown source must be 404: {body}"
+    );
+    assert_eq!(body["message"], "unknown_backend", "{body}");
+}
+
+/// Case 4 — POST an unsupported tag for a known model → 400.
+#[tokio::test]
+async fn per_model_language_unsupported_tag_is_400() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let path = fixture_model_lang_path();
+
+    // `ja` is not in the fixture's supported_languages (["en","es","es-MX","fr","de"]).
+    let (st, body) = post_req(
+        &sock,
+        &path,
+        &token,
+        serde_json::json!({ "language": "ja" }),
+    )
+    .await;
+    assert_eq!(
+        st,
+        StatusCode::BAD_REQUEST,
+        "POST unsupported tag must be 400: {body}"
+    );
+    assert_eq!(body["message"], "unsupported_language", "{body}");
+}
+
+/// Case 5 — A `status`-scoped token must be denied (403) on the global and
+/// per-model language paths.
 #[tokio::test]
 async fn language_endpoints_require_settings_scope() {
     let (_guard, sock, token) = start_daemon(&["status"]).await;
+    let per_model = fixture_model_lang_path();
 
     for (method, path) in [
-        (Method::GET, "/language"),
-        (Method::POST, "/language"),
-        (Method::GET, "/active_model/language"),
+        (Method::GET, "/language".to_string()),
+        (Method::POST, "/language".to_string()),
+        (Method::GET, per_model.clone()),
+        (Method::POST, per_model.clone()),
+        (Method::DELETE, per_model),
     ] {
         let body = (method == Method::POST).then(|| serde_json::json!({ "language": "es" }));
-        let (st, resp) = raw_request(&sock, method.clone(), path, &token, body).await;
+        let (st, resp) = raw_request(&sock, method.clone(), &path, &token, body).await;
         assert_eq!(
             st,
             StatusCode::FORBIDDEN,

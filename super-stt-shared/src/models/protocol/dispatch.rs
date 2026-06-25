@@ -46,9 +46,9 @@ impl TryFrom<DaemonRequest> for Command {
             "set_primary_language" => cmd_set_primary_language(&request),
             "get_primary_language" => Ok(Command::GetPrimaryLanguage),
             "clear_primary_language" => Ok(Command::ClearPrimaryLanguage),
-            "set_active_model_language" => cmd_set_active_model_language(&request),
-            "get_active_model_language" => Ok(Command::GetActiveModelLanguage),
-            "clear_active_model_language" => Ok(Command::ClearActiveModelLanguage),
+            "set_model_language" => cmd_set_model_language(&request),
+            "get_model_language" => cmd_get_model_language(&request),
+            "clear_model_language" => cmd_clear_model_language(&request),
             "set_allow_online_models" => cmd_set_allow_online_models(&request),
             "get_allow_online_models" => Ok(Command::GetAllowOnlineModels),
             "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
@@ -339,13 +339,48 @@ fn cmd_set_primary_language(request: &DaemonRequest) -> Result<Command, String> 
     Ok(Command::SetPrimaryLanguage { language })
 }
 
-fn cmd_set_active_model_language(request: &DaemonRequest) -> Result<Command, String> {
+/// Extract the `(source, model)` pair every per-model language command carries
+/// in `data`. Both are required.
+fn model_language_target(
+    request: &DaemonRequest,
+    command: &str,
+) -> Result<(String, String), String> {
+    let data = request.data.as_ref();
+    let source = data
+        .and_then(|d| d.get("source"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing source for {command} command"))?
+        .to_string();
+    let model = data
+        .and_then(|d| d.get("model"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing model for {command} command"))?
+        .to_string();
+    Ok((source, model))
+}
+
+fn cmd_set_model_language(request: &DaemonRequest) -> Result<Command, String> {
+    let (source, model) = model_language_target(request, "set_model_language")?;
     let language = request
         .data
         .as_ref()
         .and_then(|data| data.get("language"))
         .and_then(|v| v.as_str())
-        .ok_or("Missing language for set_active_model_language command")?
+        .ok_or("Missing language for set_model_language command")?
         .to_string();
-    Ok(Command::SetActiveModelLanguage { language })
+    Ok(Command::SetModelLanguage {
+        source,
+        model,
+        language,
+    })
+}
+
+fn cmd_get_model_language(request: &DaemonRequest) -> Result<Command, String> {
+    let (source, model) = model_language_target(request, "get_model_language")?;
+    Ok(Command::GetModelLanguage { source, model })
+}
+
+fn cmd_clear_model_language(request: &DaemonRequest) -> Result<Command, String> {
+    let (source, model) = model_language_target(request, "clear_model_language")?;
+    Ok(Command::ClearModelLanguage { source, model })
 }

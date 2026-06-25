@@ -113,8 +113,8 @@ pub struct DaemonResponse {
     pub custom_models_dir: Option<Option<String>>,
 
     // Transcription language: for GET /language a string|null; for
-    // GET /active_model/language the resolution block. See
-    // docs/protocol/endpoints/v1/{language,active_model/language}.md.
+    // GET /backends/{source}/models/{model}/language the resolution block. See
+    // docs/protocol/endpoints/v1/{language,backends/model-language}.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<Value>,
 }
