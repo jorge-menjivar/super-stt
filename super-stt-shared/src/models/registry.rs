@@ -38,6 +38,10 @@ pub struct ModelDefinition {
     pub source: String,
     /// Whether the model supports multiple languages.
     pub is_multilingual: bool,
+    /// The model's default language (BCP-47), used when no language is sent.
+    pub primary_language: String,
+    /// Language tags the model accepts (base and/or region-qualified).
+    pub supported_languages: Vec<String>,
     /// Conservative GPU memory estimate including weights, KV cache, and
     /// overhead. `0` when unknown or not GPU-resident.
     pub estimated_vram_bytes: u64,

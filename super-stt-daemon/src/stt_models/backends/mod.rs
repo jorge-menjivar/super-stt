@@ -132,6 +132,8 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
             provider: entry.provider.clone(),
             source: source.clone(),
             is_multilingual: entry.multilingual,
+            primary_language: entry.primary_language.clone(),
+            supported_languages: entry.supported_languages.clone(),
             estimated_vram_bytes: entry.estimated_vram_bytes,
             processing_interval: interval,
             supported_devices,

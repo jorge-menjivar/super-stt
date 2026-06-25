@@ -49,6 +49,19 @@ pub struct BackendsConfig {
     /// An absent entry means "use the manifest default".
     #[serde(default)]
     pub options: HashMap<String, HashMap<String, String>>,
+    /// Per-model settings: backend `source` → (model name → settings).
+    #[serde(default)]
+    pub models: HashMap<String, HashMap<String, ModelSettings>>,
+}
+
+/// Per-model configuration. A struct (not a bare value) so future per-model
+/// settings have a home.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelSettings {
+    /// Per-model language override: a BCP-47 tag, `"auto"`, or `None`
+    /// (Automatic — inherit the global `primary_language`, else the model's primary).
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +120,10 @@ pub struct TranscriptionConfig {
     /// `preferred_model` means "backend selected, no model loaded".
     #[serde(default)]
     pub active_backend: Option<String>,
+    /// Global default transcription language: a BCP-47 tag, the reserved
+    /// `"auto"`, or `None` (no preference; models use their `primary_language`).
+    #[serde(default)]
+    pub primary_language: Option<String>,
 }
 
 impl Default for DaemonConfig {
@@ -132,6 +149,7 @@ impl Default for DaemonConfig {
                 custom_models_dir: None,
                 backends_dir: None,
                 active_backend: None,
+                primary_language: None,
             },
             online: OnlineConfig::default(),
             backends: BackendsConfig::default(),
@@ -336,6 +354,87 @@ impl DaemonConfig {
             .get(source)
             .and_then(|opts| opts.get(name))
             .map(String::as_str)
+    }
+
+    pub fn update_primary_language(&mut self, language: Option<String>) {
+        self.transcription.primary_language = language;
+    }
+
+    #[must_use]
+    pub fn primary_language(&self) -> Option<&str> {
+        self.transcription.primary_language.as_deref()
+    }
+
+    /// Set (`Some`) or clear (`None`) a per-model language override.
+    pub fn update_model_language(
+        &mut self,
+        source: String,
+        model: String,
+        language: Option<String>,
+    ) {
+        match language {
+            Some(v) => {
+                self.backends
+                    .models
+                    .entry(source)
+                    .or_default()
+                    .entry(model)
+                    .or_default()
+                    .language = Some(v);
+            }
+            None => {
+                if let Some(models) = self.backends.models.get_mut(&source)
+                    && let Some(settings) = models.get_mut(&model)
+                {
+                    settings.language = None;
+                }
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn model_language(&self, source: &str, model: &str) -> Option<&str> {
+        self.backends
+            .models
+            .get(source)
+            .and_then(|m| m.get(model))
+            .and_then(|s| s.language.as_deref())
+    }
+}
+
+#[cfg(test)]
+mod language_config_tests {
+    use super::*;
+
+    #[test]
+    fn primary_and_model_language_round_trip_through_toml() {
+        let mut cfg = DaemonConfig::default();
+        assert_eq!(cfg.primary_language(), None);
+
+        cfg.update_primary_language(Some("es-MX".to_string()));
+        cfg.update_model_language(
+            "github.com/x/whisper".to_string(),
+            "whisper-large".to_string(),
+            Some("fr".to_string()),
+        );
+
+        let toml = toml::to_string(&cfg).expect("serialize");
+        let back: DaemonConfig = toml::from_str(&toml).expect("deserialize");
+
+        assert_eq!(back.primary_language(), Some("es-MX"));
+        assert_eq!(
+            back.model_language("github.com/x/whisper", "whisper-large"),
+            Some("fr")
+        );
+        assert_eq!(back.model_language("github.com/x/whisper", "absent"), None);
+    }
+
+    #[test]
+    fn clearing_model_language_sets_none() {
+        let mut cfg = DaemonConfig::default();
+        cfg.update_model_language("s".into(), "m".into(), Some("de".into()));
+        cfg.update_model_language("s".into(), "m".into(), None);
+        assert_eq!(cfg.model_language("s", "m"), None);
     }
 }
 
