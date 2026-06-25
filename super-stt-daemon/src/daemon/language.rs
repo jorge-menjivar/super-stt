@@ -48,13 +48,12 @@ fn adapt(tag: &str, supported: &[String]) -> Option<String> {
     if supported.iter().any(|s| s == tag) {
         return Some(tag.to_string()); // exact (base or region)
     }
+    // No exact match: a region tag falls back to the base language when the
+    // model lists it (e.g. es-MX → es), even if the model also carries region
+    // variants for that language (e.g. Deepgram's `es` + `es-419`). Only when
+    // the base isn't supported either is the language unsupported → omit.
     if has_region(tag) {
         let b = base(tag);
-        // Region-aware for `b` but missing this region → fall through.
-        if supported.iter().any(|s| base(s) == b && has_region(s)) {
-            return None;
-        }
-        // Region-agnostic: model lists the base code → strip the region.
         if supported.iter().any(|s| s == b) {
             return Some(b.to_string());
         }
@@ -151,8 +150,18 @@ mod tests {
     }
 
     #[test]
-    fn global_region_falls_back_when_region_aware_misses() {
-        // Model is region-aware for `es` (es-419, es-ES) but lacks es-MX → default.
+    fn global_region_strips_to_base_even_with_region_siblings() {
+        // Model lists base `es` AND a region variant (`es-419`), like Deepgram.
+        // A picked es-MX strips to base `es` rather than falling back to default.
+        let r = resolve_language(true, None, Some("es-MX"), &s(&["en", "es", "es-419"]));
+        assert_eq!(r.wire.as_deref(), Some("es"));
+        assert_eq!(r.source, LanguageSource::Global);
+    }
+
+    #[test]
+    fn global_region_falls_back_when_base_unsupported() {
+        // Model carries only region variants for `es` (`es-419`, `es-ES`) and no
+        // base `es`, and lacks es-MX → the language is unsupported → default.
         let r = resolve_language(true, None, Some("es-MX"), &s(&["en-US", "es-419", "es-ES"]));
         assert_eq!(r.wire, None);
         assert_eq!(r.source, LanguageSource::Default);
