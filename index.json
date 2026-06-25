@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-25T18:46:00Z",
+  "generated_at": "2026-06-25T21:20:06Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -39,14 +39,14 @@
       "assets": {
         "wasm": {
           "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/deepgram.wasm",
-          "size": 208274,
-          "sha256": "6fd38bcd7ca03ae4e834f3bbe9ded008706631cb141ae0d6acdc016245629022"
+          "size": 208325,
+          "sha256": "3f00db3c6dd7fd2a67a865df4c2ac259d62eefe8e02971f23ce99ad24758dc6d"
         }
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/backend.toml",
-        "size": 993,
-        "sha256": "e8b2e4516d382e7fa857b1b7abf2272565fca4f4c4e1173b4d0eea2c060b4589"
+        "size": 2047,
+        "sha256": "90cb0ac72f4ad9d5407b3f3459eeb5bc86685aedfd2e405f9aec02bd207003e4"
       }
     },
     {
@@ -202,8 +202,8 @@
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cpu",
             "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 448212596,
-            "sha256": "7393124a437518e83574503ac9fb62672ef2bc5967dd4d439f3abb7ebee7ad46"
+            "size": 448284676,
+            "sha256": "b916095d958ac0d94896ead2e6323ba1165ac5670cc2168e54d494549f2329ed"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -213,12 +213,12 @@
               {
                 "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part00",
                 "size": 2097152000,
-                "sha256": "95889829022aa1c0da180b6986d472e518f7e367d38632676c0456ff4bca6dce"
+                "sha256": "4fcbe08cab1b41d049eb33946162080c3526a6cff8f2ba7d339f3dcd3a1dbed1"
               },
               {
                 "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part01",
-                "size": 914287189,
-                "sha256": "981e4849e17272bad15638fdca8cfd950509d64e0abc84211f026bf98a82a864"
+                "size": 914367936,
+                "sha256": "3ebdfe33465269371002a9d47aadf1540ef1a067b45d0aec336e826328865a4d"
               }
             ]
           }
