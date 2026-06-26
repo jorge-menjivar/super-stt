@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-26T00:44:23Z",
+  "generated_at": "2026-06-26T07:19:46Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -152,14 +152,14 @@
       "assets": {
         "wasm": {
           "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.0/openai.wasm",
-          "size": 210504,
-          "sha256": "d4c90d16d6dbbeeeab92dc94506a3495ed9ed6ba401442f6b3c6113634e88c63"
+          "size": 211177,
+          "sha256": "ea4c54451bc2152a28e01c52a44c29769cee527c3f0fd66973a2bdc173081b8e"
         }
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.0/backend.toml",
-        "size": 1351,
-        "sha256": "9978378583f1c897dd7ec8ecbc3ffaa13eb252e3d6aaffb8cf6eba67cf0f3ba6"
+        "size": 2500,
+        "sha256": "c407443ea479d1aa1c385dfb46cc7c598d27444d13f294133d08aa06601f191f"
       }
     },
     {
@@ -202,8 +202,8 @@
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cpu",
             "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 448284676,
-            "sha256": "b916095d958ac0d94896ead2e6323ba1165ac5670cc2168e54d494549f2329ed"
+            "size": 448304695,
+            "sha256": "4c27be45d419887b91aa9898d119b089611eace4283507ce03078c57a72899ff"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -213,12 +213,12 @@
               {
                 "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part00",
                 "size": 2097152000,
-                "sha256": "4fcbe08cab1b41d049eb33946162080c3526a6cff8f2ba7d339f3dcd3a1dbed1"
+                "sha256": "1b2b217c866a0a76140dfd13a902544f3a80f70033ec63e9fd1d49d5404d4f8a"
               },
               {
                 "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part01",
-                "size": 914367936,
-                "sha256": "3ebdfe33465269371002a9d47aadf1540ef1a067b45d0aec336e826328865a4d"
+                "size": 914357111,
+                "sha256": "81bf16f3a1e90f4325e68e27896af5ac9da95586d7b2acc69ee4dc5caac59e44"
               }
             ]
           }
@@ -490,8 +490,8 @@
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cpu",
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 3492236,
-            "sha256": "06ae13ac2312d32470fbbca54f562b79b5b3ddfc9fe17769179feebef02baee2"
+            "size": 3501578,
+            "sha256": "90f408c530c3ce379016fd93ebaf2f9f0f1f944dc449fce931f8c8b5ed372c0a"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -499,8 +499,8 @@
             "cuda_major": 12,
             "cuda_sm": 75,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm75.tar.gz",
-            "size": 4506002,
-            "sha256": "86aaad9c402303785fb66dfba68220943dfeeb39f2b414a3b1a4d719eacb8eea"
+            "size": 4511906,
+            "sha256": "d182381d4425861e7c91150c02150243e8c9ee6d50d49b8430f23bcc4cd8eef4"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -508,8 +508,8 @@
             "cuda_major": 12,
             "cuda_sm": 80,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm80.tar.gz",
-            "size": 4823164,
-            "sha256": "85d8cf9eba6910ab5ff33cc861a5a76eddfa5447c61e782a065ebd8651c4df9e"
+            "size": 4824952,
+            "sha256": "caa3698e9f75074b158e06926f20741c95b5ed9adf6d5736374667d5737ebb90"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -517,8 +517,8 @@
             "cuda_major": 12,
             "cuda_sm": 86,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm86.tar.gz",
-            "size": 4842570,
-            "sha256": "b08ea650949d4a7eaec63e6e4682858fd8c8eb163cb5c3b0575d9b9b4bdee52e"
+            "size": 4846418,
+            "sha256": "98c66d962bd6238b78b796422277f8c80aae7d1a25776a7e5d339517866d6163"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -526,8 +526,8 @@
             "cuda_major": 12,
             "cuda_sm": 89,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm89.tar.gz",
-            "size": 4826859,
-            "sha256": "23a42de9f4cd84eb676796a850c677c1366d1e5bf0776ddb283e11f51895f6f5"
+            "size": 4828669,
+            "sha256": "c74a0931722c1f1203116ce3816e7063fc5be35a0a0d9f89a6866e21b89b3ab3"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -535,8 +535,8 @@
             "cuda_major": 12,
             "cuda_sm": 90,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda12-sm90.tar.gz",
-            "size": 4807416,
-            "sha256": "f33233728a29d628dfd251ffdb583609d7831522afccd09aa9b0c78f17108db3"
+            "size": 4808778,
+            "sha256": "658e16f713be630e80409cb93c5c5fd25da126304faa5cdeec5dbe676d56ae1c"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -544,8 +544,8 @@
             "cuda_major": 13,
             "cuda_sm": 75,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm75.tar.gz",
-            "size": 4509486,
-            "sha256": "47748b8834578ef48162ab0ee3e14037c861dfbbedac50cd4a21abaef9d0f3d3"
+            "size": 4512453,
+            "sha256": "0df9800ab83e6d5e519992be0218e6f6c59899f492da92352efa0110828eb338"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -553,8 +553,8 @@
             "cuda_major": 13,
             "cuda_sm": 80,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm80.tar.gz",
-            "size": 4823388,
-            "sha256": "6b16c8b76ea09c755a731328f6a42cf6cf14ae7a5f557d5d4e723eb47d5c16a7"
+            "size": 4825976,
+            "sha256": "f2303353d81c1b0b54d50847090d0416b9cef0b3d73b46a6cf5c7a68fbeff746"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -562,8 +562,8 @@
             "cuda_major": 13,
             "cuda_sm": 86,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm86.tar.gz",
-            "size": 4844044,
-            "sha256": "04b88842f200ab3b817acd2bbcca79cf4c24fb7effd16a208f827408225307aa"
+            "size": 4846569,
+            "sha256": "7d6577a556a21ba6663580cf6bcd391f2a505cf0b034a07aeda54d8e95bc68e8"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -571,8 +571,8 @@
             "cuda_major": 13,
             "cuda_sm": 89,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm89.tar.gz",
-            "size": 4824292,
-            "sha256": "1762f5eae59fb8c4d055a5e6e41ecf5814e222735019ab65d1d835d87866617e"
+            "size": 4826984,
+            "sha256": "25e0e8a616b77f19fd783638675c334c0f94cd9d09164380f4a0568cd7cb4964"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -580,8 +580,8 @@
             "cuda_major": 13,
             "cuda_sm": 90,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm90.tar.gz",
-            "size": 4807808,
-            "sha256": "e3da99a35a7be3a369fffcabab2a3735cdf0ea3fabfd952be321370eae5a090d"
+            "size": 4811737,
+            "sha256": "ab4b5031a61063a2f55ac3a4ffc3775626a9d85d4a22c354633f7455876223da"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -589,8 +589,8 @@
             "cuda_major": 13,
             "cuda_sm": 100,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm100.tar.gz",
-            "size": 5537831,
-            "sha256": "ebcee7ad7c7338eb4929f969f499c1c15d807a73fa19b52a55b3148900b5d92f"
+            "size": 5541031,
+            "sha256": "6951533e6c3bb838ef408b6d88f81e9e9a0f3b88713c2143edc5dfeafe052141"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -598,15 +598,15 @@
             "cuda_major": 13,
             "cuda_sm": 120,
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-x86_64-unknown-linux-gnu-cuda13-sm120.tar.gz",
-            "size": 5538375,
-            "sha256": "0ac97e1caecd17eab78f2fbb9b528b7a2a090da8331dbf0554043a4249446cdc"
+            "size": 5538819,
+            "sha256": "d6301d2648fddee01143e42debcd3584a8040b75ecd119ed510f78982b05a78d"
           },
           {
             "target": "aarch64-unknown-linux-gnu",
             "accel": "cpu",
             "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/whisper-aarch64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 2977211,
-            "sha256": "b7f66681c99b80f2706b35cf8d9174b22a05c67c3c70783bce417c82dbe91010"
+            "size": 2985143,
+            "sha256": "70749da280eaf613e16f1c927939c98147777f083c8e36e456bfc4f1c6d308a3"
           }
         ]
       },
