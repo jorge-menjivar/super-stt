@@ -131,12 +131,8 @@
           "description": "The backend-protocol contract version implemented."
         },
         "description": {
-          "default": null,
-          "description": "One-line summary shown in the registry/Browse listing.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "One-line, human-readable summary shown in the registry/Browse listing.\nRequired for every backend.",
+          "type": "string"
         },
         "entrypoint": {
           "description": "Path, relative to the backend directory, to the executable\n(`subprocess`) or the `.wasm` component (`wasm`). May be a nested\nrelative path such as `bin/launcher` for multi-file bundles.\nMust not escape the backend directory: no absolute paths, no `..`\ncomponents, no backslashes, no embedded NUL.",
@@ -362,7 +358,8 @@
         "version",
         "kind",
         "entrypoint",
-        "contract"
+        "contract",
+        "description"
       ],
       "type": "object"
     },

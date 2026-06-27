@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-27T18:26:29Z",
+  "generated_at": "2026-06-27T22:23:22Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -42,6 +42,12 @@
           "size": 208325,
           "sha256": "3f00db3c6dd7fd2a67a865df4c2ac259d62eefe8e02971f23ce99ad24758dc6d"
         }
+      },
+      "index_stale": {
+        "latest_attempted": "0.1.0",
+        "tag": "v0.1.0",
+        "error": "TOML parse error: TOML parse error at line 5, column 1\n  |\n5 | [backend]\n  | ^^^^^^^^^\nmissing field `description`\n",
+        "since": "2026-06-27T22:23:22Z"
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-deepgram/releases/download/v0.1.0/backend.toml",
@@ -95,6 +101,12 @@
           "size": 271202,
           "sha256": "da4c97fa2f1a0b1dbe8c787163efd34dd3bbd09a8f1267b98ae78145d19dc0fe"
         }
+      },
+      "index_stale": {
+        "latest_attempted": "0.1.0",
+        "tag": "v0.1.0",
+        "error": "TOML parse error: TOML parse error at line 5, column 1\n  |\n5 | [backend]\n  | ^^^^^^^^^\nmissing field `description`\n",
+        "since": "2026-06-27T22:23:22Z"
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-mistral/releases/download/v0.1.0/backend.toml",
@@ -155,6 +167,12 @@
           "size": 211177,
           "sha256": "ea4c54451bc2152a28e01c52a44c29769cee527c3f0fd66973a2bdc173081b8e"
         }
+      },
+      "index_stale": {
+        "latest_attempted": "0.1.0",
+        "tag": "v0.1.0",
+        "error": "TOML parse error: TOML parse error at line 5, column 1\n  |\n5 | [backend]\n  | ^^^^^^^^^\nmissing field `description`\n",
+        "since": "2026-06-27T22:23:22Z"
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.0/backend.toml",
@@ -223,6 +241,12 @@
             ]
           }
         ]
+      },
+      "index_stale": {
+        "latest_attempted": "0.1.0",
+        "tag": "v0.1.0",
+        "error": "TOML parse error: TOML parse error at line 5, column 1\n  |\n5 | [backend]\n  | ^^^^^^^^^\nmissing field `description`\n",
+        "since": "2026-06-27T22:23:22Z"
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/backend.toml",
@@ -387,6 +411,12 @@
             "sha256": "7e6849f9e00398c3e8a5cf31d983b9a93b3e38d44ce3bdc6cb399b58ea306b33"
           }
         ]
+      },
+      "index_stale": {
+        "latest_attempted": "0.1.0",
+        "tag": "v0.1.0",
+        "error": "TOML parse error: TOML parse error at line 5, column 1\n  |\n5 | [backend]\n  | ^^^^^^^^^\nmissing field `description`\n",
+        "since": "2026-06-27T22:23:22Z"
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-voxtral/releases/download/v0.1.0/backend.toml",
@@ -609,6 +639,12 @@
             "sha256": "70749da280eaf613e16f1c927939c98147777f083c8e36e456bfc4f1c6d308a3"
           }
         ]
+      },
+      "index_stale": {
+        "latest_attempted": "0.1.0",
+        "tag": "v0.1.0",
+        "error": "TOML parse error: TOML parse error at line 5, column 1\n  |\n5 | [backend]\n  | ^^^^^^^^^\nmissing field `description`\n",
+        "since": "2026-06-27T22:23:22Z"
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-whisper/releases/download/v0.1.0/backend.toml",
