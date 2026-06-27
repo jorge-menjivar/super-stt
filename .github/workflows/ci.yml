@@ -151,8 +151,7 @@ jobs:
 
       # `cargo llvm-cov` builds the whole workspace, including the COSMIC/iced
       # GUI crates, so it needs the same Wayland/xkbcommon/GTK/dbus/alsa libs
-      # the test and clippy jobs install. `lcov` provides genhtml, used to render
-      # the directory-tree HTML report.
+      # the test and clippy jobs install.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -168,7 +167,6 @@ jobs:
             libxss-dev \
             libasound2-dev \
             libdbus-1-dev \
-            lcov \
             pkg-config
 
       - name: Install Rust
@@ -208,15 +206,21 @@ jobs:
           name: coverage-lcov
           path: lcov.info
 
-      # Render the browsable report with genhtml (from lcov). Unlike llvm-cov's
-      # own --html — a single flat list of every file — genhtml groups by
-      # crate/directory with drill-down, which the workspace needs. Runs on PRs
-      # too so this rendering is exercised before it ever reaches main.
+      # Render the browsable report as a per-directory tree. cargo-llvm-cov's own
+      # --html index is a single flat list of every file; llvm-cov's
+      # -show-directory-coverage adds per-directory index pages, but cargo-llvm-cov
+      # (0.8) doesn't expose that flag. So capture the llvm-cov invocation it runs
+      # (-vv) and re-run it with the flag appended — no extra tooling beyond the
+      # llvm-tools already installed. Runs on PRs too, so the rendering is
+      # exercised before it ever reaches main.
       - name: Render HTML coverage report
         run: |
-          genhtml lcov.info --output-directory coverage-html \
-            --title "Super STT coverage" --legend \
-            --ignore-errors source,inconsistent,corrupt
+          set -euo pipefail
+          cargo llvm-cov report --html --ignore-filename-regex 'tests/' -vv 2> llvmcov-vv.log
+          cmd=$(sed -n 's/.*Running `\(.*llvm-cov show.*\)`.*/\1/p' llvmcov-vv.log | tail -1)
+          test -n "$cmd"
+          eval "$cmd -show-directory-coverage"
+          rm -rf coverage-html && cp -r target/llvm-cov/html coverage-html
 
       # Drop a shields.io "endpoint" JSON inside the report so the README badge
       # reads the latest line-% straight from Pages — no Gist or PAT. jq ships on
