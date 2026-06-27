@@ -6,12 +6,27 @@
 //! installed model whether or not it is currently loaded. See
 //! `docs/protocol/endpoints/v1/backends/model-language.md`.
 
+use chrono::Utc;
+
 use crate::daemon::language::resolve_language;
 use crate::daemon::types::SuperSTTDaemon;
 use super_stt_shared::models::protocol::{Command, DaemonResponse};
 use super_stt_shared::models::registry::ModelDefinition;
 
 impl SuperSTTDaemon {
+    /// Broadcast that a setting changed so subscribed clients re-resolve any
+    /// derived state — e.g. a per-model language that follows the global value
+    /// must re-fetch its resolution block. Reuses the `daemon_status_changed`
+    /// topic clients already subscribe to; `setting` names what changed.
+    fn publish_settings_changed(&self, setting: &str) {
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "settings_changed",
+                "setting": setting,
+                "timestamp": Utc::now().to_rfc3339(),
+            }));
+    }
+
     pub async fn handle_get_primary_language(&self) -> DaemonResponse {
         let config = self.config.read().await;
         let value = config
@@ -30,6 +45,7 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             log::warn!("Failed to persist config after primary_language change: {e}");
         }
+        self.publish_settings_changed("language");
         DaemonResponse::success().with_language(serde_json::Value::String(language))
     }
 
@@ -41,6 +57,7 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             log::warn!("Failed to persist config after primary_language clear: {e}");
         }
+        self.publish_settings_changed("language");
         DaemonResponse::success().with_language(serde_json::Value::Null)
     }
 
@@ -142,6 +159,7 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             log::warn!("Failed to persist config after model language change: {e}");
         }
+        self.publish_settings_changed("language");
         self.handle_get_model_language(source, model).await
     }
 
@@ -160,6 +178,7 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             log::warn!("Failed to persist config after model language clear: {e}");
         }
+        self.publish_settings_changed("language");
         self.handle_get_model_language(source, model).await
     }
 }

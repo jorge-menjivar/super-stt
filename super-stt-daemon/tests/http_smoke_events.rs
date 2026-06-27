@@ -24,7 +24,7 @@
 //! Hermetic: `SUPER_STT_AUTO_APPROVE=1` (no GUI) + `SUPER_STT_KEYRING_MOCK=1`
 //! (in-memory keyring), so it runs in the default `cargo test` flow.
 
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::Bytes;
 use hyper::client::conn::http1::handshake;
 use hyper::{Method, Request, StatusCode};
@@ -191,6 +191,91 @@ async fn events_subscribe(
     };
     let _ = timeout(Duration::from_secs(5), read).await;
     (status, content_type, text)
+}
+
+/// POST `/v1/language` with `{ "language": <tag> }` on a fresh connection and
+/// return the status. Used to trigger the daemon's `settings_changed` broadcast.
+async fn post_language(sock: &PathBuf, token: &str, tag: &str) -> StatusCode {
+    let stream = UnixStream::connect(sock).await.expect("connect");
+    let io = hyper_util::rt::TokioIo::new(stream);
+    let (mut sender, conn) = handshake::<_, Full<Bytes>>(io).await.expect("handshake");
+    tokio::spawn(async move {
+        let _ = conn.await;
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("http://stt.local/v1/language")
+        .header("host", "stt.local")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::from(format!(
+            "{{\"language\":\"{tag}\"}}"
+        ))))
+        .expect("build req");
+    let resp = sender.send_request(req).await.expect("send req");
+    let status = resp.status();
+    let _ = resp.into_body().collect().await; // drain so the request fully completes
+    status
+}
+
+/// Read SSE frames from `body` until `needle` appears in the accumulated text,
+/// or the timeout elapses. Returns the accumulated text.
+async fn read_until(body: &mut hyper::body::Incoming, needle: &str) -> String {
+    let mut text = String::new();
+    let read = async {
+        while let Some(frame) = body.frame().await {
+            let Ok(frame) = frame else { break };
+            if let Some(d) = frame.data_ref() {
+                text.push_str(&String::from_utf8_lossy(d));
+                if text.contains(needle) {
+                    break;
+                }
+            }
+        }
+    };
+    let _ = timeout(Duration::from_secs(5), read).await;
+    text
+}
+
+/// Changing the global Primary Language broadcasts a `daemon_status_changed`
+/// event with `status: "settings_changed"` / `setting: "language"`, so a client
+/// showing a per-model language that follows the global value can re-resolve.
+/// The handler attaches the broadcast receiver before the `subscribed` ack
+/// (events.rs), so subscribing then mutating is race-free.
+#[tokio::test]
+async fn language_change_broadcasts_settings_changed() {
+    let (_guard, sock) = start_daemon().await;
+    // `daemon_status` to subscribe to the topic; `settings` to POST the language.
+    let token = mint(&sock, &["daemon_status", "settings"]).await;
+
+    // Keep `_sender` alive for the whole test so the stream stays open.
+    let (_sender, resp) = open_events(&sock, "topics=daemon_status_changed", &token).await;
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "subscribe to daemon_status_changed should open the stream"
+    );
+    let mut body = resp.into_body();
+
+    let ack = read_until(&mut body, "event: subscribed").await;
+    assert!(ack.contains("event: subscribed"), "missing ack: {ack:?}");
+
+    let st = post_language(&sock, &token, "es-MX").await;
+    assert_eq!(st, StatusCode::OK, "POST /v1/language should succeed");
+
+    let text = read_until(&mut body, "settings_changed").await;
+    assert!(
+        text.contains("event: daemon_status_changed"),
+        "settings_changed must ride the daemon_status_changed topic: {text:?}"
+    );
+    assert!(
+        text.contains("\"status\":\"settings_changed\""),
+        "payload must carry status=settings_changed: {text:?}"
+    );
+    assert!(
+        text.contains("\"setting\":\"language\""),
+        "payload must name the changed setting: {text:?}"
+    );
 }
 
 /// A valid topic with the matching scope opens the stream and gets an

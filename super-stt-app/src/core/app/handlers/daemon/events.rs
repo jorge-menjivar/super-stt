@@ -83,6 +83,20 @@ impl AppModel {
                 }
                 None
             }
+            "settings_changed" => {
+                // A setting changed — possibly from another client, or the
+                // global Primary Language this very client just set. Re-fetch
+                // the language state so a per-model button that follows the
+                // global value, and the global card, reflect the new value.
+                if event.data.get("setting").and_then(|s| s.as_str()) != Some("language") {
+                    return None;
+                }
+                let mut tasks = vec![self.load_primary_language()];
+                if let Some((source, model)) = self.model_language_for.clone() {
+                    tasks.push(self.load_model_language(source, model));
+                }
+                Some(Task::batch(tasks))
+            }
             _ => {
                 info!("Received unhandled daemon status: {status}");
                 None
