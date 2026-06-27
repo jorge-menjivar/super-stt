@@ -174,22 +174,13 @@ async fn events_subscribe(
         .unwrap_or_default()
         .to_string();
 
+    // The handler acks the subscription immediately; read until the full
+    // `subscribed` frame (its data line plus the blank-line terminator) lands.
     let mut body = resp.into_body();
-    let mut text = String::new();
-    let read = async {
-        while let Some(frame) = body.frame().await {
-            let Ok(frame) = frame else { break };
-            if let Some(data) = frame.data_ref() {
-                text.push_str(&String::from_utf8_lossy(data));
-                // The handler acks the subscription immediately; once we've
-                // seen the full event frame we have what we need.
-                if text.contains("event: subscribed") && text.contains("\n\n") {
-                    break;
-                }
-            }
-        }
-    };
-    let _ = timeout(Duration::from_secs(5), read).await;
+    let text = read_frames_until(&mut body, |t| {
+        t.contains("event: subscribed") && t.contains("\n\n")
+    })
+    .await;
     (status, content_type, text)
 }
 
@@ -221,13 +212,23 @@ async fn post_language(sock: &PathBuf, token: &str, tag: &str) -> StatusCode {
 /// Read SSE frames from `body` until `needle` appears in the accumulated text,
 /// or the timeout elapses. Returns the accumulated text.
 async fn read_until(body: &mut hyper::body::Incoming, needle: &str) -> String {
+    read_frames_until(body, |text| text.contains(needle)).await
+}
+
+/// Shared SSE frame-read loop behind [`read_until`] and [`events_subscribe`]:
+/// accumulate each data frame's text until `done` returns true for the
+/// accumulated text, or a 5s timeout elapses. Returns the accumulated text.
+async fn read_frames_until(
+    body: &mut hyper::body::Incoming,
+    done: impl Fn(&str) -> bool,
+) -> String {
     let mut text = String::new();
     let read = async {
         while let Some(frame) = body.frame().await {
             let Ok(frame) = frame else { break };
             if let Some(d) = frame.data_ref() {
                 text.push_str(&String::from_utf8_lossy(d));
-                if text.contains(needle) {
+                if done(&text) {
                     break;
                 }
             }
