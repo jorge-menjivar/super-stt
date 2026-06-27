@@ -151,7 +151,8 @@ jobs:
 
       # `cargo llvm-cov` builds the whole workspace, including the COSMIC/iced
       # GUI crates, so it needs the same Wayland/xkbcommon/GTK/dbus/alsa libs
-      # the test and clippy jobs install.
+      # the test and clippy jobs install. `lcov` provides genhtml, used to render
+      # the directory-tree HTML report.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -167,6 +168,7 @@ jobs:
             libxss-dev \
             libasound2-dev \
             libdbus-1-dev \
+            lcov \
             pkg-config
 
       - name: Install Rust
@@ -206,22 +208,20 @@ jobs:
           name: coverage-lcov
           path: lcov.info
 
-      # --- main only: publish the browsable HTML report to GitHub Pages ---
-      # This repo serves Pages from the `gh-pages` branch (the model registry
-      # index.json + schemas live there), so we can't use actions/deploy-pages —
-      # that requires Pages Source = "GitHub Actions", which would break the
-      # registry deploy. Instead we push the report into a `coverage/` subtree of
-      # the same branch, leaving the registry files untouched.
-      # Served at https://jorge-menjivar.github.io/super-stt/coverage/.
-      - name: Generate HTML coverage report
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: cargo llvm-cov report --html --ignore-filename-regex 'tests/'
+      # Render the browsable report with genhtml (from lcov). Unlike llvm-cov's
+      # own --html — a single flat list of every file — genhtml groups by
+      # crate/directory with drill-down, which the workspace needs. Runs on PRs
+      # too so this rendering is exercised before it ever reaches main.
+      - name: Render HTML coverage report
+        run: |
+          genhtml lcov.info --output-directory coverage-html \
+            --title "Super STT coverage" --legend \
+            --ignore-errors source,inconsistent,corrupt
 
-      # Drop a shields.io "endpoint" JSON beside the HTML so the README badge
+      # Drop a shields.io "endpoint" JSON inside the report so the README badge
       # reads the latest line-% straight from Pages — no Gist or PAT. jq ships on
       # the runner.
       - name: Write coverage badge JSON
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           pct=$(cargo llvm-cov report --json --summary-only --ignore-filename-regex 'tests/' \
@@ -233,9 +233,22 @@ jobs:
           else color=red
           fi
           printf '{"schemaVersion":1,"label":"coverage","message":"%.1f%%","color":"%s"}\n' \
-            "$pct" "$color" > target/llvm-cov/html/coverage.json
-          cat target/llvm-cov/html/coverage.json
+            "$pct" "$color" > coverage-html/coverage.json
+          cat coverage-html/coverage.json
 
+      # Preview artifact so the rendered tree can be eyeballed from a PR before merge.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-html
+          path: coverage-html
+
+      # --- main only: publish the browsable HTML report to GitHub Pages ---
+      # This repo serves Pages from the `gh-pages` branch (the model registry
+      # index.json + schemas live there), so we can't use actions/deploy-pages —
+      # that requires Pages Source = "GitHub Actions", which would break the
+      # registry deploy. Instead we push the report into a `coverage/` subtree of
+      # the same branch, leaving the registry files untouched.
+      # Served at https://jorge-menjivar.github.io/super-stt/coverage/.
       - name: Publish coverage to gh-pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
@@ -258,7 +271,7 @@ jobs:
             # report's underscore-prefixed assets; .nojekyll disables that.
             touch .nojekyll
             rm -rf coverage
-            cp -r ../target/llvm-cov/html coverage
+            cp -r ../coverage-html coverage
             git add -A
             if git diff --cached --quiet; then
               echo "coverage report unchanged; nothing to publish"

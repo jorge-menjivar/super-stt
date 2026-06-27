@@ -126,6 +126,13 @@ coverage-lcov:
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --lcov --output-path lcov.info
     cargo llvm-cov report --summary-only --ignore-filename-regex 'tests/'
 
+# Render a browsable HTML report (directory tree) from lcov.info via genhtml.
+# llvm-cov's own --html index is a single flat file list; genhtml groups by
+# crate/dir with drill-down. Regenerates lcov.info first; output in
+# target/coverage-html/. Requires: lcov (provides genhtml).
+coverage-html: coverage-lcov
+    genhtml lcov.info --output-directory target/coverage-html --title 'Super STT coverage' --legend --ignore-errors source,inconsistent,corrupt
+
 # Full local CI gate: format, lint, tests, doctests, schemas
 ci: fmt-check check test doctest schema-check
 
