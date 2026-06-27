@@ -107,6 +107,7 @@ mod tests {
         kind = "wasm"
         entrypoint = "y.wasm"
         contract = "v1"
+        description = "Test backend."
         license = "Apache-2.0"
 
         [assets]
@@ -161,6 +162,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "../escape"
             contract = "v1"
+            description = "Test backend."
         "#;
         let err: ManifestError = Manifest::parse(t).unwrap_err().into();
         assert!(matches!(
@@ -179,6 +181,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "y"
             contract = "v1"
+            description = "Test backend."
             license = "Apache-2.0"
 
             [[assets.subprocess]]
@@ -201,6 +204,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "y"
             contract = "v1"
+            description = "Test backend."
             license = "Apache-2.0"
 
             [[assets.subprocess]]

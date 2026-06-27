@@ -48,13 +48,14 @@ Backend identity and packaging.
 
 ```toml
 [backend]
-source     = "github.com/super-stt/whisper"
-name       = "Whisper (local)"
-version    = "0.1.0"
-kind       = "subprocess"
-entrypoint = "whisper-backend"
-contract   = "v1"
-license    = "Apache-2.0"
+source      = "github.com/super-stt/whisper"
+name        = "Whisper (local)"
+version     = "0.1.0"
+kind        = "subprocess"
+entrypoint  = "whisper-backend"
+contract    = "v1"
+license     = "Apache-2.0"
+description = "Local Whisper speech-to-text."
 ```
 
 | Field        | Type   | Required        | Notes                                                                 |
@@ -66,6 +67,7 @@ license    = "Apache-2.0"
 | `entrypoint` | string | yes             | Path, relative to the backend directory, to the executable (`subprocess`) or the `.wasm` component (`wasm`). |
 | `contract`   | string | yes             | The contract version the backend implements. Must be `v1`; unknown versions are rejected. |
 | `license`    | string | for publication | SPDX identifier of a current OSI-approved or FSF Free/Libre license (e.g. `Apache-2.0`, `MIT`, `GPL-3.0-only`), or the literal `other` for a license outside that set. Required for registry publication; optional for locally installed backends. |
+| `description`| string | yes             | One-line, human-readable summary shown in the registry/Browse listing. |
 
 `license` is checked against the SPDX license list embedded in the registry
 indexer — no network access — and must be a single, current (non-deprecated)
@@ -349,13 +351,14 @@ models ship `config.json`, `tokenizer.json`, and a single
 
 ```toml
 [backend]
-source     = "github.com/super-stt/whisper"
-name       = "Whisper (local)"
-version    = "0.1.0"
-kind       = "subprocess"
-entrypoint = "whisper-backend"
-contract   = "v1"
-license    = "Apache-2.0"
+source      = "github.com/super-stt/whisper"
+name        = "Whisper (local)"
+version     = "0.1.0"
+kind        = "subprocess"
+entrypoint  = "whisper-backend"
+contract    = "v1"
+license     = "Apache-2.0"
+description = "Local Whisper speech-to-text."
 
 [network]
 allowed_hosts = []
@@ -408,13 +411,14 @@ An OpenAI backend. No model files; one egress host; one secret and one option.
 
 ```toml
 [backend]
-source     = "github.com/super-stt/openai"
-name       = "OpenAI"
-version    = "0.1.0"
-kind       = "wasm"
-entrypoint = "openai.wasm"
-contract   = "v1"
-license    = "Apache-2.0"
+source      = "github.com/super-stt/openai"
+name        = "OpenAI"
+version     = "0.1.0"
+kind        = "wasm"
+entrypoint  = "openai.wasm"
+contract    = "v1"
+license     = "Apache-2.0"
+description = "OpenAI cloud transcription API."
 
 [network]
 allowed_hosts = ["api.openai.com"]
@@ -466,6 +470,9 @@ supported_devices   = ["none"]
   plaintext.
 - `[backend].source` must be unique across installed backends; a collision
   is a discovery error for the later backend.
+- `[backend].description` is required: a one-line, human-readable summary
+  shown in the registry/Browse listing. A manifest that omits it fails to
+  parse, and the backend is skipped during discovery.
 - `[backend].license` is required for registry publication: a current
   OSI-approved or FSF Free/Libre SPDX identifier, or the literal `other`. The
   indexer rejects a release whose manifest omits the field or declares an

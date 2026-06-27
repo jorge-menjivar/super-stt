@@ -297,7 +297,7 @@ pub(crate) fn into_index_backend(
         version,
         tag,
         name: m.backend.name,
-        description: m.backend.description,
+        description: Some(m.backend.description),
         license: m.backend.license.unwrap_or_default(),
         kind: m.backend.kind.to_string(),
         contract: m.backend.contract.to_string(),

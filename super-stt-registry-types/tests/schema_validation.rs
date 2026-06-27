@@ -62,7 +62,7 @@ fn wasm_base() -> Value {
     json!({
         "backend": { "source": "github.com/x/y", "name": "Y", "version": "1.0.0",
                       "kind": "wasm", "entrypoint": "y.wasm", "contract": "v1",
-                      "license": "Apache-2.0" },
+                      "license": "Apache-2.0", "description": "Y backend." },
         "assets": { "wasm": "y.wasm" }
     })
 }
@@ -71,7 +71,7 @@ fn sub_base() -> Value {
     json!({
         "backend": { "source": "github.com/x/y", "name": "Y", "version": "1.0.0",
                       "kind": "subprocess", "entrypoint": "y", "contract": "v1",
-                      "license": "Apache-2.0" },
+                      "license": "Apache-2.0", "description": "Y backend." },
         "assets": { "subprocess": [
             { "file": "y.tgz", "target": "x86_64-unknown-linux-gnu", "accel": "cpu" }
         ] }

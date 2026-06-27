@@ -16,6 +16,7 @@ version = "1.0.0"
 kind = "wasm"
 entrypoint = "y.wasm"
 contract = "v1"
+description = "Test backend."
 license = "Apache-2.0"
 
 [assets]

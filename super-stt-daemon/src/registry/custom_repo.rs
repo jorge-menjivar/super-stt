@@ -123,7 +123,7 @@ pub async fn resolve(
         version: manifest.backend.version.trim_start_matches('v').to_string(),
         tag: release.tag,
         name: manifest.backend.name,
-        description: manifest.backend.description,
+        description: Some(manifest.backend.description),
         license: manifest.backend.license.unwrap_or_default(),
         kind: manifest.backend.kind,
         contract: manifest.backend.contract,
@@ -333,8 +333,7 @@ struct BackendMeta {
     kind: String,
     entrypoint: String,
     contract: String,
-    #[serde(default)]
-    description: Option<String>,
+    description: String,
     #[serde(default)]
     license: Option<String>,
 }
@@ -471,6 +470,7 @@ mod tests {
             kind = "wasm"
             entrypoint = "y.wasm"
             contract = "v1"
+            description = "Test backend."
 
             [assets]
             wasm = "y.wasm"
@@ -498,6 +498,7 @@ mod tests {
             kind = "wasm"
             entrypoint = "y.wasm"
             contract = "v1"
+            description = "Test backend."
 
             [assets]
             wasm = "missing.wasm"
@@ -517,6 +518,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "y"
             contract = "v1"
+            description = "Test backend."
 
             [[assets.subprocess]]
             file = "y-cpu.tar.gz"
@@ -562,6 +564,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "y"
             contract = "v1"
+            description = "Test backend."
 
             [[assets.subprocess]]
             parts = ["y-cuda13.tar.gz.part00", "y-cuda13.tar.gz.part01"]

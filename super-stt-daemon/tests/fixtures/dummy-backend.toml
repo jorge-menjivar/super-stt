@@ -9,6 +9,7 @@ version = "1.2.3"
 kind = "wasm"
 entrypoint = "dummy.wasm"
 contract = "v1"
+description = "Test backend."
 license = "Apache-2.0"
 
 [network]

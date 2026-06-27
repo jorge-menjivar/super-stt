@@ -251,6 +251,7 @@ mod tests {
             kind = "wasm"
             entrypoint = "dummy.wasm"
             contract = "v1"
+            description = "Test backend."
 
             [assets]
             wasm = "dummy.wasm"

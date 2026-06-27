@@ -663,6 +663,7 @@ version = "1.0.0"
 kind = "subprocess"
 entrypoint = "x"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "m"

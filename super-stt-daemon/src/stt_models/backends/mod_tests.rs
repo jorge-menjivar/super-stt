@@ -29,6 +29,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 
 [network]
 allowed_hosts = ["api.openai.com"]
@@ -67,6 +68,7 @@ version = "0.1.0"
 kind = "subprocess"
 entrypoint = "super-stt-backend-voxtral"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "voxtral-mini"
@@ -176,6 +178,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "whisper-1"
@@ -210,6 +213,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "whisper-1"
@@ -244,6 +248,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "whisper-1"
@@ -276,6 +281,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "whisper-1"
@@ -345,6 +351,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "{dir}.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "{dir}-base"
@@ -448,6 +455,7 @@ version = "0.1.0"
 kind = "subprocess"
 entrypoint = "qwen3-asr"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "qwen3-asr-0.6b"

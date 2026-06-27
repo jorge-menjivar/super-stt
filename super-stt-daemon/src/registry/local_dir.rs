@@ -75,7 +75,7 @@ pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
         version,
         tag,
         name: m.backend.name.clone(),
-        description: None,
+        description: Some(m.backend.description.clone()),
         license: String::new(),
         kind: m.backend.kind.to_string(),
         contract: m.backend.contract.to_string(),
@@ -130,6 +130,7 @@ version = "1.2.3"
 kind = "wasm"
 entrypoint = "y.wasm"
 contract = "v1"
+description = "Test backend."
 "#;
 
     #[test]

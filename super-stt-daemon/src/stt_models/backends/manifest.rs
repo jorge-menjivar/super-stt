@@ -69,6 +69,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[secrets]]
 name = "openai_api_key"
@@ -96,6 +97,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[secrets]]
 name = "openai_api_key"
@@ -117,6 +119,7 @@ version = "0.2.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
 contract = "v1"
+description = "Test backend."
 
 [capabilities]
 websocket = true
@@ -135,6 +138,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 "#;
         let m = Manifest::parse(toml_src).expect("parse");
         assert!(!m.capabilities.websocket);
@@ -150,6 +154,7 @@ version = "0.2.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
 contract = "v1"
+description = "Test backend."
 
 [capabilities]
 websocket = true
@@ -177,6 +182,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "voxtral-mini-latest"
@@ -200,6 +206,7 @@ version = "0.1.0"
 kind = "subprocess"
 entrypoint = "super-stt-backend-whisper"
 contract = "v1"
+description = "Test backend."
 
 [capabilities]
 websocket = true
@@ -219,6 +226,7 @@ version = "0.1.0"
 kind = "subprocess"
 entrypoint = "whisper-backend"
 contract = "v1"
+description = "Test backend."
 
 [network]
 allowed_hosts = ["api.example.com"]
@@ -238,6 +246,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 
 [network]
 allowed_hosts = ["api.openai.com"]
@@ -256,6 +265,7 @@ version = "0.1.0"
 kind = "subprocess"
 entrypoint = "whisper-backend"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "whisper-tiny"
@@ -281,6 +291,7 @@ version = "0.1.0"
 kind = "subprocess"
 entrypoint = "whisper-backend"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "whisper-en"
@@ -306,6 +317,7 @@ version = "0.1.0"
 kind = "subprocess"
 entrypoint = "whisper-backend"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "whisper-en"
@@ -330,6 +342,7 @@ version = "0.2.0"
 kind = "wasm"
 entrypoint = "mistral.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[models]]
 name = "voxtral-mini-transcribe-realtime-2602"
@@ -361,6 +374,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "openai.wasm"
 contract = "v1"
+description = "Test backend."
 
 [[options]]
 name = "base_url"
@@ -406,6 +420,7 @@ version = "1.0.0"
 kind = "subprocess"
 entrypoint = "/usr/bin/python3"
 contract = "v1"
+description = "Test backend."
 "#,
         )
         .unwrap();

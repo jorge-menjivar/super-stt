@@ -74,9 +74,9 @@ pub struct BackendMeta {
     /// a manifest that omits the field or declares an unrecognized value.
     #[serde(default)]
     pub license: Option<String>,
-    /// One-line summary shown in the registry/Browse listing.
-    #[serde(default)]
-    pub description: Option<String>,
+    /// One-line, human-readable summary shown in the registry/Browse listing.
+    /// Required for every backend.
+    pub description: String,
 }
 
 /// Transport a backend uses: a wasm32 component or a native executable.
@@ -568,6 +568,7 @@ mod tests {
             kind = "wasm"
             entrypoint = "y.wasm"
             contract = "v1"
+            description = "Test backend."
 
             [assets]
             wasm = "y.wasm"
@@ -614,9 +615,28 @@ mod tests {
             kind = "wasm"
             entrypoint = "y.wasm"
             contract = "v1"
+            description = "Test backend."
 
             [[secrets]]
             name = "y_api_key"
+            "#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("description"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_backend_without_description() {
+        let err = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "wasm"
+            entrypoint = "y.wasm"
+            contract = "v1"
             "#,
         )
         .unwrap_err()
@@ -635,6 +655,7 @@ mod tests {
             kind = "container"
             entrypoint = "y.wasm"
             contract = "v1"
+            description = "Test backend."
             "#,
         )
         .unwrap_err()
@@ -654,6 +675,7 @@ mod tests {
                 kind = "wasm"
                 entrypoint = "y.wasm"
                 contract = "v1"
+                description = "Test backend."
 
                 [[models]]
                 name = "m"
@@ -691,6 +713,7 @@ mod tests {
                 kind = "subprocess"
                 entrypoint = "{bad}"
                 contract = "v1"
+                description = "Test backend."
                 "#
             );
             let err = Manifest::parse(&text).unwrap_err();
@@ -715,6 +738,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "y"
             contract = "v1"
+            description = "Test backend."
 
             [[models]]
             name = "m1"
@@ -761,6 +785,7 @@ mod tests {
                 kind = "subprocess"
                 entrypoint = "y"
                 contract = "v1"
+                description = "Test backend."
 
                 [[models]]
                 name = "m"
@@ -812,6 +837,7 @@ mod tests {
             kind = "wasm"
             entrypoint = "y.wasm"
             contract = "v1"
+            description = "Test backend."
 
             [[options]]
             name = "a"
@@ -845,6 +871,7 @@ mod tests {
             kind = "wasm"
             entrypoint = "y.wasm"
             contract = "v1"
+            description = "Test backend."
             future_field = "ignored"
 
             [future_table]
@@ -866,6 +893,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "y"
             contract = "v1"
+            description = "Test backend."
 
             [[assets.subprocess]]
             file = "y-cuda13.tar.gz"
@@ -893,6 +921,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "y"
             contract = "v1"
+            description = "Test backend."
 
             [[assets.subprocess]]
             parts = ["y-cuda13.tar.gz.part00", "y-cuda13.tar.gz.part01"]
@@ -922,6 +951,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "y"
             contract = "v1"
+            description = "Test backend."
 
             [[assets.subprocess]]
             file = "y.tar.gz"
@@ -945,6 +975,7 @@ mod tests {
             kind = "subprocess"
             entrypoint = "y"
             contract = "v1"
+            description = "Test backend."
 
             [[assets.subprocess]]
             target = "x86_64-unknown-linux-gnu"
