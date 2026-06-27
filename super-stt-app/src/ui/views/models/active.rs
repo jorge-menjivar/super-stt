@@ -72,31 +72,21 @@ pub(super) fn backend_header(
         .into()
 }
 
-/// Language trigger row for the active-backend card.
+/// Per-model language trigger button for the active-backend card.
 ///
-/// Renders whenever a model is **selected** (staged or loaded) for this backend
-/// and that model declares itself multilingual in the catalog. Returns `None`
-/// when no model is selected or the selected model is mono-lingual, so the
-/// caller can skip `card.push(…)` entirely.
+/// Rendered inline next to the model/device controls (not on its own row), for
+/// the given `selected_model` when the catalog marks it multilingual. Returns
+/// `None` for a mono-lingual model so the caller can skip the push entirely.
 ///
-/// The trigger label reflects the current per-model resolution block when
+/// The button label reflects the current per-model resolution block when
 /// `app.model_language_for` matches `(backend.source, selected_model)`;
 /// otherwise it falls back to a neutral `"Language"` label (block not yet
-/// fetched — stale-block guard).
-fn language_row<'a>(
+/// fetched — stale-block guard). It opens the language picker for this model.
+fn language_button<'a>(
     backend: &'a BackendInfo,
-    model_loaded: bool,
+    selected_model: &str,
     app: &'a AppModel,
-    spacing: &cosmic::cosmic_theme::Spacing,
 ) -> Option<Element<'a, Message>> {
-    // Determine the currently-selected model name: loaded takes priority,
-    // then the staged pick.
-    let selected_model: String = if model_loaded && !app.current_model.is_empty() {
-        app.current_model.clone()
-    } else {
-        app.staged_model.clone()?
-    };
-
     // Gate: only render for multilingual models (per catalog).
     let catalog_model = backend.models.iter().find(|m| m.name == selected_model)?;
     if !catalog_model.multilingual {
@@ -108,7 +98,7 @@ fn language_row<'a>(
     // Build the trigger label from the resolution block — but only when the
     // block belongs to this exact (source, model) pair (stale-block guard).
     let label =
-        if app.model_language_for.as_ref() == Some(&(source.clone(), selected_model.clone())) {
+        if app.model_language_for.as_ref() == Some(&(source.clone(), selected_model.to_string())) {
             if let Some(block) = &app.model_language {
                 let effective = block.get("effective").and_then(serde_json::Value::as_str);
                 let source_str = block
@@ -134,15 +124,10 @@ fn language_row<'a>(
         };
 
     Some(
-        widget::row::with_capacity(2)
-            .spacing(spacing.space_s)
-            .align_y(Alignment::Center)
-            .push(text::body("Language").width(Length::Fill))
-            .push(
-                widget::button::standard(label).on_press(Message::OpenLanguagePicker {
-                    model: Some((source.clone(), selected_model)),
-                }),
-            )
+        widget::button::standard(label)
+            .on_press(Message::OpenLanguagePicker {
+                model: Some((source.clone(), selected_model.to_string())),
+            })
             .into(),
     )
 }
@@ -211,17 +196,9 @@ pub(super) fn active_backend_card<'a>(
     if missing.is_empty() {
         card = card.push(card_divider());
         if model_loaded {
-            card = card.push(loaded_model_summary(app));
+            card = card.push(loaded_model_summary(backend, app));
         } else {
             card = card.push(staged_model_picker(backend, app));
-        }
-
-        // Per-model language trigger — shown whenever a model is selected
-        // (staged or loaded) for this backend and the catalog marks it
-        // multilingual. Gated alongside the picker/summary it accompanies, so
-        // it stays hidden while requirements are unmet.
-        if let Some(row) = language_row(backend, model_loaded, app, &spacing) {
-            card = card.push(row);
         }
     }
 
@@ -257,7 +234,10 @@ pub(super) fn active_backend_card<'a>(
 /// loaded for this backend. Reads as e.g. "Active: whisper-1 · cuda" with
 /// an Unload button on the right; the Unload click drops the model but
 /// keeps the active backend selected.
-pub(super) fn loaded_model_summary(app: &AppModel) -> Element<'_, Message> {
+pub(super) fn loaded_model_summary<'a>(
+    backend: &'a BackendInfo,
+    app: &'a AppModel,
+) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let device_suffix = if app.current_device.is_empty() || app.current_device == "none" {
         String::new()
@@ -267,17 +247,22 @@ pub(super) fn loaded_model_summary(app: &AppModel) -> Element<'_, Message> {
     let label = text::body(format!("Active: {}{device_suffix}", app.current_model))
         .class(cosmic::theme::Text::Accent)
         .width(Length::Fill);
-    row![
-        label,
-        // A leading stop glyph fronts the label, mirroring the Load button's
-        // play icon so load/unload read as a play/stop pair.
-        button::standard("Unload")
-            .leading_icon(icons::phosphor_handle(icons::STOP))
-            .on_press(Message::UnloadActiveModel),
-    ]
-    .spacing(spacing.space_xs)
-    .align_y(Alignment::Center)
-    .into()
+    let mut summary = row![label]
+        .spacing(spacing.space_xs)
+        .align_y(Alignment::Center);
+    // Per-model language trigger, inline before Unload, for a multilingual model.
+    if let Some(lang_button) = language_button(backend, &app.current_model, app) {
+        summary = summary.push(lang_button);
+    }
+    // A leading stop glyph fronts the Unload label, mirroring the Load button's
+    // play icon so load/unload read as a play/stop pair.
+    summary
+        .push(
+            button::standard("Unload")
+                .leading_icon(icons::phosphor_handle(icons::STOP))
+                .on_press(Message::UnloadActiveModel),
+        )
+        .into()
 }
 
 /// Pure VRAM-fit check for a staged load: given the staged `device`, the
@@ -365,6 +350,14 @@ pub(super) fn staged_model_picker<'a>(
         .placeholder("Device")
         .width(Length::FillPortion(1));
         picker_row = picker_row.push(device_dropdown);
+    }
+
+    // Per-model language trigger, inline after the device dropdown — shown only
+    // for a staged multilingual model.
+    if let Some(model) = staged_model
+        && let Some(lang_button) = language_button(backend, model, app)
+    {
+        picker_row = picker_row.push(lang_button);
     }
 
     // Load button — enabled only when a model is staged AND (the staged
