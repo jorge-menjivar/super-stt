@@ -8,6 +8,8 @@
 
 *Easy to install • State-of-the-art Voice Models • Built in Rust • GPU Acceleration*
 
+[![coverage](https://img.shields.io/endpoint?url=https://jorge-menjivar.github.io/super-stt/coverage/coverage.json)](https://jorge-menjivar.github.io/super-stt/coverage/)
+
 </div>
 
 https://github.com/user-attachments/assets/bbbe20c3-6802-4797-afc8-aa81d1b48415

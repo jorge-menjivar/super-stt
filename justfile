@@ -112,6 +112,20 @@ doctest *args:
 schema-check:
     cargo test -p super-stt-registry-types --features schema
 
+# Measure code coverage over the whole workspace (requires cargo-llvm-cov).
+# --remap-path-prefix keeps report paths relative, and tests/ is excluded so
+# only product code is counted. Default (CPU) features — `--all-features` would
+# pull in `cuda`, which needs a toolkit. Build the mock WASM backends first
+# (just build-mock-wasm-backend{,-realtime}) so the daemon transport tests run
+# instead of self-skipping. Usage: just coverage [--html]
+coverage *args:
+    cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' {{ args }}
+
+# Coverage for CI: write lcov.info and print a summary.
+coverage-lcov:
+    cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --lcov --output-path lcov.info
+    cargo llvm-cov report --summary-only --ignore-filename-regex 'tests/'
+
 # Full local CI gate: format, lint, tests, doctests, schemas
 ci: fmt-check check test doctest schema-check
 

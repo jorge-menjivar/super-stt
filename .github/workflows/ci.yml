@@ -135,3 +135,142 @@ jobs:
           components: rustfmt
       - name: Check formatting
         run: just fmt-check
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    # Needed only by the gh-pages publish step (push to main); harmless on PRs.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-llvm-cov
+
+      # `cargo llvm-cov` builds the whole workspace, including the COSMIC/iced
+      # GUI crates, so it needs the same Wayland/xkbcommon/GTK/dbus/alsa libs
+      # the test and clippy jobs install.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libegl1-mesa-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libasound2-dev \
+            libdbus-1-dev \
+            pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+          targets: wasm32-wasip2
+
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-llvmcov-${{ hashFiles('**/Cargo.lock') }}
+
+      # Same as the test job: build the mock WASM backends so the daemon's WASM
+      # transport integration tests run (and count) instead of self-skipping.
+      - name: Build mock WASM backends
+        run: |
+          just build-mock-wasm-backend
+          just build-mock-wasm-realtime-backend
+
+      # Collect coverage once; the report steps below render lcov/html/json from
+      # this profile data without re-running the suite.
+      - name: Collect coverage
+        run: cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --no-report
+
+      - name: LCOV report + summary
+        run: |
+          cargo llvm-cov report --lcov --output-path lcov.info --ignore-filename-regex 'tests/'
+          cargo llvm-cov report --summary-only --ignore-filename-regex 'tests/'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-lcov
+          path: lcov.info
+
+      # --- main only: publish the browsable HTML report to GitHub Pages ---
+      # This repo serves Pages from the `gh-pages` branch (the model registry
+      # index.json + schemas live there), so we can't use actions/deploy-pages —
+      # that requires Pages Source = "GitHub Actions", which would break the
+      # registry deploy. Instead we push the report into a `coverage/` subtree of
+      # the same branch, leaving the registry files untouched.
+      # Served at https://jorge-menjivar.github.io/super-stt/coverage/.
+      - name: Generate HTML coverage report
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cargo llvm-cov report --html --ignore-filename-regex 'tests/'
+
+      # Drop a shields.io "endpoint" JSON beside the HTML so the README badge
+      # reads the latest line-% straight from Pages — no Gist or PAT. jq ships on
+      # the runner.
+      - name: Write coverage badge JSON
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          pct=$(cargo llvm-cov report --json --summary-only --ignore-filename-regex 'tests/' \
+            | jq -r '.data[0].totals.lines.percent')
+          if   awk "BEGIN{exit !($pct>=90)}"; then color=brightgreen
+          elif awk "BEGIN{exit !($pct>=75)}"; then color=green
+          elif awk "BEGIN{exit !($pct>=60)}"; then color=yellow
+          elif awk "BEGIN{exit !($pct>=40)}"; then color=orange
+          else color=red
+          fi
+          printf '{"schemaVersion":1,"label":"coverage","message":"%.1f%%","color":"%s"}\n' \
+            "$pct" "$color" > target/llvm-cov/html/coverage.json
+          cat target/llvm-cov/html/coverage.json
+
+      - name: Publish coverage to gh-pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Publish from a clean dir, mirroring build-index.yml. Only the
+          # `coverage/` subtree is replaced, so the registry index.json + schemas
+          # on gh-pages survive. The fetch+reset+retry loop rebases onto the
+          # current tip if build-index pushes concurrently, so no shared lock is
+          # needed between the two workflows.
+          rm -rf publish && mkdir publish && cd publish
+          git init -q -b gh-pages
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+          for attempt in 1 2 3 4 5; do
+            if git fetch --depth=1 origin gh-pages 2>/dev/null; then
+              git reset --hard -q FETCH_HEAD
+            fi
+            # Pages serves this branch through Jekyll, which would drop the
+            # report's underscore-prefixed assets; .nojekyll disables that.
+            touch .nojekyll
+            rm -rf coverage
+            cp -r ../target/llvm-cov/html coverage
+            git add -A
+            if git diff --cached --quiet; then
+              echo "coverage report unchanged; nothing to publish"
+              exit 0
+            fi
+            git -c user.name=actions -c user.email=actions@github.com \
+                commit -q -m "Update coverage report ($GITHUB_SHA)"
+            if git push origin gh-pages; then
+              exit 0
+            fi
+            echo "gh-pages push rejected (attempt $attempt); rebasing and retrying"
+            sleep 3
+          done
+          echo "failed to publish coverage after 5 attempts" >&2
+          exit 1
