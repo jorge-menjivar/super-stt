@@ -344,16 +344,11 @@ impl SuperSTTDaemon {
             instance,
         });
 
-        daemon
-            .events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "ready",
-                "model_loaded": true,
-                "provider": provider.to_string(),
-                "actual_device": actual_device,
-                "model_name": name,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            }));
+        // Announce the active model the same way a user-initiated switch does
+        // (`model_switched` + `ready`). The startup load formerly emitted only
+        // `ready`, so a settings app reconnecting after a daemon restart never
+        // learned which model became active and kept showing "no model loaded".
+        daemon.broadcast_model_active(&name, &provider, &source, &actual_device);
         Ok(())
     }
 

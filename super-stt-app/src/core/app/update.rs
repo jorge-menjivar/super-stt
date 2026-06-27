@@ -25,6 +25,7 @@ impl AppModel {
             Message::ConnectToDaemon
                 | Message::DaemonConnectionResult(_)
                 | Message::DaemonConnected
+                | Message::EventStreamConnected
                 | Message::CurrentAudioThemeLoaded(_)
                 | Message::VolumeLoaded(_)
                 | Message::CustomModelsDirLoaded(_)

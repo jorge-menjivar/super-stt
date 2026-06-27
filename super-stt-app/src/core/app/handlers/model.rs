@@ -43,16 +43,7 @@ impl AppModel {
                         Ok(models) => cosmic::Action::App(Message::AvailableModelsLoaded(models)),
                         Err(e) => cosmic::Action::App(Message::ModelError(e)),
                     }),
-                    Task::perform(get_current_model(), |result| match result {
-                        Ok((model, provider, source)) => {
-                            cosmic::Action::App(Message::CurrentModelLoaded {
-                                model,
-                                provider,
-                                source,
-                            })
-                        }
-                        Err(e) => cosmic::Action::App(Message::ModelError(e)),
-                    }),
+                    self.fetch_current_model(),
                     Task::perform(get_current_device(), |result| match result {
                         Ok((device, available_devices)) => {
                             info!(
@@ -165,18 +156,38 @@ impl AppModel {
                 model,
                 provider,
                 source,
-            }
-            | Message::ModelChanged {
-                model,
-                provider,
-                source,
+                epoch,
             } => {
+                // Discard a stale snapshot: a live `model_switched` advanced the
+                // epoch after this fetch was issued, so it is the fresher truth
+                // and this point-in-time read must not overwrite it.
+                if epoch != self.current_model_epoch {
+                    return Task::none();
+                }
                 self.current_model.clone_from(&model);
                 self.current_provider = provider;
                 self.current_source.clone_from(&source);
                 self.model_operation_state = ModelOperationState::Ready;
                 // Fetch the per-model language block now that a model is loaded.
-                // Wire point 1: model loaded (CurrentModelLoaded / ModelChanged).
+                // Wire point 1: model loaded (CurrentModelLoaded).
+                self.load_model_language(source, model)
+            }
+
+            Message::ModelChanged {
+                model,
+                provider,
+                source,
+            } => {
+                // Authoritative result of a user-initiated switch — bump the
+                // epoch so any in-flight reconnect snapshot is discarded rather
+                // than reverting this.
+                self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
+                self.current_model.clone_from(&model);
+                self.current_provider = provider;
+                self.current_source.clone_from(&source);
+                self.model_operation_state = ModelOperationState::Ready;
+                // Fetch the per-model language block now that a model is loaded.
+                // Wire point 1: model loaded (ModelChanged).
                 self.load_model_language(source, model)
             }
 
@@ -198,5 +209,24 @@ impl AppModel {
 
             _ => Task::none(),
         }
+    }
+
+    /// Snapshot the daemon's current model, tagging the result with the
+    /// `current_model_epoch` captured now. The `CurrentModelLoaded` handler
+    /// applies it only if the epoch is still current — so a slow query that
+    /// resolves after a live `model_switched` is discarded instead of reverting
+    /// the model identity. Used at initial load and on every event-stream
+    /// (re)subscribe to resync robustly against reconnect/restart ordering.
+    pub(in crate::core::app) fn fetch_current_model(&self) -> Task<cosmic::Action<Message>> {
+        let epoch = self.current_model_epoch;
+        Task::perform(get_current_model(), move |result| match result {
+            Ok((model, provider, source)) => cosmic::Action::App(Message::CurrentModelLoaded {
+                model,
+                provider,
+                source,
+                epoch,
+            }),
+            Err(e) => cosmic::Action::App(Message::ModelError(e)),
+        })
     }
 }

@@ -94,6 +94,42 @@ impl SuperSTTDaemon {
             }));
     }
 
+    /// Announce that `model` is now the active, loaded model. Emits the
+    /// `model_switched` event — which carries the full identity clients use to
+    /// update their "current model" view — followed by the operational `ready`
+    /// event. Used by both the startup load of the persisted model and
+    /// user-initiated switches so the two paths broadcast identical state.
+    ///
+    /// `source` is included on the wire because a client reconnecting after a
+    /// daemon restart has no prior `current_source` to fall back to; without it
+    /// the model loads but the settings app keeps showing "no model loaded".
+    pub fn broadcast_model_active(
+        &self,
+        name: &str,
+        provider: &Provider,
+        source: &str,
+        actual_device: &str,
+    ) {
+        let timestamp = Utc::now().to_rfc3339();
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "model_switched",
+                "model_name": name,
+                "provider": provider.to_string(),
+                "source": source,
+                "actual_device": actual_device,
+                "timestamp": timestamp,
+            }));
+        self.events
+            .publish_daemon_status_changed(serde_json::json!({
+                "status": "ready",
+                "model_loaded": true,
+                "model_name": name,
+                "actual_device": actual_device,
+                "timestamp": timestamp,
+            }));
+    }
+
     pub(super) async fn unload_current_model(&self) {
         // Take the loaded model OUT of the lock first, then release the lock
         // before calling `shutdown()` — `shutdown()` may take several seconds

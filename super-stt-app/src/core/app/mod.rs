@@ -95,6 +95,12 @@ pub struct AppModel {
     pub current_provider: Provider,
     /// Source (serving backend repo id) of the currently loaded model
     pub current_source: String,
+    /// Monotonic counter bumped every time a live daemon event (e.g.
+    /// `model_switched`) updates the model identity. A point-in-time
+    /// `get_current_model` snapshot captures this at issue time and is
+    /// discarded on arrival if the counter has since advanced — so a slow,
+    /// stale reconnect query can never clobber a fresher live event.
+    pub current_model_epoch: u64,
     /// Model operation state (downloading, loading, or ready)
     pub model_operation_state: ModelOperationState,
 

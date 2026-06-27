@@ -247,21 +247,7 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after model switch: {e}");
         }
-        self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "model_switched",
-                "model_name": model.clone(),
-                "actual_device": actual_device,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
-        self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "ready",
-                "model_loaded": true,
-                "model_name": model.clone(),
-                "actual_device": actual_device,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+        self.broadcast_model_active(&model, &provider, &source, &actual_device);
         info!("Switched to model: {model} via {provider}");
         DaemonResponse::success()
             .with_current_model(model.clone())

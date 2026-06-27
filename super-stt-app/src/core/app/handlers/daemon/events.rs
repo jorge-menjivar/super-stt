@@ -185,11 +185,23 @@ impl AppModel {
                 "Received model_switched event: current_model={:?} -> {:?} via {provider} ({source})",
                 self.current_model, model
             );
-            self.current_model = model;
+            // A live identity change supersedes any in-flight reconnect
+            // snapshot: bump the epoch so a stale get_current_model response
+            // can't revert this.
+            self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
+            self.current_model.clone_from(&model);
             self.current_provider = provider;
-            self.current_source = source;
+            self.current_source.clone_from(&source);
             self.model_operation_state = ModelOperationState::Ready;
             info!("Model state updated to Ready after model_switched event");
+            // Mirror CurrentModelLoaded/ModelChanged: fetch the per-model
+            // language block so the active-backend card's language button shows
+            // the model's resolved language instead of the neutral "Language"
+            // label. A client that learns the active model only via this
+            // broadcast — e.g. the settings app reconnecting after a daemon
+            // restart, where the startup load now emits model_switched — would
+            // otherwise leave model_language_for unset.
+            return Some(self.load_model_language(source, model));
         }
         None
     }

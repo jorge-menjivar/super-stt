@@ -26,6 +26,13 @@ pub enum Message {
     ConnectToDaemon,
     DaemonConnectionResult(Result<(), String>),
     DaemonConnected,
+    /// The `/events` SSE stream finished (re)subscribing. Distinct from
+    /// `DaemonConnected` (which the REST ping loop also fires): it marks the
+    /// point at which live events start flowing, so the app re-fetches the
+    /// current model to capture any state that changed before the stream was
+    /// subscribed (e.g. a model that finished loading during a daemon restart
+    /// whose one-shot broadcast would otherwise have been missed).
+    EventStreamConnected,
     // Settings loaded from daemon at connection time (replaces the
     // legacy bulk fetch_daemon_config). Each is fetched with its own
     // GET endpoint.
@@ -190,6 +197,10 @@ pub enum Message {
         model: String,
         provider: Provider,
         source: String,
+        /// `current_model_epoch` captured when this snapshot was requested.
+        /// The handler applies the snapshot only if the epoch is unchanged —
+        /// otherwise a live `model_switched` superseded it and wins.
+        epoch: u64,
     },
     ModelChanged {
         model: String,

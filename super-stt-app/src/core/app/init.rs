@@ -120,6 +120,7 @@ impl AppModel {
             current_model: String::new(),
             current_provider: Provider::default(),
             current_source: String::new(),
+            current_model_epoch: 0,
             model_operation_state: ModelOperationState::Loading {
                 target_model: String::new(),
                 status_message: "Loading initial model state...".to_string(),

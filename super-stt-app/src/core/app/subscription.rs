@@ -58,13 +58,15 @@ pub(super) fn audio_events_subscription(
         while let Some(update) = updates.next().await {
             let msg = match update {
                 WidgetSubscriptionUpdate::Connected => {
-                    // Mirror the applet's mapping: a successful
-                    // reconnect must clear any sticky `Blocked` /
-                    // `Error` state on the daemon-status badge.
-                    // Without forwarding this, the settings UI sits in
-                    // whatever state it was last in (e.g. Blocked from a
-                    // denial the user has since cleared).
-                    Message::DaemonConnected
+                    // A successful (re)subscribe of the live event stream.
+                    // Clears any sticky `Blocked` / `Error` state on the
+                    // daemon-status badge (without this the settings UI sits in
+                    // whatever state it was last in, e.g. Blocked from a denial
+                    // the user has since cleared) AND triggers a current-model
+                    // re-fetch now that live events are flowing — so a model
+                    // that finished loading before this subscription completed
+                    // is still picked up.
+                    Message::EventStreamConnected
                 }
                 WidgetSubscriptionUpdate::Event(evt) => {
                     match settings_widget_event_to_message(&evt) {

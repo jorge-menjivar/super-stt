@@ -1058,3 +1058,39 @@ async fn active_backend_commands_dispatch_through_handle_command() {
     assert_eq!(response.status, "success");
     assert!(daemon.active_backend.read().await.is_none());
 }
+
+/// A successful model load — whether a user-initiated switch or the daemon's
+/// startup load of the persisted model — must broadcast a self-contained
+/// `model_switched` event carrying the model's full identity (`model_name`,
+/// `provider`, `source`) followed by the operational `ready` event. A settings
+/// app reconnecting after a daemon restart has no prior `current_source` to
+/// fall back to, so `source` must be on the wire for it to mark the model
+/// loaded — otherwise the model loads (visible in logs / htop) but the UI keeps
+/// showing "no model loaded".
+#[tokio::test]
+async fn broadcast_model_active_carries_full_identity() {
+    use crate::daemon::events::Topic;
+    use super_stt_shared::models::provider::Provider;
+
+    let daemon = test_daemon().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    let provider = Provider::from("mistral");
+    daemon.broadcast_model_active(
+        "voxtral-mini",
+        &provider,
+        "github.com/super-stt/mistral",
+        "cuda",
+    );
+
+    let (_topic, switched) = rx.recv_json().await.expect("model_switched event");
+    assert_eq!(switched["status"], "model_switched");
+    assert_eq!(switched["model_name"], "voxtral-mini");
+    assert_eq!(switched["provider"], provider.to_string());
+    assert_eq!(switched["source"], "github.com/super-stt/mistral");
+
+    let (_topic, ready) = rx.recv_json().await.expect("ready event");
+    assert_eq!(ready["status"], "ready");
+    assert_eq!(ready["model_loaded"], true);
+    assert_eq!(ready["model_name"], "voxtral-mini");
+}
