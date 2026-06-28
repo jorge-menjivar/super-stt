@@ -126,22 +126,11 @@ coverage-lcov:
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --lcov --output-path lcov.info
     cargo llvm-cov report --summary-only --ignore-filename-regex 'tests/'
 
-# Render a browsable HTML report with a per-directory tree in target/llvm-cov/html/.
-# cargo-llvm-cov's own --html index is a single flat file list; llvm-cov's
-# -show-directory-coverage adds per-directory index pages. cargo-llvm-cov (0.8)
-# doesn't expose that flag, so capture the llvm-cov invocation it runs and re-run
-# it with the flag appended — no extra tooling beyond the llvm-tools-preview
-# component cargo-llvm-cov already uses. Usage: just coverage-html
+# Render a browsable HTML report to target/llvm-cov/html/. The index is a single
+# flat file list (cargo-llvm-cov's default); per-file pages show line-level
+# coverage. Usage: just coverage-html
 coverage-html *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    vvlog="$(mktemp)"
-    cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --html -vv {{ args }} 2> >(tee "$vvlog" >&2)
-    cmd="$(sed -n 's/.*Running `\(.*llvm-cov show.*\)`.*/\1/p' "$vvlog" | tail -1)"
-    [ -n "$cmd" ] || { echo 'could not capture llvm-cov show command' >&2; exit 1; }
-    eval "$cmd -show-directory-coverage"
-    rm -f "$vvlog"
-    echo 'Report: target/llvm-cov/html/index.html'
+    cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --html {{ args }}
 
 # Full local CI gate: format, lint, tests, doctests, schemas
 ci: fmt-check check test doctest schema-check

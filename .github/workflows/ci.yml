@@ -206,20 +206,14 @@ jobs:
           name: coverage-lcov
           path: lcov.info
 
-      # Render the browsable report as a per-directory tree. cargo-llvm-cov's own
-      # --html index is a single flat list of every file; llvm-cov's
-      # -show-directory-coverage adds per-directory index pages, but cargo-llvm-cov
-      # (0.8) doesn't expose that flag. So capture the llvm-cov invocation it runs
-      # (-vv) and re-run it with the flag appended — no extra tooling beyond the
-      # llvm-tools already installed. Runs on PRs too, so the rendering is
-      # exercised before it ever reaches main.
+      # Render the browsable report. cargo-llvm-cov's --html index is a single flat
+      # list of every file; per-file pages show line-level coverage. (A directory
+      # tree would need lcov's genhtml or grcov; we intentionally keep to the
+      # llvm-cov toolchain and accept the flat index.) Runs on PRs too, so the
+      # rendering is exercised before it ever reaches main.
       - name: Render HTML coverage report
         run: |
-          set -euo pipefail
-          cargo llvm-cov report --html --ignore-filename-regex 'tests/' -vv 2> llvmcov-vv.log
-          cmd=$(sed -n 's/.*Running `\(.*llvm-cov show.*\)`.*/\1/p' llvmcov-vv.log | tail -1)
-          test -n "$cmd"
-          eval "$cmd -show-directory-coverage"
+          cargo llvm-cov report --html --ignore-filename-regex 'tests/'
           rm -rf coverage-html && cp -r target/llvm-cov/html coverage-html
 
       # Drop a shields.io "endpoint" JSON inside the report so the README badge
