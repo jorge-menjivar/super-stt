@@ -249,9 +249,15 @@ mod upgrade_compat_tests {
     #[test]
     fn v0_1_3_full_applet_config_loads() {
         let (cfg, was_reset) = AppletConfig::parse_or_reset(&v0_1_3_applet_fixture());
-        assert!(!was_reset, "a valid v0.1.3 applet config must load, not reset");
+        assert!(
+            !was_reset,
+            "a valid v0.1.3 applet config must load, not reset"
+        );
         assert_eq!(cfg.visualization.theme, VisualizationTheme::Waveform);
-        assert_eq!(cfg.visualization.colors.light_colors, VisualizationColor::Blue);
+        assert_eq!(
+            cfg.visualization.colors.light_colors,
+            VisualizationColor::Blue
+        );
         assert_eq!(cfg.ui.applet_width, 150);
         assert_eq!(cfg.ui.icon_alignment, "end");
         // New field materializes at its default.
@@ -319,7 +325,10 @@ show_visualization = true
 "#;
         let cfg: AppletConfig = toml::from_str(toml_str).expect("must parse, not error");
         assert_eq!(cfg.visualization.theme, VisualizationTheme::default()); // reset
-        assert_eq!(cfg.visualization.colors.light_colors, VisualizationColor::Blue); // preserved
+        assert_eq!(
+            cfg.visualization.colors.light_colors,
+            VisualizationColor::Blue
+        ); // preserved
         assert_eq!(cfg.ui.applet_width, 150); // preserved
         assert!(cfg.ui.show_icon);
     }

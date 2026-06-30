@@ -104,6 +104,11 @@ fmt:
 test *args:
     cargo test {{ args }}
 
+# Load every committed old-config fixture against the current config types.
+config-compat *args:
+    cargo test -p super-stt-daemon --lib config {{ args }}
+    cargo test -p super-stt-cosmic-applet --lib config {{ args }}
+
 # Run doctests
 doctest *args:
     cargo test --doc {{ args }}
