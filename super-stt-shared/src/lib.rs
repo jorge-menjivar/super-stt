@@ -2,7 +2,6 @@
 pub mod daemon;
 pub mod models;
 pub mod registry;
-pub mod services;
 pub mod utils;
 pub mod validation;
 
@@ -11,7 +10,6 @@ pub mod audio;
 
 // Re-export commonly used types for convenience
 pub use models::*;
-pub use services::*;
 
 #[cfg(feature = "audio")]
 pub use utils::audio as audio_utils;
