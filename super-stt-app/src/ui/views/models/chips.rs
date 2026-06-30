@@ -108,6 +108,67 @@ pub(super) fn count_chip(label: String) -> Element<'static, Message> {
         .into()
 }
 
+/// How many model names a card lists individually before the rest collapse
+/// into a "+N" summary chip. Three keeps the inventory to a single line for
+/// typical model-name lengths.
+const MAX_MODEL_TAGS: usize = 3;
+
+/// A quiet outline "tag" for one model name: hairline border, no fill, slightly
+/// dimmed text, with the gentle `radius_s` corner so it reads as a catalog item
+/// rather than a status pill (which the capability chips own, fully rounded).
+pub(super) fn model_tag(name: String) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    let radius = cosmic::theme::active().cosmic().corner_radii.radius_s;
+    let on: cosmic::iced::Color = cosmic::theme::active()
+        .current_container()
+        .component
+        .on
+        .into();
+    let mut edge = on;
+    edge.a = 0.28;
+    let mut fg = on;
+    fg.a = 0.85;
+
+    text::caption(name)
+        .class(cosmic::theme::Text::Color(fg))
+        .apply(widget::container)
+        .padding([spacing.space_xxxs, spacing.space_xs])
+        .class(cosmic::theme::Container::custom(move |_| {
+            cosmic::iced_widget::container::Style {
+                border: cosmic::iced::Border {
+                    radius: radius.into(),
+                    width: 1.0,
+                    color: edge,
+                },
+                ..Default::default()
+            }
+        }))
+        .into()
+}
+
+/// A backend's model inventory: a muted "Models" label, the first
+/// [`MAX_MODEL_TAGS`] model names as outline [`model_tag`]s, then a filled
+/// "+N" [`count_chip`] summarizing the rest. `None` when the backend serves no
+/// models, so the caller skips the row.
+pub(super) fn models_inventory(names: &[String]) -> Option<Element<'static, Message>> {
+    if names.is_empty() {
+        return None;
+    }
+    let spacing = cosmic::theme::spacing();
+    let muted = muted_text_color();
+    let mut inventory = row![text::caption("Models").class(cosmic::theme::Text::Color(muted))]
+        .spacing(spacing.space_xxs)
+        .align_y(Alignment::Center);
+    for name in names.iter().take(MAX_MODEL_TAGS) {
+        inventory = inventory.push(model_tag(name.clone()));
+    }
+    let rest = names.len().saturating_sub(MAX_MODEL_TAGS);
+    if rest > 0 {
+        inventory = inventory.push(count_chip(format!("+{rest}")));
+    }
+    Some(inventory.into())
+}
+
 /// The Cloud capability chip: a [`capability_chip`] with a hover tooltip
 /// listing the hosts the backend transmits audio to. Shares the GPU/CPU
 /// chips' neutral tone so "runs in the cloud" reads as a plain capability,
@@ -131,12 +192,21 @@ pub(super) fn cloud_chip(fg: cosmic::iced::Color, hosts: &[String]) -> Element<'
 /// Cloud (when `online_hosts` is `Some`) flags an online backend. Returns
 /// `None` when there's nothing to advertise, so callers skip the row rather
 /// than render an empty band.
+///
+/// `tooltips` gates the hover popovers (GPU/CPU detail, Cloud host list). The
+/// Library installed card passes `!menu_open`: while that card's "⋯" overflow
+/// menu is open, its chips drop their tooltips so the menu renders cleanly on
+/// top (libcosmic draws the open menu above a tooltip, so a tooltip showing at
+/// the same time would paint half-behind it). With the menu closed — and on
+/// the active-backend / Browse cards, which have no overflow menu — tooltips
+/// show as normal.
 // reason: "supports_gpu" / "supports_cpu" are the clearest names
 #[allow(clippy::similar_names)]
 pub(super) fn capability_chips(
     supports_gpu: bool,
     supports_cpu: bool,
     online_hosts: Option<&[String]>,
+    tooltips: bool,
 ) -> Option<Element<'static, Message>> {
     use super::surface::rounded_tooltip;
     let theme = cosmic::theme::active();
@@ -144,21 +214,35 @@ pub(super) fn capability_chips(
 
     let mut chips: Vec<Element<'static, Message>> = Vec::new();
     if supports_gpu {
-        chips.push(rounded_tooltip(
-            capability_chip(icons::GRAPHICS_CARD, "GPU", neutral),
-            text::body("Accelerated on GPU"),
-            widget::tooltip::Position::Top,
-        ));
+        let chip = capability_chip(icons::GRAPHICS_CARD, "GPU", neutral);
+        chips.push(if tooltips {
+            rounded_tooltip(
+                chip,
+                text::body("Accelerated on GPU"),
+                widget::tooltip::Position::Top,
+            )
+        } else {
+            chip
+        });
     }
     if supports_cpu {
-        chips.push(rounded_tooltip(
-            capability_chip(icons::CPU, "CPU", neutral),
-            text::body("Runs on the CPU"),
-            widget::tooltip::Position::Top,
-        ));
+        let chip = capability_chip(icons::CPU, "CPU", neutral);
+        chips.push(if tooltips {
+            rounded_tooltip(
+                chip,
+                text::body("Runs on the CPU"),
+                widget::tooltip::Position::Top,
+            )
+        } else {
+            chip
+        });
     }
     if let Some(hosts) = online_hosts {
-        chips.push(cloud_chip(neutral, hosts));
+        chips.push(if tooltips {
+            cloud_chip(neutral, hosts)
+        } else {
+            capability_chip(icons::CLOUD, "Cloud", neutral)
+        });
     }
     if chips.is_empty() {
         return None;

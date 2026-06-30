@@ -3,6 +3,7 @@ use cosmic::iced::Length;
 use cosmic::widget::{self, text};
 use cosmic::{Apply, Element};
 
+use crate::core::app::AppModel;
 use crate::ui::messages::Message;
 
 /// Wrap the Models page's tab body in a bordered, page-width frame: the
@@ -157,6 +158,51 @@ pub(super) fn models_line<'a>(names: &[String]) -> Option<Element<'a, Message>> 
             .class(cosmic::theme::Text::Color(muted))
             .into(),
     )
+}
+
+/// A small icon button that opens a backend's source repository in the
+/// browser, replacing the raw repo-id caption the cards used to show. `source`
+/// is a bare repo id (e.g. `github.com/owner/name`), so the scheme is
+/// prepended. Carries an "Open repository" tooltip.
+pub(super) fn repo_button(source: &str) -> Element<'static, Message> {
+    use crate::ui::icons;
+    let url = format!("https://{source}");
+    rounded_tooltip(
+        widget::button::icon(icons::phosphor_handle(icons::GIT_BRANCH))
+            .on_press(Message::LaunchUrl(url)),
+        text::body("Open repository"),
+        widget::tooltip::Position::Top,
+    )
+}
+
+/// A card's identity block: the backend name with an optional muted
+/// description beneath it. Takes the remaining width so trailing actions sit
+/// flush at the card's right edge.
+pub(super) fn card_title_block<'a>(
+    name: String,
+    description: Option<String>,
+) -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
+    let mut col = widget::column::with_capacity(2)
+        .spacing(spacing.space_xxxs)
+        .width(Length::Fill)
+        .push(text::title4(name).line_height(1.0));
+    if let Some(desc) = description {
+        col = col.push(text::body(desc).class(cosmic::theme::Text::Color(muted_text_color())));
+    }
+    col.into()
+}
+
+/// A backend's one-line description, looked up on its registry entry by
+/// `source`. The installed `/backends` payload carries no description, so the
+/// registry index is the source; `None` when it isn't loaded or has no
+/// (non-empty) description for this backend.
+pub(super) fn backend_description(app: &AppModel, source: &str) -> Option<String> {
+    app.registry
+        .by_source()
+        .get(source)
+        .and_then(|e| e.description.clone())
+        .filter(|d| !d.is_empty())
 }
 
 /// A tooltip with a small (`radius_s` = 8 px) corner radius — cosmic's

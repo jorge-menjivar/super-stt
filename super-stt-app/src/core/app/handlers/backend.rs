@@ -56,7 +56,7 @@ impl AppModel {
                 self.registry
                     .uninstall_errors
                     .retain(|src, _| backends.iter().any(|b| &b.source == src));
-                let tasks: Vec<_> = backends
+                let mut tasks: Vec<_> = backends
                     .iter()
                     .map(|b| {
                         let source = b.source.clone();
@@ -70,6 +70,25 @@ impl AppModel {
                     })
                     .collect();
                 self.backends = backends;
+                // Load the registry index once so installed cards can show each
+                // backend's description (it lives on the registry entry, keyed
+                // by source). Guarded so it fires a single time; the Browse tab's
+                // own first-open trigger then short-circuits.
+                if self.registry.backends.is_empty() && self.registry.last_refresh.is_none() {
+                    let filters = crate::daemon::registry::ListFilters {
+                        include_incompatible: Some(true),
+                        ..Default::default()
+                    };
+                    tasks.push(Task::perform(
+                        async move { crate::daemon::registry::list(&filters).await },
+                        |r| {
+                            cosmic::Action::App(match r {
+                                Ok(resp) => Message::RegistryListLoaded(resp),
+                                Err(e) => Message::RegistryListFailed(e),
+                            })
+                        },
+                    ));
+                }
                 Task::batch(tasks)
             }
 

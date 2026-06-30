@@ -37,7 +37,13 @@ pub enum Page {
     Customization,
     Recording,
     InputSimulation,
+    /// The active transcription backend: its model picker, load/unload, and a
+    /// side sheet for switching which installed backend is active.
     Models,
+    /// Manage installed backends and browse installable ones (the old Models
+    /// page's Installed / Browse tabs). No activation here — that lives on the
+    /// Models page.
+    Library,
 }
 
 /// The context page to display in the context drawer
@@ -57,6 +63,10 @@ pub enum ContextPage {
     /// Right-side search sheet for picking a transcription language. Scope
     /// (global vs per-model) is carried by `AppModel::language_picker_target`.
     LanguagePicker,
+    /// Right-side sheet for choosing which installed backend to activate (the
+    /// Models page's "Load a backend" / "Switch backend" flow). Scoped to the
+    /// Models page; picking a backend activates it and closes the sheet.
+    LoadBackend,
 }
 
 /// Which tab of the Models page is active.

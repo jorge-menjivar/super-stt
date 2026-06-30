@@ -282,6 +282,9 @@ impl AppModel {
                 self.current_provider = Provider::default();
                 self.current_source = String::new();
                 self.model_operation_state = ModelOperationState::Ready;
+                // Activation comes from the Models page's "Load a backend" sheet;
+                // dismiss it now that a choice was made.
+                self.core.window.show_context = false;
                 Task::perform(set_active_backend(source), |result| match result {
                     Ok(()) => cosmic::Action::None,
                     Err(e) => cosmic::Action::App(Message::ModelError(e)),

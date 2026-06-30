@@ -223,6 +223,19 @@ impl cosmic::Application for AppModel {
 
     /// Elements to pack at the start of the header bar.
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
+        // App name + logo, pinned to the header's leading edge so the window
+        // always identifies itself. The logo tints to the accent; the name sits
+        // beside it in the header's text color.
+        let accent: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
+        let brand = cosmic::widget::container(
+            cosmic::widget::row::with_capacity(2)
+                .align_y(cosmic::iced::Alignment::Center)
+                .spacing(8.0)
+                .push(crate::ui::icons::app_logo(22.0, accent))
+                .push(cosmic::widget::text("Super STT").size(16.0)),
+        )
+        .padding([0, 12, 0, 8]);
+
         let menu_bar = menu::bar(vec![menu::Tree::with_children(
             menu::root("View").apply(Element::from),
             menu::items(
@@ -231,7 +244,7 @@ impl cosmic::Application for AppModel {
             ),
         )]);
 
-        vec![menu_bar.into()]
+        vec![brand.into(), menu_bar.into()]
     }
 
     /// Window header-bar readouts (right side): the GPU summary and model

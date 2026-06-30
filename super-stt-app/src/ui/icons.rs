@@ -24,6 +24,13 @@ pub const ARROWS_CLOCKWISE: &[u8] =
     include_bytes!("../../resources/icons/phosphor/arrows-clockwise.svg");
 pub const PLAY: &[u8] = include_bytes!("../../resources/icons/phosphor/play.svg");
 pub const STOP: &[u8] = include_bytes!("../../resources/icons/phosphor/stop.svg");
+pub const GIT_BRANCH: &[u8] = include_bytes!("../../resources/icons/phosphor/git-branch.svg");
+pub const BOOKS: &[u8] = include_bytes!("../../resources/icons/phosphor/books.svg");
+
+/// The Super STT app logo (mic-with-"S"), themed via `currentColor`. Not a
+/// Phosphor glyph, so it lives at the app resources root rather than the
+/// phosphor set; shown beside the app name in the window header.
+pub const APP_LOGO: &[u8] = include_bytes!("../../resources/super-stt-icon.svg");
 
 /// Build a themable [`Icon`] from one of the embedded Phosphor SVGs.
 pub fn phosphor(bytes: &'static [u8]) -> Icon {
@@ -92,6 +99,20 @@ pub fn phosphor_tinted(
 ) -> cosmic::widget::Svg<'static, cosmic::Theme> {
     tinted_svg(
         bytes,
+        size,
+        cosmic::theme::Svg::custom(move |_| svg::Style { color: Some(color) }),
+    )
+}
+
+/// The Super STT logo ([`APP_LOGO`]) rendered at `size` px, tinted to `color`.
+/// The "S" stays a transparent cutout (its mask drives the alpha, which the
+/// symbolic recolor preserves); everything else takes `color`.
+pub fn app_logo(
+    size: f32,
+    color: cosmic::iced::Color,
+) -> cosmic::widget::Svg<'static, cosmic::Theme> {
+    tinted_svg(
+        APP_LOGO,
         size,
         cosmic::theme::Svg::custom(move |_| svg::Style { color: Some(color) }),
     )

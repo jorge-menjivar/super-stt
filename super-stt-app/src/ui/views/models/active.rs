@@ -7,6 +7,7 @@ use super_stt_shared::models::protocol::DownloadProgress;
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;
+use crate::state::ContextPage;
 use crate::ui::icons;
 use crate::ui::messages::Message;
 
@@ -145,22 +146,30 @@ pub(super) fn active_backend_card<'a>(
     let model_loaded = !app.current_source.is_empty() && app.current_source == backend.source;
     let missing = unmet_requirements(&app.backend_secret_configured, backend);
 
-    let actions: Vec<Element<'a, Message>> = vec![
-        button::standard("Configure")
-            .on_press(Message::OpenBackendConfig(source.clone()))
-            .into(),
-        button::destructive("Deselect")
-            .on_press(Message::DeselectBackend)
-            .into(),
-    ];
+    // Header: glyph + name/description, then the repo button, a "Switch
+    // backend" trigger (reopens the Load-a-backend sheet), Configure, and
+    // Deselect. The repo button + description replace the old source caption.
+    let description = super::surface::backend_description(app, &source);
+    let actions = row![
+        super::surface::repo_button(&source),
+        button::standard("Switch backend")
+            .on_press(Message::ToggleContextPage(ContextPage::LoadBackend)),
+        button::standard("Configure").on_press(Message::OpenBackendConfig(source.clone())),
+        button::destructive("Deselect").on_press(Message::DeselectBackend),
+    ]
+    .spacing(spacing.space_xs)
+    .align_y(Alignment::Center);
+    let header = row![
+        backend_glyph_tile(),
+        super::surface::card_title_block(backend.name.clone(), description),
+        actions,
+    ]
+    .spacing(spacing.space_s)
+    .align_y(Alignment::Center);
 
     let mut card = widget::column::with_capacity(6)
         .spacing(spacing.space_s)
-        .push(backend_header(
-            backend.name.clone(),
-            backend.source.clone(),
-            actions,
-        ));
+        .push(header);
 
     // Capability chips advertise the backend's compute: GPU / CPU for local
     // models, Cloud for online ones (with the hosts it reaches on hover); a
@@ -174,6 +183,7 @@ pub(super) fn active_backend_card<'a>(
         backend_supports_gpu(backend),
         backend_supports_cpu(backend),
         hosts,
+        true,
     ) {
         chip_row = chip_row.push(chips);
     }

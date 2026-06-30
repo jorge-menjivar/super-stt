@@ -15,11 +15,23 @@ use super::{AppModel, DeviceState, ModelOperationState};
 fn build_nav() -> nav_bar::Model {
     let mut nav = nav_bar::Model::default();
 
+    // Models is the primary page (the active backend) — first in the rail and
+    // active on launch. Library (manage/install backends) sits directly below.
+    nav.insert()
+        .text("Models")
+        .data::<crate::state::Page>(crate::state::Page::Models)
+        .icon(icons::phosphor(icons::BRAIN))
+        .activate();
+
+    nav.insert()
+        .text("Library")
+        .data::<crate::state::Page>(crate::state::Page::Library)
+        .icon(icons::phosphor(icons::BOOKS));
+
     nav.insert()
         .text("Customization")
         .data::<crate::state::Page>(crate::state::Page::Customization)
-        .icon(icons::phosphor(icons::GEAR))
-        .activate();
+        .icon(icons::phosphor(icons::GEAR));
 
     nav.insert()
         .text("Recording")
@@ -30,11 +42,6 @@ fn build_nav() -> nav_bar::Model {
         .text("Input Simulation")
         .data::<crate::state::Page>(crate::state::Page::InputSimulation)
         .icon(icons::phosphor(icons::KEYBOARD));
-
-    nav.insert()
-        .text("Models")
-        .data::<crate::state::Page>(crate::state::Page::Models)
-        .icon(icons::phosphor(icons::BRAIN));
 
     nav.insert()
         .text("Connection")

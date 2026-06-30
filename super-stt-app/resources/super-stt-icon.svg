@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="256" height="256" viewBox="0 0 256 256" xml:space="preserve">
+<defs>
+  <!-- Mask that creates transparent "S" cutout -->
+  <mask id="microphoneMask">
+    <!-- White background shows the microphone -->
+    <rect x="0" y="0" width="90" height="90" fill="white"/>
+    <!-- Black "S" creates the transparent hole - positioned for the transformed coordinate system -->
+    <text x="45" y="52" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="50" font-weight="bold" fill="black">S</text>
+  </mask>
+</defs>
+
+<g style="stroke: none; stroke-width: 0; stroke-dasharray: none; stroke-linecap: butt; stroke-linejoin: miter; stroke-miterlimit: 10; fill: none; fill-rule: nonzero; opacity: 1;" transform="translate(1.4065934065934016 1.4065934065934016) scale(2.81 2.81)">
+    <rect x="28" y="3" width="34" height="60" rx="14" ry="14" fill="currentColor" stroke="currentColor" stroke-width="6" stroke-linecap="round" mask="url(#microphoneMask)"/>
+	<path d="M 16 45 A 19 20 0 0 0 74 45" stroke="currentColor" stroke-width="10" fill="none" stroke-linecap="round"/>
+	<line x1="45" y1="80" x2="45" y2="90" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>
+</g>
+</svg>

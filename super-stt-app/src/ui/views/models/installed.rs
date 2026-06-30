@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::Element;
-use cosmic::iced::Length;
-use cosmic::iced_widget::column;
+use cosmic::iced::{Alignment, Length};
+use cosmic::iced_widget::{column, row};
 use cosmic::widget::{self, button, text};
 
 use crate::core::app::AppModel;
@@ -10,28 +10,25 @@ use crate::daemon::catalog;
 use crate::ui::icons;
 use crate::ui::messages::Message;
 
-use super::active::backend_header;
+use super::active::backend_glyph_tile;
 use super::chips::{
     backend_is_online, backend_supports_cpu, backend_supports_gpu, capability_chips,
+    models_inventory,
 };
-use super::surface::card_surface;
+use super::surface::{card_divider, card_surface, card_title_block, repo_button};
 
-/// The active backend lives in the fixed header card, not the list.
+/// The Library's Installed tab: every backend the daemon discovered on disk,
+/// one card each. The active backend is included too — activation lives on the
+/// Models page, so the Library is a flat catalog of what's installed.
 pub(super) fn installed_tab(app: &AppModel) -> Element<'_, Message> {
     let cards: Vec<Element<'_, Message>> = app
         .backends
         .iter()
-        .filter(|b| app.active_backend.as_deref() != Some(b.source.as_str()))
         .map(|backend| installed_card(backend, app))
         .collect();
 
     if cards.is_empty() {
-        let msg = if app.active_backend.is_some() {
-            "No other backends installed."
-        } else {
-            "No backends installed. Open the Browse tab to install one."
-        };
-        return text::body(msg).into();
+        return text::body("No backends installed. Open the Browse tab to install one.").into();
     }
 
     column(cards)
@@ -40,15 +37,6 @@ pub(super) fn installed_tab(app: &AppModel) -> Element<'_, Message> {
         .into()
 }
 
-/// One installed (non-active) backend: the name and source-id, the three
-/// actions that apply at the backend level (Uninstall / Configure / Activate),
-/// and an online badge when the backend transmits audio off-device.
-///
-/// There's deliberately no model dropdown, no Use-GPU, no Select here — model
-/// choice belongs to the active-backend card up top. Activating the backend
-/// moves it there, where the user picks the model. This keeps the inactive
-/// list a flat catalog rather than a row of cards each pretending to be a
-/// "mini" active card.
 /// Whether `latest` is a strictly newer version than `installed`. Both must be
 /// valid `MAJOR.MINOR.PATCH` semver; anything `semver` can't parse yields
 /// `false`, so no update is offered for non-semver versions.
@@ -62,29 +50,33 @@ pub(super) fn update_available(installed: &str, latest: &str) -> bool {
     }
 }
 
+/// One installed backend's Library card: the leading glyph, the name and
+/// description, then a repo button + Configure + a "⋯" overflow (Update /
+/// Uninstall) on the right, over a facts row of the served-models inventory
+/// and capability chips. No Activate here — that's the Models page's job.
 pub(super) fn installed_card<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
 ) -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
     let online = backend_is_online(backend);
     let source = backend.source.clone();
 
-    // Look up the registry entry for this backend to determine whether an
-    // update is available. The registry entry carries `installed_version`
-    // (the version on disk) and `version` (the latest available). Compare them
-    // as semver so a newer registry version is offered but a stale/older index
-    // never prompts a downgrade. Non-semver versions fall back to inequality.
-    // Whether a strictly-newer version is available (drives the menu's Update
-    // item). Same semver rule as before, just surfaced inside the menu.
+    // Registry entry (by source) supplies the description shown under the name
+    // and the latest version that drives the optional Update item. Compared as
+    // semver so a stale/older index never prompts a downgrade.
     let registry_map = app.registry.by_source();
-    let update_version: Option<String> = registry_map.get(source.as_str()).and_then(|e| {
+    let registry_entry = registry_map.get(source.as_str());
+    let update_version: Option<String> = registry_entry.and_then(|e| {
         let installed = e.installed_version.as_deref()?;
         update_available(installed, &e.version).then(|| e.version.clone())
     });
+    let description = registry_entry
+        .and_then(|e| e.description.clone())
+        .filter(|d| !d.is_empty());
 
-    // Activate is the single primary action; Configure / Update / Uninstall
-    // fold into a "⋯" overflow menu so each row reads as one clear call to
-    // action instead of a wall of buttons.
+    // Overflow ("⋯") menu: the optional Update, then Uninstall. Configure left
+    // the menu to become a visible button beside it.
     let menu_open = app.installed_menu_open.as_deref() == Some(source.as_str());
     let trigger = button::icon(icons::phosphor_handle(icons::DOTS_THREE_VERTICAL))
         .on_press(Message::ToggleInstalledMenu(source.clone()));
@@ -95,27 +87,54 @@ pub(super) fn installed_card<'a>(
             .on_close(Message::CloseInstalledMenu);
     }
 
-    // Capability chips sit inline in the header (before Activate), keeping each
-    // installed row to a single compact line.
+    let actions = row![
+        repo_button(&source),
+        button::standard("Configure").on_press(Message::OpenBackendConfig(source.clone())),
+        overflow,
+    ]
+    .spacing(spacing.space_xs)
+    .align_y(Alignment::Center);
+    let header = row![
+        backend_glyph_tile(),
+        card_title_block(backend.name.clone(), description),
+        actions,
+    ]
+    .spacing(spacing.space_s)
+    .align_y(Alignment::Center);
+
+    // Facts row: the served-models inventory takes the width; the GPU / CPU /
+    // Cloud capability chips sit opposite it.
+    let model_names: Vec<String> = backend.models.iter().map(|m| m.name.clone()).collect();
     let hosts = online.then(|| {
         catalog::by_source(&backend.source).map_or(&[][..], |c| c.allowed_hosts.as_slice())
     });
-    let mut actions: Vec<Element<'a, Message>> = Vec::new();
-    if let Some(chips) = capability_chips(
+    let inventory = models_inventory(&model_names);
+    let caps = capability_chips(
         backend_supports_gpu(backend),
         backend_supports_cpu(backend),
         hosts,
-    ) {
-        actions.push(chips);
-    }
-    actions.push(
-        button::suggested("Activate")
-            .on_press(Message::SelectBackend(source.clone()))
-            .into(),
+        // Suppress chip tooltips while this card's overflow menu is open, so the
+        // menu paints cleanly on top instead of a tooltip showing half-behind it.
+        !menu_open,
     );
-    actions.push(overflow.into());
 
-    let card = backend_header(backend.name.clone(), backend.source.clone(), actions);
+    let mut card = widget::column::with_capacity(3)
+        .spacing(spacing.space_s)
+        .push(header);
+    if inventory.is_some() || caps.is_some() {
+        card = card.push(card_divider());
+        let mut meta = widget::row::with_capacity(2)
+            .spacing(spacing.space_s)
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
+        if let Some(inv) = inventory {
+            meta = meta.push(widget::container(inv).width(Length::Fill));
+        }
+        if let Some(c) = caps {
+            meta = meta.push(c);
+        }
+        card = card.push(meta);
+    }
     let surface = card_surface(card, false);
 
     // Surface a failed uninstall directly under its card until the user
@@ -132,9 +151,10 @@ pub(super) fn installed_card<'a>(
     }
 }
 
-/// The popup body for an installed card's "⋯" overflow menu: Configure, an
-/// optional Update, then Uninstall — a small rounded panel of full-width rows
-/// the popover anchors below the trigger.
+/// The popup body for an installed card's "⋯" overflow menu: an optional
+/// Update, then Uninstall — a small rounded panel of full-width rows the
+/// popover anchors below the trigger. (Configure is a visible button on the
+/// card, so it's not repeated here.)
 pub(super) fn installed_overflow_menu(
     source: &str,
     update_version: Option<String>,
@@ -144,11 +164,7 @@ pub(super) fn installed_overflow_menu(
         button::text(label).width(Length::Fill).on_press(msg).into()
     };
 
-    let mut col = widget::column::with_capacity(3).spacing(spacing.space_xxxs);
-    col = col.push(item(
-        "Configure".to_string(),
-        Message::OpenBackendConfig(source.to_string()),
-    ));
+    let mut col = widget::column::with_capacity(2).spacing(spacing.space_xxxs);
     if let Some(v) = update_version {
         col = col.push(item(
             format!("Update to {v}"),

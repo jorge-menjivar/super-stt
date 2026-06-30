@@ -6,6 +6,7 @@ mod configure;
 mod download;
 mod fmt;
 mod installed;
+mod load_sheet;
 mod status;
 mod surface;
 mod tabs;
@@ -30,6 +31,7 @@ use crate::ui::messages::Message;
 
 pub use add_sheet::add_backend_sheet;
 pub use configure::configure_sheet;
+pub use load_sheet::load_backend_sheet;
 
 /// Wrap a header readout (GPU meter / status) in a neutral "pill": a soft
 /// surface fill, hairline border, and fully-rounded corners, so the readouts
@@ -175,33 +177,50 @@ pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
 
 // ── Models page ─────────────────────────────────────────────────────────────
 
-/// Models page view: a fixed header (the active-backend card, when one is
-/// selected, plus the Installed/Download tab bar) over a scrollable list — or
-/// the per-backend configuration sub-view when one is open.
+/// Models page view: the single active-backend card (its model picker,
+/// load/unload, Configure, Deselect, and a "Switch backend" trigger), or an
+/// empty state with a "Load a backend" button when none is active. Installing
+/// and managing backends lives on the Library page; activation happens here via
+/// the "Load a backend" side sheet.
 pub fn page(app: &AppModel) -> Element<'_, Message> {
-    // Per-backend configuration now opens as a right-side sheet (see
-    // `configure_sheet` + `AppModel::context_drawer`) rather than taking over
-    // the page, so this view always renders the backend list.
+    let title_row = widget::row::with_capacity(1)
+        .align_y(Alignment::Center)
+        .push(text::title3("Models").width(Length::Fill));
+
+    // The active backend's card when one is selected (and still installed);
+    // otherwise the empty state that opens the "Load a backend" sheet.
+    let body = match app
+        .active_backend
+        .as_deref()
+        .and_then(|source| app.backends.iter().find(|b| b.source == source))
+    {
+        Some(backend) => page_container(active_backend_card(backend, app)),
+        None => page_container(load_sheet::no_backend_empty_state()),
+    };
+
+    widget::column::with_capacity(2)
+        .push(page_container(title_row))
+        .push(body)
+        .height(Length::Fill)
+        .spacing(0)
+        .into()
+}
+
+/// Library page view: a fixed header (title + Installed/Browse tab bar) over a
+/// scrollable list of backend cards. Installed cards manage and configure
+/// backends (no activation); Browse installs new ones.
+pub fn library_page(app: &AppModel) -> Element<'_, Message> {
     let active_tab = app
         .models_tabs
         .active_data::<ModelsTab>()
         .copied()
         .unwrap_or_default();
 
-    // Fixed header: the title, the active-backend card (when a backend is
-    // selected), then the tab bar. Only the list below scrolls. The GPU summary
-    // and model-readiness pills now live in the window header bar (see
-    // `AppModel::header_end`) rather than this title row.
     let mut header = widget::column::with_capacity(3);
     let title_row = widget::row::with_capacity(1)
         .align_y(Alignment::Center)
-        .push(text::title3("Models").width(Length::Fill));
+        .push(text::title3("Library").width(Length::Fill));
     header = header.push(page_container(title_row));
-    if let Some(source) = &app.active_backend
-        && let Some(backend) = app.backends.iter().find(|b| &b.source == source)
-    {
-        header = header.push(page_container(active_backend_card(backend, app)));
-    }
     header = header.push(tab_bar_container(models_tab_switcher(app)));
 
     // Browse pins its search + filter toolbar above the scroll area; Installed

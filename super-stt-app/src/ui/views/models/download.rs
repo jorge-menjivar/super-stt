@@ -247,7 +247,9 @@ pub(super) fn download_card<'a>(
         ));
 
     let online_hosts = entry.online.then_some(entry.allowed_hosts.as_slice());
-    if let Some(chips) = capability_chips(entry.supports_gpu, entry.supports_cpu, online_hosts) {
+    if let Some(chips) =
+        capability_chips(entry.supports_gpu, entry.supports_cpu, online_hosts, true)
+    {
         card = card.push(chips);
     }
 

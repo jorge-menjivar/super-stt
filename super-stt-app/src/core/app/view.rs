@@ -61,18 +61,34 @@ impl AppModel {
                 )
                 .title("About"),
             ),
-            // The Add-backend sheet is scoped to the Models page while the
-            // daemon is connected; navigating away or a dropped connection
-            // both dismiss it here, no extra bookkeeping required.
+            // The Add-backend sheet is scoped to the Library page (its Browse
+            // tab) while the daemon is connected; navigating away or a dropped
+            // connection both dismiss it here, no extra bookkeeping required.
             ContextPage::AddBackend => {
-                let on_models_page = self.daemon_status == DaemonStatus::Connected
-                    && matches!(self.nav.data::<Page>(self.nav.active()), Some(Page::Models));
-                on_models_page.then(|| {
+                let on_library_page = self.daemon_status == DaemonStatus::Connected
+                    && matches!(
+                        self.nav.data::<Page>(self.nav.active()),
+                        Some(Page::Library)
+                    );
+                on_library_page.then(|| {
                     context_drawer::context_drawer(
                         views::models::add_backend_sheet(self),
                         Message::ToggleContextPage(ContextPage::AddBackend),
                     )
                     .title("Add a backend")
+                })
+            }
+            // The "Load a backend" sheet is scoped to the Models page: it lists
+            // installed backends and activates the chosen one.
+            ContextPage::LoadBackend => {
+                let on_models_page = self.daemon_status == DaemonStatus::Connected
+                    && matches!(self.nav.data::<Page>(self.nav.active()), Some(Page::Models));
+                on_models_page.then(|| {
+                    context_drawer::context_drawer(
+                        views::models::load_backend_sheet(self),
+                        Message::ToggleContextPage(ContextPage::LoadBackend),
+                    )
+                    .title("Load a backend")
                 })
             }
             // Language picker sheet — a search-box + scrollable selectable list
@@ -91,16 +107,20 @@ impl AppModel {
                     .title(title),
                 )
             }
-            // Per-backend configuration sheet — also Models-scoped, and only
-            // when a backend is actually selected for configuration.
+            // Per-backend configuration sheet — reachable from the active card
+            // (Models) and from each installed card (Library), so it's scoped to
+            // either page, and only when a backend is selected for configuration.
             ContextPage::ConfigureBackend => {
-                let on_models_page = self.daemon_status == DaemonStatus::Connected
-                    && matches!(self.nav.data::<Page>(self.nav.active()), Some(Page::Models));
+                let on_backend_page = self.daemon_status == DaemonStatus::Connected
+                    && matches!(
+                        self.nav.data::<Page>(self.nav.active()),
+                        Some(Page::Models | Page::Library)
+                    );
                 let backend = self
                     .configure_backend
                     .as_ref()
                     .and_then(|src| self.backends.iter().find(|b| &b.source == src));
-                backend.filter(|_| on_models_page).map(|backend| {
+                backend.filter(|_| on_backend_page).map(|backend| {
                     context_drawer::context_drawer(
                         views::models::configure_sheet(backend, self),
                         Message::CloseBackendConfig,
@@ -147,6 +167,7 @@ impl AppModel {
             ),
             Page::InputSimulation => views::input_simulation::page(self.write_method),
             Page::Models => views::models::page(self),
+            Page::Library => views::models::library_page(self),
             Page::Connection => views::connection::page(
                 &self.daemon_status,
                 self.socket_path.to_string_lossy().to_string(),
