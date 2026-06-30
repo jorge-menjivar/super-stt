@@ -13,11 +13,23 @@ pub struct AppletConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VisualizationConfig {
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
     pub theme: VisualizationTheme,
-    pub side: VisualizationSide, // This will be fixed per binary but stored for completeness
+    // This will be fixed per binary but stored for completeness.
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub side: VisualizationSide,
     pub colors: VisualizationColorConfig,
     /// Animation shown while the daemon transcribes (`Processing` state).
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
     pub working_animation: WorkingAnimationTheme,
 }
 
@@ -63,32 +75,30 @@ impl AppletConfig {
         config_dir.join(format!("applet-{variant}.toml"))
     }
 
+    /// Parse applet config `content`, falling back to defaults on a parse
+    /// error. Pure (no I/O) so the load/reset decision is unit-testable.
+    /// Returns the config and whether a reset occurred.
+    fn parse_or_reset(content: &str) -> (Self, bool) {
+        match toml::from_str::<AppletConfig>(content) {
+            Ok(config) => (config, false),
+            Err(e) => {
+                warn!("Failed to parse applet config: {e}. Using defaults.");
+                (Self::default(), true)
+            }
+        }
+    }
+
     /// Load configuration from disk for a specific variant
     pub fn load(variant: &str, vis_side: VisualizationSide) -> Self {
         let config_path = Self::get_config_path(variant);
 
-        if let Ok(content) = fs::read_to_string(&config_path) {
-            match toml::from_str::<AppletConfig>(&content) {
-                Ok(mut config) => {
-                    // Always override the vis_side with the binary-specific value
-                    config.visualization.side = vis_side;
-                    config
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to parse config file {}: {e}. Using defaults.",
-                        config_path.display()
-                    );
-                    let mut config = Self::default();
-                    config.visualization.side = vis_side;
-                    config
-                }
-            }
-        } else {
-            let mut config = Self::default();
-            config.visualization.side = vis_side;
-            config
-        }
+        let mut config = match fs::read_to_string(&config_path) {
+            Ok(content) => Self::parse_or_reset(&content).0,
+            Err(_) => Self::default(),
+        };
+        // Always override the vis_side with the binary-specific value.
+        config.visualization.side = vis_side;
+        config
     }
 
     /// Save configuration to disk for a specific variant
@@ -219,5 +229,76 @@ mod working_animation_config_tests {
             cfg.visualization.working_animation,
             WorkingAnimationTheme::Droplet
         );
+    }
+}
+
+#[cfg(test)]
+mod upgrade_compat_tests {
+    use super::AppletConfig;
+    use crate::models::theme::{VisualizationColor, VisualizationTheme, WorkingAnimationTheme};
+
+    /// A complete v0.1.3 `applet-full.toml` (no `working_animation` — added later).
+    const V0_1_3_APPLET_TOML: &str = r#"
+[visualization]
+theme = "Waveform"
+side = "Full"
+
+[visualization.colors]
+light_colors = "Blue"
+dark_colors = "PastelGreen"
+
+[ui]
+last_popup_state = "None"
+show_icon = true
+icon_alignment = "end"
+applet_width = 150
+show_visualization = true
+"#;
+
+    #[test]
+    fn v0_1_3_full_applet_config_loads() {
+        let (cfg, was_reset) = AppletConfig::parse_or_reset(V0_1_3_APPLET_TOML);
+        assert!(!was_reset, "a valid v0.1.3 applet config must load, not reset");
+        assert_eq!(cfg.visualization.theme, VisualizationTheme::Waveform);
+        assert_eq!(cfg.visualization.colors.light_colors, VisualizationColor::Blue);
+        assert_eq!(cfg.ui.applet_width, 150);
+        assert_eq!(cfg.ui.icon_alignment, "end");
+        // New field materializes at its default.
+        assert_eq!(
+            cfg.visualization.working_animation,
+            WorkingAnimationTheme::default()
+        );
+    }
+
+    #[test]
+    fn corrupt_applet_config_resets_to_default() {
+        let (cfg, was_reset) = AppletConfig::parse_or_reset("not ::: valid toml [");
+        assert!(was_reset, "garbage input must trigger a reset");
+        assert_eq!(cfg.visualization.theme, VisualizationTheme::default());
+    }
+
+    #[test]
+    fn applet_bad_theme_falls_back_preserving_rest() {
+        let toml_str = r#"
+[visualization]
+theme = "Nonexistent"
+side = "Full"
+
+[visualization.colors]
+light_colors = "Blue"
+dark_colors = "PastelGreen"
+
+[ui]
+last_popup_state = "None"
+show_icon = true
+icon_alignment = "end"
+applet_width = 150
+show_visualization = true
+"#;
+        let cfg: AppletConfig = toml::from_str(toml_str).expect("must parse, not error");
+        assert_eq!(cfg.visualization.theme, VisualizationTheme::default()); // reset
+        assert_eq!(cfg.visualization.colors.light_colors, VisualizationColor::Blue); // preserved
+        assert_eq!(cfg.ui.applet_width, 150); // preserved
+        assert!(cfg.ui.show_icon);
     }
 }
