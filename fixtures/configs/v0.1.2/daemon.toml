@@ -1,0 +1,12 @@
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "SciFi"
+
+[transcription]
+preferred_model = "WhisperLargeV3"
+write_mode = false
+preview_typing_enabled = true
+recording_stop_mode = "SilenceOnly"
+write_method = "WaylandProtocol"

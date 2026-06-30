@@ -1,0 +1,10 @@
+[device]
+preferred_device = "cuda"
+
+[audio]
+theme = "Minimal"
+
+[transcription]
+preferred_model = "WhisperSmallEn"
+write_mode = true
+preview_typing_enabled = false

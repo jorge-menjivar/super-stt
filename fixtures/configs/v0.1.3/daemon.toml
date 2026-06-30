@@ -1,0 +1,17 @@
+[device]
+preferred_device = "cuda"
+
+[audio]
+theme = "Gentle"
+volume = 80
+
+[transcription]
+preferred_model = "WhisperLargeV3Turbo"
+write_mode = true
+preview_typing_enabled = false
+recording_stop_mode = "ManualOnly"
+write_method = "Ydotool"
+model_override_path = "/home/user/my-models"
+
+[online]
+allow_online_models = true

@@ -1,0 +1,10 @@
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "Classic"
+
+[transcription]
+preferred_model = "WhisperBase"
+write_mode = false
+preview_typing_enabled = false
