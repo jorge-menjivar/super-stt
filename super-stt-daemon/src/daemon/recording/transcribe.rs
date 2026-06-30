@@ -2,9 +2,9 @@
 
 use crate::daemon::types::SuperSTTDaemon;
 use crate::output::preview::Typer;
+use crate::stt_models::dispatch::{DispatchError, dispatch_transcription};
 use anyhow::{Context, Result};
 use log::{debug, error, info, warn};
-use std::sync::Arc;
 
 impl SuperSTTDaemon {
     /// Transcribe a chunk of audio data for preview
@@ -40,61 +40,23 @@ impl SuperSTTDaemon {
             processed_audio.len()
         );
 
-        let model_clone = Arc::clone(&self.model);
-
-        // Check if online to choose async vs blocking path
-        let is_online = {
-            let guard = model_clone.read().await;
-            guard
-                .as_ref()
-                .is_some_and(|loaded| loaded.instance.is_online())
-        };
-
         let language = self.resolve_active_language().await;
 
-        if is_online {
-            let mut model_guard = model_clone.write().await;
-            if let Some(loaded) = model_guard.as_mut() {
-                match loaded
-                    .instance
-                    .transcribe_audio(&processed_audio, 16000, language.as_deref())
-                    .await
-                {
-                    Ok(text) => Ok(text),
-                    Err(e) => {
-                        warn!("Online preview transcription failed, continuing: {e}");
-                        Ok(String::new())
-                    }
-                }
-            } else {
+        // Preview is best-effort: a backend failure or missing model yields an
+        // empty string rather than surfacing an error to the recording flow.
+        match dispatch_transcription(&self.model, processed_audio, 16000, language).await {
+            Ok(text) => Ok(text),
+            Err(DispatchError::Failed(e)) => {
+                warn!("Preview transcription failed, continuing: {e}");
+                Ok(String::new())
+            }
+            Err(DispatchError::NotLoaded) => {
                 warn!("Model not loaded for preview transcription");
                 Ok(String::new())
             }
-        } else {
-            let result = tokio::task::spawn_blocking(move || {
-                let handle = tokio::runtime::Handle::current();
-                let mut model_guard = model_clone.blocking_write();
-                if let Some(loaded) = model_guard.as_mut() {
-                    match handle.block_on(loaded.instance.transcribe_audio(
-                        &processed_audio,
-                        16000,
-                        language.as_deref(),
-                    )) {
-                        Ok(text) => text,
-                        Err(e) => {
-                            warn!("Preview transcription failed, continuing: {e}");
-                            String::new()
-                        }
-                    }
-                } else {
-                    warn!("Model not loaded for preview transcription");
-                    String::new()
-                }
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("Preview transcription task failed: {e}"))?;
-
-            Ok(result)
+            Err(DispatchError::Join(e)) => {
+                Err(anyhow::anyhow!("Preview transcription task failed: {e}"))
+            }
         }
     }
 
@@ -120,70 +82,36 @@ impl SuperSTTDaemon {
             .process_audio(audio_data, 16000)
             .context("Failed to process audio")?;
 
-        // Transcribe the audio
-        let model_clone = Arc::clone(&self.model);
-        let is_online = {
-            let guard = model_clone.read().await;
-            guard
-                .as_ref()
-                .is_some_and(|loaded| loaded.instance.is_online())
-        };
-
+        // Transcribe the audio.
         let language = self.resolve_active_language().await;
+        let start_time = std::time::Instant::now();
 
-        let transcription_result = if is_online {
-            let start_time = std::time::Instant::now();
-            let mut model_guard = model_clone.write().await;
-            if let Some(loaded) = model_guard.as_mut() {
-                match loaded
-                    .instance
-                    .transcribe_audio(&processed_audio, 16000, language.as_deref())
-                    .await
-                {
-                    Ok(text) => {
-                        let duration = start_time.elapsed();
-                        info!("Online transcription completed in {duration:?}: '{text}'");
-                        Ok(text)
-                    }
-                    Err(e) => {
-                        // Surface the backend's error to the user instead of
-                        // silently producing an empty "no speech" result.
-                        warn!("Online transcription failed: {e}");
-                        Err(e)
-                    }
-                }
-            } else {
+        // The final pass surfaces backend errors to the caller — unlike the
+        // best-effort preview path, a failure here must not look like silence.
+        let transcription_result = match dispatch_transcription(
+            &self.model,
+            processed_audio,
+            16000,
+            language,
+        )
+        .await
+        {
+            Ok(text) => {
+                info!(
+                    "Transcription completed in {:?}: '{text}'",
+                    start_time.elapsed()
+                );
+                Ok(text)
+            }
+            Err(DispatchError::Failed(e)) => {
+                warn!("Transcription failed: {e}");
+                Err(e)
+            }
+            Err(DispatchError::NotLoaded) => {
                 error!("Model not loaded");
                 Err(anyhow::anyhow!("Model not loaded"))
             }
-        } else {
-            tokio::task::spawn_blocking(move || {
-                let handle = tokio::runtime::Handle::current();
-                let start_time = std::time::Instant::now();
-                let mut model_guard = model_clone.blocking_write();
-                if let Some(loaded) = model_guard.as_mut() {
-                    match handle.block_on(loaded.instance.transcribe_audio(
-                        &processed_audio,
-                        16000,
-                        language.as_deref(),
-                    )) {
-                        Ok(text) => {
-                            let duration = start_time.elapsed();
-                            info!("Transcription completed in {duration:?}: '{text}'");
-                            Ok(text)
-                        }
-                        Err(e) => {
-                            warn!("Transcription failed: {e}");
-                            Err(e)
-                        }
-                    }
-                } else {
-                    error!("Model not loaded");
-                    Err(anyhow::anyhow!("Model not loaded"))
-                }
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("Transcription task failed: {e}"))?
+            Err(DispatchError::Join(e)) => Err(anyhow::anyhow!("Transcription task failed: {e}")),
         };
 
         // Stop spinner if it was started

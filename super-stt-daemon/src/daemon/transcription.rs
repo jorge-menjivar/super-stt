@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::types::SuperSTTDaemon;
+use crate::stt_models::dispatch::{DispatchError, dispatch_transcription};
 use chrono::Utc;
 use log::{debug, error, info, warn};
-use std::sync::Arc;
 use super_stt_shared::models::protocol::DaemonResponse;
 use super_stt_shared::utils::audio::validate_audio;
 
@@ -144,70 +144,26 @@ impl SuperSTTDaemon {
         processed_audio: Vec<f32>,
     ) -> Result<Result<(String, std::time::Duration), anyhow::Error>, tokio::task::JoinError> {
         let language = self.resolve_active_language().await;
-        let model_clone = Arc::clone(&self.model);
+        let start_time = std::time::Instant::now();
 
-        let is_online = {
-            let guard = model_clone.read().await;
-            guard
-                .as_ref()
-                .is_some_and(|loaded| loaded.instance.is_online())
-        };
-
-        if is_online {
-            // Async path for online models (API call)
-            let start_time = std::time::Instant::now();
-            let mut model_guard = model_clone.write().await;
-            if let Some(loaded) = model_guard.as_mut() {
-                match loaded
-                    .instance
-                    .transcribe_audio(&processed_audio, 16000, language.as_deref())
-                    .await
-                {
-                    Ok(text) => {
-                        let duration = start_time.elapsed();
-                        info!("Online transcription completed in {duration:?}: '{text}'");
-                        Ok(Ok((text, duration)))
-                    }
-                    Err(e) => {
-                        warn!("Online transcription failed, returning empty result: {e}");
-                        let duration = start_time.elapsed();
-                        Ok(Ok((String::new(), duration)))
-                    }
-                }
-            } else {
+        match dispatch_transcription(&self.model, processed_audio, 16000, language).await {
+            Ok(text) => {
+                let duration = start_time.elapsed();
+                info!("Transcription completed in {duration:?}: '{text}'");
+                Ok(Ok((text, duration)))
+            }
+            // A backend failure becomes an empty success — the one-shot path is
+            // best-effort and never surfaces "no speech" as an error.
+            Err(DispatchError::Failed(e)) => {
+                warn!("Transcription failed, returning empty result: {e}");
+                let duration = start_time.elapsed();
+                Ok(Ok((String::new(), duration)))
+            }
+            Err(DispatchError::NotLoaded) => {
                 error!("Model not loaded");
                 Ok(Err(anyhow::anyhow!("Model not loaded")))
             }
-        } else {
-            // Blocking path for local models
-            tokio::task::spawn_blocking(move || {
-                let handle = tokio::runtime::Handle::current();
-                let start_time = std::time::Instant::now();
-                let mut model_guard = model_clone.blocking_write();
-
-                if let Some(loaded) = model_guard.as_mut() {
-                    match handle.block_on(loaded.instance.transcribe_audio(
-                        &processed_audio,
-                        16000,
-                        language.as_deref(),
-                    )) {
-                        Ok(text) => {
-                            let duration = start_time.elapsed();
-                            info!("Transcription completed in {duration:?}: '{text}'");
-                            Ok((text, duration))
-                        }
-                        Err(e) => {
-                            warn!("Transcription failed, returning empty result: {e}");
-                            let duration = start_time.elapsed();
-                            Ok((String::new(), duration))
-                        }
-                    }
-                } else {
-                    error!("Model not loaded");
-                    Err(anyhow::anyhow!("Model not loaded"))
-                }
-            })
-            .await
+            Err(DispatchError::Join(e)) => Err(e),
         }
     }
 

@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::daemon::types::SharedLoadedModel;
 use crate::input::audio::AudioProcessor;
+use crate::stt_models::dispatch::{DispatchError, dispatch_transcription};
 
 use std::collections::VecDeque;
 
@@ -367,50 +368,10 @@ impl RealTimeTranscriptionManager {
         // Prepare and submit audio to model
         let resampled_len = audio_data.len();
         let processed = audio_processor.process_audio(&audio_data, 16000)?;
-
-        // Check if online model to choose async vs blocking path
-        let is_online = {
-            let guard = model.read().await;
-            guard
-                .as_ref()
-                .is_some_and(|loaded| loaded.instance.is_online())
-        };
-
         let language = language.map(str::to_string);
 
-        let transcription_result = if is_online {
-            let mut model_guard = model.write().await;
-            if let Some(loaded) = model_guard.as_mut() {
-                Ok(loaded
-                    .instance
-                    .transcribe_audio(&processed, 16000, language.as_deref())
-                    .await)
-            } else {
-                Ok(Err(anyhow::anyhow!("Model not loaded")))
-            }
-        } else {
-            tokio::task::spawn_blocking({
-                let model_clone = Arc::clone(model);
-                let audio = processed;
-                move || {
-                    let handle = tokio::runtime::Handle::current();
-                    let mut model_guard = model_clone.blocking_write();
-                    if let Some(loaded) = model_guard.as_mut() {
-                        handle.block_on(loaded.instance.transcribe_audio(
-                            &audio,
-                            16000,
-                            language.as_deref(),
-                        ))
-                    } else {
-                        Err(anyhow::anyhow!("Model not loaded"))
-                    }
-                }
-            })
-            .await
-        };
-
-        match transcription_result {
-            Ok(Ok(transcription)) => {
+        match dispatch_transcription(model, processed, 16000, language).await {
+            Ok(transcription) => {
                 if transcription.trim().is_empty() {
                     info!(
                         "Real-time preview produced empty transcription for {client_id} (resampled_len={resampled_len})"
@@ -430,10 +391,13 @@ impl RealTimeTranscriptionManager {
                     debug!("Real-time transcription for {}: {}", client_id, "<omitted>");
                 }
             }
-            Ok(Err(e)) => {
+            Err(DispatchError::Failed(e)) => {
                 warn!("Transcription error for client {client_id}: {e}");
             }
-            Err(e) => {
+            Err(DispatchError::NotLoaded) => {
+                warn!("Transcription error for client {client_id}: Model not loaded");
+            }
+            Err(DispatchError::Join(e)) => {
                 error!("Task error for client {client_id}: {e}");
             }
         }

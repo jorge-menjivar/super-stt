@@ -1094,3 +1094,125 @@ async fn broadcast_model_active_carries_full_identity() {
     assert_eq!(ready["model_loaded"], true);
     assert_eq!(ready["model_name"], "voxtral-mini");
 }
+
+/// A `Transcribe` fake whose `transcribe_audio` returns a fixed text or fails,
+/// for characterizing the one-shot `handle_transcribe` policy.
+struct ScriptedTranscribe {
+    info: crate::stt_models::transcribe::ModelInfoData,
+    /// `Ok(text)` to return `text`; `Err(())` to fail like a real backend would.
+    result: Result<String, ()>,
+}
+impl crate::stt_models::transcribe::ModelInfo for ScriptedTranscribe {
+    fn info(&self) -> &crate::stt_models::transcribe::ModelInfoData {
+        &self.info
+    }
+}
+impl crate::stt_models::transcribe::ModelState for ScriptedTranscribe {
+    fn device(&self) -> String {
+        "cpu".to_string()
+    }
+}
+#[async_trait::async_trait]
+impl crate::stt_models::transcribe::Transcribe for ScriptedTranscribe {
+    async fn transcribe_audio(
+        &mut self,
+        _audio: &[f32],
+        _sample_rate: u32,
+        _language: Option<&str>,
+    ) -> anyhow::Result<String> {
+        match &self.result {
+            Ok(text) => Ok(text.clone()),
+            Err(()) => anyhow::bail!("scripted backend failure"),
+        }
+    }
+}
+
+/// Seed the daemon's `model` lock with a [`ScriptedTranscribe`]. `online`
+/// selects the async vs. blocking dispatch path; `result` is what the backend
+/// produces.
+async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Result<String, ()>) {
+    use crate::daemon::types::LoadedModel;
+    use crate::stt_models::transcribe::ModelInfoData;
+    use std::time::Duration;
+    use super_stt_shared::models::provider::Provider;
+    use super_stt_shared::models::registry::ModelDefinition;
+
+    let provider = Provider::from("local_whisper");
+    let definition = ModelDefinition {
+        name: "scripted".to_string(),
+        provider: provider.clone(),
+        source: "github.com/super-stt/test".to_string(),
+        is_multilingual: true,
+        primary_language: "en".to_string(),
+        supported_languages: vec!["en".to_string()],
+        estimated_vram_bytes: 0,
+        processing_interval: Duration::from_secs(1),
+        supported_devices: vec!["cpu".to_string()],
+        realtime: false,
+    };
+    let info = ModelInfoData::new(
+        "scripted",
+        provider,
+        "github.com/super-stt/test",
+        true,
+        online,
+        Duration::from_secs(1),
+    );
+    *daemon.model.write().await = Some(LoadedModel {
+        definition,
+        instance: Box::new(ScriptedTranscribe { info, result }),
+    });
+}
+
+/// One second of finite samples — passes `validate_audio` and survives
+/// `process_audio` without resampling.
+fn one_second_of_audio() -> Vec<f32> {
+    vec![0.1_f32; 16000]
+}
+
+/// Happy path: the backend's text reaches the client in a `success` response.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn handle_transcribe_returns_backend_text() {
+    let daemon = test_daemon().await;
+    seed_scripted_model(&daemon, true, Ok("hello world".to_string())).await;
+
+    let resp = daemon
+        .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string())
+        .await;
+
+    assert_eq!(resp.status, "success");
+    assert_eq!(resp.transcription.as_deref(), Some("hello world"));
+}
+
+/// One-shot policy: a backend failure is reported as a *successful empty*
+/// transcription, not an error — the documented best-effort behavior.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn handle_transcribe_reports_backend_failure_as_empty_success() {
+    let daemon = test_daemon().await;
+    seed_scripted_model(&daemon, true, Err(())).await;
+
+    let resp = daemon
+        .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string())
+        .await;
+
+    assert_eq!(resp.status, "success");
+    assert_eq!(resp.transcription.as_deref(), Some(""));
+}
+
+/// With no model loaded, the one-shot path returns an error response naming
+/// the missing model.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn handle_transcribe_errors_when_no_model_loaded() {
+    let daemon = test_daemon().await;
+
+    let resp = daemon
+        .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string())
+        .await;
+
+    assert_eq!(resp.status, "error");
+    assert!(
+        resp.message.as_deref().unwrap_or_default().contains("Model not loaded"),
+        "error message should name the missing model, got: {:?}",
+        resp.message
+    );
+}

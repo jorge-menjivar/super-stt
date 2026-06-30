@@ -10,6 +10,7 @@
 //! The previous in-tree Whisper/Voxtral/online implementations now live in
 //! their own standalone backend repositories.
 pub mod backends;
+pub mod dispatch;
 pub mod download;
 #[cfg(feature = "subprocess-backends")]
 pub mod subprocess;
