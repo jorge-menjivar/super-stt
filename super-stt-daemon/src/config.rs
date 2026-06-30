@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use log::{debug, error, warn};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -8,27 +8,6 @@ use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
-
-/// Deserialize a value via its serde impl, falling back to `Default` if the
-/// stored representation is no longer recognized (e.g. a TOML field saved by
-/// an older build using a stale format). Logs a warning so the migration is
-/// observable. The model loader has its own fallback for invalid (model,
-/// provider) combinations, so a single bad field shouldn't fail the whole
-/// config.
-fn deserialize_or_default<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-where
-    T: Default + serde::de::DeserializeOwned,
-    D: Deserializer<'de>,
-{
-    let raw = serde_json::Value::deserialize(deserializer)?;
-    match serde_json::from_value::<T>(raw.clone()) {
-        Ok(value) => Ok(value),
-        Err(e) => {
-            warn!("config field {raw} unrecognized ({e}); using default");
-            Ok(T::default())
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonConfig {
@@ -71,6 +50,10 @@ pub struct DeviceConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioConfig {
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
     pub theme: AudioTheme,
     #[serde(default = "default_volume")]
     pub volume: u8,
@@ -92,7 +75,10 @@ pub struct OnlineConfig {
 pub struct TranscriptionConfig {
     #[serde(default)]
     pub preferred_model: String,
-    #[serde(default, deserialize_with = "deserialize_or_default")]
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
     pub preferred_provider: Provider,
     /// Repo id of the backend that serves the preferred model. Empty means the
     /// daemon picks the first installed backend serving `(model, provider)`.
@@ -102,9 +88,15 @@ pub struct TranscriptionConfig {
     pub write_mode: bool, // Auto-type transcriptions
     #[serde(default)] // For backwards compatibility with existing configs
     pub preview_typing_enabled: bool, // Beta feature: show preview while typing
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
     pub recording_stop_mode: RecordingStopMode,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
     pub write_method: WriteMethod,
     /// Vestigial: retained for config compatibility. Custom models are now
     /// provided as backends discovered under [`backends_dir`].
@@ -170,42 +162,49 @@ impl DaemonConfig {
         config_dir.join("daemon.toml")
     }
 
+    /// Parse config file `content` into a [`DaemonConfig`], falling back to
+    /// defaults on a parse error. Pure (no I/O) so the load/reset decision is
+    /// unit-testable without touching the real config path. Returns the config
+    /// and whether a reset occurred (so the caller knows to persist defaults).
+    fn parse_or_reset(content: &str) -> (Self, bool) {
+        match toml::from_str::<DaemonConfig>(content) {
+            Ok(config) => (config, false),
+            Err(e) => {
+                warn!("Failed to parse config: {e}. Resetting to defaults.");
+                (Self::default(), true)
+            }
+        }
+    }
+
     /// Load configuration from disk.
     ///
     /// Falls back to defaults when the file is missing or cannot be parsed
     /// (e.g. after a format change). When falling back, the default config is
-    /// saved to disk so subsequent loads succeed cleanly. If individual
-    /// fields fell back via [`deserialize_or_default`], the canonical form
-    /// is rewritten so the warning doesn't repeat next startup.
+    /// saved to disk so subsequent loads succeed cleanly. If individual fields
+    /// fell back to their defaults (a stale enum value via the shared
+    /// `deserialize_or_default` helper), the canonical form is rewritten so the
+    /// warning doesn't repeat next startup.
     #[must_use]
     pub fn load() -> Self {
         let config_path = Self::get_config_path();
 
-        match fs::read_to_string(&config_path) {
-            Ok(content) => match toml::from_str::<DaemonConfig>(&content) {
-                Ok(config) => {
-                    if let Ok(canonical) = toml::to_string_pretty(&config)
-                        && canonical != content
-                        && let Err(e) = config.save()
-                    {
-                        error!("Failed to rewrite config in canonical form: {e}");
-                    }
-                    config
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to parse config file {}: {e}. Resetting to defaults.",
-                        config_path.display()
-                    );
-                    let config = Self::default();
-                    if let Err(save_err) = config.save() {
-                        error!("Failed to save default config after parse error: {save_err}");
-                    }
-                    config
-                }
-            },
-            Err(_) => Self::default(),
+        let Ok(content) = fs::read_to_string(&config_path) else {
+            return Self::default();
+        };
+
+        let (config, was_reset) = Self::parse_or_reset(&content);
+        if was_reset {
+            // Persist the regenerated defaults so subsequent loads are clean.
+            if let Err(e) = config.save() {
+                error!("Failed to save default config after parse error: {e}");
+            }
+        } else if let Ok(canonical) = toml::to_string_pretty(&config)
+            && canonical != content
+            && let Err(e) = config.save()
+        {
+            error!("Failed to rewrite config in canonical form: {e}");
         }
+        config
     }
 
     /// Save configuration to disk
