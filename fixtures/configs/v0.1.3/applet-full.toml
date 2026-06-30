@@ -1,0 +1,14 @@
+[visualization]
+theme = "Waveform"
+side = "Full"
+
+[visualization.colors]
+light_colors = "Blue"
+dark_colors = "PastelGreen"
+
+[ui]
+last_popup_state = "None"
+show_icon = true
+icon_alignment = "end"
+applet_width = 150
+show_visualization = true

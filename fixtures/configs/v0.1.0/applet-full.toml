@@ -1,0 +1,17 @@
+[visualization]
+theme = "CenteredEqualizer"
+side = "Full"
+
+[visualization.colors]
+light_colors = "SystemAccent"
+dark_colors = "SystemAccent"
+
+[audio]
+theme = "Classic"
+
+[ui]
+last_popup_state = "None"
+show_icon = true
+icon_alignment = "end"
+applet_width = 120
+show_visualization = true

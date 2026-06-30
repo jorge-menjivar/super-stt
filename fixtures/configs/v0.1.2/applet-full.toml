@@ -1,0 +1,17 @@
+[visualization]
+theme = "BottomEqualizer"
+side = "Left"
+
+[visualization.colors]
+light_colors = "Green"
+dark_colors = "DarkGreen"
+
+[audio]
+theme = "Nature"
+
+[ui]
+last_popup_state = "None"
+show_icon = false
+icon_alignment = "end"
+applet_width = 160
+show_visualization = false

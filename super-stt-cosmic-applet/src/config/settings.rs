@@ -237,27 +237,18 @@ mod upgrade_compat_tests {
     use super::AppletConfig;
     use crate::models::theme::{VisualizationColor, VisualizationTheme, WorkingAnimationTheme};
 
-    /// A complete v0.1.3 `applet-full.toml` (no `working_animation` — added later).
-    const V0_1_3_APPLET_TOML: &str = r#"
-[visualization]
-theme = "Waveform"
-side = "Full"
-
-[visualization.colors]
-light_colors = "Blue"
-dark_colors = "PastelGreen"
-
-[ui]
-last_popup_state = "None"
-show_icon = true
-icon_alignment = "end"
-applet_width = 150
-show_visualization = true
-"#;
+    /// The committed v0.1.3 `applet-full.toml` fixture. The canonical copy lives
+    /// in the on-disk corpus so the release gate and these detailed assertions
+    /// test the same bytes.
+    fn v0_1_3_applet_fixture() -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/configs/v0.1.3/applet-full.toml");
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    }
 
     #[test]
     fn v0_1_3_full_applet_config_loads() {
-        let (cfg, was_reset) = AppletConfig::parse_or_reset(V0_1_3_APPLET_TOML);
+        let (cfg, was_reset) = AppletConfig::parse_or_reset(&v0_1_3_applet_fixture());
         assert!(!was_reset, "a valid v0.1.3 applet config must load, not reset");
         assert_eq!(cfg.visualization.theme, VisualizationTheme::Waveform);
         assert_eq!(cfg.visualization.colors.light_colors, VisualizationColor::Blue);
@@ -267,6 +258,37 @@ show_visualization = true
         assert_eq!(
             cfg.visualization.working_animation,
             WorkingAnimationTheme::default()
+        );
+    }
+
+    #[test]
+    fn all_published_applet_configs_load_cleanly() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/configs");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("fixtures/configs dir must exist") {
+            let version_dir = entry.expect("readable dir entry").path();
+            if !version_dir.is_dir() {
+                continue; // skip README.md and any other non-version files
+            }
+            for file in std::fs::read_dir(&version_dir).expect("readable version dir") {
+                let path = file.expect("readable file entry").path();
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if !(name.starts_with("applet-") && name.ends_with(".toml")) {
+                    continue;
+                }
+                let content = std::fs::read_to_string(&path).expect("read applet fixture");
+                let (_, was_reset) = AppletConfig::parse_or_reset(&content);
+                assert!(
+                    !was_reset,
+                    "applet fixture {} must load cleanly (no reset)",
+                    path.display()
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 4,
+            "expected >= 4 applet fixtures (v0.1.0-v0.1.3), found {checked}"
         );
     }
 

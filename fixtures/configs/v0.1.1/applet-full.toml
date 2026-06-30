@@ -1,0 +1,17 @@
+[visualization]
+theme = "Pulse"
+side = "Full"
+
+[visualization.colors]
+light_colors = "Blue"
+dark_colors = "DarkBlue"
+
+[audio]
+theme = "Gentle"
+
+[ui]
+last_popup_state = "None"
+show_icon = true
+icon_alignment = "start"
+applet_width = 140
+show_visualization = true
