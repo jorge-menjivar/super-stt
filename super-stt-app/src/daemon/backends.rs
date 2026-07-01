@@ -32,9 +32,6 @@ pub struct BackendInfo {
 }
 
 /// One model served by a backend.
-// reason: catalog fields are deserialized for future direct consumption; the
-// picker currently reads supported languages from the live resolution block.
-#[allow(dead_code)]
 #[derive(serde::Deserialize, Clone, Debug)]
 pub struct BackendModel {
     pub name: String,
@@ -58,12 +55,16 @@ pub struct BackendModel {
     #[serde(default)]
     pub multilingual: bool,
     /// BCP-47 tags the model can transcribe, e.g. `["en", "es", "fr"]`.
-    /// Empty for mono-lingual models.
+    /// Empty for mono-lingual models. Deserialized from the daemon for
+    /// forward use; the picker currently reads languages from the live
+    /// resolution block, so this is not read yet.
     #[serde(default)]
+    #[allow(dead_code)]
     pub supported_languages: Vec<String>,
-    /// The model's built-in default language (BCP-47 tag). Shown in the
-    /// language picker when no global or per-model override is set.
+    /// The model's built-in default language (BCP-47 tag). Deserialized from
+    /// the daemon for forward use; not read yet.
     #[serde(default)]
+    #[allow(dead_code)]
     pub primary_language: String,
 }
 

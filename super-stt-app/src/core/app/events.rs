@@ -73,15 +73,9 @@ pub(super) fn settings_widget_event_to_message(
                         bytes_done,
                         bytes_total,
                     }),
-                    RegistryEvent::Completed {
-                        install_id,
-                        source,
-                        version,
-                    } => Some(Message::InstallCompleted {
-                        install_id,
-                        source,
-                        version,
-                    }),
+                    RegistryEvent::Completed { source, .. } => {
+                        Some(Message::InstallCompleted { source })
+                    }
                     RegistryEvent::Failed {
                         install_id,
                         source,

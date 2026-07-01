@@ -22,8 +22,7 @@ impl AppModel {
         // Daemon-related messages
         if matches!(
             message,
-            Message::ConnectToDaemon
-                | Message::DaemonConnectionResult(_)
+            Message::DaemonConnectionResult(_)
                 | Message::DaemonConnected
                 | Message::EventStreamConnected
                 | Message::CurrentAudioThemeLoaded(_)
@@ -36,7 +35,6 @@ impl AppModel {
                 | Message::RefreshDaemonStatus
                 | Message::PingTimeout
                 | Message::DaemonEventsReceived(_)
-                | Message::DaemonEventsError(_)
         ) {
             return Some(self.handle_daemon_messages(message));
         }
@@ -45,8 +43,6 @@ impl AppModel {
         if matches!(
             message,
             Message::LoadInitialData
-                | Message::ModelSelected { .. }
-                | Message::ModelsLoaded { .. }
                 | Message::AvailableModelsLoaded(_)
                 | Message::CurrentModelLoaded { .. }
                 | Message::ModelChanged { .. }
@@ -99,10 +95,7 @@ impl AppModel {
         // Device-related messages
         if matches!(
             message,
-            Message::DeviceSelected(_)
-                | Message::DeviceLoaded(_)
-                | Message::DeviceInfoLoaded(_, _)
-                | Message::DeviceError(_)
+            Message::DeviceInfoLoaded(_, _) | Message::DeviceError(_)
         ) {
             return Some(self.handle_device_messages(message));
         }
@@ -156,17 +149,6 @@ impl AppModel {
             return Some(self.handle_write_method_messages(message));
         }
 
-        // Custom models directory messages
-        if matches!(
-            message,
-            Message::CustomModelsDirInput(_)
-                | Message::CustomModelsDirEdit(_)
-                | Message::CustomModelsDirSet(_)
-                | Message::CustomModelsDirError(_)
-        ) {
-            return Some(self.handle_custom_models_dir_messages(message));
-        }
-
         // Backend catalog + per-backend secret/option configuration
         if matches!(
             message,
@@ -215,15 +197,12 @@ impl AppModel {
                 | Message::StopRecording
                 | Message::PreviewTextReceived(_)
                 | Message::TranscriptionReceived(_)
-                | Message::AudioLevelUpdate { .. }
                 | Message::AudioFeedbackToggled(_)
                 | Message::AudioThemeSelected(_)
-                | Message::SetAudioTheme(_)
                 | Message::AudioThemesLoaded(_)
                 | Message::VolumeChanged(_)
                 | Message::WidgetAudioLevel { .. }
                 | Message::WidgetRecordingState(_)
-                | Message::RecordingStateChanged(_)
         ) {
             return Some(self.handle_recording_messages(message));
         }

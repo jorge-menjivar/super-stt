@@ -28,7 +28,7 @@ pub use v1::settings::backends::{
     clear_active_backend, clear_backend_option, get_active_backend, get_gpu_info, list_backends,
     set_active_backend, set_backend_option,
 };
-pub use v1::settings::custom_models_dir::{get_custom_models_dir, set_custom_models_dir};
+pub use v1::settings::custom_models_dir::get_custom_models_dir;
 pub use v1::settings::preview_typing::{get_preview_typing, set_preview_typing};
 pub use v1::settings::recording_stop_mode::{get_recording_stop_mode, set_recording_stop_mode};
 pub use v1::settings::volume::{get_volume, set_volume};

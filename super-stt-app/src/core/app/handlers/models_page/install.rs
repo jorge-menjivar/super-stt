@@ -21,7 +21,6 @@ impl AppModel {
                             Ok(a) => Message::InstallAccepted {
                                 source: source.clone(),
                                 install_id: a.install_id,
-                                warning: a.warning,
                             },
                             Err(e) => Message::InstallFailedToStart {
                                 source: source.clone(),
@@ -41,7 +40,6 @@ impl AppModel {
                             Ok(a) => Message::InstallAccepted {
                                 source: url.clone(),
                                 install_id: a.install_id,
-                                warning: a.warning.or_else(|| Some("unverified_source".into())),
                             },
                             Err(e) => Message::InstallFailedToStart {
                                 source: url.clone(),
@@ -52,11 +50,7 @@ impl AppModel {
                 )
             }
 
-            Message::InstallAccepted {
-                source,
-                install_id,
-                warning: _,
-            } => {
+            Message::InstallAccepted { source, install_id } => {
                 use crate::state::registry::InstallStatus;
                 use super_stt_shared::registry::events::InstallPhase;
                 self.registry.installs.insert(
@@ -92,7 +86,6 @@ impl AppModel {
                             Ok(r) => Message::InstallAccepted {
                                 source: source.clone(),
                                 install_id: r.install_id.unwrap_or_default(),
-                                warning: None,
                             },
                             Err(e) => Message::InstallFailedToStart {
                                 source: source.clone(),
@@ -167,11 +160,7 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::InstallCompleted {
-                install_id: _,
-                source,
-                version: _,
-            } => {
+            Message::InstallCompleted { source } => {
                 self.registry.installs.remove(&source);
                 // Refresh the installed-backends list so the new install
                 // shows up in the Installed tab.

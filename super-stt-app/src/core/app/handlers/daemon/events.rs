@@ -33,12 +33,6 @@ impl AppModel {
                 self.update_title()
             }
 
-            Message::DaemonEventsError(error) => {
-                warn!("Daemon events error: {error}");
-                // Log the error but continue - subscription will retry automatically
-                Task::none()
-            }
-
             _ => Task::none(),
         }
     }

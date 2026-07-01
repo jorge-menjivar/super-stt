@@ -21,8 +21,7 @@ impl AppModel {
         message: Message,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::ConnectToDaemon
-            | Message::DaemonConnectionResult(_)
+            Message::DaemonConnectionResult(_)
             | Message::RefreshDaemonStatus
             | Message::PingTimeout => self.handle_daemon_connect_result(message),
 
@@ -48,9 +47,7 @@ impl AppModel {
             | Message::VolumeLoaded(_)
             | Message::CustomModelsDirLoaded(_) => self.handle_daemon_initial_loads(message),
 
-            Message::DaemonEventsReceived(_) | Message::DaemonEventsError(_) => {
-                self.handle_daemon_events(message)
-            }
+            Message::DaemonEventsReceived(_) => self.handle_daemon_events(message),
 
             _ => Task::none(),
         }
@@ -58,13 +55,6 @@ impl AppModel {
 
     fn handle_daemon_connect_result(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::ConnectToDaemon => {
-                self.daemon_status = DaemonStatus::Connecting;
-                Task::perform(test_daemon_connection(), |result| {
-                    cosmic::Action::App(Message::DaemonConnectionResult(result))
-                })
-            }
-
             Message::DaemonConnectionResult(result) => {
                 match result {
                     Ok(()) => {

@@ -113,8 +113,6 @@ pub struct AppModel {
     pub gpu_info: Vec<super_stt_shared::models::protocol::GpuInfo>,
     /// Device switching state
     pub device_state: DeviceState,
-    /// Timestamp of last device switch to avoid polling too soon
-    pub last_device_switch: Option<std::time::Instant>,
     /// Timestamp of the last model-switch progress signal (switch start or any
     /// `download_progress` tick). Drives the stall watchdog in the
     /// `PingTimeout` handler so a switch that stops making progress surfaces an
@@ -139,7 +137,6 @@ pub struct AppModel {
     // Custom models directory
     pub custom_models_dir: Option<String>,
     pub custom_models_dir_input: String,
-    pub custom_models_dir_editing: bool,
 
     // Models page UI state
     /// Installed / Download tab bar for the Models page (active tab carries a

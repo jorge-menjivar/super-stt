@@ -138,7 +138,6 @@ impl AppModel {
             available_devices: vec!["cpu".to_string()], // Default until loaded from daemon
             gpu_info: Vec::new(),
             device_state: DeviceState::Ready,
-            last_device_switch: None,
             last_switch_progress_at: None,
             last_event_timestamp: None,
 
@@ -152,7 +151,6 @@ impl AppModel {
             // Custom models directory
             custom_models_dir: None,
             custom_models_dir_input: String::new(),
-            custom_models_dir_editing: false,
 
             // Models page UI state
             models_tabs,

@@ -13,7 +13,6 @@ use crate::state::{AudioTheme, ContextPage};
 
 /// Messages emitted by the application and its widgets
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum Message {
     OpenRepositoryUrl,
     ToggleContextPage(ContextPage),
@@ -23,7 +22,6 @@ pub enum Message {
     StartRecording,
     StopRecording,
     PreviewTextReceived(String),
-    ConnectToDaemon,
     DaemonConnectionResult(Result<(), String>),
     DaemonConnected,
     /// The `/events` SSE stream finished (re)subscribing. Distinct from
@@ -43,7 +41,6 @@ pub enum Message {
     TranscriptionReceived(String),
     AudioFeedbackToggled(bool),
     AudioThemeSelected(AudioTheme),
-    SetAudioTheme(AudioTheme),
     AudioThemesLoaded(Vec<AudioTheme>),
     RefreshDaemonStatus,
     /// `frequency_bands` event from the daemon's `/events` SSE stream
@@ -67,12 +64,6 @@ pub enum Message {
     RetryAuthorization,
     PingTimeout,
     DaemonEventsReceived(Vec<super_stt_shared::models::protocol::NotificationEvent>), // Received events
-    DaemonEventsError(String), // Error receiving or parsing events
-    RecordingStateChanged(crate::state::RecordingStatus),
-    AudioLevelUpdate {
-        level: f32,
-        is_speech: bool,
-    },
 
     // Model management messages
     LoadInitialData, // Load models + device info at startup
@@ -118,7 +109,6 @@ pub enum Message {
     InstallAccepted {
         source: String,
         install_id: String,
-        warning: Option<String>,
     },
     /// Install POST failed (couldn't start).
     InstallFailedToStart {
@@ -135,9 +125,7 @@ pub enum Message {
     },
     /// SSE: registry.install.completed
     InstallCompleted {
-        install_id: String,
         source: String,
-        version: String,
     },
     /// SSE: registry.install.failed
     InstallFailed {
@@ -181,17 +169,6 @@ pub enum Message {
     ImportBackendFromDirPicked(Option<String>),
     /// User typed in the Custom-repo URL field in the Download tab.
     RegistryCustomRepoInputChanged(String),
-    ModelSelected {
-        model: String,
-        provider: Provider,
-        source: String,
-    },
-    ModelsLoaded {
-        current_model: String,
-        current_provider: Provider,
-        current_source: String,
-        available: Vec<(String, Provider, String)>,
-    },
     AvailableModelsLoaded(Vec<(String, Provider, String)>),
     CurrentModelLoaded {
         model: String,
@@ -210,8 +187,6 @@ pub enum Message {
     ModelError(String),
 
     // Device management messages
-    DeviceSelected(String),                // "cpu" or "cuda"
-    DeviceLoaded(String),                  // Current device from daemon
     DeviceInfoLoaded(String, Vec<String>), // Current device, available devices
     DeviceError(String),                   // Device switching error
 
@@ -244,12 +219,6 @@ pub enum Message {
 
     // Volume messages
     VolumeChanged(u8),
-
-    // Custom models directory messages
-    CustomModelsDirInput(String),
-    CustomModelsDirSet(Option<String>),
-    CustomModelsDirEdit(bool),
-    CustomModelsDirError(String),
 
     // Backend catalog + per-backend secret/option configuration.
     // Secrets are managed via the daemon's secrets endpoints.

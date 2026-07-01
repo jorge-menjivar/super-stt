@@ -85,7 +85,6 @@ impl AppModel {
                             Ok(a) => Message::InstallAccepted {
                                 source: key.clone(),
                                 install_id: a.install_id,
-                                warning: a.warning.or_else(|| Some("unverified_source".into())),
                             },
                             Err(e) => Message::InstallFailedToStart {
                                 source: key.clone(),

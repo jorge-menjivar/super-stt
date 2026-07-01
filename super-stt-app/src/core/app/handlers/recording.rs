@@ -20,13 +20,10 @@ impl AppModel {
             Message::StartRecording
             | Message::StopRecording
             | Message::PreviewTextReceived(_)
-            | Message::TranscriptionReceived(_)
-            | Message::RecordingStateChanged(_) => self.handle_recording_control(message),
+            | Message::TranscriptionReceived(_) => self.handle_recording_control(message),
 
-            Message::AudioLevelUpdate { .. }
-            | Message::AudioFeedbackToggled(_)
+            Message::AudioFeedbackToggled(_)
             | Message::AudioThemeSelected(_)
-            | Message::SetAudioTheme(_)
             | Message::AudioThemesLoaded(_)
             | Message::VolumeChanged(_)
             | Message::WidgetAudioLevel { .. }
@@ -84,11 +81,6 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::RecordingStateChanged(state) => {
-                self.recording_status = state;
-                Task::none()
-            }
-
             _ => Task::none(),
         }
     }
@@ -96,12 +88,6 @@ impl AppModel {
     /// Handle audio-level, theme, and volume messages.
     fn handle_audio_messages(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::AudioLevelUpdate { level, is_speech } => {
-                self.audio_level = level;
-                self.is_speech_detected = is_speech;
-                Task::none()
-            }
-
             Message::AudioFeedbackToggled(enabled) => {
                 let theme = if enabled {
                     self.last_non_silent_theme
@@ -124,12 +110,6 @@ impl AppModel {
                     Ok(_) => cosmic::Action::App(Message::DaemonConnected),
                     Err(e) => cosmic::Action::App(Message::DaemonError(e)),
                 })
-            }
-
-            Message::SetAudioTheme(theme) => {
-                self.selected_audio_theme = theme;
-                // Audio theme preference is now saved by the daemon automatically
-                Task::none()
             }
 
             Message::AudioThemesLoaded(themes) => {
