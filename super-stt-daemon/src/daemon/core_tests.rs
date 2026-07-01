@@ -335,6 +335,22 @@ async fn set_allow_online_models_updates_config() {
     assert!(config.online.allow_online_models);
 }
 
+/// An unknown theme name is a client error: `docs/protocol/endpoints/v1/audio_theme.md`
+/// documents `400 invalid_audio_theme`. The daemon must reject it (not silently
+/// apply the default theme and report success).
+#[tokio::test]
+async fn set_audio_theme_rejects_unknown_theme() {
+    let daemon = test_daemon().await;
+    let before = daemon.get_audio_theme();
+
+    let resp = daemon.handle_set_audio_theme("definitely-not-a-theme".to_string());
+
+    assert_eq!(resp.status, "error");
+    assert_eq!(resp.message.as_deref(), Some("invalid_audio_theme"));
+    // The rejected value must not have changed the active theme.
+    assert_eq!(daemon.get_audio_theme(), before);
+}
+
 #[tokio::test]
 async fn get_allow_online_models_returns_config_value() {
     let daemon = test_daemon().await;

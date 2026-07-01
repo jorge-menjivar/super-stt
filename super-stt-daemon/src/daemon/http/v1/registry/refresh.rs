@@ -33,11 +33,6 @@ pub(crate) async fn refresh_registry(State(s): State<AppState>) -> impl IntoResp
         .unwrap_or_default();
         s.daemon.events.publish_registry_install(payload);
 
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            [("content-type", "application/json")],
-            serde_json::json!({"error": "registry_unavailable"}).to_string(),
-        )
-            .into_response()
+        super::registry_error(StatusCode::SERVICE_UNAVAILABLE, "registry_unavailable")
     }
 }

@@ -141,12 +141,7 @@ pub(crate) async fn list_registry_backends(
     use crate::registry::{compat, host_detect};
 
     let Ok(index) = s.registry_client.get().await else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            [("content-type", "application/json")],
-            serde_json::json!({"error": "registry_unavailable"}).to_string(),
-        )
-            .into_response();
+        return super::registry_error(StatusCode::SERVICE_UNAVAILABLE, "registry_unavailable");
     };
 
     let host = host_detect::detect();

@@ -8,10 +8,21 @@ use super_stt_shared::models::protocol::DaemonResponse;
 use super_stt_shared::theme::AudioTheme;
 
 impl SuperSTTDaemon {
-    /// Handle set audio theme command
+    /// Handle set audio theme command. An unknown theme name is rejected with
+    /// `invalid_audio_theme` (HTTP 400) per
+    /// `docs/protocol/endpoints/v1/audio_theme.md`, rather than silently
+    /// applying the default and reporting success.
     #[must_use]
     pub fn handle_set_audio_theme(&self, theme_str: String) -> DaemonResponse {
-        let theme = theme_str.parse::<AudioTheme>().unwrap_or_default();
+        // `AudioTheme::from_str` maps an unrecognized name to the default (the
+        // lenient config-load convention), so match against the real theme set
+        // instead to actually reject unknown names.
+        let Some(theme) = AudioTheme::all_themes()
+            .into_iter()
+            .find(|t| t.to_string() == theme_str.to_lowercase())
+        else {
+            return DaemonResponse::error("invalid_audio_theme");
+        };
         self.set_audio_theme(theme);
 
         // Persist the change to disk so it survives a restart. The

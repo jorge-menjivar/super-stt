@@ -144,14 +144,10 @@ fn parse_install_body(
     raw: Option<axum::Json<InstallBody>>,
 ) -> Result<(InstallBody, String), ErrResp> {
     let Some(axum::Json(body)) = raw else {
-        return Err(Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                [("content-type", "application/json")],
-                serde_json::json!({"error": "missing_body"}).to_string(),
-            )
-                .into_response(),
-        ));
+        return Err(Box::new(super::registry_error(
+            StatusCode::BAD_REQUEST,
+            "missing_body",
+        )));
     };
 
     // Validate exactly one of source / repo_url / local_path is present.
@@ -164,12 +160,11 @@ fn parse_install_body(
     .filter(|x| x.is_some())
     .count();
     if provided != 1 {
-        return Err(Box::new((
+        return Err(Box::new(super::registry_error_msg(
             StatusCode::BAD_REQUEST,
-            [("content-type", "application/json")],
-            serde_json::json!({"error": "bad_request", "message": "provide exactly one of source, repo_url, local_path"}).to_string(),
-        )
-            .into_response()));
+            "bad_request",
+            "provide exactly one of source, repo_url, local_path",
+        )));
     }
 
     let source_key = body
@@ -189,14 +184,10 @@ fn parse_install_body(
 fn acquire_install_inflight(s: &AppState, source_key: &str) -> Result<(), ErrResp> {
     let mut guard = s.install_inflight.write();
     if guard.contains(source_key) {
-        return Err(Box::new(
-            (
-                StatusCode::CONFLICT,
-                [("content-type", "application/json")],
-                serde_json::json!({"error": "install_in_progress"}).to_string(),
-            )
-                .into_response(),
-        ));
+        return Err(Box::new(super::registry_error(
+            StatusCode::CONFLICT,
+            "install_in_progress",
+        )));
     }
     guard.insert(source_key.to_owned());
     Ok(())
@@ -215,38 +206,27 @@ async fn resolve_install_entry(
     if let Some(ref src) = body.source {
         let Ok(index) = s.registry_client.get().await else {
             s.install_inflight.write().remove(source_key);
-            return Err(Box::new(
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    [("content-type", "application/json")],
-                    serde_json::json!({"error": "registry_unavailable"}).to_string(),
-                )
-                    .into_response(),
-            ));
+            return Err(Box::new(super::registry_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "registry_unavailable",
+            )));
         };
         let Some(found) = index.backends.iter().find(|b| &b.source == src).cloned() else {
             s.install_inflight.write().remove(source_key);
-            return Err(Box::new(
-                (
-                    StatusCode::NOT_FOUND,
-                    [("content-type", "application/json")],
-                    serde_json::json!({"error": "not_found"}).to_string(),
-                )
-                    .into_response(),
-            ));
+            return Err(Box::new(super::registry_error(
+                StatusCode::NOT_FOUND,
+                "not_found",
+            )));
         };
         Ok(found)
     } else if let Some(ref repo_url) = body.repo_url {
         let Some(forge) = body.forge else {
             s.install_inflight.write().remove(source_key);
-            return Err(Box::new(
-                (
-                    StatusCode::BAD_REQUEST,
-                    [("content-type", "application/json")],
-                    serde_json::json!({"error": "bad_request", "message": "custom-repo install requires `forge`"}).to_string(),
-                )
-                    .into_response(),
-            ));
+            return Err(Box::new(super::registry_error_msg(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                "custom-repo install requires `forge`",
+            )));
         };
         let client = super_stt_forge::client(forge);
         match crate::registry::custom_repo::resolve(client.as_ref(), repo_url).await {
@@ -254,14 +234,11 @@ async fn resolve_install_entry(
             Err(e) => {
                 s.install_inflight.write().remove(source_key);
                 let (status, error) = custom_repo_error_response(&e);
-                Err(Box::new(
-                    (
-                        status,
-                        [("content-type", "application/json")],
-                        serde_json::json!({"error": error, "message": e.to_string()}).to_string(),
-                    )
-                        .into_response(),
-                ))
+                Err(Box::new(super::registry_error_msg(
+                    status,
+                    error,
+                    &e.to_string(),
+                )))
             }
         }
     } else {
@@ -274,14 +251,11 @@ async fn resolve_install_entry(
             Err(e) => {
                 s.install_inflight.write().remove(source_key);
                 let (status, error) = local_dir_error_response(&e);
-                Err(Box::new(
-                    (
-                        status,
-                        [("content-type", "application/json")],
-                        serde_json::json!({"error": error, "message": e.to_string()}).to_string(),
-                    )
-                        .into_response(),
-                ))
+                Err(Box::new(super::registry_error_msg(
+                    status,
+                    error,
+                    &e.to_string(),
+                )))
             }
         }
     }
@@ -324,14 +298,10 @@ fn select_install_compat(
     let sel = compat::select(&host, entry);
     let Some(asset) = compat::to_selected_asset(entry, &sel) else {
         s.install_inflight.write().remove(source_key);
-        return Err(Box::new(
-            (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                [("content-type", "application/json")],
-                serde_json::json!({"error": "incompatible"}).to_string(),
-            )
-                .into_response(),
-        ));
+        return Err(Box::new(super::registry_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "incompatible",
+        )));
     };
     Ok((sel, asset))
 }

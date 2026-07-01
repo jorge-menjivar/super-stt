@@ -25,14 +25,10 @@ type ErrResp = Box<axum::response::Response>;
 /// Phase 1 — Parse the request body.
 fn parse_update_body(raw: Option<axum::Json<UpdateBody>>) -> Result<UpdateBody, ErrResp> {
     let Some(axum::Json(body)) = raw else {
-        return Err(Box::new(
-            (
-                StatusCode::BAD_REQUEST,
-                [("content-type", "application/json")],
-                serde_json::json!({"error": "missing_body"}).to_string(),
-            )
-                .into_response(),
-        ));
+        return Err(Box::new(super::registry_error(
+            StatusCode::BAD_REQUEST,
+            "missing_body",
+        )));
     };
     Ok(body)
 }
@@ -43,14 +39,10 @@ fn parse_update_body(raw: Option<axum::Json<UpdateBody>>) -> Result<UpdateBody, 
 /// Returns `Err` with a `409` response when an update is already in progress.
 fn acquire_update_inflight(s: &AppState, source: &str) -> Result<(), ErrResp> {
     if !s.install_inflight.write().insert(source.to_owned()) {
-        return Err(Box::new(
-            (
-                StatusCode::CONFLICT,
-                [("content-type", "application/json")],
-                serde_json::json!({"error": "update_in_progress"}).to_string(),
-            )
-                .into_response(),
-        ));
+        return Err(Box::new(super::registry_error(
+            StatusCode::CONFLICT,
+            "update_in_progress",
+        )));
     }
     Ok(())
 }
@@ -76,26 +68,18 @@ async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, Er
 
     let Ok(index) = s.registry_client.get().await else {
         s.install_inflight.write().remove(source);
-        return Err(Box::new(
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                [("content-type", "application/json")],
-                serde_json::json!({"error": "registry_unavailable"}).to_string(),
-            )
-                .into_response(),
-        ));
+        return Err(Box::new(super::registry_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "registry_unavailable",
+        )));
     };
 
     let Some(entry) = index.backends.iter().find(|b| b.source == source).cloned() else {
         s.install_inflight.write().remove(source);
-        return Err(Box::new(
-            (
-                StatusCode::NOT_FOUND,
-                [("content-type", "application/json")],
-                serde_json::json!({"error": "not_found"}).to_string(),
-            )
-                .into_response(),
-        ));
+        return Err(Box::new(super::registry_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+        )));
     };
 
     // Determine installed version from disk.
@@ -112,14 +96,10 @@ async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, Er
 
     let Some(from_version) = installed_version else {
         s.install_inflight.write().remove(source);
-        return Err(Box::new(
-            (
-                StatusCode::NOT_FOUND,
-                [("content-type", "application/json")],
-                serde_json::json!({"error": "not_installed"}).to_string(),
-            )
-                .into_response(),
-        ));
+        return Err(Box::new(super::registry_error(
+            StatusCode::NOT_FOUND,
+            "not_installed",
+        )));
     };
 
     Ok(VersionLookup {
@@ -143,14 +123,10 @@ fn select_update_compat(
 
     if compat::to_selected_asset(entry, &sel).is_none() {
         s.install_inflight.write().remove(source);
-        return Err(Box::new(
-            (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                [("content-type", "application/json")],
-                serde_json::json!({"error": "incompatible"}).to_string(),
-            )
-                .into_response(),
-        ));
+        return Err(Box::new(super::registry_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "incompatible",
+        )));
     }
 
     Ok(sel)

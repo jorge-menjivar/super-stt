@@ -64,6 +64,9 @@ const BAD_REQUEST_PHRASES: &[&str] = &[
     // supported by (or the model is not) multilingual
     // (docs/protocol/endpoints/v1/backends/model-language.md).
     "unsupported_language",
+    // `POST /audio_theme` with an unrecognized theme name
+    // (docs/protocol/endpoints/v1/audio_theme.md).
+    "invalid_audio_theme",
 ];
 
 /// Phrases (matched as substrings) that map an error `message` to
@@ -155,6 +158,14 @@ mod tests {
     fn state_conflict_maps_to_conflict() {
         let resp = DaemonResponse::error("No download in progress");
         assert_eq!(status_code_for_response(&resp), StatusCode::CONFLICT);
+    }
+
+    /// An unknown theme is documented as `400 invalid_audio_theme`
+    /// (docs/protocol/endpoints/v1/audio_theme.md), not a 500.
+    #[test]
+    fn invalid_audio_theme_maps_to_bad_request() {
+        let resp = DaemonResponse::error("invalid_audio_theme");
+        assert_eq!(status_code_for_response(&resp), StatusCode::BAD_REQUEST);
     }
 
     #[test]
