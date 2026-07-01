@@ -11,6 +11,9 @@
     name = "super-stt-cli"
     path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 clap = "4"

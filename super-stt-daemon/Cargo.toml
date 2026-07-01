@@ -7,6 +7,9 @@
     repository = "https://github.com/jorge-menjivar/super-stt"
     license = "GPL-3.0-only"
 
+[lints]
+workspace = true
+
 [dependencies]
     # Core dependencies
     anyhow.workspace = true

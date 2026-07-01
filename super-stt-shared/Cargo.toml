@@ -5,6 +5,9 @@
     edition.workspace = true
     description = "Shared types and utilities for Super STT"
 
+[lints]
+workspace = true
+
 [dependencies]
     # Core shared dependencies
     anyhow.workspace = true

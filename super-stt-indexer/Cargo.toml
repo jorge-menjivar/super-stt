@@ -6,6 +6,9 @@ edition = "2024"
 license = "GPL-3.0-only"
 description = "Cron-driven indexer that builds index.json from registry.toml"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }

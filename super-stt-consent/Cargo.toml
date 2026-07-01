@@ -11,6 +11,9 @@
     name = "super-stt-consent"
     path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
     cosmic = { package = "libcosmic", git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = [
         "autosize",

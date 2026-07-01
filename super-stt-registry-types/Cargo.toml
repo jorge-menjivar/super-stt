@@ -6,6 +6,9 @@ edition.workspace = true
 license = "GPL-3.0-only"
 description = "Canonical types for backend.toml manifests and registry.toml entries"
 
+[lints]
+workspace = true
+
 [dependencies]
 schemars = { version = "1", optional = true }
 serde.workspace = true

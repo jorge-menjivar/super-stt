@@ -123,6 +123,15 @@
         # D-Bus integration
         zbus = "5.14.0"
 
+    # Lints applied to every workspace crate via `lints.workspace = true`.
+    # Mirrors the CI clippy gate (see justfile `check`) so `cargo clippy` /
+    # `cargo build` apply the same standard locally instead of only in CI.
+    [workspace.lints.rust]
+        unused_must_use = "deny"
+
+    [workspace.lints.clippy]
+        pedantic = { level = "warn", priority = -1 }
+
     [workspace.metadata.cross.build]
         pre-build = [
             "dpkg --add-architecture $CROSS_DEB_ARCH",
