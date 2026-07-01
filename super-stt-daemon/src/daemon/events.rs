@@ -18,6 +18,11 @@
 //! the topic tables in `docs/protocol/endpoints/v1/events.md` exactly.
 //! Frequency-band payloads carry their `f32` slice base64-encoded into a
 //! `bands_b64` field so the JSON envelope is self-contained.
+//!
+//! The per-topic surface — the [`Topic`] enum and its wire-name/scope
+//! mappings, the [`EventBus`] senders, and the [`AnyReceiver`] wrapper — is
+//! generated from the single [`event_topics!`] table below, so adding a topic
+//! is a one-line change that can't drift out of sync across those sites.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Serialize;
@@ -30,86 +35,6 @@ use tokio::sync::broadcast;
 /// count.
 const AUDIO_BUF_CAPACITY: usize = 256;
 const STATE_BUF_CAPACITY: usize = 32;
-
-/// Set of topics the daemon emits over `GET /events`. The `as_str` mapping
-/// is the wire name used in the `event:` line of each SSE frame; each topic's
-/// [`Topic::required_scope`] gates who may subscribe to it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Topic {
-    RecordingStarted,
-    RecordingStopped,
-    RecordingState,
-    TranscribingStarted,
-    TranscribingStopped,
-    FrequencyBands,
-    PartialStt,
-    FinalStt,
-    DaemonStatusChanged,
-    DownloadProgress,
-    /// Registry install / refresh progress events. Requires the `daemon_status`
-    /// scope (same as `DaemonStatusChanged`).
-    RegistryInstall,
-}
-
-impl Topic {
-    /// Wire name (matches the SSE `event:` line and the `?topics=` query value).
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::RecordingStarted => "recording_started",
-            Self::RecordingStopped => "recording_stopped",
-            Self::RecordingState => "recording_state",
-            Self::TranscribingStarted => "transcribing_started",
-            Self::TranscribingStopped => "transcribing_stopped",
-            Self::FrequencyBands => "frequency_bands",
-            Self::PartialStt => "partial_stt",
-            Self::FinalStt => "final_stt",
-            Self::DaemonStatusChanged => "daemon_status_changed",
-            Self::DownloadProgress => "download_progress",
-            Self::RegistryInstall => "registry_install",
-        }
-    }
-
-    /// Parse a wire-name back into a `Topic`. Returns `None` for unknown
-    /// strings; callers translate that to `400 invalid_topic`. Named
-    /// `from_wire` rather than `from_str` to avoid confusion with the
-    /// `std::str::FromStr` trait method.
-    #[must_use]
-    pub fn from_wire(s: &str) -> Option<Self> {
-        match s {
-            "recording_started" => Some(Self::RecordingStarted),
-            "recording_stopped" => Some(Self::RecordingStopped),
-            "recording_state" => Some(Self::RecordingState),
-            "transcribing_started" => Some(Self::TranscribingStarted),
-            "transcribing_stopped" => Some(Self::TranscribingStopped),
-            "frequency_bands" => Some(Self::FrequencyBands),
-            "partial_stt" => Some(Self::PartialStt),
-            "final_stt" => Some(Self::FinalStt),
-            "daemon_status_changed" => Some(Self::DaemonStatusChanged),
-            "download_progress" => Some(Self::DownloadProgress),
-            "registry_install" => Some(Self::RegistryInstall),
-            _ => None,
-        }
-    }
-
-    /// The scope a token must hold to subscribe to this topic on
-    /// `GET /events`. Single source of truth for the topic→scope gate.
-    #[must_use]
-    pub const fn required_scope(self) -> &'static str {
-        match self {
-            Self::RecordingStarted
-            | Self::RecordingStopped
-            | Self::RecordingState
-            | Self::TranscribingStarted
-            | Self::TranscribingStopped => "recording_events",
-            Self::FrequencyBands => "audio_visualization",
-            Self::PartialStt | Self::FinalStt => "global_transcriptions",
-            Self::DaemonStatusChanged | Self::DownloadProgress | Self::RegistryInstall => {
-                "daemon_status"
-            }
-        }
-    }
-}
 
 // ---------- Event payload types ----------------------------------------------
 
@@ -184,53 +109,149 @@ pub type DownloadProgressEvent = serde_json::Value;
 /// the registry types. Settings-scope only.
 pub type RegistryInstallEvent = serde_json::Value;
 
-// ---------- The bus ----------------------------------------------------------
+// ---------- Topic table ------------------------------------------------------
 
-/// One `broadcast::Sender` per topic. The bus is held on `SuperSTTDaemon`
-/// behind `Arc`; clones share the underlying senders.
-#[derive(Clone)]
-pub struct EventBus {
-    recording_started: broadcast::Sender<RecordingStartedEvent>,
-    recording_stopped: broadcast::Sender<RecordingStoppedEvent>,
-    recording_state: broadcast::Sender<RecordingStateEvent>,
-    transcribing_started: broadcast::Sender<TranscribingStartedEvent>,
-    transcribing_stopped: broadcast::Sender<TranscribingStoppedEvent>,
-    frequency_bands: broadcast::Sender<FrequencyBandsEvent>,
-    partial_stt: broadcast::Sender<SttEvent>,
-    final_stt: broadcast::Sender<SttEvent>,
-    daemon_status_changed: broadcast::Sender<DaemonStatusChangedEvent>,
-    download_progress: broadcast::Sender<DownloadProgressEvent>,
-    registry_install: broadcast::Sender<RegistryInstallEvent>,
-}
-
-impl Default for EventBus {
-    fn default() -> Self {
-        let (recording_started, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (recording_stopped, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (recording_state, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (transcribing_started, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (transcribing_stopped, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (frequency_bands, _) = broadcast::channel(AUDIO_BUF_CAPACITY);
-        let (partial_stt, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (final_stt, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (daemon_status_changed, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (download_progress, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        let (registry_install, _) = broadcast::channel(STATE_BUF_CAPACITY);
-        Self {
-            recording_started,
-            recording_stopped,
-            recording_state,
-            transcribing_started,
-            transcribing_stopped,
-            frequency_bands,
-            partial_stt,
-            final_stt,
-            daemon_status_changed,
-            download_progress,
-            registry_install,
+/// Generate the per-topic surface from a single table: the [`Topic`] enum and
+/// its `as_str` / `from_wire` / `required_scope` mappings, the [`EventBus`]
+/// senders + `Default` + `subscribe`, and the [`AnyReceiver`] wrapper. Adding a
+/// topic is one row here; the mappings can't drift out of sync.
+macro_rules! event_topics {
+    (
+        $(
+            $(#[$vmeta:meta])*
+            $Variant:ident {
+                wire: $wire:literal,
+                scope: $scope:literal,
+                field: $field:ident,
+                payload: $Payload:ty,
+                capacity: $cap:expr,
+            }
+        ),+ $(,)?
+    ) => {
+        /// Set of topics the daemon emits over `GET /events`. The `as_str`
+        /// mapping is the wire name used in the `event:` line of each SSE
+        /// frame; each topic's [`Topic::required_scope`] gates who may
+        /// subscribe to it.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum Topic {
+            $( $(#[$vmeta])* $Variant, )+
         }
-    }
+
+        impl Topic {
+            /// Wire name (matches the SSE `event:` line and the `?topics=` query value).
+            #[must_use]
+            pub const fn as_str(self) -> &'static str {
+                match self { $( Self::$Variant => $wire, )+ }
+            }
+
+            /// Parse a wire-name back into a `Topic`. Returns `None` for unknown
+            /// strings; callers translate that to `400 invalid_topic`. Named
+            /// `from_wire` rather than `from_str` to avoid confusion with the
+            /// `std::str::FromStr` trait method.
+            #[must_use]
+            pub fn from_wire(s: &str) -> Option<Self> {
+                match s {
+                    $( $wire => Some(Self::$Variant), )+
+                    _ => None,
+                }
+            }
+
+            /// The scope a token must hold to subscribe to this topic on
+            /// `GET /events`. Single source of truth for the topic→scope gate.
+            #[must_use]
+            pub const fn required_scope(self) -> &'static str {
+                match self { $( Self::$Variant => $scope, )+ }
+            }
+        }
+
+        /// One `broadcast::Sender` per topic. The bus is held on `SuperSTTDaemon`
+        /// behind `Arc`; clones share the underlying senders.
+        #[derive(Clone)]
+        pub struct EventBus {
+            $( $field: broadcast::Sender<$Payload>, )+
+        }
+
+        impl Default for EventBus {
+            fn default() -> Self {
+                $( let ($field, _) = broadcast::channel($cap); )+
+                Self { $( $field, )+ }
+            }
+        }
+
+        impl EventBus {
+            /// Subscribe to a topic. Returns a typed `broadcast::Receiver` whose
+            /// item type is the event payload struct (also `Serialize`, so the
+            /// `/events` handler can pass it directly to `serde_json::to_value`).
+            ///
+            /// Each call returns an independent receiver — multiple widgets can
+            /// subscribe to the same topic concurrently.
+            #[must_use]
+            pub fn subscribe(&self, topic: Topic) -> AnyReceiver {
+                match topic {
+                    $( Topic::$Variant => AnyReceiver::$Variant(self.$field.subscribe()), )+
+                }
+            }
+        }
+
+        /// Heterogeneous receiver wrapper so the `/events` handler can hold a
+        /// `Vec<AnyReceiver>` keyed by `Topic` and `select` across them in one
+        /// loop. Each variant carries its typed `broadcast::Receiver`.
+        pub enum AnyReceiver {
+            $( $Variant(broadcast::Receiver<$Payload>), )+
+        }
+    };
 }
+
+event_topics! {
+    RecordingStarted {
+        wire: "recording_started", scope: "recording_events",
+        field: recording_started, payload: RecordingStartedEvent, capacity: STATE_BUF_CAPACITY,
+    },
+    RecordingStopped {
+        wire: "recording_stopped", scope: "recording_events",
+        field: recording_stopped, payload: RecordingStoppedEvent, capacity: STATE_BUF_CAPACITY,
+    },
+    RecordingState {
+        wire: "recording_state", scope: "recording_events",
+        field: recording_state, payload: RecordingStateEvent, capacity: STATE_BUF_CAPACITY,
+    },
+    TranscribingStarted {
+        wire: "transcribing_started", scope: "recording_events",
+        field: transcribing_started, payload: TranscribingStartedEvent, capacity: STATE_BUF_CAPACITY,
+    },
+    TranscribingStopped {
+        wire: "transcribing_stopped", scope: "recording_events",
+        field: transcribing_stopped, payload: TranscribingStoppedEvent, capacity: STATE_BUF_CAPACITY,
+    },
+    FrequencyBands {
+        wire: "frequency_bands", scope: "audio_visualization",
+        field: frequency_bands, payload: FrequencyBandsEvent, capacity: AUDIO_BUF_CAPACITY,
+    },
+    PartialStt {
+        wire: "partial_stt", scope: "global_transcriptions",
+        field: partial_stt, payload: SttEvent, capacity: STATE_BUF_CAPACITY,
+    },
+    FinalStt {
+        wire: "final_stt", scope: "global_transcriptions",
+        field: final_stt, payload: SttEvent, capacity: STATE_BUF_CAPACITY,
+    },
+    DaemonStatusChanged {
+        wire: "daemon_status_changed", scope: "daemon_status",
+        field: daemon_status_changed, payload: DaemonStatusChangedEvent, capacity: STATE_BUF_CAPACITY,
+    },
+    DownloadProgress {
+        wire: "download_progress", scope: "daemon_status",
+        field: download_progress, payload: DownloadProgressEvent, capacity: STATE_BUF_CAPACITY,
+    },
+    /// Registry install / refresh progress events. Requires the `daemon_status`
+    /// scope (same as `DaemonStatusChanged`).
+    RegistryInstall {
+        wire: "registry_install", scope: "daemon_status",
+        field: registry_install, payload: RegistryInstallEvent, capacity: STATE_BUF_CAPACITY,
+    },
+}
+
+// ---------- The bus: construction + publish API ------------------------------
 
 impl EventBus {
     #[must_use]
@@ -306,62 +327,6 @@ impl EventBus {
     pub fn publish_registry_install(&self, data: serde_json::Value) {
         let _ = self.registry_install.send(data);
     }
-
-    // ---------- Subscribe API ----------------------------------------------
-
-    /// Subscribe to a topic. Returns a typed `broadcast::Receiver` whose
-    /// item type is the event payload struct (also `Serialize`, so the
-    /// `/events` handler can pass it directly to `serde_json::to_value`).
-    ///
-    /// Each call returns an independent receiver — multiple widgets can
-    /// subscribe to the same topic concurrently.
-    #[must_use]
-    pub fn subscribe(&self, topic: Topic) -> AnyReceiver {
-        match topic {
-            Topic::RecordingStarted => {
-                AnyReceiver::RecordingStarted(self.recording_started.subscribe())
-            }
-            Topic::RecordingStopped => {
-                AnyReceiver::RecordingStopped(self.recording_stopped.subscribe())
-            }
-            Topic::RecordingState => AnyReceiver::RecordingState(self.recording_state.subscribe()),
-            Topic::TranscribingStarted => {
-                AnyReceiver::TranscribingStarted(self.transcribing_started.subscribe())
-            }
-            Topic::TranscribingStopped => {
-                AnyReceiver::TranscribingStopped(self.transcribing_stopped.subscribe())
-            }
-            Topic::FrequencyBands => AnyReceiver::FrequencyBands(self.frequency_bands.subscribe()),
-            Topic::PartialStt => AnyReceiver::PartialStt(self.partial_stt.subscribe()),
-            Topic::FinalStt => AnyReceiver::FinalStt(self.final_stt.subscribe()),
-            Topic::DaemonStatusChanged => {
-                AnyReceiver::DaemonStatusChanged(self.daemon_status_changed.subscribe())
-            }
-            Topic::DownloadProgress => {
-                AnyReceiver::DownloadProgress(self.download_progress.subscribe())
-            }
-            Topic::RegistryInstall => {
-                AnyReceiver::RegistryInstall(self.registry_install.subscribe())
-            }
-        }
-    }
-}
-
-/// Heterogeneous receiver wrapper so the `/events` handler can hold a
-/// `Vec<AnyReceiver>` keyed by `Topic` and `select` across them in one
-/// loop. Each variant carries its typed `broadcast::Receiver`.
-pub enum AnyReceiver {
-    RecordingStarted(broadcast::Receiver<RecordingStartedEvent>),
-    RecordingStopped(broadcast::Receiver<RecordingStoppedEvent>),
-    RecordingState(broadcast::Receiver<RecordingStateEvent>),
-    TranscribingStarted(broadcast::Receiver<TranscribingStartedEvent>),
-    TranscribingStopped(broadcast::Receiver<TranscribingStoppedEvent>),
-    FrequencyBands(broadcast::Receiver<FrequencyBandsEvent>),
-    PartialStt(broadcast::Receiver<SttEvent>),
-    FinalStt(broadcast::Receiver<SttEvent>),
-    DaemonStatusChanged(broadcast::Receiver<DaemonStatusChangedEvent>),
-    DownloadProgress(broadcast::Receiver<DownloadProgressEvent>),
-    RegistryInstall(broadcast::Receiver<RegistryInstallEvent>),
 }
 
 impl AnyReceiver {
