@@ -75,6 +75,14 @@ impl RecordingState {
     }
 
     pub fn update_adaptive_levels(&mut self, rms: f32, is_currently_active: bool) {
+        // Drop non-finite samples before they reach the level buffers. An empty
+        // capture chunk computes `0.0/0.0 = NaN`, and a misbehaving device can
+        // deliver NaN samples; a NaN in the buffers would poison the percentile
+        // sorts in `update_level_estimates` and panic the capture thread.
+        if !rms.is_finite() {
+            return;
+        }
+
         if self.recent_levels.len() >= RECENT_LEVELS_BUFFER_SIZE {
             self.recent_levels.pop_front();
         }
@@ -98,7 +106,9 @@ impl RecordingState {
     fn update_level_estimates(&mut self) {
         if !self.quiet_levels.is_empty() {
             let mut sorted_quiet: Vec<f32> = self.quiet_levels.iter().copied().collect();
-            sorted_quiet.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            // `total_cmp` is a total order over f32 (NaN-safe), so the sort can
+            // never panic even if a non-finite value slips past the guard above.
+            sorted_quiet.sort_by(f32::total_cmp);
             // sorted_quiet.len() ≤ QUIET_LEVELS_BUFFER_SIZE = 100; fits u32 and f32 exactly.
             let len_f32 =
                 crate::num_cast::u32_to_f32(u32::try_from(sorted_quiet.len()).unwrap_or(u32::MAX));
@@ -112,7 +122,7 @@ impl RecordingState {
 
         if !self.active_levels.is_empty() {
             let mut sorted_active: Vec<f32> = self.active_levels.iter().copied().collect();
-            sorted_active.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted_active.sort_by(f32::total_cmp);
             // sorted_active.len() ≤ ACTIVE_LEVELS_BUFFER_SIZE = 100; fits u32 and f32 exactly.
             let len_f32 =
                 crate::num_cast::u32_to_f32(u32::try_from(sorted_active.len()).unwrap_or(u32::MAX));
@@ -149,5 +159,32 @@ impl RecordingState {
             crate::num_cast::u32_to_f32(u32::try_from(speech_count).unwrap_or(u32::MAX));
         let total_f32 = crate::num_cast::u32_to_f32(u32::try_from(total_count).unwrap_or(u32::MAX));
         speech_f32 / total_f32 > SPEECH_DETECTION_THRESHOLD
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RecordingState;
+
+    /// A non-finite RMS (an empty capture buffer computes `0.0/0.0 = NaN`, and a
+    /// misbehaving device can deliver NaN samples) must not reach the percentile
+    /// sort in `update_level_estimates`, whose `partial_cmp(...).unwrap()` would
+    /// panic on the cpal capture-callback thread. The level estimates must also
+    /// stay finite (a NaN must not poison the adaptive thresholds).
+    #[test]
+    fn non_finite_rms_does_not_panic_or_poison_levels() {
+        let mut state = RecordingState::new();
+        // Prime both buffers with finite levels so the sort has >1 element.
+        state.update_adaptive_levels(0.01, false);
+        state.update_adaptive_levels(0.02, true);
+        // These would panic under `partial_cmp(...).unwrap()`.
+        state.update_adaptive_levels(f32::NAN, false);
+        state.update_adaptive_levels(f32::NAN, true);
+        state.update_adaptive_levels(f32::INFINITY, false);
+        assert!(state.baseline_level.is_finite(), "baseline poisoned by NaN");
+        assert!(
+            state.active_level.is_finite(),
+            "active level poisoned by NaN"
+        );
     }
 }

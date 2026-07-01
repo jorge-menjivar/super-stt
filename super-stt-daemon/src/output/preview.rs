@@ -351,7 +351,12 @@ impl Typer {
         best_text.to_string()
     }
 
-    /// Find the position where the last 'n' characters of text1 match with a substring in text2.
+    /// Find where the last `length_of_match` characters of `text1` match a
+    /// substring of `text2`, returning the **byte offset** in `text2` just past
+    /// that match (so callers can `&text2[pos..]` safely), or `-1` if no match.
+    ///
+    /// The offset is a byte index — not a char index — so slicing `text2` with
+    /// it never lands inside a multibyte UTF-8 sequence.
     fn find_tail_match_in_text(text1: &str, text2: &str, length_of_match: usize) -> i32 {
         // Check if either text is too short
         if text1.chars().count() < length_of_match || text2.chars().count() < length_of_match {
@@ -373,7 +378,15 @@ impl Typer {
 
             // Compare substrings
             if current_substring == target_substring {
-                return i32::try_from(end_pos).unwrap_or_default();
+                // `end_pos` is a CHAR index into text2; map it to a byte offset
+                // so callers can byte-slice `&text2[pos..]` without splitting a
+                // multibyte char. `nth(end_pos) == None` means the match ends at
+                // the very end of text2, i.e. byte offset `text2.len()`.
+                let byte_off = text2
+                    .char_indices()
+                    .nth(end_pos)
+                    .map_or(text2.len(), |(b, _)| b);
+                return i32::try_from(byte_off).unwrap_or(i32::MAX);
             }
         }
 

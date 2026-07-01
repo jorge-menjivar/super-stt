@@ -56,6 +56,22 @@ fn test_find_tail_match_in_text() {
 }
 
 #[test]
+fn find_tail_match_returns_utf8_safe_byte_offset() {
+    // "xyzáb" holds a 2-byte 'á' before the match boundary, so the matched-tail
+    // position as a CHAR index (4) differs from the BYTE offset (5). The result
+    // must be a byte offset: callers slice `&text2[pos..]`, and a char index
+    // would land inside the multibyte 'á' and panic ("not a char boundary").
+    let pos = Typer::find_tail_match_in_text("wyzá", "xyzáb", 3);
+    assert_eq!(
+        pos, 5,
+        "expected the byte offset (5), not the char index (4)"
+    );
+    // Must be usable as a &str byte slice without panicking.
+    let suffix = &"xyzáb"[usize::try_from(pos).unwrap()..];
+    assert_eq!(suffix, "b");
+}
+
+#[test]
 fn test_find_common_prefix() {
     assert_eq!(Typer::find_common_prefix("hello world", "hello there"), 6);
     assert_eq!(Typer::find_common_prefix("abc", "def"), 0);
