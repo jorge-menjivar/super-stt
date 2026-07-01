@@ -5,7 +5,6 @@ pub mod registry;
 pub mod utils;
 pub mod validation;
 
-#[cfg(feature = "analysis")]
 pub mod audio;
 
 // Re-export commonly used types for convenience
@@ -14,7 +13,6 @@ pub use models::*;
 #[cfg(feature = "audio")]
 pub use utils::audio as audio_utils;
 
-#[cfg(feature = "analysis")]
 pub use audio::*;
 
 /// Macro to conditionally provide GPU device options based on CUDA feature availability

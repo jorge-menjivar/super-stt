@@ -3,27 +3,7 @@ use spectrum_analyzer::scaling::divide_by_N_sqrt;
 use spectrum_analyzer::windows::hann_window;
 use spectrum_analyzer::{FrequencyLimit, FrequencySpectrum, samples_fft_to_spectrum};
 
-/// Audio frequency analysis for wave visualization
-#[derive(Debug, Clone)]
-pub struct FrequencyData {
-    pub bands: Vec<f32>, // Frequency band amplitudes (0.0 to 1.0)
-    pub total_energy: f32,
-    pub dominant_frequency: f32, // Dominant frequency in Hz for dynamic wave visualization
-    pub frequency_confidence: f32, // Confidence of dominant frequency detection (0.0 to 1.0)
-    pub dynamic_wave_frequency: Option<f32>, // Optional dynamic wave frequency for visualization
-}
-
-impl Default for FrequencyData {
-    fn default() -> Self {
-        Self {
-            bands: vec![0.0; 64], // Default 64 frequency bands for richer visualization
-            total_energy: 0.0,
-            dominant_frequency: 440.0, // Default to A4 (440Hz) when no audio
-            frequency_confidence: 0.0,
-            dynamic_wave_frequency: None, // Let the applet handle wave frequency mapping
-        }
-    }
-}
+use super::FrequencyData;
 
 /// Number of frequency bands to compute for visualization
 /// Using 64 bands provides richer visualization detail

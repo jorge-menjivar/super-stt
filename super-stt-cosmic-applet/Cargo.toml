@@ -29,6 +29,6 @@ base64 = "0.22.1"
     log.workspace = true
     serde.workspace = true
     serde_json.workspace = true
-    super-stt-shared = { path = "../super-stt-shared", features = ["analysis"] }
+    super-stt-shared = { path = "../super-stt-shared" }
     tokio.workspace = true
     toml.workspace = true
