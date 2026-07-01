@@ -1,42 +1,41 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! `/volume` — audio-cue master volume (0–100).
 
-use crate::daemon::client::internal::response::{require_success, require_unit};
-use crate::daemon::client::internal::session::with_settings_token;
-use super_stt_shared::daemon::http_client::transport;
+settings_getter!(
+    get_volume -> u8, "/volume", "get_volume",
+    |resp| parse_volume(resp.message.as_deref())
+);
+settings_setter!(set_volume, volume: u8, "/volume", "volume", "set_volume");
 
-/// Read current cue volume (HTTP `GET /volume`).
-pub async fn get_volume() -> Result<u8, String> {
-    with_settings_token(|socket, token| async move {
-        let resp = require_success(
-            transport::settings_get(socket, &token, "/volume").await?,
-            "get_volume",
-        )?;
-        // The daemon reports volume in the `message` field as text
-        // ("Volume is 75"); parse the trailing integer.
-        let vol = resp
-            .message
-            .unwrap_or_default()
-            .rsplit(' ')
-            .next()
-            .and_then(|s| s.parse::<u8>().ok())
-            .unwrap_or(100);
-        Ok(vol)
-    })
-    .await
+/// Parse the daemon's `message` field ("Volume is 75") into a 0–100 level,
+/// falling back to 100 when the field is absent or does not end in a valid
+/// `u8` (e.g. empty, non-numeric, or out of range).
+fn parse_volume(message: Option<&str>) -> u8 {
+    message
+        .unwrap_or_default()
+        .rsplit(' ')
+        .next()
+        .and_then(|s| s.parse::<u8>().ok())
+        .unwrap_or(100)
 }
 
-/// Set master volume (HTTP `POST /volume`).
-pub async fn set_volume(volume: u8) -> Result<(), String> {
-    with_settings_token(move |socket, token| async move {
-        let resp = transport::settings_post(
-            socket,
-            &token,
-            "/volume",
-            &serde_json::json!({ "volume": volume }),
-        )
-        .await?;
-        require_unit(resp, "set_volume")
-    })
-    .await
+#[cfg(test)]
+mod tests {
+    use super::parse_volume;
+
+    #[test]
+    fn parses_trailing_integer() {
+        assert_eq!(parse_volume(Some("Volume is 75")), 75);
+        assert_eq!(parse_volume(Some("0")), 0);
+        assert_eq!(parse_volume(Some("100")), 100);
+    }
+
+    #[test]
+    fn falls_back_to_100_when_absent_or_unparseable() {
+        assert_eq!(parse_volume(None), 100);
+        assert_eq!(parse_volume(Some("")), 100);
+        assert_eq!(parse_volume(Some("Volume is loud")), 100);
+        // 999 overflows u8 → parse fails → fallback.
+        assert_eq!(parse_volume(Some("999")), 100);
+    }
 }
