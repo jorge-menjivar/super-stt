@@ -891,6 +891,59 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
     });
 }
 
+/// A backend option write for the *active* backend triggers a reload so the
+/// change takes effect. If that reload fails (here: the backend isn't installed,
+/// so re-instantiation errors), the option write still succeeds — but the reload
+/// failure must be surfaced in the response, not silently swallowed.
+#[tokio::test]
+async fn set_backend_option_surfaces_reload_failure() {
+    let daemon = test_daemon().await;
+    let source = "github.com/x/not-installed";
+    seed_loaded_model(&daemon, "m", source).await;
+
+    let resp = daemon
+        .handle_set_backend_option(
+            source.to_string(),
+            "base_url".to_string(),
+            "https://x".to_string(),
+        )
+        .await;
+
+    assert_eq!(resp.status, "success", "the option write itself succeeds");
+    let msg = resp.message.unwrap_or_default();
+    assert!(
+        msg.to_lowercase().contains("reload"),
+        "reload failure should be surfaced, got: {msg}"
+    );
+}
+
+/// Disabling online models while an online model is loaded reverts to a local
+/// model. With no local backend installed, the daemon unloads the online model —
+/// the response must say so rather than claim "all transcription is local".
+#[tokio::test]
+async fn disabling_online_without_local_fallback_surfaces_warning() {
+    let daemon = test_daemon().await;
+    // supported_devices = ["none"] → an online model.
+    seed_loaded_model(&daemon, "m", "github.com/x/online").await;
+    {
+        let mut config = daemon.config.write().await;
+        config.online.allow_online_models = true;
+    }
+
+    let resp = daemon.handle_set_allow_online_models(false).await;
+
+    assert_eq!(resp.status, "success");
+    assert!(
+        daemon.model.read().await.is_none(),
+        "online model should be unloaded"
+    );
+    let msg = resp.message.unwrap_or_default();
+    assert!(
+        msg.to_lowercase().contains("no local"),
+        "no-local-fallback should be surfaced, got: {msg}"
+    );
+}
+
 /// Switching from backend A (with a loaded model) to backend B drops the
 /// loaded model — the documented postcondition: after `set_active_backend`,
 /// `/active_model` returns `null` until the user explicitly picks one.

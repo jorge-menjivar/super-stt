@@ -32,6 +32,20 @@ impl SuperSTTDaemon {
             .with_audio_theme(theme_str)
     }
 
+    /// Handle list audio themes command - return all available audio themes
+    #[must_use]
+    pub fn handle_list_audio_themes(&self) -> DaemonResponse {
+        let available_themes = AudioTheme::all_themes();
+        info!(
+            "Available audio themes requested, returning {} themes",
+            available_themes.len()
+        );
+
+        DaemonResponse::success()
+            .with_available_audio_themes(available_themes)
+            .with_message("Available audio themes listed successfully".to_string())
+    }
+
     /// Handle get audio theme command
     #[must_use]
     pub fn handle_get_audio_theme(&self) -> DaemonResponse {
