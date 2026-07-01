@@ -6,7 +6,6 @@ use cosmic::widget::{self, button, text};
 
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
-use crate::daemon::catalog;
 use crate::state::ContextPage;
 use crate::ui::icons;
 use crate::ui::messages::Message;
@@ -103,9 +102,7 @@ pub fn load_backend_sheet(app: &AppModel) -> Element<'_, Message> {
 fn load_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
     let online = backend_is_online(backend);
-    let hosts = online.then(|| {
-        catalog::by_source(&backend.source).map_or(&[][..], |c| c.allowed_hosts.as_slice())
-    });
+    let hosts = online.then_some(backend.allowed_hosts.as_slice());
 
     let mut meta = widget::column::with_capacity(2)
         .spacing(spacing.space_xxxs)

@@ -358,6 +358,7 @@ mod capability_tests {
         BackendInfo {
             source: "github.com/super-stt/test".to_string(),
             name: "Test".to_string(),
+            allowed_hosts: Vec::new(),
             models: per_model
                 .iter()
                 .enumerate()

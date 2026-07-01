@@ -174,10 +174,7 @@ pub(super) fn active_backend_card<'a>(
     // Capability chips advertise the backend's compute: GPU / CPU for local
     // models, Cloud for online ones (with the hosts it reaches on hover); a
     // trailing "N models" count chip rounds out the row.
-    let hosts = online.then(|| {
-        crate::daemon::catalog::by_source(&backend.source)
-            .map_or(&[][..], |c| c.allowed_hosts.as_slice())
-    });
+    let hosts = online.then_some(backend.allowed_hosts.as_slice());
     let mut chip_row = row![].spacing(spacing.space_xxs).align_y(Alignment::Center);
     if let Some(chips) = capability_chips(
         backend_supports_gpu(backend),

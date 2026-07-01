@@ -61,6 +61,7 @@ Authorization: Bearer stt_…64hex…
       "source": "github.com/super-stt/openai",
       "name":   "OpenAI",
       "kind":   "wasm",                 // "wasm" | "subprocess"
+      "allowed_hosts": ["api.openai.com"],  // hosts the backend may reach; [] for subprocess/local
       "models": [
         {
           "name":                 "whisper-1",
@@ -102,6 +103,7 @@ Authorization: Bearer stt_…64hex…
 | `…[].source`      | string           | Backend repo id; the `source` of every model it serves.              |
 | `…[].name`        | string           | Human-readable backend name.                                         |
 | `…[].kind`        | string           | `wasm` or `subprocess`.                                              |
+| `…[].allowed_hosts` | array of strings | Hosts the backend is permitted to reach (`[network].allowed_hosts` from its `backend.toml`). Empty for `subprocess` backends (which run with no network) and for backends that declare none. Surfaced in the settings UI's "Online model" badge so the user sees where a cloud backend's audio would go. |
 | `…[].models`      | array            | Models served, as `{ name, provider, multilingual, primary_language, supported_languages, supported_devices, estimated_vram_bytes }`. `multilingual` is `true` when the model accepts a language tag. `primary_language` is the model's default BCP-47 tag (the fallback when no override or global setting applies). `supported_languages` is the non-empty array of BCP-47 tags the model accepts; these feed the per-model language picker and the [`/backends/{source}/models/{model}/language`](./backends/model-language.md) resolution. `supported_devices` is a non-empty array drawn from `["cpu", "cuda", "metal", "none"]`; `"none"` marks a remote/online model with no local compute. `estimated_vram_bytes` is a conservative GPU memory estimate (weights + KV cache + overhead); `0` when unknown or not GPU-resident. See [`GET /gpu_info`](./gpu_info.md) for the detected GPU memory it's weighed against. |
 | `…[].secrets`     | array            | Declared secrets: `{ name, label, description, required }`. `label` falls back to `name` when absent. Secret **values** are never returned. |
 | `…[].options`     | array            | Declared options: `{ name, label, description, type, default, required, value }`. `label` falls back to `name` when absent; `value` is the effective value (config override if set, else `default`). |

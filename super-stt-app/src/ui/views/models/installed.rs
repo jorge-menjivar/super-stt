@@ -6,7 +6,6 @@ use cosmic::widget::{self, button, text};
 
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
-use crate::daemon::catalog;
 use crate::ui::icons;
 use crate::ui::messages::Message;
 
@@ -105,9 +104,7 @@ pub(super) fn installed_card<'a>(
     // Facts row: the served-models inventory takes the width; the GPU / CPU /
     // Cloud capability chips sit opposite it.
     let model_names: Vec<String> = backend.models.iter().map(|m| m.name.clone()).collect();
-    let hosts = online.then(|| {
-        catalog::by_source(&backend.source).map_or(&[][..], |c| c.allowed_hosts.as_slice())
-    });
+    let hosts = online.then_some(backend.allowed_hosts.as_slice());
     let inventory = models_inventory(&model_names);
     let caps = capability_chips(
         backend_supports_gpu(backend),

@@ -18,6 +18,11 @@ pub struct BackendInfo {
     pub source: String,
     /// Human-readable backend name, e.g. `OpenAI`.
     pub name: String,
+    /// Hosts the backend is permitted to reach (`[network].allowed_hosts` from
+    /// its `backend.toml`). Empty for subprocess/local backends. Feeds the
+    /// "Online model" badge so the user sees where a cloud backend's audio goes.
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
     /// Models this backend serves.
     pub models: Vec<BackendModel>,
     /// Sensitive values (API keys, etc.) stored in the system keyring.
@@ -95,4 +100,40 @@ pub struct BackendOption {
     /// Current effective value (override or default) reported by the daemon.
     #[serde(default)]
     pub value: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BackendInfo;
+
+    /// `GET /backends` reports each backend's `[network].allowed_hosts`; the
+    /// "Online model" badge reads them straight off `BackendInfo`.
+    #[test]
+    fn parses_allowed_hosts() {
+        let json = serde_json::json!({
+            "source": "github.com/super-stt/openai",
+            "name": "OpenAI",
+            "models": [],
+            "secrets": [],
+            "options": [],
+            "allowed_hosts": ["api.openai.com"],
+        });
+        let info: BackendInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(info.allowed_hosts, vec!["api.openai.com".to_string()]);
+    }
+
+    /// A backend that declares no hosts (or an older daemon that omits the
+    /// field) yields an empty list, not a parse error.
+    #[test]
+    fn allowed_hosts_defaults_empty_when_absent() {
+        let json = serde_json::json!({
+            "source": "s",
+            "name": "n",
+            "models": [],
+            "secrets": [],
+            "options": [],
+        });
+        let info: BackendInfo = serde_json::from_value(json).unwrap();
+        assert!(info.allowed_hosts.is_empty());
+    }
 }

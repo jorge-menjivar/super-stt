@@ -52,6 +52,7 @@ mod unmet_requirements_tests {
         BackendInfo {
             source: "github.com/super-stt/openai".to_string(),
             name: "OpenAI".to_string(),
+            allowed_hosts: Vec::new(),
             models: vec![BackendModel {
                 name: "whisper-1".to_string(),
                 provider: "openai".to_string(),
@@ -276,6 +277,7 @@ mod model_status_tests {
         BackendInfo {
             source: "github.com/super-stt/openai".to_string(),
             name: "OpenAI".to_string(),
+            allowed_hosts: Vec::new(),
             models: vec![BackendModel {
                 name: "whisper-1".to_string(),
                 provider: "openai".to_string(),

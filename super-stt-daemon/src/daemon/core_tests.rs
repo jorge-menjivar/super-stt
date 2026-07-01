@@ -564,6 +564,9 @@ async fn list_backends_catalog_and_option_override() {
     assert_eq!(resp.status, "success");
     let cat = resp.backends.expect("backends catalog");
     assert_eq!(cat[0]["source"], source);
+    // The backend's `[network].allowed_hosts` reaches the catalog JSON so the
+    // app's "Online model" badge can name where a cloud backend's audio goes.
+    assert_eq!(cat[0]["allowed_hosts"][0], "api.openai.com");
     assert_eq!(cat[0]["models"][0]["name"], "whisper-1");
     assert_eq!(cat[0]["secrets"][0]["name"], "openai_api_key");
     assert_eq!(cat[0]["secrets"][0]["label"], "OpenAI API key");

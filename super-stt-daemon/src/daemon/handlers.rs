@@ -393,6 +393,7 @@ impl SuperSTTDaemon {
                     "source": b.source,
                     "name": b.name,
                     "kind": b.kind,
+                    "allowed_hosts": b.allowed_hosts,
                     "models": models,
                     "secrets": secrets,
                     "options": options,
