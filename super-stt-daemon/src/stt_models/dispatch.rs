@@ -185,7 +185,10 @@ mod tests {
     async fn online_model_returns_transcribed_text() {
         let (model, _, _) = loaded(true, Outcome::Ok("hello".to_string()));
         let out = dispatch_transcription(&model, vec![0.0; 16000], 16000, None).await;
-        assert!(matches!(out, Ok(ref t) if t == "hello"), "online path should return the backend text");
+        assert!(
+            matches!(out, Ok(ref t) if t == "hello"),
+            "online path should return the backend text"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -193,7 +196,10 @@ mod tests {
         // Exercises the spawn_blocking path used for non-online models.
         let (model, _, _) = loaded(false, Outcome::Ok("world".to_string()));
         let out = dispatch_transcription(&model, vec![0.0; 16000], 16000, None).await;
-        assert!(matches!(out, Ok(ref t) if t == "world"), "local blocking path should return the backend text");
+        assert!(
+            matches!(out, Ok(ref t) if t == "world"),
+            "local blocking path should return the backend text"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -220,7 +226,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn language_and_audio_are_forwarded_to_backend() {
         let (model, seen_lang, seen_len) = loaded(true, Outcome::Ok("ok".to_string()));
-        let _ = dispatch_transcription(&model, vec![0.0; 1234], 16000, Some("es-MX".to_string())).await;
+        let _ =
+            dispatch_transcription(&model, vec![0.0; 1234], 16000, Some("es-MX".to_string())).await;
         assert_eq!(
             seen_lang.lock().unwrap().clone(),
             Some(Some("es-MX".to_string())),

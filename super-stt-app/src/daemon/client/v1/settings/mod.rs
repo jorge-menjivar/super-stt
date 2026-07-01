@@ -14,14 +14,13 @@ macro_rules! settings_getter {
         pub async fn $fn() -> Result<$ret, String> {
             crate::daemon::client::internal::session::with_settings_token(
                 |socket, token| async move {
-                    let $resp =
-                        crate::daemon::client::internal::response::require_success(
-                            super_stt_shared::daemon::http_client::transport::settings_get(
-                                socket, &token, $path,
-                            )
-                            .await?,
-                            $label,
-                        )?;
+                    let $resp = crate::daemon::client::internal::response::require_success(
+                        super_stt_shared::daemon::http_client::transport::settings_get(
+                            socket, &token, $path,
+                        )
+                        .await?,
+                        $label,
+                    )?;
                     Ok($extract)
                 },
             )

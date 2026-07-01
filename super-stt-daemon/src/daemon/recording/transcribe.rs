@@ -88,31 +88,27 @@ impl SuperSTTDaemon {
 
         // The final pass surfaces backend errors to the caller — unlike the
         // best-effort preview path, a failure here must not look like silence.
-        let transcription_result = match dispatch_transcription(
-            &self.model,
-            processed_audio,
-            16000,
-            language,
-        )
-        .await
-        {
-            Ok(text) => {
-                info!(
-                    "Transcription completed in {:?}: '{text}'",
-                    start_time.elapsed()
-                );
-                Ok(text)
-            }
-            Err(DispatchError::Failed(e)) => {
-                warn!("Transcription failed: {e}");
-                Err(e)
-            }
-            Err(DispatchError::NotLoaded) => {
-                error!("Model not loaded");
-                Err(anyhow::anyhow!("Model not loaded"))
-            }
-            Err(DispatchError::Join(e)) => Err(anyhow::anyhow!("Transcription task failed: {e}")),
-        };
+        let transcription_result =
+            match dispatch_transcription(&self.model, processed_audio, 16000, language).await {
+                Ok(text) => {
+                    info!(
+                        "Transcription completed in {:?}: '{text}'",
+                        start_time.elapsed()
+                    );
+                    Ok(text)
+                }
+                Err(DispatchError::Failed(e)) => {
+                    warn!("Transcription failed: {e}");
+                    Err(e)
+                }
+                Err(DispatchError::NotLoaded) => {
+                    error!("Model not loaded");
+                    Err(anyhow::anyhow!("Model not loaded"))
+                }
+                Err(DispatchError::Join(e)) => {
+                    Err(anyhow::anyhow!("Transcription task failed: {e}"))
+                }
+            };
 
         // Stop spinner if it was started
         if let Some(handle) = spinner_handle.take() {

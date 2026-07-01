@@ -3,6 +3,7 @@ use crate::config::DaemonConfig;
 use crate::daemon::events::EventBus;
 use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
+use crate::resource_management::ResourceManager;
 use crate::services::dbus::DBusManager;
 use crate::services::transcription::RealTimeTranscriptionManager;
 use crate::stt_models::backends::{self, DiscoveredBackend};
@@ -10,7 +11,6 @@ use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
 use super_stt_shared::models::provider::Provider;
-use crate::resource_management::ResourceManager;
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 

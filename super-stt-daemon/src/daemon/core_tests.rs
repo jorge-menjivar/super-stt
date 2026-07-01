@@ -4,10 +4,10 @@ use crate::config::DaemonConfig;
 use crate::daemon::events::EventBus;
 use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
+use crate::resource_management::ResourceManager;
 use crate::services::transcription::RealTimeTranscriptionManager;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
-use crate::resource_management::ResourceManager;
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 use tokio::time::{Duration, timeout};
@@ -1214,7 +1214,10 @@ async fn handle_transcribe_errors_when_no_model_loaded() {
 
     assert_eq!(resp.status, "error");
     assert!(
-        resp.message.as_deref().unwrap_or_default().contains("Model not loaded"),
+        resp.message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Model not loaded"),
         "error message should name the missing model, got: {:?}",
         resp.message
     );
