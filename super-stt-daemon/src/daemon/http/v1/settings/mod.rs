@@ -1,4 +1,74 @@
 // SPDX-License-Identifier: GPL-3.0-only
+
+// The settings handlers are thin wrappers over `dispatch_command`: build a
+// `DaemonRequest`, hand it to the daemon, shape the `DaemonResponse` into an
+// HTTP response. These three macros collapse that boilerplate. They are defined
+// here — before the `mod` declarations below — so textual macro scope makes
+// them visible inside every child module without an import.
+
+/// A no-payload settings handler: dispatch `$cmd` with no request body. Used by
+/// `GET` readers and verb-free actions (`test_audio_theme`, `clear_language`).
+macro_rules! settings_dispatch {
+    ($fn:ident, $cmd:literal) => {
+        pub(crate) async fn $fn(
+            ::axum::extract::State(s): ::axum::extract::State<
+                $crate::daemon::http::state::AppState,
+            >,
+        ) -> impl ::axum::response::IntoResponse {
+            $crate::daemon::http::internal::helpers::dispatch::dispatch_command(
+                &s.daemon, $cmd, None,
+            )
+            .await
+        }
+    };
+}
+
+/// A single-field `POST` handler: deserialize `$body { $field: $ty }` and
+/// dispatch `$cmd` with `{ $key: field }` in the request `data`.
+macro_rules! settings_setter {
+    ($fn:ident, $body:ident { $field:ident : $ty:ty }, $cmd:literal, $key:literal) => {
+        #[derive(::serde::Deserialize)]
+        pub(crate) struct $body {
+            pub(crate) $field: $ty,
+        }
+        pub(crate) async fn $fn(
+            ::axum::extract::State(s): ::axum::extract::State<$crate::daemon::http::state::AppState>,
+            ::axum::Json(body): ::axum::Json<$body>,
+        ) -> impl ::axum::response::IntoResponse {
+            $crate::daemon::http::internal::helpers::dispatch::dispatch_command(
+                &s.daemon,
+                $cmd,
+                Some(::serde_json::json!({ $key: body.$field })),
+            )
+            .await
+        }
+    };
+}
+
+/// A boolean-toggle `POST` handler. These legacy commands read `enabled` from
+/// the top level of `DaemonRequest` (not from `data`), so they build the
+/// request directly rather than via `dispatch_command`.
+macro_rules! settings_toggle {
+    ($fn:ident, $body:ident, $cmd:literal) => {
+        #[derive(::serde::Deserialize)]
+        pub(crate) struct $body {
+            pub(crate) enabled: bool,
+        }
+        pub(crate) async fn $fn(
+            ::axum::extract::State(s): ::axum::extract::State<
+                $crate::daemon::http::state::AppState,
+            >,
+            ::axum::Json(body): ::axum::Json<$body>,
+        ) -> impl ::axum::response::IntoResponse {
+            use $crate::daemon::http::internal::helpers::dispatch;
+            let mut req = dispatch::build_request($cmd, None);
+            req.enabled = Some(body.enabled);
+            let resp = dispatch::dispatch(&s.daemon, req).await;
+            dispatch::json_response(&resp)
+        }
+    };
+}
+
 pub(crate) mod active_device;
 pub(crate) mod active_model;
 pub(crate) mod allow_online_models;

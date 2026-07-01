@@ -274,51 +274,11 @@ impl DaemonConfig {
         }
     }
 
-    /// Update write mode and save to disk
-    pub fn update_write_mode(&mut self, write_mode: bool) {
-        self.transcription.write_mode = write_mode;
-        if let Err(e) = self.save() {
-            error!("Failed to save config after write mode update: {e}");
-        }
-    }
-
-    /// Update recording stop mode and save to disk
-    pub fn update_recording_stop_mode(&mut self, mode: RecordingStopMode) {
-        self.transcription.recording_stop_mode = mode;
-        if let Err(e) = self.save() {
-            error!("Failed to save config after recording stop mode update: {e}");
-        }
-    }
-
     /// Update master volume and save to disk
     pub fn update_volume(&mut self, volume: u8) {
         self.audio.volume = volume;
         if let Err(e) = self.save() {
             error!("Failed to save config after volume update: {e}");
-        }
-    }
-
-    /// Update allow online models setting and save to disk
-    pub fn update_allow_online_models(&mut self, enabled: bool) {
-        self.online.allow_online_models = enabled;
-        if let Err(e) = self.save() {
-            error!("Failed to save config after online models update: {e}");
-        }
-    }
-
-    /// Update write method and save to disk
-    pub fn update_write_method(&mut self, method: WriteMethod) {
-        self.transcription.write_method = method;
-        if let Err(e) = self.save() {
-            error!("Failed to save config after write method update: {e}");
-        }
-    }
-
-    /// Update custom models directory and save to disk
-    pub fn update_custom_models_dir(&mut self, path: Option<String>) {
-        self.transcription.custom_models_dir = path;
-        if let Err(e) = self.save() {
-            error!("Failed to save config after custom models dir update: {e}");
         }
     }
 
