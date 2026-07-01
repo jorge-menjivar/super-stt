@@ -10,7 +10,7 @@ use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
 use super_stt_shared::models::provider::Provider;
-use super_stt_shared::resource_management::ResourceManager;
+use crate::resource_management::ResourceManager;
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 

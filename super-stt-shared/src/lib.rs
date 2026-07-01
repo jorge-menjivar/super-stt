@@ -2,7 +2,6 @@
 pub mod daemon;
 pub mod models;
 pub mod registry;
-pub mod resource_management;
 pub mod services;
 pub mod utils;
 pub mod validation;

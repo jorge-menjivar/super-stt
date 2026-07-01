@@ -7,7 +7,7 @@ use crate::input::audio::AudioProcessor;
 use crate::services::transcription::RealTimeTranscriptionManager;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
-use super_stt_shared::resource_management::ResourceManager;
+use crate::resource_management::ResourceManager;
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 use tokio::time::{Duration, timeout};

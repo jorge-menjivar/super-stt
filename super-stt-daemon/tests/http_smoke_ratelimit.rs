@@ -35,7 +35,7 @@ const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 
 /// `ResourceLimits::development().max_requests_per_minute` — the build the
 /// test daemon runs. Kept in sync with
-/// `super-stt-shared/src/resource_management/mod.rs`.
+/// `super-stt-daemon/src/resource_management/mod.rs`.
 const DEV_PER_MINUTE: usize = 300;
 
 struct DaemonGuard {

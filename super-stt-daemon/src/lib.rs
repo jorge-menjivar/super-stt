@@ -8,6 +8,7 @@ pub mod input;
 pub mod keyring;
 pub mod output;
 pub mod registry;
+pub mod resource_management;
 pub mod services;
 pub mod stt_models;
 
