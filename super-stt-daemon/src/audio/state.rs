@@ -8,9 +8,6 @@ pub const GRACE_PERIOD: Duration = Duration::from_secs(2);
 pub const SILENCE_TIMEOUT: Duration = Duration::from_millis(1500);
 pub const NO_SPEECH_TIMEOUT: Duration = Duration::from_secs(5);
 
-// Debug interval for printing adaptive levels (in sample ticks)
-pub const DEBUG_PRINT_INTERVAL: usize = 400;
-
 // Buffers and adaptive thresholds
 pub const SPEECH_BUFFER_SIZE: usize = 5;
 pub const RECENT_LEVELS_BUFFER_SIZE: usize = 200;

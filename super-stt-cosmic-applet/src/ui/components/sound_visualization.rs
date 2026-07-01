@@ -69,11 +69,6 @@ impl VisualizationComponent {
         self.visualization_theme = theme;
     }
 
-    /// Update visualization side without recreating the component
-    pub fn update_side(&mut self, side: VisualizationSide) {
-        self.visualization_side = side;
-    }
-
     /// Update with pre-computed frequency bands from daemon
     pub fn update_frequency_bands(&mut self, bands: &[f32], total_energy: f32) {
         // For backward compatibility, we need to compute dominant frequency from bands
@@ -134,11 +129,6 @@ impl VisualizationComponent {
                 * FREQUENCY_SMOOTHING
                 + target_wave_frequency * (1.0 - FREQUENCY_SMOOTHING);
         }
-    }
-
-    /// Get the current smoothed wave frequency for visualization
-    pub fn get_wave_frequency(&self) -> f32 {
-        self.smoothed_visualization_frequency
     }
 
     /// Update visualization colors without recreating the entire component

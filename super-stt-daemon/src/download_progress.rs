@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 use super_stt_shared::models::protocol::DownloadProgress;
-use tokio::sync::mpsc;
 
 use crate::daemon::events::EventBus;
 
@@ -25,11 +24,9 @@ pub struct DownloadProgressTracker {
     pub started_at: Instant,
     pub started_at_str: String,
     pub cancelled: Arc<AtomicBool>,
-    pub progress_sender: Option<mpsc::UnboundedSender<DownloadProgress>>,
     /// Optional event bus the tracker publishes `download_progress`
     /// SSE events into. Set via [`Self::with_event_bus`]; when `None`
-    /// the tracker still drives `progress_sender` but the HTTP
-    /// `/events` channel sees nothing.
+    /// the HTTP `/events` channel sees nothing.
     pub events: Option<Arc<EventBus>>,
     last_broadcast_percentage: AtomicU64, // Store as fixed point (percentage * 100)
     /// The `status` string we most recently broadcast. Used so that
@@ -69,7 +66,6 @@ impl DownloadProgressTracker {
             started_at: Instant::now(),
             started_at_str: Utc::now().to_rfc3339(),
             cancelled,
-            progress_sender: None,
             events: None,
             last_broadcast_percentage: AtomicU64::new(0),
             last_broadcast_status: Arc::new(RwLock::new(String::new())),
@@ -84,12 +80,6 @@ impl DownloadProgressTracker {
     #[must_use]
     pub fn with_event_bus(mut self, events: Arc<EventBus>) -> Self {
         self.events = Some(events);
-        self
-    }
-
-    #[must_use]
-    pub fn with_progress_sender(mut self, sender: mpsc::UnboundedSender<DownloadProgress>) -> Self {
-        self.progress_sender = Some(sender);
         self
     }
 
@@ -152,8 +142,7 @@ impl DownloadProgressTracker {
         }
     }
 
-    /// Broadcast progress update via the HTTP `/events` SSE bus and the
-    /// optional in-process `progress_sender`. Throttled to 1%
+    /// Broadcast progress update via the HTTP `/events` SSE bus. Throttled to 1%
     /// increments so a tight streaming download doesn't flood
     /// subscribers — but any transition to a terminal `status` value
     /// (`completed` / `cancelled` / `error`) always publishes, since
@@ -208,11 +197,6 @@ impl DownloadProgressTracker {
                 }
                 events.publish_download_progress(payload);
             }
-        }
-
-        // Also send via channel if available
-        if let Some(ref sender) = self.progress_sender {
-            let _ = sender.send(progress);
         }
     }
 
@@ -337,11 +321,6 @@ impl DownloadStateManager {
     pub fn clear_download(&self) {
         *self.current_download.write() = None;
         self.cancellation_flag.store(false, Ordering::Relaxed);
-    }
-
-    #[must_use]
-    pub fn get_cancellation_flag(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.cancellation_flag)
     }
 }
 

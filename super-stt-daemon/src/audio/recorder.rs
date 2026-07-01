@@ -116,12 +116,6 @@ impl DaemonAudioRecorder {
         crate::audio::device::perform_audio_health_check(&self.audio_device_cache)
     }
 
-    /// Subscribe to audio level updates
-    #[must_use]
-    pub fn subscribe_audio_levels(&self) -> broadcast::Receiver<AudioLevel> {
-        self.audio_level_tx.subscribe()
-    }
-
     /// Warm up the audio system to prevent cold start issues
     fn warm_up_audio_system(&self) -> Result<()> {
         if self.audio_theme == AudioTheme::Silent {

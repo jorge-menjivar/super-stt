@@ -510,23 +510,6 @@ impl Typer {
 
         info!("Cleared all {chars_to_delete} characters and reset state");
     }
-
-    /// In a single input session, backspace preview chars then type final text
-    ///
-    /// # Errors
-    /// This function can fail if the enigo initialization fails or if the text typing task fails.
-    pub fn replace_preview_and_type(&mut self, preview_chars: usize, text: &str) {
-        // Use unified preprocessor for final text (adds period, capitalizes)
-        let processed_text = Typer::preprocess_text(text, false);
-        let text_to_type = processed_text + " ";
-
-        // Erase preview in batches
-        if preview_chars > 0 {
-            let _ = self.keyboard_simulator.backspace_n(preview_chars);
-        }
-
-        let _ = self.keyboard_simulator.type_text(&text_to_type);
-    }
 }
 
 #[cfg(test)]

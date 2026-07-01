@@ -82,11 +82,6 @@ impl ConnectionInfo {
         }
     }
 
-    /// Update the last activity timestamp
-    pub fn update_activity(&mut self) {
-        self.last_activity = Utc::now();
-    }
-
     /// Check if connection has timed out
     #[must_use]
     pub fn is_timed_out(&self, timeout_seconds: u64) -> bool {

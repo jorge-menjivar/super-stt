@@ -49,43 +49,4 @@ impl AudioProcessor {
 
         Ok(processed)
     }
-
-    /// Convert audio data to WAV format for debugging/testing
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the audio data cannot be converted to WAV format.
-    pub fn audio_to_wav(&self, audio: &[f32], sample_rate: u32) -> Result<Vec<u8>> {
-        use std::io::{Cursor, Write};
-
-        let mut cursor = Cursor::new(Vec::new());
-
-        // WAV header
-        cursor.write_all(b"RIFF")?;
-        cursor.write_all(&(36 + audio.len() * 2).to_le_bytes())?; // File size - 8
-        cursor.write_all(b"WAVE")?;
-
-        // Format chunk
-        cursor.write_all(b"fmt ")?;
-        cursor.write_all(&16u32.to_le_bytes())?; // Format chunk size
-        cursor.write_all(&1u16.to_le_bytes())?; // PCM format
-        cursor.write_all(&1u16.to_le_bytes())?; // Mono
-        cursor.write_all(&sample_rate.to_le_bytes())?;
-        cursor.write_all(&(sample_rate * 2).to_le_bytes())?; // Byte rate
-        cursor.write_all(&2u16.to_le_bytes())?; // Block align
-        cursor.write_all(&16u16.to_le_bytes())?; // Bits per sample
-
-        // Data chunk
-        cursor.write_all(b"data")?;
-        cursor.write_all(&(audio.len() * 2).to_le_bytes())?; // Data chunk size
-
-        // Convert f32 samples to i16; clamped to [-1, 1] before scaling so the result
-        // is always in [i16::MIN, i16::MAX] before the cast.
-        for &sample in audio {
-            let sample_i16 = crate::num_cast::f32_to_i16(sample.clamp(-1.0, 1.0) * 32767.0);
-            cursor.write_all(&sample_i16.to_le_bytes())?;
-        }
-
-        Ok(cursor.into_inner())
-    }
 }

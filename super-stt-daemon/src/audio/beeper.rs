@@ -3,7 +3,6 @@
 use anyhow::Result;
 use cpal::Device;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use log::debug;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -11,23 +10,6 @@ use std::time::Duration;
 pub const WARMUP_TONE_DURATION_MS: u64 = 20;
 pub const WARMUP_TONE_FREQUENCY: f32 = 44000.0;
 pub const WARMUP_DELAY_AFTER_TONE_MS: u64 = 50;
-
-/// Play a short warm-up tone to initialize audio drivers.
-///
-/// # Errors
-///
-/// Returns an error only if the post-tone sleep fails (unlikely). Errors
-/// from the tone itself are logged and ignored.
-pub fn play_warmup_tone() -> Result<()> {
-    debug!("Playing warm-up tone to initialize audio drivers");
-    let warmup_frequencies = [WARMUP_TONE_FREQUENCY];
-    let warmup_duration = WARMUP_TONE_DURATION_MS;
-    if let Err(e) = play_beep_sequence(&warmup_frequencies, warmup_duration, 5, 5, 1.0) {
-        debug!("Warm-up tone failed (usually fine): {e}");
-    }
-    std::thread::sleep(Duration::from_millis(WARMUP_DELAY_AFTER_TONE_MS));
-    Ok(())
-}
 
 /// Timing parameters derived from the sample rate and ms inputs.
 struct BeepParams {
