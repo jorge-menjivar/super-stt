@@ -2,7 +2,7 @@
 
 use super::RecordingSession;
 use crate::daemon::types::SuperSTTDaemon;
-use crate::output::preview::Typer;
+use crate::output::typer::Typer;
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::sync::Arc;
@@ -242,7 +242,7 @@ impl SuperSTTDaemon {
         if let Ok(text) = self.transcribe_audio_chunk(&resampled_audio).await
             && !text.trim().is_empty()
         {
-            let processed = crate::output::preview::Typer::preprocess_text(&text, true);
+            let processed = crate::output::preview::preprocess_text(&text, true);
 
             info!(
                 "Preview: '{}'",

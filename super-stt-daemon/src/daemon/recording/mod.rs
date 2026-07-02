@@ -5,7 +5,7 @@ mod transcribe;
 
 use crate::daemon::types::SuperSTTDaemon;
 use crate::services::dbus::ListeningEvent;
-use crate::{audio::recorder::DaemonAudioRecorder, output::preview::Typer};
+use crate::{audio::recorder::DaemonAudioRecorder, output::typer::Typer};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use log::{error, info, warn};

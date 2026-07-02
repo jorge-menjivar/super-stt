@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::daemon::types::SuperSTTDaemon;
-use crate::output::preview::Typer;
+use crate::output::typer::Typer;
 use crate::stt_models::dispatch::{DispatchError, dispatch_transcription};
 use anyhow::{Context, Result};
 use log::{debug, error, info, warn};

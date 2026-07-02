@@ -2,3 +2,4 @@
 
 pub mod keyboard;
 pub mod preview;
+pub mod typer;

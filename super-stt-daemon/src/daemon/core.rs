@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{daemon::types::SuperSTTDaemon, output::keyboard::Simulator, output::preview::Typer};
+use crate::{daemon::types::SuperSTTDaemon, output::keyboard::Simulator, output::typer::Typer};
 use super_stt_shared::models::protocol::{Command, DaemonRequest, DaemonResponse};
 
 impl SuperSTTDaemon {
