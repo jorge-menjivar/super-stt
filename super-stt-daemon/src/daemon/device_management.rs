@@ -35,9 +35,14 @@ impl SuperSTTDaemon {
             return self.update_device_preference_only(&device).await;
         }
 
-        // Get context for the device switch
-        let (current_preferred, model_to_reload, provider, source, is_online) =
-            self.get_device_switch_context(&device).await;
+        // Get context for the device switch. The model can be unloaded
+        // concurrently between the `is_none()` check above and this read — treat
+        // "gone" as "nothing to reload" and just record the preference.
+        let Some((current_preferred, model_to_reload, provider, source, is_online)) =
+            self.get_device_switch_context(&device).await
+        else {
+            return self.update_device_preference_only(&device).await;
+        };
 
         // Online models don't use local GPU — just update the preference; no
         // reload is needed since the model runs on a remote service.
@@ -181,38 +186,38 @@ impl SuperSTTDaemon {
     async fn get_device_switch_context(
         &self,
         _device: &str,
-    ) -> (
+    ) -> Option<(
         String,
         String,
         super_stt_shared::models::provider::Provider,
         String,
         bool,
-    ) {
-        // Get the model that needs to be reloaded (validated to exist already).
-        // Online-ness is read from the loaded model (which implements
-        // `ModelInfo`) — the `provider` string no longer encodes it.
+    )> {
+        // Read the model that needs to be reloaded. It was present when the
+        // caller checked, but the lock is released in between, so a concurrent
+        // unload (a reload or a backend uninstall) can leave it `None` — return
+        // that instead of panicking. Online-ness is read from the loaded model
+        // (which implements `ModelInfo`) — the `provider` string no longer
+        // encodes it.
         let (model_to_reload, provider, source, is_online) = {
             let guard = self.model.read().await;
-            guard
-                .as_ref()
-                .map(|loaded| {
-                    (
-                        loaded.definition.name.clone(),
-                        loaded.definition.provider.clone(),
-                        loaded.definition.source.clone(),
-                        loaded.definition.is_online(),
-                    )
-                })
-                .expect("Model existence already validated")
-        };
+            guard.as_ref().map(|loaded| {
+                (
+                    loaded.definition.name.clone(),
+                    loaded.definition.provider.clone(),
+                    loaded.definition.source.clone(),
+                    loaded.definition.is_online(),
+                )
+            })
+        }?;
         let current_preferred = self.preferred_device.read().await.clone();
-        (
+        Some((
             current_preferred,
             model_to_reload,
             provider,
             source,
             is_online,
-        )
+        ))
     }
 
     /// Prepare for device switch by broadcasting status and unloading current model
@@ -247,11 +252,23 @@ impl SuperSTTDaemon {
     ) -> DaemonResponse {
         let actual_device = crate::daemon::types::normalize_device(&model_instance.device());
 
-        // Store the reloaded model
-        let definition = self
+        // Store the reloaded model. The backend serving it can be uninstalled
+        // concurrently with the switch, so `resolve_definition` may now return
+        // `None` — fail the request gracefully (leaving the daemon idle) rather
+        // than panicking on the capture thread.
+        let Some(definition) = self
             .resolve_definition(model_to_reload, provider, source)
             .await
-            .expect("device-switched model resolved before reload");
+        else {
+            error!(
+                "Backend serving {model_to_reload} ({source}) disappeared during the device \
+                 switch; cannot finalize the reloaded model — leaving the daemon idle"
+            );
+            return DaemonResponse::error(&format!(
+                "Model {model_to_reload} is no longer available (its backend may have been \
+                 uninstalled during the device switch)"
+            ));
+        };
         *self.model.write().await = Some(crate::daemon::types::LoadedModel {
             definition,
             instance: model_instance,
@@ -346,10 +363,19 @@ impl SuperSTTDaemon {
                 let recovery_actual_device =
                     crate::daemon::types::normalize_device(&model_instance.device());
 
-                let definition = self
+                let Some(definition) = self
                     .resolve_definition(model_to_reload, provider, source)
                     .await
-                    .expect("recovery model resolved before reload");
+                else {
+                    error!(
+                        "Backend serving {model_to_reload} ({source}) disappeared during \
+                         device-switch recovery; cannot finalize — leaving the daemon idle"
+                    );
+                    return DaemonResponse::error(&format!(
+                        "Device switch failed: {error}. Recovery could not finalize because \
+                         model {model_to_reload} is no longer available."
+                    ));
+                };
                 *self.model.write().await = Some(crate::daemon::types::LoadedModel {
                     definition,
                     instance: model_instance,

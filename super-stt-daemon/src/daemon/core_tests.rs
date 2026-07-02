@@ -1062,6 +1062,26 @@ async fn set_device_when_idle_rejects_invalid_device() {
     assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
 }
 
+/// Switching devices while an online model is loaded only records the
+/// preference — online models run remotely, so there is nothing to reload.
+/// Exercises `get_device_switch_context` (which reads the loaded model) on
+/// the reachable path, verifying it returns the model context + `is_online`.
+#[tokio::test]
+async fn set_device_with_online_model_keeps_model_and_updates_preference() {
+    let daemon = test_daemon().await;
+    // `seed_loaded_model` sets supported_devices = ["none"] → an online model.
+    seed_loaded_model(&daemon, "m", "github.com/x/online").await;
+
+    let response = daemon.handle_set_device("cuda".to_string()).await;
+
+    assert_eq!(response.status, "success", "got: {:?}", response.message);
+    assert_eq!(daemon.preferred_device.read().await.as_str(), "cuda");
+    assert!(
+        daemon.model.read().await.is_some(),
+        "online model must not be unloaded by a device switch"
+    );
+}
+
 /// `unload_active_model` is a no-op when no model is loaded — success
 /// with a clear message — and otherwise drops the model lock while
 /// leaving `active_backend` selected so the user can pick another model.
