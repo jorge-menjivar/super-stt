@@ -11,6 +11,7 @@ pub mod language_handlers;
 pub mod model_management;
 pub mod recording;
 pub mod settings_handlers;
+pub mod startup;
 pub mod status_handlers;
 pub mod theme_handlers;
 pub mod transcription;
