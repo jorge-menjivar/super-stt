@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 pub(crate) mod install;
 pub(crate) mod list;
+pub(crate) mod pipeline;
 pub(crate) mod refresh;
 pub(crate) mod update;
 

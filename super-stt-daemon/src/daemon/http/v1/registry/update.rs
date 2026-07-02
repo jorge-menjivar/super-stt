@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::install::spawn_install_pipeline;
+use super::pipeline::spawn_install_pipeline;
 use crate::daemon::http::state::AppState;
 use axum::extract::State;
 use axum::http::StatusCode;
