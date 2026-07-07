@@ -52,6 +52,7 @@ mod unmet_requirements_tests {
         BackendInfo {
             source: "github.com/super-stt/openai".to_string(),
             name: "OpenAI".to_string(),
+            kind: "wasm".to_string(),
             allowed_hosts: Vec::new(),
             models: vec![BackendModel {
                 name: "whisper-1".to_string(),
@@ -61,6 +62,7 @@ mod unmet_requirements_tests {
                 multilingual: false,
                 supported_languages: Vec::new(),
                 primary_language: String::new(),
+                realtime: false,
             }],
             secrets,
             options,
@@ -86,6 +88,7 @@ mod unmet_requirements_tests {
             name: name.to_string(),
             label: label.map(str::to_string),
             description: String::new(),
+            r#type: None,
             default: None,
             required,
             value: value.map(str::to_string),
@@ -277,6 +280,7 @@ mod model_status_tests {
         BackendInfo {
             source: "github.com/super-stt/openai".to_string(),
             name: "OpenAI".to_string(),
+            kind: "wasm".to_string(),
             allowed_hosts: Vec::new(),
             models: vec![BackendModel {
                 name: "whisper-1".to_string(),
@@ -286,6 +290,7 @@ mod model_status_tests {
                 multilingual: false,
                 supported_languages: Vec::new(),
                 primary_language: String::new(),
+                realtime: false,
             }],
             secrets: vec![BackendSecret {
                 name: "openai_api_key".to_string(),

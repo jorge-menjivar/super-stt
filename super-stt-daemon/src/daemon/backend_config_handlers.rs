@@ -2,6 +2,7 @@
 
 use crate::daemon::types::SuperSTTDaemon;
 use log::info;
+use super_stt_shared::models::backends::{BackendInfo, BackendModel, BackendOption, BackendSecret};
 use super_stt_shared::models::protocol::DaemonResponse;
 
 /// Fold an optional reload-failure warning into a success message, so a failed
@@ -21,38 +22,34 @@ impl SuperSTTDaemon {
         let config = self.config.read().await;
         let backends = self.backends.read().await;
 
-        let catalog: Vec<serde_json::Value> = backends
+        let catalog: Vec<BackendInfo> = backends
             .iter()
             .map(|b| {
-                let models: Vec<serde_json::Value> = b
+                let models = b
                     .models
                     .iter()
-                    .map(|m| {
-                        serde_json::json!({
-                            "name": m.name,
-                            "provider": m.provider.to_string(),
-                            "multilingual": m.is_multilingual,
-                            "primary_language": m.primary_language,
-                            "supported_languages": m.supported_languages,
-                            "supported_devices": m.supported_devices,
-                            "estimated_vram_bytes": m.estimated_vram_bytes,
-                            "realtime": m.realtime,
-                        })
+                    .map(|m| BackendModel {
+                        name: m.name.clone(),
+                        provider: m.provider.to_string(),
+                        supported_devices: m.supported_devices.clone(),
+                        estimated_vram_bytes: m.estimated_vram_bytes,
+                        multilingual: m.is_multilingual,
+                        supported_languages: m.supported_languages.clone(),
+                        primary_language: m.primary_language.clone(),
+                        realtime: m.realtime,
                     })
                     .collect();
-                let secrets: Vec<serde_json::Value> = b
+                let secrets = b
                     .secrets
                     .iter()
-                    .map(|s| {
-                        serde_json::json!({
-                            "name": s.name,
-                            "label": s.label,
-                            "description": s.description,
-                            "required": s.required,
-                        })
+                    .map(|s| BackendSecret {
+                        name: s.name.clone(),
+                        label: s.label.clone(),
+                        description: s.description.clone(),
+                        required: s.required,
                     })
                     .collect();
-                let options: Vec<serde_json::Value> = b
+                let options = b
                     .options
                     .iter()
                     .map(|o| {
@@ -61,32 +58,33 @@ impl SuperSTTDaemon {
                             .backend_option(&b.source, &o.name)
                             .map(str::to_string)
                             .or_else(|| default.clone());
-                        serde_json::json!({
-                            "name": o.name,
-                            "label": o.label,
-                            "description": o.description,
-                            "type": o.r#type,
-                            "default": default,
-                            "required": o.required,
-                            "value": value,
-                        })
+                        BackendOption {
+                            name: o.name.clone(),
+                            label: o.label.clone(),
+                            description: o.description.clone(),
+                            r#type: o.r#type.map(|t| t.as_str().to_string()),
+                            default,
+                            required: o.required,
+                            value,
+                        }
                     })
                     .collect();
-                serde_json::json!({
-                    "source": b.source,
-                    "name": b.name,
-                    "kind": b.kind,
-                    "allowed_hosts": b.allowed_hosts,
-                    "models": models,
-                    "secrets": secrets,
-                    "options": options,
-                })
+                BackendInfo {
+                    source: b.source.clone(),
+                    name: b.name.clone(),
+                    kind: b.kind.clone(),
+                    allowed_hosts: b.allowed_hosts.clone(),
+                    models,
+                    secrets,
+                    options,
+                }
             })
             .collect();
 
         info!("Backends catalog requested: {} backend(s)", catalog.len());
+        let backends_json = serde_json::to_value(&catalog).unwrap_or_default();
         DaemonResponse::success()
-            .with_backends(serde_json::json!(catalog))
+            .with_backends(backends_json)
             .with_message("Backends listed successfully".to_string())
     }
 
