@@ -29,10 +29,9 @@ fn custom_repo_error_response(
         ResolveError::BadRepoUrl(_) => (StatusCode::BAD_REQUEST, "bad_repo_url"),
         ResolveError::ManifestTooLarge => (StatusCode::UNPROCESSABLE_ENTITY, "manifest_too_large"),
         ResolveError::NotUtf8(_)
-        | ResolveError::Toml(_)
+        | ResolveError::Manifest(_)
         | ResolveError::MissingWasmAsset
         | ResolveError::MissingSubprocessAssets
-        | ResolveError::UnknownKind(_)
         | ResolveError::UnsafeComponent { .. } => {
             (StatusCode::UNPROCESSABLE_ENTITY, "manifest_invalid")
         }

@@ -11,10 +11,7 @@
 //! it verbatim — the `unverified_source` warning surfaced to clients (see
 //! `docs/protocol/endpoints/v1/registry/install.md`) reflects this.
 
-use std::str::FromStr;
-
-use serde::Deserialize;
-use super_stt_registry_types::manifest::Device;
+use super_stt_registry_types::manifest::{Device, Kind, Manifest, ManifestError, ModelEntry};
 use thiserror::Error;
 
 use crate::registry::index_schema::{
@@ -35,14 +32,12 @@ pub enum ResolveError {
     ManifestTooLarge,
     #[error("backend.toml is not valid UTF-8: {0}")]
     NotUtf8(#[from] std::string::FromUtf8Error),
-    #[error("backend.toml parse: {0}")]
-    Toml(#[from] toml::de::Error),
+    #[error("backend.toml invalid: {0}")]
+    Manifest(#[from] ManifestError),
     #[error("backend.toml declares kind = `wasm` but no `[assets].wasm` entry")]
     MissingWasmAsset,
     #[error("backend.toml declares kind = `subprocess` but no `[[assets.subprocess]]` entries")]
     MissingSubprocessAssets,
-    #[error("backend.toml declares unknown kind `{0}` (expected `wasm` or `subprocess`)")]
-    UnknownKind(String),
     #[error("release has no asset named `{0}`")]
     AssetMissing(String),
     #[error(
@@ -86,20 +81,17 @@ pub async fn resolve(
         return Err(ResolveError::ManifestTooLarge);
     }
     let manifest_text = String::from_utf8(manifest_bytes)?;
-    let manifest: Manifest = toml::from_str(&manifest_text)?;
+    // Parse through the canonical manifest so a custom-repo install is validated
+    // exactly as the daemon's own discovery will validate it: typed
+    // kind/provider/device/accel, required descriptions, and the safe-entrypoint
+    // / safe-destination guards all come from the single shared parser.
+    let manifest = Manifest::parse(&manifest_text)?;
 
     // Unlike the registry path, a custom repo's manifest is never run through
     // the indexer's source-vs-repo check. Enforce it here (see
-    // `ensure_source_matches_repo`).
+    // `ensure_source_matches_repo`). The entrypoint safety guard is already
+    // applied by `Manifest::parse`.
     ensure_source_matches_repo(&manifest.backend.source, &repo)?;
-    // `entrypoint` is joined onto the install dir (it may be nested, e.g.
-    // `bin/launcher`), and `id` becomes that dir's name (a single component).
-    if !super_stt_shared::registry::is_safe_relative_path(&manifest.backend.entrypoint) {
-        return Err(ResolveError::UnsafeComponent {
-            field: "entrypoint",
-            value: manifest.backend.entrypoint,
-        });
-    }
 
     let assets = synthesize_assets(&manifest, &release.assets)?;
 
@@ -125,8 +117,8 @@ pub async fn resolve(
         name: manifest.backend.name,
         description: Some(manifest.backend.description),
         license: manifest.backend.license.unwrap_or_default(),
-        kind: manifest.backend.kind,
-        contract: manifest.backend.contract,
+        kind: manifest.backend.kind.to_string(),
+        contract: manifest.backend.contract.to_string(),
         entrypoint: manifest.backend.entrypoint,
         allowed_hosts: manifest.network.allowed_hosts,
         online,
@@ -134,11 +126,15 @@ pub async fn resolve(
         supports_cpu,
         models: manifest
             .models
-            .into_iter()
+            .iter()
             .map(|m| IndexModel {
-                name: m.name,
-                provider: m.provider,
-                supported_devices: m.supported_devices,
+                name: m.name.clone(),
+                provider: m.provider.as_str().to_string(),
+                supported_devices: m
+                    .supported_devices
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
             })
             .collect(),
         secrets: manifest
@@ -146,7 +142,7 @@ pub async fn resolve(
             .into_iter()
             .map(|s| IndexSecret {
                 name: s.name,
-                label: s.label,
+                label: s.label.unwrap_or_default(),
                 required: s.required,
             })
             .collect(),
@@ -155,9 +151,12 @@ pub async fn resolve(
             .into_iter()
             .map(|o| IndexOption {
                 name: o.name,
-                label: o.label,
-                r#type: o.r#type,
-                default: o.default,
+                label: o.label.unwrap_or_default(),
+                r#type: o.r#type.map(|t| t.as_str().to_string()).unwrap_or_default(),
+                default: o
+                    .default
+                    .as_ref()
+                    .and_then(|d| serde_json::to_value(d).ok()),
             })
             .collect(),
         assets,
@@ -184,25 +183,16 @@ struct ModelSupport {
     supports_cpu: bool,
 }
 
-/// Classify a manifest's models through the canonical [`Device`] type (and the
-/// `none` device sentinel for online/remote models) so the custom-repo path
-/// agrees with the registry indexer on what counts as online / GPU / CPU.
-/// Device strings that aren't canonical simply don't match — the lenient parser
-/// still records them in the index, and the canonical layer rejects them
-/// downstream.
-fn classify_models(models: &[Model]) -> ModelSupport {
-    let online = models
-        .iter()
-        .any(|m| m.supported_devices.iter().any(|d| d == "none"));
-    let any_device = |pred: fn(Device) -> bool| {
-        models.iter().any(|m| {
-            m.supported_devices
-                .iter()
-                .any(|d| Device::from_str(d).is_ok_and(pred))
-        })
-    };
+/// Classify a manifest's models by their [`Device`]s — the `none` sentinel
+/// marks online/remote models, `cuda`/`metal` mark GPU, `cpu` marks CPU — so
+/// the custom-repo path's index card agrees with the registry indexer. Devices
+/// are already validated by [`Manifest::parse`], so there is no string matching
+/// to get wrong here.
+fn classify_models(models: &[ModelEntry]) -> ModelSupport {
+    let any_device =
+        |pred: fn(&Device) -> bool| models.iter().any(|m| m.supported_devices.iter().any(pred));
     ModelSupport {
-        online,
+        online: any_device(|d| matches!(d, Device::None)),
         supports_gpu: any_device(|d| matches!(d, Device::Cuda | Device::Metal)),
         supports_cpu: any_device(|d| matches!(d, Device::Cpu)),
     }
@@ -238,8 +228,8 @@ fn synthesize_assets(
     };
 
     let mut out = IndexAssets::default();
-    match manifest.backend.kind.as_str() {
-        "wasm" => {
+    match manifest.backend.kind {
+        Kind::Wasm => {
             let file = manifest
                 .assets
                 .wasm
@@ -252,18 +242,16 @@ fn synthesize_assets(
                 sha256: String::new(),
             });
         }
-        "subprocess" => {
+        Kind::Subprocess => {
             if manifest.assets.subprocess.is_empty() {
                 return Err(ResolveError::MissingSubprocessAssets);
             }
             for sa in &manifest.assets.subprocess {
-                // A variant is one `file` or several concatenated `parts`. The
-                // custom-repo path has no pinned hash (TLS is the guarantee), so
-                // each synthesized pin carries an empty sha256.
-                let names: Vec<&str> = match &sa.file {
-                    Some(f) => vec![f.as_str()],
-                    None => sa.parts.iter().map(String::as_str).collect(),
-                };
+                // A variant is one `file` or several concatenated `parts` (the
+                // file-xor-parts invariant is guaranteed by `Manifest::parse`).
+                // The custom-repo path has no pinned hash (TLS is the
+                // guarantee), so each synthesized pin carries an empty sha256.
+                let names = sa.release_files();
                 if names.is_empty() {
                     return Err(ResolveError::MissingSubprocessAssets);
                 }
@@ -276,7 +264,7 @@ fn synthesize_assets(
                         sha256: String::new(),
                     });
                 }
-                let (url, size, sha256, parts) = if sa.file.is_none() {
+                let (url, size, sha256, parts) = if sa.is_multipart() {
                     (None, None, None, pins)
                 } else {
                     let p = pins.remove(0);
@@ -284,7 +272,7 @@ fn synthesize_assets(
                 };
                 out.subprocess.push(IndexSubprocessAsset {
                     target: sa.target.clone(),
-                    accel: sa.accel.clone(),
+                    accel: sa.accel.to_string(),
                     cuda_major: sa.cuda_major,
                     cuda_sm: sa.cuda_sm,
                     cudnn: sa.cudnn,
@@ -295,150 +283,67 @@ fn synthesize_assets(
                 });
             }
         }
-        other => return Err(ResolveError::UnknownKind(other.into())),
     }
     Ok(out)
 }
 
-// ---------- Manifest types (local to this module) ----------
-//
-// custom_repo vets a remote repository's manifest before install; it needs
-// only the asset-selection subset of the full manifest schema.  A minimal,
-// lenient local parser is kept here deliberately rather than parsing the whole
-// thing through the canonical super-stt-registry-types, which owns the
-// installed-backend shape.  The provider/device fields stay `String` here, but
-// their *classification* (online / GPU / CPU) runs through the canonical
-// `Provider`/`Device` types — see `classify_models` — so this path agrees with
-// the registry indexer instead of using ad-hoc string lists.
-
-#[derive(Debug, Deserialize)]
-struct Manifest {
-    backend: BackendMeta,
-    #[serde(default)]
-    network: Network,
-    #[serde(default)]
-    models: Vec<Model>,
-    #[serde(default)]
-    secrets: Vec<Secret>,
-    #[serde(default)]
-    options: Vec<Opt>,
-    assets: Assets,
-}
-
-#[derive(Debug, Deserialize)]
-struct BackendMeta {
-    source: String,
-    name: String,
-    version: String,
-    kind: String,
-    entrypoint: String,
-    contract: String,
-    description: String,
-    #[serde(default)]
-    license: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct Network {
-    #[serde(default)]
-    allowed_hosts: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Model {
-    name: String,
-    provider: String,
-    #[serde(default)]
-    supported_devices: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Secret {
-    name: String,
-    #[serde(default)]
-    label: String,
-    #[serde(default)]
-    required: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct Opt {
-    name: String,
-    #[serde(default)]
-    label: String,
-    #[serde(rename = "type", default)]
-    r#type: String,
-    #[serde(default)]
-    default: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Assets {
-    #[serde(default)]
-    wasm: Option<String>,
-    #[serde(default)]
-    subprocess: Vec<SubprocessAsset>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SubprocessAsset {
-    #[serde(default)]
-    file: Option<String>,
-    #[serde(default)]
-    parts: Vec<String>,
-    target: String,
-    accel: String,
-    #[serde(default)]
-    cuda_major: Option<u32>,
-    #[serde(default)]
-    cuda_sm: Option<u32>,
-    #[serde(default)]
-    cudnn: bool,
-}
+// The manifest types are the canonical `super_stt_registry_types::manifest`
+// set (see the imports): custom_repo parses a remote repo's `backend.toml`
+// through the same strict parser the daemon's discovery uses, then projects the
+// asset-selection subset onto the loose registry-index shape (`IndexBackend`).
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use super_stt_forge::RepoRef;
+    use super_stt_registry_types::provider::Provider;
 
-    fn model(name: &str, provider: &str, devices: &[&str]) -> Model {
-        Model {
-            name: name.into(),
-            provider: provider.into(),
-            supported_devices: devices.iter().map(|s| (*s).to_string()).collect(),
+    /// Build a `ModelEntry` with the given provider and devices; the other
+    /// fields are irrelevant to `classify_models` (which reads only devices).
+    fn model(provider: &str, devices: &[Device]) -> ModelEntry {
+        ModelEntry {
+            name: "m".into(),
+            provider: Provider::from(provider),
+            multilingual: true,
+            primary_language: "en".into(),
+            supported_languages: vec!["en".into()],
+            supported_devices: devices.to_vec(),
+            estimated_vram_bytes: 0,
+            processing_interval_ms: None,
+            realtime: false,
+            files: vec![],
         }
     }
 
     #[test]
     fn classify_marks_online_from_none_device_not_provider() {
         // Online-ness is derived from the `none` device sentinel, not the
-        // (now free-form) provider string.
-        assert!(classify_models(&[model("m", "openai", &["none"])]).online);
-        assert!(classify_models(&[model("m", "mistral", &["none"])]).online);
-        assert!(classify_models(&[model("m", "deepgram", &["none"])]).online);
+        // (free-form) provider string.
+        assert!(classify_models(&[model("openai", &[Device::None])]).online);
+        assert!(classify_models(&[model("mistral", &[Device::None])]).online);
         // A made-up provider is still online if it declares the `none` device.
-        assert!(classify_models(&[model("m", "anthropic", &["none"])]).online);
-        assert!(classify_models(&[model("m", "totally_bogus", &["none"])]).online);
+        assert!(classify_models(&[model("totally_bogus", &[Device::None])]).online);
         // No `none` device → not online, regardless of provider.
-        assert!(!classify_models(&[model("m", "openai", &["cpu"])]).online);
-        assert!(!classify_models(&[model("m", "local_whisper", &["cpu"])]).online);
-        assert!(!classify_models(&[model("m", "openai", &[])]).online);
+        assert!(!classify_models(&[model("openai", &[Device::Cpu])]).online);
+        assert!(!classify_models(&[model("local_whisper", &[Device::Cpu])]).online);
+        assert!(!classify_models(&[model("openai", &[])]).online);
     }
 
     #[test]
-    fn classify_marks_gpu_for_cuda_or_metal_not_rocm() {
-        assert!(classify_models(&[model("m", "local_whisper", &["cuda"])]).supports_gpu);
-        assert!(classify_models(&[model("m", "local_whisper", &["metal"])]).supports_gpu);
-        // `rocm` is an Accel build axis, never a model Device — not GPU here.
-        assert!(!classify_models(&[model("m", "local_whisper", &["rocm"])]).supports_gpu);
-        assert!(!classify_models(&[model("m", "local_whisper", &["cpu"])]).supports_gpu);
+    fn classify_marks_gpu_for_cuda_or_metal() {
+        // `rocm` is an `Accel` build axis, never a model `Device` — the typed
+        // `Device` enum makes it unrepresentable here, so there is nothing to
+        // mis-classify.
+        assert!(classify_models(&[model("local_whisper", &[Device::Cuda])]).supports_gpu);
+        assert!(classify_models(&[model("local_whisper", &[Device::Metal])]).supports_gpu);
+        assert!(!classify_models(&[model("local_whisper", &[Device::Cpu])]).supports_gpu);
     }
 
     #[test]
     fn classify_marks_cpu_only_for_cpu_device() {
-        assert!(classify_models(&[model("m", "local_whisper", &["cpu"])]).supports_cpu);
-        assert!(!classify_models(&[model("m", "openai", &["none"])]).supports_cpu);
-        assert!(!classify_models(&[model("m", "local_whisper", &["cuda"])]).supports_cpu);
+        assert!(classify_models(&[model("local_whisper", &[Device::Cpu])]).supports_cpu);
+        assert!(!classify_models(&[model("openai", &[Device::None])]).supports_cpu);
+        assert!(!classify_models(&[model("local_whisper", &[Device::Cuda])]).supports_cpu);
     }
 
     #[test]
@@ -475,7 +380,7 @@ mod tests {
             [assets]
             wasm = "y.wasm"
         "#;
-        let m: Manifest = toml::from_str(manifest_text).unwrap();
+        let m = Manifest::parse(manifest_text).unwrap();
         let release_assets = vec![ReleaseAsset {
             name: "y.wasm".into(),
             download_url: "https://example/y.wasm".into(),
@@ -503,7 +408,7 @@ mod tests {
             [assets]
             wasm = "missing.wasm"
         "#;
-        let m: Manifest = toml::from_str(manifest_text).unwrap();
+        let m = Manifest::parse(manifest_text).unwrap();
         let err = synthesize_assets(&m, &[]).unwrap_err();
         assert!(matches!(err, ResolveError::AssetMissing(_)));
     }
@@ -532,7 +437,7 @@ mod tests {
             cuda_major = 12
             cuda_sm = 86
         "#;
-        let m: Manifest = toml::from_str(manifest_text).unwrap();
+        let m = Manifest::parse(manifest_text).unwrap();
         let release_assets = vec![
             ReleaseAsset {
                 name: "y-cpu.tar.gz".into(),
@@ -572,7 +477,7 @@ mod tests {
             accel = "cuda"
             cuda_major = 13
         "#;
-        let m: Manifest = toml::from_str(manifest_text).unwrap();
+        let m = Manifest::parse(manifest_text).unwrap();
         let release_assets = vec![
             ReleaseAsset {
                 name: "y-cuda13.tar.gz.part00".into(),
