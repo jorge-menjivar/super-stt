@@ -6,7 +6,6 @@ use crate::ui::messages::Message;
 use cosmic::prelude::*;
 use log::info;
 use log::warn;
-use super_stt_shared::models::provider::Provider;
 
 impl AppModel {
     /// Handle download progress messages
@@ -112,9 +111,7 @@ impl AppModel {
                 // resolve to "no installed backend serves  via
                 // local_whisper" and surface as a UI error.
                 self.model_operation_state = ModelOperationState::Ready;
-                self.current_model.clear();
-                self.current_provider = Provider::default();
-                self.current_source.clear();
+                self.clear_loaded_model();
                 Task::none()
             }
 
@@ -122,9 +119,7 @@ impl AppModel {
                 warn!("Download error for model {model}: {error}");
                 self.model_operation_state = ModelOperationState::Ready;
                 self.transcription_text = format!("Download Error: {error}");
-                self.current_model.clear();
-                self.current_provider = Provider::default();
-                self.current_source.clear();
+                self.clear_loaded_model();
                 Task::none()
             }
 

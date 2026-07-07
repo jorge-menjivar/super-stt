@@ -9,7 +9,6 @@ use crate::ui::messages::Message;
 use cosmic::prelude::*;
 use log::info;
 use log::warn;
-use super_stt_shared::models::provider::Provider;
 
 impl AppModel {
     /// Handle model management messages
@@ -125,9 +124,7 @@ impl AppModel {
                 self.model_operation_state = ModelOperationState::Error { message: sanitized };
                 // A failed switch leaves the daemon idle (no model) — the
                 // backend stays selected, but no model is loaded.
-                self.current_model = String::new();
-                self.current_provider = Provider::default();
-                self.current_source = String::new();
+                self.clear_loaded_model();
                 Task::none()
             }
 

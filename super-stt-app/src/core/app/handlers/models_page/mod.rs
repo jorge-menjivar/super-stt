@@ -12,7 +12,6 @@ use crate::state::{ContextPage, DaemonStatus, ModelsTab};
 use crate::ui::messages::Message;
 use cosmic::prelude::*;
 use log::debug;
-use super_stt_shared::models::provider::Provider;
 
 impl AppModel {
     /// Models-page UI: tab switch, per-backend dropdown / GPU / select, the
@@ -141,9 +140,7 @@ impl AppModel {
                 // Optimistic clear so the UI returns to the staged-pickers
                 // state immediately; the daemon's `ready` event with
                 // `model_loaded: false` is the source of truth.
-                self.current_model = String::new();
-                self.current_provider = Provider::default();
-                self.current_source = String::new();
+                self.clear_loaded_model();
                 self.staged_model = None;
                 self.staged_device = None;
                 self.model_operation_state = ModelOperationState::Ready;
@@ -278,9 +275,7 @@ impl AppModel {
                     return Task::none();
                 }
                 self.active_backend = Some(source.clone());
-                self.current_model = String::new();
-                self.current_provider = Provider::default();
-                self.current_source = String::new();
+                self.clear_loaded_model();
                 self.model_operation_state = ModelOperationState::Ready;
                 // Activation comes from the Models page's "Load a backend" sheet;
                 // dismiss it now that a choice was made.
@@ -296,9 +291,7 @@ impl AppModel {
                 // daemon goes idle. (Rejected only mid-recording — an edge case
                 // that self-heals on the next refresh.)
                 self.active_backend = None;
-                self.current_model = String::new();
-                self.current_provider = Provider::default();
-                self.current_source = String::new();
+                self.clear_loaded_model();
                 self.model_operation_state = ModelOperationState::Ready;
                 self.configure_backend = None;
                 // Close the configuration sheet if it was open for this backend.

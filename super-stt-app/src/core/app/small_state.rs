@@ -19,6 +19,17 @@ impl AppModel {
         matches!(self.model_operation_state, ModelOperationState::Ready)
     }
 
+    /// Clear the locally-tracked loaded model — its name, provider, and source.
+    /// Called wherever the daemon goes idle (unload, failed switch, download
+    /// error/cancel) or the selection is optimistically dropped. Adjacent state
+    /// (operation status, staged pickers, active backend) is each caller's
+    /// responsibility.
+    pub(in crate::core::app) fn clear_loaded_model(&mut self) {
+        self.current_model.clear();
+        self.current_provider = super_stt_shared::models::provider::Provider::default();
+        self.current_source.clear();
+    }
+
     /// Set model to downloading state
     pub(in crate::core::app) fn set_model_downloading(
         &mut self,
@@ -92,9 +103,7 @@ impl AppModel {
                 // A failed switch leaves the daemon idle — clear the selection
                 // so the UI doesn't show a model that isn't loaded (mirrors the
                 // `ModelError` handler).
-                self.current_model.clear();
-                self.current_provider = super_stt_shared::models::provider::Provider::default();
-                self.current_source.clear();
+                self.clear_loaded_model();
             }
             "completed" | "cancelled" => {
                 // State will be updated by subsequent daemon events
