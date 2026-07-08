@@ -466,6 +466,37 @@ fn v0_1_3_config_reserializes_to_stable_canonical() {
 }
 
 #[test]
+fn cleared_preferred_model_persists_as_idle_with_backend_kept() {
+    // Invariant behind the unload path (`clear_preferred_model`): dropping the
+    // loaded model empties preferred_model/source but keeps the active backend
+    // selected, and that state must survive a save/reload so a daemon restart
+    // stays idle instead of reloading the just-unloaded model.
+    let mut config = DaemonConfig::default();
+    config.transcription.preferred_model = "whisper-large-v3".to_string();
+    config.transcription.preferred_source = "openai-whisper".to_string();
+    config.transcription.active_backend = Some("openai-whisper".to_string());
+
+    // Simulate the clear (the method itself also calls save(), which touches
+    // the real config path, so exercise the field effect directly).
+    config.transcription.preferred_model = String::new();
+    config.transcription.preferred_source = String::new();
+
+    let toml_str = toml::to_string_pretty(&config).expect("should serialize");
+    let (parsed, was_reset) = DaemonConfig::parse_or_reset(&toml_str);
+    assert!(!was_reset, "cleared config must re-parse cleanly");
+    assert!(
+        parsed.transcription.preferred_model.is_empty(),
+        "restart must not reload an unloaded model"
+    );
+    assert!(parsed.transcription.preferred_source.is_empty());
+    assert_eq!(
+        parsed.transcription.active_backend.as_deref(),
+        Some("openai-whisper"),
+        "unload keeps the active backend selected"
+    );
+}
+
+#[test]
 fn all_published_daemon_configs_load_cleanly() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/configs");
     let mut checked = 0;

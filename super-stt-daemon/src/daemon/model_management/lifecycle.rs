@@ -181,12 +181,9 @@ impl SuperSTTDaemon {
             .as_ref()
             .map(|l| l.definition.name.clone());
         self.unload_current_model().await;
-        // Drop the preferred model from config so a daemon restart stays idle.
-        {
-            let mut c = self.config.write().await;
-            c.transcription.preferred_model.clear();
-            c.transcription.preferred_source.clear();
-        }
+        // Drop the preferred model from config *and persist* so a daemon
+        // restart stays idle instead of reloading the just-unloaded model.
+        self.config.write().await.clear_preferred_model();
         self.events
             .publish_daemon_status_changed(serde_json::json!({
                 "status": "ready",

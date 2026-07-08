@@ -254,6 +254,18 @@ impl DaemonConfig {
         }
     }
 
+    /// Clear the loaded-model preference (model + source) while keeping the
+    /// active backend selected, then save. Used by the unload path so a daemon
+    /// restart stays idle instead of reloading the unloaded model. Bundling the
+    /// save with the clear guarantees the on-disk state can't drift from memory.
+    pub fn clear_preferred_model(&mut self) {
+        self.transcription.preferred_model = String::new();
+        self.transcription.preferred_source = String::new();
+        if let Err(e) = self.save() {
+            error!("Failed to save config after clearing preferred model: {e}");
+        }
+    }
+
     /// Set the active backend (its relative install dir) and drop the loaded
     /// model preference — selecting a backend does not load a model. Saves.
     pub fn update_active_backend(&mut self, dir: String) {
