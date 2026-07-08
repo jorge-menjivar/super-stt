@@ -110,9 +110,18 @@ impl SuperSTTDaemon {
                 break;
             }
 
-            // Prevent runaway recordings.
+            // Prevent runaway recordings. Breaking out of the preview loop is
+            // not enough: `collect_and_clear_preview` then awaits the recorder
+            // task, which — with silence detection disabled and manual stop
+            // refused (SilenceOnly mode) — would otherwise never finish, leaving
+            // capture unbounded with `busy=true` and a frozen preview. Signal
+            // the recorder's stop channel (same one the manual-stop shortcut
+            // uses) so it ends cleanly and returns the audio captured so far.
             if session.start_time.elapsed() > std::time::Duration::from_mins(1) {
-                warn!("Recording timeout reached, stopping preview loop");
+                warn!("Recording timeout reached, signalling recorder to stop");
+                if let Some(tx) = self.manual_stop_tx.read().await.as_ref() {
+                    let _ = tx.send(());
+                }
                 break;
             }
 
