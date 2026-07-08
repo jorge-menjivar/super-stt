@@ -152,11 +152,18 @@ The `source` is URL-percent-encoded.
 { "uninstalled": true, "was_active": false }
 ```
 
-`was_active` is `true` if this was the active backend, which is cleared by
-the uninstall (daemon goes idle).
+`was_active` is `true` if this was the active backend. Uninstalling the
+active backend first unloads its loaded model (freeing device memory) and
+clears the active-backend and preferred-model config, so the daemon goes
+fully idle and `GET /status` stays consistent with `GET /active_backend`.
 
 ### Failure modes
 
-| Status | Cause |
-|---|---|
-| `404` | No backend with that source is installed. |
+Errors use the registry error envelope `{ "error": <code> }` (a stable,
+machine-readable `code`), matching `POST /registry/install`:
+
+| Status | `error` | Cause |
+|---|---|---|
+| `404` | `not_found` | No backend with that source is installed. |
+| `409` | `backend_busy` | A recording or real-time session is active; the backend set cannot be mutated until it finishes. |
+| `500` | `remove_failed` | The backend directory could not be removed (includes a `message`). |

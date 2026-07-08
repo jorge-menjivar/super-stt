@@ -27,8 +27,10 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// Recording/realtime guard shared by backend + model switching.
-    pub(super) async fn switch_guard(&self) -> Option<DaemonResponse> {
+    /// Recording/realtime guard shared by backend + model switching. Also used
+    /// as a boolean predicate by the HTTP uninstall handler to refuse mutating
+    /// the backend set mid-recording.
+    pub(crate) async fn switch_guard(&self) -> Option<DaemonResponse> {
         if *self.busy.read().await {
             return Some(DaemonResponse::error(
                 "Cannot change the backend during active recording. Please wait for it to finish.",
