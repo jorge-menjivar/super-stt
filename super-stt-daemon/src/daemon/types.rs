@@ -5,7 +5,6 @@ use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::resource_management::ResourceManager;
 use crate::services::dbus::DBusManager;
-use crate::services::transcription::RealTimeTranscriptionManager;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use anyhow::Result;
 use std::sync::{Arc, RwLock};
@@ -56,7 +55,6 @@ pub struct SuperSTTDaemon {
     pub audio_processor: Arc<AudioProcessor>,
     pub shutdown_tx: broadcast::Sender<()>,
     pub dbus_manager: Option<Arc<DBusManager>>,
-    pub realtime_manager: Arc<RealTimeTranscriptionManager>,
     /// Internal pub/sub bus that fans recording / audio / STT events
     /// out to widget HTTP/SSE subscribers via `GET /events`.
     pub events: Arc<EventBus>,

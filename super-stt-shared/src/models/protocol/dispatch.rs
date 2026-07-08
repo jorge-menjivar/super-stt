@@ -20,8 +20,6 @@ impl TryFrom<DaemonRequest> for Command {
                 client_id: request.client_id.clone(),
             }),
             "status" => Ok(Command::Status),
-            "start_realtime" => Ok(cmd_start_realtime(&request)),
-            "realtime_audio" => cmd_realtime_audio(&request),
             "record" => Ok(cmd_record(&request)),
             "set_audio_theme" => cmd_set_audio_theme(&request),
             "get_audio_theme" => Ok(Command::GetAudioTheme),
@@ -80,35 +78,6 @@ fn cmd_transcribe(request: &DaemonRequest) -> Result<Command, String> {
         audio_data,
         sample_rate,
         client_id,
-    })
-}
-
-fn cmd_start_realtime(request: &DaemonRequest) -> Command {
-    let client_id = request
-        .client_id
-        .clone()
-        .unwrap_or_else(|| format!("realtime_{}", uuid::Uuid::new_v4()));
-    Command::StartRealTimeTranscription {
-        client_id,
-        sample_rate: request.sample_rate,
-        language: request.language.clone(),
-    }
-}
-
-fn cmd_realtime_audio(request: &DaemonRequest) -> Result<Command, String> {
-    let client_id = request
-        .client_id
-        .clone()
-        .ok_or("Missing client_id for realtime_audio command")?;
-    let audio_data = request
-        .audio_data
-        .clone()
-        .ok_or("Missing audio_data for realtime_audio command")?;
-    let sample_rate = request.sample_rate.unwrap_or(16000);
-    Ok(Command::RealTimeAudioChunk {
-        client_id,
-        audio_data,
-        sample_rate,
     })
 }
 

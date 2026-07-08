@@ -14,16 +14,6 @@ pub enum Command {
         client_id: Option<String>,
     },
     Status,
-    StartRealTimeTranscription {
-        client_id: String,
-        sample_rate: Option<u32>,
-        language: Option<String>,
-    },
-    RealTimeAudioChunk {
-        client_id: String,
-        audio_data: Vec<f32>,
-        sample_rate: u32,
-    },
     Record {
         write_mode: bool,
         stop_mode: Option<RecordingStopMode>,

@@ -27,18 +27,15 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// Recording/realtime guard shared by backend + model switching. Also used
-    /// as a boolean predicate by the HTTP uninstall handler to refuse mutating
-    /// the backend set mid-recording.
+    /// Recording guard shared by backend + model switching. Also used as a
+    /// boolean predicate by the HTTP uninstall handler to refuse mutating the
+    /// backend set mid-recording. Real-time (WebSocket) sessions are guarded
+    /// separately: they hold the `model` read lock for their duration, so a
+    /// switch's write-lock acquisition already serializes behind them.
     pub(crate) async fn switch_guard(&self) -> Option<DaemonResponse> {
         if *self.busy.read().await {
             return Some(DaemonResponse::error(
                 "Cannot change the backend during active recording. Please wait for it to finish.",
-            ));
-        }
-        if !self.realtime_manager.get_active_sessions().await.is_empty() {
-            return Some(DaemonResponse::error(
-                "Cannot change the backend during active real-time transcription sessions.",
             ));
         }
         None
@@ -269,18 +266,6 @@ impl SuperSTTDaemon {
             return Some(DaemonResponse::error(
                 "Cannot switch models during active recording. Please wait for recording to complete.",
             ));
-        }
-        let active_sessions = self.realtime_manager.get_active_sessions().await;
-        if !active_sessions.is_empty() {
-            warn!(
-                "Model switch rejected - {} real-time transcription sessions active",
-                active_sessions.len()
-            );
-            return Some(DaemonResponse::error(&format!(
-                "Cannot switch models during active real-time transcription sessions. {} active sessions: {}. Please stop all sessions first.",
-                active_sessions.len(),
-                active_sessions.join(", ")
-            )));
         }
         if let Some(loaded) = self.model.read().await.as_ref()
             && loaded.definition.name == model

@@ -165,20 +165,6 @@ impl SuperSTTDaemon {
             }
         }
 
-        // Security check: prevent device switching during real-time transcription
-        let active_sessions = self.realtime_manager.get_active_sessions().await;
-        if !active_sessions.is_empty() {
-            warn!(
-                "Device switch rejected - {} real-time transcription sessions active",
-                active_sessions.len()
-            );
-            return Some(DaemonResponse::error(&format!(
-                "Cannot switch devices during active real-time transcription sessions. {} active sessions: {}. Please stop all sessions first.",
-                active_sessions.len(),
-                active_sessions.join(", ")
-            )));
-        }
-
         None
     }
 

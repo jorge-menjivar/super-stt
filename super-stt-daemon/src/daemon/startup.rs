@@ -13,7 +13,6 @@ use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::resource_management::ResourceManager;
 use crate::services::dbus::DBusManager;
-use crate::services::transcription::RealTimeTranscriptionManager;
 use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
@@ -26,7 +25,6 @@ struct DaemonComponents {
     shutdown_tx: broadcast::Sender<()>,
     audio_processor: Arc<AudioProcessor>,
     model: SharedLoadedModel,
-    realtime_manager: Arc<RealTimeTranscriptionManager>,
     download_manager: Arc<DownloadStateManager>,
     resource_manager: Arc<ResourceManager>,
     dbus_manager: Option<Arc<DBusManager>>,
@@ -42,10 +40,6 @@ impl DaemonComponents {
         // Model slot starts empty; filled once the startup model loads.
         let model: SharedLoadedModel = Arc::new(tokio::sync::RwLock::new(None));
 
-        let realtime_manager = Arc::new(RealTimeTranscriptionManager::new(
-            Arc::clone(&model),
-            Arc::clone(&audio_processor),
-        ));
         let download_manager = Arc::new(DownloadStateManager::new());
 
         let resource_manager = if cfg!(debug_assertions) {
@@ -67,7 +61,6 @@ impl DaemonComponents {
             shutdown_tx,
             audio_processor,
             model,
-            realtime_manager,
             download_manager,
             resource_manager,
             dbus_manager,
@@ -109,7 +102,6 @@ impl SuperSTTDaemon {
             audio_processor: components.audio_processor,
             shutdown_tx: components.shutdown_tx,
             dbus_manager: components.dbus_manager,
-            realtime_manager: components.realtime_manager,
             events: Arc::new(EventBus::new()),
             audio_theme: Arc::new(RwLock::new(audio_theme)),
             volume: Arc::new(RwLock::new(volume)),

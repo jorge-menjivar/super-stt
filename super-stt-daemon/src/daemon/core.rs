@@ -22,22 +22,6 @@ impl SuperSTTDaemon {
             }
             Command::Ping { client_id } => self.handle_ping(client_id),
             Command::Status => self.handle_status().await,
-            Command::StartRealTimeTranscription {
-                client_id,
-                sample_rate,
-                language,
-            } => {
-                self.handle_start_realtime(client_id, sample_rate, language)
-                    .await
-            }
-            Command::RealTimeAudioChunk {
-                client_id,
-                audio_data,
-                sample_rate,
-            } => {
-                self.handle_realtime_audio(client_id, audio_data, sample_rate)
-                    .await
-            }
             Command::Record {
                 write_mode,
                 stop_mode,
@@ -180,54 +164,6 @@ impl SuperSTTDaemon {
         // Return the simulator to the cache for reuse.
         *self.simulator.write().await = Some(typer.take_simulator());
         response
-    }
-
-    /// Placeholder for real-time handlers - these need to be implemented
-    pub async fn handle_start_realtime(
-        &self,
-        client_id: String,
-        sample_rate: Option<u32>,
-        language: Option<String>,
-    ) -> DaemonResponse {
-        let language = match language {
-            Some(l) => Some(l),
-            None => self.resolve_active_language().await,
-        };
-        match self
-            .realtime_manager
-            .start_session(client_id.clone(), sample_rate, language)
-            .await
-        {
-            Ok(_receiver) => {
-                log::info!("Started real-time transcription for client: {client_id}");
-                DaemonResponse::success()
-                    .with_client_id(client_id)
-                    .with_message("Real-time transcription session started".to_string())
-            }
-            Err(e) => {
-                log::error!("Failed to start real-time session: {e}");
-                DaemonResponse::error(&format!("Failed to start real-time session: {e}"))
-            }
-        }
-    }
-
-    pub async fn handle_realtime_audio(
-        &self,
-        client_id: String,
-        audio_data: Vec<f32>,
-        sample_rate: u32,
-    ) -> DaemonResponse {
-        match self
-            .realtime_manager
-            .process_audio_chunk(&client_id, audio_data, sample_rate)
-            .await
-        {
-            Ok(()) => DaemonResponse::success().with_message("Audio chunk processed".to_string()),
-            Err(e) => {
-                log::warn!("Failed to process audio chunk for {client_id}: {e}");
-                DaemonResponse::error(&format!("Failed to process audio chunk: {e}"))
-            }
-        }
     }
 }
 

@@ -5,7 +5,6 @@ use crate::daemon::events::EventBus;
 use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::resource_management::ResourceManager;
-use crate::services::transcription::RealTimeTranscriptionManager;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 use super_stt_shared::theme::AudioTheme;
@@ -16,16 +15,11 @@ async fn test_daemon() -> SuperSTTDaemon {
     let model = Arc::new(tokio::sync::RwLock::new(None));
     let audio_processor = Arc::new(AudioProcessor::new());
     let (shutdown_tx, _) = broadcast::channel(1);
-    let realtime_manager = Arc::new(RealTimeTranscriptionManager::new(
-        Arc::clone(&model),
-        Arc::clone(&audio_processor),
-    ));
     SuperSTTDaemon {
         model,
         audio_processor,
         shutdown_tx,
         dbus_manager: None,
-        realtime_manager,
         events: Arc::new(EventBus::new()),
         audio_theme: Arc::new(RwLock::new(AudioTheme::default())),
         volume: Arc::new(RwLock::new(100)),
