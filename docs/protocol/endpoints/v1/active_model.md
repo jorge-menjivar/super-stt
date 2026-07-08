@@ -187,7 +187,6 @@ Content-Type: application/json
 
 | HTTP | `message`         | Meaning                                                       |
 |------|-------------------|---------------------------------------------------------------|
-| 400  | `recording_active`      | Recording in progress (try again when it ends)          |
-| 400  | `realtime_active`       | Active real-time transcription sessions                 |
+| 409  | `recording_in_progress` | A recording or real-time session is active; stop it first |
 | 401  | `invalid_session`       | Token unknown / expired / `exe_changed`                  |
 | 403  | `scope_denied`          | Token lacks the `settings` scope                         |

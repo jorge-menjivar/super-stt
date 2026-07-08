@@ -74,20 +74,26 @@ const BAD_REQUEST_PHRASES: &[&str] = &[
 /// is well-formed but the daemon's current state forbids it.
 ///
 /// Update this list when adding a new state-conflict error string;
-/// the canonical strings live in `daemon/device_management.rs`,
-/// `daemon/model_management.rs`, and `download_progress.rs`. Any
-/// "Already using …" message should be a `DaemonResponse::success()`
-/// (so it short-circuits to 200 above) — keep it that way and do
-/// not add an alternate match here.
+/// the canonical strings live in `daemon/model_management/{switch,lifecycle}.rs`,
+/// `daemon/device_management.rs`, `daemon/recording/mod.rs`, and
+/// `download_progress.rs`. Any "Already using …" message should be a
+/// `DaemonResponse::success()` (so it short-circuits to 200 above) — keep it
+/// that way and do not add an alternate match here.
+///
+/// Each prefix below is chosen to cover both the recording and real-time
+/// variants a guard emits (e.g. "Cannot change the backend during" matches
+/// both "…active recording…" and "…active real-time transcription sessions.").
 const CONFLICT_PHRASES: &[&str] = &[
     "No download in progress",
+    // switch_guard (backend switch / uninstall) — was mapping to 500.
+    "Cannot change the backend during",
+    // Model reload guard (lifecycle.rs) — was mapping to 500.
+    "Cannot reload the model during",
     "Cannot switch models during",
     "Cannot switch devices during",
-    "Cannot switch devices when",
-    "recording in progress",
+    // POST /v1/transcribe busy race (recording/mod.rs) — was mapping to 500.
+    "Recording already in progress",
     "A download is already in progress",
-    "Another download is in progress",
-    "Failed to register download",
 ];
 
 pub(crate) fn status_code_for_response(resp: &DaemonResponse) -> StatusCode {
@@ -158,6 +164,30 @@ mod tests {
     fn state_conflict_maps_to_conflict() {
         let resp = DaemonResponse::error("No download in progress");
         assert_eq!(status_code_for_response(&resp), StatusCode::CONFLICT);
+    }
+
+    /// The `switch_guard`, model-reload, and recording-busy guards are all
+    /// state conflicts (well-formed request, wrong daemon state) and must map
+    /// to `409`, not `500`. These are the exact canonical strings produced by
+    /// `switch.rs` (backend switch / uninstall), `lifecycle.rs` (reload), and
+    /// `recording/mod.rs` (the `POST /v1/transcribe` busy race).
+    #[test]
+    fn guard_messages_map_to_conflict() {
+        for msg in [
+            "Cannot change the backend during active recording. Please wait for it to finish.",
+            "Cannot change the backend during active real-time transcription sessions.",
+            "Cannot reload the model during active recording. Please wait for it to finish.",
+            "Cannot reload the model during active real-time transcription sessions.",
+            "Recording already in progress. Please wait for current recording to complete.",
+            "Cannot switch models during active recording. Please wait for recording to complete.",
+            "Cannot switch devices during active recording. Please wait for recording to complete.",
+        ] {
+            assert_eq!(
+                status_code_for_response(&DaemonResponse::error(msg)),
+                StatusCode::CONFLICT,
+                "expected 409 for guard message: {msg}"
+            );
+        }
     }
 
     /// An unknown theme is documented as `400 invalid_audio_theme`
