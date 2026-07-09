@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Deserialization shape for `index.json` as published by the Phase 1 indexer.
-//! Kept in sync with `super-stt-indexer/src/index_json.rs`. The
-//! daemon side does not need every field — those it ignores are skipped via
-//! `serde(default)`.
+//! Daemon-side registry-index policy. The `index.json` schema itself is the
+//! canonical `super-stt-registry-types::index` (shared with the indexer
+//! producer and the `/registry/backends` leaf types); this module re-exports
+//! those types and adds the two daemon-only extensions over [`Index`] — the
+//! `min_client` soft-floor check and the unsafe-path backend filter — as free
+//! functions, the same pattern `validate_runtime` uses for `Manifest`.
 
 use semver::Version;
-use serde::Deserialize;
+
+pub use super_stt_registry_types::index::{
+    Index, IndexAsset, IndexAssets, IndexBackend, IndexModel, IndexOption, IndexSecret, IndexStale,
+    IndexSubprocessAsset, id_from_source,
+};
 
 /// The running daemon's version, used as the "client" version when checking an
 /// index's `min_client` soft floor. This is the workspace version baked in at
@@ -44,154 +50,38 @@ pub fn check_min_client(client_version: &str, min_client: &str) -> MinClientStat
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct Index {
-    pub schema_version: u32,
-    pub generated_at: String,
-    pub min_client: String,
-    pub backends: Vec<IndexBackend>,
+/// Warn when this index's `min_client` floor is newer than the running daemon.
+/// The registry stays usable — `min_client` is a soft floor.
+pub fn warn_if_client_too_old(index: &Index) {
+    if let MinClientStatus::TooOld { client, min_client } =
+        check_min_client(CLIENT_VERSION, &index.min_client)
+    {
+        log::warn!(
+            "registry index requires client >= {min_client}, but this daemon is \
+             {client}; newer backends may fail to install or run — please update Super STT"
+        );
+    }
 }
 
-impl Index {
-    /// Warn when this index's `min_client` floor is newer than the running
-    /// daemon. The registry stays usable — `min_client` is a soft floor.
-    pub fn warn_if_client_too_old(&self) {
-        if let MinClientStatus::TooOld { client, min_client } =
-            check_min_client(CLIENT_VERSION, &self.min_client)
-        {
+/// Drop backends whose `id` or `entrypoint` is not a safe path component.
+/// These values become directory names / are joined onto the backends dir
+/// at install time; an absolute or traversing value would escape it. A
+/// well-formed index (the indexer rejects them) never contains such a
+/// backend, so a stray one — e.g. from a poisoned `SUPER_STT_REGISTRY_URL`
+/// — is dropped with a warning rather than failing the whole index.
+pub fn retain_safe_backends(index: &mut Index) {
+    use super_stt_shared::registry::{is_safe_component, is_safe_relative_path};
+    index.backends.retain(|b| {
+        let ok = is_safe_component(&b.id) && is_safe_relative_path(&b.entrypoint);
+        if !ok {
             log::warn!(
-                "registry index requires client >= {min_client}, but this daemon is \
-                 {client}; newer backends may fail to install or run — please update Super STT"
+                "registry: dropping backend `{}` with unsafe id/entrypoint (entrypoint={:?})",
+                b.id,
+                b.entrypoint
             );
         }
-    }
-
-    /// Drop backends whose `id` or `entrypoint` is not a safe path component.
-    /// These values become directory names / are joined onto the backends dir
-    /// at install time; an absolute or traversing value would escape it. A
-    /// well-formed index (the indexer rejects them) never contains such a
-    /// backend, so a stray one — e.g. from a poisoned `SUPER_STT_REGISTRY_URL`
-    /// — is dropped with a warning rather than failing the whole index.
-    pub fn retain_safe_backends(&mut self) {
-        use super_stt_shared::registry::{is_safe_component, is_safe_relative_path};
-        self.backends.retain(|b| {
-            let ok = is_safe_component(&b.id) && is_safe_relative_path(&b.entrypoint);
-            if !ok {
-                log::warn!(
-                    "registry: dropping backend `{}` with unsafe id/entrypoint (entrypoint={:?})",
-                    b.id,
-                    b.entrypoint
-                );
-            }
-            ok
-        });
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct IndexBackend {
-    pub id: String,
-    pub source: String,
-    pub version: String,
-    pub tag: String,
-    pub name: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub license: String,
-    pub kind: String,
-    pub contract: String,
-    pub entrypoint: String,
-    #[serde(default)]
-    pub allowed_hosts: Vec<String>,
-    pub online: bool,
-    pub supports_gpu: bool,
-    pub supports_cpu: bool,
-    pub models: Vec<IndexModel>,
-    pub secrets: Vec<IndexSecret>,
-    pub options: Vec<IndexOption>,
-    pub assets: IndexAssets,
-    #[serde(default)]
-    pub index_stale: Option<IndexStale>,
-    /// Pinned `backend.toml` release asset. When present, the installer fetches
-    /// these exact bytes, verifies them against `sha256`, and installs them
-    /// verbatim instead of synthesizing a manifest from the fields above.
-    #[serde(default)]
-    pub manifest: Option<IndexAsset>,
-}
-
-/// The browse-only model subset the catalog and host-compatibility filter need.
-/// The authoritative manifest ships as the pinned `manifest` asset and is
-/// installed verbatim — it is not re-encoded here.
-#[derive(Debug, Clone, Deserialize)]
-pub struct IndexModel {
-    pub name: String,
-    pub provider: String,
-    pub supported_devices: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct IndexSecret {
-    pub name: String,
-    pub label: String,
-    pub required: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct IndexOption {
-    pub name: String,
-    pub label: String,
-    pub r#type: String,
-    #[serde(default)]
-    pub default: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct IndexAssets {
-    #[serde(default)]
-    pub wasm: Option<IndexAsset>,
-    #[serde(default)]
-    pub subprocess: Vec<IndexSubprocessAsset>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct IndexAsset {
-    pub url: String,
-    pub size: u64,
-    pub sha256: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct IndexSubprocessAsset {
-    pub target: String,
-    pub accel: String,
-    #[serde(default)]
-    pub cuda_major: Option<u32>,
-    #[serde(default)]
-    pub cuda_sm: Option<u32>,
-    #[serde(default)]
-    pub cudnn: bool,
-    /// Single-file archive pin: present for a single-file variant, absent for
-    /// multi-part.
-    #[serde(default)]
-    pub url: Option<String>,
-    #[serde(default)]
-    pub size: Option<u64>,
-    #[serde(default)]
-    pub sha256: Option<String>,
-    /// Multi-part archive: ordered part pins whose byte-for-byte concatenation
-    /// is the `.tar.gz`. Present for a multi-part variant, absent for
-    /// single-file. Each part is hash-verified independently on download.
-    #[serde(default)]
-    pub parts: Vec<IndexAsset>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct IndexStale {
-    pub latest_attempted: String,
-    pub tag: String,
-    pub error: String,
-    pub since: String,
+        ok
+    });
 }
 
 #[cfg(test)]
@@ -351,8 +241,8 @@ mod tests {
             min_client: min_client.into(),
             backends: vec![],
         };
-        mk("9999.0.0").warn_if_client_too_old(); // exercises the warn branch
-        mk("0.1.0").warn_if_client_too_old(); // exercises the quiet branch
+        warn_if_client_too_old(&mk("9999.0.0")); // exercises the warn branch
+        warn_if_client_too_old(&mk("0.1.0")); // exercises the quiet branch
         assert!(matches!(
             check_min_client(CLIENT_VERSION, "9999.0.0"),
             MinClientStatus::TooOld { .. }

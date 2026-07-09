@@ -9,8 +9,6 @@ use log::{error, info, warn};
 
 use super_stt_forge::{ForgeClient, RepoRef};
 
-use crate::manifest::Device;
-
 mod assets;
 mod carryforward;
 mod index_json;
@@ -266,10 +264,10 @@ async fn resolve_index_assets(
 }
 
 /// Assemble the published `IndexBackend` from a validated manifest, its
-/// resolved `version` + `tag`, and the hashed assets. `online` / `supports_gpu`
-/// / `supports_cpu` are derived from the manifest's models. Shared by the
-/// forge-release path and the offline `local` path.
-#[allow(clippy::similar_names)] // supports_gpu / supports_cpu mirror the output fields
+/// resolved `version` + `tag`, and the hashed assets. Thin wrapper over the
+/// canonical [`index_json::IndexBackend::from_manifest`] synthesis (shared with
+/// the daemon's Custom-repo and local-dir install paths) — the indexer supplies
+/// the maintainer-declared `id` rather than deriving it from `source`.
 pub(crate) fn into_index_backend(
     id: &str,
     m: manifest::Manifest,
@@ -278,76 +276,7 @@ pub(crate) fn into_index_backend(
     assets: index_json::IndexAssets,
     manifest: Option<index_json::IndexAsset>,
 ) -> index_json::IndexBackend {
-    let online = m
-        .models
-        .iter()
-        .any(super_stt_registry_types::manifest::ModelEntry::is_online);
-    let supports_gpu = m.models.iter().any(|md| {
-        md.supported_devices
-            .iter()
-            .any(|d| matches!(d, Device::Cuda | Device::Metal))
-    });
-    let supports_cpu = m
-        .models
-        .iter()
-        .any(|md| md.supported_devices.contains(&Device::Cpu));
-    index_json::IndexBackend {
-        id: id.into(),
-        source: m.backend.source,
-        version,
-        tag,
-        name: m.backend.name,
-        description: Some(m.backend.description),
-        license: m.backend.license.unwrap_or_default(),
-        kind: m.backend.kind.to_string(),
-        contract: m.backend.contract.to_string(),
-        entrypoint: m.backend.entrypoint,
-        allowed_hosts: m.network.allowed_hosts,
-        online,
-        supports_gpu,
-        supports_cpu,
-        models: m
-            .models
-            .into_iter()
-            .map(|md| index_json::IndexModel {
-                name: md.name,
-                provider: md.provider.to_string(),
-                supported_devices: md
-                    .supported_devices
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
-            })
-            .collect(),
-        secrets: m
-            .secrets
-            .into_iter()
-            .map(|s| index_json::IndexSecret {
-                label: s.label.unwrap_or_else(|| s.name.clone()),
-                name: s.name,
-                required: s.required,
-            })
-            .collect(),
-        options: m
-            .options
-            .into_iter()
-            .map(|o| index_json::IndexOption {
-                label: o.label.unwrap_or_else(|| o.name.clone()),
-                name: o.name,
-                r#type: o
-                    .r#type
-                    .map_or_else(|| "string".to_string(), |t| t.to_string()),
-                // Untagged serialize yields the plain JSON value (string/number/bool),
-                // exactly what the old serde_json::Value field carried.
-                default: o
-                    .default
-                    .map(|d| serde_json::to_value(d).expect("plain value")),
-            })
-            .collect(),
-        assets,
-        index_stale: None,
-        manifest,
-    }
+    index_json::IndexBackend::from_manifest(id.to_string(), m, version, tag, assets, manifest)
 }
 
 /// A backend's `source` is its unique identity. Two distinct entries that

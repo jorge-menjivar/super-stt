@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::registry::index_schema::Index;
+use crate::registry::index_schema::{Index, retain_safe_backends, warn_if_client_too_old};
 
 pub const DEFAULT_URL: &str = "https://jorge-menjivar.github.io/super-stt/index.json";
 pub const DEFAULT_TTL: Duration = Duration::from_hours(6);
@@ -159,8 +159,8 @@ impl Client {
             .map(String::from);
         let bytes = resp.bytes().await?;
         let mut index: Index = serde_json::from_slice(&bytes)?;
-        index.retain_safe_backends();
-        index.warn_if_client_too_old();
+        retain_safe_backends(&mut index);
+        warn_if_client_too_old(&index);
         let cached = Cached {
             index: index.clone(),
             etag: new_etag,
@@ -178,8 +178,8 @@ impl Client {
         let bytes = std::fs::read(&self.cache_path)?;
         let file: CacheFile = serde_json::from_slice(&bytes)?;
         let mut index: Index = serde_json::from_value(file.index)?;
-        index.retain_safe_backends();
-        index.warn_if_client_too_old();
+        retain_safe_backends(&mut index);
+        warn_if_client_too_old(&index);
         Ok(Some((index, file.etag)))
     }
 

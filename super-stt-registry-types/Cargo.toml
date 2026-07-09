@@ -12,17 +12,16 @@ workspace = true
 [dependencies]
 schemars = { version = "1", optional = true }
 serde.workspace = true
-serde_json = { workspace = true, optional = true }
+serde_json.workspace = true
 spdx = { version = "0.13.4", default-features = false }
 thiserror.workspace = true
 toml.workspace = true
 
 [features]
-schema = ["dep:schemars", "dep:serde_json"]
+schema = ["dep:schemars"]
 
 [dev-dependencies]
 jsonschema = { version = "0.46.5", default-features = false }
-serde_json.workspace = true
 
 [[bin]]
 name = "gen_schemas"

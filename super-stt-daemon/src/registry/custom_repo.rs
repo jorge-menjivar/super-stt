@@ -11,12 +11,11 @@
 //! it verbatim — the `unverified_source` warning surfaced to clients (see
 //! `docs/protocol/endpoints/v1/registry/install.md`) reflects this.
 
-use super_stt_registry_types::manifest::{Device, Kind, Manifest, ManifestError, ModelEntry};
+use super_stt_registry_types::manifest::{Kind, Manifest, ManifestError};
 use thiserror::Error;
 
 use crate::registry::index_schema::{
-    IndexAsset, IndexAssets, IndexBackend, IndexModel, IndexOption, IndexSecret,
-    IndexSubprocessAsset,
+    IndexAsset, IndexAssets, IndexBackend, IndexSubprocessAsset, id_from_source,
 };
 use super_stt_forge::{ForgeClient, ReleaseAsset, RepoRef};
 
@@ -95,12 +94,6 @@ pub async fn resolve(
 
     let assets = synthesize_assets(&manifest, &release.assets)?;
 
-    let ModelSupport {
-        online,
-        supports_gpu,
-        supports_cpu,
-    } = classify_models(&manifest.models);
-
     let id = id_from_source(&manifest.backend.source);
     if !super_stt_shared::registry::is_safe_component(&id) {
         return Err(ResolveError::UnsafeComponent {
@@ -108,94 +101,22 @@ pub async fn resolve(
             value: manifest.backend.source,
         });
     }
+    let version = manifest.backend.version.trim_start_matches('v').to_string();
 
-    Ok(IndexBackend {
+    // Shared synthesis: identical field mapping to the registry indexer and the
+    // local-dir path (name-fallback labels, "string" option-type default, …).
+    Ok(IndexBackend::from_manifest(
         id,
-        source: manifest.backend.source,
-        version: manifest.backend.version.trim_start_matches('v').to_string(),
-        tag: release.tag,
-        name: manifest.backend.name,
-        description: Some(manifest.backend.description),
-        license: manifest.backend.license.unwrap_or_default(),
-        kind: manifest.backend.kind.to_string(),
-        contract: manifest.backend.contract.to_string(),
-        entrypoint: manifest.backend.entrypoint,
-        allowed_hosts: manifest.network.allowed_hosts,
-        online,
-        supports_gpu,
-        supports_cpu,
-        models: manifest
-            .models
-            .iter()
-            .map(|m| IndexModel {
-                name: m.name.clone(),
-                provider: m.provider.as_str().to_string(),
-                supported_devices: m
-                    .supported_devices
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
-            })
-            .collect(),
-        secrets: manifest
-            .secrets
-            .into_iter()
-            .map(|s| IndexSecret {
-                name: s.name,
-                label: s.label.unwrap_or_default(),
-                required: s.required,
-            })
-            .collect(),
-        options: manifest
-            .options
-            .into_iter()
-            .map(|o| IndexOption {
-                name: o.name,
-                label: o.label.unwrap_or_default(),
-                r#type: o.r#type.map(|t| t.as_str().to_string()).unwrap_or_default(),
-                default: o
-                    .default
-                    .as_ref()
-                    .and_then(|d| serde_json::to_value(d).ok()),
-            })
-            .collect(),
+        manifest,
+        version,
+        release.tag,
         assets,
-        index_stale: None,
-        manifest: Some(IndexAsset {
+        Some(IndexAsset {
             url: manifest_url,
             size: manifest_size,
             sha256: String::new(),
         }),
-    })
-}
-
-/// `<host>/<owner>/<repo>` -> `<repo>`. Used as the install-dir name. Custom-
-/// repo installs collide-by-name with registry installs of the same repo; that
-/// is intentional — installing the same backend twice writes the same dir.
-fn id_from_source(source: &str) -> String {
-    source.rsplit('/').next().unwrap_or(source).to_string()
-}
-
-/// Index-level capability flags derived from a manifest's declared models.
-struct ModelSupport {
-    online: bool,
-    supports_gpu: bool,
-    supports_cpu: bool,
-}
-
-/// Classify a manifest's models by their [`Device`]s — the `none` sentinel
-/// marks online/remote models, `cuda`/`metal` mark GPU, `cpu` marks CPU — so
-/// the custom-repo path's index card agrees with the registry indexer. Devices
-/// are already validated by [`Manifest::parse`], so there is no string matching
-/// to get wrong here.
-fn classify_models(models: &[ModelEntry]) -> ModelSupport {
-    let any_device =
-        |pred: fn(&Device) -> bool| models.iter().any(|m| m.supported_devices.iter().any(pred));
-    ModelSupport {
-        online: any_device(|d| matches!(d, Device::None)),
-        supports_gpu: any_device(|d| matches!(d, Device::Cuda | Device::Metal)),
-        supports_cpu: any_device(|d| matches!(d, Device::Cpu)),
-    }
+    ))
 }
 
 /// The declared `source` must be the repo the user pointed at
@@ -296,55 +217,6 @@ fn synthesize_assets(
 mod tests {
     use super::*;
     use super_stt_forge::RepoRef;
-    use super_stt_registry_types::provider::Provider;
-
-    /// Build a `ModelEntry` with the given provider and devices; the other
-    /// fields are irrelevant to `classify_models` (which reads only devices).
-    fn model(provider: &str, devices: &[Device]) -> ModelEntry {
-        ModelEntry {
-            name: "m".into(),
-            provider: Provider::from(provider),
-            multilingual: true,
-            primary_language: "en".into(),
-            supported_languages: vec!["en".into()],
-            supported_devices: devices.to_vec(),
-            estimated_vram_bytes: 0,
-            processing_interval_ms: None,
-            realtime: false,
-            files: vec![],
-        }
-    }
-
-    #[test]
-    fn classify_marks_online_from_none_device_not_provider() {
-        // Online-ness is derived from the `none` device sentinel, not the
-        // (free-form) provider string.
-        assert!(classify_models(&[model("openai", &[Device::None])]).online);
-        assert!(classify_models(&[model("mistral", &[Device::None])]).online);
-        // A made-up provider is still online if it declares the `none` device.
-        assert!(classify_models(&[model("totally_bogus", &[Device::None])]).online);
-        // No `none` device → not online, regardless of provider.
-        assert!(!classify_models(&[model("openai", &[Device::Cpu])]).online);
-        assert!(!classify_models(&[model("local_whisper", &[Device::Cpu])]).online);
-        assert!(!classify_models(&[model("openai", &[])]).online);
-    }
-
-    #[test]
-    fn classify_marks_gpu_for_cuda_or_metal() {
-        // `rocm` is an `Accel` build axis, never a model `Device` — the typed
-        // `Device` enum makes it unrepresentable here, so there is nothing to
-        // mis-classify.
-        assert!(classify_models(&[model("local_whisper", &[Device::Cuda])]).supports_gpu);
-        assert!(classify_models(&[model("local_whisper", &[Device::Metal])]).supports_gpu);
-        assert!(!classify_models(&[model("local_whisper", &[Device::Cpu])]).supports_gpu);
-    }
-
-    #[test]
-    fn classify_marks_cpu_only_for_cpu_device() {
-        assert!(classify_models(&[model("local_whisper", &[Device::Cpu])]).supports_cpu);
-        assert!(!classify_models(&[model("openai", &[Device::None])]).supports_cpu);
-        assert!(!classify_models(&[model("local_whisper", &[Device::Cuda])]).supports_cpu);
-    }
 
     #[test]
     fn source_matching_repo_or_namespaced_under_it_is_accepted() {

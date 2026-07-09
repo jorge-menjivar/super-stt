@@ -6,7 +6,7 @@ use semver::Version;
 use thiserror::Error;
 
 pub use super_stt_registry_types::manifest::{
-    Accel, Device, Kind, Manifest, ManifestError as ParseError, SubprocessAsset,
+    Accel, Kind, Manifest, ManifestError as ParseError, SubprocessAsset,
 };
 
 #[derive(Debug, Error)]
