@@ -13,8 +13,8 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::registry::index_schema::{IndexAssets, IndexBackend, IndexModel};
-use crate::stt_models::backends::manifest::{Device, Manifest};
+use crate::registry::index_schema::{IndexAssets, IndexBackend, id_from_source};
+use crate::stt_models::backends::manifest::Manifest;
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
@@ -57,11 +57,6 @@ pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
     let m = Manifest::load(local_path).map_err(anyhow::Error::from)?;
     crate::stt_models::backends::manifest::validate_runtime(&m)?;
 
-    let online = m
-        .models
-        .iter()
-        .any(super_stt_registry_types::manifest::ModelEntry::is_online);
-
     let id = id_from_source(&m.backend.source);
     if !super_stt_shared::registry::is_safe_component(&id) {
         return Err(ResolveError::UnsafeId(m.backend.source.clone()));
@@ -69,51 +64,19 @@ pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
     let version = m.backend.version.trim_start_matches('v').to_string();
     let tag = m.backend.version.clone();
 
-    Ok(IndexBackend {
+    // Shared synthesis with the registry indexer and Custom-repo path. Local
+    // installs have no downloadable assets and no pinned manifest — the files
+    // are copied verbatim from the staged dir. Previously this path hand-rolled
+    // the mapping and silently dropped the manifest's secrets, options, and
+    // license; `from_manifest` now maps them like every other install path.
+    Ok(IndexBackend::from_manifest(
         id,
-        source: m.backend.source.clone(),
+        m,
         version,
         tag,
-        name: m.backend.name.clone(),
-        description: Some(m.backend.description.clone()),
-        license: String::new(),
-        kind: m.backend.kind.to_string(),
-        contract: m.backend.contract.to_string(),
-        entrypoint: m.backend.entrypoint.clone(),
-        allowed_hosts: m.network.allowed_hosts.clone(),
-        online,
-        supports_gpu: m.models.iter().any(|md| {
-            md.supported_devices
-                .iter()
-                .any(|d| matches!(d, Device::Cuda | Device::Metal))
-        }),
-        supports_cpu: m
-            .models
-            .iter()
-            .any(|md| md.supported_devices.contains(&Device::Cpu)),
-        models: m
-            .models
-            .iter()
-            .map(|md| IndexModel {
-                name: md.name.clone(),
-                provider: md.provider.to_string(),
-                supported_devices: md
-                    .supported_devices
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
-            })
-            .collect(),
-        secrets: Vec::new(),
-        options: Vec::new(),
-        assets: IndexAssets::default(),
-        index_stale: None,
-        manifest: None,
-    })
-}
-
-fn id_from_source(source: &str) -> String {
-    source.rsplit('/').next().unwrap_or(source).to_string()
+        IndexAssets::default(),
+        None,
+    ))
 }
 
 #[cfg(test)]
@@ -144,6 +107,34 @@ description = "Test backend."
         assert_eq!(entry.version, "1.2.3");
         assert_eq!(entry.kind, "wasm");
         assert_eq!(entry.entrypoint, "y.wasm");
+    }
+
+    #[test]
+    fn maps_secrets_and_options_from_manifest() {
+        // Regression: the local-dir path used to hardcode `secrets: Vec::new()`
+        // / `options: Vec::new()`, so an imported backend lost its declared
+        // secrets/options (and their name-fallback labels). It now shares the
+        // canonical `from_manifest` synthesis with every other install path.
+        let manifest = format!(
+            "{MIN_MANIFEST}\n\
+             [[secrets]]\n\
+             name = \"y_api_key\"\n\
+             description = \"Key.\"\n\
+             \n\
+             [[options]]\n\
+             name = \"base_url\"\n\
+             description = \"Override.\"\n"
+        );
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("backend.toml"), manifest).unwrap();
+        fs::write(dir.path().join("y.wasm"), [0u8; 4]).unwrap();
+        let entry = resolve(dir.path()).unwrap();
+        assert_eq!(entry.secrets.len(), 1);
+        assert_eq!(entry.secrets[0].name, "y_api_key");
+        assert_eq!(entry.secrets[0].label, "y_api_key"); // falls back to name
+        assert_eq!(entry.options.len(), 1);
+        assert_eq!(entry.options[0].name, "base_url");
+        assert_eq!(entry.options[0].r#type, "string"); // default type
     }
 
     #[test]

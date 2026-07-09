@@ -10,7 +10,7 @@ use semver::Version;
 
 pub use super_stt_registry_types::index::{
     Index, IndexAsset, IndexAssets, IndexBackend, IndexModel, IndexOption, IndexSecret, IndexStale,
-    IndexSubprocessAsset,
+    IndexSubprocessAsset, id_from_source,
 };
 
 /// The running daemon's version, used as the "client" version when checking an
