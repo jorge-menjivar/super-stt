@@ -154,15 +154,10 @@ impl SuperSTTDaemon {
             );
         }
 
-        // Security check: prevent device switching during active recording
-        {
-            let busy_guard = self.busy.read().await;
-            if *busy_guard {
-                warn!("Device switch rejected - recording in progress");
-                return Some(DaemonResponse::error(
-                    "Cannot switch devices during active recording. Please wait for recording to complete.",
-                ));
-            }
+        // Prevent device switching during active recording.
+        if let Some(resp) = self.guard_model_mutation("switch devices").await {
+            warn!("Device switch rejected - recording in progress");
+            return Some(resp);
         }
 
         None

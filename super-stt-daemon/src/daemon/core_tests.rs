@@ -97,6 +97,23 @@ async fn stop_signal_sent_on_second_press_with_default_mode() {
 }
 
 #[tokio::test]
+async fn guard_model_mutation_flags_recording_in_progress() {
+    use super_stt_shared::models::protocol::ErrorCode;
+    let daemon = test_daemon().await;
+    // Idle: the mutation is allowed.
+    assert!(daemon.guard_model_mutation("switch models").await.is_none());
+    // Recording: the unified guard rejects with the machine-readable
+    // RecordingInProgress code, independent of the human `action` wording.
+    *daemon.busy.write().await = true;
+    let resp = daemon
+        .guard_model_mutation("switch models")
+        .await
+        .expect("mutation must be rejected while recording");
+    assert_eq!(resp.status, "error");
+    assert_eq!(resp.error_code, Some(ErrorCode::RecordingInProgress));
+}
+
+#[tokio::test]
 async fn second_press_ignored_in_silence_only_mode() {
     let daemon = test_daemon().await;
     let (tx, mut rx) = tokio::sync::broadcast::channel(1);

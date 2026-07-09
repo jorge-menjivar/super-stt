@@ -25,98 +25,26 @@ pub(crate) fn build_request(command: &str, data: Option<Value>) -> DaemonRequest
     }
 }
 
-/// Map a [`DaemonResponse`] to the HTTP status code it should surface
-/// on the wire.
+/// Map a [`DaemonResponse`] to the HTTP status code it surfaces on the wire.
 ///
-/// `DaemonResponse.message` is supposed to be a stable identifier
-/// (per `docs/protocol/transport.md`), but in practice handlers
-/// return free-form sentences here. Rather than refactor every
-/// handler, this function matches on the substrings each error
-/// message reliably contains and maps them to the right HTTP class:
+/// | Category         | HTTP                                              |
+/// |------------------|---------------------------------------------------|
+/// | `"success"` body | `200`                                             |
+/// | classified error | from `error_code.http_status()` (e.g. 400/404/409)|
+/// | un-coded error   | `500` (unclassified server-side failure)          |
 ///
-/// | Category                                | HTTP |
-/// |-----------------------------------------|------|
-/// | "success" body                          | 200  |
-/// | Validation failures (unknown enum/name) | 400  |
-/// | Online-models gate or CUDA unavailable  | 400  |
-/// | State conflicts (no switch, recording)  | 409  |
-/// | Everything else                         | 500  |
-///
-/// Free-form text is fine in `message` — the matcher is conservative
-/// (substring-on-stable-phrasing) and falls through to 500 for
-/// anything unrecognized, which is the right default for unexpected
-/// errors.
-/// Phrases (matched as substrings) that map an error `message` to
-/// `400 Bad Request`. These are bad-input conditions — the client
-/// gave the daemon something it couldn't use.
-const BAD_REQUEST_PHRASES: &[&str] = &[
-    "Unknown model",
-    "Unknown ",
-    "CUDA unavailable",
-    "Online models are disabled",
-    "not a valid",
-    "Invalid ",
-    // `POST /active_model` `invalid_model` and `POST /active_backend`
-    // `invalid_backend` — the client named a model/source no installed
-    // backend serves (docs/protocol/endpoints/v1/{active_model,active_backend}.md).
-    "No installed backend",
-    // `POST /backends/{source}/models/{model}/language` when the tag is not
-    // supported by (or the model is not) multilingual
-    // (docs/protocol/endpoints/v1/backends/model-language.md).
-    "unsupported_language",
-    // `POST /audio_theme` with an unrecognized theme name
-    // (docs/protocol/endpoints/v1/audio_theme.md).
-    "invalid_audio_theme",
-];
-
-/// Phrases (matched as substrings) that map an error `message` to
-/// `409 Conflict`. These are state-conflict conditions — the request
-/// is well-formed but the daemon's current state forbids it.
-///
-/// Update this list when adding a new state-conflict error string;
-/// the canonical strings live in `daemon/model_management/{switch,lifecycle}.rs`,
-/// `daemon/device_management.rs`, `daemon/recording/mod.rs`, and
-/// `download_progress.rs`. Any "Already using …" message should be a
-/// `DaemonResponse::success()` (so it short-circuits to 200 above) — keep it
-/// that way and do not add an alternate match here.
-///
-/// Each prefix below is chosen to cover both the recording and real-time
-/// variants a guard emits (e.g. "Cannot change the backend during" matches
-/// both "…active recording…" and "…active real-time transcription sessions.").
-const CONFLICT_PHRASES: &[&str] = &[
-    "No download in progress",
-    // switch_guard (backend switch / uninstall) — was mapping to 500.
-    "Cannot change the backend during",
-    // Model reload guard (lifecycle.rs) — was mapping to 500.
-    "Cannot reload the model during",
-    "Cannot switch models during",
-    "Cannot switch devices during",
-    // POST /v1/transcribe busy race (recording/mod.rs) — was mapping to 500.
-    "Recording already in progress",
-    "A download is already in progress",
-];
-
+/// Error identity is the machine-readable [`ErrorCode`](super_stt_shared::models::protocol::ErrorCode)
+/// the daemon attaches (see `docs/protocol/transport.md`); the earlier
+/// substring-on-`message` matcher — which had drifted from the live wire
+/// strings — has been retired in favor of it.
 pub(crate) fn status_code_for_response(resp: &DaemonResponse) -> StatusCode {
     if resp.status == "success" {
         return StatusCode::OK;
     }
-    // Prefer the machine-readable code — the contract's single source of truth
-    // for code→status. The substring matcher below is a migration fallback for
-    // error paths that don't yet carry an `error_code`; it is retired as those
-    // paths are converted.
-    if let Some(code) = resp.error_code {
-        return StatusCode::from_u16(code.http_status())
-            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-    let msg = resp.message.as_deref().unwrap_or("");
-
-    if BAD_REQUEST_PHRASES.iter().any(|p| msg.contains(p)) {
-        return StatusCode::BAD_REQUEST;
-    }
-    if CONFLICT_PHRASES.iter().any(|p| msg.contains(p)) {
-        return StatusCode::CONFLICT;
-    }
-    StatusCode::INTERNAL_SERVER_ERROR
+    resp.error_code
+        .map_or(StatusCode::INTERNAL_SERVER_ERROR, |code| {
+            StatusCode::from_u16(code.http_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+        })
 }
 
 pub(crate) fn json_response(
@@ -143,86 +71,51 @@ pub(crate) async fn dispatch_command(
 mod tests {
     use super::status_code_for_response;
     use axum::http::StatusCode;
-    use super_stt_shared::models::protocol::DaemonResponse;
+    use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 
-    /// A request naming a model/backend that no installed backend serves is a
-    /// client error, documented as `400 invalid_model` / `400 invalid_backend`
-    /// (docs/protocol/endpoints/v1/{active_model,active_backend}.md) — not 500.
+    /// The status is derived from the machine-readable `error_code`, not the
+    /// human `message`. Covers the classes the retired substring matcher used to
+    /// handle: bad-input (400), state conflict (409), and not-found (404).
     #[test]
-    fn no_installed_backend_messages_are_bad_request() {
-        let unknown_model = DaemonResponse::error(
-            "No installed backend serves whisper-tiny via local_whisper. \
-             Install the backend or check the model name.",
-        );
-        assert_eq!(
-            status_code_for_response(&unknown_model),
-            StatusCode::BAD_REQUEST
-        );
-
-        let unknown_backend = DaemonResponse::error(
-            "No installed backend with source github.com/x/y (or its files are missing)",
-        );
-        assert_eq!(
-            status_code_for_response(&unknown_backend),
-            StatusCode::BAD_REQUEST
-        );
-    }
-
-    #[test]
-    fn state_conflict_maps_to_conflict() {
-        let resp = DaemonResponse::error("No download in progress");
-        assert_eq!(status_code_for_response(&resp), StatusCode::CONFLICT);
-    }
-
-    /// A machine-readable `error_code` drives the status directly and takes
-    /// precedence over the substring matcher — even when the human `message`
-    /// would otherwise match a different class.
-    #[test]
-    fn error_code_takes_precedence_over_message_substring() {
-        use super_stt_shared::models::protocol::ErrorCode;
-        // Message contains "Unknown model" (a BAD_REQUEST phrase), but the code
-        // says conflict — the code wins.
-        let resp = DaemonResponse::error_with_code(
-            ErrorCode::RecordingInProgress,
-            "Unknown model situation while recording",
-        );
-        assert_eq!(status_code_for_response(&resp), StatusCode::CONFLICT);
-    }
-
-    /// The `switch_guard`, model-reload, and recording-busy guards are all
-    /// state conflicts (well-formed request, wrong daemon state) and must map
-    /// to `409`, not `500`. These are the exact canonical strings produced by
-    /// `switch.rs` (backend switch / uninstall), `lifecycle.rs` (reload), and
-    /// `recording/mod.rs` (the `POST /v1/transcribe` busy race).
-    #[test]
-    fn guard_messages_map_to_conflict() {
-        for msg in [
-            "Cannot change the backend during active recording. Please wait for it to finish.",
-            "Cannot change the backend during active real-time transcription sessions.",
-            "Cannot reload the model during active recording. Please wait for it to finish.",
-            "Cannot reload the model during active real-time transcription sessions.",
-            "Recording already in progress. Please wait for current recording to complete.",
-            "Cannot switch models during active recording. Please wait for recording to complete.",
-            "Cannot switch devices during active recording. Please wait for recording to complete.",
-        ] {
+    fn status_is_derived_from_error_code() {
+        let cases = [
+            // client named a model/source no installed backend serves →
+            // 400 (docs/protocol/endpoints/v1/{active_model,active_backend}.md)
+            (ErrorCode::InvalidModel, StatusCode::BAD_REQUEST),
+            (ErrorCode::InvalidBackend, StatusCode::BAD_REQUEST),
+            (ErrorCode::InvalidAudioTheme, StatusCode::BAD_REQUEST),
+            (ErrorCode::UnsupportedLanguage, StatusCode::BAD_REQUEST),
+            // request well-formed but daemon state forbids it → 409
+            (ErrorCode::RecordingInProgress, StatusCode::CONFLICT),
+            (ErrorCode::DownloadInProgress, StatusCode::CONFLICT),
+            (ErrorCode::NotFound, StatusCode::NOT_FOUND),
+            (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR),
+        ];
+        for (code, expected) in cases {
+            let resp = DaemonResponse::error_with_code(code, "human-readable detail");
             assert_eq!(
-                status_code_for_response(&DaemonResponse::error(msg)),
-                StatusCode::CONFLICT,
-                "expected 409 for guard message: {msg}"
+                status_code_for_response(&resp),
+                expected,
+                "unexpected status for {code:?}"
             );
         }
     }
 
-    /// An unknown theme is documented as `400 invalid_audio_theme`
-    /// (docs/protocol/endpoints/v1/audio_theme.md), not a 500.
+    /// The `message` wording never affects the status — only the code does.
     #[test]
-    fn invalid_audio_theme_maps_to_bad_request() {
-        let resp = DaemonResponse::error("invalid_audio_theme");
-        assert_eq!(status_code_for_response(&resp), StatusCode::BAD_REQUEST);
+    fn message_wording_does_not_affect_status() {
+        // A conflict code whose message happens to read like a bad-input error
+        // still maps by the code (409), not the words.
+        let resp = DaemonResponse::error_with_code(
+            ErrorCode::RecordingInProgress,
+            "invalid model situation while recording",
+        );
+        assert_eq!(status_code_for_response(&resp), StatusCode::CONFLICT);
     }
 
+    /// An error with no `error_code` is an unclassified server-side failure.
     #[test]
-    fn unclassified_error_stays_internal() {
+    fn uncoded_error_is_internal() {
         let resp = DaemonResponse::error("something unexpected blew up");
         assert_eq!(
             status_code_for_response(&resp),

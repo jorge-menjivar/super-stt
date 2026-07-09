@@ -35,10 +35,8 @@ impl SuperSTTDaemon {
     /// an active recording. A real-time (WebSocket) session holds the `model`
     /// read lock, so the reload's write-lock acquisition serializes behind it.
     pub async fn handle_reload_active_model(&self) -> DaemonResponse {
-        if *self.busy.read().await {
-            return DaemonResponse::error(
-                "Cannot reload the model during active recording. Please wait for it to finish.",
-            );
+        if let Some(resp) = self.guard_model_mutation("reload the model").await {
+            return resp;
         }
         let current = self.model.read().await.as_ref().map(|l| {
             (

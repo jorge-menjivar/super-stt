@@ -4,7 +4,7 @@ use crate::audio::beeper::play_beep_sequence;
 use crate::daemon::types::SuperSTTDaemon;
 use log::{error, info};
 use std::sync::Arc;
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_stt_shared::theme::AudioTheme;
 
 impl SuperSTTDaemon {
@@ -21,7 +21,10 @@ impl SuperSTTDaemon {
             .into_iter()
             .find(|t| t.to_string() == theme_str.to_lowercase())
         else {
-            return DaemonResponse::error("invalid_audio_theme");
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidAudioTheme,
+                "invalid_audio_theme",
+            );
         };
         self.set_audio_theme(theme);
 

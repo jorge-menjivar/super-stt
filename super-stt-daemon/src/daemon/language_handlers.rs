@@ -10,7 +10,7 @@ use chrono::Utc;
 
 use crate::daemon::language::resolve_language;
 use crate::daemon::types::SuperSTTDaemon;
-use super_stt_shared::models::protocol::{Command, DaemonResponse};
+use super_stt_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
 use super_stt_shared::models::registry::ModelDefinition;
 
 impl SuperSTTDaemon {
@@ -132,7 +132,7 @@ impl SuperSTTDaemon {
     pub async fn handle_get_model_language(&self, source: String, model: String) -> DaemonResponse {
         match self.model_language_block(&source, &model).await {
             Ok(block) => DaemonResponse::success().with_language(block),
-            Err(()) => DaemonResponse::error("unknown_model"),
+            Err(()) => DaemonResponse::error_with_code(ErrorCode::InvalidModel, "unknown_model"),
         }
     }
 
@@ -145,12 +145,15 @@ impl SuperSTTDaemon {
         // Validate against the named model: it must be multilingual and the tag
         // must be `auto` or one of its supported_languages.
         let Some(def) = self.find_model_definition(&source, &model).await else {
-            return DaemonResponse::error("unknown_model");
+            return DaemonResponse::error_with_code(ErrorCode::InvalidModel, "unknown_model");
         };
         let ok = def.is_multilingual
             && (language == "auto" || def.supported_languages.contains(&language));
         if !ok {
-            return DaemonResponse::error("unsupported_language");
+            return DaemonResponse::error_with_code(
+                ErrorCode::UnsupportedLanguage,
+                "unsupported_language",
+            );
         }
         {
             let mut config = self.config.write().await;
@@ -169,7 +172,7 @@ impl SuperSTTDaemon {
         model: String,
     ) -> DaemonResponse {
         if self.find_model_definition(&source, &model).await.is_none() {
-            return DaemonResponse::error("unknown_model");
+            return DaemonResponse::error_with_code(ErrorCode::InvalidModel, "unknown_model");
         }
         {
             let mut config = self.config.write().await;

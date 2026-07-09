@@ -3,7 +3,7 @@ use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::dispatch::{DispatchError, dispatch_transcription};
 use chrono::Utc;
 use log::{debug, error, info, warn};
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_stt_shared::utils::audio::validate_audio;
 
 impl SuperSTTDaemon {
@@ -19,7 +19,10 @@ impl SuperSTTDaemon {
         // Validate audio
         if let Err(e) = validate_audio(&audio_data, sample_rate) {
             warn!("Audio validation failed: {e}");
-            return DaemonResponse::error(&format!("Invalid audio data: {e}"));
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidValue,
+                &format!("Invalid audio data: {e}"),
+            );
         }
         debug!("Audio validation completed");
 

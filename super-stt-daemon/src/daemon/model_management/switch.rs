@@ -4,7 +4,7 @@ use crate::stt_models::backends;
 use crate::stt_models::transcribe::Transcribe;
 use chrono::Utc;
 use log::{error, info, warn};
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::registry::ModelDefinition;
 
@@ -27,18 +27,28 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// Recording guard shared by backend + model switching. Also used as a
-    /// boolean predicate by the HTTP uninstall handler to refuse mutating the
-    /// backend set mid-recording. Real-time (WebSocket) sessions are guarded
-    /// separately: they hold the `model` read lock for their duration, so a
-    /// switch's write-lock acquisition already serializes behind them.
-    pub(crate) async fn switch_guard(&self) -> Option<DaemonResponse> {
+    /// Reject a model/backend/device mutation while a daemon-mic recording is in
+    /// flight. `action` names the operation for the human `message` (e.g.
+    /// "change the backend", "switch models"); the machine-readable identity is
+    /// always [`ErrorCode::RecordingInProgress`], so callers and clients never
+    /// depend on the wording. Real-time (WebSocket) sessions are guarded
+    /// separately — they hold the `model` read lock for their duration, so a
+    /// mutation's write-lock acquisition already serializes behind them.
+    /// Returns `None` when idle.
+    pub(crate) async fn guard_model_mutation(&self, action: &str) -> Option<DaemonResponse> {
         if *self.busy.read().await {
-            return Some(DaemonResponse::error(
-                "Cannot change the backend during active recording. Please wait for it to finish.",
+            return Some(DaemonResponse::error_with_code(
+                ErrorCode::RecordingInProgress,
+                &format!("Cannot {action} during active recording. Please wait for it to finish."),
             ));
         }
         None
+    }
+
+    /// Backend-mutation guard (`change the backend`) shared by the
+    /// set/clear/unload active-backend commands and the HTTP uninstall handler.
+    pub(crate) async fn switch_guard(&self) -> Option<DaemonResponse> {
+        self.guard_model_mutation("change the backend").await
     }
 
     /// Build the `{source, name, model_loaded}` payload for the backend at the
@@ -79,9 +89,10 @@ impl SuperSTTDaemon {
                 .and_then(backends::dir_name)
         };
         let Some(dir_name) = dir_name else {
-            return DaemonResponse::error(&format!(
-                "No installed backend with source {source} (or its files are missing)"
-            ));
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidBackend,
+                &format!("No installed backend with source {source} (or its files are missing)"),
+            );
         };
 
         // Always unload when the active backend actually changes — this is the
@@ -178,10 +189,13 @@ impl SuperSTTDaemon {
                 .map(|(b, d)| (b.source.clone(), backends::dir_name(b), d.is_online()))
         };
         let Some((backend_source, backend_dir, is_online)) = resolved else {
-            return DaemonResponse::error(&format!(
-                "No installed backend serves {model} via {provider}. \
-                 Install the backend or check the model name."
-            ));
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidModel,
+                &format!(
+                    "No installed backend serves {model} via {provider}. \
+                     Install the backend or check the model name."
+                ),
+            );
         };
 
         // Online models must be explicitly enabled — gated after resolution
@@ -261,11 +275,9 @@ impl SuperSTTDaemon {
         provider: &Provider,
         source: &str,
     ) -> Option<DaemonResponse> {
-        if *self.busy.read().await {
+        if let Some(resp) = self.guard_model_mutation("switch models").await {
             warn!("Model switch rejected - recording in progress");
-            return Some(DaemonResponse::error(
-                "Cannot switch models during active recording. Please wait for recording to complete.",
-            ));
+            return Some(resp);
         }
         if let Some(loaded) = self.model.read().await.as_ref()
             && loaded.definition.name == model

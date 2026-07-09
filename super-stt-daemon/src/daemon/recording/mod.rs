@@ -11,7 +11,7 @@ use chrono::Utc;
 use log::{error, info, warn};
 use std::collections::VecDeque;
 use std::sync::Arc;
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use tokio::time::Instant;
 
@@ -41,7 +41,8 @@ impl SuperSTTDaemon {
             let busy_guard = self.busy.read().await;
             if *busy_guard {
                 warn!("Recording request rejected - already recording");
-                return DaemonResponse::error(
+                return DaemonResponse::error_with_code(
+                    ErrorCode::RecordingInProgress,
                     "Recording already in progress. Please wait for current recording to complete.",
                 );
             }
