@@ -5,6 +5,7 @@
 
 pub mod entry;
 pub mod forge;
+pub mod index;
 pub mod license;
 pub mod manifest;
 pub mod provider;

@@ -38,28 +38,12 @@ pub struct RegistryBackend {
     pub index_stale: Option<IndexStale>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegistryModel {
-    pub name: String,
-    pub provider: String,
-    pub supported_devices: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegistrySecret {
-    pub name: String,
-    pub label: String,
-    pub required: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegistryOption {
-    pub name: String,
-    pub label: String,
-    pub r#type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default: Option<serde_json::Value>,
-}
+// The `/registry/backends` model/secret/option leaves are field-identical to
+// the `index.json` leaves, so they share one canonical definition rather than
+// drifting. Re-exported under the historical `Registry*` names.
+pub use super_stt_registry_types::index::{
+    IndexModel as RegistryModel, IndexOption as RegistryOption, IndexSecret as RegistrySecret,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Compatibility {
@@ -82,13 +66,7 @@ pub struct SelectedAsset {
     pub cudnn: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexStale {
-    pub latest_attempted: String,
-    pub tag: String,
-    pub error: String,
-    pub since: String,
-}
+pub use super_stt_registry_types::index::IndexStale;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
