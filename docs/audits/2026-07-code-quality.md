@@ -50,7 +50,7 @@ Three patterns account for the majority of findings:
   conflicts that should be 409.
 - **Fix:** add the missing phrases as a stopgap; the real fix is machine-readable
   error codes (Tier 2 #3), which retires the substring mapping entirely.
-- **Resolved (`3d7aaea`, branch `fix/daemon-bug-batch`):** added the missing conflict
+- **Resolved (`3d7aaea`, branch `refactor/daemon-audit-batch`):** added the missing conflict
   prefixes (`Cannot change the backend during`, `Cannot reload the model during`,
   `Recording already in progress`), dropped four dead phrases, and pinned the guard
   strings with a characterization test. Also aligned `DELETE /active_model`'s doc from
@@ -71,7 +71,7 @@ Three patterns account for the majority of findings:
 - **Fix:** remove and cancel sessions when the client goes away (dead-channel send
   is the signal); cancel the token on stop; move resampling out of the write lock;
   delete or wire up the throttling fields.
-- **Resolved (`c4fc6d4`, branch `fix/daemon-bug-batch`):** removed the entire
+- **Resolved (`c4fc6d4`, branch `refactor/daemon-audit-batch`):** removed the entire
   `RealTimeTranscriptionManager` instead of hardening it. It was a documented
   placeholder that dropped its result receiver, undocumented, unused by any shipping
   client, and superseded by `GET /v1/transcribe/realtime` (which bridges to the
@@ -87,7 +87,7 @@ Three patterns account for the majority of findings:
 - **Impact:** a restart reloads the model the user explicitly unloaded.
 - **Fix:** persist after clearing (the `set_config_field` helper in Tier 3 #7 would
   prevent this class of miss).
-- **Resolved (`b72f38e`, branch `fix/daemon-bug-batch`):** replaced the manual
+- **Resolved (`b72f38e`, branch `refactor/daemon-audit-batch`):** replaced the manual
   in-memory clear with a bundled `clear_preferred_model()` config mutator that clears
   and saves together (mirroring `clear_active_backend`), so the on-disk state can't
   drift from memory. Added a round-trip test for the restart-idle invariant.
@@ -102,7 +102,7 @@ Three patterns account for the majority of findings:
   recorder.
 - **Impact:** capture is unbounded with `busy=true` and a frozen preview.
 - **Fix:** send on `manual_stop_tx` on timeout.
-- **Resolved (`33d2cdf`, branch `fix/daemon-bug-batch`):** on the 1-minute guard,
+- **Resolved (`33d2cdf`, branch `refactor/daemon-audit-batch`):** on the 1-minute guard,
   `run_preview_loop` now signals the recorder's stop channel (the same one the
   manual-stop shortcut uses) before breaking, so the recorder ends cleanly and
   `collect_and_clear_preview` returns the audio captured so far.
@@ -117,7 +117,7 @@ Three patterns account for the majority of findings:
   `GET /active_backend` disagree; clients can't parse the error.
 - **Fix:** route through the shared mutation guard, unload the current model first,
   and use the house envelope (folds into Tier 2 #3).
-- **Resolved (`599a422`, branch `fix/daemon-bug-batch`):** the handler now reuses
+- **Resolved (`599a422`, branch `refactor/daemon-audit-batch`):** the handler now reuses
   `switch_guard()` (→ 409 `backend_busy`), calls `handle_clear_active_backend()` on
   the was-active path (unloads the model + clears active-backend/preferred-model
   before removing the files), and routes errors through the registry envelope helpers
@@ -371,7 +371,7 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   `RegistryModel`/`RegistrySecret`/`RegistryOption`
   (`shared/src/registry/mod.rs:41-91`) into the same leaf types. Move the
   manifest→`IndexBackend` synthesis to one shared implementation.
-- **Resolved (`7b27bed` + `7dfbfad`, branch `refactor/index-schema-registry-types`):**
+- **Resolved (`7b27bed` + `7dfbfad`, branch `refactor/daemon-audit-batch`):**
   Phase 1 (`7b27bed`) moved the nine structs + `SCHEMA_VERSION`/`MIN_CLIENT` into
   `super-stt-registry-types::index` (Serialize + Deserialize derived together);
   `license` is lenient on read and always written;
@@ -408,6 +408,16 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   `widget_subscription/mod.rs:188-193`, `app/core/app/events.rs:20` — root cause:
   `with_token`'s `op` erases to `Result<T, String>`; have it return
   `HttpResult<T>`); and the ad-hoc error envelopes (Tier 1 #5).
+- **Partially resolved (`5d31afc`, branch `refactor/daemon-audit-batch`):** Phase 1
+  landed the mechanism — a typed `ErrorCode` enum in shared (snake_case wire,
+  `#[serde(other)] Unknown` for forward-compat, `http_status()` as the single
+  code→status source of truth), an `error_code` field + `error_with_code()`
+  constructor on `DaemonResponse`, and `status_code_for_response` now derives the
+  status from `error_code` (the substring matcher stays as a fallback for
+  not-yet-migrated paths). `transport.md` documents the new contract. Remaining:
+  Phase 2 (unify the four guards into `guard_model_mutation`, emit codes on the
+  daemon error paths, retire the substring matcher) and Phase 3 (app `with_token`
+  → `HttpResult<T>`, replace the string classification).
 
 ### [ ] 4. 🟠 Download/verify plumbing
 
