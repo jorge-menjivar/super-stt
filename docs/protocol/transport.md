@@ -231,16 +231,28 @@ Every error returns a JSON body with the same shape:
 
 ```jsonc
 {
-  "status":  "error",
-  "message": "<short identifier>",
-  "data":    { "reason": "<machine-readable reason>", ... }
+  "status":     "error",
+  "error_code": "recording_in_progress",
+  "message":    "Cannot change the backend during active recording.",
+  "data":       { "reason": "<machine-readable reason>", ... }
 }
 ```
 
-`message` is a stable identifier suitable for clients to switch on.
-The optional `data` carries machine-readable detail. Wire errors are
-sanitized to a single line so secrets can't accidentally leak into
-the response body.
+`error_code` is a stable, machine-readable `snake_case` identifier — the
+field clients should switch on. It is present on every error the daemon
+originates. `message` is a human-readable, single-line explanation suitable
+for display; it is sanitized so secrets can't leak into the response body,
+and its exact wording is **not** part of the contract (do not match on it).
+The optional `data` carries additional structured detail.
+
+The HTTP status is derived from `error_code` (e.g. a state-conflict code →
+`409`, a bad-input code → `400`); an error the daemon cannot classify carries
+no `error_code` and surfaces as `500`.
+
+> **Compatibility.** `error_code` was introduced after `message`. Earlier
+> clients switched on `message`, and the auth identifiers (`invalid_session`,
+> `scope_denied`) still appear there verbatim for that reason. New clients
+> should switch on `error_code`.
 
 ## Forward compatibility with TCP
 

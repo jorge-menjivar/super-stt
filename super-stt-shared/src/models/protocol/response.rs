@@ -7,6 +7,11 @@ use serde_json::Value;
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct DaemonResponse {
     pub status: String,
+    /// Stable, machine-readable error identifier — the field clients switch on.
+    /// Present on classified errors; drives the HTTP status. See
+    /// [`ErrorCode`](super::ErrorCode) and `docs/protocol/transport.md`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<super::ErrorCode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -187,6 +192,24 @@ impl DaemonResponse {
             message: Some(sanitize_error_message(message)),
             ..Default::default()
         }
+    }
+
+    /// Build a classified error response: a machine-readable [`ErrorCode`] plus
+    /// a sanitized human-readable `message`. The HTTP layer derives the status
+    /// from the code (see [`ErrorCode::http_status`](super::ErrorCode)).
+    #[must_use]
+    pub fn error_with_code(code: super::ErrorCode, message: &str) -> Self {
+        Self {
+            error_code: Some(code),
+            ..Self::error(message)
+        }
+    }
+
+    /// Attach (or override) the machine-readable error code.
+    #[must_use]
+    pub fn with_error_code(mut self, code: super::ErrorCode) -> Self {
+        self.error_code = Some(code);
+        self
     }
 
     #[must_use]

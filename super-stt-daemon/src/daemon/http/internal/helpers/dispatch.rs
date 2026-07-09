@@ -100,6 +100,14 @@ pub(crate) fn status_code_for_response(resp: &DaemonResponse) -> StatusCode {
     if resp.status == "success" {
         return StatusCode::OK;
     }
+    // Prefer the machine-readable code — the contract's single source of truth
+    // for code→status. The substring matcher below is a migration fallback for
+    // error paths that don't yet carry an `error_code`; it is retired as those
+    // paths are converted.
+    if let Some(code) = resp.error_code {
+        return StatusCode::from_u16(code.http_status())
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    }
     let msg = resp.message.as_deref().unwrap_or("");
 
     if BAD_REQUEST_PHRASES.iter().any(|p| msg.contains(p)) {
@@ -163,6 +171,21 @@ mod tests {
     #[test]
     fn state_conflict_maps_to_conflict() {
         let resp = DaemonResponse::error("No download in progress");
+        assert_eq!(status_code_for_response(&resp), StatusCode::CONFLICT);
+    }
+
+    /// A machine-readable `error_code` drives the status directly and takes
+    /// precedence over the substring matcher — even when the human `message`
+    /// would otherwise match a different class.
+    #[test]
+    fn error_code_takes_precedence_over_message_substring() {
+        use super_stt_shared::models::protocol::ErrorCode;
+        // Message contains "Unknown model" (a BAD_REQUEST phrase), but the code
+        // says conflict — the code wins.
+        let resp = DaemonResponse::error_with_code(
+            ErrorCode::RecordingInProgress,
+            "Unknown model situation while recording",
+        );
         assert_eq!(status_code_for_response(&resp), StatusCode::CONFLICT);
     }
 
