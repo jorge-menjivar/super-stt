@@ -397,7 +397,7 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   covering config migration. Requires a protocol-docs pass first (docs currently
   pin kebab-case; decide kebab vs snake deliberately). Includes fixing Tier 1 #24.
 
-### [ ] 3. 🔴 Machine-readable error codes on `DaemonResponse`
+### [x] 3. 🔴 Machine-readable error codes on `DaemonResponse`
 
 - **Where/Problem:** error identity today lives in prose, so every consumer matches
   strings.
@@ -408,16 +408,20 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   `widget_subscription/mod.rs:188-193`, `app/core/app/events.rs:20` — root cause:
   `with_token`'s `op` erases to `Result<T, String>`; have it return
   `HttpResult<T>`); and the ad-hoc error envelopes (Tier 1 #5).
-- **Partially resolved (`5d31afc`, branch `refactor/daemon-audit-batch`):** Phase 1
-  landed the mechanism — a typed `ErrorCode` enum in shared (snake_case wire,
-  `#[serde(other)] Unknown` for forward-compat, `http_status()` as the single
-  code→status source of truth), an `error_code` field + `error_with_code()`
-  constructor on `DaemonResponse`, and `status_code_for_response` now derives the
-  status from `error_code` (the substring matcher stays as a fallback for
-  not-yet-migrated paths). `transport.md` documents the new contract. Remaining:
-  Phase 2 (unify the four guards into `guard_model_mutation`, emit codes on the
-  daemon error paths, retire the substring matcher) and Phase 3 (app `with_token`
-  → `HttpResult<T>`, replace the string classification).
+- **Resolved (`5d31afc` + `103792b` + `c123f27`, branch `refactor/daemon-audit-batch`):**
+  Phase 1 (`5d31afc`) landed the mechanism — a typed `ErrorCode` enum in shared
+  (snake_case wire, `#[serde(other)] Unknown` for forward-compat, `http_status()` as
+  the single code→status source of truth), an `error_code` field +
+  `error_with_code()` constructor on `DaemonResponse`, and `status_code_for_response`
+  deriving the status from `error_code`; `transport.md` documents the contract.
+  Phase 2 (`103792b`) unified the four guards into `guard_model_mutation(action)`,
+  migrated the daemon's 400/409 producers to carry codes, and deleted the drifted
+  substring matcher (`status_code_for_response` is now pure `error_code → status`).
+  Phase 3 (`c123f27`) typed the client error path end-to-end: `with_token`'s `op`
+  returns `HttpResult<T>`, so the retry and the `is_user_denied` /
+  `classify_daemon_error` decisions match the typed `HttpError` variant instead of
+  its wording (`is_wire_invalid_session` deleted). The ad-hoc uninstall envelope was
+  folded in under Tier 1 #5.
 
 ### [ ] 4. 🟠 Download/verify plumbing
 
