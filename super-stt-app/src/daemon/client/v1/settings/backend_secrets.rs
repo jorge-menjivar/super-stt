@@ -3,6 +3,7 @@
 
 use crate::daemon::client::internal::response::{require_success, require_unit};
 use crate::daemon::client::internal::session::with_settings_token;
+use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
 fn enc(s: &str) -> String {
@@ -10,7 +11,7 @@ fn enc(s: &str) -> String {
 }
 
 /// Store a backend secret via the daemon (HTTP `POST /backends/{source}/secrets/{name}`).
-pub async fn set_backend_secret(source: String, name: String, value: String) -> Result<(), String> {
+pub async fn set_backend_secret(source: String, name: String, value: String) -> HttpResult<()> {
     with_settings_token(move |socket, token| {
         let (source, name, value) = (source.clone(), name.clone(), value.clone());
         async move {
@@ -29,7 +30,7 @@ pub async fn set_backend_secret(source: String, name: String, value: String) -> 
 }
 
 /// Clear a backend secret via the daemon (HTTP `DELETE /backends/{source}/secrets/{name}`).
-pub async fn clear_backend_secret(source: String, name: String) -> Result<(), String> {
+pub async fn clear_backend_secret(source: String, name: String) -> HttpResult<()> {
     with_settings_token(move |socket, token| {
         let (source, name) = (source.clone(), name.clone());
         async move {
@@ -43,7 +44,7 @@ pub async fn clear_backend_secret(source: String, name: String) -> Result<(), St
 
 /// List which secrets are configured for a backend (HTTP `GET /backends/{source}/secrets/list`).
 /// Returns a `Vec<(name, configured)>` pair for each declared secret.
-pub async fn list_backend_secrets(source: String) -> Result<Vec<(String, bool)>, String> {
+pub async fn list_backend_secrets(source: String) -> HttpResult<Vec<(String, bool)>> {
     with_settings_token(move |socket, token| {
         let source = source.clone();
         async move {

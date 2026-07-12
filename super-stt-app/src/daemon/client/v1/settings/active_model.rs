@@ -5,6 +5,7 @@ use crate::daemon::client::internal::response::{require_message, require_success
 use crate::daemon::client::internal::session::with_settings_token;
 use serde::Deserialize;
 use super_stt_shared::daemon::http_client::transport;
+use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
 
 // Only the `/active_model` fields the settings app consumes are modeled; serde ignores the rest.
 
@@ -49,16 +50,14 @@ pub struct ActiveModelDownload {
 async fn fetch_active_model(
     socket: std::path::PathBuf,
     token: &str,
-) -> Result<ActiveModelStatus, String> {
-    transport::get_json::<ActiveModelStatus>(socket, token, "/active_model")
-        .await
-        .map_err(String::from)
+) -> HttpResult<ActiveModelStatus> {
+    transport::get_json::<ActiveModelStatus>(socket, token, "/active_model").await
 }
 
 /// Get current loaded model from daemon as `(name, provider, source)`
 /// (HTTP `GET /active_model`).
 pub async fn get_current_model()
--> Result<(String, super_stt_shared::models::provider::Provider, String), String> {
+-> HttpResult<(String, super_stt_shared::models::provider::Provider, String)> {
     with_settings_token(|socket, token| async move {
         let status = fetch_active_model(socket, &token).await?;
         let current = status.active_model.current;
@@ -73,10 +72,10 @@ pub async fn get_current_model()
         };
         let provider_str = current
             .provider
-            .ok_or("missing active_model.current.provider")?;
+            .ok_or_else(|| HttpError::Other("missing active_model.current.provider".to_string()))?;
         let provider: super_stt_shared::models::provider::Provider = provider_str
             .parse()
-            .map_err(|e| format!("invalid provider {provider_str:?}: {e}"))?;
+            .map_err(|e| HttpError::Other(format!("invalid provider {provider_str:?}: {e}")))?;
         let source = current.source.unwrap_or_default();
         Ok((model, provider, source))
     })
@@ -86,7 +85,7 @@ pub async fn get_current_model()
 /// Get current download status. Composed from `/active_model`'s
 /// `switch.download` sub-object.
 pub async fn get_download_status()
--> Result<Option<super_stt_shared::models::protocol::DownloadProgress>, String> {
+-> HttpResult<Option<super_stt_shared::models::protocol::DownloadProgress>> {
     with_settings_token(|socket, token| async move {
         let status = fetch_active_model(socket, &token).await?;
         let Some(switch) = status.active_model.switch else {
@@ -126,7 +125,7 @@ pub async fn set_model(
     model: String,
     provider: super_stt_shared::models::provider::Provider,
     source: String,
-) -> Result<String, String> {
+) -> HttpResult<String> {
     let provider_str = provider.to_string();
     let source_str = source;
     with_settings_token(move |socket, token| {
@@ -150,7 +149,7 @@ pub async fn set_model(
 
 /// List all available models from daemon (HTTP `GET /models`).
 pub async fn list_available_models()
--> Result<Vec<(String, super_stt_shared::models::provider::Provider, String)>, String> {
+-> HttpResult<Vec<(String, super_stt_shared::models::provider::Provider, String)>> {
     with_settings_token(|socket, token| async move {
         let resp = require_success(
             transport::settings_get(socket, &token, "/models").await?,
@@ -162,7 +161,7 @@ pub async fn list_available_models()
 }
 
 /// Cancel any ongoing model-switch download (HTTP `POST /active_model/cancel`).
-pub async fn cancel_download() -> Result<String, String> {
+pub async fn cancel_download() -> HttpResult<String> {
     with_settings_token(|socket, token| async move {
         let resp = transport::settings_post(
             socket,
@@ -179,7 +178,7 @@ pub async fn cancel_download() -> Result<String, String> {
 /// Unload the currently loaded model (HTTP `DELETE /active_model`). The
 /// active backend stays selected; the user can then pick another of its
 /// models. Use [`clear_active_backend`] to return the daemon to idle.
-pub async fn unload_active_model() -> Result<String, String> {
+pub async fn unload_active_model() -> HttpResult<String> {
     with_settings_token(|socket, token| async move {
         let resp = transport::settings_delete(socket, &token, "/active_model").await?;
         require_message(resp, "unload_active_model")

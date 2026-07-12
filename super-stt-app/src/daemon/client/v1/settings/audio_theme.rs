@@ -4,6 +4,7 @@
 use crate::daemon::client::internal::response::{require_message, require_success};
 use crate::daemon::client::internal::session::with_settings_token;
 use crate::state::AudioTheme;
+use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
 /// Load available audio themes from daemon, falling back to the built-in set.
@@ -14,7 +15,7 @@ pub async fn load_audio_themes() -> Vec<AudioTheme> {
 }
 
 /// List available audio themes (HTTP `GET /audio_themes`).
-pub async fn list_available_audio_themes() -> Result<Vec<AudioTheme>, String> {
+pub async fn list_available_audio_themes() -> HttpResult<Vec<AudioTheme>> {
     with_settings_token(|socket, token| async move {
         let resp = require_success(
             transport::settings_get(socket, &token, "/audio_themes").await?,
@@ -33,7 +34,7 @@ pub async fn list_available_audio_themes() -> Result<Vec<AudioTheme>, String> {
 }
 
 /// Read the configured audio-cue theme (HTTP `GET /audio_theme`).
-pub async fn get_current_audio_theme() -> Result<AudioTheme, String> {
+pub async fn get_current_audio_theme() -> HttpResult<AudioTheme> {
     with_settings_token(|socket, token| async move {
         let resp = require_success(
             transport::settings_get(socket, &token, "/audio_theme").await?,
@@ -49,7 +50,7 @@ pub async fn get_current_audio_theme() -> Result<AudioTheme, String> {
 }
 
 /// Set audio theme without playing a test sound (HTTP `POST /audio_theme`).
-pub async fn set_audio_theme(theme: AudioTheme) -> Result<String, String> {
+pub async fn set_audio_theme(theme: AudioTheme) -> HttpResult<String> {
     let theme_str = theme.to_string().to_lowercase();
     with_settings_token(move |socket, token| {
         let theme_str = theme_str.clone();
@@ -68,7 +69,7 @@ pub async fn set_audio_theme(theme: AudioTheme) -> Result<String, String> {
 }
 
 /// Set then audition a theme (`POST /audio_theme` + `POST /audio_theme/test`).
-pub async fn set_and_test_audio_theme(theme: AudioTheme) -> Result<String, String> {
+pub async fn set_and_test_audio_theme(theme: AudioTheme) -> HttpResult<String> {
     set_audio_theme(theme).await?;
     with_settings_token(|socket, token| async move {
         let resp =

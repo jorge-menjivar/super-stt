@@ -35,13 +35,16 @@ pub struct PingResponse {
 async fn with_widget_token<F, Fut, T>(socket_path: PathBuf, op: F) -> Result<T, String>
 where
     F: Fn(PathBuf, String) -> Fut,
-    Fut: std::future::Future<Output = Result<T, String>>,
+    Fut: std::future::Future<Output = http_client::HttpResult<T>>,
 {
     let socket_for_op = socket_path.clone();
+    // The typed error is only needed for `with_token`'s retry decision; the
+    // applet's callers surface a plain string, so convert at this boundary.
     session::with_token(socket_path, APP_ID, APP_NAME, SCOPES, move |token| {
         op(socket_for_op.clone(), token)
     })
     .await
+    .map_err(String::from)
 }
 
 /// Ping the daemon to check it's reachable. Returns the daemon's
@@ -54,7 +57,7 @@ where
 /// retry.
 pub async fn ping_daemon(socket_path: PathBuf) -> Result<String, String> {
     with_widget_token(socket_path, |sock, token| async move {
-        http_client::ping(sock, &token).await.map_err(String::from)
+        http_client::ping(sock, &token).await
     })
     .await
 }

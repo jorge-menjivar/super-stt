@@ -84,7 +84,7 @@ impl AppModel {
                         |r| {
                             cosmic::Action::App(match r {
                                 Ok(resp) => Message::RegistryListLoaded(resp),
-                                Err(e) => Message::RegistryListFailed(e),
+                                Err(e) => Message::RegistryListFailed(e.to_string()),
                             })
                         },
                     ));
@@ -107,7 +107,7 @@ impl AppModel {
 
             Message::BackendsReload => Task::perform(list_backends(), |result| match result {
                 Ok(backends) => cosmic::Action::App(Message::BackendsLoaded(backends)),
-                Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
             }),
 
             _ => Task::none(),
@@ -147,7 +147,7 @@ impl AppModel {
                             source: source.clone(),
                             name: name.clone(),
                         }),
-                        Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                        Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
                     },
                 )
             }
@@ -165,7 +165,7 @@ impl AppModel {
                     .remove(&(source.clone(), name.clone()));
                 Task::perform(clear_backend_secret(source, name), move |res| match res {
                     Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                    Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                    Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
                 })
             }
 
@@ -189,14 +189,14 @@ impl AppModel {
                 if value.is_empty() {
                     Task::perform(clear_backend_option(source, name), |result| match result {
                         Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                        Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                        Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
                     })
                 } else {
                     Task::perform(
                         set_backend_option(source, name, value),
                         |result| match result {
                             Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                            Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                            Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
                         },
                     )
                 }
@@ -207,7 +207,7 @@ impl AppModel {
             Message::BackendOptionReset { source, name } => {
                 Task::perform(clear_backend_option(source, name), |result| match result {
                     Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                    Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                    Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
                 })
             }
 

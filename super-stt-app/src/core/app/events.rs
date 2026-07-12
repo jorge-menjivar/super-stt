@@ -4,23 +4,25 @@ use crate::state::DaemonStatus;
 use crate::ui::messages::Message;
 use log::warn;
 
-/// Classify a daemon error message into the right next `DaemonStatus`.
+/// Classify a daemon [`HttpError`] into the right next `DaemonStatus`.
 ///
-/// `auth_denied (user_denied)` / `auth_denied (user_denied_cached)`
-/// must transition to [`DaemonStatus::Blocked`] so the surrounding
-/// auto-retry loop in `Message::DaemonError` stops firing — otherwise
-/// the settings app re-pings every 5s and the daemon's in-memory
-/// deny cache keeps logging the same `user_denied_cached`. Any other
-/// error string is transient (daemon restarting, socket missing,
-/// etc.) and gets [`DaemonStatus::Error`], which the caller pairs
-/// with the 5s retry. Extracted out of `Message::DaemonError` so
-/// this load-bearing branch is unit-testable without dragging the
-/// full cosmic update loop into the test harness.
-pub(super) fn classify_daemon_error(err: String) -> DaemonStatus {
+/// A user-triggered `auth_denied` ([`is_user_denied`]) must transition to
+/// [`DaemonStatus::Blocked`] so the surrounding auto-retry loop stops firing —
+/// otherwise the settings app re-pings every 5s and the daemon's in-memory deny
+/// cache keeps logging the same `user_denied_cached`. Every other error is
+/// transient (daemon restarting, socket missing, token expiry, …) and gets
+/// [`DaemonStatus::Error`], which the caller pairs with the 5s retry. The
+/// decision is on the typed variant; the human string is kept only for display.
+///
+/// [`HttpError`]: super_stt_shared::daemon::http_client::HttpError
+/// [`is_user_denied`]: super_stt_shared::daemon::widget_subscription::is_user_denied
+pub(super) fn classify_daemon_error(
+    err: super_stt_shared::daemon::http_client::HttpError,
+) -> DaemonStatus {
     if super_stt_shared::daemon::widget_subscription::is_user_denied(&err) {
-        DaemonStatus::Blocked(err)
+        DaemonStatus::Blocked(err.into())
     } else {
-        DaemonStatus::Error(err)
+        DaemonStatus::Error(err.into())
     }
 }
 
@@ -157,14 +159,20 @@ mod classify_daemon_error_tests {
     //! Locking this in protects against a regression of the deny
     //! spam loop the helper change already fixed for the applet.
     use super::*;
+    use super_stt_shared::daemon::http_client::HttpError;
+
+    fn auth_denied(reason: &str) -> HttpError {
+        HttpError::AuthDenied {
+            reason: reason.to_string(),
+        }
+    }
 
     #[test]
     fn user_denied_cached_routes_to_blocked() {
-        // Verbatim daemon response shape — see
-        // super-stt-daemon/src/daemon/http_server.rs::auth_err.
-        let next = classify_daemon_error("auth_denied (user_denied_cached)".to_string());
+        let next = classify_daemon_error(auth_denied("user_denied_cached"));
         match next {
             DaemonStatus::Blocked(reason) => {
+                // Blocked keeps the human string for display.
                 assert_eq!(reason, "auth_denied (user_denied_cached)");
             }
             other => panic!("user_denied_cached must route to Blocked, got {other:?}"),
@@ -173,7 +181,7 @@ mod classify_daemon_error_tests {
 
     #[test]
     fn fresh_user_denied_routes_to_blocked() {
-        let next = classify_daemon_error("auth_denied (user_denied)".to_string());
+        let next = classify_daemon_error(auth_denied("user_denied"));
         assert!(matches!(next, DaemonStatus::Blocked(_)));
     }
 
@@ -181,7 +189,7 @@ mod classify_daemon_error_tests {
     fn dismissed_popup_routes_to_error_so_retry_can_recover() {
         // user_dismissed is recoverable — next attempt pops the
         // popup fresh — so the retry loop must keep firing.
-        let next = classify_daemon_error("auth_denied (user_dismissed)".to_string());
+        let next = classify_daemon_error(auth_denied("user_dismissed"));
         assert!(matches!(next, DaemonStatus::Error(_)));
     }
 
@@ -189,16 +197,18 @@ mod classify_daemon_error_tests {
     fn invalid_session_routes_to_error() {
         // Token expiry / exe_changed are transient — let the
         // retry loop drive a fresh consent on the next attempt.
-        let next = classify_daemon_error("invalid_session (expired)".to_string());
+        let next = classify_daemon_error(HttpError::InvalidSession {
+            reason: "expired".to_string(),
+        });
         assert!(matches!(next, DaemonStatus::Error(_)));
     }
 
     #[test]
     fn socket_unreachable_routes_to_error() {
         // Daemon restarting / socket missing — pure transient.
-        let next = classify_daemon_error(
+        let next = classify_daemon_error(HttpError::Other(
             "Daemon HTTP listener not running. Start the daemon first.".to_string(),
-        );
+        ));
         assert!(matches!(next, DaemonStatus::Error(_)));
     }
 }

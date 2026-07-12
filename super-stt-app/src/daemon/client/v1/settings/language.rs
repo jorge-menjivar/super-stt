@@ -4,6 +4,7 @@
 
 use crate::daemon::client::internal::response::{require_success, require_unit};
 use crate::daemon::client::internal::session::with_settings_token;
+use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
 fn enc(s: &str) -> String {
@@ -12,7 +13,7 @@ fn enc(s: &str) -> String {
 
 /// Read the global primary language (HTTP `GET /language`).
 /// Returns `None` when unset (daemon will auto-detect or use the model default).
-pub async fn get_primary_language() -> Result<Option<String>, String> {
+pub async fn get_primary_language() -> HttpResult<Option<String>> {
     with_settings_token(|socket, token| async move {
         let resp = require_success(
             transport::settings_get(socket, &token, "/language").await?,
@@ -26,7 +27,7 @@ pub async fn get_primary_language() -> Result<Option<String>, String> {
 }
 
 /// Store the global primary language (HTTP `POST /language`).
-pub async fn set_primary_language(language: String) -> Result<(), String> {
+pub async fn set_primary_language(language: String) -> HttpResult<()> {
     with_settings_token(move |socket, token| {
         let language = language.clone();
         async move {
@@ -44,7 +45,7 @@ pub async fn set_primary_language(language: String) -> Result<(), String> {
 }
 
 /// Clear the global primary language (HTTP `DELETE /language`).
-pub async fn clear_primary_language() -> Result<(), String> {
+pub async fn clear_primary_language() -> HttpResult<()> {
     with_settings_token(|socket, token| async move {
         let resp = transport::settings_delete(socket, &token, "/language").await?;
         require_unit(resp, "clear_primary_language")
@@ -57,10 +58,7 @@ pub async fn clear_primary_language() -> Result<(), String> {
 /// Returns the full resolution `Value` (object with `effective`, `source`,
 /// `multilingual`, `supported`, `primary`, `override`), or `Value::Null`
 /// when the model is not found.
-pub async fn get_model_language(
-    source: String,
-    model: String,
-) -> Result<serde_json::Value, String> {
+pub async fn get_model_language(source: String, model: String) -> HttpResult<serde_json::Value> {
     with_settings_token(move |socket, token| {
         let (source, model) = (source.clone(), model.clone());
         async move {
@@ -82,7 +80,7 @@ pub async fn set_model_language(
     source: String,
     model: String,
     language: String,
-) -> Result<serde_json::Value, String> {
+) -> HttpResult<serde_json::Value> {
     with_settings_token(move |socket, token| {
         let (source, model, language) = (source.clone(), model.clone(), language.clone());
         async move {
@@ -106,10 +104,7 @@ pub async fn set_model_language(
 /// Clear a specific model's language override
 /// (HTTP `DELETE /backends/{source}/models/{model}/language`).
 /// Returns the updated resolution block.
-pub async fn clear_model_language(
-    source: String,
-    model: String,
-) -> Result<serde_json::Value, String> {
+pub async fn clear_model_language(source: String, model: String) -> HttpResult<serde_json::Value> {
     with_settings_token(move |socket, token| {
         let (source, model) = (source.clone(), model.clone());
         async move {

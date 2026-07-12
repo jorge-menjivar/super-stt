@@ -120,7 +120,7 @@ async fn main() -> Result<()> {
 async fn run_with_token<F, Fut, T>(socket_path: PathBuf, op: F) -> Result<T>
 where
     F: Fn(String) -> Fut,
-    Fut: std::future::Future<Output = std::result::Result<T, String>>,
+    Fut: std::future::Future<Output = super_stt_shared::daemon::http_client::HttpResult<T>>,
 {
     session::with_token(socket_path, APP_ID, APP_NAME, SCOPES, op)
         .await
@@ -136,16 +136,24 @@ where
 // re-runs consent and retries the op, so handlers don't need to classify
 // auth-vs-non-auth errors themselves.
 
-async fn cmd_ping(socket_path: PathBuf, token: String) -> std::result::Result<(), String> {
+async fn cmd_ping(
+    socket_path: PathBuf,
+    token: String,
+) -> super_stt_shared::daemon::http_client::HttpResult<()> {
     let msg = http_client::ping(socket_path, &token).await?;
     println!("{msg}");
     Ok(())
 }
 
-async fn cmd_status(socket_path: PathBuf, token: String) -> std::result::Result<(), String> {
+async fn cmd_status(
+    socket_path: PathBuf,
+    token: String,
+) -> super_stt_shared::daemon::http_client::HttpResult<()> {
     let resp = http_client::status(socket_path, &token).await?;
     if resp.status != "success" {
-        return Err(resp.message.unwrap_or_else(|| "unknown error".to_string()));
+        return Err(http_client::HttpError::Other(
+            resp.message.unwrap_or_else(|| "unknown error".to_string()),
+        ));
     }
     println!(
         "Model:  {}",
@@ -161,7 +169,7 @@ async fn cmd_record(
     write_mode: bool,
     wait: bool,
     stop_mode: Option<String>,
-) -> std::result::Result<(), String> {
+) -> super_stt_shared::daemon::http_client::HttpResult<()> {
     // Toggle behavior: probe `/v1/status` first. If a daemon-mic
     // capture is already in progress, this invocation acts as a stop
     // signal; otherwise we start a fresh recording. The daemon's
@@ -185,7 +193,9 @@ async fn cmd_record(
     )
     .await?;
     if resp.status != "success" {
-        return Err(resp.message.unwrap_or_else(|| "record failed".to_string()));
+        return Err(http_client::HttpError::Other(
+            resp.message.unwrap_or_else(|| "record failed".to_string()),
+        ));
     }
     if let Some(transcription) = resp.transcription {
         if transcription.trim().is_empty() {
@@ -201,10 +211,15 @@ async fn cmd_record(
     Ok(())
 }
 
-async fn cmd_stop(socket_path: PathBuf, token: String) -> std::result::Result<(), String> {
+async fn cmd_stop(
+    socket_path: PathBuf,
+    token: String,
+) -> super_stt_shared::daemon::http_client::HttpResult<()> {
     let resp = http_client::transcribe_stop(socket_path, &token).await?;
     if resp.status != "success" {
-        return Err(resp.message.unwrap_or_else(|| "stop failed".to_string()));
+        return Err(http_client::HttpError::Other(
+            resp.message.unwrap_or_else(|| "stop failed".to_string()),
+        ));
     }
     println!(
         "{}",

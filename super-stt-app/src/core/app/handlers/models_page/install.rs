@@ -24,7 +24,7 @@ impl AppModel {
                             },
                             Err(e) => Message::InstallFailedToStart {
                                 source: source.clone(),
-                                error: e,
+                                error: e.to_string(),
                             },
                         })
                     },
@@ -43,7 +43,7 @@ impl AppModel {
                             },
                             Err(e) => Message::InstallFailedToStart {
                                 source: url.clone(),
-                                error: e,
+                                error: e.to_string(),
                             },
                         })
                     },
@@ -89,7 +89,7 @@ impl AppModel {
                             },
                             Err(e) => Message::InstallFailedToStart {
                                 source: source.clone(),
-                                error: e,
+                                error: e.to_string(),
                             },
                         })
                     },
@@ -117,7 +117,7 @@ impl AppModel {
                             Ok(_) => Message::BackendsReload,
                             Err(error) => Message::UninstallFailed {
                                 source: source.clone(),
-                                error,
+                                error: error.to_string(),
                             },
                         })
                     },
@@ -166,7 +166,7 @@ impl AppModel {
                 // shows up in the Installed tab.
                 Task::perform(list_backends(), |result| match result {
                     Ok(backends) => cosmic::Action::App(Message::BackendsLoaded(backends)),
-                    Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                    Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
                 })
             }
 

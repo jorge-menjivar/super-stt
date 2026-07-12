@@ -25,7 +25,7 @@ impl AppModel {
                     |r| {
                         cosmic::Action::App(match r {
                             Ok(resp) => Message::RegistryListLoaded(resp),
-                            Err(e) => Message::RegistryListFailed(e),
+                            Err(e) => Message::RegistryListFailed(e.to_string()),
                         })
                     },
                 )
@@ -88,7 +88,7 @@ impl AppModel {
                             },
                             Err(e) => Message::InstallFailedToStart {
                                 source: key.clone(),
-                                error: e,
+                                error: e.to_string(),
                             },
                         })
                     },

@@ -6,6 +6,7 @@
 //! operation with that token and, on `invalid_session`, drops the cache
 //! and retries once with fresh consent.
 
+use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::session::{self, AppId};
 use super_stt_shared::validation::get_http_socket_path;
 
@@ -28,10 +29,10 @@ pub(crate) const APP_ID_NAME: AppId = AppId("super-stt-app");
 /// Run an HTTP-protocol operation with the cached settings-scope token.
 /// On `invalid_session` the cache is invalidated and the operation
 /// retries once with a fresh consent flow.
-pub(crate) async fn with_settings_token<F, Fut, T>(op: F) -> Result<T, String>
+pub(crate) async fn with_settings_token<F, Fut, T>(op: F) -> HttpResult<T>
 where
     F: Fn(std::path::PathBuf, String) -> Fut,
-    Fut: std::future::Future<Output = Result<T, String>>,
+    Fut: std::future::Future<Output = HttpResult<T>>,
 {
     let socket = get_http_socket_path();
     let socket_for_op = socket.clone();

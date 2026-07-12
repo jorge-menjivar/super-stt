@@ -190,16 +190,13 @@ pub async fn obtain(
 /// [`HttpError::InvalidSession`] from the daemon, drops the cached
 /// token and retries `op` once with a fresh consent flow.
 ///
-/// `op` returns `Result<T, String>` so the iced UI plumbing can
-/// shovel error strings straight into toasts. Internally the retry
-/// decision parses the wire-deterministic `HttpError::Display`
-/// prefix — `invalid_session (<reason>)` is produced by exactly one
-/// site in `http_client.rs` ([`http_client::HttpError::InvalidSession`]),
-/// so this substring inspection is checking content the shared crate
-/// just produced rather than arbitrary error text.
+/// `op` returns [`http_client::HttpResult`], so the retry decision is the
+/// typed [`HttpError::is_invalid_session`] rather than a match on the error's
+/// wording. Callers that want a plain string for UI toasts convert at their own
+/// boundary (`HttpError: Display`, and `From<HttpError> for String`).
 ///
 /// # Errors
-/// Returns the underlying error if `op` fails for any non-auth reason
+/// Returns the underlying [`HttpError`] if `op` fails for any non-auth reason
 /// or if re-auth fails.
 pub async fn with_token<F, Fut, T>(
     socket_path: PathBuf,
@@ -207,34 +204,24 @@ pub async fn with_token<F, Fut, T>(
     app_name: &str,
     scopes: &[&str],
     op: F,
-) -> Result<T, String>
+) -> http_client::HttpResult<T>
 where
     F: Fn(String) -> Fut,
-    Fut: std::future::Future<Output = Result<T, String>>,
+    Fut: std::future::Future<Output = http_client::HttpResult<T>>,
 {
-    let token = obtain(socket_path.clone(), app_id, app_name, scopes)
-        .await
-        .map_err(|e| e.to_string())?;
+    let token = obtain(socket_path.clone(), app_id, app_name, scopes).await?;
     match op(token).await {
         Ok(v) => Ok(v),
-        Err(e) if is_wire_invalid_session(&e) => {
-            // Token rejected — drop cache, re-auth, retry once.
+        Err(e) if e.is_invalid_session() => {
+            // Token rejected — drop cache, re-auth, retry once. The retry
+            // decision is the typed `HttpError::InvalidSession`, not a match on
+            // the error's wording.
             let _ = forget(app_id);
-            let token = obtain(socket_path, app_id, app_name, scopes)
-                .await
-                .map_err(|e| e.to_string())?;
+            let token = obtain(socket_path, app_id, app_name, scopes).await?;
             op(token).await
         }
         Err(e) => Err(e),
     }
-}
-
-/// True if `s` matches the deterministic prefix
-/// `HttpError::InvalidSession::Display` emits. Centralized so the
-/// retry-on-401 logic isn't matching arbitrary error text — only
-/// strings the shared `http_client` produced.
-fn is_wire_invalid_session(s: &str) -> bool {
-    s.starts_with("invalid_session (")
 }
 
 #[cfg(test)]

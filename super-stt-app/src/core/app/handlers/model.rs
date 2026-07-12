@@ -35,7 +35,7 @@ impl AppModel {
         Task::batch([
             Task::perform(list_available_models(), |result| match result {
                 Ok(models) => cosmic::Action::App(Message::AvailableModelsLoaded(models)),
-                Err(e) => cosmic::Action::App(Message::ModelError(e)),
+                Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
             }),
             self.fetch_current_model(),
             Task::perform(get_current_device(), |result| match result {
@@ -47,7 +47,7 @@ impl AppModel {
                 }
                 Err(e) => {
                     warn!("Initial device load failed: {e}");
-                    cosmic::Action::App(Message::DeviceError(e))
+                    cosmic::Action::App(Message::DeviceError(e.to_string()))
                 }
             }),
             // Online backends are gated by the install-time choice to
@@ -56,7 +56,7 @@ impl AppModel {
             Task::perform(set_allow_online_models(true), |_| cosmic::Action::None),
             Task::perform(list_backends(), |result| match result {
                 Ok(backends) => cosmic::Action::App(Message::BackendsLoaded(backends)),
-                Err(e) => cosmic::Action::App(Message::BackendsError(e)),
+                Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
             }),
             Task::perform(get_active_backend(), |result| {
                 cosmic::Action::App(Message::ActiveBackendLoaded(result.unwrap_or(None)))
@@ -147,7 +147,7 @@ impl AppModel {
                 source,
                 epoch,
             }),
-            Err(e) => cosmic::Action::App(Message::ModelError(e)),
+            Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
         })
     }
 }

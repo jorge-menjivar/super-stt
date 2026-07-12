@@ -177,19 +177,14 @@ fn is_user_denied_reason(reason: &str) -> bool {
     matches!(reason, "user_denied" | "user_denied_cached")
 }
 
-/// Public version of [`is_user_denied_reason`] that takes the wire
-/// `Display` output of an [`HttpError`]: `auth_denied (user_denied)`
-/// or `auth_denied (user_denied_cached)`. Returns false for any
-/// other `auth_denied` reason and for non-auth errors.
-///
-/// Operates on the `Display`-formatted string so callers don't have
-/// to import the enum.
+/// True when `err` is an [`HttpError::AuthDenied`] the *user* triggered
+/// (`user_denied` / `user_denied_cached`) — the only auth failures that should
+/// suppress the reconnect loop. Any other `auth_denied` reason (e.g.
+/// `user_dismissed`, `popup_failed`) and every non-auth error return false.
+/// Matches the typed variant, not the error's wording.
 #[must_use]
-pub fn is_user_denied(err: &str) -> bool {
-    matches!(
-        err,
-        "auth_denied (user_denied)" | "auth_denied (user_denied_cached)"
-    )
+pub fn is_user_denied(err: &crate::daemon::http_client::HttpError) -> bool {
+    matches!(err, crate::daemon::http_client::HttpError::AuthDenied { reason } if is_user_denied_reason(reason))
 }
 
 fn next_backoff(current: Duration, max: Duration) -> Duration {

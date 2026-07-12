@@ -6,6 +6,7 @@ use crate::daemon::client::internal::session::{
     APP_ID_NAME, APP_NAME, SETTINGS_SCOPES, with_settings_token,
 };
 use super_stt_shared::daemon::http_client;
+use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::session;
 use super_stt_shared::validation::get_http_socket_path;
 
@@ -114,7 +115,7 @@ pub fn record_command_stream() -> impl futures_util::Stream<Item = RecordEvent> 
 }
 
 /// Send a stop signal to a running recording (HTTP `POST /transcribe/stop`).
-pub async fn stop_record_command() -> Result<(), String> {
+pub async fn stop_record_command() -> HttpResult<()> {
     with_settings_token(|socket, token| async move {
         let resp = http_client::transcribe_stop(socket, &token).await?;
         require_unit(resp, "stop_record_command")

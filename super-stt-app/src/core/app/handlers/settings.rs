@@ -16,7 +16,7 @@ impl AppModel {
                 self.preview_typing_enabled = enabled;
                 Task::perform(set_preview_typing(enabled), move |result| match result {
                     Ok(()) => cosmic::Action::App(Message::PreviewTypingSettingLoaded(enabled)),
-                    Err(e) => cosmic::Action::App(Message::PreviewTypingError(e)),
+                    Err(e) => cosmic::Action::App(Message::PreviewTypingError(e.to_string())),
                 })
             }
 
@@ -49,7 +49,9 @@ impl AppModel {
                     set_recording_stop_mode(mode_str),
                     move |result| match result {
                         Ok(()) => cosmic::Action::App(Message::RecordingStopModeLoaded(mode)),
-                        Err(e) => cosmic::Action::App(Message::RecordingStopModeError(e)),
+                        Err(e) => {
+                            cosmic::Action::App(Message::RecordingStopModeError(e.to_string()))
+                        }
                     },
                 )
             }
@@ -79,7 +81,7 @@ impl AppModel {
                 let method_str = method.to_string();
                 Task::perform(set_write_method(method_str), move |result| match result {
                     Ok(()) => cosmic::Action::App(Message::WriteMethodLoaded(method)),
-                    Err(e) => cosmic::Action::App(Message::WriteMethodError(e)),
+                    Err(e) => cosmic::Action::App(Message::WriteMethodError(e.to_string())),
                 })
             }
 

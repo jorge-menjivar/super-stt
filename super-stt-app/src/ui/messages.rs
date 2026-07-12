@@ -22,7 +22,7 @@ pub enum Message {
     StartRecording,
     StopRecording,
     PreviewTextReceived(String),
-    DaemonConnectionResult(Result<(), String>),
+    DaemonConnectionResult(super_stt_shared::daemon::http_client::HttpResult<()>),
     DaemonConnected,
     /// The `/events` SSE stream finished (re)subscribing. Distinct from
     /// `DaemonConnected` (which the REST ping loop also fires): it marks the
@@ -37,7 +37,9 @@ pub enum Message {
     CurrentAudioThemeLoaded(AudioTheme),
     VolumeLoaded(u8),
     CustomModelsDirLoaded(Option<String>),
-    DaemonError(String),
+    // Carries the typed error so `classify_daemon_error` can decide
+    // blocked-vs-retry on the variant, not the wording.
+    DaemonError(super_stt_shared::daemon::http_client::HttpError),
     TranscriptionReceived(String),
     AudioFeedbackToggled(bool),
     AudioThemeSelected(AudioTheme),

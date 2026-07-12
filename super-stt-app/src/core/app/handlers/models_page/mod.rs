@@ -90,7 +90,7 @@ impl AppModel {
                         |r| {
                             cosmic::Action::App(match r {
                                 Ok(resp) => Message::RegistryListLoaded(resp),
-                                Err(e) => Message::RegistryListFailed(e),
+                                Err(e) => Message::RegistryListFailed(e.to_string()),
                             })
                         },
                     );
@@ -146,7 +146,7 @@ impl AppModel {
                 self.model_operation_state = ModelOperationState::Ready;
                 Task::perform(unload_active_model(), |result| match result {
                     Ok(_) => cosmic::Action::None,
-                    Err(e) => cosmic::Action::App(Message::ModelError(e)),
+                    Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
                 })
             }
 
@@ -213,7 +213,7 @@ impl AppModel {
                         provider: provider_label.clone(),
                         source: source_label.clone(),
                     }),
-                    Err(e) => cosmic::Action::App(Message::ModelError(e)),
+                    Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
                 },
             ),
             Task::perform(
@@ -282,7 +282,7 @@ impl AppModel {
                 self.core.window.show_context = false;
                 Task::perform(set_active_backend(source), |result| match result {
                     Ok(()) => cosmic::Action::None,
-                    Err(e) => cosmic::Action::App(Message::ModelError(e)),
+                    Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
                 })
             }
 

@@ -42,7 +42,7 @@ impl AppModel {
                     },
                     |res| match res {
                         Ok(()) => cosmic::Action::App(Message::RefreshDaemonStatus),
-                        Err(e) => cosmic::Action::App(Message::LanguageError(e)),
+                        Err(e) => cosmic::Action::App(Message::LanguageError(e.to_string())),
                     },
                 )
             }
@@ -76,7 +76,7 @@ impl AppModel {
                             model: mdl.clone(),
                             block,
                         }),
-                        Err(e) => cosmic::Action::App(Message::LanguageError(e)),
+                        Err(e) => cosmic::Action::App(Message::LanguageError(e.to_string())),
                     },
                 )
             }
@@ -93,7 +93,7 @@ impl AppModel {
     pub(in crate::core::app) fn load_primary_language(&self) -> Task<cosmic::Action<Message>> {
         Task::perform(client::get_primary_language(), |res| match res {
             Ok(lang) => cosmic::Action::App(Message::PrimaryLanguageLoaded(lang)),
-            Err(e) => cosmic::Action::App(Message::LanguageError(e)),
+            Err(e) => cosmic::Action::App(Message::LanguageError(e.to_string())),
         })
     }
 
@@ -116,7 +116,7 @@ impl AppModel {
                     model: mdl.clone(),
                     block,
                 }),
-                Err(e) => cosmic::Action::App(Message::LanguageError(e)),
+                Err(e) => cosmic::Action::App(Message::LanguageError(e.to_string())),
             },
         )
     }

@@ -41,7 +41,7 @@ impl AppModel {
                 Ok(_) => cosmic::Action::App(Message::DownloadCancelled(String::new())),
                 Err(e) => cosmic::Action::App(Message::DownloadError {
                     model: String::new(),
-                    error: e,
+                    error: e.to_string(),
                 }),
             }),
 

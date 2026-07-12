@@ -91,10 +91,10 @@ mod tests {
 
     #[test]
     fn http_error_display_locks_wire_format() {
-        // `session::with_token` recognizes the InvalidSession retry
-        // signal by matching the `Display` prefix
-        // `invalid_session (`. If this format ever changes the retry
-        // stops firing — so this test pins it down.
+        // `Display` is the human string shown in UI toasts and stored in
+        // `DaemonStatus::Blocked`/`Error`. The retry and blocked-vs-error
+        // decisions now match the typed variant (not this text), but the wording
+        // is still user-visible, so pin it.
         let e = HttpError::InvalidSession {
             reason: "expired".to_string(),
         };

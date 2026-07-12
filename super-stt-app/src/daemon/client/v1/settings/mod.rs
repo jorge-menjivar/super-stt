@@ -11,7 +11,7 @@
 /// `|resp| <extract>` over the response body to produce the return value.
 macro_rules! settings_getter {
     ($fn:ident -> $ret:ty, $path:literal, $label:literal, |$resp:ident| $extract:expr $(,)?) => {
-        pub async fn $fn() -> Result<$ret, String> {
+        pub async fn $fn() -> super_stt_shared::daemon::http_client::HttpResult<$ret> {
             crate::daemon::client::internal::session::with_settings_token(
                 |socket, token| async move {
                     let $resp = crate::daemon::client::internal::response::require_success(
@@ -33,7 +33,7 @@ macro_rules! settings_getter {
 /// require success (unit result).
 macro_rules! settings_setter {
     ($fn:ident, $param:ident : $ty:ty, $path:literal, $key:literal, $label:literal $(,)?) => {
-        pub async fn $fn($param: $ty) -> Result<(), String> {
+        pub async fn $fn($param: $ty) -> super_stt_shared::daemon::http_client::HttpResult<()> {
             // Build the body once (consuming the param); the retrying `Fn`
             // closure clones the `Value` each call — cheap and uniform for
             // `Copy` and owned params alike (a blanket `$param.clone()` would

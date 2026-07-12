@@ -58,53 +58,50 @@ fn is_user_denied_reason_matches_both_deny_variants() {
 
 #[test]
 fn is_user_denied_matches_both_reasons() {
+    use crate::daemon::http_client::HttpError;
+    let denied = |reason: &str| HttpError::AuthDenied {
+        reason: reason.to_string(),
+    };
     // Both fresh denials and deny-cache hits must terminate the
     // subscription so we don't spam the daemon.
-    assert!(is_user_denied("auth_denied (user_denied)"));
-    assert!(is_user_denied("auth_denied (user_denied_cached)"));
+    assert!(is_user_denied(&denied("user_denied")));
+    assert!(is_user_denied(&denied("user_denied_cached")));
     // A dismissed popup is recoverable — the user just walked away,
     // so the next attempt will pop a fresh prompt. Do NOT treat as
     // blocked.
-    assert!(!is_user_denied("auth_denied (user_dismissed)"));
+    assert!(!is_user_denied(&denied("user_dismissed")));
     // popup_failed / invalid_scope / etc. — those are infra
     // problems, the consumer's normal backoff path handles them.
-    assert!(!is_user_denied("auth_denied (popup_failed)"));
-    assert!(!is_user_denied("invalid_session (expired)"));
+    assert!(!is_user_denied(&denied("popup_failed")));
+    assert!(!is_user_denied(&HttpError::InvalidSession {
+        reason: "expired".to_string(),
+    }));
 }
 
-/// Pins the wire-format contract between
-/// `http_client::auth_request` (which formats `Err("auth_denied
-/// ({reason})")`) and this matcher. If either side drifts the
-/// classifier silently stops triggering Blocked and the deny
-/// spam loop the applet/settings fix solved comes back. This is
-/// the regression guard for that drift.
+/// The classifier keys off the typed [`HttpError::AuthDenied`] reason, so only
+/// user-initiated denials drive the Blocked path; every other `auth_denied`
+/// reason takes the ordinary backoff/reconnect path.
 #[test]
-fn wire_format_round_trip_matches_classifier() {
-    // Verbatim format used by
-    // super-stt-shared/src/daemon/http_client.rs::auth_request
-    // when the daemon returns 4xx. Two reasons that must drive
-    // the Blocked path:
+fn user_denied_reasons_classify_as_blocked() {
+    use crate::daemon::http_client::HttpError;
+    let denied = |reason: &str| HttpError::AuthDenied {
+        reason: reason.to_string(),
+    };
     for reason in ["user_denied", "user_denied_cached"] {
-        let wire = format!("auth_denied ({reason})");
         assert!(
-            is_user_denied(&wire),
-            "wire format `{wire}` must classify as user-denied; \
-             if this test fails, the http_client formatter or \
-             the daemon's auth_err reason string drifted"
+            is_user_denied(&denied(reason)),
+            "`{reason}` must classify as user-denied"
         );
     }
-    // And these must NOT drive Blocked — they need the helper's
-    // ordinary backoff/reconnect path.
     for reason in [
         "user_dismissed",
         "popup_failed",
         "throttled",
         "invalid_scope",
     ] {
-        let wire = format!("auth_denied ({reason})");
         assert!(
-            !is_user_denied(&wire),
-            "wire format `{wire}` must NOT classify as user-denied"
+            !is_user_denied(&denied(reason)),
+            "`{reason}` must NOT classify as user-denied"
         );
     }
 }
