@@ -88,6 +88,7 @@ mod tests {
             // request well-formed but daemon state forbids it → 409
             (ErrorCode::RecordingInProgress, StatusCode::CONFLICT),
             (ErrorCode::DownloadInProgress, StatusCode::CONFLICT),
+            (ErrorCode::NoSwitchInProgress, StatusCode::CONFLICT),
             (ErrorCode::NotFound, StatusCode::NOT_FOUND),
             (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR),
         ];

@@ -20,6 +20,9 @@ pub enum ErrorCode {
     RecordingInProgress,
     /// A model download/switch is already in flight.
     DownloadInProgress,
+    /// A cancel was requested but there is no switch/download to cancel
+    /// (`POST /active_model/cancel`; see `active_model/cancel.md`).
+    NoSwitchInProgress,
 
     // --- 400 Bad Request: the client gave the daemon something it couldn't
     // use. ---
@@ -56,7 +59,7 @@ impl ErrorCode {
     #[must_use]
     pub fn http_status(self) -> u16 {
         match self {
-            Self::RecordingInProgress | Self::DownloadInProgress => 409,
+            Self::RecordingInProgress | Self::DownloadInProgress | Self::NoSwitchInProgress => 409,
             Self::InvalidModel
             | Self::InvalidBackend
             | Self::CudaUnavailable

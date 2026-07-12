@@ -2,7 +2,7 @@
 
 use crate::daemon::types::SuperSTTDaemon;
 use log::{info, warn};
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 
 impl SuperSTTDaemon {
     /// Handle cancel download command
@@ -15,8 +15,10 @@ impl SuperSTTDaemon {
                     .with_message("Download cancelled successfully".to_string())
             }
             Err(e) => {
+                // The sole failure is "nothing to cancel" — a state conflict
+                // (409 `no_switch_in_progress`), not a server error.
                 warn!("Failed to cancel download: {e}");
-                DaemonResponse::error(&e)
+                DaemonResponse::error_with_code(ErrorCode::NoSwitchInProgress, &e)
             }
         }
     }
