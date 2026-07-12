@@ -14,15 +14,15 @@ fn config_without_online_section_deserializes() {
 preferred_device = "cpu"
 
 [audio]
-theme = "Classic"
+theme = "classic"
 volume = 100
 
 [transcription]
 preferred_model = "whisper-tiny"
 write_mode = false
 preview_typing_enabled = false
-recording_stop_mode = "SilenceAndManual"
-write_method = "Auto"
+recording_stop_mode = "silence_and_manual"
+write_method = "auto"
 "#;
     let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
     assert!(!config.online.allow_online_models);
@@ -88,15 +88,15 @@ fn config_without_custom_models_dir_deserializes() {
 preferred_device = "cpu"
 
 [audio]
-theme = "Classic"
+theme = "classic"
 volume = 100
 
 [transcription]
 preferred_model = "whisper-tiny"
 write_mode = false
 preview_typing_enabled = false
-recording_stop_mode = "SilenceAndManual"
-write_method = "Auto"
+recording_stop_mode = "silence_and_manual"
+write_method = "auto"
 "#;
     let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
     assert!(config.transcription.custom_models_dir.is_none());
@@ -172,7 +172,7 @@ fn config_without_backends_section_deserializes() {
 preferred_device = "cpu"
 
 [audio]
-theme = "Classic"
+theme = "classic"
 volume = 100
 
 [transcription]
@@ -194,7 +194,7 @@ fn config_with_legacy_provider_string_falls_back() {
 preferred_device = "cpu"
 
 [audio]
-theme = "Silent"
+theme = "silent"
 volume = 75
 
 [transcription]
@@ -203,8 +203,8 @@ preferred_provider = "LocalWhisper"
 preferred_source = "BadValue"
 write_mode = false
 preview_typing_enabled = true
-recording_stop_mode = "SilenceAndManual"
-write_method = "Auto"
+recording_stop_mode = "silence_and_manual"
+write_method = "auto"
 
 [online]
 allow_online_models = true
@@ -229,7 +229,7 @@ fn config_with_canonical_snake_case_provider_round_trips() {
 preferred_device = "cpu"
 
 [audio]
-theme = "Classic"
+theme = "classic"
 volume = 100
 
 [transcription]
@@ -238,8 +238,8 @@ preferred_provider = "local_voxtral"
 preferred_source = "github.com/super-stt/voxtral"
 write_mode = false
 preview_typing_enabled = false
-recording_stop_mode = "SilenceAndManual"
-write_method = "Auto"
+recording_stop_mode = "silence_and_manual"
+write_method = "auto"
 "#;
     let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
     assert_eq!(
@@ -295,7 +295,7 @@ fn config_without_active_backend_field_deserializes() {
 preferred_device = "cpu"
 
 [audio]
-theme = "Classic"
+theme = "classic"
 volume = 100
 
 [transcription]
@@ -320,8 +320,8 @@ volume = 80
 [transcription]
 preferred_model = "WhisperTiny"
 write_mode = true
-recording_stop_mode = "ManualOnly"
-write_method = "Ydotool"
+recording_stop_mode = "manual_only"
+write_method = "ydotool"
 "#;
     let cfg: DaemonConfig = toml::from_str(toml_str).expect("must parse, not error");
     assert_eq!(cfg.audio.theme, AudioTheme::default()); // bad field reset
@@ -342,7 +342,7 @@ fn daemon_bad_stop_mode_and_write_method_fall_back_preserving_rest() {
 preferred_device = "cpu"
 
 [audio]
-theme = "Gentle"
+theme = "gentle"
 volume = 100
 
 [transcription]
@@ -385,16 +385,22 @@ fn v0_1_3_full_daemon_config_loads_and_migrates() {
 
     // Preserved fields.
     assert_eq!(cfg.device.preferred_device, "cuda");
-    assert_eq!(cfg.audio.theme, AudioTheme::Gentle);
     assert_eq!(cfg.audio.volume, 80);
     assert!(cfg.transcription.write_mode);
     assert!(!cfg.transcription.preview_typing_enabled);
+    assert!(cfg.online.allow_online_models);
+
+    // Settings-enum fields migrate to default: v0.1.3 persisted them in the old
+    // PascalCase form (`Gentle`/`ManualOnly`/`Ydotool`), which the snake_case
+    // wire/config form no longer recognizes, so `deserialize_or_default` degrades
+    // each to its default rather than failing the whole load. (The whole config
+    // still loads cleanly — `was_reset` is false above.)
+    assert_eq!(cfg.audio.theme, AudioTheme::default());
     assert_eq!(
         cfg.transcription.recording_stop_mode,
-        RecordingStopMode::ManualOnly
+        RecordingStopMode::default()
     );
-    assert_eq!(cfg.transcription.write_method, WriteMethod::Ydotool);
-    assert!(cfg.online.allow_online_models);
+    assert_eq!(cfg.transcription.write_method, WriteMethod::default());
 
     // `preferred_model` widened from STTModel enum to String: the old value is
     // retained verbatim (daemon model loader has its own fallback downstream).

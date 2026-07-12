@@ -47,9 +47,9 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/audio_theme/test`](../endpoints/v1/audio_theme/test.md)  | POST       | Audition the current theme's start + stop cues                                                        |
 | [`/audio_themes`](../endpoints/v1/audio_themes.md)          | GET        | List available themes                                                                                  |
 | [`/volume`](../endpoints/v1/volume.md)                      | POST, GET  | Set / read audio cue volume (0–100)                                                                   |
-| [`/recording_stop_mode`](../endpoints/v1/recording_stop_mode.md) | POST, GET | Default stop behavior for `/transcribe` (silence / silence-and-manual / manual-only)                  |
+| [`/recording_stop_mode`](../endpoints/v1/recording_stop_mode.md) | POST, GET | Default stop behavior for `/transcribe` (silence_only / silence_and_manual / manual_only)                  |
 | [`/preview_typing`](../endpoints/v1/preview_typing.md)      | POST, GET  | Toggle live typing of preview text while recording                                                    |
-| [`/write_method`](../endpoints/v1/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg-desktop-portal / ydotool / wayland-protocol)                   |
+| [`/write_method`](../endpoints/v1/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg_desktop_portal / ydotool / wayland_protocol)                   |
 | [`/allow_online_models`](../endpoints/v1/allow_online_models.md) | POST, GET | Privacy gate for online providers (OpenAI / Mistral / Deepgram)                                       |
 | [`/custom_models_dir`](../endpoints/v1/custom_models_dir.md) | POST, GET | Where to scan for user-supplied models                                                                |
 | [`/backends`](../endpoints/v1/backends.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |

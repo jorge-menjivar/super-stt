@@ -284,7 +284,7 @@ Three patterns account for the majority of findings:
 - **Problem:** the comments advertise a safety net that was removed.
 - **Fix:** implement the watchdog or delete the field and comments.
 
-### [ ] 24. 🟠 Shared: `GET /audio_themes` violates the documented wire form
+### [x] 24. 🟠 Shared: `GET /audio_themes` violates the documented wire form
 
 - **Where:** `AudioTheme` derives serde with no `rename_all` (`models/theme.rs:7-31`)
   and is put on the wire via `available_audio_themes` (`protocol/response.rs:49`).
@@ -293,6 +293,10 @@ Three patterns account for the majority of findings:
   the smoke test only asserts `is_array()`.
 - **Fix:** part of the wire-enum normalization (Tier 2 #2); strengthen the smoke
   test to pin the values.
+- **Resolved (`refactor/daemon-audit-batch`, folded into Tier 2 #2):** `AudioTheme`
+  now serializes via the `wire_enum_strings!` table (snake tokens, `scifi`), so
+  `available_audio_themes` returns the documented lowercase form; the smoke test
+  now pins the exact value list.
 
 ### [ ] 25. 🟡 Registry-types: `SubprocessAsset` with `file = ""` plus valid `parts` passes `Manifest::parse`
 
@@ -383,7 +387,7 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   fixing the local-dir secrets/options/license drop and the custom-repo label/type
   drift (name-fallback labels, `"string"` option-type default).
 
-### [ ] 2. 🟠 One wire-string enum convention
+### [x] 2. 🟠 One wire-string enum convention
 
 - **Where:** `RecordingStopMode`, `WriteMethod`, and `AudioTheme` each carry 2–3
   live string forms — PascalCase serde persisted in daemon.toml via
@@ -396,6 +400,16 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   snake_case, fallback-to-default, no aliases — with `deserialize_or_default`
   covering config migration. Requires a protocol-docs pass first (docs currently
   pin kebab-case; decide kebab vs snake deliberately). Includes fixing Tier 1 #24.
+- **Resolved (`refactor/daemon-audit-batch`):** chose **snake_case** (the house
+  rule). New `wire_enum_strings!` macro generates `Display`/`FromStr`/serde from
+  one table for all three enums — one `snake_case` token each
+  (`silence_and_manual`, `xdg_desktop_portal`, `scifi`), `FromStr`/`Deserialize`
+  reject unknown (REST 400), config resilience stays with `deserialize_or_default`.
+  Dropped every alias (`silence`/`both`/`manual`, `xdg`/`portal`/`wayland`) and the
+  kebab forms. Protocol docs rewritten to snake first. **Wire-breaking**: clients
+  sending the old kebab tokens now get the default, and pre-snake daemon.toml
+  values (PascalCase) migrate to default on load (accepted trade-off; the config
+  still loads without a full reset). Folds in Tier 1 #24.
 
 ### [x] 3. 🔴 Machine-readable error codes on `DaemonResponse`
 

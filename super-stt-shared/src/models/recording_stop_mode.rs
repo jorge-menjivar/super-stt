@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use serde::{Deserialize, Serialize};
+use super::wire_enum::wire_enum_strings;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RecordingStopMode {
     /// Recording stops only when silence is detected.
     SilenceOnly,
@@ -12,6 +12,12 @@ pub enum RecordingStopMode {
     /// Recording stops only via manual shortcut press.
     ManualOnly,
 }
+
+wire_enum_strings!(RecordingStopMode {
+    SilenceOnly => "silence_only",
+    SilenceAndManual => "silence_and_manual",
+    ManualOnly => "manual_only",
+});
 
 impl RecordingStopMode {
     /// Whether silence detection should be active in this mode.
@@ -33,29 +39,6 @@ impl RecordingStopMode {
             Self::SilenceOnly => "Silence Detection Only",
             Self::SilenceAndManual => "Silence Detection + Manual Stop",
             Self::ManualOnly => "Manual Stop Only",
-        }
-    }
-}
-
-impl std::fmt::Display for RecordingStopMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SilenceOnly => write!(f, "silence-only"),
-            Self::SilenceAndManual => write!(f, "silence-and-manual"),
-            Self::ManualOnly => write!(f, "manual-only"),
-        }
-    }
-}
-
-impl std::str::FromStr for RecordingStopMode {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "silence-only" | "silence" => Ok(Self::SilenceOnly),
-            "silence-and-manual" | "both" => Ok(Self::SilenceAndManual),
-            "manual-only" | "manual" => Ok(Self::ManualOnly),
-            other => Err(format!("unknown recording stop mode: {other}")),
         }
     }
 }
@@ -86,24 +69,25 @@ mod tests {
     }
 
     #[test]
-    fn from_str_short_aliases() {
+    fn wire_tokens_are_snake_case() {
+        assert_eq!(RecordingStopMode::SilenceOnly.to_string(), "silence_only");
         assert_eq!(
-            "silence".parse::<RecordingStopMode>().unwrap(),
-            RecordingStopMode::SilenceOnly
+            RecordingStopMode::SilenceAndManual.to_string(),
+            "silence_and_manual"
         );
-        assert_eq!(
-            "both".parse::<RecordingStopMode>().unwrap(),
-            RecordingStopMode::SilenceAndManual
-        );
-        assert_eq!(
-            "manual".parse::<RecordingStopMode>().unwrap(),
-            RecordingStopMode::ManualOnly
-        );
+        assert_eq!(RecordingStopMode::ManualOnly.to_string(), "manual_only");
     }
 
     #[test]
-    fn from_str_invalid() {
+    fn from_str_rejects_unknown_and_dropped_aliases() {
         assert!("nonsense".parse::<RecordingStopMode>().is_err());
+        // Former aliases are gone (no legacy aliases).
+        for dropped in ["silence", "both", "manual", "silence-only", "manual-only"] {
+            assert!(
+                dropped.parse::<RecordingStopMode>().is_err(),
+                "`{dropped}` must no longer parse"
+            );
+        }
     }
 
     #[test]

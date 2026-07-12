@@ -52,7 +52,7 @@ Content-Length: 178
   "sample_rate": null,
   "language":    "en",
   "data":        { "wait": true, "stream_realtime": true,
-                   "stop_mode": "manual-only" }
+                   "stop_mode": "manual_only" }
 }
 ```
 

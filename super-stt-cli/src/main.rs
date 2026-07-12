@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
                     Arg::new("stop-mode")
                         .long("stop-mode")
                         .help("Override the configured stop mode")
-                        .value_parser(["silence", "silence-and-manual", "manual-only"]),
+                        .value_parser(["silence_only", "silence_and_manual", "manual_only"]),
                 ),
         )
         .subcommand(Command::new("stop").about("Stop an in-flight daemon-mic recording"))

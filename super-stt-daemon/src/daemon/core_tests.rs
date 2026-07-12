@@ -163,10 +163,10 @@ async fn per_request_stop_mode_overrides_config() {
     *daemon.busy.write().await = true;
     *daemon.manual_stop_tx.write().await = Some(tx);
 
-    // But the request explicitly asks for manual-only mode
+    // But the request explicitly asks for manual_only mode
     let request = make_record_request(Some(serde_json::json!({
         "write_mode": false,
-        "stop_mode": "manual-only",
+        "stop_mode": "manual_only",
     })));
 
     let response = daemon.handle_command(request).await;
@@ -215,7 +215,7 @@ async fn per_request_silence_only_overrides_manual_config() {
     // But request forces SilenceOnly
     let request = make_record_request(Some(serde_json::json!({
         "write_mode": false,
-        "stop_mode": "silence-only",
+        "stop_mode": "silence_only",
     })));
 
     let response = daemon.handle_command(request).await;

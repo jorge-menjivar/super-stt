@@ -53,8 +53,8 @@ To stop an in-flight daemon-mic capture, see
     "write_mode":      false,
 
     // Per-request override for the configured stop mode. One of:
-    //   "silence" | "silence-and-manual" | "manual-only"
-    "stop_mode":       "manual-only",
+    //   "silence_only" | "silence_and_manual" | "manual_only"
+    "stop_mode":       "manual_only",
 
     // Default false. true = hold the response open until the
     // transcription is delivered.

@@ -192,7 +192,7 @@ async fn http_endpoints_respond() {
         TranscribeOptions {
             wait: false,
             write_mode: false,
-            stop_mode: Some("manual-only".to_string()),
+            stop_mode: Some("manual_only".to_string()),
         },
     )
     .await
@@ -311,7 +311,7 @@ async fn second_transcribe_during_active_recording_surfaces_recording_in_progres
     let opts = || TranscribeOptions {
         wait: true,
         write_mode: false,
-        stop_mode: Some("manual-only".to_string()),
+        stop_mode: Some("manual_only".to_string()),
     };
 
     // Fire the two transcribe calls concurrently. When audio works

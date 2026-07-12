@@ -8,9 +8,9 @@ window.
 | Method                | Notes                                                                                |
 |-----------------------|--------------------------------------------------------------------------------------|
 | `auto`                | Pick the best available method for the current session (the default).               |
-| `xdg-desktop-portal`  | Use the portal's `RemoteDesktop` interface; requires a portal available on the bus.  |
+| `xdg_desktop_portal`  | Use the portal's `RemoteDesktop` interface; requires a portal available on the bus.  |
 | `ydotool`             | Use the `ydotool` daemon if present; works without a portal on most Wayland sessions. |
-| `wayland-protocol`    | Use a direct Wayland protocol path (compositor-dependent).                            |
+| `wayland_protocol`    | Use a direct Wayland protocol path (compositor-dependent).                            |
 
 The new method takes effect on the next `/transcribe` request.
 
@@ -37,7 +37,7 @@ Content-Type: application/json
 
 | Field    | Type   | Required | Notes                                                                          |
 |----------|--------|----------|--------------------------------------------------------------------------------|
-| `method` | string | yes      | One of `auto`, `xdg-desktop-portal`, `ydotool`, `wayland-protocol`             |
+| `method` | string | yes      | One of `auto`, `xdg_desktop_portal`, `ydotool`, `wayland_protocol`             |
 
 **Response (200):**
 

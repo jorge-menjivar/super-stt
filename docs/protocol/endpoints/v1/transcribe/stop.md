@@ -64,7 +64,7 @@ The `message` field carries one of:
 |-------------------------------------------------|---------------------------------------------------------------------------------|
 | `"Recording stop signal sent"`                  | A daemon-mic capture was running and the active stop mode allows manual stop.   |
 | `"No recording in progress"`                    | Nothing to stop right now.                                                      |
-| `"Manual stop not enabled in current mode"`     | The active stop mode is `silence-only`; manual stop is disabled.                |
+| `"Manual stop not enabled in current mode"`     | The active stop mode is `silence_only`; manual stop is disabled.                |
 | `"Transcription in progress, please wait"`      | Capture has already ended; the model is decoding. The result will arrive on the connection that started it. |
 
 **Errors:**

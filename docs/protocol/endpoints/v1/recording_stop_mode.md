@@ -6,9 +6,9 @@ Read and set the default stop behavior for
 
 | Mode                 | Stops on silence (VAD) | Stops on manual signal                      |
 |----------------------|------------------------|---------------------------------------------|
-| `silence`            | yes                    | no                                          |
-| `silence-and-manual` | yes                    | yes                                         |
-| `manual-only`        | no                     | yes — explicit [`/transcribe/stop`](./transcribe/stop.md) or socket disconnect |
+| `silence_only`            | yes                    | no                                          |
+| `silence_and_manual` | yes                    | yes                                         |
+| `manual_only`        | no                     | yes — explicit [`/transcribe/stop`](./transcribe/stop.md) or socket disconnect |
 
 Per-request overrides on `/transcribe` take precedence over the
 default set here.
@@ -30,13 +30,13 @@ Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
 {
-  "mode": "manual-only"
+  "mode": "manual_only"
 }
 ```
 
 | Field  | Type   | Required | Notes                                                       |
 |--------|--------|----------|-------------------------------------------------------------|
-| `mode` | string | yes      | One of `silence`, `silence-and-manual`, `manual-only`       |
+| `mode` | string | yes      | One of `silence_only`, `silence_and_manual`, `manual_only`       |
 
 **Response (200):**
 
@@ -46,7 +46,7 @@ Content-Type: application/json
 
 {
   "status":              "success",
-  "recording_stop_mode": "manual-only"
+  "recording_stop_mode": "manual_only"
 }
 ```
 
@@ -76,7 +76,7 @@ Content-Type: application/json
 
 {
   "status":              "success",
-  "recording_stop_mode": "silence-and-manual"
+  "recording_stop_mode": "silence_and_manual"
 }
 ```
 

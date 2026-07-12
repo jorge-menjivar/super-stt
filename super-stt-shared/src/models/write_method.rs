@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use serde::{Deserialize, Serialize};
+use super::wire_enum::wire_enum_strings;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WriteMethod {
     /// Auto-detect: try XDG Portal, then ydotool, then wayland-protocol.
     #[default]
@@ -15,6 +15,13 @@ pub enum WriteMethod {
     WaylandProtocol,
 }
 
+wire_enum_strings!(WriteMethod {
+    Auto => "auto",
+    XdgDesktopPortal => "xdg_desktop_portal",
+    Ydotool => "ydotool",
+    WaylandProtocol => "wayland_protocol",
+});
+
 impl WriteMethod {
     #[must_use]
     pub fn pretty_name(self) -> &'static str {
@@ -23,31 +30,6 @@ impl WriteMethod {
             Self::XdgDesktopPortal => "XDG Desktop Portal",
             Self::Ydotool => "ydotool",
             Self::WaylandProtocol => "Wayland Protocol",
-        }
-    }
-}
-
-impl std::fmt::Display for WriteMethod {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Auto => write!(f, "auto"),
-            Self::XdgDesktopPortal => write!(f, "xdg-desktop-portal"),
-            Self::Ydotool => write!(f, "ydotool"),
-            Self::WaylandProtocol => write!(f, "wayland-protocol"),
-        }
-    }
-}
-
-impl std::str::FromStr for WriteMethod {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "auto" => Ok(Self::Auto),
-            "xdg-desktop-portal" | "xdg" | "portal" => Ok(Self::XdgDesktopPortal),
-            "ydotool" => Ok(Self::Ydotool),
-            "wayland-protocol" | "wayland" => Ok(Self::WaylandProtocol),
-            other => Err(format!("unknown write method: {other}")),
         }
     }
 }
@@ -76,20 +58,31 @@ mod tests {
     }
 
     #[test]
-    fn from_str_aliases() {
+    fn wire_tokens_are_snake_case() {
+        assert_eq!(WriteMethod::Auto.to_string(), "auto");
         assert_eq!(
-            "xdg".parse::<WriteMethod>().unwrap(),
-            WriteMethod::XdgDesktopPortal
+            WriteMethod::XdgDesktopPortal.to_string(),
+            "xdg_desktop_portal"
         );
-        assert_eq!(
-            "portal".parse::<WriteMethod>().unwrap(),
-            WriteMethod::XdgDesktopPortal
-        );
+        assert_eq!(WriteMethod::WaylandProtocol.to_string(), "wayland_protocol");
     }
 
     #[test]
-    fn from_str_invalid() {
+    fn from_str_rejects_unknown_and_dropped_aliases() {
         assert!("nonsense".parse::<WriteMethod>().is_err());
+        // Former aliases + kebab forms are gone (no legacy aliases).
+        for dropped in [
+            "xdg",
+            "portal",
+            "wayland",
+            "xdg-desktop-portal",
+            "wayland-protocol",
+        ] {
+            assert!(
+                dropped.parse::<WriteMethod>().is_err(),
+                "`{dropped}` must no longer parse"
+            );
+        }
     }
 
     #[test]

@@ -26,7 +26,7 @@ fn record_command_parses_stop_mode() {
         "record",
         Some(json!({
             "write_mode": false,
-            "stop_mode": "manual-only",
+            "stop_mode": "manual_only",
         })),
     );
     let command = Command::try_from(request).expect("record command should parse");
@@ -66,7 +66,7 @@ fn record_command_wait_true() {
         "record",
         Some(json!({
             "write_mode": false,
-            "stop_mode": "manual-only",
+            "stop_mode": "manual_only",
             "wait": true,
         })),
     );
@@ -254,7 +254,7 @@ fn set_model_rejects_missing_provider() {
 fn set_recording_stop_mode_parses() {
     let request = make_request(
         "set_recording_stop_mode",
-        Some(json!({ "mode": "silence-only" })),
+        Some(json!({ "mode": "silence_only" })),
     );
     let command = Command::try_from(request).expect("command should parse");
     match command {

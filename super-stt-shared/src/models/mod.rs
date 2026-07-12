@@ -6,4 +6,5 @@ pub mod provider;
 pub mod recording_stop_mode;
 pub mod registry;
 pub mod theme;
+mod wire_enum;
 pub mod write_method;

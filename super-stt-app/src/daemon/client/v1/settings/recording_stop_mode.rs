@@ -5,7 +5,7 @@ settings_getter!(
     get_recording_stop_mode -> String, "/recording_stop_mode", "get_stop_mode",
     |resp| resp
         .recording_stop_mode
-        .unwrap_or_else(|| "silence-and-manual".to_string())
+        .unwrap_or_else(|| "silence_and_manual".to_string())
 );
 settings_setter!(
     set_recording_stop_mode,

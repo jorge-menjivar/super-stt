@@ -270,9 +270,22 @@ async fn settings_scope_endpoints() {
     assert!(body["available_models"].is_array());
 
     // --- GET /audio_themes ---
+    // Pin the wire values, not just the shape: they must be the documented
+    // snake_case tokens (docs/protocol/endpoints/v1/audio_themes.md), e.g.
+    // `scifi` — not the PascalCase variant names.
     let (s, body) = raw_get_json(&http_socket, "/audio_themes", &settings_token).await;
     assert_eq!(s, StatusCode::OK);
-    assert!(body["available_audio_themes"].is_array());
+    let themes = body["available_audio_themes"]
+        .as_array()
+        .expect("available_audio_themes must be a JSON array");
+    let names: Vec<&str> = themes.iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(
+        names,
+        vec![
+            "classic", "gentle", "minimal", "scifi", "musical", "nature", "retro", "silent",
+        ],
+        "audio themes must be the documented snake_case tokens"
+    );
 
     // --- GET /preview_typing ---
     let (s, body) = raw_get_json(&http_socket, "/preview_typing", &settings_token).await;
@@ -342,14 +355,14 @@ async fn settings_scope_endpoints() {
     assert_eq!(body["status"], "success");
     let initial_stop_mode = body["recording_stop_mode"]
         .as_str()
-        .unwrap_or("silence-and-manual")
+        .unwrap_or("silence_and_manual")
         .to_string();
 
     // --- POST /recording_stop_mode: round-trip ---
-    let target_stop_mode = if initial_stop_mode == "manual-only" {
-        "silence-and-manual"
+    let target_stop_mode = if initial_stop_mode == "manual_only" {
+        "silence_and_manual"
     } else {
-        "manual-only"
+        "manual_only"
     };
     let (s, _) = raw_post_json(
         &http_socket,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use serde::{Deserialize, Serialize};
+use super::wire_enum::wire_enum_strings;
 use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, EnumCount, EnumIter, VariantArray, VariantNames};
 
@@ -9,8 +9,6 @@ use strum_macros::{AsRefStr, EnumCount, EnumIter, VariantArray, VariantNames};
     Clone,
     Copy,
     PartialEq,
-    Serialize,
-    Deserialize,
     AsRefStr,
     EnumCount,
     EnumIter,
@@ -30,20 +28,18 @@ pub enum AudioTheme {
     Silent,  // No audio feedback
 }
 
-impl std::fmt::Display for AudioTheme {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AudioTheme::Classic => write!(f, "classic"),
-            AudioTheme::Gentle => write!(f, "gentle"),
-            AudioTheme::Minimal => write!(f, "minimal"),
-            AudioTheme::SciFi => write!(f, "scifi"),
-            AudioTheme::Musical => write!(f, "musical"),
-            AudioTheme::Nature => write!(f, "nature"),
-            AudioTheme::Retro => write!(f, "retro"),
-            AudioTheme::Silent => write!(f, "silent"),
-        }
-    }
-}
+// `SciFi` intentionally maps to the single-word `scifi` (not `sci_fi`); the
+// rest are already single-word snake tokens.
+wire_enum_strings!(AudioTheme {
+    Classic => "classic",
+    Gentle => "gentle",
+    Minimal => "minimal",
+    SciFi => "scifi",
+    Musical => "musical",
+    Nature => "nature",
+    Retro => "retro",
+    Silent => "silent",
+});
 
 impl AudioTheme {
     // Additional helpers below
@@ -101,25 +97,6 @@ impl AudioTheme {
     }
 }
 
-impl std::str::FromStr for AudioTheme {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let theme = match s.to_lowercase().as_str() {
-            "classic" => AudioTheme::Classic,
-            "gentle" => AudioTheme::Gentle,
-            "minimal" => AudioTheme::Minimal,
-            "scifi" => AudioTheme::SciFi,
-            "musical" => AudioTheme::Musical,
-            "nature" => AudioTheme::Nature,
-            "retro" => AudioTheme::Retro,
-            "silent" => AudioTheme::Silent,
-            _ => AudioTheme::default(),
-        };
-        Ok(theme)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,12 +119,12 @@ mod tests {
             "classic".parse::<AudioTheme>().unwrap(),
             AudioTheme::Classic
         );
-        assert_eq!("GENTLE".parse::<AudioTheme>().unwrap(), AudioTheme::Gentle);
-        assert_eq!("SciFi".parse::<AudioTheme>().unwrap(), AudioTheme::SciFi);
-        assert_eq!(
-            "unknown".parse::<AudioTheme>().unwrap(),
-            AudioTheme::Classic
-        ); // Default fallback
+        assert_eq!("scifi".parse::<AudioTheme>().unwrap(), AudioTheme::SciFi);
+        // Exact snake token only: no case-folding, no fallback-to-default. An
+        // unknown value errors so REST callers can 400 (the config layer's
+        // `deserialize_or_default` handles load resilience separately).
+        assert!("GENTLE".parse::<AudioTheme>().is_err());
+        assert!("unknown".parse::<AudioTheme>().is_err());
     }
 
     #[test]
