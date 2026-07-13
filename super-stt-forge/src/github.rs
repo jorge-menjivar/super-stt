@@ -3,8 +3,6 @@
 //! `ForgeClient` trait. Merges what the indexer and the daemon's custom-repo
 //! path previously each kept in their own `github.rs`.
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde::Deserialize;
 
@@ -70,11 +68,7 @@ impl Github {
     pub fn new(base: impl Into<String>, token: Option<String>) -> Self {
         Self {
             base: base.into(),
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(20))
-                .redirect(reqwest::redirect::Policy::limited(5))
-                .build()
-                .expect("failed to build reqwest HTTP client"),
+            http: crate::http::short_client(),
             token,
         }
     }
@@ -95,10 +89,11 @@ impl Github {
     }
 
     fn req(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        // User-Agent is set at the client level (the workspace UA); GitHub only
+        // requires it to be present and non-empty.
         let mut b = self
             .http
             .request(method, format!("{}{path}", self.base))
-            .header("User-Agent", "super-stt-forge/0.1")
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28");
         if let Some(t) = &self.token {

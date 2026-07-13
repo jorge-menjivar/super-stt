@@ -14,6 +14,9 @@ use tokio::io::AsyncWriteExt;
 
 use crate::registry::compat::Selection;
 use crate::registry::index_schema::{IndexAsset, IndexBackend};
+use super_stt_registry_types::verify::{
+    sha256_matches, tar_budget_step, tar_entry_unsafe_reason, unpack_cap,
+};
 
 /// Absolute ceiling on a single downloaded asset when its size is not declared
 /// in the index. Declared sizes are honored directly (plus a small margin).
@@ -23,18 +26,6 @@ const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 /// Slack allowed over a declared asset size before a download is rejected.
 const DOWNLOAD_SIZE_MARGIN: u64 = 1024 * 1024;
-/// Per-file ceiling when unpacking a subprocess tarball. A single bundled
-/// library (e.g. a CUDA `.so`) can be large, so this is generous.
-const MAX_TARBALL_ENTRY_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-/// Floor for the total uncompressed-output ceiling. The actual cap scales with
-/// the compressed archive (see [`unpack_cap`]) so a large but legitimate bundle
-/// (a CUDA `PyTorch` tarball unpacks to several GiB) is allowed while a zip-bomb —
-/// a tiny archive with huge output — is still rejected.
-const MAX_TARBALL_TOTAL_FLOOR: u64 = 4 * 1024 * 1024 * 1024;
-/// Maximum unpacked-output-to-compressed-archive ratio. gzip over already-packed
-/// ML libraries stays far below this; a zip-bomb is far above it.
-const MAX_DECOMP_RATIO: u64 = 5;
-
 /// The byte ceiling for a download given the index-declared `expected_size`
 /// (0 when unknown).
 fn download_cap(expected_size: u64) -> u64 {
@@ -43,14 +34,6 @@ fn download_cap(expected_size: u64) -> u64 {
     } else {
         expected_size.saturating_add(DOWNLOAD_SIZE_MARGIN)
     }
-}
-
-/// The uncompressed-output ceiling for an archive of `archive_size` compressed
-/// bytes: scales with the input but never drops below the floor.
-fn unpack_cap(archive_size: u64) -> u64 {
-    archive_size
-        .saturating_mul(MAX_DECOMP_RATIO)
-        .max(MAX_TARBALL_TOTAL_FLOOR)
 }
 
 #[derive(Debug, Error)]
@@ -429,7 +412,7 @@ async fn verify_asset_sha(
             "install({source}): no expected sha256; skipping asset verification (actual=`{actual}`)"
         );
         Ok(())
-    } else if actual == expected {
+    } else if sha256_matches(actual, expected) {
         Ok(())
     } else {
         let _ = fs::remove_file(partial).await;
@@ -496,7 +479,7 @@ where
             );
         }
         let actual = hex::encode(hasher.finish().as_ref());
-        if !part.sha256.is_empty() && actual != part.sha256 {
+        if !part.sha256.is_empty() && !sha256_matches(&actual, &part.sha256) {
             let _ = out.flush().await;
             drop(out);
             let _ = tokio::fs::remove_file(dest).await;
@@ -523,11 +506,10 @@ fn extract_tarball(src: &Path, dest_dir: &Path) -> Result<(), PipelineError> {
             let entry = entry?;
             let path = entry.path()?;
             let s = path.to_string_lossy();
-            if s.starts_with('/') || s.contains("..") {
-                return Err(PipelineError::TarUnsafe(s.into()));
-            }
-            if entry.header().entry_type().is_symlink() {
-                return Err(PipelineError::TarUnsafe(format!("symlink: {s}")));
+            if let Some(reason) =
+                tar_entry_unsafe_reason(&s, entry.header().entry_type().is_symlink())
+            {
+                return Err(PipelineError::TarUnsafe(reason));
             }
         }
     }
@@ -541,18 +523,8 @@ fn extract_tarball(src: &Path, dest_dir: &Path) -> Result<(), PipelineError> {
     let mut total: u64 = 0;
     for entry in archive.entries()? {
         let mut entry = entry?;
-        let size = entry.size();
-        if size > MAX_TARBALL_ENTRY_BYTES {
-            return Err(PipelineError::TarUnsafe(format!(
-                "entry exceeds {MAX_TARBALL_ENTRY_BYTES} bytes"
-            )));
-        }
-        total = total.saturating_add(size);
-        if total > total_cap {
-            return Err(PipelineError::TarUnsafe(format!(
-                "archive output exceeds {total_cap} bytes"
-            )));
-        }
+        total =
+            tar_budget_step(entry.size(), total, total_cap).map_err(PipelineError::TarUnsafe)?;
         entry.unpack_in(dest_dir)?;
     }
     Ok(())
@@ -599,7 +571,7 @@ fn verify_manifest_bytes(
         );
     } else {
         let actual = hex::encode(ring::digest::digest(&SHA256, bytes).as_ref());
-        if actual != pin_sha256 {
+        if !sha256_matches(&actual, pin_sha256) {
             return Err((P::Verifying, InstallError::AssetHashMismatch));
         }
     }

@@ -16,6 +16,7 @@ use ring::digest::{Context, SHA256};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use super_stt_registry_types::verify::sha256_matches;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -61,7 +62,7 @@ async fn usable_existing(dest: &Path, sha256: Option<&str>) -> Result<Option<u64
     }
     if let Some(expected) = sha256 {
         let actual = sha256_hex_of_file(dest).await?;
-        if !actual.eq_ignore_ascii_case(expected) {
+        if !sha256_matches(&actual, expected) {
             info!(
                 "Hash mismatch for existing {} (expected {expected}, got {actual}); re-downloading",
                 dest.display()
@@ -182,7 +183,7 @@ async fn download_one(
     // Verify before publishing the file at its final path.
     if let (Some(h), Some(expected)) = (hasher, item.sha256.as_ref()) {
         let actual = hex::encode(h.finish().as_ref());
-        if !actual.eq_ignore_ascii_case(expected) {
+        if !sha256_matches(&actual, expected) {
             let _ = fs::remove_file(&tmp).await;
             anyhow::bail!("SHA-256 mismatch for {name}: expected {expected}, got {actual}");
         }
@@ -217,10 +218,7 @@ pub async fn download_files(
     starting_file_index: usize,
 ) -> Result<()> {
     crate::install_crypto_provider();
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_hours(1))
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .build()?;
+    let client = super_stt_forge::http::download_client();
 
     for (offset, item) in items.iter().enumerate() {
         if let Some(t) = tracker

@@ -7,7 +7,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use parking_lot::RwLock as ParkingRwLock;
 use super_stt_shared::registry::events::RegistryEvent;
@@ -110,17 +109,10 @@ pub(super) fn spawn_install_pipeline(
         let pipeline = crate::registry::install::Pipeline {
             backends_dir,
             cache_dir,
-            http: reqwest::Client::builder()
-                // Bundles can be multi-GB (e.g. a CUDA backend's multi-part
-                // archive), so allow a generous total timeout like the model
-                // download client; the connect timeout still fails fast on an
-                // unreachable host. A 5-minute total previously aborted large
-                // GPU-bundle downloads as `DownloadFailed`.
-                .timeout(Duration::from_hours(1))
-                .connect_timeout(Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::limited(10))
-                .build()
-                .unwrap_or_default(),
+            // Bundles can be multi-GB (e.g. a CUDA backend's multi-part
+            // archive), so use the generous-timeout download client; the
+            // connect timeout still fails fast on an unreachable host.
+            http: super_stt_forge::http::download_client(),
             on_progress: Arc::new(move |phase, bytes: Option<(u64, Option<u64>)>| {
                 use super_stt_shared::registry::events::{InstallPhase, RegistryEvent};
                 let (bytes_done, bytes_total) = bytes.map_or((None, None), |(d, t)| (Some(d), t));

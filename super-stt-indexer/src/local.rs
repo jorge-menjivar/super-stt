@@ -66,7 +66,7 @@ pub fn run(args: &LocalArgs) -> anyhow::Result<()> {
     };
     let out_path = args.out.join("index.json");
     let text = serde_json::to_string_pretty(&index)? + "\n";
-    std::fs::write(&out_path, text.as_bytes())
+    super_stt_registry_types::fs::write_atomic(&out_path, text.as_bytes())
         .with_context(|| format!("writing {}", out_path.display()))?;
     info!(
         "wrote {} ({} backends)",

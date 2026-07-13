@@ -80,7 +80,10 @@ async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
         _ => None,
     };
 
-    let http = reqwest::Client::new();
+    // Downloads release assets (subprocess bundles can be multi-GB) — use the
+    // shared download client, not a timeout-less `Client::new()` that could hang
+    // forever on a stalled connection.
+    let http = super_stt_forge::http::download_client();
     let now_iso = chrono_now_iso();
 
     let mut out_backends: Vec<index_json::IndexBackend> = Vec::new();
@@ -126,8 +129,8 @@ async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
         min_client: index_json::MIN_CLIENT.into(),
         backends: out_backends,
     };
-    let text = serde_json::to_string_pretty(&index)?;
-    std::fs::write(&args.out, text.as_bytes())
+    let text = serde_json::to_string_pretty(&index)? + "\n";
+    super_stt_registry_types::fs::write_atomic(&args.out, text.as_bytes())
         .with_context(|| format!("writing {}", args.out.display()))?;
     info!(
         "wrote {} ({} backends)",
