@@ -3,7 +3,6 @@ use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use crate::stt_models::transcribe::Transcribe;
 use anyhow::{Result, anyhow, bail};
-use log::warn;
 use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::registry::ModelDefinition;
 
@@ -125,7 +124,7 @@ impl SuperSTTDaemon {
                 .download_manager
                 .start_download(std::sync::Arc::clone(&t))
             {
-                warn!("could not register download tracker: {e}");
+                log::warn!("could not register download tracker: {e}");
             }
             // Emit the initial state immediately so the UI shows "0%" rather
             // than nothing while the first chunk lands.
@@ -158,6 +157,7 @@ impl SuperSTTDaemon {
 
     #[cfg(not(feature = "subprocess-backends"))]
     async fn instantiate_subprocess(
+        &self,
         backend: &DiscoveredBackend,
         _name: &str,
         _device_pref: &str,

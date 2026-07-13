@@ -2,10 +2,15 @@
 use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, json_response};
 use crate::daemon::http::internal::helpers::responses::recording_in_progress_response;
 use crate::daemon::http::state::AppState;
+// Only the wasm-backends realtime handler references the daemon type / bare
+// `Response`; gated so the subprocess-only and no-backend builds stay warning-clean.
+#[cfg(feature = "wasm-backends")]
 use crate::daemon::types::SuperSTTDaemon;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
+#[cfg(feature = "wasm-backends")]
+use axum::response::Response;
 use std::sync::Arc;
 use super_stt_shared::models::protocol::DaemonResponse;
 

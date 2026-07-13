@@ -130,7 +130,8 @@ pub async fn run() -> Result<()> {
     // skipped `Drop`). The transient unit's name embeds the spawning
     // daemon's PID, so a restarted daemon can't reach it via the regular
     // unload path — sweeping at startup is the only deterministic way to
-    // recover from that.
+    // recover from that. Only meaningful with the subprocess transport.
+    #[cfg(feature = "subprocess-backends")]
     crate::stt_models::subprocess::cleanup_orphan_units().await;
 
     // Set up Ctrl+C handler

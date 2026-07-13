@@ -92,6 +92,16 @@ check *args:
 # Runs a clippy check with JSON message format
 check-json: (check '--message-format=json')
 
+# Verify the daemon compiles under every backend-transport feature combination.
+# The `check`/`test` gates use `--all-features` (both transports on), so a `#[cfg]`
+# slip that only breaks a single-transport or no-backend build slips through
+# otherwise (see audit Tier 1 #8). `-D warnings` also catches feature-conditional
+# unused imports.
+check-features:
+    RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features --features subprocess-backends
+    RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features --features wasm-backends
+    RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features
+
 # Check formatting without modifying files
 fmt-check:
     cargo fmt --all -- --check
@@ -137,8 +147,8 @@ coverage-lcov:
 coverage-html *args:
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --html {{ args }}
 
-# Full local CI gate: format, lint, tests, doctests, schemas
-ci: fmt-check check test doctest schema-check
+# Full local CI gate: format, lint, feature-combo compile, tests, doctests, schemas
+ci: fmt-check check check-features test doctest schema-check
 
 # Run the app for testing purposes
 run-app *args:

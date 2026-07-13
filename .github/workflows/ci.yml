@@ -122,6 +122,12 @@ jobs:
       - name: Run clippy
         run: just check
 
+      # The clippy/test gates use --all-features (both backend transports on),
+      # so a #[cfg] slip that only breaks a single-transport or no-backend build
+      # is invisible to them (audit Tier 1 #8). Compile every combination here.
+      - name: Check backend-feature combinations
+        run: just check-features
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
