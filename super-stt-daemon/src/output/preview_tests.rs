@@ -30,23 +30,26 @@ fn test_find_tail_match_in_text() {
     // Test the key case: "engi" should match with "engineer"
     assert_eq!(
         find_tail_match_in_text("hello engi", "engineer is good", 4),
-        4
+        Some(4)
     );
 
     // Test basic tail matching
     assert_eq!(
         find_tail_match_in_text("hello world", "world is nice", 5),
-        5
+        Some(5)
     );
 
     // Test no match
-    assert_eq!(find_tail_match_in_text("hello", "goodbye", 3), -1);
+    assert_eq!(find_tail_match_in_text("hello", "goodbye", 3), None);
 
     // Test short strings
-    assert_eq!(find_tail_match_in_text("hi", "hello", 3), -1);
+    assert_eq!(find_tail_match_in_text("hi", "hello", 3), None);
 
     // Test exact match at end
-    assert_eq!(find_tail_match_in_text("abc", "xyzabc", 3), 6);
+    assert_eq!(find_tail_match_in_text("abc", "xyzabc", 3), Some(6));
+
+    // Rightmost occurrence wins: "abc" appears twice, match the later one.
+    assert_eq!(find_tail_match_in_text("abc", "abcxabc", 3), Some(7));
 }
 
 #[test]
@@ -57,11 +60,12 @@ fn find_tail_match_returns_utf8_safe_byte_offset() {
     // would land inside the multibyte 'á' and panic ("not a char boundary").
     let pos = find_tail_match_in_text("wyzá", "xyzáb", 3);
     assert_eq!(
-        pos, 5,
+        pos,
+        Some(5),
         "expected the byte offset (5), not the char index (4)"
     );
     // Must be usable as a &str byte slice without panicking.
-    let suffix = &"xyzáb"[usize::try_from(pos).unwrap()..];
+    let suffix = &"xyzáb"[pos.unwrap()..];
     assert_eq!(suffix, "b");
 }
 

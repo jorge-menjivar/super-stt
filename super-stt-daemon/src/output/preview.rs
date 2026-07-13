@@ -64,44 +64,48 @@ pub(crate) fn find_common_prefix(text1: &str, text2: &str) -> usize {
 }
 
 /// Find where the last `length_of_match` characters of `text1` match a
-/// substring of `text2`, returning the **byte offset** in `text2` just past
-/// that match (so callers can `&text2[pos..]` safely), or `-1` if no match.
+/// substring of `text2`, returning `Some(byte_offset)` in `text2` just past the
+/// rightmost such match (so callers can `&text2[pos..]` safely), or `None` if
+/// there is no match.
 ///
-/// The offset is a byte index — not a char index — so slicing `text2` with
-/// it never lands inside a multibyte UTF-8 sequence.
-pub(crate) fn find_tail_match_in_text(text1: &str, text2: &str, length_of_match: usize) -> i32 {
-    // Check if either text is too short
-    if text1.chars().count() < length_of_match || text2.chars().count() < length_of_match {
-        return -1;
-    }
-
+/// The offset is a byte index — not a char index — so slicing `text2` with it
+/// never lands inside a multibyte UTF-8 sequence.
+pub(crate) fn find_tail_match_in_text(
+    text1: &str,
+    text2: &str,
+    length_of_match: usize,
+) -> Option<usize> {
     let text1_chars: Vec<char> = text1.chars().collect();
     let text2_chars: Vec<char> = text2.chars().collect();
 
-    // The end portion of text1 that we want to find in text2
-    let target_substring: Vec<char> = text1_chars[text1_chars.len() - length_of_match..].to_vec();
+    // Either side too short to hold a `length_of_match` window.
+    if text1_chars.len() < length_of_match || text2_chars.len() < length_of_match {
+        return None;
+    }
 
-    // Loop through text2 from right to left
+    // The trailing `length_of_match` chars of text1 we want to locate in text2.
+    let target = &text1_chars[text1_chars.len() - length_of_match..];
+
+    // Scan text2 right-to-left for the last occurrence of `target`. Compare the
+    // char slices directly rather than allocating a `Vec` per position.
     for i in 0..=(text2_chars.len() - length_of_match) {
-        let start_pos = text2_chars.len() - i - length_of_match;
-        let end_pos = text2_chars.len() - i;
-        let current_substring: Vec<char> = text2_chars[start_pos..end_pos].to_vec();
-
-        // Compare substrings
-        if current_substring == target_substring {
-            // `end_pos` is a CHAR index into text2; map it to a byte offset
-            // so callers can byte-slice `&text2[pos..]` without splitting a
-            // multibyte char. `nth(end_pos) == None` means the match ends at
-            // the very end of text2, i.e. byte offset `text2.len()`.
-            let byte_off = text2
-                .char_indices()
-                .nth(end_pos)
-                .map_or(text2.len(), |(b, _)| b);
-            return i32::try_from(byte_off).unwrap_or(i32::MAX);
+        let end_char = text2_chars.len() - i;
+        let start_char = end_char - length_of_match;
+        if text2_chars[start_char..end_char] == *target {
+            // `end_char` is a CHAR index into text2; map it to a byte offset so
+            // callers can byte-slice `&text2[pos..]` without splitting a
+            // multibyte char. No chars past the match => the byte offset is
+            // `text2.len()`.
+            return Some(
+                text2
+                    .char_indices()
+                    .nth(end_char)
+                    .map_or(text2.len(), |(b, _)| b),
+            );
         }
     }
 
-    -1
+    None
 }
 
 #[cfg(test)]

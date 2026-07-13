@@ -109,13 +109,8 @@ impl State {
         }
 
         // Use tail matching to extend session with new content
-        let matching_pos = find_tail_match_in_text(&self.full_session_text, new_preview_text, 3);
-        if matching_pos >= 0 {
-            let extended = format!(
-                "{}{}",
-                self.full_session_text,
-                &new_preview_text[usize::try_from(matching_pos).unwrap_or(0)..]
-            );
+        if let Some(pos) = find_tail_match_in_text(&self.full_session_text, new_preview_text, 3) {
+            let extended = format!("{}{}", self.full_session_text, &new_preview_text[pos..]);
             if extended.len() > self.full_session_text.len() {
                 self.full_session_text = extended;
                 self.last_growth_time = std::time::Instant::now();
@@ -137,16 +132,9 @@ impl State {
         }
 
         // Try tail matching first
-        let matching_pos = find_tail_match_in_text(&self.stabilized_text, preview_text, 3);
-
-        if matching_pos >= 0 {
+        if let Some(pos) = find_tail_match_in_text(&self.stabilized_text, preview_text, 3) {
             // Found overlap - combine stabilized text with new part from preview
-            let combined = format!(
-                "{}{}",
-                self.stabilized_text,
-                &preview_text[usize::try_from(matching_pos).unwrap_or(0)..]
-            );
-            return combined;
+            return format!("{}{}", self.stabilized_text, &preview_text[pos..]);
         }
 
         // No tail match found - be conservative to avoid text loss
@@ -187,17 +175,22 @@ impl Typer {
         self.keyboard_simulator
     }
 
-    /// Apply a simple differential update by backspacing and retyping from first difference
-    pub fn apply_simple_diff(&mut self, old_text: &str, new_text: &str) -> usize {
+    /// Apply a simple differential update by backspacing to the first differing
+    /// character and retyping the rest. Returns the **net change in screen
+    /// characters** (chars typed minus chars deleted) so callers accounting in
+    /// chars stay consistent — mixing this with a byte length would drift on any
+    /// multibyte text.
+    pub fn apply_simple_diff(&mut self, old_text: &str, new_text: &str) -> isize {
         // Safety checks
         if old_text == new_text {
             return 0;
         }
 
         if old_text.is_empty() && !new_text.is_empty() {
-            let _ = self.keyboard_simulator.type_text(new_text);
-            debug!("Failed to type new text");
-            return new_text.len();
+            if let Err(e) = self.keyboard_simulator.type_text(new_text) {
+                debug!("Failed to type new text: {e}");
+            }
+            return isize::try_from(new_text.chars().count()).unwrap_or(isize::MAX);
         }
 
         if new_text.is_empty() {
@@ -214,6 +207,7 @@ impl Typer {
         // Calculate what to delete and what to type
         let chars_to_delete = old_chars.len() - common_prefix;
         let text_to_type: String = new_chars[common_prefix..].iter().collect();
+        let chars_to_type = new_chars.len() - common_prefix;
 
         debug!(
             "Simple diff: prefix={}, delete={}, type='{}'",
@@ -228,7 +222,9 @@ impl Typer {
         // Type the new part
         let _ = self.keyboard_simulator.type_text(&text_to_type);
 
-        text_to_type.len()
+        // Net screen delta in chars: what we added minus what we removed.
+        isize::try_from(chars_to_type).unwrap_or(isize::MAX)
+            - isize::try_from(chars_to_delete).unwrap_or(isize::MAX)
     }
 
     /// Update preview text using two-phase approach
@@ -311,74 +307,41 @@ impl Typer {
 
     /// Apply text update to screen (common logic)
     fn apply_text_update(&mut self, new_text: &str, actually_typed: &mut String) {
-        let old_char_count = actually_typed.chars().count();
-        let new_char_count = new_text.chars().count();
-
         info!(
-            "Typing logic: old_typed='{}', new_display='{}', old_count={}, new_count={}",
+            "Typing logic: old_typed='{}', new_display='{}'",
             actually_typed.chars().take(30).collect::<String>(),
             new_text.chars().take(30).collect::<String>(),
-            old_char_count,
-            new_char_count
         );
 
-        let actual_chars_on_screen;
-        // Screen is empty, just type the new text
-        if old_char_count == 0 {
+        if actually_typed.is_empty() {
+            // Screen is empty — type the whole thing.
             info!(
                 "Screen empty, typing new text: '{}'",
                 new_text.chars().take(30).collect::<String>()
             );
             let _ = self.keyboard_simulator.type_text(&format!("{new_text} "));
-            actual_chars_on_screen = new_char_count;
-        }
-        // Screen is not empty, check if new text starts with actually typed text
-        else if new_text.starts_with(actually_typed.as_str())
+        } else if new_text.starts_with(actually_typed.as_str())
             && new_text.len() > actually_typed.len()
         {
-            // Perfect extension - just add the suffix
+            // Perfect extension — append only the new suffix.
             let suffix = &new_text[actually_typed.len()..];
             info!("Perfect extension, adding suffix: '{suffix}'");
             let _ = self.keyboard_simulator.type_text(&format!("{suffix} "));
-            actual_chars_on_screen = new_char_count;
         } else {
-            // Need to replace - use differential update
-            info!("Need replacement, using diff update");
+            // Replacement — backspace to the first difference and retype.
             let net_change = self.apply_simple_diff(actually_typed, new_text);
-
-            // Calculate actual characters on screen based on the net change
-            actual_chars_on_screen = old_char_count + net_change;
-
-            info!(
-                "Replaced: {}{} chars (screen total: {})",
-                if net_change > 0 { "+" } else { "" },
-                net_change,
-                actual_chars_on_screen
-            );
+            info!("Diff replacement: net {net_change} char(s)");
         }
 
-        // Update state to match what we think is actually on screen
-        if actual_chars_on_screen == new_char_count {
-            // Typing succeeded completely
-            actually_typed.clear();
-            actually_typed.push_str(new_text);
-            info!(
-                "Updated actually_typed to: '{}'",
-                actually_typed.chars().take(30).collect::<String>()
-            );
-        } else {
-            // Typing failed or was partial - but for preview, we should still track what we attempted to type
-            // This ensures preview clearing works correctly even when there are typing discrepancies
-            warn!(
-                "Character count mismatch: expected {new_char_count}, actual {actual_chars_on_screen}, updating actually_typed anyway"
-            );
-            actually_typed.clear();
-            actually_typed.push_str(new_text);
-            info!(
-                "Force updated actually_typed to: '{}'",
-                actually_typed.chars().take(30).collect::<String>()
-            );
-        }
+        // `actually_typed` mirrors what we drove onto the screen so
+        // `clear_preview` backspaces the right count next time. Every branch
+        // above leaves the screen showing `new_text`. The keyboard results are
+        // best-effort and unchecked, so there is no measured count to reconcile
+        // against — the old byte-vs-char reconciliation was both wrong (it added
+        // `apply_simple_diff`'s byte length to a char count) and dead (both of
+        // its branches did exactly this assignment).
+        actually_typed.clear();
+        actually_typed.push_str(new_text);
     }
 
     /// Clear all typed text and reset state

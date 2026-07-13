@@ -233,7 +233,7 @@ Three patterns account for the majority of findings:
   canonical realtime path is `GET /v1/transcribe/realtime`. Nothing left to fix;
   `RealTimeSession` and `add_audio_chunk` no longer exist in the tree.
 
-### [ ] 12. 🟠 Daemon: preview typer accounting mixes bytes and chars
+### [x] 12. 🟠 Daemon: preview typer accounting mixes bytes and chars
 
 - **Where:** `apply_simple_diff` returns bytes (`output/typer.rs:200,231`) that
   `apply_text_update` adds to char counts (`typer.rs:313-350`).
@@ -244,8 +244,17 @@ Three patterns account for the majority of findings:
   O(n²) `Vec<char>` rebuilds.
 - **Fix:** count one unit consistently end-to-end; subtract deletions; return
   `Option<usize>` instead of the sentinel.
+- **Resolved (branch `refactor/audit-app-error-surface`):** `apply_simple_diff` now
+  returns the net **char** delta (chars typed minus chars deleted) instead of a byte
+  length; the byte-vs-char reconciliation in `apply_text_update` — whose two branches
+  were identical and whose only effect was a spurious non-ASCII warn — was deleted, so
+  `actually_typed` is set once to the display text. The misleading unconditional
+  "Failed to type" debug now logs the real `type_text` error. `find_tail_match_in_text`
+  returns `Option<usize>` (byte offset) and compares char slices in place instead of
+  allocating a `Vec<char>` per position; both call sites and the tests use the
+  `Option` form (added a rightmost-match case).
 
-### [ ] 13. 🟠 App: a single failed `set_volume`/theme POST flips the app to the full-screen connection-error page
+### [x] 13. 🟠 App: a single failed `set_volume`/theme POST flips the app to the full-screen connection-error page
 
 - **Where:** volume/theme failures map to `Message::DaemonError`
   (`handlers/recording.rs:100-124`), and `view.rs:140-145` forces the Connection
