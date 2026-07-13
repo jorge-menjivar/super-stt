@@ -161,7 +161,7 @@ Three patterns account for the majority of findings:
   clears it only when the id is still its own, so a losing racer can neither clobber
   nor null the winner's sender.
 
-### [ ] 8. 🟠 Daemon: `--no-default-features --features wasm-backends` does not compile
+### [x] 8. 🟠 Daemon: `--no-default-features --features wasm-backends` does not compile
 
 - **Where:** the subprocess stub is missing `&self`
   (`daemon/model_management/instantiate.rs:159-169`), and
@@ -170,8 +170,18 @@ Three patterns account for the majority of findings:
 - **Problem/Impact:** the feature combination is broken and neither combination is
   exercised by CI, so it can't stay fixed.
 - **Fix:** repair the stub and variant references; add the feature matrix to CI.
+- **Resolved (branch `refactor/audit-daemon-robustness`):** the empirical breakage
+  (the `install.rs` variant references had already been de-gated since the audit)
+  was: the `#[cfg(not(subprocess-backends))]` `instantiate_subprocess` stub lacked
+  `&self`; `daemon_main.rs` called `stt_models::subprocess::cleanup_orphan_units()`
+  unconditionally; and `transcribe.rs`'s `SuperSTTDaemon`/`Response` imports plus
+  `instantiate.rs`'s `log::warn` import went unused when a transport was off. Added
+  `&self`, gated the orphan-sweep call and the wasm-only imports, and fully-qualified
+  the one `warn` call. New `just check-features` compiles all three reduced combos
+  (subprocess-only, wasm-only, no-backends) under `RUSTFLAGS=-D warnings`, wired into
+  `just ci` and the CI clippy job so the drift can't return.
 
-### [ ] 9. 🟠 Daemon: unsolicited `304` panics the registry client
+### [x] 9. 🟠 Daemon: unsolicited `304` panics the registry client
 
 - **Where:** `refresh()` does `self.state.read().as_ref().unwrap()` on 304
   (`registry/client.rs:147-152`); `Client::new` also unwraps the builder
@@ -179,8 +189,18 @@ Three patterns account for the majority of findings:
 - **Impact:** a misbehaving proxy can panic the daemon.
 - **Fix:** treat an unsolicited 304 with no cached state as a refetch/error;
   propagate builder failure instead of unwrapping.
+- **Resolved (branch `refactor/audit-daemon-robustness`):** the 304 branch now takes
+  a single write lock and, if the in-memory cache is empty (an unsolicited 304 when
+  we sent no `If-None-Match`), returns `ClientError::Unavailable` instead of
+  unwrapping `None`. `get()` already degrades that to the disk cache or `Unavailable`,
+  so a misbehaving proxy can no longer panic the daemon. Added a mockito test. The
+  builder-unwrap sub-point was superseded by the Tier 2 #4 forge consolidation: the
+  `reqwest` client is now built once in `super_stt_forge::http::{short,download}_client`
+  with a single documented `.expect()` on a path that can't fail for these settings
+  (rustls-no-provider does no eager TLS init) — threading `Result` through a dozen
+  infallible call sites for an unreachable branch was not worth it.
 
-### [ ] 10. 🔴 Daemon: HTTP vs WS egress allowlists diverge in the wasm host *(security)*
+### [x] 10. 🔴 Daemon: HTTP vs WS egress allowlists diverge in the wasm host *(security)*
 
 - **Where:** `send_request` matches the authority as written
   (`stt_models/wasm/host.rs:67-69`) while `check_host_allowed` matches synthesized
@@ -190,14 +210,28 @@ Three patterns account for the majority of findings:
   on the runtime and is check-then-connect (TOCTOU, acknowledged at
   `host.rs:84-85`).
 - **Fix:** route `send_request` through `check_host_allowed`.
+- **Resolved (branch `refactor/audit-daemon-robustness`):** the HTTP hook's inline
+  allowlist match (authority-as-written) is gone; `send_request` now derives
+  `host` + scheme-default `port` and calls `check_host_allowed`, the exact function
+  the `ws` host uses — so `["h:443"]` behaves identically for `https://h/` and
+  `wss://h/`. A no-host authority-form request is rejected outright. Added a
+  regression test at the shared `check_host_allowed` for the default-port `host:port`
+  match. The synchronous-DNS / check-then-connect TOCTOU is unchanged and stays noted
+  in the code (a follow-up; not the divergence this item is about).
 
-### [ ] 11. 🟠 Daemon: duplicate adaptive-VAD in `RealTimeSession::add_audio_chunk` reintroduces the NaN hazard fixed in #268
+### [x] 11. 🟠 Daemon: duplicate adaptive-VAD in `RealTimeSession::add_audio_chunk` reintroduces the NaN hazard fixed in #268
 
 - **Where:** `services/transcription.rs:90-132`.
 - **Problem:** RMS computes 0/0 = NaN on an empty chunk (the guard exists only in
   `audio/state.rs:78-81`); `recent_levels`/`silence_start`/votes feed write-only
   state that is never read.
 - **Fix:** delete the block or reuse `RecordingState`.
+- **Resolved (subsumed by Tier 1 #2, PR #275):** the entire `services/transcription.rs`
+  file — `RealTimeSession`, its `add_audio_chunk`, the duplicate adaptive-VAD block,
+  and the `recent_levels`/`silence_start`/vote fields — was deleted when the
+  vestigial `RealTimeTranscriptionManager` was removed (commit `caaff4d`). The
+  canonical realtime path is `GET /v1/transcribe/realtime`. Nothing left to fix;
+  `RealTimeSession` and `add_audio_chunk` no longer exist in the tree.
 
 ### [ ] 12. 🟠 Daemon: preview typer accounting mixes bytes and chars
 
