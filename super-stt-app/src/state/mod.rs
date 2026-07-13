@@ -7,5 +7,6 @@ pub mod registry;
 
 // Re-export commonly used types
 pub use models::{
-    AudioTheme, ContextPage, DaemonStatus, MenuAction, ModelsTab, Page, RecordingStatus,
+    ActionError, AudioTheme, ContextPage, DaemonStatus, ErrorScope, MenuAction, ModelsTab, Page,
+    RecordingStatus,
 };

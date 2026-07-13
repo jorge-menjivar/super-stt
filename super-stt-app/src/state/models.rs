@@ -69,6 +69,28 @@ pub enum ContextPage {
     LoadBackend,
 }
 
+/// Where a transient action error belongs, so a failed save surfaces as an
+/// inline banner on the owning surface instead of hijacking the whole UI
+/// (Tier 1 #13) or being dropped to the log (Tier 1 #15). One scope-tagged
+/// slot ([`ActionError`]) is held on `AppModel`; the audit's "one error
+/// surface" (App Tier 3 #11) generalizes this.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ErrorScope {
+    /// The Customization page's Audio section: theme / volume / feedback saves.
+    Customization,
+    /// The per-backend Configure sheet: secret / option saves.
+    ConfigureBackend,
+}
+
+/// A scope-tagged, transient action failure rendered as an inline banner on the
+/// page named by [`ErrorScope`]. Set on a failed save, cleared when the user
+/// retries that action, reconnects, or closes the owning surface.
+#[derive(Clone, Debug)]
+pub struct ActionError {
+    pub scope: ErrorScope,
+    pub message: String,
+}
+
 /// Which tab of the Models page is active.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum ModelsTab {

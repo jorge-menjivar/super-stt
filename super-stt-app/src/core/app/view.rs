@@ -156,6 +156,7 @@ impl AppModel {
                 &self.selected_audio_theme,
                 self.volume,
                 self.primary_language.as_deref(),
+                self.action_error_for(crate::state::ErrorScope::Customization),
             ),
             Page::Recording => views::recording::page(
                 self.recording_stop_mode,

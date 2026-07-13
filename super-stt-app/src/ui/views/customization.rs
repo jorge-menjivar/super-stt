@@ -4,7 +4,7 @@ use cosmic::widget::{self, settings, space::horizontal as horizontal_space, text
 use cosmic::{Apply, Element};
 use super_stt_shared::theme::AudioTheme;
 
-use super::common::page_layout;
+use super::common::{error_banner, page_layout};
 use crate::ui::messages::Message;
 
 /// Customization page: audio feedback toggle, theme selection, volume, and language.
@@ -13,6 +13,7 @@ pub fn page<'a>(
     selected_audio_theme: &'a AudioTheme,
     volume: u8,
     app_primary_language: Option<&'a str>,
+    action_error: Option<&'a str>,
 ) -> Element<'a, Message> {
     let audio_enabled = *selected_audio_theme != AudioTheme::Silent;
 
@@ -94,6 +95,14 @@ pub fn page<'a>(
             ),
     );
 
-    let sections = settings::view_column(vec![section.into(), language_section.into()]);
-    page_layout("Customization", sections)
+    // Surface a failed audio-settings save inline (Tier 1 #13) instead of
+    // letting the failure flip the whole app to the connection-error page.
+    let mut blocks: Vec<Element<'a, Message>> = Vec::new();
+    if let Some(message) = action_error {
+        blocks.push(error_banner(message));
+    }
+    blocks.push(section.into());
+    blocks.push(language_section.into());
+
+    page_layout("Customization", settings::view_column(blocks))
 }

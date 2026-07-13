@@ -192,6 +192,23 @@ pub struct AppModel {
 
     // Registry state (catalog + install progress for the Download tab).
     pub registry: crate::state::registry::RegistryState,
+
+    /// Scope-tagged banner for a failed settings/backend save. Rendered inline
+    /// on the owning page instead of hijacking the UI (Tier 1 #13) or being
+    /// dropped to the log (Tier 1 #15). `None` when there is no pending error.
+    pub action_error: Option<crate::state::ActionError>,
+}
+
+impl AppModel {
+    /// The pending [`action_error`](Self::action_error) message iff it is tagged
+    /// for `scope` — used by each page's view to render its own inline banner.
+    #[must_use]
+    pub fn action_error_for(&self, scope: crate::state::ErrorScope) -> Option<&str> {
+        self.action_error
+            .as_ref()
+            .filter(|e| e.scope == scope)
+            .map(|e| e.message.as_str())
+    }
 }
 
 /// Create a COSMIC application from the app model

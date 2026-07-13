@@ -131,17 +131,22 @@ impl AppModel {
             }
         }
 
-        let load_settings = build_load_settings_tasks();
-        let load_primary_language = self.load_primary_language();
-
+        // Load settings/models/languages ONLY on the disconnected→connected
+        // transition. Periodic keep-alive pings also resolve to `DaemonConnected`
+        // (daemon/mod.rs `PingTimeout`), so re-fetching here unconditionally re-ran
+        // six settings GETs + a language load every tick and clobbered optimistic
+        // local edits (Tier 1 #14). Cross-client settings sync rides the SSE
+        // `settings_changed` topic, not this poll.
         if was_disconnected {
+            // Fresh connection — drop any banner left over from before the drop.
+            self.action_error = None;
             Task::batch([
                 self.handle_model_messages(Message::LoadInitialData),
-                load_settings,
-                load_primary_language,
+                build_load_settings_tasks(),
+                self.load_primary_language(),
             ])
         } else {
-            Task::batch([load_settings, load_primary_language])
+            Task::none()
         }
     }
 

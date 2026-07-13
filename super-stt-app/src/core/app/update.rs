@@ -19,6 +19,12 @@ impl AppModel {
 
     /// Routes daemon, model, models-page, device, and download messages.
     fn dispatch_core(&mut self, message: Message) -> Option<Task<cosmic::Action<Message>>> {
+        // Scoped action failure: park it in the per-page banner slot.
+        if let Message::SettingActionFailed { scope, message } = message {
+            self.action_error = Some(crate::state::ActionError { scope, message });
+            return Some(Task::none());
+        }
+
         // Daemon-related messages
         if matches!(
             message,

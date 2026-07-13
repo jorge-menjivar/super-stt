@@ -5,10 +5,19 @@ use crate::daemon::client::{
     RecordEvent, record_command_stream, set_and_test_audio_theme, set_audio_theme, set_volume,
     stop_record_command,
 };
-use crate::state::{AudioTheme, RecordingStatus};
+use crate::state::{AudioTheme, ErrorScope, RecordingStatus};
 use crate::ui::messages::Message;
 use cosmic::prelude::*;
 use futures_util::StreamExt;
+use super_stt_shared::daemon::http_client::HttpError;
+
+/// Build a Customization-scoped banner message for a failed audio-settings save.
+fn customization_error(e: &HttpError) -> Message {
+    Message::SettingActionFailed {
+        scope: ErrorScope::Customization,
+        message: e.to_string(),
+    }
+}
 
 impl AppModel {
     /// Route recording/audio messages to the appropriate helper.
@@ -89,26 +98,34 @@ impl AppModel {
     fn handle_audio_messages(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::AudioFeedbackToggled(enabled) => {
+                // Clear any stale Customization banner as the user retries.
+                self.action_error = None;
                 let theme = if enabled {
                     self.last_non_silent_theme
                 } else {
                     AudioTheme::Silent
                 };
                 self.selected_audio_theme = theme;
+                // Success is a no-op (the optimistic value already holds); a
+                // failure surfaces a scoped banner instead of flipping the whole
+                // app to the connection-error page (Tier 1 #13). Reusing
+                // `DaemonConnected` here also used to trigger a full settings
+                // refetch on every toggle (Tier 1 #14).
                 Task::perform(set_audio_theme(theme), |result| match result {
-                    Ok(_) => cosmic::Action::App(Message::DaemonConnected),
-                    Err(e) => cosmic::Action::App(Message::DaemonError(e)),
+                    Ok(_) => cosmic::Action::None,
+                    Err(e) => cosmic::Action::App(customization_error(&e)),
                 })
             }
 
             Message::AudioThemeSelected(theme) => {
+                self.action_error = None;
                 self.selected_audio_theme = theme;
                 if theme != AudioTheme::Silent {
                     self.last_non_silent_theme = theme;
                 }
                 Task::perform(set_and_test_audio_theme(theme), |result| match result {
-                    Ok(_) => cosmic::Action::App(Message::DaemonConnected),
-                    Err(e) => cosmic::Action::App(Message::DaemonError(e)),
+                    Ok(_) => cosmic::Action::None,
+                    Err(e) => cosmic::Action::App(customization_error(&e)),
                 })
             }
 
@@ -118,10 +135,11 @@ impl AppModel {
             }
 
             Message::VolumeChanged(vol) => {
+                self.action_error = None;
                 self.volume = vol;
                 Task::perform(set_volume(vol), |result| match result {
                     Ok(()) => cosmic::Action::None,
-                    Err(e) => cosmic::Action::App(Message::DaemonError(e)),
+                    Err(e) => cosmic::Action::App(customization_error(&e)),
                 })
             }
 

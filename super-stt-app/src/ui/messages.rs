@@ -230,6 +230,13 @@ pub enum Message {
     /// UI reflects the new effective values.
     BackendsReload,
     BackendsError(String),
+    /// A scoped settings/backend save failed. Stored in `AppModel::action_error`
+    /// and rendered as an inline banner on the page named by `scope`, instead of
+    /// hijacking the UI (Tier 1 #13) or being dropped to the log (Tier 1 #15).
+    SettingActionFailed {
+        scope: crate::state::ErrorScope,
+        message: String,
+    },
     /// Daemon-sourced configured flags for a backend's secrets, received after
     /// `BackendsLoaded`. Folds `(name, configured)` into `backend_secret_configured`.
     BackendSecretsConfigured {

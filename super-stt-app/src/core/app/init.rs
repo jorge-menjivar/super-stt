@@ -177,6 +177,9 @@ impl AppModel {
 
             // Registry state
             registry: crate::state::registry::RegistryState::default(),
+
+            // No pending scoped action error at startup.
+            action_error: None,
         };
 
         // Create startup commands

@@ -262,8 +262,16 @@ Three patterns account for the majority of findings:
 - **Impact:** one trivial request failure hijacks the whole UI.
 - **Fix:** scope the error instead of escalating to connection state (the shared
   error surface, Tier 3 #11).
+- **Resolved (branch `refactor/audit-app-error-surface`):** built the shared
+  scope-tagged error slot the "one error surface" item calls for —
+  `AppModel::action_error: Option<ActionError>` with an `ErrorScope`
+  (`Customization` / `ConfigureBackend`) and an `action_error_for(scope)` accessor.
+  Volume/theme/feedback failures now raise `SettingActionFailed { Customization, .. }`
+  (rendered as an inline `error_banner` on the Customization page) instead of
+  `DaemonError`, so `daemon_status` no longer flips and the connection page is not
+  forced. The slot clears on retry, on reconnect, and on sheet open/close.
 
-### [ ] 14. 🟡 App: the app refetches all settings every 5 seconds forever
+### [x] 14. 🟡 App: the app refetches all settings every 5 seconds forever
 
 - **Where:** successful pings map to `Message::DaemonConnected`
   (`handlers/daemon/mod.rs:79-84`), whose handler unconditionally runs six settings
@@ -273,8 +281,15 @@ Three patterns account for the majority of findings:
 - **Fix:** introduce a dedicated `SettingSaved` ack and load settings only on the
   disconnected→connected transition (SSE `settings_changed` already covers
   cross-client sync).
+- **Resolved (branch `refactor/audit-app-error-surface`):** `handle_daemon_connected`
+  now runs the settings/model/language loads only on the disconnected→connected
+  transition; a periodic keep-alive ping (which also resolves to `DaemonConnected`)
+  returns `Task::none()`, so the six GETs no longer fire every tick or clobber
+  optimistic edits. The two audio save handlers stopped reusing `DaemonConnected` as
+  their success ack (they now resolve to `Action::None`), removing the per-toggle
+  refetch without needing a separate `SettingSaved` message.
 
-### [ ] 15. 🟠 App: failed secret/option saves are invisible
+### [x] 15. 🟠 App: failed secret/option saves are invisible
 
 - **Where:** all backend secret/option save failures route to log-only
   `BackendsError` (`handlers/backend.rs:103-211`); `InstallFailedToStart` is
