@@ -62,40 +62,34 @@ impl WasiHttpHooks for AllowlistHooks {
         request: hyper::Request<HyperOutgoingBody>,
         config: OutgoingRequestConfig,
     ) -> HttpResult<HostFutureIncomingResponse> {
-        let authority = request.uri().authority().map(|a| a.as_str().to_string());
-        let host = request.uri().host().map(str::to_string);
-        let allowed = self.allowed_hosts.iter().any(|a| {
-            Some(a.as_str()) == authority.as_deref() || Some(a.as_str()) == host.as_deref()
-        });
-        if !allowed {
-            return Err(ErrorCode::InternalError(Some(format!(
-                "outbound host not allowed: {}",
-                authority.or(host).unwrap_or_default()
-            )))
-            .into());
-        }
-
-        // SSRF guard: a backend must not reach a private/loopback/link-local
-        // address or the cloud metadata endpoint (169.254.169.254), whether it
-        // names a hostname (which could DNS-rebind) or an IP literal. The
-        // allowlist is backend-declared, so an IP literal is *not* a trusted
-        // operator opt-in — check it against the disallow-list too.
+        // Enforce egress through the shared allowlist+SSRF check so HTTP and the
+        // `ws` host apply byte-for-byte identical rules. This hook used to match
+        // the authority string exactly as written, which diverged from
+        // `check_host_allowed`'s synthesized `host:port` match: an allowlist
+        // entry of `api.example.com:443` passed for `wss://` but not `https://`
+        // (whose port is the scheme default and so absent from the authority).
         //
-        // NOTE: this resolves synchronously; production should use async DNS
-        // and pin the resolved address through to connect.
-        if let Some(h) = host.as_deref() {
-            let port =
-                request
-                    .uri()
-                    .port_u16()
-                    .unwrap_or(if request.uri().scheme_str() == Some("http") {
-                        80
-                    } else {
-                        443
-                    });
-            if let Err(msg) = guard_egress_host(h, port, self.allow_loopback) {
-                return Err(ErrorCode::InternalError(Some(msg)).into());
-            }
+        // NOTE: `check_host_allowed` resolves DNS synchronously and is
+        // check-then-connect (TOCTOU); production should use async DNS and pin
+        // the resolved address through to connect. The bare-host early return
+        // rejects an authority-form request with no host outright.
+        let Some(host) = request.uri().host().map(str::to_string) else {
+            return Err(
+                ErrorCode::InternalError(Some("outbound request has no host".to_string())).into(),
+            );
+        };
+        let port =
+            request
+                .uri()
+                .port_u16()
+                .unwrap_or(if request.uri().scheme_str() == Some("http") {
+                    80
+                } else {
+                    443
+                });
+        if let Err(msg) = check_host_allowed(&self.allowed_hosts, &host, port, self.allow_loopback)
+        {
+            return Err(ErrorCode::InternalError(Some(msg)).into());
         }
 
         Ok(default_send_request(request, config))
@@ -241,6 +235,17 @@ mod tests {
     fn host_not_on_allowlist_is_rejected() {
         let allow = vec!["api.example.com".to_string()];
         assert!(check_host_allowed(&allow, "169.254.169.254", 80, false).is_err());
+    }
+
+    #[test]
+    fn host_port_authority_matches_when_port_is_scheme_default() {
+        // Divergence regression (Tier 1 #10): a `host:port` allowlist entry must
+        // match a request whose port is the scheme default and therefore absent
+        // from the written authority. Both the HTTP hook (`send_request`) and the
+        // `ws` host now route through `check_host_allowed`, so `["h:443"]` behaves
+        // identically for `https://h/` and `wss://h/`. Loopback avoids real DNS.
+        let allow = vec!["127.0.0.1:443".to_string()];
+        assert!(check_host_allowed(&allow, "127.0.0.1", 443, true).is_ok());
     }
 
     #[test]
