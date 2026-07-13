@@ -96,6 +96,9 @@ impl AppModel {
         let was_disconnected = self.daemon_status != DaemonStatus::Connected;
 
         self.daemon_status = DaemonStatus::Connected;
+        // Connected: reset the reconnect backoff so the next disconnect starts
+        // from the short initial delay again.
+        self.reconnect_retry.reset();
         // Only clear potentially stuck switching states on actual reconnect, not periodic pings
         if was_disconnected {
             self.device_state = DeviceState::Ready;
@@ -157,9 +160,14 @@ impl AppModel {
                     Task::none()
                 } else {
                     self.daemon_status = next;
+                    // Exponential backoff with jitter (shared RetryStrategy)
+                    // instead of a flat 5 s, so many clients reconnecting after a
+                    // daemon restart don't stampede in lockstep.
+                    let delay = self.reconnect_retry.next_delay();
+                    self.reconnect_retry.should_retry();
                     Task::perform(
-                        async {
-                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        async move {
+                            tokio::time::sleep(delay).await;
                         },
                         |()| cosmic::Action::App(Message::RetryConnection),
                     )

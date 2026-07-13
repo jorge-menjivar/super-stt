@@ -67,6 +67,9 @@ pub struct AppModel {
     pub socket_path: PathBuf,
     /// Current daemon connection status
     pub daemon_status: DaemonStatus,
+    /// Reconnect backoff (shared `RetryStrategy`: exponential + jitter),
+    /// advanced on each failed reconnect and reset on a successful connection.
+    pub reconnect_retry: super_stt_shared::daemon::retry::RetryStrategy,
     /// Current recording status
     pub recording_status: RecordingStatus,
     /// Latest transcription text

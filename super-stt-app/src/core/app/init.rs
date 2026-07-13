@@ -112,6 +112,8 @@ impl AppModel {
             // Initialize Super STT state using proper socket path
             socket_path: super_stt_shared::validation::get_http_socket_path(),
             daemon_status: DaemonStatus::Disconnected,
+            reconnect_retry: super_stt_shared::daemon::retry::RetryStrategy::for_initial_connection(
+            ),
             recording_status: RecordingStatus::Idle,
             transcription_text: String::new(),
             audio_level: 0.0,
