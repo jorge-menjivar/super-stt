@@ -298,6 +298,17 @@ Three patterns account for the majority of findings:
 - **Impact:** a failed API-key save shows nothing in the Configure sheet — the user
   believes the key is stored.
 - **Fix:** surface the failures and roll back optimistic state (Tier 3 #11).
+- **Resolved (branch `refactor/audit-app-error-surface`):** the four backend
+  secret/option save handlers now raise `SettingActionFailed { ConfigureBackend, .. }`
+  (rendered as an `error_banner` inside the Configure sheet) instead of the log-only
+  `BackendsError`, which is kept for catalog-load failures. `InstallFailedToStart`
+  records into a new `RegistryState::install_errors` map (mirroring `uninstall_errors`)
+  so the Browse card shows "Failed to start: …" and keeps the Install button for a
+  retry, rather than silently dropping the entry. The optimistic-state gap is closed
+  by making the preview-typing / recording-stop-mode / write-method handlers
+  confirm-then-apply: the local value is set only on the daemon ack, so a failed save
+  leaves the control on its old, correct value (and the `PreviewTypingError` handler
+  no longer abuses the transcription box). Uses the shared error slot from #13.
 
 ### [ ] 16. 🟡 App: `$HOME` sanitization corrupts messages when HOME is unset
 

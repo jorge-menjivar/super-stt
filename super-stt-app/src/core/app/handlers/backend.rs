@@ -5,9 +5,19 @@ use crate::daemon::client::{
     clear_backend_option, clear_backend_secret, list_backend_secrets, list_backends,
     set_backend_option, set_backend_secret,
 };
+use crate::state::ErrorScope;
 use crate::ui::messages::Message;
 use cosmic::prelude::*;
+use super_stt_shared::daemon::http_client::HttpError;
 use super_stt_shared::models::provider::Provider;
+
+/// Build a Configure-sheet-scoped banner message for a failed secret/option save.
+fn configure_backend_error(e: &HttpError) -> Message {
+    Message::SettingActionFailed {
+        scope: ErrorScope::ConfigureBackend,
+        message: e.to_string(),
+    }
+}
 
 impl AppModel {
     /// Backend catalog refresh + per-backend secret/option configuration
@@ -133,6 +143,8 @@ impl AppModel {
             // success via BackendSecretStored, so a transient failure leaves
             // the typed value intact for retry.
             Message::BackendSecretSaved { source, name } => {
+                // Clear any stale Configure-sheet banner as the user retries.
+                self.action_error = None;
                 let key = (source.clone(), name.clone());
                 let Some(value) = self.backend_secret_inputs.get(&key).cloned() else {
                     return Task::none();
@@ -147,7 +159,7 @@ impl AppModel {
                             source: source.clone(),
                             name: name.clone(),
                         }),
-                        Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
+                        Err(e) => cosmic::Action::App(configure_backend_error(&e)),
                     },
                 )
             }
@@ -161,11 +173,12 @@ impl AppModel {
 
             // Clear secret via daemon; daemon reloads-if-active itself.
             Message::BackendSecretRemoved { source, name } => {
+                self.action_error = None;
                 self.backend_secret_inputs
                     .remove(&(source.clone(), name.clone()));
                 Task::perform(clear_backend_secret(source, name), move |res| match res {
                     Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                    Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
+                    Err(e) => cosmic::Action::App(configure_backend_error(&e)),
                 })
             }
 
@@ -181,6 +194,7 @@ impl AppModel {
             // Options go to the daemon config. If the input is empty, clear the
             // override; otherwise set the new value. The daemon reloads-if-active.
             Message::BackendOptionSaved { source, name } => {
+                self.action_error = None;
                 let value = self
                     .backend_option_inputs
                     .get(&(source.clone(), name.clone()))
@@ -189,14 +203,14 @@ impl AppModel {
                 if value.is_empty() {
                     Task::perform(clear_backend_option(source, name), |result| match result {
                         Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                        Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
+                        Err(e) => cosmic::Action::App(configure_backend_error(&e)),
                     })
                 } else {
                     Task::perform(
                         set_backend_option(source, name, value),
                         |result| match result {
                             Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                            Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
+                            Err(e) => cosmic::Action::App(configure_backend_error(&e)),
                         },
                     )
                 }
@@ -205,9 +219,10 @@ impl AppModel {
             // Explicit reset: clear the stored override and reload so the
             // option reverts to its daemon default.
             Message::BackendOptionReset { source, name } => {
+                self.action_error = None;
                 Task::perform(clear_backend_option(source, name), |result| match result {
                     Ok(()) => cosmic::Action::App(Message::BackendsReload),
-                    Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
+                    Err(e) => cosmic::Action::App(configure_backend_error(&e)),
                 })
             }
 

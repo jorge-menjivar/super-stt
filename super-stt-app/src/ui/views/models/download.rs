@@ -236,6 +236,9 @@ pub(super) fn download_card<'a>(
     let spacing = cosmic::theme::spacing();
     let muted = muted_text_color();
     let in_flight = app.registry.installs.get(&entry.source);
+    // A request the daemon rejected before any background install started
+    // (Tier 1 #15). The Install button stays enabled for a retry.
+    let start_error = app.registry.install_errors.get(&entry.source);
 
     // Header carries no action — Install lives in the footer below.
     let mut card = widget::column::with_capacity(6)
@@ -290,6 +293,14 @@ pub(super) fn download_card<'a>(
             }
             _ => horizontal_space().into(),
         }
+    } else if let Some(err) = start_error {
+        row![
+            icons::phosphor_destructive(icons::WARNING, 14.0),
+            text::caption(format!("Failed to start: {err}")),
+        ]
+        .spacing(spacing.space_xxs)
+        .align_y(Alignment::Center)
+        .into()
     } else if !entry.compatibility.compatible {
         let reason = entry
             .compatibility

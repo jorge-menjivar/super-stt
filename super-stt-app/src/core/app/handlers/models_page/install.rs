@@ -13,6 +13,8 @@ impl AppModel {
         match message {
             // Registry / Download-tab messages
             Message::InstallBackend(source) => {
+                // Clear a prior "failed to start" so the card reads "Installing…".
+                self.registry.install_errors.remove(&source);
                 let s = source.clone();
                 Task::perform(
                     async move { crate::daemon::registry::install_by_source(&s).await },
@@ -32,6 +34,7 @@ impl AppModel {
             }
 
             Message::InstallBackendFromRepoUrl(url) => {
+                self.registry.install_errors.remove(&url);
                 let u = url.clone();
                 Task::perform(
                     async move { crate::daemon::registry::install_by_repo_url(&u).await },
@@ -53,6 +56,8 @@ impl AppModel {
             Message::InstallAccepted { source, install_id } => {
                 use crate::state::registry::InstallStatus;
                 use super_stt_shared::registry::events::InstallPhase;
+                // The request was accepted — retire any prior start error.
+                self.registry.install_errors.remove(&source);
                 self.registry.installs.insert(
                     source,
                     InstallStatus {
@@ -68,11 +73,16 @@ impl AppModel {
 
             Message::InstallFailedToStart { source, error } => {
                 log::error!("install({source}) failed to start: {error}");
+                // Drop the pending marker (there is no background install) and
+                // record the reason so the Browse card shows "Failed" + a note
+                // instead of silently snapping back to the Install button.
                 self.registry.installs.remove(&source);
+                self.registry.install_errors.insert(source, error);
                 Task::none()
             }
 
             Message::UpdateBackend(source) => {
+                self.registry.install_errors.remove(&source);
                 let s = source.clone();
                 Task::perform(
                     async move { crate::daemon::registry::update(&s).await },
@@ -162,6 +172,7 @@ impl AppModel {
 
             Message::InstallCompleted { source } => {
                 self.registry.installs.remove(&source);
+                self.registry.install_errors.remove(&source);
                 // Refresh the installed-backends list so the new install
                 // shows up in the Installed tab.
                 Task::perform(list_backends(), |result| match result {

@@ -16,6 +16,11 @@ pub struct RegistryState {
     /// Cleared when the user retries that backend or it disappears from the
     /// reloaded catalog (i.e. the uninstall ultimately succeeded).
     pub uninstall_errors: HashMap<String, String>,
+    /// Install-request failures that never produced a background install
+    /// (`InstallFailedToStart`), keyed by `source`/repo-url. Surfaced on the
+    /// Browse card so a rejected request isn't silently dropped (Tier 1 #15).
+    /// Cleared when the user retries or the install ultimately succeeds.
+    pub install_errors: HashMap<String, String>,
     pub last_refresh: Option<RefreshOutcome>,
     /// In-progress URL text for the Custom-repo input in the Download tab.
     pub custom_repo_input: String,

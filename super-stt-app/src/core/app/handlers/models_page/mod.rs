@@ -235,12 +235,15 @@ impl AppModel {
                 self.context_page = ContextPage::ConfigureBackend;
                 self.core.window.show_context = true;
                 self.installed_menu_open = None;
+                // Start the sheet without a stale save-error banner.
+                self.action_error = None;
                 Task::none()
             }
 
             Message::CloseBackendConfig => {
                 self.configure_backend = None;
                 self.core.window.show_context = false;
+                self.action_error = None;
                 Task::none()
             }
 

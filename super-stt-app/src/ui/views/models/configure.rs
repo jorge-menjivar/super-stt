@@ -19,6 +19,12 @@ pub fn configure_sheet<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Eleme
 
     let mut body: Vec<Element<'a, Message>> = Vec::new();
 
+    // Surface a failed secret/option save inline in the sheet (Tier 1 #15)
+    // instead of dropping it to the log.
+    if let Some(message) = app.action_error_for(crate::state::ErrorScope::ConfigureBackend) {
+        body.push(crate::ui::views::common::error_banner(message));
+    }
+
     if backend.secrets.is_empty() && backend.options.is_empty() {
         body.push(text::body("This backend has nothing to configure.").into());
     } else {
