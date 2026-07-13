@@ -187,6 +187,13 @@ pub(crate) fn emit_sse_event(
     tx.send(Ok(axum::body::Bytes::from(bytes))).is_ok()
 }
 
+/// Monotonic id identifying one `/transcribe` request's claim on the shared
+/// preview slot, so a racing request clears only its own sender.
+fn next_preview_slot_id() -> u64 {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 pub(crate) async fn transcribe(
     State(s): State<AppState>,
     body: Option<axum::Json<serde_json::Value>>,
@@ -221,9 +228,24 @@ pub(crate) async fn transcribe(
     let daemon = Arc::clone(&s.daemon);
     tokio::spawn(async move {
         // Hook into the daemon's preview-text channel so each preview
-        // update gets forwarded as an SSE `preview` event.
+        // update gets forwarded as an SSE `preview` event. Claim the shared slot
+        // atomically: if another `/transcribe` already holds it we lost the
+        // busy-check race (line 203 is a plain read), so bail with an error
+        // frame rather than clobbering the winner's stream.
         let (preview_tx, mut preview_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        *daemon.preview_text.write().await = Some(preview_tx);
+        let slot_id = next_preview_slot_id();
+        {
+            let mut slot = daemon.preview_text.write().await;
+            if slot.is_some() {
+                let _ = emit_sse_event(
+                    &line_tx,
+                    "error",
+                    &serde_json::json!({ "message": "recording_in_progress" }),
+                );
+                return;
+            }
+            *slot = Some((slot_id, preview_tx));
+        }
 
         let cmd_fut = daemon.handle_command(req);
         let mut cmd_fut = std::pin::pin!(cmd_fut);
@@ -290,8 +312,15 @@ pub(crate) async fn transcribe(
         }
 
         // Phase 3: clear our preview slot and emit the terminal event.
-        // If the client is gone, the SSE sends are silent no-ops.
-        *daemon.preview_text.write().await = None;
+        // If the client is gone, the SSE sends are silent no-ops. Clear the slot
+        // only if it is still ours — a racing request must not null a sender it
+        // doesn't own.
+        {
+            let mut slot = daemon.preview_text.write().await;
+            if slot.as_ref().is_some_and(|(id, _)| *id == slot_id) {
+                *slot = None;
+            }
+        }
         if let Some(resp) = final_response {
             if resp.status == "success" {
                 let payload = serde_json::json!({

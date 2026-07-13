@@ -49,6 +49,12 @@ pub struct LoadedModel {
 /// Shared handle to the currently-loaded model (or `None` while idle/loading).
 pub type SharedLoadedModel = Arc<tokio::sync::RwLock<Option<LoadedModel>>>;
 
+/// The single `/transcribe` preview slot: an `(id, sender)` guarded by a lock,
+/// where `id` lets a racing request claim the slot only when free and clear it
+/// only when it is still its own.
+pub type PreviewSlot =
+    Arc<tokio::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<String>)>>>;
+
 #[derive(Clone)]
 pub struct SuperSTTDaemon {
     pub model: SharedLoadedModel,
@@ -75,8 +81,10 @@ pub struct SuperSTTDaemon {
     pub manual_stop_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::broadcast::Sender<()>>>>,
     // Cached keyboard simulator (session persists across recordings)
     pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
-    // Channel for streaming preview text to a waiting client (set by the recording flow)
-    pub preview_text: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
+    // Streams preview text to the one waiting `/transcribe` client. See
+    // [`PreviewSlot`]: the id closes the busy-check TOCTOU that let a losing
+    // request null the winner's preview stream.
+    pub preview_text: PreviewSlot,
     // Backends discovered from the backends directory.
     pub backends: Arc<tokio::sync::RwLock<Vec<DiscoveredBackend>>>,
     // Active backend: the relative install dir (subdir of the backends dir) of

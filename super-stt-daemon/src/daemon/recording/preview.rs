@@ -261,8 +261,9 @@ impl SuperSTTDaemon {
             // Live preview to widgets holding `global_transcriptions`.
             self.events.publish_partial_stt(processed.clone(), 1.0);
 
-            // Stream to waiting client
-            if let Some(ref tx) = *self.preview_text.read().await {
+            // Stream to the waiting client (the id is only used to gate slot
+            // claim/clear in the HTTP handler).
+            if let Some((_, ref tx)) = *self.preview_text.read().await {
                 let _ = tx.send(processed);
             }
 
