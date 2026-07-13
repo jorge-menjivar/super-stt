@@ -437,7 +437,7 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   its wording (`is_wire_invalid_session` deleted). The ad-hoc uninstall envelope was
   folded in under Tier 1 #5.
 
-### [ ] 4. 🟠 Download/verify plumbing
+### [x] 4. 🟠 Download/verify plumbing
 
 - **sha256:** `verify_sha256` at `stt_models/download.rs:64,185` compares
   case-insensitively; `registry/install.rs:432,499,602` compares `==`. One helper.
@@ -461,7 +461,7 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   `stt_models/download.rs:101-193` is a third implementation with better
   conventions (tmp+rename, cancellation, sync_all). Extract
   `stream_to_file(http, url, cap, dest, on_chunk) -> sha256`.
-- **Mostly resolved (`refactor/download-verify-hardening`), 4 of 5 sub-parts:**
+- **Resolved (`refactor/download-verify-hardening`), all 5 sub-parts:**
   a new `super-stt-registry-types::verify` hosts the shared download-verify
   policy — `sha256_matches` (case-insensitive; fixed three case-sensitive `==`
   compares in `install.rs`), the tar entry-safety predicate, and the unpack
@@ -472,10 +472,12 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   builders and fixes the indexer's timeout-less `Client::new()`. A
   `super-stt-registry-types::fs::write_atomic` (tmp + fsync + rename) replaces
   the daemon cache write and the indexer's two non-atomic `index.json` writers
-  (which also disagreed on a trailing newline — now consistent). **Deferred:**
-  the chunk-loop dedup (`stream_to_file`) — the three loops differ in
-  cancellation, error type, multi-part append, and fsync, so it's a risky
-  pure-dedup pass on the live download path and warrants its own careful change.
+  (which also disagreed on a trailing newline — now consistent). Finally,
+  `download_stream::stream_body_to_writer` unifies the three chunk loops
+  (single-file, multi-part append, cancellable model download): a writer-based
+  helper that hashes, enforces an optional cap, honors an optional cancellation
+  predicate, and reports per-chunk progress, with the caller owning file
+  lifecycle / verify / error mapping.
 
 ### [ ] 5. 🟠 Daemon connection supervisor + retry policy
 

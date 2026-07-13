@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::StreamExt;
-use ring::digest::{Context, SHA256};
+use ring::digest::SHA256;
 use super_stt_shared::registry::events::{InstallError, InstallPhase};
 use thiserror::Error;
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
 
+use crate::download_stream::{StreamError, stream_body_to_writer};
 use crate::registry::compat::Selection;
 use crate::registry::index_schema::{IndexAsset, IndexBackend};
 use super_stt_registry_types::verify::{
@@ -371,31 +371,31 @@ where
     let total = resp.content_length();
     let cap = download_cap(expected_size);
     let mut file = tokio::fs::File::create(dest).await?;
-    let mut hasher = Context::new(&SHA256);
-    let mut stream = resp.bytes_stream();
+    // Bound a server that streams past the index-declared size (or forever when
+    // no size was declared) before it fills the disk.
     let mut bytes_done: u64 = 0;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| {
-            log::warn!(
-                "install: stream error ({url}) after {bytes_done} bytes{}: {e}",
-                if e.is_timeout() { " [timeout]" } else { "" }
-            );
-            e
-        })?;
-        bytes_done += chunk.len() as u64;
-        // Bound a server that streams past the index-declared size (or forever
-        // when no size was declared) before it fills the disk.
-        if bytes_done > cap {
-            let _ = file.flush().await;
+    let result = stream_body_to_writer(
+        resp,
+        &mut file,
+        Some(cap),
+        || false,
+        |n| {
+            bytes_done += n;
+            on_progress(InstallPhase::Downloading, Some((bytes_done, total)));
+        },
+    )
+    .await;
+    match result {
+        Ok((_, sha)) => Ok(sha),
+        Err(StreamError::TooLarge { limit }) => {
             let _ = tokio::fs::remove_file(dest).await;
-            return Err(PipelineError::TooLarge { limit: cap });
+            Err(PipelineError::TooLarge { limit })
         }
-        file.write_all(&chunk).await?;
-        hasher.update(&chunk);
-        on_progress(InstallPhase::Downloading, Some((bytes_done, total)));
+        Err(StreamError::Http(e)) => Err(PipelineError::Network(e)),
+        Err(StreamError::Io(e)) => Err(PipelineError::Io(e)),
+        // `should_cancel` is `|| false` here, so cancellation never occurs.
+        Err(StreamError::Cancelled) => unreachable!("install download has no cancellation"),
     }
-    file.flush().await?;
-    Ok(hex::encode(hasher.finish().as_ref()))
 }
 
 /// Verify a downloaded asset's SHA-256 against the index pin. An empty pin is
@@ -449,38 +449,34 @@ where
                 );
                 e
             })?;
+        // Each part appends to the same `out`; progress spans the whole set.
         let cap = download_cap(part.size);
-        let mut hasher = Context::new(&SHA256);
-        let mut stream = resp.bytes_stream();
-        let mut part_done: u64 = 0;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| {
-                log::warn!(
-                    "install: stream error on part {} after {part_done}/{} bytes{}: {e}",
-                    part.url,
-                    part.size,
-                    if e.is_timeout() { " [timeout]" } else { "" }
+        let result = stream_body_to_writer(
+            resp,
+            &mut out,
+            Some(cap),
+            || false,
+            |n| {
+                overall += n;
+                on_progress(
+                    InstallPhase::Downloading,
+                    Some((overall, Some(total_expected))),
                 );
-                e
-            })?;
-            part_done += chunk.len() as u64;
-            if part_done > cap {
-                let _ = out.flush().await;
+            },
+        )
+        .await;
+        let actual = match result {
+            Ok((_, actual)) => actual,
+            Err(StreamError::TooLarge { limit }) => {
                 drop(out);
                 let _ = tokio::fs::remove_file(dest).await;
-                return Err(PipelineError::TooLarge { limit: cap });
+                return Err(PipelineError::TooLarge { limit });
             }
-            out.write_all(&chunk).await?;
-            hasher.update(&chunk);
-            overall += chunk.len() as u64;
-            on_progress(
-                InstallPhase::Downloading,
-                Some((overall, Some(total_expected))),
-            );
-        }
-        let actual = hex::encode(hasher.finish().as_ref());
+            Err(StreamError::Http(e)) => return Err(PipelineError::Network(e)),
+            Err(StreamError::Io(e)) => return Err(PipelineError::Io(e)),
+            Err(StreamError::Cancelled) => unreachable!("install download has no cancellation"),
+        };
         if !part.sha256.is_empty() && !sha256_matches(&actual, &part.sha256) {
-            let _ = out.flush().await;
             drop(out);
             let _ = tokio::fs::remove_file(dest).await;
             return Err(PipelineError::HashMismatch {
@@ -489,7 +485,6 @@ where
             });
         }
     }
-    out.flush().await?;
     Ok(())
 }
 
