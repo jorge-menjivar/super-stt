@@ -48,12 +48,13 @@ impl SuperSTTDaemon {
             }
         }
 
-        // Wait for recording to complete and return the transcription
+        // Wait for recording to complete and return the transcription.
         match self
             .record_and_transcribe(typer, write_mode, stop_mode)
             .await
         {
-            Ok(transcription) => {
+            // Cycle completed successfully (empty text = no speech, still success).
+            Ok(Ok(transcription)) => {
                 if transcription.trim().is_empty() {
                     info!("🎤 Recording completed - No speech detected");
                     DaemonResponse::success()
@@ -61,17 +62,23 @@ impl SuperSTTDaemon {
                         .with_transcription(String::new())
                 } else {
                     info!("🎤 Recording completed: '{transcription}'");
-
                     DaemonResponse::success()
                         .with_message("Recording completed successfully".to_string())
                         .with_transcription(transcription)
                 }
             }
+            // Capture/transcription failed after the cycle started. `finalize`
+            // already cleared `busy` and emitted `transcribing_stopped`; surface
+            // it as an error so the HTTP layer emits the `error` SSE event
+            // instead of a `done` with error text as the transcription.
+            Ok(Err(detail)) => {
+                warn!("🎤 Recording cycle failed: {detail}");
+                DaemonResponse::error(&detail)
+            }
+            // Setup failed before capture began: no `recording_started`/state(true)
+            // went out, so just release the busy guard the setup claimed.
             Err(e) => {
-                error!("🎤 Recording failed: {e}");
-                // record_and_transcribe only returns Err before capture began
-                // (setup failure), so no recording_started/state(true) went out.
-                // Just clear the busy guard so the daemon isn't locked out.
+                error!("🎤 Recording setup failed: {e}");
                 {
                     let mut guard = self.busy.write().await;
                     *guard = false;
@@ -91,12 +98,18 @@ impl SuperSTTDaemon {
     /// # Panics
     ///
     /// Panics if internal locks (e.g., audio theme or buffers) are poisoned.
+    /// Run one record→transcribe cycle. The outer `Result` is a *setup* failure
+    /// (before capture began, busy not yet consumed by a cycle); the inner
+    /// `Result` is the cycle outcome — `Ok(text)` on success, `Err(detail)` when
+    /// capture or transcription failed after the cycle started. A failure is
+    /// never returned as `Ok` success text and is never typed into the user's
+    /// window (finalize already reported it via `transcribing_stopped`).
     pub async fn record_and_transcribe(
         &self,
         typer: &mut Typer,
         write_mode: bool,
         stop_mode: RecordingStopMode,
-    ) -> Result<String> {
+    ) -> Result<Result<String, String>> {
         info!("Starting direct audio recording in daemon with simplified architecture");
 
         // Phase 1: spawn the recorder. `busy` is set inside setup.
@@ -118,13 +131,13 @@ impl SuperSTTDaemon {
             }
             Err(e) => {
                 // The recorder failed after capture started. Tell widgets the
-                // mic is done, then close the cycle as a failed transcription.
+                // mic is done, then close the cycle as a failed transcription —
+                // surfaced as an inner `Err`, never as success text.
                 self.emit_mic_stopped();
-                let message = format!("[recording error: {e}]");
                 warn!("Recording capture failed: {e}");
-                self.finalize_recording_session(&message, false, Some(e.to_string()))
+                self.finalize_recording_session("", false, Some(e.to_string()))
                     .await;
-                return Ok(message);
+                return Ok(Err(format!("recording error: {e}")));
             }
         };
 
@@ -136,14 +149,14 @@ impl SuperSTTDaemon {
         {
             Ok(text) => text,
             Err(e) => {
-                let message = format!("[STT error: {e}]");
+                // A transcription failure is not typed into the user's focused
+                // window (the old code typed "[STT error: …]"): finalize reports
+                // it via `transcribing_stopped`, and it surfaces as an inner
+                // `Err` so the HTTP layer emits the contract's `error` event.
                 warn!("Final transcription failed: {e}");
-                if write_mode {
-                    typer.process_final_text(&message);
-                }
-                self.finalize_recording_session(&message, false, Some(e.to_string()))
+                self.finalize_recording_session("", false, Some(e.to_string()))
                     .await;
-                return Ok(message);
+                return Ok(Err(format!("STT error: {e}")));
             }
         };
 
@@ -157,7 +170,7 @@ impl SuperSTTDaemon {
         self.finalize_recording_session(&transcription_result, true, None)
             .await;
 
-        Ok(transcription_result)
+        Ok(Ok(transcription_result))
     }
 
     /// Set up recording state and create audio recorder

@@ -1287,10 +1287,12 @@ async fn handle_transcribe_returns_backend_text() {
     assert_eq!(resp.transcription.as_deref(), Some("hello world"));
 }
 
-/// One-shot policy: a backend failure is reported as a *successful empty*
-/// transcription, not an error — the documented best-effort behavior.
+/// One-shot policy: a real backend failure is surfaced as an error response,
+/// not masked as a successful empty transcription (audit Tier 1 #6). "No speech"
+/// is an `Ok("")` from the backend and stays a success; a `Failed` dispatch is a
+/// genuine error.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn handle_transcribe_reports_backend_failure_as_empty_success() {
+async fn handle_transcribe_reports_backend_failure_as_error() {
     let daemon = test_daemon().await;
     seed_scripted_model(&daemon, true, Err(())).await;
 
@@ -1298,8 +1300,12 @@ async fn handle_transcribe_reports_backend_failure_as_empty_success() {
         .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string())
         .await;
 
-    assert_eq!(resp.status, "success");
-    assert_eq!(resp.transcription.as_deref(), Some(""));
+    assert_eq!(resp.status, "error");
+    assert!(
+        resp.message.as_deref().unwrap_or("").contains("failed"),
+        "error message should name the failure: {:?}",
+        resp.message
+    );
 }
 
 /// With no model loaded, the one-shot path returns an error response naming

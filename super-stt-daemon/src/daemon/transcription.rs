@@ -155,12 +155,12 @@ impl SuperSTTDaemon {
                 info!("Transcription completed in {duration:?}: '{text}'");
                 Ok(Ok((text, duration)))
             }
-            // A backend failure becomes an empty success — the one-shot path is
-            // best-effort and never surfaces "no speech" as an error.
+            // A real backend failure is surfaced, not masked as empty success —
+            // "no speech" is an `Ok("")` from the backend, so `Failed` here is a
+            // genuine error the caller must report.
             Err(DispatchError::Failed(e)) => {
-                warn!("Transcription failed, returning empty result: {e}");
-                let duration = start_time.elapsed();
-                Ok(Ok((String::new(), duration)))
+                warn!("Transcription failed: {e}");
+                Ok(Err(anyhow::anyhow!("Transcription failed: {e}")))
             }
             Err(DispatchError::NotLoaded) => {
                 error!("Model not loaded");
