@@ -110,10 +110,8 @@ impl Client {
     ///
     /// # Errors
     /// Returns a `ClientError` on network failure, I/O error, or JSON parse error.
-    ///
-    /// # Panics
-    /// Panics only if the in-memory cache is unexpectedly empty after a 304 Not-Modified
-    /// response (should never happen in practice).
+    /// Returns `ClientError::Unavailable` if the server answers with an unsolicited
+    /// `304 Not Modified` and there is no cached index to fall back on.
     pub async fn refresh(&self) -> Result<Index, ClientError> {
         // Load from disk if memory is empty.
         let etag = {
@@ -141,10 +139,16 @@ impl Client {
         let resp = req.send().await?;
 
         if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
-            if let Some(c) = self.state.write().as_mut() {
-                c.fetched_at = SystemTime::now();
-            }
-            return Ok(self.state.read().as_ref().unwrap().index.clone());
+            // A 304 is only valid as the answer to our conditional request, so a
+            // cached index should exist to refresh. If it doesn't — a misbehaving
+            // proxy replying 304 when we sent no `If-None-Match` — treat it as
+            // unavailable rather than unwrapping `None` and panicking the daemon.
+            let mut guard = self.state.write();
+            let Some(c) = guard.as_mut() else {
+                return Err(ClientError::Unavailable);
+            };
+            c.fetched_at = SystemTime::now();
+            return Ok(c.index.clone());
         }
 
         let resp = resp.error_for_status()?;
@@ -222,6 +226,26 @@ mod tests {
         let idx = c.refresh().await.unwrap();
         assert_eq!(idx.schema_version, 1);
         assert!(dir.path().join("c.json").exists());
+    }
+
+    #[tokio::test]
+    async fn unsolicited_304_without_cache_is_unavailable_not_panic() {
+        // A misbehaving proxy can answer 304 even though we sent no
+        // If-None-Match (fresh client, no disk cache). Must surface as
+        // Unavailable, not panic on an empty in-memory cache.
+        crate::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        s.mock("GET", "/idx.json")
+            .with_status(304)
+            .create_async()
+            .await;
+        let dir = tempdir().unwrap();
+        let c = Client::new(
+            format!("{}/idx.json", s.url()),
+            dir.path().join("c.json"),
+            DEFAULT_TTL,
+        );
+        assert!(matches!(c.refresh().await, Err(ClientError::Unavailable)));
     }
 
     #[tokio::test]
