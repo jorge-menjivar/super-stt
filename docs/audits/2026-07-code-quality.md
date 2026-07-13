@@ -125,7 +125,7 @@ Three patterns account for the majority of findings:
   doc. Chose the registry envelope over the house one since uninstall is install's
   inverse and returns a registry type.
 
-### [ ] 6. 🔴 Daemon: STT failures are masked as success
+### [x] 6. 🔴 Daemon: STT failures are masked as success
 
 - **Where:** one-shot transcribe (`daemon/transcription.rs:156-161`), the recording
   flow (`daemon/recording/mod.rs:122-138`), and the SSE terminal event
@@ -137,8 +137,15 @@ Three patterns account for the majority of findings:
   `error` event.
 - **Fix:** propagate the failure; emit the contract's `error` SSE event; never type
   error text.
+- **Resolved (`b4e67b2`, branch `refactor/connection-retry`):** `run_transcription`
+  propagates `DispatchError::Failed` as an error (no-speech is an `Ok("")` from the
+  backend, so `Failed` is a genuine failure). `record_and_transcribe` returns
+  `Result<Result<String, String>>` — outer = setup failure, inner `Err` =
+  post-capture failure — so `handle_record_internal` surfaces it as an error
+  response (HTTP emits the contract's `error` event, not `done`) and it is never
+  typed into the user's window. Updated the characterization test.
 
-### [ ] 7. 🟠 Daemon: `POST /v1/transcribe` busy-check TOCTOU on the preview slot
+### [x] 7. 🟠 Daemon: `POST /v1/transcribe` busy-check TOCTOU on the preview slot
 
 - **Where:** busy check at `transcribe.rs:203`; busy is set later in
   `recording/mod.rs:167-175`; the loser nulls the daemon-global preview sender at
@@ -148,6 +155,11 @@ Three patterns account for the majority of findings:
 - **Impact:** the winner's preview stream is silently killed.
 - **Fix:** claim the slot under the same write that sets `busy`, and clear only if
   it is still your sender.
+- **Resolved (`f511874`, branch `refactor/connection-retry`):** the shared preview
+  slot is now `PreviewSlot = Option<(u64, Sender)>`. A request claims it only when
+  free (bailing with a `recording_in_progress` error frame if another holds it) and
+  clears it only when the id is still its own, so a losing racer can neither clobber
+  nor null the winner's sender.
 
 ### [ ] 8. 🟠 Daemon: `--no-default-features --features wasm-backends` does not compile
 
@@ -462,7 +474,7 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   conventions (tmp+rename, cancellation, sync_all). Extract
   `stream_to_file(http, url, cap, dest, on_chunk) -> sha256`.
 
-### [ ] 5. 🟠 Daemon connection supervisor + retry policy
+### [x] 5. 🟠 Daemon connection supervisor + retry policy
 
 - **Where:** three reconnect policies against the same daemon — shared
   `next_backoff` (doubling 1s→30s, no jitter), applet `RetryStrategy`
@@ -474,16 +486,18 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   `app subscription.rs:11-101`, `handlers/daemon/mod.rs:74-208`).
 - **Fix:** promote `RetryStrategy` and a generic subscription bridge into shared;
   per-app topics/scopes/messages stay per-crate.
-- **Partially resolved (`refactor/connection-retry`):** the retry *policy* is
-  unified — `RetryStrategy` (exponential + ±10% jitter) now lives in
-  `super-stt-shared::daemon::retry`. The applet uses it directly (its local copy
-  + test deleted) and the shared widget-subscription reconnect loop drives it
-  instead of the jitter-less `next_backoff` doubling, so the SSE reconnect now
-  jitters too. Also fixed a latent `% 0` panic in `next_delay` for sub-10 ms
-  initial delays. **Remaining:** the settings app still reconnects on a flat 5 s
-  sleep (`handlers/daemon/mod.rs`) — adopting `RetryStrategy` there needs an
-  attempt-counter field on `AppModel`; and the app/applet subscription *bridges*
-  are still per-crate adapters over the shared `run_widget_subscription`.
+- **Resolved (`refactor/connection-retry`):** the retry *policy* is unified across
+  all three clients. `RetryStrategy` (exponential + ±10% jitter) now lives in
+  `super-stt-shared::daemon::retry`; the applet uses it directly (its local copy +
+  test deleted), the shared widget-subscription reconnect loop drives it instead
+  of the jitter-less `next_backoff` doubling (so the SSE reconnect jitters too),
+  and the settings app reconnect drops its flat 5 s sleep for a
+  `reconnect_retry: RetryStrategy` field on `AppModel` (advanced on failure, reset
+  on connect). Also fixed a latent `% 0` panic in `next_delay` for sub-10 ms
+  initial delays. The generic subscription bridge (`run_widget_subscription`) was
+  already shared; both clients' remaining `subscription.rs` are thin per-crate
+  adapters (config + update→message mapping), which is by design — per the fix's
+  "per-app topics/scopes/messages stay per-crate".
 
 ### [ ] 6. 🟡 Logging init
 
