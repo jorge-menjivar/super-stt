@@ -55,11 +55,7 @@ impl Client {
     pub fn new(url: impl Into<String>, cache_path: PathBuf, ttl: Duration) -> Self {
         Self {
             url: url.into(),
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(20))
-                .redirect(reqwest::redirect::Policy::limited(5))
-                .build()
-                .unwrap(),
+            http: super_stt_forge::http::short_client(),
             cache_path,
             ttl,
             state: Arc::default(),
@@ -193,9 +189,7 @@ impl Client {
                 .as_secs(),
             index: serde_json::from_slice(body)?,
         };
-        let tmp = self.cache_path.with_extension("tmp");
-        std::fs::write(&tmp, serde_json::to_vec(&file)?)?;
-        std::fs::rename(tmp, &self.cache_path)?;
+        super_stt_registry_types::fs::write_atomic(&self.cache_path, &serde_json::to_vec(&file)?)?;
         Ok(())
     }
 }

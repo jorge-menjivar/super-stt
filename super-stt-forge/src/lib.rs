@@ -2,6 +2,7 @@
 //! Pluggable git-forge clients.
 
 mod github;
+pub mod http;
 pub use github::Github;
 
 use async_trait::async_trait;

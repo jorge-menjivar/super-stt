@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod daemon;
 pub mod download_progress;
+pub mod download_stream;
 pub mod input;
 pub mod keyring;
 pub mod output;

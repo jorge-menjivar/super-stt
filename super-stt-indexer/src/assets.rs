@@ -10,6 +10,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use ring::digest::{Context, SHA256};
+use super_stt_registry_types::verify::{tar_budget_step, tar_entry_unsafe_reason, unpack_cap};
 use thiserror::Error;
 
 /// Ceiling for a single release asset — a `file` or one part of a multi-part
@@ -31,6 +32,8 @@ pub enum AssetError {
     NotWasm(String),
     #[error("tarball `{file}` contains escape entry `{entry}`")]
     TarEscape { file: String, entry: String },
+    #[error("tarball `{file}` breaches the unpack budget: {reason}")]
+    TarBudget { file: String, reason: String },
     #[error("tarball `{file}` does not contain `bin/{entrypoint}`")]
     TarMissingEntrypoint { file: String, entrypoint: String },
     #[error(transparent)]
@@ -180,37 +183,52 @@ pub fn validate_subprocess_parts(
     file: &str,
     entrypoint: &str,
 ) -> Result<(), AssetError> {
+    // Compressed size = sum of the part files; the unpack budget scales with it
+    // so the indexer applies the same zip-bomb ceiling the daemon enforces at
+    // install (a green publish that would fail every install is rejected here).
+    let mut compressed: u64 = 0;
     let mut chained: Box<dyn Read> = Box::new(std::io::empty());
     for p in parts {
+        compressed = compressed.saturating_add(std::fs::metadata(p)?.len());
         let f = std::fs::File::open(p)?;
         chained = Box::new(chained.chain(f));
     }
-    validate_tarball_read(file, entrypoint, chained)
+    validate_tarball_read(file, entrypoint, chained, unpack_cap(compressed))
 }
 
 /// The tar-content checks, over any reader: rejects path-traversal and symlink
-/// entries and requires `bin/<entrypoint>` (or the bare entrypoint path).
-fn validate_tarball_read<R: Read>(file: &str, entrypoint: &str, r: R) -> Result<(), AssetError> {
+/// entries (the shared [`tar_entry_unsafe_reason`] predicate), enforces the
+/// per-entry and total unpack budgets ([`tar_budget_step`], `total_cap` from
+/// [`unpack_cap`]), and requires `bin/<entrypoint>` (or the bare entrypoint
+/// path). The safety predicate and budgets are the exact ones the daemon
+/// applies at install.
+fn validate_tarball_read<R: Read>(
+    file: &str,
+    entrypoint: &str,
+    r: R,
+    total_cap: u64,
+) -> Result<(), AssetError> {
     let gz = flate2::read::GzDecoder::new(r);
     let mut archive = tar::Archive::new(gz);
     let mut found_entrypoint = false;
+    let mut total: u64 = 0;
     for entry in archive.entries()? {
         let entry = entry?;
         let path = entry.path()?;
         let s = path.to_string_lossy();
-        if s.starts_with('/') || s.contains("..") {
+        if let Some(reason) = tar_entry_unsafe_reason(&s, entry.header().entry_type().is_symlink())
+        {
             return Err(AssetError::TarEscape {
                 file: file.into(),
-                entry: s.into(),
+                entry: reason,
             });
         }
-        if entry.header().entry_type().is_symlink() {
-            // Reject symlinks outright; the daemon's installer also rejects.
-            return Err(AssetError::TarEscape {
+        total = tar_budget_step(entry.size(), total, total_cap).map_err(|reason| {
+            AssetError::TarBudget {
                 file: file.into(),
-                entry: s.into(),
-            });
-        }
+                reason,
+            }
+        })?;
         // Accept the entrypoint at its declared path (e.g. `bin/qwen3-asr`),
         // or the legacy bare-name-under-bin form (`bin/<entrypoint>`).
         if s == entrypoint || s == format!("bin/{entrypoint}") {
@@ -228,7 +246,7 @@ fn validate_tarball_read<R: Read>(file: &str, entrypoint: &str, r: R) -> Result<
 
 #[cfg(test)]
 fn validate_tarball(file: &str, entrypoint: &str, bytes: &[u8]) -> Result<(), AssetError> {
-    validate_tarball_read(file, entrypoint, bytes)
+    validate_tarball_read(file, entrypoint, bytes, unpack_cap(bytes.len() as u64))
 }
 
 #[cfg(test)]
@@ -268,6 +286,31 @@ mod tests {
                 .unwrap();
         });
         validate_tarball("q.tar.gz", "bin/qwen3-asr", &bytes).unwrap();
+    }
+
+    #[test]
+    fn rejects_output_over_the_unpack_budget_at_publish() {
+        // The unpack budget is now enforced at publish (it wasn't before), so a
+        // tarball whose unpacked output exceeds the cap is rejected here rather
+        // than passing publish and failing every install. Drive the validator
+        // with a deliberately tiny `total_cap` so the check trips on a small
+        // archive — no need to materialize gigabytes.
+        let bytes = make_tarball(|tb| {
+            let body = vec![0u8; 200];
+            let mut h = tar::Header::new_gnu();
+            h.set_size(body.len() as u64);
+            h.set_mode(0o755);
+            h.set_cksum();
+            tb.append_data(&mut h, "bin/voxtral", &body[..]).unwrap();
+        });
+        // total_cap = 100 < the 200-byte entry.
+        let err = validate_tarball_read("v.tar.gz", "voxtral", &bytes[..], 100).unwrap_err();
+        assert!(
+            matches!(err, AssetError::TarBudget { .. }),
+            "expected TarBudget, got {err:?}"
+        );
+        // The same archive validates when the cap is generous.
+        validate_tarball_read("v.tar.gz", "voxtral", &bytes[..], 10_000).unwrap();
     }
 
     #[test]

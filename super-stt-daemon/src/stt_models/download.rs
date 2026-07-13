@@ -9,15 +9,16 @@
 //! only downloader the daemon keeps now that model inference lives entirely in
 //! out-of-tree backends.
 
+use crate::download_stream::{StreamError, stream_body_to_writer};
 use anyhow::Result;
-use futures::StreamExt;
 use log::info;
 use ring::digest::{Context, SHA256};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use super_stt_registry_types::verify::sha256_matches;
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 
 use crate::download_progress::DownloadProgressTracker;
 
@@ -61,7 +62,7 @@ async fn usable_existing(dest: &Path, sha256: Option<&str>) -> Result<Option<u64
     }
     if let Some(expected) = sha256 {
         let actual = sha256_hex_of_file(dest).await?;
-        if !actual.eq_ignore_ascii_case(expected) {
+        if !sha256_matches(&actual, expected) {
             info!(
                 "Hash mismatch for existing {} (expected {expected}, got {actual}); re-downloading",
                 dest.display()
@@ -154,38 +155,42 @@ async fn download_one(
 
     let tmp = parent.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
     let mut file = fs::File::create(&tmp).await?;
-    let mut hasher = item.sha256.as_ref().map(|_| Context::new(&SHA256));
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        if let Some(t) = tracker
-            && t.is_cancelled()
-        {
+    // No byte cap for model files (unlike the registry install path); the
+    // download is cancellable and progress is reported through `tracker`.
+    let result = stream_body_to_writer(
+        response,
+        &mut file,
+        None,
+        || tracker.is_some_and(|t| t.is_cancelled()),
+        |n| {
+            if let Some(t) = tracker {
+                t.bytes_downloaded.fetch_add(n, Ordering::Relaxed);
+                // The tracker throttles to 1% increments, so per-chunk is fine.
+                t.broadcast_progress();
+            }
+        },
+    )
+    .await;
+    let actual = match result {
+        Ok((_, actual)) => actual,
+        Err(StreamError::Cancelled) => {
             let _ = fs::remove_file(&tmp).await;
             anyhow::bail!("download cancelled");
         }
-        let bytes = chunk?;
-        file.write_all(&bytes).await?;
-        if let Some(h) = hasher.as_mut() {
-            h.update(&bytes);
-        }
-        if let Some(t) = tracker {
-            t.bytes_downloaded
-                .fetch_add(bytes.len() as u64, Ordering::Relaxed);
-            // The tracker throttles to 1% increments, so per-chunk is fine.
-            t.broadcast_progress();
-        }
-    }
-    file.flush().await?;
+        Err(e) => return Err(e.into()),
+    };
+    // Flush already happened in the helper; fsync before publishing at the final
+    // path so a crash can't leave a renamed-but-unflushed file.
     file.sync_all().await?;
     drop(file);
 
-    // Verify before publishing the file at its final path.
-    if let (Some(h), Some(expected)) = (hasher, item.sha256.as_ref()) {
-        let actual = hex::encode(h.finish().as_ref());
-        if !actual.eq_ignore_ascii_case(expected) {
-            let _ = fs::remove_file(&tmp).await;
-            anyhow::bail!("SHA-256 mismatch for {name}: expected {expected}, got {actual}");
-        }
+    // Verify before publishing the file at its final path. The hash is always
+    // computed; verify only when the item declares a pin.
+    if let Some(expected) = item.sha256.as_ref()
+        && !sha256_matches(&actual, expected)
+    {
+        let _ = fs::remove_file(&tmp).await;
+        anyhow::bail!("SHA-256 mismatch for {name}: expected {expected}, got {actual}");
     }
 
     fs::rename(&tmp, dest).await?;
@@ -217,10 +222,7 @@ pub async fn download_files(
     starting_file_index: usize,
 ) -> Result<()> {
     crate::install_crypto_provider();
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_hours(1))
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .build()?;
+    let client = super_stt_forge::http::download_client();
 
     for (offset, item) in items.iter().enumerate() {
         if let Some(t) = tracker

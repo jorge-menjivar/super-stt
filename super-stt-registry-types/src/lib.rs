@@ -5,6 +5,7 @@
 
 pub mod entry;
 pub mod forge;
+pub mod fs;
 pub mod index;
 pub mod license;
 pub mod manifest;
@@ -12,5 +13,6 @@ pub mod provider;
 mod safe_path;
 #[cfg(feature = "schema")]
 pub mod schema;
+pub mod verify;
 
 pub use safe_path::{is_safe_component, is_safe_relative_path};
