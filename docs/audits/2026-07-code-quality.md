@@ -137,7 +137,7 @@ Three patterns account for the majority of findings:
   `error` event.
 - **Fix:** propagate the failure; emit the contract's `error` SSE event; never type
   error text.
-- **Resolved (`b4e67b2`, branch `refactor/connection-retry`):** `run_transcription`
+- **Resolved (`b4e67b2`, branch `refactor/audit-batch-hardening`):** `run_transcription`
   propagates `DispatchError::Failed` as an error (no-speech is an `Ok("")` from the
   backend, so `Failed` is a genuine failure). `record_and_transcribe` returns
   `Result<Result<String, String>>` — outer = setup failure, inner `Err` =
@@ -155,7 +155,7 @@ Three patterns account for the majority of findings:
 - **Impact:** the winner's preview stream is silently killed.
 - **Fix:** claim the slot under the same write that sets `busy`, and clear only if
   it is still your sender.
-- **Resolved (`f511874`, branch `refactor/connection-retry`):** the shared preview
+- **Resolved (`f511874`, branch `refactor/audit-batch-hardening`):** the shared preview
   slot is now `PreviewSlot = Option<(u64, Sender)>`. A request claims it only when
   free (bailing with a `recording_in_progress` error frame if another holds it) and
   clears it only when the id is still its own, so a losing racer can neither clobber
@@ -473,7 +473,7 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   `stt_models/download.rs:101-193` is a third implementation with better
   conventions (tmp+rename, cancellation, sync_all). Extract
   `stream_to_file(http, url, cap, dest, on_chunk) -> sha256`.
-- **Resolved (`refactor/download-verify-hardening`), all 5 sub-parts:**
+- **Resolved (`refactor/audit-batch-hardening`), all 5 sub-parts:**
   a new `super-stt-registry-types::verify` hosts the shared download-verify
   policy — `sha256_matches` (case-insensitive; fixed three case-sensitive `==`
   compares in `install.rs`), the tar entry-safety predicate, and the unpack
@@ -503,7 +503,7 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   `app subscription.rs:11-101`, `handlers/daemon/mod.rs:74-208`).
 - **Fix:** promote `RetryStrategy` and a generic subscription bridge into shared;
   per-app topics/scopes/messages stay per-crate.
-- **Resolved (`refactor/connection-retry`):** the retry *policy* is unified across
+- **Resolved (`refactor/audit-batch-hardening`):** the retry *policy* is unified across
   all three clients. `RetryStrategy` (exponential + ±10% jitter) now lives in
   `super-stt-shared::daemon::retry`; the applet uses it directly (its local copy +
   test deleted), the shared widget-subscription reconnect loop drives it instead
