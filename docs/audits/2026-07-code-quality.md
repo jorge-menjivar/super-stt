@@ -474,6 +474,16 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   `app subscription.rs:11-101`, `handlers/daemon/mod.rs:74-208`).
 - **Fix:** promote `RetryStrategy` and a generic subscription bridge into shared;
   per-app topics/scopes/messages stay per-crate.
+- **Partially resolved (`refactor/connection-retry`):** the retry *policy* is
+  unified — `RetryStrategy` (exponential + ±10% jitter) now lives in
+  `super-stt-shared::daemon::retry`. The applet uses it directly (its local copy
+  + test deleted) and the shared widget-subscription reconnect loop drives it
+  instead of the jitter-less `next_backoff` doubling, so the SSE reconnect now
+  jitters too. Also fixed a latent `% 0` panic in `next_delay` for sub-10 ms
+  initial delays. **Remaining:** the settings app still reconnects on a flat 5 s
+  sleep (`handlers/daemon/mod.rs`) — adopting `RetryStrategy` there needs an
+  attempt-counter field on `AppModel`; and the app/applet subscription *bridges*
+  are still per-crate adapters over the shared `run_widget_subscription`.
 
 ### [ ] 6. 🟡 Logging init
 

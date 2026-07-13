@@ -187,11 +187,6 @@ pub fn is_user_denied(err: &crate::daemon::http_client::HttpError) -> bool {
     matches!(err, crate::daemon::http_client::HttpError::AuthDenied { reason } if is_user_denied_reason(reason))
 }
 
-fn next_backoff(current: Duration, max: Duration) -> Duration {
-    let doubled = current.saturating_mul(2);
-    if doubled > max { max } else { doubled }
-}
-
 /// Outcome of trying to obtain a token at the top of a loop iteration.
 enum TokenOutcome {
     Ready(String),
@@ -266,7 +261,12 @@ pub fn run_widget_subscription(
     config: WidgetSubscriptionConfig,
 ) -> impl futures_util::Stream<Item = WidgetSubscriptionUpdate> + Send + 'static {
     async_stream::stream! {
-        let mut backoff = config.initial_backoff;
+        let mut retry = super::retry::RetryStrategy {
+            attempt: 0,
+            initial_delay: config.initial_backoff,
+            max_delay: config.max_backoff,
+            use_exponential_backoff: true,
+        };
         loop {
             let token = match acquire_token(&socket, &config).await {
                 TokenOutcome::Ready(t) => t,
@@ -276,14 +276,14 @@ pub fn run_widget_subscription(
                 }
                 TokenOutcome::Reauth(reason) => {
                     yield WidgetSubscriptionUpdate::NeedsReauth { reason };
-                    tokio::time::sleep(backoff).await;
-                    backoff = next_backoff(backoff, config.max_backoff);
+                    tokio::time::sleep(retry.next_delay()).await;
+                    retry.should_retry();
                     continue;
                 }
                 TokenOutcome::Disconnected(reason) => {
                     yield WidgetSubscriptionUpdate::Disconnected { reason };
-                    tokio::time::sleep(backoff).await;
-                    backoff = next_backoff(backoff, config.max_backoff);
+                    tokio::time::sleep(retry.next_delay()).await;
+                    retry.should_retry();
                     continue;
                 }
             };
@@ -296,13 +296,13 @@ pub fn run_widget_subscription(
                 }
                 OpenOutcome::Disconnected(reason) => {
                     yield WidgetSubscriptionUpdate::Disconnected { reason };
-                    tokio::time::sleep(backoff).await;
-                    backoff = next_backoff(backoff, config.max_backoff);
+                    tokio::time::sleep(retry.next_delay()).await;
+                    retry.should_retry();
                     continue;
                 }
             };
             yield WidgetSubscriptionUpdate::Connected;
-            backoff = config.initial_backoff;
+            retry.reset();
 
             // Read with an idle deadline. EOF / timeout / revoked all break out.
             let mut reauth = None;
@@ -338,8 +338,8 @@ pub fn run_widget_subscription(
                 yield WidgetSubscriptionUpdate::NeedsReauth { reason };
                 continue;
             }
-            tokio::time::sleep(backoff).await;
-            backoff = next_backoff(backoff, config.max_backoff);
+            tokio::time::sleep(retry.next_delay()).await;
+            retry.should_retry();
         }
     }
 }

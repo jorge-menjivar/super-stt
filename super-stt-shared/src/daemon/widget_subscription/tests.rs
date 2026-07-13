@@ -1,24 +1,7 @@
 use super::*;
 
-#[test]
-fn next_backoff_doubles_then_caps() {
-    assert_eq!(
-        next_backoff(Duration::from_secs(1), Duration::from_secs(30)),
-        Duration::from_secs(2)
-    );
-    assert_eq!(
-        next_backoff(Duration::from_secs(2), Duration::from_secs(30)),
-        Duration::from_secs(4)
-    );
-    assert_eq!(
-        next_backoff(Duration::from_secs(16), Duration::from_secs(30)),
-        Duration::from_secs(30)
-    );
-    assert_eq!(
-        next_backoff(Duration::from_secs(30), Duration::from_secs(30)),
-        Duration::from_secs(30)
-    );
-}
+// Backoff progression is now `RetryStrategy` (see `daemon::retry` tests); the
+// subscription loop just drives it via `next_delay`/`should_retry`/`reset`.
 
 #[test]
 fn http_error_is_invalid_session_matches_only_invalid_session() {
