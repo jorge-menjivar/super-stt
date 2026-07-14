@@ -321,12 +321,16 @@ Three patterns account for the majority of findings:
   (only folding + capping to 200 chars when it is set) and unit-tested the
   empty-HOME regression, the fold, and the cap.
 
-### [ ] 17. 🟡 App: `handle_daemon_events` returns from inside the loop
+### [x] 17. 🟡 App: `handle_daemon_events` returns from inside the loop
 
 - **Where:** `handlers/daemon/events.rs:16-34`.
 - **Problem:** drops all events after the first that yields a task. Latent today
   (producers wrap singletons) but the API takes a `Vec`.
 - **Fix:** collect tasks across the whole batch and return them together.
+- **Resolved (branch `refactor/audit-app-tier1-16-19`):** the loop now pushes each
+  event's task into a `Vec`, processes the whole batch (so `last_event_timestamp`
+  advances past every event), appends the final `update_title()`, and returns
+  `Task::batch(tasks)`.
 
 ### [ ] 18. 🟡 App: reconnect force-navigates to Customization
 

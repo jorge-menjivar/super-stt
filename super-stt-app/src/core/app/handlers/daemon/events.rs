@@ -15,22 +15,28 @@ impl AppModel {
         match message {
             Message::DaemonEventsReceived(events) => {
                 debug!("Received {} daemon events", events.len());
+                // Process EVERY event and collect their tasks. Returning on the
+                // first event that yields a task dropped the rest of the batch
+                // (and left `last_event_timestamp` stuck before them) — latent
+                // only because producers currently wrap singletons (Tier 1 #17).
+                let mut tasks = Vec::new();
                 for event in events {
                     // Update timestamp for next polling
                     self.last_event_timestamp = Some(event.timestamp.clone());
 
                     if event.event_type == "daemon_status_changed" {
                         if let Some(task) = self.process_daemon_status_event(&event) {
-                            return task;
+                            tasks.push(task);
                         }
                     } else if event.event_type == "download_progress"
                         && let Some(task) = self.process_download_progress_event(&event)
                     {
-                        return task;
+                        tasks.push(task);
                     }
                 }
                 // Force UI update after processing events that may change state
-                self.update_title()
+                tasks.push(self.update_title());
+                Task::batch(tasks)
             }
 
             _ => Task::none(),
