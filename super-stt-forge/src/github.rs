@@ -135,9 +135,19 @@ impl ForgeClient for Github {
             .collect())
     }
 
-    async fn download(&self, url: &str) -> Result<Vec<u8>, ForgeError> {
-        let r = self.http.get(url).send().await?.error_for_status()?;
-        Ok(r.bytes().await?.to_vec())
+    async fn download(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, ForgeError> {
+        let mut resp = self.http.get(url).send().await?.error_for_status()?;
+        // Stream chunk-by-chunk with a running total instead of buffering the
+        // whole body up front, so an oversized (or endless) response is rejected
+        // as soon as it crosses the cap rather than after it is fully in memory.
+        let mut body: Vec<u8> = Vec::new();
+        while let Some(chunk) = resp.chunk().await? {
+            if body.len() as u64 + chunk.len() as u64 > max_bytes {
+                return Err(ForgeError::TooLarge { limit: max_bytes });
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
     }
 }
 
@@ -197,8 +207,29 @@ mod tests {
             .create_async()
             .await;
         let gh = Github::new(s.url(), None);
-        let bytes = gh.download(&format!("{}/asset", s.url())).await.unwrap();
+        let bytes = gh
+            .download(&format!("{}/asset", s.url()), 1024)
+            .await
+            .unwrap();
         assert_eq!(&bytes, b"hello");
+    }
+
+    #[tokio::test]
+    async fn download_rejects_body_over_the_cap() {
+        crate::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        s.mock("GET", "/big")
+            .with_status(200)
+            .with_body("hello world") // 11 bytes
+            .create_async()
+            .await;
+        let gh = Github::new(s.url(), None);
+        // Cap below the body size — must abort with TooLarge, not buffer it all.
+        let err = gh
+            .download(&format!("{}/big", s.url()), 4)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::ForgeError::TooLarge { limit: 4 }));
     }
 
     #[tokio::test]

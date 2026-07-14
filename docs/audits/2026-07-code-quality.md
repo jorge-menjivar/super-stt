@@ -441,7 +441,7 @@ Three patterns account for the majority of findings:
   value; `docs/protocol/endpoints/v1/recording_stop_mode.md` was updated to document
   the fallback (only an *absent* `mode` is a client error). New tests pin both paths.
 
-### [ ] 27. 🔴 Forge: `ForgeClient::download` buffers unbounded bodies *(security)*
+### [x] 27. 🔴 Forge: `ForgeClient::download` buffers unbounded bodies *(security)*
 
 - **Where:** `github.rs:143-147` reads the whole body into memory;
   `custom_repo.rs` size-checks only declared (attacker-controlled) metadata before
@@ -449,6 +449,13 @@ Three patterns account for the majority of findings:
 - **Fix:** add `max_bytes` to the trait and stream with an accumulating check — the
   pattern already exists at `registry/install.rs:633-650` and
   `indexer/src/assets.rs:144-171`.
+- **Resolved (branch `refactor/audit-tier1-25-29`):** `ForgeClient::download` gained a
+  `max_bytes` param; the GitHub adapter now streams `resp.chunk()` with a running
+  total and aborts with the new `ForgeError::TooLarge` the instant the body would
+  exceed the cap (no full buffering). The one production caller (`custom_repo.rs`
+  manifest fetch) passes `MAX_MANIFEST_BYTES` and maps `TooLarge` →
+  `ManifestTooLarge`, retiring the after-the-fact `len()` check. Added a
+  cap-rejection test.
 
 ### [ ] 28. 🟠 Indexer: one malformed `repo` string aborts the entire index build
 

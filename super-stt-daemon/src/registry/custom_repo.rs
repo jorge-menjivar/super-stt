@@ -75,10 +75,16 @@ pub async fn resolve(
     }
     let manifest_url = manifest_asset.download_url.clone();
     let manifest_size = manifest_asset.size;
-    let manifest_bytes = client.download(&manifest_url).await?;
-    if manifest_bytes.len() > MAX_MANIFEST_BYTES {
-        return Err(ResolveError::ManifestTooLarge);
-    }
+    // The declared `size` above is attacker-controlled metadata, so enforce the
+    // real cap during the transfer: `download` streams and aborts the moment the
+    // body would exceed it, rather than buffering an unbounded body first.
+    let manifest_bytes = client
+        .download(&manifest_url, MAX_MANIFEST_BYTES as u64)
+        .await
+        .map_err(|e| match e {
+            super_stt_forge::ForgeError::TooLarge { .. } => ResolveError::ManifestTooLarge,
+            e @ super_stt_forge::ForgeError::Http(_) => ResolveError::Forge(e),
+        })?;
     let manifest_text = String::from_utf8(manifest_bytes)?;
     // Parse through the canonical manifest so a custom-repo install is validated
     // exactly as the daemon's own discovery will validate it: typed

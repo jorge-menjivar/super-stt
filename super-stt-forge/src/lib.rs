@@ -81,6 +81,8 @@ pub struct ReleaseAsset {
 pub enum ForgeError {
     #[error("HTTP: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("response body exceeded the {limit}-byte cap")]
+    TooLarge { limit: u64 },
 }
 
 impl ForgeError {
@@ -90,6 +92,7 @@ impl ForgeError {
     pub fn http_status(&self) -> Option<reqwest::StatusCode> {
         match self {
             ForgeError::Http(e) => e.status(),
+            ForgeError::TooLarge { .. } => None,
         }
     }
 }
@@ -109,11 +112,14 @@ pub trait ForgeClient: Send + Sync {
     /// Network failure or a non-2xx response from the forge.
     async fn list_releases(&self, repo: &RepoRef) -> Result<Vec<Release>, ForgeError>;
     /// Download raw bytes from an asset URL, reusing the adapter's configured
-    /// HTTP client (timeouts, redirects).
+    /// HTTP client (timeouts, redirects). The body is streamed with an
+    /// accumulating cap: as soon as it would exceed `max_bytes` the download is
+    /// aborted with [`ForgeError::TooLarge`], so a malicious forge/proxy can't
+    /// OOM the caller by serving a huge body regardless of the declared size.
     ///
     /// # Errors
-    /// Network failure or a non-2xx response.
-    async fn download(&self, url: &str) -> Result<Vec<u8>, ForgeError>;
+    /// Network failure, a non-2xx response, or a body over `max_bytes`.
+    async fn download(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, ForgeError>;
 }
 
 /// Build the client for a forge. The match is exhaustive with no catch-all
