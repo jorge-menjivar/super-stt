@@ -7,7 +7,7 @@ use cosmic::widget::{self, button, text};
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::ui::icons;
-use crate::ui::messages::Message;
+use crate::ui::messages::{Message, ModelsPageMessage};
 
 use super::active::backend_glyph_tile;
 use super::chips::{
@@ -65,18 +65,21 @@ pub(super) fn installed_card<'a>(
     // Overflow ("⋯") menu: the optional Update, then Uninstall. Configure left
     // the menu to become a visible button beside it.
     let menu_open = app.installed_menu_open.as_deref() == Some(source.as_str());
-    let trigger = button::icon(icons::phosphor_handle(icons::DOTS_THREE_VERTICAL))
-        .on_press(Message::ToggleInstalledMenu(source.clone()));
+    let trigger = button::icon(icons::phosphor_handle(icons::DOTS_THREE_VERTICAL)).on_press(
+        Message::ModelsPage(ModelsPageMessage::ToggleInstalledMenu(source.clone())),
+    );
     let mut overflow = widget::popover(trigger).position(widget::popover::Position::Bottom);
     if menu_open {
         overflow = overflow
             .popup(installed_overflow_menu(&source, update_version))
-            .on_close(Message::CloseInstalledMenu);
+            .on_close(Message::ModelsPage(ModelsPageMessage::CloseInstalledMenu));
     }
 
     let actions = row![
         repo_button(&source),
-        button::standard("Configure").on_press(Message::OpenBackendConfig(source.clone())),
+        button::standard("Configure").on_press(Message::ModelsPage(
+            ModelsPageMessage::OpenBackendConfig(source.clone()),
+        )),
         overflow,
     ]
     .spacing(spacing.space_xs)
@@ -153,12 +156,12 @@ pub(super) fn installed_overflow_menu(
     if let Some(v) = update_version {
         col = col.push(item(
             format!("Update to {v}"),
-            Message::UpdateBackend(source.to_string()),
+            Message::ModelsPage(ModelsPageMessage::UpdateBackend(source.to_string())),
         ));
     }
     col = col.push(item(
         "Uninstall".to_string(),
-        Message::UninstallBackend(source.to_string()),
+        Message::ModelsPage(ModelsPageMessage::UninstallBackend(source.to_string())),
     ));
 
     widget::container(col)

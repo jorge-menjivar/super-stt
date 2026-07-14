@@ -4,7 +4,7 @@ use cosmic::iced::Length;
 use cosmic::widget::{self, button, text};
 
 use crate::core::app::AppModel;
-use crate::ui::messages::Message;
+use crate::ui::messages::{Message, ModelsPageMessage};
 
 /// Tab switcher for the Models page (Installed / Browse): flat text tabs with an
 /// accent border marking the active one, over a full-width hairline divider.
@@ -12,7 +12,7 @@ use crate::ui::messages::Message;
 /// buttons.
 ///
 /// Still driven by `app.models_tabs`, so clicking a tab emits the same
-/// [`Message::ModelsTabActivated`] the segmented-button model expects.
+/// [`ModelsPageMessage::ModelsTabActivated`] the segmented-button model expects.
 pub(super) fn models_tab_switcher(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let active = app.models_tabs.active();
@@ -34,7 +34,9 @@ pub(super) fn models_tab_switcher(app: &AppModel) -> Element<'_, Message> {
 
         let inner = button::custom(label_text)
             .padding([spacing.space_xxs, spacing.space_s])
-            .on_press(Message::ModelsTabActivated(entity))
+            .on_press(Message::ModelsPage(ModelsPageMessage::ModelsTabActivated(
+                entity,
+            )))
             .class(tab_inner_class(is_active));
 
         // Accent border on the top and sides only (open at the bottom): an

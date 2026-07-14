@@ -6,7 +6,7 @@ use cosmic::widget::{self, settings, text};
 
 use crate::core::app::AppModel;
 use crate::daemon::backends::{BackendInfo, BackendOption, BackendSecret};
-use crate::ui::messages::Message;
+use crate::ui::messages::{BackendMessage, Message};
 
 use super::surface::muted_text_color;
 
@@ -111,10 +111,12 @@ pub(super) fn secret_row<'a>(
         let remove_name = name_owned.clone();
         row![
             text::body("Configured").width(Length::Fill),
-            widget::button::destructive("Remove").on_press(Message::BackendSecretRemoved {
-                source: remove_source,
-                name: remove_name,
-            }),
+            widget::button::destructive("Remove").on_press(Message::Backend(
+                BackendMessage::BackendSecretRemoved {
+                    source: remove_source,
+                    name: remove_name,
+                },
+            )),
         ]
         .spacing(spacing.space_s)
         .align_y(Alignment::Center)
@@ -123,17 +125,21 @@ pub(super) fn secret_row<'a>(
         let input_source = source_owned.clone();
         let input_name = name_owned.clone();
         let field = widget::text_input("Enter API key...", input)
-            .on_input(move |value| Message::BackendSecretInputChanged {
-                source: input_source.clone(),
-                name: input_name.clone(),
-                value,
+            .on_input(move |value| {
+                Message::Backend(BackendMessage::BackendSecretInputChanged {
+                    source: input_source.clone(),
+                    name: input_name.clone(),
+                    value,
+                })
             })
             .password()
             .width(Length::Fill);
-        let save = widget::button::standard("Save").on_press(Message::BackendSecretSaved {
-            source: source_owned,
-            name: name_owned,
-        });
+        let save = widget::button::standard("Save").on_press(Message::Backend(
+            BackendMessage::BackendSecretSaved {
+                source: source_owned,
+                name: name_owned,
+            },
+        ));
         row![field, save]
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center)
@@ -181,26 +187,32 @@ pub(super) fn option_row<'a>(
     let save_name = input_name.clone();
 
     let field = widget::text_input("", input)
-        .on_input(move |value| Message::BackendOptionInputChanged {
-            source: input_source.clone(),
-            name: input_name.clone(),
-            value,
+        .on_input(move |value| {
+            Message::Backend(BackendMessage::BackendOptionInputChanged {
+                source: input_source.clone(),
+                name: input_name.clone(),
+                value,
+            })
         })
         .width(Length::Fill);
-    let save = widget::button::standard("Save").on_press(Message::BackendOptionSaved {
-        source: save_source,
-        name: save_name,
-    });
+    let save = widget::button::standard("Save").on_press(Message::Backend(
+        BackendMessage::BackendOptionSaved {
+            source: save_source,
+            name: save_name,
+        },
+    ));
 
     // Show Reset only when an override is stored (value differs from default).
     let has_override = option.value.as_deref() != option.default.as_deref();
     let control: Element<'a, Message> = if has_override {
         let reset_source = source.to_string();
         let reset_name = option.name.clone();
-        let reset = widget::button::standard("Reset").on_press(Message::BackendOptionReset {
-            source: reset_source,
-            name: reset_name,
-        });
+        let reset = widget::button::standard("Reset").on_press(Message::Backend(
+            BackendMessage::BackendOptionReset {
+                source: reset_source,
+                name: reset_name,
+            },
+        ));
         row![field, save, reset]
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center)

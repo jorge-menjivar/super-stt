@@ -5,7 +5,7 @@ use cosmic::widget::{self, button, column, scrollable, text_input};
 
 use crate::core::app::AppModel;
 use crate::ui::languages::{GLOBAL_LANGUAGES, friendly_name};
-use crate::ui::messages::Message;
+use crate::ui::messages::{LanguageMessage, Message};
 
 pub fn sheet(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
@@ -58,19 +58,19 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
 
     // Search field pinned at the top.
     let search = text_input("Search languages…", &app.language_picker_query)
-        .on_input(Message::LanguagePickerQueryChanged)
+        .on_input(|s| Message::Language(LanguageMessage::LanguagePickerQueryChanged(s)))
         .width(Length::Fill);
 
     let mut list = column::with_capacity(rows.len()).spacing(spacing.space_xxs);
     for (tag, label) in rows {
         let msg = if let Some((ref src, ref mdl)) = app.language_picker_target {
-            Message::ModelLanguageSelected {
+            Message::Language(LanguageMessage::ModelLanguageSelected {
                 source: src.clone(),
                 model: mdl.clone(),
                 choice: tag,
-            }
+            })
         } else {
-            Message::PrimaryLanguageSelected(tag)
+            Message::Language(LanguageMessage::PrimaryLanguageSelected(tag))
         };
         list = list.push(button::text(label).width(Length::Fill).on_press(msg));
     }

@@ -2,58 +2,58 @@
 
 use crate::core::app::AppModel;
 use crate::daemon::client::list_backends;
-use crate::ui::messages::Message;
+use crate::ui::messages::{BackendMessage, Message, ModelsPageMessage};
 use cosmic::prelude::*;
 
 impl AppModel {
     pub(in crate::core::app) fn handle_models_install_lifecycle(
         &mut self,
-        message: Message,
+        message: ModelsPageMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
             // Registry / Download-tab messages
-            Message::InstallBackend(source) => {
+            ModelsPageMessage::InstallBackend(source) => {
                 // Clear a prior "failed to start" so the card reads "Installing…".
                 self.registry.install_errors.remove(&source);
                 let s = source.clone();
                 Task::perform(
                     async move { crate::daemon::registry::install_by_source(&s).await },
                     move |res| {
-                        cosmic::Action::App(match res {
-                            Ok(a) => Message::InstallAccepted {
+                        cosmic::Action::App(Message::ModelsPage(match res {
+                            Ok(a) => ModelsPageMessage::InstallAccepted {
                                 source: source.clone(),
                                 install_id: a.install_id,
                             },
-                            Err(e) => Message::InstallFailedToStart {
+                            Err(e) => ModelsPageMessage::InstallFailedToStart {
                                 source: source.clone(),
                                 error: e.to_string(),
                             },
-                        })
+                        }))
                     },
                 )
             }
 
-            Message::InstallBackendFromRepoUrl(url) => {
+            ModelsPageMessage::InstallBackendFromRepoUrl(url) => {
                 self.registry.install_errors.remove(&url);
                 let u = url.clone();
                 Task::perform(
                     async move { crate::daemon::registry::install_by_repo_url(&u).await },
                     move |res| {
-                        cosmic::Action::App(match res {
-                            Ok(a) => Message::InstallAccepted {
+                        cosmic::Action::App(Message::ModelsPage(match res {
+                            Ok(a) => ModelsPageMessage::InstallAccepted {
                                 source: url.clone(),
                                 install_id: a.install_id,
                             },
-                            Err(e) => Message::InstallFailedToStart {
+                            Err(e) => ModelsPageMessage::InstallFailedToStart {
                                 source: url.clone(),
                                 error: e.to_string(),
                             },
-                        })
+                        }))
                     },
                 )
             }
 
-            Message::InstallAccepted { source, install_id } => {
+            ModelsPageMessage::InstallAccepted { source, install_id } => {
                 use crate::state::registry::InstallStatus;
                 use super_stt_shared::registry::events::InstallPhase;
                 // The request was accepted — retire any prior start error.
@@ -71,7 +71,7 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::InstallFailedToStart { source, error } => {
+            ModelsPageMessage::InstallFailedToStart { source, error } => {
                 log::error!("install({source}) failed to start: {error}");
                 // Drop the pending marker (there is no background install) and
                 // record the reason so the Browse card shows "Failed" + a note
@@ -81,7 +81,7 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::UpdateBackend(source) => {
+            ModelsPageMessage::UpdateBackend(source) => {
                 self.registry.install_errors.remove(&source);
                 let s = source.clone();
                 Task::perform(
@@ -91,16 +91,18 @@ impl AppModel {
                             Ok(r) if r.noop => {
                                 log::info!("update({source}) noop — already at {}", r.to_version);
                                 // Nothing to do; let the UI settle naturally.
-                                Message::BackendsReload
+                                Message::Backend(BackendMessage::BackendsReload)
                             }
-                            Ok(r) => Message::InstallAccepted {
+                            Ok(r) => Message::ModelsPage(ModelsPageMessage::InstallAccepted {
                                 source: source.clone(),
                                 install_id: r.install_id.unwrap_or_default(),
-                            },
-                            Err(e) => Message::InstallFailedToStart {
-                                source: source.clone(),
-                                error: e.to_string(),
-                            },
+                            }),
+                            Err(e) => {
+                                Message::ModelsPage(ModelsPageMessage::InstallFailedToStart {
+                                    source: source.clone(),
+                                    error: e.to_string(),
+                                })
+                            }
                         })
                     },
                 )
@@ -113,10 +115,10 @@ impl AppModel {
     /// Uninstall lifecycle: kick off the request and surface its failure.
     pub(in crate::core::app) fn handle_models_uninstall(
         &mut self,
-        message: Message,
+        message: ModelsPageMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::UninstallBackend(source) => {
+            ModelsPageMessage::UninstallBackend(source) => {
                 // Clear any stale failure so the row reads "in progress" on retry.
                 self.registry.uninstall_errors.remove(&source);
                 let s = source.clone();
@@ -124,17 +126,17 @@ impl AppModel {
                     async move { crate::daemon::registry::uninstall(&s).await },
                     move |res| {
                         cosmic::Action::App(match res {
-                            Ok(_) => Message::BackendsReload,
-                            Err(error) => Message::UninstallFailed {
+                            Ok(_) => Message::Backend(BackendMessage::BackendsReload),
+                            Err(error) => Message::ModelsPage(ModelsPageMessage::UninstallFailed {
                                 source: source.clone(),
                                 error: error.to_string(),
-                            },
+                            }),
                         })
                     },
                 )
             }
 
-            Message::UninstallFailed { source, error } => {
+            ModelsPageMessage::UninstallFailed { source, error } => {
                 log::error!("uninstall({source}) failed: {error}");
                 self.registry.uninstall_errors.insert(source, error);
                 Task::none()
@@ -146,10 +148,10 @@ impl AppModel {
 
     pub(in crate::core::app) fn handle_models_install_progress(
         &mut self,
-        message: Message,
+        message: ModelsPageMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::InstallProgress {
+            ModelsPageMessage::InstallProgress {
                 install_id,
                 source,
                 phase,
@@ -170,18 +172,22 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::InstallCompleted { source } => {
+            ModelsPageMessage::InstallCompleted { source } => {
                 self.registry.installs.remove(&source);
                 self.registry.install_errors.remove(&source);
                 // Refresh the installed-backends list so the new install
                 // shows up in the Installed tab.
                 Task::perform(list_backends(), |result| match result {
-                    Ok(backends) => cosmic::Action::App(Message::BackendsLoaded(backends)),
-                    Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
+                    Ok(backends) => cosmic::Action::App(Message::Backend(
+                        BackendMessage::BackendsLoaded(backends),
+                    )),
+                    Err(e) => cosmic::Action::App(Message::Backend(BackendMessage::BackendsError(
+                        e.to_string(),
+                    ))),
                 })
             }
 
-            Message::InstallFailed {
+            ModelsPageMessage::InstallFailed {
                 install_id,
                 source,
                 phase,

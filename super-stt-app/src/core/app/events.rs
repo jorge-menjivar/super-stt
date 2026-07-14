@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::DaemonStatus;
-use crate::ui::messages::Message;
+use crate::ui::messages::{DaemonMessage, Message, ModelsPageMessage, RecordingMessage};
 use log::warn;
 
 /// Classify a daemon [`HttpError`] into the right next `DaemonStatus`.
@@ -36,27 +36,29 @@ pub(super) fn settings_widget_event_to_message(
     use serde_json::Value;
     let p: &Value = &evt.payload;
     match evt.name.as_str() {
-        "recording_state" => Some(Message::WidgetRecordingState(
+        "recording_state" => Some(Message::Recording(RecordingMessage::WidgetRecordingState(
             p.get("is_recording")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
-        )),
+        ))),
         "frequency_bands" => {
             // reason: audio energy values are small positive floats well within f32 range; precision loss is acceptable for level display.
             #[allow(clippy::cast_possible_truncation)]
             let total_energy = p.get("total_energy").and_then(Value::as_f64).unwrap_or(0.0) as f32;
             let level = raw_level_to_db_display_percent(total_energy);
             let is_speech = total_energy > 0.0001;
-            Some(Message::WidgetAudioLevel { level, is_speech })
+            Some(Message::Recording(RecordingMessage::WidgetAudioLevel {
+                level,
+                is_speech,
+            }))
         }
         // `daemon_status_changed` and `download_progress` arrive as
         // settings-scope SSE topics now; the existing
         // `Message::DaemonEventsReceived` handler already knows how to
         // dispatch the legacy JSON shape, so we wrap each event in a
         // singleton `NotificationEvent` and feed it through unchanged.
-        "daemon_status_changed" | "download_progress" => {
-            widget_event_to_notification(evt).map(|n| Message::DaemonEventsReceived(vec![n]))
-        }
+        "daemon_status_changed" | "download_progress" => widget_event_to_notification(evt)
+            .map(|n| Message::Daemon(DaemonMessage::DaemonEventsReceived(vec![n]))),
         "registry_install" => {
             use super_stt_shared::registry::events::RegistryEvent;
             let p = &evt.payload;
@@ -68,27 +70,29 @@ pub(super) fn settings_widget_event_to_message(
                         phase,
                         bytes_done,
                         bytes_total,
-                    } => Some(Message::InstallProgress {
+                    } => Some(Message::ModelsPage(ModelsPageMessage::InstallProgress {
                         install_id,
                         source,
                         phase,
                         bytes_done,
                         bytes_total,
-                    }),
+                    })),
                     RegistryEvent::Completed { source, .. } => {
-                        Some(Message::InstallCompleted { source })
+                        Some(Message::ModelsPage(ModelsPageMessage::InstallCompleted {
+                            source,
+                        }))
                     }
                     RegistryEvent::Failed {
                         install_id,
                         source,
                         phase,
                         error,
-                    } => Some(Message::InstallFailed {
+                    } => Some(Message::ModelsPage(ModelsPageMessage::InstallFailed {
                         install_id,
                         source,
                         phase,
                         error,
-                    }),
+                    })),
                     RegistryEvent::RefreshCompleted { .. }
                     | RegistryEvent::RefreshFailed { .. } => None,
                 }

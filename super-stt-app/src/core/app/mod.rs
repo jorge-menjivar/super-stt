@@ -11,7 +11,7 @@ use subscription::{UdpSubscriptionId, audio_events_subscription};
 
 use crate::daemon::backends::BackendInfo;
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, RecordingStatus};
-use crate::ui::messages::Message;
+use crate::ui::messages::{DaemonMessage, Message, ModelsPageMessage, ShellMessage};
 use cosmic::app::context_drawer;
 use cosmic::iced::Subscription;
 use cosmic::prelude::*;
@@ -312,11 +312,11 @@ impl cosmic::Application for AppModel {
             ),
             // Periodic connection monitoring
             cosmic::iced::time::every(std::time::Duration::from_secs(PING_INTERVAL_SECS))
-                .map(|_| Message::PingTimeout),
+                .map(|_| Message::Daemon(DaemonMessage::PingTimeout)),
             // Periodic GPU inventory/memory refresh (gated on connection in the
             // handler, so it's a no-op while disconnected).
             cosmic::iced::time::every(std::time::Duration::from_secs(GPU_POLL_INTERVAL_SECS))
-                .map(|_| Message::RefreshGpuInfo),
+                .map(|_| Message::ModelsPage(ModelsPageMessage::RefreshGpuInfo)),
         ])
     }
 
@@ -347,7 +347,9 @@ impl menu::action::MenuAction for MenuAction {
 
     fn message(&self) -> Self::Message {
         match self {
-            MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+            MenuAction::About => {
+                Message::Shell(ShellMessage::ToggleContextPage(ContextPage::About))
+            }
         }
     }
 }

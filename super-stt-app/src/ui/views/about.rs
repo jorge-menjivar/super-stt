@@ -6,7 +6,7 @@ use cosmic::iced_widget::column;
 use cosmic::widget::{self, button};
 use cosmic::{Element, cosmic_theme, theme};
 
-use crate::ui::messages::Message;
+use crate::ui::messages::{Message, ShellMessage};
 
 const APP_ICON: &[u8] =
     include_bytes!("../../../resources/icons/hicolor/scalable/apps/super-stt-app.svg");
@@ -25,7 +25,7 @@ pub fn page() -> Element<'static, Message> {
     let date = env!("VERGEN_GIT_COMMIT_DATE");
 
     let link = widget::button::link(REPOSITORY)
-        .on_press(Message::OpenRepositoryUrl)
+        .on_press(Message::Shell(ShellMessage::OpenRepositoryUrl))
         .padding(0);
 
     column![
@@ -33,7 +33,9 @@ pub fn page() -> Element<'static, Message> {
         title,
         link,
         button::link(format!("Git: {short_hash} ({date})"))
-            .on_press(Message::LaunchUrl(format!("{REPOSITORY}/commits/{hash}")))
+            .on_press(Message::Shell(ShellMessage::LaunchUrl(format!(
+                "{REPOSITORY}/commits/{hash}"
+            ))))
             .padding(0),
     ]
     .align_x(Alignment::Center)

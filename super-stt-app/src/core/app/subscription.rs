@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::daemon::client::internal::session::SETTINGS_SCOPES;
-use crate::ui::messages::Message;
+use crate::ui::messages::{DaemonMessage, Message};
 use futures_util::SinkExt;
 use log::{info, warn};
 
@@ -66,7 +66,7 @@ pub(super) fn audio_events_subscription(
                     // re-fetch now that live events are flowing — so a model
                     // that finished loading before this subscription completed
                     // is still picked up.
-                    Message::EventStreamConnected
+                    Message::Daemon(DaemonMessage::EventStreamConnected)
                 }
                 WidgetSubscriptionUpdate::Event(evt) => {
                     match settings_widget_event_to_message(&evt) {
@@ -89,7 +89,7 @@ pub(super) fn audio_events_subscription(
                     // Forward to the update loop so the UI flips to
                     // the Blocked state (Retry button) instead of
                     // sitting silently with a dead audio meter.
-                    Message::WidgetBlocked(reason)
+                    Message::Daemon(DaemonMessage::WidgetBlocked(reason))
                 }
             };
             if channel.send(msg).await.is_err() {

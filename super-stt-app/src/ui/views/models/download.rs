@@ -7,7 +7,7 @@ use cosmic::{Apply, Element};
 use crate::core::app::AppModel;
 use crate::state::ContextPage;
 use crate::ui::icons;
-use crate::ui::messages::Message;
+use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
 
 use super::active::backend_header;
 use super::chips::{capability_chips, result_count};
@@ -97,12 +97,15 @@ pub(super) fn download_toolbar<'a>(
         "Search backends, models, or providers\u{2026}",
         &filters.search,
     )
-    .on_input(Message::RegistrySearchChanged)
-    .on_clear(Message::RegistrySearchChanged(String::new()))
+    .on_input(|x| Message::ModelsPage(ModelsPageMessage::RegistrySearchChanged(x)))
+    .on_clear(Message::ModelsPage(
+        ModelsPageMessage::RegistrySearchChanged(String::new()),
+    ))
     .width(Length::Fill);
 
-    let add_btn = button::suggested("+ Add backend")
-        .on_press(Message::ToggleContextPage(ContextPage::AddBackend));
+    let add_btn = button::suggested("+ Add backend").on_press(Message::Shell(
+        ShellMessage::ToggleContextPage(ContextPage::AddBackend),
+    ));
     // Refresh shows as an icon-only button (a refresh glyph) with a tooltip
     // rather than a text label. A `Standard`-classed custom button gives it the
     // surface fill + hairline border that matches the neighbouring text buttons.
@@ -120,7 +123,7 @@ pub(super) fn download_toolbar<'a>(
         .class(cosmic::theme::Button::Standard)
         .padding(0)
         .height(Length::Fixed(f32::from(btn_height)))
-        .on_press(Message::RefreshRegistry),
+        .on_press(Message::ModelsPage(ModelsPageMessage::RefreshRegistry)),
         widget::container(text::body("Refresh registry")).padding(spacing.space_xxs),
         widget::tooltip::Position::Bottom,
     );
@@ -137,24 +140,24 @@ pub(super) fn download_toolbar<'a>(
             (
                 "All",
                 filters.online.is_none(),
-                Message::RegistryOnlineFilter(None),
+                Message::ModelsPage(ModelsPageMessage::RegistryOnlineFilter(None)),
             ),
             (
                 "Local",
                 filters.online == Some(false),
-                Message::RegistryOnlineFilter(Some(false)),
+                Message::ModelsPage(ModelsPageMessage::RegistryOnlineFilter(Some(false))),
             ),
             (
                 "Cloud",
                 filters.online == Some(true),
-                Message::RegistryOnlineFilter(Some(true)),
+                Message::ModelsPage(ModelsPageMessage::RegistryOnlineFilter(Some(true))),
             ),
         ],
     );
     let show_incompat = cosmic::widget::toggler(filters.include_incompatible)
         .label("Show incompatible".to_string())
         .spacing(spacing.space_xs)
-        .on_toggle(Message::RegistryIncludeIncompatible);
+        .on_toggle(|x| Message::ModelsPage(ModelsPageMessage::RegistryIncludeIncompatible(x)));
 
     // RUNS ON chips on the left; the incompatible toggle pushed to the right edge.
     let filter_row = row![runs_on, horizontal_space(), show_incompat]
@@ -217,7 +220,7 @@ pub(super) fn download_empty_state(app: &AppModel) -> Element<'_, Message> {
     );
     column![
         text::body(msg),
-        button::standard("Retry").on_press(Message::RefreshRegistry),
+        button::standard("Retry").on_press(Message::ModelsPage(ModelsPageMessage::RefreshRegistry)),
         widget::text(updated_label).size(10),
     ]
     .spacing(cosmic::theme::spacing().space_s)
@@ -274,7 +277,9 @@ pub(super) fn download_card<'a>(
         button::standard(label).into()
     } else if entry.compatibility.compatible {
         button::suggested("Install")
-            .on_press(Message::InstallBackend(entry.source.clone()))
+            .on_press(Message::ModelsPage(ModelsPageMessage::InstallBackend(
+                entry.source.clone(),
+            )))
             .into()
     } else {
         button::standard("Not compatible").into()

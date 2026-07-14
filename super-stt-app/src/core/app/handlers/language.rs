@@ -2,35 +2,35 @@
 use crate::core::app::AppModel;
 use crate::daemon::client::v1::settings::language as client;
 use crate::state::models::ContextPage;
-use crate::ui::messages::Message;
+use crate::ui::messages::{DaemonMessage, LanguageMessage, Message};
 use cosmic::prelude::*;
 
 impl AppModel {
     pub(in crate::core::app) fn handle_language_messages(
         &mut self,
-        message: Message,
+        message: LanguageMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::OpenLanguagePicker { model } => {
+            LanguageMessage::OpenLanguagePicker { model } => {
                 self.language_picker_target = model;
                 self.language_picker_query.clear();
                 self.context_page = ContextPage::LanguagePicker;
                 self.core.window.show_context = true;
                 Task::none()
             }
-            Message::CloseLanguagePicker => {
+            LanguageMessage::CloseLanguagePicker => {
                 self.core.window.show_context = false;
                 Task::none()
             }
-            Message::LanguagePickerQueryChanged(q) => {
+            LanguageMessage::LanguagePickerQueryChanged(q) => {
                 self.language_picker_query = q;
                 Task::none()
             }
-            Message::PrimaryLanguageLoaded(lang) => {
+            LanguageMessage::PrimaryLanguageLoaded(lang) => {
                 self.primary_language = lang;
                 Task::none()
             }
-            Message::PrimaryLanguageSelected(choice) => {
+            LanguageMessage::PrimaryLanguageSelected(choice) => {
                 self.primary_language.clone_from(&choice);
                 self.core.window.show_context = false;
                 Task::perform(
@@ -41,12 +41,16 @@ impl AppModel {
                         }
                     },
                     |res| match res {
-                        Ok(()) => cosmic::Action::App(Message::RefreshDaemonStatus),
-                        Err(e) => cosmic::Action::App(Message::LanguageError(e.to_string())),
+                        Ok(()) => {
+                            cosmic::Action::App(Message::Daemon(DaemonMessage::RefreshDaemonStatus))
+                        }
+                        Err(e) => cosmic::Action::App(Message::Language(
+                            LanguageMessage::LanguageError(e.to_string()),
+                        )),
                     },
                 )
             }
-            Message::ModelLanguageLoaded {
+            LanguageMessage::ModelLanguageLoaded {
                 source,
                 model,
                 block,
@@ -55,7 +59,7 @@ impl AppModel {
                 self.model_language_for = Some((source, model));
                 Task::none()
             }
-            Message::ModelLanguageSelected {
+            LanguageMessage::ModelLanguageSelected {
                 source,
                 model,
                 choice,
@@ -71,20 +75,23 @@ impl AppModel {
                         }
                     },
                     move |res| match res {
-                        Ok(block) => cosmic::Action::App(Message::ModelLanguageLoaded {
-                            source: src.clone(),
-                            model: mdl.clone(),
-                            block,
-                        }),
-                        Err(e) => cosmic::Action::App(Message::LanguageError(e.to_string())),
+                        Ok(block) => cosmic::Action::App(Message::Language(
+                            LanguageMessage::ModelLanguageLoaded {
+                                source: src.clone(),
+                                model: mdl.clone(),
+                                block,
+                            },
+                        )),
+                        Err(e) => cosmic::Action::App(Message::Language(
+                            LanguageMessage::LanguageError(e.to_string()),
+                        )),
                     },
                 )
             }
-            Message::LanguageError(e) => {
+            LanguageMessage::LanguageError(e) => {
                 log::warn!("Language settings error: {e}");
                 Task::none()
             }
-            _ => Task::none(),
         }
     }
 
@@ -92,8 +99,12 @@ impl AppModel {
     #[allow(clippy::unused_self)]
     pub(in crate::core::app) fn load_primary_language(&self) -> Task<cosmic::Action<Message>> {
         Task::perform(client::get_primary_language(), |res| match res {
-            Ok(lang) => cosmic::Action::App(Message::PrimaryLanguageLoaded(lang)),
-            Err(e) => cosmic::Action::App(Message::LanguageError(e.to_string())),
+            Ok(lang) => cosmic::Action::App(Message::Language(
+                LanguageMessage::PrimaryLanguageLoaded(lang),
+            )),
+            Err(e) => cosmic::Action::App(Message::Language(LanguageMessage::LanguageError(
+                e.to_string(),
+            ))),
         })
     }
 
@@ -111,12 +122,16 @@ impl AppModel {
         Task::perform(
             client::get_model_language(source, model),
             move |res| match res {
-                Ok(block) => cosmic::Action::App(Message::ModelLanguageLoaded {
-                    source: src.clone(),
-                    model: mdl.clone(),
-                    block,
-                }),
-                Err(e) => cosmic::Action::App(Message::LanguageError(e.to_string())),
+                Ok(block) => {
+                    cosmic::Action::App(Message::Language(LanguageMessage::ModelLanguageLoaded {
+                        source: src.clone(),
+                        model: mdl.clone(),
+                        block,
+                    }))
+                }
+                Err(e) => cosmic::Action::App(Message::Language(LanguageMessage::LanguageError(
+                    e.to_string(),
+                ))),
             },
         )
     }

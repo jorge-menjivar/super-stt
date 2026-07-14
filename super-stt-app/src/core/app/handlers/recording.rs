@@ -6,7 +6,7 @@ use crate::daemon::client::{
     stop_record_command,
 };
 use crate::state::{AudioTheme, ErrorScope, RecordingStatus};
-use crate::ui::messages::Message;
+use crate::ui::messages::{Message, RecordingMessage};
 use cosmic::prelude::*;
 use futures_util::StreamExt;
 use super_stt_shared::daemon::http_client::HttpError;
@@ -23,30 +23,31 @@ impl AppModel {
     /// Route recording/audio messages to the appropriate helper.
     pub(in crate::core::app) fn handle_recording_messages(
         &mut self,
-        message: Message,
+        message: RecordingMessage,
     ) -> Task<cosmic::Action<Message>> {
         match &message {
-            Message::StartRecording
-            | Message::StopRecording
-            | Message::PreviewTextReceived(_)
-            | Message::TranscriptionReceived(_) => self.handle_recording_control(message),
+            RecordingMessage::StartRecording
+            | RecordingMessage::StopRecording
+            | RecordingMessage::PreviewTextReceived(_)
+            | RecordingMessage::TranscriptionReceived(_) => self.handle_recording_control(message),
 
-            Message::AudioFeedbackToggled(_)
-            | Message::AudioThemeSelected(_)
-            | Message::AudioThemesLoaded(_)
-            | Message::VolumeChanged(_)
-            | Message::VolumeCommit
-            | Message::WidgetAudioLevel { .. }
-            | Message::WidgetRecordingState(_) => self.handle_audio_messages(message),
-
-            _ => Task::none(),
+            RecordingMessage::AudioFeedbackToggled(_)
+            | RecordingMessage::AudioThemeSelected(_)
+            | RecordingMessage::AudioThemesLoaded(_)
+            | RecordingMessage::VolumeChanged(_)
+            | RecordingMessage::VolumeCommit
+            | RecordingMessage::WidgetAudioLevel { .. }
+            | RecordingMessage::WidgetRecordingState(_) => self.handle_audio_messages(message),
         }
     }
 
     /// Handle recording control messages: start/stop recording and transcription results.
-    fn handle_recording_control(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    fn handle_recording_control(
+        &mut self,
+        message: RecordingMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::StartRecording => {
+            RecordingMessage::StartRecording => {
                 if matches!(self.recording_status, RecordingStatus::Recording) {
                     return Task::none();
                 }
@@ -56,31 +57,31 @@ impl AppModel {
 
                 let stream = record_command_stream();
                 cosmic::task::stream(stream.map(|event| match event {
-                    RecordEvent::Preview(text) => {
-                        cosmic::Action::App(Message::PreviewTextReceived(text))
-                    }
-                    RecordEvent::Final(Ok(text)) => {
-                        cosmic::Action::App(Message::TranscriptionReceived(text))
-                    }
-                    RecordEvent::Final(Err(e)) => {
-                        cosmic::Action::App(Message::TranscriptionReceived(format!("Error: {e}")))
-                    }
+                    RecordEvent::Preview(text) => cosmic::Action::App(Message::Recording(
+                        RecordingMessage::PreviewTextReceived(text),
+                    )),
+                    RecordEvent::Final(Ok(text)) => cosmic::Action::App(Message::Recording(
+                        RecordingMessage::TranscriptionReceived(text),
+                    )),
+                    RecordEvent::Final(Err(e)) => cosmic::Action::App(Message::Recording(
+                        RecordingMessage::TranscriptionReceived(format!("Error: {e}")),
+                    )),
                 }))
             }
 
-            Message::StopRecording => Task::perform(stop_record_command(), |result| {
+            RecordingMessage::StopRecording => Task::perform(stop_record_command(), |result| {
                 if let Err(e) = result {
                     log::warn!("Stop recording failed: {e}");
                 }
                 cosmic::Action::None
             }),
 
-            Message::PreviewTextReceived(text) => {
+            RecordingMessage::PreviewTextReceived(text) => {
                 self.transcription_text = text;
                 Task::none()
             }
 
-            Message::TranscriptionReceived(text) => {
+            RecordingMessage::TranscriptionReceived(text) => {
                 log::info!(
                     "TranscriptionReceived: '{}'",
                     text.chars().take(50).collect::<String>()
@@ -96,9 +97,12 @@ impl AppModel {
     }
 
     /// Handle audio-level, theme, and volume messages.
-    fn handle_audio_messages(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    fn handle_audio_messages(
+        &mut self,
+        message: RecordingMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::AudioFeedbackToggled(enabled) => {
+            RecordingMessage::AudioFeedbackToggled(enabled) => {
                 // Clear any stale Customization banner as the user retries.
                 self.action_error = None;
                 let theme = if enabled {
@@ -118,7 +122,7 @@ impl AppModel {
                 })
             }
 
-            Message::AudioThemeSelected(theme) => {
+            RecordingMessage::AudioThemeSelected(theme) => {
                 self.action_error = None;
                 self.selected_audio_theme = theme;
                 if theme != AudioTheme::Silent {
@@ -130,12 +134,12 @@ impl AppModel {
                 })
             }
 
-            Message::AudioThemesLoaded(themes) => {
+            RecordingMessage::AudioThemesLoaded(themes) => {
                 self.audio_themes = themes;
                 Task::none()
             }
 
-            Message::VolumeChanged(vol) => {
+            RecordingMessage::VolumeChanged(vol) => {
                 // Drag tick: update the slider locally only. The daemon POST is
                 // deferred to VolumeCommit (on release) so a drag doesn't fire
                 // one set_volume per tick (Tier 1 #19).
@@ -143,7 +147,7 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::VolumeCommit => {
+            RecordingMessage::VolumeCommit => {
                 self.action_error = None;
                 Task::perform(set_volume(self.volume), |result| match result {
                     Ok(()) => cosmic::Action::None,
@@ -151,14 +155,14 @@ impl AppModel {
                 })
             }
 
-            Message::WidgetAudioLevel { level, is_speech } => {
+            RecordingMessage::WidgetAudioLevel { level, is_speech } => {
                 self.last_udp_data = std::time::Instant::now();
                 self.audio_level = level;
                 self.is_speech_detected = is_speech;
                 Task::none()
             }
 
-            Message::WidgetRecordingState(is_recording) => {
+            RecordingMessage::WidgetRecordingState(is_recording) => {
                 self.last_udp_data = std::time::Instant::now();
                 self.recording_status = if is_recording {
                     RecordingStatus::Recording

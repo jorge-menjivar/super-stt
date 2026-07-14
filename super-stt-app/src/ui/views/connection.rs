@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::common::page_layout;
 use crate::state::DaemonStatus;
-use crate::ui::messages::Message;
+use crate::ui::messages::{DaemonMessage, Message};
 use cosmic::{
     Element,
     widget::{button, settings, text},
@@ -34,7 +34,8 @@ pub fn page(daemon_status: &DaemonStatus, socket_path: String) -> Element<'_, Me
             ))
             .add(settings::item(
                 "",
-                button::standard("Retry authorization").on_press(Message::RetryAuthorization),
+                button::standard("Retry authorization")
+                    .on_press(Message::Daemon(DaemonMessage::RetryAuthorization)),
             ));
     }
 

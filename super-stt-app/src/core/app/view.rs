@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::{ContextPage, DaemonStatus, Page};
-use crate::ui::messages::Message;
+use crate::ui::messages::{LanguageMessage, Message, ModelsPageMessage, ShellMessage};
 use crate::ui::views;
 use cosmic::app::context_drawer;
 use cosmic::prelude::*;
@@ -57,7 +57,7 @@ impl AppModel {
             ContextPage::About => Some(
                 context_drawer::context_drawer(
                     views::about::page(),
-                    Message::ToggleContextPage(ContextPage::About),
+                    Message::Shell(ShellMessage::ToggleContextPage(ContextPage::About)),
                 )
                 .title("About"),
             ),
@@ -73,7 +73,7 @@ impl AppModel {
                 on_library_page.then(|| {
                     context_drawer::context_drawer(
                         views::models::add_backend_sheet(self),
-                        Message::ToggleContextPage(ContextPage::AddBackend),
+                        Message::Shell(ShellMessage::ToggleContextPage(ContextPage::AddBackend)),
                     )
                     .title("Add a backend")
                 })
@@ -86,7 +86,7 @@ impl AppModel {
                 on_models_page.then(|| {
                     context_drawer::context_drawer(
                         views::models::load_backend_sheet(self),
-                        Message::ToggleContextPage(ContextPage::LoadBackend),
+                        Message::Shell(ShellMessage::ToggleContextPage(ContextPage::LoadBackend)),
                     )
                     .title("Load a backend")
                 })
@@ -102,7 +102,7 @@ impl AppModel {
                 Some(
                     context_drawer::context_drawer(
                         views::language_picker::sheet(self),
-                        Message::CloseLanguagePicker,
+                        Message::Language(LanguageMessage::CloseLanguagePicker),
                     )
                     .title(title),
                 )
@@ -123,7 +123,7 @@ impl AppModel {
                 backend.filter(|_| on_backend_page).map(|backend| {
                     context_drawer::context_drawer(
                         views::models::configure_sheet(backend, self),
-                        Message::CloseBackendConfig,
+                        Message::ModelsPage(ModelsPageMessage::CloseBackendConfig),
                     )
                     .title(format!("{} configuration", backend.name))
                 })

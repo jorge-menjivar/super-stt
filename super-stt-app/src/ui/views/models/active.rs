@@ -9,7 +9,9 @@ use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;
 use crate::state::ContextPage;
 use crate::ui::icons;
-use crate::ui::messages::Message;
+use crate::ui::messages::{
+    DownloadMessage, LanguageMessage, Message, ModelsPageMessage, ShellMessage,
+};
 
 use super::chips::{
     backend_is_online, backend_supports_cpu, backend_supports_gpu, capability_chips, count_chip,
@@ -126,9 +128,9 @@ fn language_button<'a>(
 
     Some(
         widget::button::standard(label)
-            .on_press(Message::OpenLanguagePicker {
+            .on_press(Message::Language(LanguageMessage::OpenLanguagePicker {
                 model: Some((source.clone(), selected_model.to_string())),
-            })
+            }))
             .into(),
     )
 }
@@ -152,10 +154,14 @@ pub(super) fn active_backend_card<'a>(
     let description = super::surface::backend_description(app, &source);
     let actions = row![
         super::surface::repo_button(&source),
-        button::standard("Switch backend")
-            .on_press(Message::ToggleContextPage(ContextPage::LoadBackend)),
-        button::standard("Configure").on_press(Message::OpenBackendConfig(source.clone())),
-        button::destructive("Deselect").on_press(Message::DeselectBackend),
+        button::standard("Switch backend").on_press(Message::Shell(
+            ShellMessage::ToggleContextPage(ContextPage::LoadBackend),
+        )),
+        button::standard("Configure").on_press(Message::ModelsPage(
+            ModelsPageMessage::OpenBackendConfig(source.clone()),
+        )),
+        button::destructive("Deselect")
+            .on_press(Message::ModelsPage(ModelsPageMessage::DeselectBackend)),
     ]
     .spacing(spacing.space_xs)
     .align_y(Alignment::Center);
@@ -267,7 +273,7 @@ pub(super) fn loaded_model_summary<'a>(
         .push(
             button::standard("Unload")
                 .leading_icon(icons::phosphor_handle(icons::STOP))
-                .on_press(Message::UnloadActiveModel),
+                .on_press(Message::ModelsPage(ModelsPageMessage::UnloadActiveModel)),
         )
         .into()
 }
@@ -326,7 +332,9 @@ pub(super) fn staged_model_picker<'a>(
     let model_names_pick = model_names.clone();
     // Model select takes twice the width of the device select (2:1 flex ratio).
     let model_dropdown = widget::dropdown(model_names, model_index, move |index| {
-        Message::StageActiveModel(model_names_pick[index].clone())
+        Message::ModelsPage(ModelsPageMessage::StageActiveModel(
+            model_names_pick[index].clone(),
+        ))
     })
     .placeholder("Select model")
     .width(Length::FillPortion(2));
@@ -352,7 +360,9 @@ pub(super) fn staged_model_picker<'a>(
             .and_then(|d| devices.iter().position(|x| x == d));
         let devices_pick = devices.clone();
         let device_dropdown = widget::dropdown(devices, device_index, move |index| {
-            Message::StageActiveDevice(devices_pick[index].clone())
+            Message::ModelsPage(ModelsPageMessage::StageActiveDevice(
+                devices_pick[index].clone(),
+            ))
         })
         .placeholder("Device")
         .width(Length::FillPortion(1));
@@ -375,7 +385,10 @@ pub(super) fn staged_model_picker<'a>(
             || staged_model_supports.is_some_and(|d| d == ["none".to_string()]));
     let load_button = button::suggested("Load model")
         .leading_icon(icons::phosphor_handle(icons::PLAY))
-        .on_press_maybe((staged_ok && app.is_model_ready()).then_some(Message::LoadStagedModel));
+        .on_press_maybe(
+            (staged_ok && app.is_model_ready())
+                .then_some(Message::ModelsPage(ModelsPageMessage::LoadStagedModel)),
+        );
     picker_row = picker_row.push(load_button);
 
     // A staged CUDA load whose conservative VRAM estimate exceeds the GPU's
@@ -421,7 +434,8 @@ pub(super) fn card_download_progress<'a>(
         widget::progress_bar(0.0..=1.0, fraction.max(0.05)),
         row![
             text::caption(bytes).width(Length::Fill),
-            widget::button::destructive("Cancel").on_press(Message::CancelDownload),
+            widget::button::destructive("Cancel")
+                .on_press(Message::Download(DownloadMessage::CancelDownload)),
         ]
         .align_y(Alignment::Center),
     ]

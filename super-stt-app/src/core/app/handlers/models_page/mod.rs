@@ -9,7 +9,7 @@ use crate::daemon::client::{
     unload_active_model,
 };
 use crate::state::{ContextPage, DaemonStatus, ModelsTab};
-use crate::ui::messages::Message;
+use crate::ui::messages::{DownloadMessage, Message, ModelMessage, ModelsPageMessage};
 use cosmic::prelude::*;
 use log::debug;
 
@@ -18,56 +18,61 @@ impl AppModel {
     /// configuration sub-view, and the (UI-only) download actions.
     pub(in crate::core::app) fn handle_models_page_messages(
         &mut self,
-        message: Message,
+        message: ModelsPageMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::ModelsTabActivated(_)
-            | Message::StageActiveModel(_)
-            | Message::StageActiveDevice(_)
-            | Message::LoadStagedModel
-            | Message::UnloadActiveModel => self.handle_models_tab_selection(message),
+            ModelsPageMessage::ModelsTabActivated(_)
+            | ModelsPageMessage::StageActiveModel(_)
+            | ModelsPageMessage::StageActiveDevice(_)
+            | ModelsPageMessage::LoadStagedModel
+            | ModelsPageMessage::UnloadActiveModel => self.handle_models_tab_selection(message),
 
-            Message::OpenBackendConfig(_)
-            | Message::CloseBackendConfig
-            | Message::SelectBackend(_)
-            | Message::DeselectBackend
-            | Message::ActiveBackendLoaded(_)
-            | Message::RefreshGpuInfo
-            | Message::GpuInfoLoaded(_)
-            | Message::ToggleInstalledMenu(_)
-            | Message::CloseInstalledMenu => self.handle_models_backend_config(message),
+            ModelsPageMessage::OpenBackendConfig(_)
+            | ModelsPageMessage::CloseBackendConfig
+            | ModelsPageMessage::SelectBackend(_)
+            | ModelsPageMessage::DeselectBackend
+            | ModelsPageMessage::ActiveBackendLoaded(_)
+            | ModelsPageMessage::RefreshGpuInfo
+            | ModelsPageMessage::GpuInfoLoaded(_)
+            | ModelsPageMessage::ToggleInstalledMenu(_)
+            | ModelsPageMessage::CloseInstalledMenu => self.handle_models_backend_config(message),
 
-            Message::InstallBackend(_)
-            | Message::InstallBackendFromRepoUrl(_)
-            | Message::InstallAccepted { .. }
-            | Message::InstallFailedToStart { .. }
-            | Message::UpdateBackend(_) => self.handle_models_install_lifecycle(message),
+            ModelsPageMessage::InstallBackend(_)
+            | ModelsPageMessage::InstallBackendFromRepoUrl(_)
+            | ModelsPageMessage::InstallAccepted { .. }
+            | ModelsPageMessage::InstallFailedToStart { .. }
+            | ModelsPageMessage::UpdateBackend(_) => self.handle_models_install_lifecycle(message),
 
-            Message::UninstallBackend(_) | Message::UninstallFailed { .. } => {
+            ModelsPageMessage::UninstallBackend(_) | ModelsPageMessage::UninstallFailed { .. } => {
                 self.handle_models_uninstall(message)
             }
 
-            Message::InstallProgress { .. }
-            | Message::InstallCompleted { .. }
-            | Message::InstallFailed { .. } => self.handle_models_install_progress(message),
+            ModelsPageMessage::InstallProgress { .. }
+            | ModelsPageMessage::InstallCompleted { .. }
+            | ModelsPageMessage::InstallFailed { .. } => {
+                self.handle_models_install_progress(message)
+            }
 
-            Message::RefreshRegistry
-            | Message::RegistryListLoaded(_)
-            | Message::RegistryListFailed(_)
-            | Message::RegistrySearchChanged(_)
-            | Message::RegistryIncludeIncompatible(_)
-            | Message::RegistryOnlineFilter(_)
-            | Message::ImportBackendFromDir
-            | Message::ImportBackendFromDirPicked(_)
-            | Message::RegistryCustomRepoInputChanged(_) => self.handle_models_registry(message),
-
-            _ => Task::none(),
+            ModelsPageMessage::RefreshRegistry
+            | ModelsPageMessage::RegistryListLoaded(_)
+            | ModelsPageMessage::RegistryListFailed(_)
+            | ModelsPageMessage::RegistrySearchChanged(_)
+            | ModelsPageMessage::RegistryIncludeIncompatible(_)
+            | ModelsPageMessage::RegistryOnlineFilter(_)
+            | ModelsPageMessage::ImportBackendFromDir
+            | ModelsPageMessage::ImportBackendFromDirPicked(_)
+            | ModelsPageMessage::RegistryCustomRepoInputChanged(_) => {
+                self.handle_models_registry(message)
+            }
         }
     }
 
-    fn handle_models_tab_selection(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    fn handle_models_tab_selection(
+        &mut self,
+        message: ModelsPageMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::ModelsTabActivated(entity) => {
+            ModelsPageMessage::ModelsTabActivated(entity) => {
                 self.models_tabs.activate(entity);
                 // Trigger initial registry fetch when the Download tab is opened
                 // for the first time (backends empty and no prior refresh attempt).
@@ -88,17 +93,17 @@ impl AppModel {
                     return Task::perform(
                         async move { crate::daemon::registry::list(&filters).await },
                         |r| {
-                            cosmic::Action::App(match r {
-                                Ok(resp) => Message::RegistryListLoaded(resp),
-                                Err(e) => Message::RegistryListFailed(e.to_string()),
-                            })
+                            cosmic::Action::App(Message::ModelsPage(match r {
+                                Ok(resp) => ModelsPageMessage::RegistryListLoaded(resp),
+                                Err(e) => ModelsPageMessage::RegistryListFailed(e.to_string()),
+                            }))
                         },
                     );
                 }
                 Task::none()
             }
 
-            Message::StageActiveModel(model) => {
+            ModelsPageMessage::StageActiveModel(model) => {
                 // Stage the pick. The Load button reads `staged_model` /
                 // `staged_device` and only then calls the daemon. Default the
                 // device to the model's first supported entry (so a single-
@@ -128,14 +133,14 @@ impl AppModel {
                 }
             }
 
-            Message::StageActiveDevice(device) => {
+            ModelsPageMessage::StageActiveDevice(device) => {
                 self.staged_device = Some(device);
                 Task::none()
             }
 
-            Message::LoadStagedModel => self.handle_load_staged_model(),
+            ModelsPageMessage::LoadStagedModel => self.handle_load_staged_model(),
 
-            Message::UnloadActiveModel => {
+            ModelsPageMessage::UnloadActiveModel => {
                 // Drop the loaded model but keep the backend selected.
                 // Optimistic clear so the UI returns to the staged-pickers
                 // state immediately; the daemon's `ready` event with
@@ -146,7 +151,9 @@ impl AppModel {
                 self.model_operation_state = ModelOperationState::Ready;
                 Task::perform(unload_active_model(), |result| match result {
                     Ok(_) => cosmic::Action::None,
-                    Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
+                    Err(e) => {
+                        cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string())))
+                    }
                 })
             }
 
@@ -208,26 +215,31 @@ impl AppModel {
                     set_model(model, provider, source).await.map(|_| ())
                 },
                 move |result| match result {
-                    Ok(()) => cosmic::Action::App(Message::ModelChanged {
+                    Ok(()) => cosmic::Action::App(Message::Model(ModelMessage::ModelChanged {
                         model: model_label.clone(),
                         provider: provider_label.clone(),
                         source: source_label.clone(),
-                    }),
-                    Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
+                    })),
+                    Err(e) => {
+                        cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string())))
+                    }
                 },
             ),
             Task::perform(
                 async {
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 },
-                |()| cosmic::Action::App(Message::CheckDownloadStatus),
+                |()| cosmic::Action::App(Message::Download(DownloadMessage::CheckDownloadStatus)),
             ),
         ])
     }
 
-    fn handle_models_backend_config(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    fn handle_models_backend_config(
+        &mut self,
+        message: ModelsPageMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::OpenBackendConfig(source) => {
+            ModelsPageMessage::OpenBackendConfig(source) => {
                 // Open the per-backend configuration as a right-side sheet over
                 // the current list (active card or Installed tab), instead of a
                 // full-page takeover. Also closes the card's overflow menu.
@@ -240,37 +252,39 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::CloseBackendConfig => {
+            ModelsPageMessage::CloseBackendConfig => {
                 self.configure_backend = None;
                 self.core.window.show_context = false;
                 self.action_error = None;
                 Task::none()
             }
 
-            Message::ActiveBackendLoaded(source) => {
+            ModelsPageMessage::ActiveBackendLoaded(source) => {
                 self.active_backend = source;
                 Task::none()
             }
 
-            Message::RefreshGpuInfo => {
+            ModelsPageMessage::RefreshGpuInfo => {
                 // Periodic poll — only query when connected so the disconnected
                 // state doesn't spam failing requests.
                 if self.daemon_status == DaemonStatus::Connected {
                     Task::perform(get_gpu_info(), |result| {
-                        cosmic::Action::App(Message::GpuInfoLoaded(result.unwrap_or_default()))
+                        cosmic::Action::App(Message::ModelsPage(ModelsPageMessage::GpuInfoLoaded(
+                            result.unwrap_or_default(),
+                        )))
                     })
                 } else {
                     Task::none()
                 }
             }
 
-            Message::GpuInfoLoaded(gpus) => {
+            ModelsPageMessage::GpuInfoLoaded(gpus) => {
                 debug!("GpuInfoLoaded: storing {} GPU(s) in app state", gpus.len());
                 self.gpu_info = gpus;
                 Task::none()
             }
 
-            Message::SelectBackend(source) => {
+            ModelsPageMessage::SelectBackend(source) => {
                 // Select the backend WITHOUT loading a model — the card moves
                 // to the top fixed header, any model from a different backend
                 // is unloaded. (`set_model` is the way to also load a model.)
@@ -285,11 +299,13 @@ impl AppModel {
                 self.core.window.show_context = false;
                 Task::perform(set_active_backend(source), |result| match result {
                     Ok(()) => cosmic::Action::None,
-                    Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
+                    Err(e) => {
+                        cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string())))
+                    }
                 })
             }
 
-            Message::DeselectBackend => {
+            ModelsPageMessage::DeselectBackend => {
                 // Optimistically clear the active backend + loaded model; the
                 // daemon goes idle. (Rejected only mid-recording — an edge case
                 // that self-heals on the next refresh.)
@@ -302,7 +318,7 @@ impl AppModel {
                 Task::perform(clear_active_backend(), |_| cosmic::Action::None)
             }
 
-            Message::ToggleInstalledMenu(source) => {
+            ModelsPageMessage::ToggleInstalledMenu(source) => {
                 // Toggle this card's overflow menu; opening one closes any other.
                 if self.installed_menu_open.as_deref() == Some(source.as_str()) {
                     self.installed_menu_open = None;
@@ -312,7 +328,7 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::CloseInstalledMenu => {
+            ModelsPageMessage::CloseInstalledMenu => {
                 self.installed_menu_open = None;
                 Task::none()
             }

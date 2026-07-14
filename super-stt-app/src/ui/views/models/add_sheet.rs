@@ -6,7 +6,7 @@ use cosmic::{Apply, Element};
 
 use crate::core::app::AppModel;
 use crate::ui::icons;
-use crate::ui::messages::Message;
+use crate::ui::messages::{Message, ModelsPageMessage};
 
 use super::surface::muted_text_color;
 
@@ -22,8 +22,8 @@ pub fn add_backend_sheet(app: &AppModel) -> Element<'_, Message> {
     // From a repository: URL input + Install, with the unverified-source note.
     let can_install = !app.registry.custom_repo_input.trim().is_empty();
     let install_btn = if can_install {
-        button::suggested("Install").on_press(Message::InstallBackendFromRepoUrl(
-            app.registry.custom_repo_input.clone(),
+        button::suggested("Install").on_press(Message::ModelsPage(
+            ModelsPageMessage::InstallBackendFromRepoUrl(app.registry.custom_repo_input.clone()),
         ))
     } else {
         button::suggested("Install")
@@ -40,7 +40,7 @@ pub fn add_backend_sheet(app: &AppModel) -> Element<'_, Message> {
                 "https://github.com/owner/backend",
                 &app.registry.custom_repo_input
             )
-            .on_input(Message::RegistryCustomRepoInputChanged)
+            .on_input(|x| Message::ModelsPage(ModelsPageMessage::RegistryCustomRepoInputChanged(x)))
             .width(Length::Fill),
             install_btn,
         ]
@@ -64,7 +64,8 @@ pub fn add_backend_sheet(app: &AppModel) -> Element<'_, Message> {
         text::title4("From a folder"),
         text::body("Point Super STT at a local directory that contains a backend.toml manifest.")
             .class(cosmic::theme::Text::Color(muted)),
-        button::standard("Choose folder\u{2026}").on_press(Message::ImportBackendFromDir),
+        button::standard("Choose folder\u{2026}")
+            .on_press(Message::ModelsPage(ModelsPageMessage::ImportBackendFromDir)),
     ]
     .spacing(spacing.space_s)
     .apply(widget::container)

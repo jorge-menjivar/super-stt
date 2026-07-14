@@ -4,7 +4,7 @@ use cosmic::widget::{self, text};
 use cosmic::{Apply, Element};
 
 use crate::core::app::AppModel;
-use crate::ui::messages::Message;
+use crate::ui::messages::{Message, ShellMessage};
 
 /// Wrap the Models page's tab body in a bordered, page-width frame: the
 /// scrollable list sits *inside* the border, so the outline stays fixed while
@@ -169,7 +169,7 @@ pub(super) fn repo_button(source: &str) -> Element<'static, Message> {
     let url = format!("https://{source}");
     rounded_tooltip(
         widget::button::icon(icons::phosphor_handle(icons::GIT_BRANCH))
-            .on_press(Message::LaunchUrl(url)),
+            .on_press(Message::Shell(ShellMessage::LaunchUrl(url))),
         text::body("Open repository"),
         widget::tooltip::Position::Top,
     )

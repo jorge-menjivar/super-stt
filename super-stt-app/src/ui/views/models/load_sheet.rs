@@ -8,7 +8,7 @@ use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::state::ContextPage;
 use crate::ui::icons;
-use crate::ui::messages::Message;
+use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
 
 use super::active::backend_glyph_tile;
 use super::chips::{
@@ -51,7 +51,9 @@ pub(super) fn no_backend_empty_state<'a>() -> Element<'a, Message> {
         .push(
             button::suggested("Load a backend")
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
-                .on_press(Message::ToggleContextPage(ContextPage::LoadBackend)),
+                .on_press(Message::Shell(ShellMessage::ToggleContextPage(
+                    ContextPage::LoadBackend,
+                ))),
         );
 
     widget::container(col)
@@ -124,7 +126,9 @@ fn load_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, 
     } else {
         button::suggested("Load")
             .leading_icon(icons::phosphor_handle(icons::PLAY))
-            .on_press(Message::SelectBackend(backend.source.clone()))
+            .on_press(Message::ModelsPage(ModelsPageMessage::SelectBackend(
+                backend.source.clone(),
+            )))
             .into()
     };
 

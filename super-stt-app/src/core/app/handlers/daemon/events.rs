@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, DeviceState, ModelOperationState};
-use crate::ui::messages::Message;
+use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message};
 use cosmic::prelude::*;
 use log::{debug, info, warn};
 use super_stt_shared::models::protocol::NotificationEvent;
@@ -10,10 +10,10 @@ use super_stt_shared::models::provider::Provider;
 impl AppModel {
     pub(in crate::core::app) fn handle_daemon_events(
         &mut self,
-        message: Message,
+        message: DaemonMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::DaemonEventsReceived(events) => {
+            DaemonMessage::DaemonEventsReceived(events) => {
                 debug!("Received {} daemon events", events.len());
                 // Process EVERY event and collect their tasks. Returning on the
                 // first event that yields a task dropped the rest of the batch
@@ -42,6 +42,9 @@ impl AppModel {
             _ => Task::none(),
         }
     }
+    // ^ `handle_daemon_events` only ever receives `DaemonEventsReceived`, but it
+    // takes the full `DaemonMessage` for a uniform delegate signature; the
+    // catch-all covers the other (unreachable) variants without a panic.
 
     pub(in crate::core::app) fn process_daemon_status_event(
         &mut self,
@@ -158,7 +161,7 @@ impl AppModel {
             let error_message = error_msg.to_string();
             // Show error to user
             return Some(Task::perform(async move { error_message }, |msg| {
-                cosmic::Action::App(Message::DeviceError(msg))
+                cosmic::Action::App(Message::Device(DeviceMessage::DeviceError(msg)))
             }));
         }
         None
@@ -232,11 +235,11 @@ impl AppModel {
             // Send download completed message; model_switched event from the daemon
             // will update state if needed — no explicit reload required.
             return Some(Task::perform(async move { progress.model_name }, |model| {
-                cosmic::Action::App(Message::DownloadCompleted(model))
+                cosmic::Action::App(Message::Download(DownloadMessage::DownloadCompleted(model)))
             }));
         } else if progress.status == "cancelled" {
             return Some(Task::perform(async move { progress.model_name }, |model| {
-                cosmic::Action::App(Message::DownloadCancelled(model))
+                cosmic::Action::App(Message::Download(DownloadMessage::DownloadCancelled(model)))
             }));
         }
         None

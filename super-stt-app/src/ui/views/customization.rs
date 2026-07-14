@@ -5,7 +5,7 @@ use cosmic::{Apply, Element};
 use super_stt_shared::theme::AudioTheme;
 
 use super::common::{error_banner, page_layout};
-use crate::ui::messages::Message;
+use crate::ui::messages::{LanguageMessage, Message, RecordingMessage};
 
 /// Customization page: audio feedback toggle, theme selection, volume, and language.
 pub fn page<'a>(
@@ -34,7 +34,8 @@ pub fn page<'a>(
         settings::item::builder("Audio Feedback")
             .description("Play sounds when recording starts and stops")
             .control(
-                cosmic::widget::toggler(audio_enabled).on_toggle(Message::AudioFeedbackToggled),
+                cosmic::widget::toggler(audio_enabled)
+                    .on_toggle(|b| Message::Recording(RecordingMessage::AudioFeedbackToggled(b))),
             ),
     );
 
@@ -46,9 +47,9 @@ pub fn page<'a>(
         } else {
             widget::dropdown(theme_names, selected_index, move |index| {
                 if let Some(&theme) = non_silent_clone.get(index) {
-                    Message::AudioThemeSelected(theme)
+                    Message::Recording(RecordingMessage::AudioThemeSelected(theme))
                 } else {
-                    Message::AudioThemeSelected(AudioTheme::Classic)
+                    Message::Recording(RecordingMessage::AudioThemeSelected(AudioTheme::Classic))
                 }
             })
             .into()
@@ -57,11 +58,13 @@ pub fn page<'a>(
         // Drag ticks update the local value; the daemon POST fires once on
         // release (Tier 1 #19), so a single drag isn't hundreds of set_volume
         // requests.
-        let slider = widget::slider(0..=100, volume, Message::VolumeChanged)
-            .on_release(Message::VolumeCommit)
-            .width(Length::Fill)
-            .apply(widget::container)
-            .max_width(250.);
+        let slider = widget::slider(0..=100, volume, |v| {
+            Message::Recording(RecordingMessage::VolumeChanged(v))
+        })
+        .on_release(Message::Recording(RecordingMessage::VolumeCommit))
+        .width(Length::Fill)
+        .apply(widget::container)
+        .max_width(250.);
 
         let volume_control = widget::row::with_capacity(3)
             .align_y(Alignment::Center)
@@ -94,8 +97,9 @@ pub fn page<'a>(
         settings::item::builder("Primary Language")
             .description("Default transcription language for models that support it")
             .control(
-                widget::button::standard(lang_label)
-                    .on_press(Message::OpenLanguagePicker { model: None }),
+                widget::button::standard(lang_label).on_press(Message::Language(
+                    LanguageMessage::OpenLanguagePicker { model: None },
+                )),
             ),
     );
 

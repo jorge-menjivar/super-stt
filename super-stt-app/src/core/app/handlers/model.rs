@@ -5,7 +5,9 @@ use crate::daemon::client::{
     get_active_backend, get_current_device, get_current_model, get_gpu_info, list_available_models,
     list_backends, set_allow_online_models,
 };
-use crate::ui::messages::Message;
+use crate::ui::messages::{
+    BackendMessage, DeviceMessage, Message, ModelMessage, ModelsPageMessage,
+};
 use cosmic::prelude::*;
 use log::info;
 use log::warn;
@@ -14,17 +16,15 @@ impl AppModel {
     /// Handle model management messages
     pub(in crate::core::app) fn handle_model_messages(
         &mut self,
-        message: Message,
+        message: ModelMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::LoadInitialData => self.handle_model_load_commands(),
+            ModelMessage::LoadInitialData => self.handle_model_load_commands(),
 
-            Message::AvailableModelsLoaded(_)
-            | Message::CurrentModelLoaded { .. }
-            | Message::ModelChanged { .. }
-            | Message::ModelError(_) => self.handle_model_results(message),
-
-            _ => Task::none(),
+            ModelMessage::AvailableModelsLoaded(_)
+            | ModelMessage::CurrentModelLoaded { .. }
+            | ModelMessage::ModelChanged { .. }
+            | ModelMessage::ModelError(_) => self.handle_model_results(message),
         }
     }
 
@@ -34,8 +34,12 @@ impl AppModel {
         // One-time startup load: models + device info
         Task::batch([
             Task::perform(list_available_models(), |result| match result {
-                Ok(models) => cosmic::Action::App(Message::AvailableModelsLoaded(models)),
-                Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
+                Ok(models) => {
+                    cosmic::Action::App(Message::Model(ModelMessage::AvailableModelsLoaded(models)))
+                }
+                Err(e) => {
+                    cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string())))
+                }
             }),
             self.fetch_current_model(),
             Task::perform(get_current_device(), |result| match result {
@@ -43,11 +47,14 @@ impl AppModel {
                     info!(
                         "Initial device load successful: device={device}, available_devices={available_devices:?}"
                     );
-                    cosmic::Action::App(Message::DeviceInfoLoaded(device, available_devices))
+                    cosmic::Action::App(Message::Device(DeviceMessage::DeviceInfoLoaded(
+                        device,
+                        available_devices,
+                    )))
                 }
                 Err(e) => {
                     warn!("Initial device load failed: {e}");
-                    cosmic::Action::App(Message::DeviceError(e.to_string()))
+                    cosmic::Action::App(Message::Device(DeviceMessage::DeviceError(e.to_string())))
                 }
             }),
             // Online backends are gated by the install-time choice to
@@ -55,27 +62,35 @@ impl AppModel {
             // ensure the daemon permits them. Fire-and-forget.
             Task::perform(set_allow_online_models(true), |_| cosmic::Action::None),
             Task::perform(list_backends(), |result| match result {
-                Ok(backends) => cosmic::Action::App(Message::BackendsLoaded(backends)),
-                Err(e) => cosmic::Action::App(Message::BackendsError(e.to_string())),
+                Ok(backends) => {
+                    cosmic::Action::App(Message::Backend(BackendMessage::BackendsLoaded(backends)))
+                }
+                Err(e) => cosmic::Action::App(Message::Backend(BackendMessage::BackendsError(
+                    e.to_string(),
+                ))),
             }),
             Task::perform(get_active_backend(), |result| {
-                cosmic::Action::App(Message::ActiveBackendLoaded(result.unwrap_or(None)))
+                cosmic::Action::App(Message::ModelsPage(ModelsPageMessage::ActiveBackendLoaded(
+                    result.unwrap_or(None),
+                )))
             }),
             Task::perform(get_gpu_info(), |result| {
-                cosmic::Action::App(Message::GpuInfoLoaded(result.unwrap_or_default()))
+                cosmic::Action::App(Message::ModelsPage(ModelsPageMessage::GpuInfoLoaded(
+                    result.unwrap_or_default(),
+                )))
             }),
         ])
     }
 
     /// Handle model result messages: loads, changes, and errors.
-    fn handle_model_results(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    fn handle_model_results(&mut self, message: ModelMessage) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::AvailableModelsLoaded(models) => {
+            ModelMessage::AvailableModelsLoaded(models) => {
                 self.available_models = models;
                 Task::none()
             }
 
-            Message::CurrentModelLoaded {
+            ModelMessage::CurrentModelLoaded {
                 model,
                 provider,
                 source,
@@ -96,7 +111,7 @@ impl AppModel {
                 self.load_model_language(source, model)
             }
 
-            Message::ModelChanged {
+            ModelMessage::ModelChanged {
                 model,
                 provider,
                 source,
@@ -114,7 +129,7 @@ impl AppModel {
                 self.load_model_language(source, model)
             }
 
-            Message::ModelError(err) => {
+            ModelMessage::ModelError(err) => {
                 warn!("Model operation failed: {err}");
                 let home = std::env::var("HOME").unwrap_or_default();
                 let sanitized = sanitize_home(&err, &home);
@@ -125,7 +140,9 @@ impl AppModel {
                 Task::none()
             }
 
-            _ => Task::none(),
+            // Startup load is driven by the sibling `handle_model_load_commands`
+            // arm; nothing to do here.
+            ModelMessage::LoadInitialData => Task::none(),
         }
     }
 
@@ -138,13 +155,15 @@ impl AppModel {
     pub(in crate::core::app) fn fetch_current_model(&self) -> Task<cosmic::Action<Message>> {
         let epoch = self.current_model_epoch;
         Task::perform(get_current_model(), move |result| match result {
-            Ok((model, provider, source)) => cosmic::Action::App(Message::CurrentModelLoaded {
-                model,
-                provider,
-                source,
-                epoch,
-            }),
-            Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
+            Ok((model, provider, source)) => {
+                cosmic::Action::App(Message::Model(ModelMessage::CurrentModelLoaded {
+                    model,
+                    provider,
+                    source,
+                    epoch,
+                }))
+            }
+            Err(e) => cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string()))),
         })
     }
 }

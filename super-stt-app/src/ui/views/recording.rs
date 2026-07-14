@@ -7,7 +7,9 @@ use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 
 use super::common::page_layout;
 use crate::state::RecordingStatus;
-use crate::ui::messages::Message;
+use crate::ui::messages::{
+    Message, PreviewTypingMessage, RecordingMessage, RecordingStopModeMessage,
+};
 
 /// Recording settings section: stop mode + preview typing
 fn settings_section(
@@ -28,7 +30,7 @@ fn settings_section(
             settings::item::builder("Stop Mode")
                 .description("Controls how to stop transcribing")
                 .control(widget::dropdown(mode_names, selected_index, move |index| {
-                    Message::RecordingStopModeChanged(modes[index])
+                    Message::RecordingStopMode(RecordingStopModeMessage::Changed(modes[index]))
                 })),
         )
         .add(
@@ -38,7 +40,7 @@ fn settings_section(
                 )
                 .control(
                     cosmic::widget::toggler(preview_typing_enabled)
-                        .on_toggle(Message::PreviewTypingToggled),
+                        .on_toggle(|b| Message::PreviewTyping(PreviewTypingMessage::Toggled(b))),
                 ),
         )
         .into()
@@ -63,12 +65,10 @@ fn test_section<'a>(
     };
 
     let record_button = match recording_status {
-        RecordingStatus::Recording => {
-            button::destructive("Stop Recording").on_press(Message::StopRecording)
-        }
-        RecordingStatus::Idle => {
-            button::suggested("Test Recording").on_press(Message::StartRecording)
-        }
+        RecordingStatus::Recording => button::destructive("Stop Recording")
+            .on_press(Message::Recording(RecordingMessage::StopRecording)),
+        RecordingStatus::Idle => button::suggested("Test Recording")
+            .on_press(Message::Recording(RecordingMessage::StartRecording)),
     };
 
     let audio_widget = row![

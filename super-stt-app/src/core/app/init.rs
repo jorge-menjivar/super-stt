@@ -3,7 +3,7 @@
 use crate::daemon::client::{load_audio_themes, ping_daemon};
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, ModelsTab, RecordingStatus};
 use crate::ui::icons;
-use crate::ui::messages::Message;
+use crate::ui::messages::{DaemonMessage, Message, ModelMessage, RecordingMessage};
 use cosmic::prelude::*;
 use cosmic::widget::{nav_bar, segmented_button};
 use std::collections::HashMap;
@@ -72,14 +72,16 @@ fn initial_load_tasks(
 ) -> Task<cosmic::Action<Message>> {
     // Load audio themes on startup (always available)
     let load_themes = Task::perform(load_audio_themes(), |themes| {
-        cosmic::Action::App(Message::AudioThemesLoaded(themes))
+        cosmic::Action::App(Message::Recording(RecordingMessage::AudioThemesLoaded(
+            themes,
+        )))
     });
 
     // Try to ping the daemon on startup
     let initial_ping = Task::perform(ping_daemon(), |result| {
         cosmic::Action::App(match result {
-            Ok(_) => Message::DaemonConnected,
-            Err(e) => Message::DaemonError(e),
+            Ok(_) => Message::Daemon(DaemonMessage::DaemonConnected),
+            Err(e) => Message::Daemon(DaemonMessage::DaemonError(e)),
         })
     });
 
@@ -89,7 +91,7 @@ fn initial_load_tasks(
             // Small delay to let daemon connection establish
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         },
-        |()| cosmic::Action::App(Message::LoadInitialData),
+        |()| cosmic::Action::App(Message::Model(ModelMessage::LoadInitialData)),
     );
 
     Task::batch([title_command, load_themes, initial_ping, load_initial_data])

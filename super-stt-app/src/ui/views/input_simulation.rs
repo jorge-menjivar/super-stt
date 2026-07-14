@@ -4,7 +4,7 @@ use cosmic::widget::{self, settings};
 use super_stt_shared::models::write_method::WriteMethod;
 
 use super::common::page_layout;
-use crate::ui::messages::Message;
+use crate::ui::messages::{Message, WriteMethodMessage};
 
 /// Input simulation page: write method selection
 pub fn page(write_method: WriteMethod) -> Element<'static, Message> {
@@ -29,7 +29,9 @@ pub fn page(write_method: WriteMethod) -> Element<'static, Message> {
                     .control(widget::dropdown(
                         method_names,
                         selected_index,
-                        move |index| Message::WriteMethodChanged(methods[index]),
+                        move |index| {
+                            Message::WriteMethod(WriteMethodMessage::Changed(methods[index]))
+                        },
                     )),
             )
             .into(),

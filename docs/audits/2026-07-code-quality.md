@@ -917,12 +917,27 @@ Tier 2 #4/#6/#8.
   (including the async wrappers added in Tier 3 #4) for marginal benefit; better as a
   focused pass than bundled here.
 
-### [ ] 10. 🟡 App: group the flat ~90-variant `Message` enum into sub-enums
+### [x] 10. 🟡 App: group the flat ~90-variant `Message` enum into sub-enums
 
 - **Where:** routing is declared twice — nine `matches!` lists in
   `core/app/update.rs:21-211` + per-handler `_ => Task::none()` catch-alls.
 - **Problem:** a forgotten variant silently no-ops.
 - **Fix:** sub-enums make dispatch exhaustive and delete both lists.
+- **Resolved (branch `refactor/audit-tier3-9-11`):** the flat 103-variant `Message`
+  is now 12 per-area sub-enums (`ShellMessage`, `DaemonMessage`, `ModelMessage`,
+  `ModelsPageMessage`, `DeviceMessage`, `DownloadMessage`, `PreviewTypingMessage`,
+  `RecordingStopModeMessage`, `WriteMethodMessage`, `BackendMessage`, `LanguageMessage`,
+  `RecordingMessage`) wrapped by `Message`, plus the still-top-level `SettingActionFailed`
+  (handled inline). `dispatch` is one exhaustive `match` (the twelve `matches!` lists are
+  gone), and each `handle_*_messages` takes and `match`es its own sub-enum — so all the
+  top-level `_ => Task::none()` catch-alls are deleted and a forgotten variant is a compile
+  error at both ends. `From<XMessage> for Message` impls exist for ergonomics. Now that the
+  group name carries the context, the three redundant-prefix settings enums shed it
+  (`PreviewTypingMessage::Toggled`, `RecordingStopModeMessage::Changed`, etc.). The few
+  intra-group delegate sub-handlers (daemon, models_page, download) keep a narrow
+  `_ => Task::none()` since they each receive the full sub-enum but handle a subset — the
+  exhaustiveness guarantee lives at the sub-enum boundary, which is what silently no-op'd
+  before.
 
 ### [ ] 11. 🟠 App: one error surface
 

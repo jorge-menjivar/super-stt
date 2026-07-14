@@ -10,7 +10,10 @@ use crate::daemon::client::{
     get_volume, get_write_method, ping_daemon, test_daemon_connection,
 };
 use crate::state::{AudioTheme, DaemonStatus};
-use crate::ui::messages::Message;
+use crate::ui::messages::{
+    DaemonMessage, Message, ModelMessage, PreviewTypingMessage, RecordingStopModeMessage,
+    WriteMethodMessage,
+};
 use cosmic::prelude::*;
 use log::{info, warn};
 
@@ -18,16 +21,16 @@ impl AppModel {
     /// Handle daemon connection messages
     pub(in crate::core::app) fn handle_daemon_messages(
         &mut self,
-        message: Message,
+        message: DaemonMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::DaemonConnectionResult(_)
-            | Message::RefreshDaemonStatus
-            | Message::PingTimeout => self.handle_daemon_connect_result(message),
+            DaemonMessage::DaemonConnectionResult(_)
+            | DaemonMessage::RefreshDaemonStatus
+            | DaemonMessage::PingTimeout => self.handle_daemon_connect_result(message),
 
-            Message::DaemonConnected => self.handle_daemon_connected(),
+            DaemonMessage::DaemonConnected => self.handle_daemon_connected(),
 
-            Message::EventStreamConnected => {
+            DaemonMessage::EventStreamConnected => {
                 // Same connection-status handling as DaemonConnected, plus a
                 // current-model re-fetch: the live event stream is now
                 // subscribed, so re-read the daemon's authoritative model state
@@ -38,24 +41,25 @@ impl AppModel {
                 Task::batch([self.handle_daemon_connected(), self.fetch_current_model()])
             }
 
-            Message::DaemonError(_)
-            | Message::RetryConnection
-            | Message::WidgetBlocked(_)
-            | Message::RetryAuthorization => self.handle_daemon_errors_retry(message),
+            DaemonMessage::DaemonError(_)
+            | DaemonMessage::RetryConnection
+            | DaemonMessage::WidgetBlocked(_)
+            | DaemonMessage::RetryAuthorization => self.handle_daemon_errors_retry(message),
 
-            Message::CurrentAudioThemeLoaded(_)
-            | Message::VolumeLoaded(_)
-            | Message::CustomModelsDirLoaded(_) => self.handle_daemon_initial_loads(message),
+            DaemonMessage::CurrentAudioThemeLoaded(_)
+            | DaemonMessage::VolumeLoaded(_)
+            | DaemonMessage::CustomModelsDirLoaded(_) => self.handle_daemon_initial_loads(message),
 
-            Message::DaemonEventsReceived(_) => self.handle_daemon_events(message),
-
-            _ => Task::none(),
+            DaemonMessage::DaemonEventsReceived(_) => self.handle_daemon_events(message),
         }
     }
 
-    fn handle_daemon_connect_result(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    fn handle_daemon_connect_result(
+        &mut self,
+        message: DaemonMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::DaemonConnectionResult(result) => {
+            DaemonMessage::DaemonConnectionResult(result) => {
                 match result {
                     Ok(()) => {
                         self.daemon_status = DaemonStatus::Connected;
@@ -67,20 +71,24 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::RefreshDaemonStatus => Task::perform(test_daemon_connection(), |result| {
-                cosmic::Action::App(Message::DaemonConnectionResult(result))
-            }),
+            DaemonMessage::RefreshDaemonStatus => {
+                Task::perform(test_daemon_connection(), |result| {
+                    cosmic::Action::App(Message::Daemon(DaemonMessage::DaemonConnectionResult(
+                        result,
+                    )))
+                })
+            }
 
-            Message::PingTimeout => {
+            DaemonMessage::PingTimeout => {
                 // Surface a stalled model switch (no progress for too long)
                 // rather than letting the UI spin on the now-untimed POST.
                 self.check_switch_stall();
                 if self.daemon_status == DaemonStatus::Connected {
                     Task::perform(ping_daemon(), |result| {
-                        cosmic::Action::App(match result {
-                            Ok(_) => Message::DaemonConnected,
-                            Err(e) => Message::DaemonError(e),
-                        })
+                        cosmic::Action::App(Message::Daemon(match result {
+                            Ok(_) => DaemonMessage::DaemonConnected,
+                            Err(e) => DaemonMessage::DaemonError(e),
+                        }))
                     })
                 } else {
                     Task::none()
@@ -132,7 +140,7 @@ impl AppModel {
             // Fresh connection — drop any banner left over from before the drop.
             self.action_error = None;
             Task::batch([
-                self.handle_model_messages(Message::LoadInitialData),
+                self.handle_model_messages(ModelMessage::LoadInitialData),
                 build_load_settings_tasks(),
                 self.load_primary_language(),
             ])
@@ -141,9 +149,12 @@ impl AppModel {
         }
     }
 
-    fn handle_daemon_errors_retry(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    fn handle_daemon_errors_retry(
+        &mut self,
+        message: DaemonMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::DaemonError(err) => {
+            DaemonMessage::DaemonError(err) => {
                 // Route user-denied responses into the Blocked state
                 // so we don't keep pinging the daemon every 5s and
                 // re-priming its in-memory deny cache. Any other
@@ -165,28 +176,28 @@ impl AppModel {
                         async move {
                             tokio::time::sleep(delay).await;
                         },
-                        |()| cosmic::Action::App(Message::RetryConnection),
+                        |()| cosmic::Action::App(Message::Daemon(DaemonMessage::RetryConnection)),
                     )
                 }
             }
 
-            Message::RetryConnection => {
+            DaemonMessage::RetryConnection => {
                 self.daemon_status = DaemonStatus::Connecting;
                 Task::perform(ping_daemon(), |result| {
-                    cosmic::Action::App(match result {
-                        Ok(_) => Message::DaemonConnected,
-                        Err(e) => Message::DaemonError(e),
-                    })
+                    cosmic::Action::App(Message::Daemon(match result {
+                        Ok(_) => DaemonMessage::DaemonConnected,
+                        Err(e) => DaemonMessage::DaemonError(e),
+                    }))
                 })
             }
 
-            Message::WidgetBlocked(reason) => {
+            DaemonMessage::WidgetBlocked(reason) => {
                 warn!("Widget subscription blocked ({reason}); halting auto-retry");
                 self.daemon_status = DaemonStatus::Blocked(reason);
                 Task::none()
             }
 
-            Message::RetryAuthorization => {
+            DaemonMessage::RetryAuthorization => {
                 info!("Retrying authorization after user denial");
                 // Drop the cached settings token so the next
                 // session::obtain fires /auth/request and (after a
@@ -200,10 +211,10 @@ impl AppModel {
                 self.udp_restart_counter = self.udp_restart_counter.wrapping_add(1);
                 self.daemon_status = DaemonStatus::Connecting;
                 Task::perform(ping_daemon(), |result| {
-                    cosmic::Action::App(match result {
-                        Ok(_) => Message::DaemonConnected,
-                        Err(e) => Message::DaemonError(e),
-                    })
+                    cosmic::Action::App(Message::Daemon(match result {
+                        Ok(_) => DaemonMessage::DaemonConnected,
+                        Err(e) => DaemonMessage::DaemonError(e),
+                    }))
                 })
             }
 
@@ -211,9 +222,12 @@ impl AppModel {
         }
     }
 
-    fn handle_daemon_initial_loads(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    fn handle_daemon_initial_loads(
+        &mut self,
+        message: DaemonMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::CurrentAudioThemeLoaded(theme) => {
+            DaemonMessage::CurrentAudioThemeLoaded(theme) => {
                 self.selected_audio_theme = theme;
                 if theme != AudioTheme::Silent {
                     self.last_non_silent_theme = theme;
@@ -221,12 +235,12 @@ impl AppModel {
                 Task::none()
             }
 
-            Message::VolumeLoaded(vol) => {
+            DaemonMessage::VolumeLoaded(vol) => {
                 self.volume = vol;
                 Task::none()
             }
 
-            Message::CustomModelsDirLoaded(custom_path) => {
+            DaemonMessage::CustomModelsDirLoaded(custom_path) => {
                 let old_committed = self.custom_models_dir.as_deref().unwrap_or_default();
                 if self.custom_models_dir_input == old_committed {
                     self.custom_models_dir_input =
@@ -247,31 +261,41 @@ impl AppModel {
 pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<Message>> {
     Task::batch([
         Task::perform(get_current_audio_theme(), |result| match result {
-            Ok(theme) => cosmic::Action::App(Message::CurrentAudioThemeLoaded(theme)),
+            Ok(theme) => cosmic::Action::App(Message::Daemon(
+                DaemonMessage::CurrentAudioThemeLoaded(theme),
+            )),
             Err(e) => {
                 warn!("Failed to load audio theme: {e}");
-                cosmic::Action::App(Message::CurrentAudioThemeLoaded(AudioTheme::default()))
+                cosmic::Action::App(Message::Daemon(DaemonMessage::CurrentAudioThemeLoaded(
+                    AudioTheme::default(),
+                )))
             }
         }),
         Task::perform(get_volume(), |result| match result {
-            Ok(vol) => cosmic::Action::App(Message::VolumeLoaded(vol)),
+            Ok(vol) => cosmic::Action::App(Message::Daemon(DaemonMessage::VolumeLoaded(vol))),
             Err(e) => {
                 warn!("Failed to load volume: {e}");
-                cosmic::Action::App(Message::VolumeLoaded(100))
+                cosmic::Action::App(Message::Daemon(DaemonMessage::VolumeLoaded(100)))
             }
         }),
         Task::perform(get_custom_models_dir(), |result| match result {
-            Ok(dir) => cosmic::Action::App(Message::CustomModelsDirLoaded(dir)),
+            Ok(dir) => {
+                cosmic::Action::App(Message::Daemon(DaemonMessage::CustomModelsDirLoaded(dir)))
+            }
             Err(e) => {
                 warn!("Failed to load custom models dir: {e}");
-                cosmic::Action::App(Message::CustomModelsDirLoaded(None))
+                cosmic::Action::App(Message::Daemon(DaemonMessage::CustomModelsDirLoaded(None)))
             }
         }),
         Task::perform(get_preview_typing(), |result| match result {
-            Ok(enabled) => cosmic::Action::App(Message::PreviewTypingSettingLoaded(enabled)),
+            Ok(enabled) => cosmic::Action::App(Message::PreviewTyping(
+                PreviewTypingMessage::SettingLoaded(enabled),
+            )),
             Err(e) => {
                 log::warn!("Failed to load preview typing setting: {e}");
-                cosmic::Action::App(Message::PreviewTypingSettingLoaded(false))
+                cosmic::Action::App(Message::PreviewTyping(PreviewTypingMessage::SettingLoaded(
+                    false,
+                )))
             }
         }),
         Task::perform(get_recording_stop_mode(), |result| {
@@ -279,12 +303,14 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
             match result {
                 Ok(mode_str) => {
                     let mode = mode_str.parse::<RecordingStopMode>().unwrap_or_default();
-                    cosmic::Action::App(Message::RecordingStopModeLoaded(mode))
+                    cosmic::Action::App(Message::RecordingStopMode(
+                        RecordingStopModeMessage::Loaded(mode),
+                    ))
                 }
                 Err(e) => {
                     log::warn!("Failed to load recording stop mode: {e}");
-                    cosmic::Action::App(Message::RecordingStopModeLoaded(
-                        RecordingStopMode::default(),
+                    cosmic::Action::App(Message::RecordingStopMode(
+                        RecordingStopModeMessage::Loaded(RecordingStopMode::default()),
                     ))
                 }
             }
@@ -294,11 +320,13 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
             match result {
                 Ok(method_str) => {
                     let method = method_str.parse::<WriteMethod>().unwrap_or_default();
-                    cosmic::Action::App(Message::WriteMethodLoaded(method))
+                    cosmic::Action::App(Message::WriteMethod(WriteMethodMessage::Loaded(method)))
                 }
                 Err(e) => {
                     log::warn!("Failed to load write method: {e}");
-                    cosmic::Action::App(Message::WriteMethodLoaded(WriteMethod::default()))
+                    cosmic::Action::App(Message::WriteMethod(WriteMethodMessage::Loaded(
+                        WriteMethod::default(),
+                    )))
                 }
             }
         }),
