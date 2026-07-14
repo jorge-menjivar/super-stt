@@ -343,10 +343,14 @@ Three patterns account for the majority of findings:
   page stays Models (set in `init.rs`) and the user's current page is untouched
   across a daemon restart.
 
-### [ ] 19. 🟡 App: volume slider fires one POST per drag tick
+### [x] 19. 🟡 App: volume slider fires one POST per drag tick
 
 - **Where:** `ui/views/customization.rs:56`, `handlers/recording.rs:120-126`.
 - **Fix:** commit on `on_release` or debounce.
+- **Resolved (branch `refactor/audit-app-tier1-16-19`):** the slider's drag callback
+  (`VolumeChanged`) now only updates the local value; a new `VolumeCommit` wired to
+  the slider's `on_release` fires the single `set_volume` POST. A whole drag is one
+  request instead of hundreds.
 
 ### [ ] 20. 🟡 App: language client encodes `source` but interpolates `model` raw
 

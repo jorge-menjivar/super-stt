@@ -207,6 +207,7 @@ impl AppModel {
                 | Message::AudioThemeSelected(_)
                 | Message::AudioThemesLoaded(_)
                 | Message::VolumeChanged(_)
+                | Message::VolumeCommit
                 | Message::WidgetAudioLevel { .. }
                 | Message::WidgetRecordingState(_)
         ) {

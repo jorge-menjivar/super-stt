@@ -54,7 +54,11 @@ pub fn page<'a>(
             .into()
         };
 
+        // Drag ticks update the local value; the daemon POST fires once on
+        // release (Tier 1 #19), so a single drag isn't hundreds of set_volume
+        // requests.
         let slider = widget::slider(0..=100, volume, Message::VolumeChanged)
+            .on_release(Message::VolumeCommit)
             .width(Length::Fill)
             .apply(widget::container)
             .max_width(250.);

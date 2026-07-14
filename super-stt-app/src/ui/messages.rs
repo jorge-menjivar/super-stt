@@ -220,7 +220,11 @@ pub enum Message {
     WriteMethodError(String),
 
     // Volume messages
+    /// A drag tick: updates the local slider value only (no daemon POST).
     VolumeChanged(u8),
+    /// The slider was released: commit the current value to the daemon once,
+    /// rather than one POST per drag tick (Tier 1 #19).
+    VolumeCommit,
 
     // Backend catalog + per-backend secret/option configuration.
     // Secrets are managed via the daemon's secrets endpoints.

@@ -35,6 +35,7 @@ impl AppModel {
             | Message::AudioThemeSelected(_)
             | Message::AudioThemesLoaded(_)
             | Message::VolumeChanged(_)
+            | Message::VolumeCommit
             | Message::WidgetAudioLevel { .. }
             | Message::WidgetRecordingState(_) => self.handle_audio_messages(message),
 
@@ -135,9 +136,16 @@ impl AppModel {
             }
 
             Message::VolumeChanged(vol) => {
-                self.action_error = None;
+                // Drag tick: update the slider locally only. The daemon POST is
+                // deferred to VolumeCommit (on release) so a drag doesn't fire
+                // one set_volume per tick (Tier 1 #19).
                 self.volume = vol;
-                Task::perform(set_volume(vol), |result| match result {
+                Task::none()
+            }
+
+            Message::VolumeCommit => {
+                self.action_error = None;
+                Task::perform(set_volume(self.volume), |result| match result {
                     Ok(()) => cosmic::Action::None,
                     Err(e) => cosmic::Action::App(customization_error(&e)),
                 })
