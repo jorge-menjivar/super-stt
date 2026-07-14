@@ -200,13 +200,14 @@ impl DaemonConfig {
         config
     }
 
-    /// Save configuration to disk
+    /// Save configuration to disk. Blocking (`std::fs::write`); on the async
+    /// runtime call it via `persist_config()` / `spawn_blocking`, not inline.
     ///
     /// # Errors
     ///
     /// Returns an error if the configuration directory cannot be created,
     /// serialization fails, or the file cannot be written.
-    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save(&self) -> anyhow::Result<()> {
         let config_path = Self::get_config_path();
 
         // Create config directory if it doesn't exist
@@ -221,75 +222,57 @@ impl DaemonConfig {
         Ok(())
     }
 
-    /// Update preferred device and save to disk
+    // Config mutators are PURE (Tier 3 #3): they mutate in-memory state only.
+    // The caller persists once via `persist_config()` (which writes off the
+    // async runtime), so there are no blocking `fs::write`s under the config
+    // lock and no double writes.
+
+    /// Update preferred device.
     pub fn update_preferred_device(&mut self, device: String) {
         self.device.preferred_device = device;
-        if let Err(e) = self.save() {
-            error!("Failed to save config after device update: {e}");
-        }
     }
 
-    /// Update audio theme and save to disk
+    /// Update audio theme.
     pub fn update_audio_theme(&mut self, theme: AudioTheme) {
         self.audio.theme = theme;
-        if let Err(e) = self.save() {
-            error!("Failed to save config after audio theme update: {e}");
-        }
     }
 
-    /// Update preferred model + provider + source and save to disk.
+    /// Update preferred model + provider + source.
     pub fn update_preferred_model(&mut self, model: String, provider: Provider, source: String) {
         self.transcription.preferred_model = model;
         self.transcription.preferred_provider = provider;
         self.transcription.preferred_source = source;
-        if let Err(e) = self.save() {
-            error!("Failed to save config after model update: {e}");
-        }
     }
 
     /// Clear the loaded-model preference (model + source) while keeping the
-    /// active backend selected, then save. Used by the unload path so a daemon
-    /// restart stays idle instead of reloading the unloaded model. Bundling the
-    /// save with the clear guarantees the on-disk state can't drift from memory.
+    /// active backend selected. Used by the unload path so a daemon restart
+    /// stays idle instead of reloading the unloaded model.
     pub fn clear_preferred_model(&mut self) {
         self.transcription.preferred_model = String::new();
         self.transcription.preferred_source = String::new();
-        if let Err(e) = self.save() {
-            error!("Failed to save config after clearing preferred model: {e}");
-        }
     }
 
     /// Set the active backend (its relative install dir) and drop the loaded
-    /// model preference — selecting a backend does not load a model. Saves.
+    /// model preference — selecting a backend does not load a model.
     pub fn update_active_backend(&mut self, dir: String) {
         self.transcription.active_backend = Some(dir);
         self.transcription.preferred_model = String::new();
-        if let Err(e) = self.save() {
-            error!("Failed to save config after active backend update: {e}");
-        }
     }
 
-    /// Clear the active backend and the loaded-model preference (→ idle). Saves.
+    /// Clear the active backend and the loaded-model preference (→ idle).
     pub fn clear_active_backend(&mut self) {
         self.transcription.active_backend = None;
         self.transcription.preferred_model = String::new();
         self.transcription.preferred_source = String::new();
-        if let Err(e) = self.save() {
-            error!("Failed to save config after clearing active backend: {e}");
-        }
     }
 
-    /// Update master volume and save to disk
+    /// Update master volume.
     pub fn update_volume(&mut self, volume: u8) {
         self.audio.volume = volume;
-        if let Err(e) = self.save() {
-            error!("Failed to save config after volume update: {e}");
-        }
     }
 
-    /// Set or clear a backend option override and save to disk. An empty
-    /// `value` clears the override (the backend falls back to its manifest
-    /// default).
+    /// Set or clear a backend option override. An empty `value` clears the
+    /// override (the backend falls back to its manifest default).
     pub fn update_backend_option(&mut self, source: String, name: String, value: String) {
         if value.is_empty() {
             if let Some(opts) = self.backends.options.get_mut(&source) {
@@ -304,9 +287,6 @@ impl DaemonConfig {
                 .entry(source)
                 .or_default()
                 .insert(name, value);
-        }
-        if let Err(e) = self.save() {
-            error!("Failed to save config after backend option update: {e}");
         }
     }
 

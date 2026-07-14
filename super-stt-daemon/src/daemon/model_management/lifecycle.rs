@@ -178,6 +178,9 @@ impl SuperSTTDaemon {
         // Drop the preferred model from config *and persist* so a daemon
         // restart stays idle instead of reloading the just-unloaded model.
         self.config.write().await.clear_preferred_model();
+        if let Err(e) = self.persist_config().await {
+            warn!("Failed to persist config after unloading model: {e}");
+        }
         self.events
             .publish_daemon_status_changed(serde_json::json!({
                 "status": "ready",

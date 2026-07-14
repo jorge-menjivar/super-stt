@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::daemon::types::SuperSTTDaemon;
-use log::info;
+use log::{info, warn};
 use super_stt_shared::models::backends::{BackendInfo, BackendModel, BackendOption, BackendSecret};
 use super_stt_shared::models::protocol::DaemonResponse;
 
@@ -119,6 +119,9 @@ impl SuperSTTDaemon {
         {
             let mut config = self.config.write().await;
             config.update_backend_option(source.clone(), name.clone(), value.clone());
+        }
+        if let Err(e) = self.persist_config().await {
+            warn!("Failed to persist config after backend option update: {e}");
         }
 
         let reload_warning = self.reload_if_source_active(&source).await;

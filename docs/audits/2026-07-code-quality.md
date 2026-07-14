@@ -761,7 +761,7 @@ Tier 2 #4/#6/#8.
   the model under the write lock.
 - **Fix:** one `finalize_loaded_model()`; route unload through the real path.
 
-### [ ] 3. 🟠 Daemon: config persistence has three idioms
+### [x] 3. 🟠 Daemon: config persistence has three idioms
 
 - **Where:** self-saving `update_*` (blocking `fs::write` under the tokio config
   write lock, errors swallowed), pure mutation + `persist_config()`, and
@@ -770,6 +770,15 @@ Tier 2 #4/#6/#8.
   neither (Tier 1 #3).
 - **Fix:** make all mutators pure, persist via `persist_config()` in
   `spawn_blocking`; `save()`'s `Box<dyn Error>` → `anyhow::Result`.
+- **Resolved (branch `refactor/audit-tier3-1-4`):** all eight `update_*`/`clear_*`
+  config mutators are now pure (no `self.save()`); `persist_config_static` snapshots
+  the config under the lock, releases it, and does the blocking TOML-serialize +
+  `fs::write` in `spawn_blocking` — so no `fs::write` runs on an async worker under a
+  config lock. The six former double-write sites become single-write automatically;
+  the five sites that relied on the self-save (`update_active_backend` ×2,
+  `clear_active_backend`, `clear_preferred_model`, `update_backend_option`) gained an
+  explicit `persist_config()`, including the pre-load `active_backend` write that must
+  survive a load failure across a restart. `save()` now returns `anyhow::Result`.
 
 ### [ ] 4. 🟠 Daemon: blocking work on the async runtime
 

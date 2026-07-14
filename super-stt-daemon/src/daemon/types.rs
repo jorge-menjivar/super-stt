@@ -203,9 +203,13 @@ impl SuperSTTDaemon {
     pub async fn persist_config_static(
         config: &Arc<tokio::sync::RwLock<DaemonConfig>>,
     ) -> Result<(), anyhow::Error> {
-        let config_guard = config.read().await;
-        config_guard
-            .save()
+        // Snapshot under the lock (cheap clone), release it, then do the
+        // blocking TOML-serialize + `fs::write` on a blocking thread — never on
+        // an async worker while a config lock is held (Tier 3 #3).
+        let snapshot = config.read().await.clone();
+        tokio::task::spawn_blocking(move || snapshot.save())
+            .await
+            .map_err(|e| anyhow::anyhow!("config-persist task failed: {e}"))?
             .map_err(|e| anyhow::anyhow!("Failed to save config to disk: {e}"))?;
         log::debug!("Persisted config to disk");
         Ok(())
