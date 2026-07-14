@@ -36,7 +36,7 @@ Content-Type: application/json
 
 | Field  | Type   | Required | Notes                                                       |
 |--------|--------|----------|-------------------------------------------------------------|
-| `mode` | string | yes      | One of `silence_only`, `silence_and_manual`, `manual_only`       |
+| `mode` | string | yes      | One of `silence_only`, `silence_and_manual`, `manual_only`. An unrecognized value falls back to the default (`silence_and_manual`) rather than being rejected. |
 
 **Response (200):**
 
@@ -54,9 +54,14 @@ Content-Type: application/json
 
 | HTTP | `message`                    | Meaning                                                       |
 |------|------------------------------|---------------------------------------------------------------|
-| 400  | `invalid_recording_stop_mode`| `mode` wasn't one of the three known values                   |
+| 400  | (request error)              | `mode` was absent from the request body                        |
 | 401  | `invalid_session`            | Token unknown / expired / `exe_changed`                       |
 | 403  | `scope_denied`               | Token lacks the `settings` scope                              |
+
+A **present but unrecognized** `mode` value is **not** an error — it falls back to
+the default (`silence_and_manual`), matching the wire-enum house rule used across
+the protocol and the `record` command's `stop_mode` override. Only an *absent*
+`mode` field is a client error.
 
 ## `GET /recording_stop_mode`
 

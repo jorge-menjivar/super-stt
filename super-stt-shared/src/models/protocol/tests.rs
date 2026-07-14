@@ -88,20 +88,39 @@ fn record_command_wait_defaults_to_false() {
 }
 
 #[test]
-fn record_command_backward_compat_disable_silence_detection() {
+fn record_command_invalid_stop_mode_falls_back_to_default() {
+    // Tier 1 #26: a present-but-unknown stop_mode is not silently dropped to
+    // None — it falls back to the type default (same policy as the SET path).
     let request = make_request(
         "record",
         Some(json!({
             "write_mode": false,
-            "disable_silence_detection": true,
+            "stop_mode": "not_a_real_mode",
         })),
     );
     let command = Command::try_from(request).expect("record command should parse");
     match command {
         Command::Record { stop_mode, .. } => {
-            assert_eq!(stop_mode, Some(RecordingStopMode::ManualOnly));
+            assert_eq!(stop_mode, Some(RecordingStopMode::default()));
         }
         _ => panic!("expected Command::Record"),
+    }
+}
+
+#[test]
+fn set_recording_stop_mode_invalid_falls_back_to_default() {
+    // Tier 1 #26: the SET path no longer 400s an unknown mode — it, too, falls
+    // back to the type default per the wire-enum house rule.
+    let request = make_request(
+        "set_recording_stop_mode",
+        Some(json!({ "mode": "not_a_real_mode" })),
+    );
+    let command = Command::try_from(request).expect("set command should parse");
+    match command {
+        Command::SetRecordingStopMode { mode } => {
+            assert_eq!(mode, RecordingStopMode::default());
+        }
+        _ => panic!("expected Command::SetRecordingStopMode"),
     }
 }
 

@@ -88,27 +88,17 @@ fn cmd_record(request: &DaemonRequest) -> Command {
         .and_then(|data| data.get("write_mode"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    // Parse stop_mode string if present
+    // `stop_mode` is an optional per-request override: absent -> `None` (the
+    // daemon uses its configured default). When present, an unknown value falls
+    // back to the type default rather than being silently dropped, matching the
+    // house rule and the `set_recording_stop_mode` path (Tier 1 #26). The legacy
+    // `disable_silence_detection` compat branch was undocumented and caller-less.
     let stop_mode = request
         .data
         .as_ref()
         .and_then(|data| data.get("stop_mode"))
         .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<RecordingStopMode>().ok())
-        // Backward compat: if stop_mode absent, check legacy disable_silence_detection
-        .or_else(|| {
-            let disabled = request
-                .data
-                .as_ref()
-                .and_then(|data| data.get("disable_silence_detection"))
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
-            if disabled {
-                Some(RecordingStopMode::ManualOnly)
-            } else {
-                None
-            }
-        });
+        .map(|s| s.parse::<RecordingStopMode>().unwrap_or_default());
     let wait = request
         .data
         .as_ref()
@@ -210,9 +200,9 @@ fn cmd_set_recording_stop_mode(request: &DaemonRequest) -> Result<Command, Strin
         .and_then(|data| data.get("mode"))
         .and_then(|v| v.as_str())
         .ok_or("Missing mode for set_recording_stop_mode command")?;
-    let mode = mode_str
-        .parse::<RecordingStopMode>()
-        .map_err(|e| format!("Invalid recording stop mode: {e}"))?;
+    // Unknown value -> the type default (house rule: bad wire enums fall back to
+    // default, no error), matching `cmd_record` (Tier 1 #26).
+    let mode = mode_str.parse::<RecordingStopMode>().unwrap_or_default();
     Ok(Command::SetRecordingStopMode { mode })
 }
 

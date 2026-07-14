@@ -424,7 +424,7 @@ Three patterns account for the majority of findings:
   `file = ""` + valid `parts` yields `file: None` / `is_multipart(): true` /
   `release_files(): [parts…]` instead of a `[""]` filename. Added a regression test.
 
-### [ ] 26. 🟡 Shared: `cmd_record` silently drops an invalid `stop_mode`
+### [x] 26. 🟡 Shared: `cmd_record` silently drops an invalid `stop_mode`
 
 - **Where:** `.ok()` at `protocol/dispatch.rs:123-128`, while
   `set_recording_stop_mode` 400s the same input (`dispatch.rs:237-248`); the
@@ -432,6 +432,14 @@ Three patterns account for the majority of findings:
   and caller-less.
 - **Fix:** one unknown-value policy across both paths (house rule:
   fallback-to-default); delete the compat branch.
+- **Resolved (branch `refactor/audit-tier1-25-29`):** both paths now use
+  `parse::<RecordingStopMode>().unwrap_or_default()` — a present-but-unknown value
+  falls back to the type default instead of being silently dropped to `None`
+  (`cmd_record`) or 400'd (`cmd_set_recording_stop_mode`). The dead
+  `disable_silence_detection` compat branch and its test are gone. **Contract change:**
+  the SET endpoint no longer returns `400 invalid_recording_stop_mode` for an unknown
+  value; `docs/protocol/endpoints/v1/recording_stop_mode.md` was updated to document
+  the fallback (only an *absent* `mode` is a client error). New tests pin both paths.
 
 ### [ ] 27. 🔴 Forge: `ForgeClient::download` buffers unbounded bodies *(security)*
 
