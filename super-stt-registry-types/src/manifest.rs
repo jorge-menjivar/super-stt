@@ -507,7 +507,7 @@ impl Manifest {
     /// # Errors
     /// Returns a [`ManifestError`] on TOML errors or an unsafe entrypoint.
     pub fn parse(text: &str) -> Result<Self, ManifestError> {
-        let m: Self = toml::from_str(text)?;
+        let mut m: Self = toml::from_str(text)?;
         if !crate::is_safe_relative_path(&m.backend.entrypoint) {
             return Err(ManifestError::UnsafeEntrypoint(m.backend.entrypoint));
         }
@@ -525,8 +525,16 @@ impl Manifest {
         // `file` (single) or `parts` (split across release assets, concatenated
         // in order). The guard lives in the canonical parser so the daemon and
         // the indexer agree on the contract.
-        for a in &m.assets.subprocess {
-            let has_file = a.file.as_deref().is_some_and(|f| !f.is_empty());
+        for a in &mut m.assets.subprocess {
+            // Normalize an empty `file` to `None` so the XOR check and the
+            // downstream `release_files()` / `is_multipart()` all agree that
+            // `parts` is the source. Without this, `file = ""` plus valid `parts`
+            // passed parse but `release_files()` then returned `[""]` and
+            // `is_multipart()` was false (Tier 1 #25).
+            if a.file.as_deref().is_some_and(str::is_empty) {
+                a.file = None;
+            }
+            let has_file = a.file.is_some();
             let has_parts = !a.parts.is_empty() && a.parts.iter().all(|p| !p.is_empty());
             if has_file == has_parts {
                 return Err(ManifestError::AssetFileXorParts(a.target.clone()));
@@ -937,6 +945,39 @@ mod tests {
         assert_eq!(
             a.release_files(),
             vec!["y-cuda13.tar.gz.part00", "y-cuda13.tar.gz.part01"]
+        );
+    }
+
+    #[test]
+    fn empty_file_string_normalizes_to_parts() {
+        // Regression (Tier 1 #25): `file = ""` plus valid `parts` used to pass
+        // parse but leave `file = Some("")`, so `release_files()` returned `[""]`
+        // and `is_multipart()` was false. Parse must normalize empty -> None.
+        let m = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "subprocess"
+            entrypoint = "y"
+            contract = "v1"
+            description = "Test backend."
+
+            [[assets.subprocess]]
+            file = ""
+            parts = ["y.tar.gz.part00", "y.tar.gz.part01"]
+            target = "x86_64-unknown-linux-gnu"
+            accel = "cpu"
+            "#,
+        )
+        .unwrap();
+        let a = &m.assets.subprocess[0];
+        assert_eq!(a.file, None);
+        assert!(a.is_multipart());
+        assert_eq!(
+            a.release_files(),
+            vec!["y.tar.gz.part00", "y.tar.gz.part01"]
         );
     }
 

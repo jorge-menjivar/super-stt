@@ -413,12 +413,16 @@ Three patterns account for the majority of findings:
   `available_audio_themes` returns the documented lowercase form; the smoke test
   now pins the exact value list.
 
-### [ ] 25. 🟡 Registry-types: `SubprocessAsset` with `file = ""` plus valid `parts` passes `Manifest::parse`
+### [x] 25. 🟡 Registry-types: `SubprocessAsset` with `file = ""` plus valid `parts` passes `Manifest::parse`
 
 - **Where:** the XOR guard treats empty as absent
   (`super-stt-registry-types/src/manifest.rs:528-534`), but `release_files()`
   returns `[""]` and `is_multipart()` is false (`manifest.rs:202-213`).
 - **Fix:** normalize empty→`None` in parse.
+- **Resolved (branch `refactor/audit-tier1-25-29`):** `Manifest::parse` now takes
+  `&mut m` and normalizes an empty `file` string to `None` before the XOR check, so
+  `file = ""` + valid `parts` yields `file: None` / `is_multipart(): true` /
+  `release_files(): [parts…]` instead of a `[""]` filename. Added a regression test.
 
 ### [ ] 26. 🟡 Shared: `cmd_record` silently drops an invalid `stop_mode`
 
