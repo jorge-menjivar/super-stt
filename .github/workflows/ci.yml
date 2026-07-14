@@ -14,11 +14,12 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
+      # PRs gate on `stable` only (fast feedback). The `beta`/`nightly`
+      # toolchain checks run post-merge on `push` (main/develop) so a
+      # toolchain-specific break is still caught without slowing every PR.
       matrix:
-        rust:
-          - stable
-          - beta
-          - nightly
+        rust: ${{ github.event_name == 'pull_request' && fromJSON('["stable"]') || fromJSON('["beta", "nightly"]') }}
 
     steps:
       - uses: actions/checkout@v7
