@@ -857,10 +857,20 @@ Tier 2 #4/#6/#8.
   calls; the now-unused `source_key`/`source`/`&AppState` params drop from the phase
   helpers.
 
-### [ ] 7. 🟡 Daemon: settings handlers repeat a 25-line mutate→persist→respond block 6×
+### [x] 7. 🟡 Daemon: settings handlers repeat a 25-line mutate→persist→respond block 6×
 
 - **Where:** `settings_handlers.rs:12-250`.
 - **Fix:** one `set_config_field` helper (also prevents Tier 1 #3 recurrences).
+- **Resolved (branch `refactor/audit-tier3-5-8`):** added `set_config_field`
+  (lock → mutate closure → `persist_config`, returning the persist `Result`) and a
+  `settings_saved` response helper (folds the persist outcome into the response,
+  appending `(save failed: {e})` and logging a warning on failure while keeping the
+  in-memory change). The four simple setters — preview typing, recording stop mode,
+  write method, custom models dir — now route through both, dropping their
+  hand-rolled `{ lock; mutate }` + `persist_config().await` + Ok/Err match.
+  `handle_set_allow_online_models` keeps its explicit mutate/persist: it interleaves
+  an async online→local revert between the mutate and the persist and builds a
+  revert-aware message, so it doesn't fit the couple-mutate-and-persist shape.
 
 ### [ ] 8. 🟠 Daemon: SSE fan-out uses unbounded channels
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::config::DaemonConfig;
 use crate::daemon::types::SuperSTTDaemon;
 use log::{info, warn};
 use super_stt_shared::models::protocol::DaemonResponse;
@@ -7,45 +8,57 @@ use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 
 impl SuperSTTDaemon {
+    /// Mutate the config under the write lock, then persist it. Centralizes the
+    /// lock → mutate → persist sequence so a settings handler can't hand-roll it
+    /// and forget the persist (see Tier 1 #3). Returns the persist outcome so the
+    /// caller can fold a save failure into its response.
+    async fn set_config_field<F>(&self, mutate: F) -> anyhow::Result<()>
+    where
+        F: FnOnce(&mut DaemonConfig),
+    {
+        {
+            let mut config = self.config.write().await;
+            mutate(&mut config);
+        }
+        self.persist_config().await
+    }
+
+    /// Fold a persist outcome into a settings response. `base` already carries
+    /// the setting-specific `.with_*` field and `message` is the success text.
+    /// A save failure keeps the (already-applied) in-memory change — the daemon
+    /// stays authoritative for the process lifetime — and appends the error to
+    /// the message, logging a warning.
+    fn settings_saved(
+        base: DaemonResponse,
+        message: String,
+        persist: anyhow::Result<()>,
+    ) -> DaemonResponse {
+        match persist {
+            Ok(()) => base.with_message(message),
+            Err(e) => {
+                warn!("Setting changed but config save failed: {e}");
+                base.with_message(format!("{message} (save failed: {e})"))
+            }
+        }
+    }
     /// Handle set preview typing command - enable or disable preview typing
     #[must_use]
     pub async fn handle_set_preview_typing(&self, enabled: bool) -> DaemonResponse {
-        // Update the in-memory setting
+        // Update the in-memory setting.
         self.preview_typing_enabled
             .store(enabled, std::sync::atomic::Ordering::Relaxed);
 
-        // Update the config directly (don't clone)
-        {
-            let mut config_guard = self.config.write().await;
-            config_guard.transcription.preview_typing_enabled = enabled;
-        }
+        let persist = self
+            .set_config_field(|c| c.transcription.preview_typing_enabled = enabled)
+            .await;
 
-        // Persist the change to disk so it survives a restart.
-        let persist_result = self.persist_config().await;
-
-        match persist_result {
-            Ok(()) => {
-                info!(
-                    "Preview typing {} and saved to config",
-                    if enabled { "enabled" } else { "disabled" }
-                );
-                DaemonResponse::success()
-                    .with_preview_typing_enabled(enabled)
-                    .with_message(format!(
-                        "Preview typing {} and saved",
-                        if enabled { "enabled" } else { "disabled" }
-                    ))
-            }
-            Err(e) => {
-                warn!("Preview typing setting changed but failed to save to config: {e}");
-                DaemonResponse::success()
-                    .with_preview_typing_enabled(enabled)
-                    .with_message(format!(
-                        "Preview typing {} (config save failed: {e})",
-                        if enabled { "enabled" } else { "disabled" }
-                    ))
-            }
-        }
+        let state = if enabled { "enabled" } else { "disabled" };
+        info!("Preview typing {state}");
+        Self::settings_saved(
+            DaemonResponse::success().with_preview_typing_enabled(enabled),
+            format!("Preview typing {state}"),
+            persist,
+        )
     }
 
     /// Handle get preview typing command - return current preview typing setting
@@ -62,29 +75,16 @@ impl SuperSTTDaemon {
 
     /// Handle set recording stop mode command
     pub async fn handle_set_recording_stop_mode(&self, mode: RecordingStopMode) -> DaemonResponse {
-        {
-            let mut config_guard = self.config.write().await;
-            config_guard.transcription.recording_stop_mode = mode;
-        }
+        let persist = self
+            .set_config_field(|c| c.transcription.recording_stop_mode = mode)
+            .await;
 
-        let persist_result = self.persist_config().await;
-
-        match persist_result {
-            Ok(()) => {
-                info!("Recording stop mode set to {mode} and saved to config");
-                DaemonResponse::success()
-                    .with_recording_stop_mode(mode.to_string())
-                    .with_message(format!("Recording stop mode set to {mode}"))
-            }
-            Err(e) => {
-                warn!("Recording stop mode changed but failed to save: {e}");
-                DaemonResponse::success()
-                    .with_recording_stop_mode(mode.to_string())
-                    .with_message(format!(
-                        "Recording stop mode set to {mode} (save failed: {e})"
-                    ))
-            }
-        }
+        info!("Recording stop mode set to {mode}");
+        Self::settings_saved(
+            DaemonResponse::success().with_recording_stop_mode(mode.to_string()),
+            format!("Recording stop mode set to {mode}"),
+            persist,
+        )
     }
 
     /// Handle get recording stop mode command
@@ -96,29 +96,18 @@ impl SuperSTTDaemon {
 
     /// Handle set write method command
     pub async fn handle_set_write_method(&self, method: WriteMethod) -> DaemonResponse {
-        {
-            let mut config_guard = self.config.write().await;
-            config_guard.transcription.write_method = method;
-        }
+        let persist = self
+            .set_config_field(|c| c.transcription.write_method = method)
+            .await;
         // Invalidate the cached simulator so the next recording creates a fresh one.
         *self.simulator.write().await = None;
 
-        let persist_result = self.persist_config().await;
-
-        match persist_result {
-            Ok(()) => {
-                info!("Write method set to {method} and saved to config");
-                DaemonResponse::success()
-                    .with_write_method(method.to_string())
-                    .with_message(format!("Write method set to {method}"))
-            }
-            Err(e) => {
-                warn!("Write method changed but failed to save: {e}");
-                DaemonResponse::success()
-                    .with_write_method(method.to_string())
-                    .with_message(format!("Write method set to {method} (save failed: {e})"))
-            }
-        }
+        info!("Write method set to {method}");
+        Self::settings_saved(
+            DaemonResponse::success().with_write_method(method.to_string()),
+            format!("Write method set to {method}"),
+            persist,
+        )
     }
 
     /// Handle get write method command
@@ -227,25 +216,15 @@ impl SuperSTTDaemon {
     pub async fn handle_set_custom_models_dir(&self, path: Option<String>) -> DaemonResponse {
         let path_display = path.as_deref().unwrap_or("none").to_string();
 
-        {
-            let mut config_guard = self.config.write().await;
-            config_guard.transcription.custom_models_dir = path;
-        }
+        let persist = self
+            .set_config_field(|c| c.transcription.custom_models_dir = path)
+            .await;
 
-        let persist_result = self.persist_config().await;
-
-        match persist_result {
-            Ok(()) => {
-                info!("Custom models directory set to {path_display} and saved to config");
-                DaemonResponse::success()
-                    .with_message(format!("Custom models directory set to {path_display}"))
-            }
-            Err(e) => {
-                warn!("Custom models directory changed but failed to save: {e}");
-                DaemonResponse::success().with_message(format!(
-                    "Custom models directory set to {path_display} (save failed: {e})"
-                ))
-            }
-        }
+        info!("Custom models directory set to {path_display}");
+        Self::settings_saved(
+            DaemonResponse::success(),
+            format!("Custom models directory set to {path_display}"),
+            persist,
+        )
     }
 }
