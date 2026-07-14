@@ -9,7 +9,7 @@ use crate::daemon::client::{
     get_current_audio_theme, get_custom_models_dir, get_preview_typing, get_recording_stop_mode,
     get_volume, get_write_method, ping_daemon, test_daemon_connection,
 };
-use crate::state::{AudioTheme, DaemonStatus, Page};
+use crate::state::{AudioTheme, DaemonStatus};
 use crate::ui::messages::Message;
 use cosmic::prelude::*;
 use log::{info, warn};
@@ -117,19 +117,10 @@ impl AppModel {
             info!("Daemon reconnected; events subscription is self-healing, no iced restart");
         }
 
-        // Only switch to first page on initial connection, not on periodic pings
-        if was_disconnected {
-            let mut first_entity = None;
-            for entity in self.nav.iter() {
-                if matches!(self.nav.data::<Page>(entity), Some(Page::Customization)) {
-                    first_entity = Some(entity);
-                    break;
-                }
-            }
-            if let Some(entity) = first_entity {
-                self.nav.activate(entity);
-            }
-        }
+        // Do NOT navigate on (re)connect: the launch page is Models (set in
+        // `init.rs`), and yanking a mid-flow user to another page on every
+        // daemon restart was both surprising and contradicted that default
+        // (Tier 1 #18). Whatever page the user is on stays active.
 
         // Load settings/models/languages ONLY on the disconnected→connected
         // transition. Periodic keep-alive pings also resolve to `DaemonConnected`

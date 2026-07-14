@@ -332,12 +332,16 @@ Three patterns account for the majority of findings:
   advances past every event), appends the final `update_title()`, and returns
   `Task::batch(tasks)`.
 
-### [ ] 18. 🟡 App: reconnect force-navigates to Customization
+### [x] 18. 🟡 App: reconnect force-navigates to Customization
 
 - **Where:** `handlers/daemon/mod.rs:117-129`, contradicting the documented Models
   launch page (`core/app/init.rs:18-24`).
 - **Impact:** yanks mid-flow users to another page on every daemon restart.
 - **Fix:** don't navigate on reconnect.
+- **Resolved (branch `refactor/audit-app-tier1-16-19`):** deleted the
+  reconnect-time nav-activate block (and the now-unused `Page` import); the launch
+  page stays Models (set in `init.rs`) and the user's current page is untouched
+  across a daemon restart.
 
 ### [ ] 19. 🟡 App: volume slider fires one POST per drag tick
 
