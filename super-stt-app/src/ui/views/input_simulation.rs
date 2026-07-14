@@ -3,11 +3,11 @@ use cosmic::Element;
 use cosmic::widget::{self, settings};
 use super_stt_shared::models::write_method::WriteMethod;
 
-use super::common::page_layout;
+use super::common::{error_banner, page_layout};
 use crate::ui::messages::{Message, WriteMethodMessage};
 
 /// Input simulation page: write method selection
-pub fn page(write_method: WriteMethod) -> Element<'static, Message> {
+pub fn page(write_method: WriteMethod, action_error: Option<&str>) -> Element<'_, Message> {
     let methods = [
         WriteMethod::Auto,
         WriteMethod::XdgDesktopPortal,
@@ -20,7 +20,11 @@ pub fn page(write_method: WriteMethod) -> Element<'static, Message> {
         .collect();
     let selected_index = methods.iter().position(|m| *m == write_method);
 
-    let sections = settings::view_column(vec![
+    let mut blocks = Vec::new();
+    if let Some(message) = action_error {
+        blocks.push(error_banner(message));
+    }
+    blocks.push(
         settings::section()
             .title("Input Simulation")
             .add(
@@ -35,7 +39,7 @@ pub fn page(write_method: WriteMethod) -> Element<'static, Message> {
                     )),
             )
             .into(),
-    ]);
+    );
 
-    page_layout("Input Simulation", sections)
+    page_layout("Input Simulation", settings::view_column(blocks))
 }

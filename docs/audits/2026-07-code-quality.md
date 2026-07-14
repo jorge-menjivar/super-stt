@@ -939,7 +939,7 @@ Tier 2 #4/#6/#8.
   exhaustiveness guarantee lives at the sub-enum boundary, which is what silently no-op'd
   before.
 
-### [ ] 11. 🟠 App: one error surface
+### [x] 11. 🟠 App: one error surface
 
 - **Where:** four ad-hoc patterns today — transcription-box hijack, log-only,
   invisible, escalate-to-connection-page (Tier 1 #13/#15).
@@ -947,6 +947,26 @@ Tier 2 #4/#6/#8.
   `ui/views/models/active.rs:437-445`) is the good template; add a shared
   scope-tagged error slot rendered per page, and roll back optimistic state on
   failure.
+- **Resolved (branch `refactor/audit-tier3-9-11`):** generalized the existing
+  scope-tagged `action_error` slot. `ErrorScope` gained `Recording` and
+  `InputSimulation`; the Recording and Input Simulation pages now render the shared
+  `error_banner` (via `action_error_for(scope)`) like Customization already did. Added
+  `set_action_error`/`clear_action_error` helpers (scope-safe: clearing one page's
+  banner can't wipe another's). Converged the ad-hoc error paths onto it:
+  - **Log-only → banner:** the preview-typing / stop-mode / write-method save errors
+    and the language-save error now populate their page's banner instead of only
+    `log::warn!`.
+  - **Transcription-box hijack → Models card:** `DeviceError` and `DownloadError` set
+    `ModelOperationState::Error` (the good template) instead of overwriting the
+    Recording page's `transcription_text`.
+- **Deferred (follow-up, Tier 3 #37):** rolling back optimistic state on failure
+  (audio theme / volume / select-backend / staged-device). Doing it right needs a
+  captured previous value threaded through a per-setting success/failure message
+  (the failure arrives as a separate message that doesn't carry the prior value), and
+  the drift self-heals on the next reconnect refetch (`VolumeLoaded` /
+  `CurrentAudioThemeLoaded` / `ActiveBackendLoaded`), so it's a refinement rather than
+  a correctness gap. The `escalate-to-connection-page` behavior (whole-UI takeover on
+  `DaemonStatus::Error`) is intentional for a lost daemon and stays.
 
 ### [x] 12. 🟡 App: `clear_loaded_model()` helper for the copy-pasted current-model triple
 
@@ -1128,6 +1148,21 @@ Tier 2 #4/#6/#8.
   for marginal benefit.
 - **Fix:** route sessions through `kv_get`/`kv_set` and delete
   `install_mock_if_requested`; introduce a small keyring error enum.
+
+### [ ] 37. 🟡 App: roll back optimistic UI state on save failure (split off Tier 3 #11)
+
+- **Where:** the optimistic-then-banner sites — audio theme / feedback
+  (`handlers/recording.rs`), volume commit (same), `SelectBackend` /
+  `LoadStagedModel` staged device (`handlers/models_page/mod.rs`).
+- **Why split:** Tier 3 #11 landed the "one error surface" (scoped banners + Models
+  card, no more transcription hijack or log-only). Rollback is separable: the failure
+  arrives as its own message that doesn't carry the pre-optimistic value, so each site
+  needs a captured previous value threaded through a per-setting success/failure
+  message (and volume needs a stored last-committed value, since the drag already
+  overwrote `self.volume`). The drift also self-heals on the next reconnect refetch
+  (`VolumeLoaded`/`CurrentAudioThemeLoaded`/`ActiveBackendLoaded`).
+- **Fix:** capture the prior value at the optimistic set and restore it in a
+  dedicated failure message that also raises the banner.
 
 ---
 

@@ -131,8 +131,11 @@ impl AppModel {
 
             DownloadMessage::DownloadError { model, error } => {
                 warn!("Download error for model {model}: {error}");
-                self.model_operation_state = ModelOperationState::Ready;
-                self.transcription_text = format!("Download Error: {error}");
+                // Surface on the Models card banner instead of hijacking the
+                // Recording page's transcription box (Tier 3 #11).
+                self.model_operation_state = ModelOperationState::Error {
+                    message: format!("Download failed: {error}"),
+                };
                 self.clear_loaded_model();
                 Task::none()
             }

@@ -76,10 +76,16 @@ pub enum ContextPage {
 /// surface" (App Tier 3 #11) generalizes this.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ErrorScope {
-    /// The Customization page's Audio section: theme / volume / feedback saves.
+    /// The Customization page's Audio section: theme / volume / feedback saves,
+    /// and the global Primary Language save.
     Customization,
     /// The per-backend Configure sheet: secret / option saves.
     ConfigureBackend,
+    /// The Recording page: preview-typing / stop-mode saves and the daemon-mic
+    /// recording result.
+    Recording,
+    /// The Input Simulation page: write-method save.
+    InputSimulation,
 }
 
 /// A scope-tagged, transient action failure rendered as an inline banner on the

@@ -31,14 +31,20 @@ impl AppModel {
 
             PreviewTypingMessage::SettingLoaded(enabled) => {
                 self.preview_typing_enabled = enabled;
+                self.clear_action_error(crate::state::ErrorScope::Recording);
                 Task::none()
             }
 
             PreviewTypingMessage::Error(err) => {
                 // The toggle already reflects the daemon's last-known value (we
-                // never applied optimistically), so just log — no transcription
-                // box abuse.
+                // never applied optimistically), so there's nothing to roll back
+                // — surface the failure on the Recording page's banner instead of
+                // only logging it (Tier 3 #11).
                 log::warn!("Preview typing error: {err}");
+                self.set_action_error(
+                    crate::state::ErrorScope::Recording,
+                    format!("Couldn't save preview typing: {err}"),
+                );
                 Task::none()
             }
         }
@@ -69,11 +75,16 @@ impl AppModel {
 
             RecordingStopModeMessage::Loaded(mode) => {
                 self.recording_stop_mode = mode;
+                self.clear_action_error(crate::state::ErrorScope::Recording);
                 Task::none()
             }
 
             RecordingStopModeMessage::Error(err) => {
                 log::warn!("Recording stop mode error: {err}");
+                self.set_action_error(
+                    crate::state::ErrorScope::Recording,
+                    format!("Couldn't save recording stop mode: {err}"),
+                );
                 Task::none()
             }
         }
@@ -101,11 +112,16 @@ impl AppModel {
 
             WriteMethodMessage::Loaded(method) => {
                 self.write_method = method;
+                self.clear_action_error(crate::state::ErrorScope::InputSimulation);
                 Task::none()
             }
 
             WriteMethodMessage::Error(err) => {
                 log::warn!("Write method error: {err}");
+                self.set_action_error(
+                    crate::state::ErrorScope::InputSimulation,
+                    format!("Couldn't save write method: {err}"),
+                );
                 Task::none()
             }
         }

@@ -165,8 +165,12 @@ impl AppModel {
                 &self.transcription_text,
                 self.audio_level,
                 self.is_speech_detected,
+                self.action_error_for(crate::state::ErrorScope::Recording),
             ),
-            Page::InputSimulation => views::input_simulation::page(self.write_method),
+            Page::InputSimulation => views::input_simulation::page(
+                self.write_method,
+                self.action_error_for(crate::state::ErrorScope::InputSimulation),
+            ),
             Page::Models => views::models::page(self),
             Page::Library => views::models::library_page(self),
             Page::Connection => views::connection::page(

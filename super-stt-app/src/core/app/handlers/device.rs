@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::core::app::{AppModel, DeviceState};
+use crate::core::app::{AppModel, DeviceState, ModelOperationState};
 use crate::ui::messages::{DeviceMessage, Message};
 use cosmic::prelude::*;
 use log::info;
@@ -29,8 +29,13 @@ impl AppModel {
             }
 
             DeviceMessage::DeviceError(err) => {
+                // A device switch is a Models-page operation, so surface the
+                // failure on that page's card banner rather than hijacking the
+                // Recording page's transcription box (Tier 3 #11).
                 self.device_state = DeviceState::Ready;
-                self.transcription_text = format!("Device Error: {err}");
+                self.model_operation_state = ModelOperationState::Error {
+                    message: format!("Device error: {err}"),
+                };
                 Task::none()
             }
         }

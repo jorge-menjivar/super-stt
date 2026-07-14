@@ -5,7 +5,7 @@ use cosmic::iced_widget::row;
 use cosmic::widget::{self, button, settings, text};
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 
-use super::common::page_layout;
+use super::common::{error_banner, page_layout};
 use crate::state::RecordingStatus;
 use crate::ui::messages::{
     Message, PreviewTypingMessage, RecordingMessage, RecordingStopModeMessage,
@@ -113,16 +113,22 @@ pub fn page<'a>(
     transcription_text: &'a str,
     audio_level: f32,
     is_speech_detected: bool,
+    action_error: Option<&'a str>,
 ) -> Element<'a, Message> {
-    let sections = settings::view_column(vec![
-        settings_section(recording_stop_mode, preview_typing_enabled),
-        test_section(
-            recording_status,
-            transcription_text,
-            audio_level,
-            is_speech_detected,
-        ),
-    ]);
+    let mut blocks = Vec::new();
+    if let Some(message) = action_error {
+        blocks.push(error_banner(message));
+    }
+    blocks.push(settings_section(
+        recording_stop_mode,
+        preview_typing_enabled,
+    ));
+    blocks.push(test_section(
+        recording_status,
+        transcription_text,
+        audio_level,
+        is_speech_detected,
+    ));
 
-    page_layout("Recording", sections)
+    page_layout("Recording", settings::view_column(blocks))
 }

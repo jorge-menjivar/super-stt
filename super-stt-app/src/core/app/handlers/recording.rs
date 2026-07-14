@@ -104,7 +104,7 @@ impl AppModel {
         match message {
             RecordingMessage::AudioFeedbackToggled(enabled) => {
                 // Clear any stale Customization banner as the user retries.
-                self.action_error = None;
+                self.clear_action_error(ErrorScope::Customization);
                 let theme = if enabled {
                     self.last_non_silent_theme
                 } else {
@@ -123,7 +123,7 @@ impl AppModel {
             }
 
             RecordingMessage::AudioThemeSelected(theme) => {
-                self.action_error = None;
+                self.clear_action_error(ErrorScope::Customization);
                 self.selected_audio_theme = theme;
                 if theme != AudioTheme::Silent {
                     self.last_non_silent_theme = theme;
@@ -148,7 +148,7 @@ impl AppModel {
             }
 
             RecordingMessage::VolumeCommit => {
-                self.action_error = None;
+                self.clear_action_error(ErrorScope::Customization);
                 Task::perform(set_volume(self.volume), |result| match result {
                     Ok(()) => cosmic::Action::None,
                     Err(e) => cosmic::Action::App(customization_error(&e)),

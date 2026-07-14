@@ -209,6 +209,21 @@ impl AppModel {
             .filter(|e| e.scope == scope)
             .map(|e| e.message.as_str())
     }
+
+    /// Park a failed action in the single scope-tagged banner slot. The one
+    /// slot is deliberate — only one page is visible at a time, and
+    /// [`action_error_for`](Self::action_error_for) gates rendering by scope.
+    pub fn set_action_error(&mut self, scope: crate::state::ErrorScope, message: String) {
+        self.action_error = Some(crate::state::ActionError { scope, message });
+    }
+
+    /// Clear the banner only if it currently belongs to `scope`, so retrying or
+    /// succeeding at one page's action can't wipe another page's pending error.
+    pub fn clear_action_error(&mut self, scope: crate::state::ErrorScope) {
+        if self.action_error.as_ref().is_some_and(|e| e.scope == scope) {
+            self.action_error = None;
+        }
+    }
 }
 
 /// Create a COSMIC application from the app model

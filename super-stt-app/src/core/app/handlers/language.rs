@@ -89,7 +89,14 @@ impl AppModel {
                 )
             }
             LanguageMessage::LanguageError(e) => {
+                // The language picker lives on the Customization page — surface
+                // the failure on that page's banner instead of only logging it
+                // (Tier 3 #11).
                 log::warn!("Language settings error: {e}");
+                self.set_action_error(
+                    crate::state::ErrorScope::Customization,
+                    format!("Couldn't update language: {e}"),
+                );
                 Task::none()
             }
         }
