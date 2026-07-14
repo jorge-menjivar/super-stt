@@ -457,17 +457,24 @@ Three patterns account for the majority of findings:
   `ManifestTooLarge`, retiring the after-the-fact `len()` check. Added a
   cap-rejection test.
 
-### [ ] 28. 🟠 Indexer: one malformed `repo` string aborts the entire index build
+### [x] 28. 🟠 Indexer: one malformed `repo` string aborts the entire index build
 
 - **Where:** `RepoRef::parse(&entry.repo)?` (`indexer/src/main.rs:96`).
 - **Problem:** bypasses the carry-forward resilience path every other per-entry
   failure uses.
 - **Fix:** carry the entry forward like the rest.
+- **Resolved (branch `refactor/audit-tier1-25-29`):** a `RepoRef::parse` error is now
+  turned into a `BuildFailure` and routed through the same per-entry carry-forward
+  `match` as every other failure, instead of `?`-propagating out of the build loop.
 
-### [ ] 29. 🟡 Indexer: multi-GB temp parts leak on mid-loop errors
+### [x] 29. 🟡 Indexer: multi-GB temp parts leak on mid-loop errors
 
 - **Where:** `indexer/src/main.rs:246-262` — `?` returns before the cleanup loop.
 - **Fix:** use a `TempDir`/`Drop` guard.
+- **Resolved (branch `refactor/audit-tier1-25-29`):** a `TempParts` RAII guard owns the
+  downloaded part paths (registered *before* each download) and removes them all on
+  drop, so an early `?` from `resolve_url` / `download_to_file` / validation no longer
+  leaks the parts already fetched. The explicit post-loop cleanup is gone.
 
 ### [ ] 30. 🔴 Consent: the auto-approve env path ships in release builds *(security)*
 

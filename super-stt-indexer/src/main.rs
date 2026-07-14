@@ -94,8 +94,18 @@ async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
             continue;
         }
         let client = super_stt_forge::client(entry.forge);
-        let repo = RepoRef::parse(&entry.repo)?;
-        match build_entry(client.as_ref(), &http, id, entry, &repo).await {
+        // A malformed `repo` string must not abort the whole build — route it
+        // through the same per-entry carry-forward path every other failure uses
+        // (Tier 1 #28), instead of `?`-propagating out of the loop.
+        let built = match RepoRef::parse(&entry.repo) {
+            Ok(repo) => build_entry(client.as_ref(), &http, id, entry, &repo).await,
+            Err(e) => Err(BuildFailure {
+                error: format!("invalid repo `{}`: {e}", entry.repo),
+                attempted_version: None,
+                attempted_tag: None,
+            }),
+        };
+        match built {
             Ok(b) => out_backends.push(b),
             Err(failure) => {
                 error!("entry `{id}` failed: {}", failure.error);
@@ -200,6 +210,32 @@ fn temp_part_path() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("stt-idx-{}-{n}.part", std::process::id()))
 }
 
+/// RAII owner of the downloaded part files: removes them all on drop, so a
+/// mid-loop download/validation error can't leak the (possibly multi-GB) parts
+/// already fetched (Tier 1 #29). A path is registered *before* its download so
+/// even a partially-written part is cleaned up.
+struct TempParts(Vec<std::path::PathBuf>);
+
+impl TempParts {
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+    fn register(&mut self, path: std::path::PathBuf) {
+        self.0.push(path);
+    }
+    fn paths(&self) -> &[std::path::PathBuf] {
+        &self.0
+    }
+}
+
+impl Drop for TempParts {
+    fn drop(&mut self) {
+        for p in &self.0 {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 /// Build the index entry for one subprocess variant from its downloaded part
 /// pins: a single-file pin (`url`/`size`/`sha256`) or a multi-part pin.
 fn subprocess_index_entry(
@@ -245,23 +281,22 @@ async fn resolve_index_assets(
     for sa in &m.assets.subprocess {
         // Download each part (a single-file variant has one) to a temp file,
         // hashing it, then validate the reassembled archive before pinning.
+        // `TempParts` removes every downloaded part on scope exit — including on
+        // an early `?` from `resolve_url`/`download_to_file`/validation — so a
+        // mid-loop error can't leak multi-GB temp files (Tier 1 #29).
         let files = sa.release_files();
-        let mut tmp_paths: Vec<std::path::PathBuf> = Vec::with_capacity(files.len());
+        let mut tmp = TempParts::new();
         let mut pins: Vec<index_json::IndexAsset> = Vec::with_capacity(files.len());
         for f in &files {
             let (url, _) = assets::resolve_url(f, release_assets)?;
             let dest = temp_part_path();
+            tmp.register(dest.clone());
             let (size, sha256) = assets::download_to_file(http, &url, f, &dest).await?;
-            tmp_paths.push(dest);
             pins.push(index_json::IndexAsset { url, size, sha256 });
         }
-        let validated =
-            assets::validate_subprocess_parts(&tmp_paths, &sa.label(), &m.backend.entrypoint);
-        for p in &tmp_paths {
-            let _ = std::fs::remove_file(p);
-        }
-        validated?;
+        assets::validate_subprocess_parts(tmp.paths(), &sa.label(), &m.backend.entrypoint)?;
         idx_assets.subprocess.push(subprocess_index_entry(sa, pins));
+        // `tmp` drops here (validation done), removing the parts.
     }
     Ok(idx_assets)
 }
