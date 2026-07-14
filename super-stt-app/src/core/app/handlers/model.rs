@@ -116,11 +116,8 @@ impl AppModel {
 
             Message::ModelError(err) => {
                 warn!("Model operation failed: {err}");
-                let sanitized = err
-                    .replace(&std::env::var("HOME").unwrap_or_default(), "$HOME")
-                    .chars()
-                    .take(200)
-                    .collect::<String>();
+                let home = std::env::var("HOME").unwrap_or_default();
+                let sanitized = sanitize_home(&err, &home);
                 self.model_operation_state = ModelOperationState::Error { message: sanitized };
                 // A failed switch leaves the daemon idle (no model) — the
                 // backend stays selected, but no model is loaded.
@@ -149,5 +146,45 @@ impl AppModel {
             }),
             Err(e) => cosmic::Action::App(Message::ModelError(e.to_string())),
         })
+    }
+}
+
+/// Collapse the user's home directory back to `$HOME` in an error message and
+/// cap it at 200 chars for display. Skips the substitution when `home` is empty
+/// — an empty `from` makes `str::replace` insert the replacement at every char
+/// boundary, shredding the message (Tier 1 #16).
+fn sanitize_home(err: &str, home: &str) -> String {
+    if home.is_empty() {
+        err.chars().take(200).collect()
+    } else {
+        err.replace(home, "$HOME").chars().take(200).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_home;
+
+    #[test]
+    fn empty_home_leaves_message_intact() {
+        // The regression: an empty HOME must NOT insert "$HOME" everywhere.
+        assert_eq!(
+            sanitize_home("load failed at /a/b", ""),
+            "load failed at /a/b"
+        );
+    }
+
+    #[test]
+    fn set_home_is_folded_back() {
+        assert_eq!(
+            sanitize_home("no file /home/jo/models/x", "/home/jo"),
+            "no file $HOME/models/x"
+        );
+    }
+
+    #[test]
+    fn output_is_capped_at_200_chars() {
+        let long = "e".repeat(500);
+        assert_eq!(sanitize_home(&long, "").chars().count(), 200);
     }
 }

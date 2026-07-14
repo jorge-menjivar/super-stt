@@ -310,12 +310,16 @@ Three patterns account for the majority of findings:
   leaves the control on its old, correct value (and the `PreviewTypingError` handler
   no longer abuses the transcription box). Uses the shared error slot from #13.
 
-### [ ] 16. 🟡 App: `$HOME` sanitization corrupts messages when HOME is unset
+### [x] 16. 🟡 App: `$HOME` sanitization corrupts messages when HOME is unset
 
 - **Where:** `err.replace(&std::env::var("HOME").unwrap_or_default(), "$HOME")`
   (`handlers/model.rs:120-124`).
 - **Problem:** an empty pattern inserts `$HOME` at every char boundary.
 - **Fix:** skip the replacement when the variable is missing or empty.
+- **Resolved (branch `refactor/audit-app-tier1-16-19`):** extracted a pure
+  `sanitize_home(err, home)` that returns the message unchanged when `home` is empty
+  (only folding + capping to 200 chars when it is set) and unit-tested the
+  empty-HOME regression, the fold, and the cap.
 
 ### [ ] 17. 🟡 App: `handle_daemon_events` returns from inside the loop
 
