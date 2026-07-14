@@ -432,14 +432,15 @@ Three patterns account for the majority of findings:
   and caller-less.
 - **Fix:** one unknown-value policy across both paths (house rule:
   fallback-to-default); delete the compat branch.
-- **Resolved (branch `refactor/audit-tier1-25-29`):** both paths now use
-  `parse::<RecordingStopMode>().unwrap_or_default()` — a present-but-unknown value
-  falls back to the type default instead of being silently dropped to `None`
-  (`cmd_record`) or 400'd (`cmd_set_recording_stop_mode`). The dead
-  `disable_silence_detection` compat branch and its test are gone. **Contract change:**
-  the SET endpoint no longer returns `400 invalid_recording_stop_mode` for an unknown
-  value; `docs/protocol/endpoints/v1/recording_stop_mode.md` was updated to document
-  the fallback (only an *absent* `mode` is a client error). New tests pin both paths.
+- **Resolved (branch `refactor/audit-tier1-25-29`):** both paths now **reject** a
+  present-but-unknown value with an error and change nothing —
+  `cmd_set_recording_stop_mode` keeps its documented `400 invalid_recording_stop_mode`
+  (leaving the stored setting untouched), and `cmd_record` (made fallible) rejects an
+  invalid override instead of silently dropping it to `None`. This is the single
+  unknown-value policy the item asked for; per-request state-changing writes validate
+  strictly rather than silently coercing to the default. The dead
+  `disable_silence_detection` compat branch and its test are gone; new tests pin the
+  reject-on-invalid behavior on both paths.
 
 ### [x] 27. 🔴 Forge: `ForgeClient::download` buffers unbounded bodies *(security)*
 

@@ -88,9 +88,9 @@ fn record_command_wait_defaults_to_false() {
 }
 
 #[test]
-fn record_command_invalid_stop_mode_falls_back_to_default() {
-    // Tier 1 #26: a present-but-unknown stop_mode is not silently dropped to
-    // None — it falls back to the type default (same policy as the SET path).
+fn record_command_invalid_stop_mode_is_rejected() {
+    // Tier 1 #26: a present-but-unknown stop_mode is a bad request — reject it
+    // (not silently drop to None), consistent with the SET path.
     let request = make_request(
         "record",
         Some(json!({
@@ -98,29 +98,32 @@ fn record_command_invalid_stop_mode_falls_back_to_default() {
             "stop_mode": "not_a_real_mode",
         })),
     );
-    let command = Command::try_from(request).expect("record command should parse");
-    match command {
-        Command::Record { stop_mode, .. } => {
-            assert_eq!(stop_mode, Some(RecordingStopMode::default()));
-        }
-        _ => panic!("expected Command::Record"),
-    }
+    assert!(Command::try_from(request).is_err());
 }
 
 #[test]
-fn set_recording_stop_mode_invalid_falls_back_to_default() {
-    // Tier 1 #26: the SET path no longer 400s an unknown mode — it, too, falls
-    // back to the type default per the wire-enum house rule.
+fn set_recording_stop_mode_invalid_is_rejected() {
+    // Tier 1 #26: an unknown mode returns an error and leaves the stored
+    // setting unchanged, rather than silently persisting the default.
     let request = make_request(
         "set_recording_stop_mode",
         Some(json!({ "mode": "not_a_real_mode" })),
     );
-    let command = Command::try_from(request).expect("set command should parse");
-    match command {
-        Command::SetRecordingStopMode { mode } => {
-            assert_eq!(mode, RecordingStopMode::default());
+    assert!(Command::try_from(request).is_err());
+}
+
+#[test]
+fn record_command_valid_stop_mode_parses() {
+    // A well-formed override still resolves to the parsed value.
+    let request = make_request(
+        "record",
+        Some(json!({ "write_mode": false, "stop_mode": "manual_only" })),
+    );
+    match Command::try_from(request).expect("record command should parse") {
+        Command::Record { stop_mode, .. } => {
+            assert_eq!(stop_mode, Some(RecordingStopMode::ManualOnly));
         }
-        _ => panic!("expected Command::SetRecordingStopMode"),
+        _ => panic!("expected Command::Record"),
     }
 }
 

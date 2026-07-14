@@ -20,7 +20,7 @@ impl TryFrom<DaemonRequest> for Command {
                 client_id: request.client_id.clone(),
             }),
             "status" => Ok(Command::Status),
-            "record" => Ok(cmd_record(&request)),
+            "record" => cmd_record(&request),
             "set_audio_theme" => cmd_set_audio_theme(&request),
             "get_audio_theme" => Ok(Command::GetAudioTheme),
             "test_audio_theme" => Ok(Command::TestAudioTheme),
@@ -81,7 +81,7 @@ fn cmd_transcribe(request: &DaemonRequest) -> Result<Command, String> {
     })
 }
 
-fn cmd_record(request: &DaemonRequest) -> Command {
+fn cmd_record(request: &DaemonRequest) -> Result<Command, String> {
     let write_mode = request
         .data
         .as_ref()
@@ -89,16 +89,22 @@ fn cmd_record(request: &DaemonRequest) -> Command {
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     // `stop_mode` is an optional per-request override: absent -> `None` (the
-    // daemon uses its configured default). When present, an unknown value falls
-    // back to the type default rather than being silently dropped, matching the
-    // house rule and the `set_recording_stop_mode` path (Tier 1 #26). The legacy
+    // daemon uses its configured default). A present-but-unknown value is a bad
+    // request — reject it rather than silently dropping it, matching the strict
+    // `set_recording_stop_mode` path (Tier 1 #26). The legacy
     // `disable_silence_detection` compat branch was undocumented and caller-less.
-    let stop_mode = request
+    let stop_mode = match request
         .data
         .as_ref()
         .and_then(|data| data.get("stop_mode"))
         .and_then(|v| v.as_str())
-        .map(|s| s.parse::<RecordingStopMode>().unwrap_or_default());
+    {
+        Some(s) => Some(
+            s.parse::<RecordingStopMode>()
+                .map_err(|e| format!("Invalid recording stop mode: {e}"))?,
+        ),
+        None => None,
+    };
     let wait = request
         .data
         .as_ref()
@@ -110,12 +116,12 @@ fn cmd_record(request: &DaemonRequest) -> Command {
         .as_ref()
         .and_then(|data| data.get("preview"))
         .and_then(serde_json::Value::as_bool);
-    Command::Record {
+    Ok(Command::Record {
         write_mode,
         stop_mode,
         wait,
         preview,
-    }
+    })
 }
 
 fn cmd_set_audio_theme(request: &DaemonRequest) -> Result<Command, String> {
@@ -200,9 +206,12 @@ fn cmd_set_recording_stop_mode(request: &DaemonRequest) -> Result<Command, Strin
         .and_then(|data| data.get("mode"))
         .and_then(|v| v.as_str())
         .ok_or("Missing mode for set_recording_stop_mode command")?;
-    // Unknown value -> the type default (house rule: bad wire enums fall back to
-    // default, no error), matching `cmd_record` (Tier 1 #26).
-    let mode = mode_str.parse::<RecordingStopMode>().unwrap_or_default();
+    // A present-but-unknown value is a bad request: return an error and leave
+    // the stored setting unchanged, rather than silently persisting the default
+    // (Tier 1 #26). Matches the `record` command's `stop_mode` override.
+    let mode = mode_str
+        .parse::<RecordingStopMode>()
+        .map_err(|e| format!("Invalid recording stop mode: {e}"))?;
     Ok(Command::SetRecordingStopMode { mode })
 }
 
