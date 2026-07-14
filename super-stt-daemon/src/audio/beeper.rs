@@ -312,6 +312,29 @@ pub fn play_beep_sequence(
     Ok(())
 }
 
+/// Async wrapper over [`play_beep_sequence`]. The underlying call sets up a cpal
+/// stream and then spin-waits (with `std::thread::sleep`) for the whole beep to
+/// finish, which would stall an async worker for the sound's full duration; run
+/// it on a blocking thread instead (Tier 3 #4).
+///
+/// # Errors
+///
+/// Propagates the playback error (no output device, or stream build/play
+/// failure), or reports a task-join failure.
+pub async fn play_beep_sequence_async(
+    frequencies: Vec<f32>,
+    duration_ms: u64,
+    fade_in_ms: u64,
+    fade_out_ms: u64,
+    volume: f32,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        play_beep_sequence(&frequencies, duration_ms, fade_in_ms, fade_out_ms, volume)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("beep playback task failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

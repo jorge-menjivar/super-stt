@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::audio::beeper::play_beep_sequence;
+use crate::audio::beeper::play_beep_sequence_async;
 use crate::daemon::types::SuperSTTDaemon;
 use log::{error, info};
 use std::sync::Arc;
@@ -119,26 +119,30 @@ impl SuperSTTDaemon {
 
         // Test with start sound first
         info!("Playing start sound...");
-        match play_beep_sequence(
-            &start_frequencies,
+        match play_beep_sequence_async(
+            start_frequencies,
             start_duration,
             start_fade_in,
             start_fade_out,
             volume,
-        ) {
+        )
+        .await
+        {
             Ok(()) => {
                 info!("Start sound completed successfully");
 
                 // Test end sound as well
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 info!("Playing end sound...");
-                match play_beep_sequence(
-                    &end_frequencies,
+                match play_beep_sequence_async(
+                    end_frequencies,
                     end_duration,
                     end_fade_in,
                     end_fade_out,
                     volume,
-                ) {
+                )
+                .await
+                {
                     Ok(()) => {
                         info!("End sound completed successfully");
                         DaemonResponse::success()

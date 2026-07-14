@@ -789,7 +789,7 @@ Tier 2 #4/#6/#8.
   explicit `persist_config()`, including the pre-load `active_backend` write that must
   survive a load failure across a restart. `save()` now returns `anyhow::Result`.
 
-### [ ] 4. 🟠 Daemon: blocking work on the async runtime
+### [x] 4. 🟠 Daemon: blocking work on the async runtime
 
 - **Where:** the portal backend spawns a thread + new tokio runtime per keysym then
   joins (`xdg_portal_backend.rs:122-153`, two runtime `expect`s); enigo sleeps per
@@ -800,6 +800,28 @@ Tier 2 #4/#6/#8.
 - **Fix:** make `Simulator` async (portal already holds an async zbus connection)
   or `spawn_blocking` throughout; `handle_get_gpu_info`
   (`device_management.rs:460-468`) shows the right pattern.
+- **Resolved (branch `refactor/audit-tier3-1-4`):** the two hot paths that actually
+  stall an async worker are now off-runtime via `spawn_blocking`.
+  - **Beep** — added `play_beep_sequence_async` (the `spawn_blocking` form of the
+    spin-waiting `play_beep_sequence`); `handle_test_audio_theme` and the recording
+    start-sound (`recorder::play_start_sound_and_wait`, now `async`) await it instead
+    of blocking the worker for the sound's full duration.
+  - **Keyring** — added `{get,set,delete,has}_backend_secret_async` (`spawn_blocking`
+    wrappers); the async secret handlers (`handle_set_backend_secret`,
+    `handle_clear_backend_secret`, the `secrets.rs` list/get endpoints) and the
+    WASM model-load secret read (`instantiate::backend_headers`) now await these, so a
+    locked-keyring DBus stall no longer parks a runtime thread.
+- **Deferred (follow-up, tracked as Tier 3 #35):** the keyboard `Simulator` path
+  (portal thread-per-keysym, enigo per-chunk sleeps) and the session-store keyring
+  writes (`TokenStore::flush_snapshot`/`load_persisted`). The `Simulator` is a sync
+  state machine driven while a `!Send` `std::Mutex` guard (`actually_typed`) is held
+  across the call, so offloading it needs the larger async-`Simulator` rewrite the
+  fix lists as the primary option (the portal path already spawns its own OS thread,
+  so it does not park a runtime worker today — only wastes a runtime per keysym).
+  `flush_snapshot` is called from the sync `mint`/`revoke`; a naive detached
+  `spawn_blocking` there would race the persist ordering, and `load_persisted` is a
+  one-time startup cost — both want a dedicated single-writer persist task rather than
+  a point wrap.
 
 ### [ ] 5. 🟡 Daemon: mutex poison recovery copy-pasted ~10× in `audio/`
 
@@ -997,6 +1019,25 @@ Tier 2 #4/#6/#8.
 - The three same-named `ResolveError` enums (custom_repo / local_dir / indexer
   resolve) are distinct concepts, not duplication — at most rename the indexer's.
   Same verdict for `Host` ×2 and `VisualizationConfig` ×2: no action needed.
+
+### [ ] 35. 🟠 Daemon: remaining blocking work (split off Tier 3 #4)
+
+- **Where:** the keyboard `Simulator` path — portal `notify_keysym` spins up an OS
+  thread + a fresh current-thread tokio runtime per keysym
+  (`xdg_portal_backend.rs:122-153`), enigo sleeps per 64-char chunk /per backspace
+  batch (`enigo_backend.rs:24-50`); and the session-store keyring writes
+  (`TokenStore::flush_snapshot`/`load_persisted`, `tokens.rs`).
+- **Why split:** Tier 3 #4 offloaded the two hot paths that park a runtime worker
+  (beep, request-handler keyring). These remaining ones need structure, not a point
+  wrap: `Simulator::{type_text,backspace_n}` are sync and driven while the `!Send`
+  `actually_typed` `std::Mutex` guard is held across the call, so they want the
+  async-`Simulator` rewrite (the portal already holds an async zbus connection, so it
+  can drop the thread+runtime entirely). `flush_snapshot` is called from the sync
+  `mint`/`revoke`; correctness wants a single-writer persist task (a detached
+  `spawn_blocking` per call would race the on-disk ordering), and `load_persisted` is
+  a one-time startup blocking read.
+- **Fix:** async `Simulator` (threads the `Typer`/preview loop off the `std::Mutex`
+  guard); a dedicated session-persist task fed over a channel.
 
 ---
 

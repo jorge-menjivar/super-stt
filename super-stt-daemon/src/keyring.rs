@@ -207,6 +207,58 @@ pub fn has_backend_secret(source: &str, name: &str) -> Result<bool, String> {
     Ok(kv_get(&backend_secret_account(source, name))?.is_some())
 }
 
+// Async wrappers for the backend-secret accessors. A keyring lookup goes through
+// DBus to the secret service and can stall for seconds on a locked keyring; the
+// sync forms above are called from async request handlers, so route them through
+// `spawn_blocking` to keep those calls off the async runtime (Tier 3 #4).
+
+/// Async form of [`get_backend_secret`], run on a blocking thread.
+///
+/// # Errors
+/// Returns an error if the keyring is unavailable or access fails.
+pub async fn get_backend_secret_async(
+    source: String,
+    name: String,
+) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || get_backend_secret(&source, &name))
+        .await
+        .map_err(|e| format!("keyring task failed: {e}"))?
+}
+
+/// Async form of [`set_backend_secret`], run on a blocking thread.
+///
+/// # Errors
+/// Returns an error if the keyring is unavailable or the write fails.
+pub async fn set_backend_secret_async(
+    source: String,
+    name: String,
+    value: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || set_backend_secret(&source, &name, &value))
+        .await
+        .map_err(|e| format!("keyring task failed: {e}"))?
+}
+
+/// Async form of [`delete_backend_secret`], run on a blocking thread.
+///
+/// # Errors
+/// Returns an error if the keyring is unavailable or the delete fails.
+pub async fn delete_backend_secret_async(source: String, name: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || delete_backend_secret(&source, &name))
+        .await
+        .map_err(|e| format!("keyring task failed: {e}"))?
+}
+
+/// Async form of [`has_backend_secret`], run on a blocking thread.
+///
+/// # Errors
+/// Returns an error if the keyring is unavailable or access fails.
+pub async fn has_backend_secret_async(source: String, name: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || has_backend_secret(&source, &name))
+        .await
+        .map_err(|e| format!("keyring task failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

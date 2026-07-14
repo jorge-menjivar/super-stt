@@ -143,7 +143,9 @@ impl SuperSTTDaemon {
         name: String,
         value: String,
     ) -> DaemonResponse {
-        if let Err(e) = crate::keyring::set_backend_secret(&source, &name, &value) {
+        if let Err(e) =
+            crate::keyring::set_backend_secret_async(source.clone(), name.clone(), value).await
+        {
             return DaemonResponse::error(&format!("keyring_unavailable: {e}"));
         }
         let reload_warning = self.reload_if_source_active(&source).await;
@@ -160,7 +162,9 @@ impl SuperSTTDaemon {
         source: String,
         name: String,
     ) -> DaemonResponse {
-        if let Err(e) = crate::keyring::delete_backend_secret(&source, &name) {
+        if let Err(e) =
+            crate::keyring::delete_backend_secret_async(source.clone(), name.clone()).await
+        {
             return DaemonResponse::error(&format!("keyring_unavailable: {e}"));
         }
         let reload_warning = self.reload_if_source_active(&source).await;

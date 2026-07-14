@@ -31,7 +31,9 @@ async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response
     };
     let mut out = Vec::with_capacity(backend.secrets.len());
     for sec in &backend.secrets {
-        let configured = crate::keyring::has_backend_secret(&source, &sec.name).unwrap_or(false);
+        let configured = crate::keyring::has_backend_secret_async(source.clone(), sec.name.clone())
+            .await
+            .unwrap_or(false);
         out.push(serde_json::json!({
             "name": sec.name,
             "label": sec.label.clone().unwrap_or_else(|| sec.name.clone()),
@@ -52,7 +54,9 @@ async fn get_one(
         Guard::NoBackend => json_error(StatusCode::NOT_FOUND, "unknown_backend"),
         Guard::NoItem => json_error(StatusCode::NOT_FOUND, "unknown_secret"),
         Guard::Ok => {
-            let configured = crate::keyring::has_backend_secret(&source, &name).unwrap_or(false);
+            let configured = crate::keyring::has_backend_secret_async(source.clone(), name.clone())
+                .await
+                .unwrap_or(false);
             ok(&serde_json::json!({ "status": "success", "name": name, "configured": configured }))
         }
     }

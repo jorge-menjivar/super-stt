@@ -153,7 +153,7 @@ impl DaemonAudioRecorder {
         info!("🎤 Starting audio recording with streaming...");
 
         // Play start sound and wait for it to complete
-        self.play_start_sound_and_wait();
+        self.play_start_sound_and_wait().await;
 
         self.init_recording_state(silence_detection_disabled);
 
@@ -418,14 +418,17 @@ impl DaemonAudioRecorder {
         optimal_config.with_sample_rate(target_rate).pipe(Ok)
     }
 
-    /// Play start recording sound using current theme and wait for it to complete
-    fn play_start_sound_and_wait(&self) {
+    /// Play start recording sound using current theme and wait for it to
+    /// complete. `play_beep_sequence` spin-waits for the sound's full duration,
+    /// so run it off the async runtime (Tier 3 #4).
+    async fn play_start_sound_and_wait(&self) {
         if self.audio_theme == AudioTheme::Silent {
             return;
         }
         let (frequencies, duration, fade_in, fade_out) = self.audio_theme.start_sound();
         if let Err(e) =
-            beeper::play_beep_sequence(&frequencies, duration, fade_in, fade_out, self.volume)
+            beeper::play_beep_sequence_async(frequencies, duration, fade_in, fade_out, self.volume)
+                .await
         {
             log::warn!("Failed to play start sound (audio permissions may be missing): {e}");
         }

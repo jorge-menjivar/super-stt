@@ -179,9 +179,13 @@ impl SuperSTTDaemon {
     async fn backend_headers(&self, backend: &DiscoveredBackend) -> Result<Vec<(String, String)>> {
         let mut headers = Vec::new();
         for secret in &backend.secrets {
-            let value = crate::keyring::get_backend_secret(&backend.source, &secret.name)
-                .map_err(|e| anyhow!(e))?
-                .filter(|v| !v.is_empty());
+            let value = crate::keyring::get_backend_secret_async(
+                backend.source.clone(),
+                secret.name.clone(),
+            )
+            .await
+            .map_err(|e| anyhow!(e))?
+            .filter(|v| !v.is_empty());
             match value {
                 Some(v) => headers.push((format!("x-stt-secret-{}", secret.name), v)),
                 // Safety-net error: the settings UI is expected to surface this
