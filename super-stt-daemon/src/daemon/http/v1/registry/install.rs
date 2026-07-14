@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::pipeline::spawn_install_pipeline;
+use super::pipeline::{InflightMarker, spawn_install_pipeline};
 
 /// Request body for `POST /registry/backends/install`.
 #[derive(Deserialize)]
@@ -118,42 +118,41 @@ fn parse_install_body(
     Ok((body, source_key))
 }
 
-/// Phase 2 — Acquire the inflight guard (conflict check + insert).
+/// Phase 2 — Acquire the inflight marker (conflict check + insert).
 ///
-/// On conflict returns a `409` response. On success inserts `source_key`
-/// into the set and returns `()`.
-fn acquire_install_inflight(s: &AppState, source_key: &str) -> Result<(), ErrResp> {
-    let mut guard = s.install_inflight.write();
-    if guard.contains(source_key) {
-        return Err(Box::new(super::registry_error(
-            StatusCode::CONFLICT,
-            "install_in_progress",
-        )));
-    }
-    guard.insert(source_key.to_owned());
-    Ok(())
+/// On conflict returns a `409` response. On success inserts `source_key` into
+/// the set and returns an [`InflightMarker`] whose `Drop` removes it again, so
+/// the later synchronous phases can bail with a bare `return` and still clean
+/// up. The happy path calls [`InflightMarker::defuse`] to hand that duty to the
+/// spawned pipeline.
+fn acquire_install_inflight(s: &AppState, source_key: &str) -> Result<InflightMarker, ErrResp> {
+    InflightMarker::acquire(Arc::clone(&s.install_inflight), source_key.to_owned()).ok_or_else(
+        || {
+            Box::new(super::registry_error(
+                StatusCode::CONFLICT,
+                "install_in_progress",
+            ))
+        },
+    )
 }
 
 /// Phase 3 — Resolve the registry entry from whichever of
 /// `source` / `repo_url` / `local_path` was supplied.
 ///
-/// On any error the inflight set is cleaned up and an HTTP error response is
-/// returned.
+/// On any error an HTTP error response is returned; the caller's
+/// [`InflightMarker`] cleans up the inflight set.
 async fn resolve_install_entry(
     s: &AppState,
     body: &InstallBody,
-    source_key: &str,
 ) -> Result<crate::registry::index_schema::IndexBackend, ErrResp> {
     if let Some(ref src) = body.source {
         let Ok(index) = s.registry_client.get().await else {
-            s.install_inflight.write().remove(source_key);
             return Err(Box::new(super::registry_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "registry_unavailable",
             )));
         };
         let Some(found) = index.backends.iter().find(|b| &b.source == src).cloned() else {
-            s.install_inflight.write().remove(source_key);
             return Err(Box::new(super::registry_error(
                 StatusCode::NOT_FOUND,
                 "not_found",
@@ -162,7 +161,6 @@ async fn resolve_install_entry(
         Ok(found)
     } else if let Some(ref repo_url) = body.repo_url {
         let Some(forge) = body.forge else {
-            s.install_inflight.write().remove(source_key);
             return Err(Box::new(super::registry_error_msg(
                 StatusCode::BAD_REQUEST,
                 "bad_request",
@@ -173,7 +171,6 @@ async fn resolve_install_entry(
         match crate::registry::custom_repo::resolve(client.as_ref(), repo_url).await {
             Ok(entry) => Ok(entry),
             Err(e) => {
-                s.install_inflight.write().remove(source_key);
                 let (status, error) = custom_repo_error_response(&e);
                 Err(Box::new(super::registry_error_msg(
                     status,
@@ -190,7 +187,6 @@ async fn resolve_install_entry(
         match crate::registry::local_dir::resolve(path) {
             Ok(entry) => Ok(entry),
             Err(e) => {
-                s.install_inflight.write().remove(source_key);
                 let (status, error) = local_dir_error_response(&e);
                 Err(Box::new(super::registry_error_msg(
                     status,
@@ -208,12 +204,11 @@ async fn resolve_install_entry(
 /// `accel = "local"` marker that documents how the bytes landed on disk.
 /// The registry / custom-repo paths route through `compat::select`.
 ///
-/// On incompatibility the inflight set is cleaned up and a `422` is returned.
+/// On incompatibility a `422` is returned; the caller's [`InflightMarker`]
+/// cleans up the inflight set.
 fn select_install_compat(
-    s: &AppState,
     entry: &crate::registry::index_schema::IndexBackend,
     local_src: Option<&PathBuf>,
-    source_key: &str,
 ) -> Result<
     (
         crate::registry::compat::Selection,
@@ -238,7 +233,6 @@ fn select_install_compat(
     let host = host_detect::detect();
     let sel = compat::select(&host, entry);
     let Some(asset) = compat::to_selected_asset(entry, &sel) else {
-        s.install_inflight.write().remove(source_key);
         return Err(Box::new(super::registry_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "incompatible",
@@ -262,24 +256,26 @@ pub(crate) async fn install_registry_backend(
         Err(r) => return *r,
     };
 
-    // Phase 2: conflict guard.
-    if let Err(r) = acquire_install_inflight(&s, &source_key) {
-        return *r;
-    }
+    // Phase 2: conflict guard. `marker` removes `source_key` from the inflight
+    // set if dropped, so the fallible phases below just `return` on error and
+    // cleanup is automatic; the happy path defuses it before spawning.
+    let marker = match acquire_install_inflight(&s, &source_key) {
+        Ok(m) => m,
+        Err(r) => return *r,
+    };
 
     // Phase 3: resolve registry entry.
     let local_src: Option<PathBuf> = body.local_path.as_deref().map(PathBuf::from);
-    let entry = match resolve_install_entry(&s, &body, &source_key).await {
+    let entry = match resolve_install_entry(&s, &body).await {
         Ok(e) => e,
         Err(r) => return *r,
     };
 
     // Phase 4: compat selection.
-    let (sel, selected_asset_resp) =
-        match select_install_compat(&s, &entry, local_src.as_ref(), &source_key) {
-            Ok(v) => v,
-            Err(r) => return *r,
-        };
+    let (sel, selected_asset_resp) = match select_install_compat(&entry, local_src.as_ref()) {
+        Ok(v) => v,
+        Err(r) => return *r,
+    };
 
     // Phase 5: shape response and spawn background pipeline.
     let install_id = format!("ins_{}", ulid::Ulid::new());
@@ -312,6 +308,8 @@ pub(crate) async fn install_registry_backend(
         source_key,
         local_src,
     );
+    // The spawned pipeline's own `InflightGuard` now owns the marker's removal.
+    marker.defuse();
 
     (
         StatusCode::ACCEPTED,

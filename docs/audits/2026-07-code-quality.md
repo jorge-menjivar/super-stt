@@ -839,12 +839,23 @@ Tier 2 #4/#6/#8.
   `actually_typed` stays `std::sync::Mutex` (not shared with a callback). Dropped the
   now-false `# Panics` (poison) doc on `check_output_device_health`.
 
-### [ ] 6. 🟡 Daemon: inflight cleanup hand-rolled in 8+ places despite an RAII guard
+### [x] 6. 🟡 Daemon: inflight cleanup hand-rolled in 8+ places despite an RAII guard
 
 - **Where:** `install_inflight.write().remove()` on every error path
   (`install.rs:149-241`, `update.rs:70-168`) while `pipeline.rs`'s `InflightGuard`
   is only used inside the spawned task.
 - **Fix:** construct the guard at insert.
+- **Resolved (branch `refactor/audit-tier3-5-8`):** added `InflightMarker` in
+  `pipeline.rs` — a lightweight RAII guard that inserts the source (atomic
+  check+insert under one write lock) and removes it on `Drop`, but emits **no**
+  event (the synchronous phases fail with plain HTTP errors, not `Failed` install
+  events — unlike the pipeline's event-emitting `InflightGuard`). Phase 2 of both
+  handlers now returns the marker; the fallible phases (and the update no-op early
+  return) just `return`, so the marker's `Drop` cleans up. The happy path calls
+  `marker.defuse()` after spawning, handing removal duty to the pipeline's
+  `InflightGuard`. This deletes all 11 hand-rolled `install_inflight.write().remove()`
+  calls; the now-unused `source_key`/`source`/`&AppState` params drop from the phase
+  helpers.
 
 ### [ ] 7. 🟡 Daemon: settings handlers repeat a 25-line mutate→persist→respond block 6×
 

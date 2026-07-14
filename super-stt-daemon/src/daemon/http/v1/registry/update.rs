@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::pipeline::spawn_install_pipeline;
+use super::pipeline::{InflightMarker, spawn_install_pipeline};
 use crate::daemon::http::state::AppState;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -33,18 +33,20 @@ fn parse_update_body(raw: Option<axum::Json<UpdateBody>>) -> Result<UpdateBody, 
     Ok(body)
 }
 
-/// Phase 2 — Acquire the inflight guard (conflict check + insert).
+/// Phase 2 — Acquire the inflight marker (conflict check + insert).
 ///
-/// Single write-lock so the check+insert is atomic.
-/// Returns `Err` with a `409` response when an update is already in progress.
-fn acquire_update_inflight(s: &AppState, source: &str) -> Result<(), ErrResp> {
-    if !s.install_inflight.write().insert(source.to_owned()) {
-        return Err(Box::new(super::registry_error(
+/// Check+insert is atomic under one write lock. Returns `Err` with a `409` when
+/// an update is already in progress; otherwise an [`InflightMarker`] whose
+/// `Drop` removes the marker, so the later synchronous phases (and the no-op
+/// early return) bail with a bare `return` and cleanup is automatic. The happy
+/// path defuses it before spawning.
+fn acquire_update_inflight(s: &AppState, source: &str) -> Result<InflightMarker, ErrResp> {
+    InflightMarker::acquire(Arc::clone(&s.install_inflight), source.to_owned()).ok_or_else(|| {
+        Box::new(super::registry_error(
             StatusCode::CONFLICT,
             "update_in_progress",
-        )));
-    }
-    Ok(())
+        ))
+    })
 }
 
 /// Outcome of the version-lookup phase.
@@ -55,8 +57,9 @@ struct VersionLookup {
 
 /// Phase 3 — Fetch the registry entry and determine the installed version.
 ///
-/// Cleans up the inflight marker and returns an HTTP error on any failure:
-/// registry unavailable, source not in index, not installed on disk.
+/// Returns an HTTP error on any failure (registry unavailable, source not in
+/// index, not installed on disk); the caller's [`InflightMarker`] cleans up the
+/// inflight set.
 async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, ErrResp> {
     let backends_dir = {
         let c = s.daemon.config.read().await;
@@ -67,7 +70,6 @@ async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, Er
     };
 
     let Ok(index) = s.registry_client.get().await else {
-        s.install_inflight.write().remove(source);
         return Err(Box::new(super::registry_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "registry_unavailable",
@@ -75,7 +77,6 @@ async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, Er
     };
 
     let Some(entry) = index.backends.iter().find(|b| b.source == source).cloned() else {
-        s.install_inflight.write().remove(source);
         return Err(Box::new(super::registry_error(
             StatusCode::NOT_FOUND,
             "not_found",
@@ -95,7 +96,6 @@ async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, Er
     };
 
     let Some(from_version) = installed_version else {
-        s.install_inflight.write().remove(source);
         return Err(Box::new(super::registry_error(
             StatusCode::NOT_FOUND,
             "not_installed",
@@ -110,11 +110,10 @@ async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, Er
 
 /// Phase 4 — Select a compatible asset for the current host.
 ///
-/// Cleans up the inflight marker and returns `422` if no asset matches.
+/// Returns `422` if no asset matches; the caller's [`InflightMarker`] cleans up
+/// the inflight set.
 fn select_update_compat(
-    s: &AppState,
     entry: &crate::registry::index_schema::IndexBackend,
-    source: &str,
 ) -> Result<crate::registry::compat::Selection, ErrResp> {
     use crate::registry::{compat, host_detect};
 
@@ -122,7 +121,6 @@ fn select_update_compat(
     let sel = compat::select(&host, entry);
 
     if compat::to_selected_asset(entry, &sel).is_none() {
-        s.install_inflight.write().remove(source);
         return Err(Box::new(super::registry_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "incompatible",
@@ -149,10 +147,14 @@ pub(crate) async fn update_registry_backend(
         Err(r) => return *r,
     };
 
-    // Phase 2: conflict guard.
-    if let Err(r) = acquire_update_inflight(&s, &body.source) {
-        return *r;
-    }
+    // Phase 2: conflict guard. `marker` removes `body.source` from the inflight
+    // set if dropped, so the fallible phases and the no-op early return below
+    // just `return` and cleanup is automatic; the happy path defuses it before
+    // spawning.
+    let marker = match acquire_update_inflight(&s, &body.source) {
+        Ok(m) => m,
+        Err(r) => return *r,
+    };
 
     // Phase 3: look up registry entry + installed version.
     let VersionLookup {
@@ -168,7 +170,7 @@ pub(crate) async fn update_registry_backend(
     // registry version happily "updated" into a downgrade (Tier 1 #31); the
     // shared semver check refuses anything not strictly newer.
     if !super_stt_registry_types::version::update_available(&from_version, &entry.version) {
-        s.install_inflight.write().remove(&body.source);
+        // `marker` drops here → removes the inflight entry.
         let resp = UpdateResponse {
             install_id: None,
             from_version: from_version.clone(),
@@ -184,7 +186,7 @@ pub(crate) async fn update_registry_backend(
     }
 
     // Phase 4: compat selection.
-    let sel = match select_update_compat(&s, &entry, &body.source) {
+    let sel = match select_update_compat(&entry) {
         Ok(s) => s,
         Err(r) => return *r,
     };
@@ -194,7 +196,7 @@ pub(crate) async fn update_registry_backend(
     let to_version = entry.version.clone();
 
     // Spawn background install (same pipeline as install handler).
-    // (source already marked inflight by the guard above)
+    // (source already marked inflight by the marker above)
     spawn_install_pipeline(
         Arc::clone(&s.daemon),
         Arc::clone(&s.install_inflight),
@@ -204,6 +206,8 @@ pub(crate) async fn update_registry_backend(
         body.source.clone(),
         None, // update never uses local_src
     );
+    // The spawned pipeline's own `InflightGuard` now owns the marker's removal.
+    marker.defuse();
 
     let resp = UpdateResponse {
         install_id: Some(install_id),

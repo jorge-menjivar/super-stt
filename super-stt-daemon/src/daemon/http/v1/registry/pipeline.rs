@@ -67,6 +67,55 @@ impl Drop for InflightGuard {
     }
 }
 
+/// Removes a `source` from the inflight set when dropped — unless
+/// [`InflightMarker::defuse`]d. Used by the *synchronous* pre-spawn phases of
+/// the install/update handlers so every early error return cleans up the
+/// inflight marker automatically instead of a hand-rolled
+/// `inflight.write().remove(...)` at each bail site. Unlike [`InflightGuard`] it
+/// emits no progress event: these phases fail with plain HTTP errors
+/// (400/404/409/422/503), not `Failed` install events. On the happy path the
+/// handler calls [`InflightMarker::defuse`] to hand the removal duty off to the
+/// spawned pipeline's [`InflightGuard`].
+pub(super) struct InflightMarker {
+    inflight: Arc<ParkingRwLock<HashSet<String>>>,
+    source: String,
+    armed: bool,
+}
+
+impl InflightMarker {
+    /// Insert `source` into the inflight set, returning a marker that removes it
+    /// on drop. Returns `None` if `source` was already in flight (the set
+    /// already contained it) — the caller maps that to its own `409`. The
+    /// check-and-insert is atomic under one write lock.
+    pub(super) fn acquire(
+        inflight: Arc<ParkingRwLock<HashSet<String>>>,
+        source: String,
+    ) -> Option<Self> {
+        if !inflight.write().insert(source.clone()) {
+            return None;
+        }
+        Some(Self {
+            inflight,
+            source,
+            armed: true,
+        })
+    }
+
+    /// Hand the removal duty to the spawned pipeline's [`InflightGuard`]: leave
+    /// the entry in place and do nothing on drop.
+    pub(super) fn defuse(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for InflightMarker {
+    fn drop(&mut self) {
+        if self.armed {
+            self.inflight.write().remove(&self.source);
+        }
+    }
+}
+
 /// Shared background pipeline spawner used by both the install and update
 /// handlers. The caller has already inserted `source_bg` into the inflight
 /// set; this function takes ownership of that responsibility via
