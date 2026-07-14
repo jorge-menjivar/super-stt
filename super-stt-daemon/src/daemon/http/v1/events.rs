@@ -3,13 +3,42 @@ use crate::daemon::http::internal::auth::middleware::AuthContext;
 use crate::daemon::http::internal::auth::tokens::TokenStore;
 use crate::daemon::http::internal::helpers::responses::{invalid_session, reason, scope_denied};
 use crate::daemon::http::state::{AppState, PeerInfo};
-use crate::daemon::http::v1::transcribe::emit_sse_event;
+use crate::daemon::http::v1::transcribe::format_sse_frame;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use std::path::PathBuf;
 
 // ---------- /events (SSE) --------------------------------------------------
+
+/// Per-connection SSE channel capacity. The channel serializes every frame
+/// (all topic forwarders + keepalive + revocation) into the response body. A
+/// widget that stops draining its side would otherwise buffer `frequency_bands`
+/// frames — emitted many times per second — without bound; capping the channel
+/// and dropping frames once it fills sheds that load instead (Tier 3 #8). The
+/// dominant volume is visualization frames, so those are what overflow drops in
+/// practice; low-rate control frames only shed for an already-stalled reader,
+/// which the keepalive / exe-watch task then tears down.
+const SSE_CHANNEL_CAPACITY: usize = 256;
+
+/// Convenience alias for the bounded per-connection SSE sender.
+type SseSender = tokio::sync::mpsc::Sender<Result<axum::body::Bytes, std::io::Error>>;
+
+/// Try to enqueue an SSE frame on the bounded per-connection channel. Returns
+/// `false` only when the receiver is gone (client disconnected), so the caller
+/// tears down. A full channel drops the frame — the reader is stalled, so shed
+/// it — and returns `true`.
+fn try_emit_sse_event(tx: &SseSender, event: &str, data: &serde_json::Value) -> bool {
+    use tokio::sync::mpsc::error::TrySendError;
+    match tx.try_send(Ok(format_sse_frame(event, data))) {
+        Ok(()) => true,
+        Err(TrySendError::Full(_)) => {
+            log::warn!("widget SSE backpressured; dropped a {event} frame");
+            true
+        }
+        Err(TrySendError::Closed(_)) => false,
+    }
+}
 
 #[derive(serde::Deserialize)]
 pub(crate) struct EventsQuery {
@@ -70,10 +99,12 @@ pub(crate) async fn events(
         return scope_denied();
     }
 
-    // mpsc that serializes all SSE writes (broadcast forwarders +
-    // keepalive + revocation).
-    let (sse_tx, sse_rx) =
-        tokio::sync::mpsc::unbounded_channel::<Result<axum::body::Bytes, std::io::Error>>();
+    // Bounded mpsc that serializes all SSE writes (broadcast forwarders +
+    // keepalive + revocation). Bounded so a stalled reader sheds frames instead
+    // of buffering without limit — see [`SSE_CHANNEL_CAPACITY`].
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(
+        SSE_CHANNEL_CAPACITY,
+    );
 
     // Subscribe BEFORE emitting `subscribed`. Subscribing creates the
     // broadcast::Receiver that captures any event fired from this
@@ -88,8 +119,9 @@ pub(crate) async fn events(
         spawn_topic_forwarder(rx, sse_tx.clone(), cancel.clone());
     }
 
-    // Now that the receivers exist, ack the client.
-    let _ = emit_sse_event(
+    // Now that the receivers exist, ack the client. The channel is fresh so
+    // this frame always has room.
+    let _ = try_emit_sse_event(
         &sse_tx,
         "subscribed",
         &serde_json::json!({
@@ -112,7 +144,7 @@ pub(crate) async fn events(
     // finish, the mpsc receiver yields None and the response body ends.
     drop(sse_tx);
 
-    let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(sse_rx);
+    let stream = tokio_stream::wrappers::ReceiverStream::new(sse_rx);
     let body = axum::body::Body::from_stream(stream);
 
     Response::builder()
@@ -163,7 +195,7 @@ fn parse_events_topics(q: &EventsQuery) -> Result<Vec<crate::daemon::events::Top
 /// channel, or when the SSE response body has been dropped.
 fn spawn_topic_forwarder(
     mut rx: crate::daemon::events::AnyReceiver,
-    tx: tokio::sync::mpsc::UnboundedSender<Result<axum::body::Bytes, std::io::Error>>,
+    tx: SseSender,
     cancel: tokio_util::sync::CancellationToken,
 ) {
     tokio::spawn(async move {
@@ -174,7 +206,7 @@ fn spawn_topic_forwarder(
                 res = rx.recv_json() => {
                     match res {
                         Ok((name, payload)) => {
-                            if !emit_sse_event(&tx, name, &payload) {
+                            if !try_emit_sse_event(&tx, name, &payload) {
                                 break;
                             }
                         }
@@ -194,7 +226,7 @@ fn spawn_topic_forwarder(
 /// `revoked` event, calls `TokenStore::revoke`, and triggers the
 /// shared `cancel` token to tear down the rest of the subscription.
 fn spawn_events_keepalive_and_exe_watch(
-    tx: tokio::sync::mpsc::UnboundedSender<Result<axum::body::Bytes, std::io::Error>>,
+    tx: SseSender,
     cancel: tokio_util::sync::CancellationToken,
     peer_pid: Option<u32>,
     tokens: TokenStore,
@@ -218,9 +250,12 @@ fn spawn_events_keepalive_and_exe_watch(
                 biased;
                 () = cancel.cancelled() => break,
                 _ = keepalive.tick() => {
-                    if tx
-                        .send(Ok(axum::body::Bytes::from_static(b": keepalive\n\n")))
-                        .is_err()
+                    // Only a gone receiver (client disconnected) tears down; a
+                    // full channel means a stalled-but-live reader, so drop this
+                    // heartbeat rather than cancel.
+                    use tokio::sync::mpsc::error::TrySendError;
+                    if let Err(TrySendError::Closed(_)) =
+                        tx.try_send(Ok(axum::body::Bytes::from_static(b": keepalive\n\n")))
                     {
                         cancel.cancel();
                         break;
@@ -237,7 +272,7 @@ fn spawn_events_keepalive_and_exe_watch(
                         stored_exe.display(),
                         current,
                     );
-                    let _ = emit_sse_event(
+                    let _ = try_emit_sse_event(
                         &tx,
                         "revoked",
                         &serde_json::json!({ "reason": "exe_changed" }),

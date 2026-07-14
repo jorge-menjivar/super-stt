@@ -177,19 +177,25 @@ async fn run_realtime_session(socket: axum::extract::ws::WebSocket, daemon: Arc<
 /// `done` / `error` and the connection closes. Closing the
 /// connection mid-stream cancels the recording (the daemon detects
 /// the disconnect on its next write attempt).
-/// Emit a single SSE `event: <name>\ndata: <json>\n\n` frame onto the
-/// outbound stream. Returns `false` if the receiver is gone (client
-/// disconnected). `serde_json::to_string` never embeds raw newlines, so
-/// the JSON fits on the single `data:` line by construction.
+/// Build the raw bytes of one SSE `event: <name>\ndata: <json>\n\n` frame.
+/// `serde_json::to_string` never embeds raw newlines, so the JSON fits on the
+/// single `data:` line by construction. Shared by the unbounded `/transcribe`
+/// stream ([`emit_sse_event`]) and the bounded `/events` fan-out.
+pub(crate) fn format_sse_frame(event: &str, data: &serde_json::Value) -> axum::body::Bytes {
+    let mut bytes = format!("event: {event}\ndata: ").into_bytes();
+    bytes.extend_from_slice(serde_json::to_string(data).unwrap_or_default().as_bytes());
+    bytes.extend_from_slice(b"\n\n");
+    axum::body::Bytes::from(bytes)
+}
+
+/// Emit a single SSE frame onto the unbounded `/transcribe` stream. Returns
+/// `false` if the receiver is gone (client disconnected).
 pub(crate) fn emit_sse_event(
     tx: &tokio::sync::mpsc::UnboundedSender<Result<axum::body::Bytes, std::io::Error>>,
     event: &str,
     data: &serde_json::Value,
 ) -> bool {
-    let mut bytes = format!("event: {event}\ndata: ").into_bytes();
-    bytes.extend_from_slice(serde_json::to_string(data).unwrap_or_default().as_bytes());
-    bytes.extend_from_slice(b"\n\n");
-    tx.send(Ok(axum::body::Bytes::from(bytes))).is_ok()
+    tx.send(Ok(format_sse_frame(event, data))).is_ok()
 }
 
 /// Monotonic id identifying one `/transcribe` request's claim on the shared

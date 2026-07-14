@@ -872,11 +872,23 @@ Tier 2 #4/#6/#8.
   an async online→local revert between the mutate and the persist and builds a
   revert-aware message, so it doesn't fit the couple-mutate-and-persist shape.
 
-### [ ] 8. 🟠 Daemon: SSE fan-out uses unbounded channels
+### [x] 8. 🟠 Daemon: SSE fan-out uses unbounded channels
 
 - **Where:** `http/v1/events.rs:75-76,164-190`.
 - **Problem:** a stalled reader buffers `frequency_bands` frames without bound.
 - **Fix:** bounded channel; drop visualization frames on overflow.
+- **Resolved (branch `refactor/audit-tier3-5-8`):** the per-connection `/events`
+  channel is now `mpsc::channel(SSE_CHANNEL_CAPACITY = 256)` (was
+  `unbounded_channel`), read out via `ReceiverStream`. A shared `try_emit_sse_event`
+  helper does `try_send`: a full channel drops the frame (the reader is stalled —
+  shed it, logging a warn) and only a `Closed` channel tears the forwarder down.
+  Keepalive uses the same `try_send` (drop the heartbeat when full; cancel only on
+  `Closed`); the `subscribed` ack and `revoked` frame go through it too. `frequency_bands`
+  is the dominant volume, so those are what overflow drops in practice; the
+  `/transcribe` stream keeps its unbounded channel (bounded per-recording lifetime,
+  non-droppable `preview`/`done`/`error` frames). Frame formatting is now a shared
+  `format_sse_frame` used by both the bounded fan-out and the unbounded
+  `emit_sse_event`.
 
 ### [ ] 9. 🟡 Daemon: minor items
 
