@@ -52,12 +52,21 @@ impl VisualizationRenderer for EqualizerVisualization {
             VisualizationSide::Full => (total_bars, 0),
         };
 
+        // Nothing to draw (e.g. malformed/empty frequency data decoded to zero
+        // bands). Bail before dividing `bar_width`/`spacing` by zero and before
+        // `bars_to_show - 1` underflows the usize below (Tier 1 #21, same class
+        // as #268).
+        if bars_to_show == 0 {
+            return;
+        }
+
         let bars_f32 = usize_to_f32(bars_to_show);
         let bar_width = effective_bounds.width / bars_f32 * 0.8;
         let spacing = effective_bounds.width / bars_f32 * 0.2;
 
         // Center the bars in the available width.
-        let total_bars_width = (bar_width * bars_f32) + (spacing * usize_to_f32(bars_to_show - 1));
+        let total_bars_width =
+            (bar_width * bars_f32) + (spacing * usize_to_f32(bars_to_show.saturating_sub(1)));
         let start_x = effective_bounds.x + (effective_bounds.width - total_bars_width) / 2.0;
 
         let normalization_factor = 1.0 / FREQUENCY_NORMALIZATION_MAX;

@@ -361,13 +361,18 @@ Three patterns account for the majority of findings:
   `/backends/{source}/models/{model}/language` builders now `enc(&model)` as well as
   `enc(&source)`, so a `/` (or any reserved char) in a model name yields a valid path.
 
-### [ ] 21. 🟠 Applet: empty `frequency_bands` panics/degenerates the bar renderers
+### [x] 21. 🟠 Applet: empty `frequency_bands` panics/degenerates the bar renderers
 
 - **Where:** `equalizer.rs:60` / `centered_bars.rs:59`.
 - **Problem:** `b64_to_f32_vec` degrades malformed input to an empty vec, then
   `bars_to_show - 1` underflows a usize (debug panic; ~1.8e19 spacing in release).
   Same class as the #268 fix.
 - **Fix:** guard `bands_to_show == 0` and use `saturating_sub`.
+- **Resolved (branch `refactor/audit-tier1-20-23`):** both renderers now
+  early-return when `bars_to_show == 0` (which also avoids the `width / 0.0`
+  degeneration) and use `saturating_sub(1)` for the centering width. `waveform.rs`
+  was checked and is safe — its `bands_to_show - 1` sits inside the
+  `0..bands_to_show` loop, never reached at zero.
 
 ### [ ] 22. 🟡 Applet: `launch_app`/`open_github` never reap children
 
