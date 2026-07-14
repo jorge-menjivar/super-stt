@@ -146,7 +146,12 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    # Needed only by the gh-pages publish step (push to main); harmless on PRs.
+    # Main pushes only. Coverage exists to publish the gh-pages report (a
+    # main-only step), and on main it doubles as the stable-toolchain test run
+    # (the `test` job covers beta/nightly there). On a PR it would just rebuild
+    # the whole workspace instrumented and re-run the suite for artifacts nobody
+    # reads — the `test (stable)` job is already the PR gate.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
     steps:
@@ -216,8 +221,7 @@ jobs:
       # Render the browsable report. cargo-llvm-cov's --html index is a single flat
       # list of every file; per-file pages show line-level coverage. (A directory
       # tree would need lcov's genhtml or grcov; we intentionally keep to the
-      # llvm-cov toolchain and accept the flat index.) Runs on PRs too, so the
-      # rendering is exercised before it ever reaches main.
+      # llvm-cov toolchain and accept the flat index.)
       - name: Render HTML coverage report
         run: |
           cargo llvm-cov report --html --ignore-filename-regex 'tests/'
@@ -241,7 +245,7 @@ jobs:
             "$pct" "$color" > coverage-html/coverage.json
           cat coverage-html/coverage.json
 
-      # Preview artifact so the rendered tree can be eyeballed from a PR before merge.
+      # Browsable HTML artifact for the run, alongside the gh-pages publish below.
       - uses: actions/upload-artifact@v7
         with:
           name: coverage-html
