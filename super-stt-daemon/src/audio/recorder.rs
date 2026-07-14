@@ -14,8 +14,9 @@ use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use log::info;
+use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use super_stt_shared::AudioAnalyzer;
 use super_stt_shared::audio_utils::ResampleQuality;
@@ -191,22 +192,10 @@ impl DaemonAudioRecorder {
 
     /// Clear the audio buffer and reset recording state before a new recording.
     fn init_recording_state(&self, silence_detection_disabled: bool) {
-        let mut buffer = match self.audio_buffer.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                log::warn!("Audio buffer lock was poisoned, attempting recovery");
-                poisoned.into_inner()
-            }
-        };
+        let mut buffer = self.audio_buffer.lock();
         buffer.clear();
 
-        let mut state = match self.recording_state.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                log::warn!("Recording state lock was poisoned, attempting recovery");
-                poisoned.into_inner()
-            }
-        };
+        let mut state = self.recording_state.lock();
         *state = RecordingState::new();
         state.recording_start = Some(Instant::now());
         state.silence_detection_disabled = silence_detection_disabled;
@@ -302,18 +291,7 @@ impl DaemonAudioRecorder {
                 time::sleep(AUDIO_LOOP_INTERVAL).await;
             }
 
-            let should_stop = {
-                let state = match self.recording_state.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        log::warn!(
-                            "Recording state lock was poisoned during recording, attempting recovery"
-                        );
-                        poisoned.into_inner()
-                    }
-                };
-                state.should_stop()
-            };
+            let should_stop = self.recording_state.lock().should_stop();
 
             if should_stop {
                 break;
@@ -323,18 +301,8 @@ impl DaemonAudioRecorder {
             // (not applicable when silence detection is disabled)
             if !silence_detection_disabled {
                 let elapsed = start_time.elapsed();
-                let has_detected_speech = {
-                    let state = match self.recording_state.lock() {
-                        Ok(guard) => guard,
-                        Err(poisoned) => {
-                            log::warn!(
-                                "Recording state lock was poisoned while checking speech detection, attempting recovery"
-                            );
-                            poisoned.into_inner()
-                        }
-                    };
-                    state.recording // Check if speech has been detected and recording started
-                };
+                // Check if speech has been detected and recording started.
+                let has_detected_speech = self.recording_state.lock().recording;
 
                 // If speech has been detected, rely on silence detection instead of timeout
                 // Only timeout if no speech has been detected at all
@@ -350,18 +318,7 @@ impl DaemonAudioRecorder {
 
     /// Extract buffered audio and resample to the target rate when needed.
     fn drain_and_resample(&self, device_sample_rate: u32) -> Result<Vec<f32>> {
-        let audio_data: Vec<f32> = {
-            let buffer = match self.audio_buffer.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => {
-                    log::warn!(
-                        "Audio buffer lock was poisoned during extraction, attempting recovery"
-                    );
-                    poisoned.into_inner()
-                }
-            };
-            buffer.iter().copied().collect()
-        };
+        let audio_data: Vec<f32> = self.audio_buffer.lock().iter().copied().collect();
 
         if audio_data.is_empty() {
             return Err(anyhow::anyhow!("No audio recorded"));
@@ -543,17 +500,7 @@ impl DaemonAudioRecorder {
     ///
     /// Returns an error if the audio buffer cannot be accessed
     pub fn get_full_audio_data(&self) -> Result<Vec<f32>> {
-        let buffer = match self.audio_buffer.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                log::warn!(
-                    "Audio buffer lock was poisoned during get_full_audio_data, attempting recovery"
-                );
-                poisoned.into_inner()
-            }
-        };
-
-        let audio_data: Vec<f32> = buffer.iter().copied().collect();
+        let audio_data: Vec<f32> = self.audio_buffer.lock().iter().copied().collect();
         Ok(audio_data)
     }
 
@@ -561,16 +508,7 @@ impl DaemonAudioRecorder {
     /// This checks the internal recording state
     #[must_use]
     pub fn is_still_recording(&self) -> bool {
-        match self.recording_state.lock() {
-            Ok(state) => !state.should_stop(),
-            Err(poisoned) => {
-                log::warn!(
-                    "Recording state lock was poisoned during is_still_recording check, attempting recovery"
-                );
-                let state = poisoned.into_inner();
-                !state.should_stop()
-            }
-        }
+        !self.recording_state.lock().should_stop()
     }
 
     /// Get a reference to the internal audio buffer for direct access during recording

@@ -823,12 +823,21 @@ Tier 2 #4/#6/#8.
   one-time startup cost — both want a dedicated single-writer persist task rather than
   a point wrap.
 
-### [ ] 5. 🟡 Daemon: mutex poison recovery copy-pasted ~10× in `audio/`
+### [x] 5. 🟡 Daemon: mutex poison recovery copy-pasted ~10× in `audio/`
 
 - **Where:** `recorder.rs`, `processing.rs`, `device.rs`, while the rest of the
   crate uses parking_lot.
 - **Fix:** switch audio to `parking_lot::Mutex` (cpal callbacks are sync-safe with
   it) or one `lock_recover` helper.
+- **Resolved (branch `refactor/audit-tier3-5-8`):** switched the three audio
+  mutexes (`audio_buffer`, `recording_state`, `audio_device_cache`) from
+  `std::sync::Mutex` to `parking_lot::Mutex`. `parking_lot` guards carry no poison
+  state, so all 11 `match .lock() { Ok => .., Err(poisoned) => poisoned.into_inner() }`
+  recovery blocks collapse to a direct `.lock()` — the cpal real-time callbacks stay
+  sync-safe. The type leaks through `get_audio_buffer_ref` into the preview loop, so
+  `RecordingSession::preview_buffer` and its one lock site moved too; the sibling
+  `actually_typed` stays `std::sync::Mutex` (not shared with a callback). Dropped the
+  now-false `# Panics` (poison) doc on `check_output_device_health`.
 
 ### [ ] 6. 🟡 Daemon: inflight cleanup hand-rolled in 8+ places despite an RAII guard
 

@@ -3,7 +3,8 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SupportedStreamConfig};
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[derive(Clone)]
@@ -112,13 +113,7 @@ const DEVICE_VERIFICATION_ATTEMPTS: usize = 3;
 pub fn get_or_initialize_audio_device(
     audio_device_cache: &Arc<Mutex<Option<AudioDeviceCache>>>,
 ) -> Result<AudioDeviceCache> {
-    let mut cache = match audio_device_cache.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            log::warn!("Audio device cache lock was poisoned, attempting recovery");
-            poisoned.into_inner()
-        }
-    };
+    let mut cache = audio_device_cache.lock();
     if let Some(ref cached) = *cache
         && cached.last_verified.elapsed() < DEVICE_CACHE_VALIDITY
         && cached.initialization_verified
@@ -168,9 +163,7 @@ pub fn verify_audio_device_readiness(
         match attempt_device_verification(device_cache, attempt) {
             Ok(()) => {
                 log::debug!("Audio device verification successful on attempt {attempt}");
-                if let Ok(mut cache) = audio_device_cache.lock()
-                    && let Some(ref mut cached) = cache.as_mut()
-                {
+                if let Some(ref mut cached) = audio_device_cache.lock().as_mut() {
                     cached.initialization_verified = true;
                     cached.last_verified = Instant::now();
                 }
@@ -259,10 +252,6 @@ fn attempt_device_verification(device_cache: &AudioDeviceCache, _attempt: usize)
 
 /// Check health and details of the output audio device.
 ///
-/// # Panics
-///
-/// Panics if the device cache mutex is poisoned.
-///
 /// # Errors
 ///
 /// Returns an error if no default output device is available or
@@ -271,15 +260,7 @@ pub fn check_output_device_health(
     audio_device_cache: &Arc<Mutex<Option<AudioDeviceCache>>>,
 ) -> Result<AudioDeviceInfo> {
     let device_result = {
-        let cache_guard = match audio_device_cache.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                log::warn!(
-                    "Audio device cache lock was poisoned during device check, attempting recovery"
-                );
-                poisoned.into_inner()
-            }
-        };
+        let cache_guard = audio_device_cache.lock();
         if let Some(ref cached) = *cache_guard {
             if cached.last_verified.elapsed() < DEVICE_CACHE_VALIDITY {
                 Ok((cached.output_device.clone(), cached.output_config.clone()))

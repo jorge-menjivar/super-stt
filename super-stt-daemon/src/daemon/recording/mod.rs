@@ -23,7 +23,9 @@ struct RecordingSession {
     pub(super) recorder_handle: tokio::task::JoinHandle<Result<Vec<f32>>>,
     pub(super) model_processing_interval: std::time::Duration,
     pub(super) actually_typed: Arc<std::sync::Mutex<String>>,
-    pub(super) preview_buffer: Arc<std::sync::Mutex<VecDeque<f32>>>,
+    // Shared with the recorder's ring buffer (`get_audio_buffer_ref`), which is
+    // a `parking_lot::Mutex` (Tier 3 #5).
+    pub(super) preview_buffer: Arc<parking_lot::Mutex<VecDeque<f32>>>,
     pub(super) device_sample_rate: u32,
     pub(super) start_time: Instant,
 }

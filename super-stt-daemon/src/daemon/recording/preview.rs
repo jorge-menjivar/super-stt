@@ -161,13 +161,7 @@ impl SuperSTTDaemon {
     fn read_preview_audio_from_buffer(session: &RecordingSession) -> Vec<f32> {
         // Get last 5 seconds of audio data directly from buffer for preview
         debug!("About to get 10 secs from buffer");
-        let buffer_guard = match session.preview_buffer.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                debug!("Buffer lock poisoned, recovering");
-                poisoned.into_inner()
-            }
-        };
+        let buffer_guard = session.preview_buffer.lock();
 
         let total_samples = buffer_guard.len();
 

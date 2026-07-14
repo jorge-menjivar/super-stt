@@ -1,35 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::audio::state::{GRACE_PERIOD, NO_SPEECH_TIMEOUT, RecordingState, SILENCE_TIMEOUT};
+use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use super_stt_shared::models::audio::AudioLevel;
 use tokio::sync::broadcast;
 
-/// Process mono audio samples for recording state and levels
+/// Process mono audio samples for recording state and levels.
 ///
-/// Handles poisoned locks gracefully by logging warnings and recovering the data.
+/// Uses `parking_lot::Mutex`, whose guards carry no poison state — a panic
+/// while another thread holds the lock cannot poison it, so there is no
+/// recovery to hand-roll. cpal invokes this on the real-time input thread, and
+/// `parking_lot` locks are safe in sync callbacks.
 pub fn process_audio_samples(
     mono_samples: &[f32],
     buffer: &Arc<Mutex<VecDeque<f32>>>,
     state: &Arc<Mutex<RecordingState>>,
     level_tx: &broadcast::Sender<AudioLevel>,
 ) {
-    let mut buffer = match buffer.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            log::warn!("Audio buffer lock was poisoned in processing, attempting recovery");
-            poisoned.into_inner()
-        }
-    };
-    let mut state = match state.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            log::warn!("Recording state lock was poisoned in processing, attempting recovery");
-            poisoned.into_inner()
-        }
-    };
+    let mut buffer = buffer.lock();
+    let mut state = state.lock();
 
     // mono_samples.len() is a chunk size (typically a few hundred to a few thousand);
     // fits in u32 and thus in f32 exactly.
