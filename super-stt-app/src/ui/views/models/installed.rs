@@ -36,19 +36,6 @@ pub(super) fn installed_tab(app: &AppModel) -> Element<'_, Message> {
         .into()
 }
 
-/// Whether `latest` is a strictly newer version than `installed`. Both must be
-/// valid `MAJOR.MINOR.PATCH` semver; anything `semver` can't parse yields
-/// `false`, so no update is offered for non-semver versions.
-pub(super) fn update_available(installed: &str, latest: &str) -> bool {
-    match (
-        semver::Version::parse(installed),
-        semver::Version::parse(latest),
-    ) {
-        (Ok(have), Ok(want)) => want > have,
-        _ => false,
-    }
-}
-
 /// One installed backend's Library card: the leading glyph, the name and
 /// description, then a repo button + Configure + a "⋯" overflow (Update /
 /// Uninstall) on the right, over a facts row of the served-models inventory
@@ -68,7 +55,8 @@ pub(super) fn installed_card<'a>(
     let registry_entry = registry_map.get(source.as_str());
     let update_version: Option<String> = registry_entry.and_then(|e| {
         let installed = e.installed_version.as_deref()?;
-        update_available(installed, &e.version).then(|| e.version.clone())
+        super_stt_registry_types::version::update_available(installed, &e.version)
+            .then(|| e.version.clone())
     });
     let description = registry_entry
         .and_then(|e| e.description.clone())
@@ -201,32 +189,4 @@ pub(super) fn installed_overflow_menu(
             }
         }))
         .into()
-}
-
-#[cfg(test)]
-mod update_available_tests {
-    //! Pin the update-button rule: offer an update only when both versions are
-    //! valid semver and the registry's is strictly newer. `0.10.0` outranks
-    //! `0.2.0` (the string-compare trap); anything unparseable offers nothing.
-    use super::*;
-
-    #[test]
-    fn newer_registry_version_offers_update() {
-        assert!(update_available("0.1.0", "0.2.0"));
-        // Double-digit minor really is newer despite "0.10" < "0.2" as strings.
-        assert!(update_available("0.2.0", "0.10.0"));
-    }
-
-    #[test]
-    fn equal_or_older_offers_nothing() {
-        assert!(!update_available("1.2.3", "1.2.3"));
-        assert!(!update_available("2.0.0", "1.9.9"));
-    }
-
-    #[test]
-    fn non_semver_offers_nothing() {
-        assert!(!update_available("1.2", "1.3.0")); // partial installed version
-        assert!(!update_available("1.0.0", "nightly")); // non-semver registry
-        assert!(!update_available("", "1.0.0"));
-    }
 }

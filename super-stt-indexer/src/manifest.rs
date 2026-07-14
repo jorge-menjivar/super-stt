@@ -42,9 +42,12 @@ pub fn validate(
     expected_version: &Version,
     expected_source: &str,
 ) -> Result<(), ManifestError> {
-    let v = Version::parse(m.backend.version.trim_start_matches('v')).map_err(|_| {
-        ManifestError::VersionMismatch(m.backend.version.clone(), expected_version.clone())
-    })?;
+    // Parse via the one shared version parser (v-prefix strip + semver) so the
+    // manifest check can't drift from the daemon/app/resolve logic (Tier 1 #31).
+    let v =
+        super_stt_registry_types::version::parse_version(&m.backend.version).ok_or_else(|| {
+            ManifestError::VersionMismatch(m.backend.version.clone(), expected_version.clone())
+        })?;
     if &v != expected_version {
         return Err(ManifestError::VersionMismatch(
             m.backend.version.clone(),

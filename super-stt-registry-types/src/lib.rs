@@ -14,5 +14,6 @@ mod safe_path;
 #[cfg(feature = "schema")]
 pub mod schema;
 pub mod verify;
+pub mod version;
 
 pub use safe_path::{is_safe_component, is_safe_relative_path};

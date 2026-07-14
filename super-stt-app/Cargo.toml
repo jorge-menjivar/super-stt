@@ -24,7 +24,6 @@ workspace = true
     open.workspace = true
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
     rust-embed.workspace = true
-semver = "1.0.28"
     serde.workspace = true
     serde_json.workspace = true
     # Cosmic settings dependencies
@@ -32,6 +31,7 @@ semver = "1.0.28"
     slotmap = "1.1"
     strum.workspace = true
     strum_macros.workspace = true
+super-stt-registry-types = { version = "0.1.4-beta.2", path = "../super-stt-registry-types" }
     # Workspace dependencies
     super-stt-shared = { path = "../super-stt-shared", features = ["analysis"] }
     tokio.workspace = true

@@ -94,7 +94,10 @@ fn select_release(releases: Vec<Release>, entry: &Entry) -> Result<Resolved, Res
 }
 
 fn parse_semver(s: &str) -> Result<Version, String> {
-    Version::parse(s.strip_prefix('v').unwrap_or(s)).map_err(|_| s.to_string())
+    // Delegate the v-prefix strip + parse to the one shared parser so the
+    // indexer, daemon, and app can't drift (Tier 1 #31). Keep the `Result`
+    // shape here for the `BadSemver` error the caller reports.
+    super_stt_registry_types::version::parse_version(s).ok_or_else(|| s.to_string())
 }
 
 #[cfg(test)]

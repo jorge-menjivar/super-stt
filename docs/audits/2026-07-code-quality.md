@@ -488,12 +488,20 @@ Three patterns account for the majority of findings:
   binaries entirely. `cargo test` builds with `debug_assertions` on, so the
   `http_smoke_full` integration test (its only user) still works.
 
-### [ ] 31. 🟠 Daemon: "update" uses string equality, so it happily downgrades
+### [x] 31. 🟠 Daemon: "update" uses string equality, so it happily downgrades
 
 - **Where:** `registry/update.rs:167`, where the app's check is strictly-newer
   semver (`app/.../installed.rs:42-49`); the indexer has two more subtly different
   `v`-prefix strippers (`resolve.rs:96-98`, `manifest.rs:45`).
 - **Fix:** one shared `parse_version`/`update_available`.
+- **Resolved (branch `refactor/audit-tier1-30-31`):** added
+  `super_stt_registry_types::version` with `parse_version` (single-`v`-prefix strip +
+  semver) and `update_available` (strictly-newer, `false` on any non-semver). The
+  daemon update handler no-ops unless the registry is strictly newer (no more
+  downgrades or reformatted-string false updates); the app's `installed.rs` check,
+  the indexer's `resolve::parse_semver`, and its `manifest::validate` all delegate to
+  it. Dropped the app's now-redundant local `update_available` + tests (moved to the
+  shared crate) and its now-unused `semver` dep.
 
 ---
 

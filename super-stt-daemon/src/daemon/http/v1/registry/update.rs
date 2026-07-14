@@ -163,8 +163,11 @@ pub(crate) async fn update_registry_backend(
         Err(r) => return *r,
     };
 
-    // No-op if already at the latest version.
-    if from_version == entry.version {
+    // No-op unless the registry offers a strictly-newer semver. String equality
+    // treated any different string as an update, so an older or reformatted
+    // registry version happily "updated" into a downgrade (Tier 1 #31); the
+    // shared semver check refuses anything not strictly newer.
+    if !super_stt_registry_types::version::update_available(&from_version, &entry.version) {
         s.install_inflight.write().remove(&body.source);
         let resp = UpdateResponse {
             install_id: None,
