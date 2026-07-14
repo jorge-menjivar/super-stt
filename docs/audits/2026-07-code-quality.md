@@ -374,20 +374,30 @@ Three patterns account for the majority of findings:
   was checked and is safe — its `bands_to_show - 1` sits inside the
   `0..bands_to_show` loop, never reached at zero.
 
-### [ ] 22. 🟡 Applet: `launch_app`/`open_github` never reap children
+### [x] 22. 🟡 Applet: `launch_app`/`open_github` never reap children
 
 - **Where:** `app/update.rs:348-389`.
 - **Problem:** zombies accumulate for the session-long applet; `launch_app` also
   probes hardcoded `./target/{debug,release}/` dev paths relative to the panel
   process CWD.
 - **Fix:** reap spawned children (or detach properly); drop the dev-path probing.
+- **Resolved (branch `refactor/audit-tier1-20-23`):** added a `spawn_detached`
+  helper that reaps each child in a detached thread, and routed both `open_github`
+  and `launch_app` through it. The two `./target/{debug,release}` dev paths (and the
+  redundant `which` probe — `Command::new("super-stt-app")` already searches `PATH`)
+  are gone; `launch_app` now tries PATH, `/usr/local/bin`, `/usr/bin`.
 
-### [ ] 23. 🟡 Applet: the "connection health watchdog" doesn't exist
+### [x] 23. 🟡 Applet: the "connection health watchdog" doesn't exist
 
 - **Where:** `last_udp_data` is written four times, read nowhere (`app/mod.rs:45`,
   `update.rs:47,57,229-231,256`).
 - **Problem:** the comments advertise a safety net that was removed.
 - **Fix:** implement the watchdog or delete the field and comments.
+- **Resolved (branch `refactor/audit-tier1-20-23`):** deleted the write-only
+  `last_udp_data` field, its initializer, the four writes, and the "connection health
+  watchdog" comment (plus the now-unused `Instant` import in `init.rs`). The
+  self-healing event subscription is the real reconnection path; there is no separate
+  watchdog to advertise.
 
 ### [x] 24. 🟠 Shared: `GET /audio_themes` violates the documented wire form
 

@@ -44,7 +44,6 @@ impl SuperSttApplet {
                 ..
             } => self.widget_frequency_bands(&bands, total_energy),
             Message::WidgetTranscribingStarted => {
-                self.last_udp_data = Instant::now();
                 // Guard against out-of-order delivery: only enter Processing
                 // mid-cycle, never resurrect it after transcribing_stopped
                 // already returned us to Idle.
@@ -54,7 +53,6 @@ impl SuperSttApplet {
                 cosmic_app::Task::none()
             }
             Message::WidgetTranscribingStopped => {
-                self.last_udp_data = Instant::now();
                 self.set_recording_state(RecordingState::Idle);
                 self.visualization.clear();
                 cosmic_app::Task::none()
@@ -226,10 +224,6 @@ impl SuperSttApplet {
     }
 
     fn widget_recording_state(&mut self, is_recording: bool) -> cosmic_app::Task<Message> {
-        // Update the last-event timestamp used by the connection health
-        // watchdog.
-        self.last_udp_data = Instant::now();
-
         let was_recording = matches!(self.recording_state, RecordingState::Recording);
         let new_state = if is_recording {
             RecordingState::Recording
@@ -253,7 +247,6 @@ impl SuperSttApplet {
         bands: &[f32],
         total_energy: f32,
     ) -> cosmic_app::Task<Message> {
-        self.last_udp_data = Instant::now();
         self.visualization
             .update_frequency_bands(bands, total_energy);
         self.audio_level = total_energy;
@@ -345,10 +338,21 @@ impl SuperSttApplet {
         cosmic_app::Task::none()
     }
 
+    /// Spawn a fire-and-forget child and reap it in a detached thread, so a
+    /// launched helper never lingers as a zombie in the session-long applet
+    /// (Tier 1 #22). We don't care about the exit status — the `wait` only
+    /// prevents the zombie.
+    fn spawn_detached(cmd: &mut std::process::Command) -> std::io::Result<()> {
+        let mut child = cmd.spawn()?;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
+    }
+
     fn open_github() -> cosmic_app::Task<Message> {
-        if let Err(e) = std::process::Command::new("xdg-open")
-            .arg(crate::REPOSITORY)
-            .spawn()
+        if let Err(e) =
+            Self::spawn_detached(std::process::Command::new("xdg-open").arg(crate::REPOSITORY))
         {
             warn!("Failed to open GitHub URL: {e}");
         }
@@ -356,29 +360,18 @@ impl SuperSttApplet {
     }
 
     fn launch_app() -> cosmic_app::Task<Message> {
+        // `Command::new("super-stt-app")` already searches `PATH`, then fall
+        // back to the standard install prefixes. The old `./target/{debug,
+        // release}` dev paths (resolved against the panel process' CWD) never
+        // matched for an installed applet and were dropped (Tier 1 #22).
         let launch_attempts = [
-            "super-stt-app",                  // System PATH
-            "./target/debug/super-stt-app",   // Local debug build
-            "./target/release/super-stt-app", // Local release build
-            "/usr/local/bin/super-stt-app",   // Local install
-            "/usr/bin/super-stt-app",         // System install
+            "super-stt-app",                // System PATH
+            "/usr/local/bin/super-stt-app", // Local install
+            "/usr/bin/super-stt-app",       // System install
         ];
 
-        if let Ok(output) = std::process::Command::new("which")
-            .arg("super-stt-app")
-            .output()
-            && output.status.success()
-            && let Ok(path) = std::str::from_utf8(&output.stdout)
-        {
-            let path = path.trim();
-            if std::process::Command::new(path).spawn().is_ok() {
-                info!("Successfully launched Super STT app from PATH: {path}");
-                return cosmic_app::Task::none();
-            }
-        }
-
-        for command in &launch_attempts {
-            if std::process::Command::new(command).spawn().is_ok() {
+        for command in launch_attempts {
+            if Self::spawn_detached(&mut std::process::Command::new(command)).is_ok() {
                 info!("Successfully launched Super STT app with command: {command}");
                 return cosmic_app::Task::none();
             }

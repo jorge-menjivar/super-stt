@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use std::time::Instant;
-
 use cosmic::{
     app as cosmic_app,
     widget::segmented_button::{Entity, SingleSelectModel},
@@ -94,7 +92,6 @@ impl SuperSttApplet {
             visualization,
             working_animation,
             working_anim_start: None,
-            last_udp_data: Instant::now(),
             config,
             variant_name,
             icon_alignment_model,

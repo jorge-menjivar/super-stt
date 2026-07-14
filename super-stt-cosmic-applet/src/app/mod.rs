@@ -42,7 +42,6 @@ pub struct SuperSttApplet {
     /// Wall-clock start of the current Processing phase; `Some` only while
     /// transcribing, used to derive the animation's elapsed time.
     working_anim_start: Option<Instant>,
-    last_udp_data: Instant,
     config: AppletConfig,
     variant_name: String,
     icon_alignment_model: SingleSelectModel,
