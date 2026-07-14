@@ -739,13 +739,20 @@ Ranked by drift risk. These answer "what should be standardized or reused."
 Indexer/forge/consent/cli defects live in Tier 1 #27–#31; their shared plumbing is
 Tier 2 #4/#6/#8.
 
-### [ ] 1. 🟡 Daemon: wasm/subprocess backends duplicate the `/v1` client
+### [x] 1. 🟡 Daemon: wasm/subprocess backends duplicate the `/v1` client
 
 - **Where:** ~35 lines already drifted — `wasm/mod.rs:400-443` vs
   `subprocess/mod.rs:324-361`, plus `invoke` vs `request`, `status`/`ping` vs
   `wait_for_ping`.
 - **Fix:** extract `build_transcribe_body` / `parse_transcribe_response` / a small
   `V1Transport` trait.
+- **Resolved (branch `refactor/audit-tier3-1-4`):** added a feature-agnostic
+  `stt_models::v1` module with `build_transcribe_body` and
+  `parse_transcribe_response` (the byte-identical, drifting parts); both backends'
+  `transcribe_audio` now call them. Kept the transports (`request` over a Unix
+  socket vs `invoke` through the WASM component) per-backend — they are genuinely
+  different, not duplication — so a `V1Transport` trait bought nothing over the two
+  free functions. Added unit tests for the shared build/parse.
 
 ### [ ] 2. 🟠 Daemon: device-switch success/recovery duplicate ~120 lines and bypass graceful unload
 

@@ -337,35 +337,13 @@ impl Transcribe for SubprocessBackend {
     ) -> Result<String> {
         // The daemon owns resampling; backends receive 16 kHz.
         let audio16 = resample(audio, sample_rate, SAMPLE_RATE, ResampleQuality::Fast)?;
-        let mut body_json = serde_json::json!({
-            "audio_data": audio16,
-            "sample_rate": SAMPLE_RATE,
-        });
-        if let Some(lang) = language {
-            body_json["language"] = serde_json::Value::String(lang.to_string());
-        }
-        let body = serde_json::to_vec(&body_json)?;
+        let body = crate::stt_models::v1::build_transcribe_body(&audio16, SAMPLE_RATE, language)?;
         let mut headers = json_headers();
         headers.push(("x-stt-model".to_string(), self.model_id.clone()));
         let (status, resp) = self
             .request("POST", "/v1/transcribe", &headers, body)
             .await?;
-        let json: serde_json::Value = serde_json::from_slice(&resp)?;
-        if status == 200 {
-            json["transcription"]
-                .as_str()
-                .map(String::from)
-                .ok_or_else(|| anyhow!("backend response missing transcription"))
-        } else {
-            // Surface the backend's own error message (shown to the user)
-            // rather than the raw HTTP body.
-            let msg = json
-                .get("detail")
-                .and_then(|v| v.as_str())
-                .or_else(|| json.get("message").and_then(|v| v.as_str()))
-                .unwrap_or("transcription failed");
-            bail!("{msg}");
-        }
+        crate::stt_models::v1::parse_transcribe_response(status, &resp)
     }
 }
 

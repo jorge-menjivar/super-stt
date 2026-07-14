@@ -15,5 +15,7 @@ pub mod download;
 #[cfg(feature = "subprocess-backends")]
 pub mod subprocess;
 pub mod transcribe;
+#[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
+pub mod v1;
 #[cfg(feature = "wasm-backends")]
 pub mod wasm;
