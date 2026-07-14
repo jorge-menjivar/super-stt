@@ -62,7 +62,7 @@ pub async fn get_model_language(source: String, model: String) -> HttpResult<ser
     with_settings_token(move |socket, token| {
         let (source, model) = (source.clone(), model.clone());
         async move {
-            let path = format!("/backends/{}/models/{}/language", enc(&source), model);
+            let path = format!("/backends/{}/models/{}/language", enc(&source), enc(&model));
             let resp = require_success(
                 transport::settings_get(socket, &token, &path).await?,
                 "get_model_language",
@@ -84,7 +84,7 @@ pub async fn set_model_language(
     with_settings_token(move |socket, token| {
         let (source, model, language) = (source.clone(), model.clone(), language.clone());
         async move {
-            let path = format!("/backends/{}/models/{}/language", enc(&source), model);
+            let path = format!("/backends/{}/models/{}/language", enc(&source), enc(&model));
             let resp = require_success(
                 transport::settings_post(
                     socket,
@@ -108,7 +108,7 @@ pub async fn clear_model_language(source: String, model: String) -> HttpResult<s
     with_settings_token(move |socket, token| {
         let (source, model) = (source.clone(), model.clone());
         async move {
-            let path = format!("/backends/{}/models/{}/language", enc(&source), model);
+            let path = format!("/backends/{}/models/{}/language", enc(&source), enc(&model));
             let resp = require_success(
                 transport::settings_delete(socket, &token, &path).await?,
                 "clear_model_language",

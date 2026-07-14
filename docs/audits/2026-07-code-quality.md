@@ -352,11 +352,14 @@ Three patterns account for the majority of findings:
   the slider's `on_release` fires the single `set_volume` POST. A whole drag is one
   request instead of hundreds.
 
-### [ ] 20. 🟡 App: language client encodes `source` but interpolates `model` raw
+### [x] 20. 🟡 App: language client encodes `source` but interpolates `model` raw
 
 - **Where:** `daemon/client/v1/settings/language.rs:67,89,116`.
 - **Impact:** a model name containing `/` produces a malformed path.
 - **Fix:** percent-encode both path segments.
+- **Resolved (branch `refactor/audit-tier1-20-23`):** all three
+  `/backends/{source}/models/{model}/language` builders now `enc(&model)` as well as
+  `enc(&source)`, so a `/` (or any reserved char) in a model name yields a valid path.
 
 ### [ ] 21. 🟠 Applet: empty `frequency_bands` panics/degenerates the bar renderers
 
