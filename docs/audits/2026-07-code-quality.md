@@ -659,7 +659,7 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   adapters (config + update→message mapping), which is by design — per the fix's
   "per-app topics/scopes/messages stay per-crate".
 
-### [ ] 6. 🟡 Logging init
+### [x] 6. 🟡 Logging init
 
 - **Where:** five variants — byte-identical RUST_LOG-else-Info blocks in
   `app/main.rs:9-17` and `consent/main.rs:341-347`, parameterized in
@@ -670,8 +670,16 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   config *before* initializing logging (`daemon_main.rs:93` vs `:114`), so the
   "config invalid, reset to defaults" warning (`config.rs:173`) is silently
   dropped — init logging first.
+- **Resolved (branch `refactor/audit-tier2-6-7-8`):** added
+  `super_stt_shared::logging::{init, init_with}` (RUST_LOG wins, else the given
+  default). Wired the app, CLI (previously none), applet (was silent — now `Info`
+  like its siblings), consent, and daemon; the daemon now inits logging **before**
+  `DaemonConfig::load()`, so the config-invalid warning is captured. `env_logger`
+  moved out of four crates (now only shared + the standalone indexer). The indexer
+  is deliberately left on its own one-liner rather than coupling a build tool to the
+  daemon-protocol crate for a logging call.
 
-### [ ] 7. 🟡 XDG path helpers
+### [x] 7. 🟡 XDG path helpers
 
 - **Where:** `get_config_path` is byte-identical daemon↔applet
   (`daemon/config.rs:154-163` vs `applet/config/settings.rs:67-76`); three
@@ -682,8 +690,17 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   (`shared/validation/paths.rs:29-61`).
 - **Fix:** one `shared::paths` module; route the subprocess socket through the
   validated helper.
+- **Resolved (branch `refactor/audit-tier2-6-7-8`):** added
+  `super_stt_shared::paths::{config_dir, data_dir, cache_dir}` (each keeping its
+  call sites' existing fallback, so no behavior change) and routed all five
+  production dir sites through it — the daemon+applet `get_config_path`, the
+  backends `data_dir`, and the registry-client/pipeline `cache_dir`. The private
+  socket validator was generalized to `pub fn secure_runtime_path(relative)`; the
+  subprocess socket now goes through it (`backends/<name>.sock`) instead of a raw
+  `$XDG_RUNTIME_DIR` join, so it inherits the traversal/prefix/length guards. Dropped
+  the applet's now-unused `dirs` dep.
 
-### [ ] 8. 🟡 Smaller shared items
+### [x] 8. 🟡 Smaller shared items
 
 - `accept_base_url` duplicated verbatim (`forge/lib.rs:139-147` vs
   `daemon/registry/mod.rs:17-22`) — keep forge's, import it.
@@ -700,6 +717,20 @@ Ranked by drift risk. These answer "what should be standardized or reused."
   `sse::block_stream`; also fix the stale NDJSON doc comments in transcribe.rs.
 - Hand-rolled `unsafe` pin projection (`http_client/internal/transport.rs:17-42`)
   re-implements `http_body_util::Either` — the crate's only `unsafe`, deletable.
+- **Resolved (branch `refactor/audit-tier2-6-7-8`):** all six:
+  `accept_base_url` is now `pub` in forge (tests moved there); the daemon re-exports
+  it. `install_crypto_provider` lives in `forge::http` beside the client factory
+  (forge `rustls` promoted from dev-dep); the daemon re-exports it, the redundant
+  `download.rs` call is gone, and the indexer's inline install is dropped (its unused
+  `rustls` removed). `KNOWN_SCOPES`/`is_known_scope` moved to
+  `super_stt_shared::daemon::scopes`; the daemon re-exports, consent gained a
+  conformance test that every known scope has a specific description (no
+  "deny is safe" fall-through). The CLI's `stop-mode` values come from the shared
+  `RecordingStopMode::WIRE_VARIANTS` (added to `wire_enum_strings!`). The two SSE
+  loops collapse into `sse::block_stream(body, parse_block, on_error)`; the stale
+  "NDJSON" docs now say SSE. `RequestBody` is now
+  `http_body_util::Either<Empty, Full>`, deleting the hand-rolled `unsafe` pin
+  projection.
 
 ---
 

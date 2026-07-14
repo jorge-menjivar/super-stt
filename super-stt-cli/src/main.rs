@@ -28,6 +28,10 @@ const SCOPES: &[&str] = &["transcribe", "status"];
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // The CLI previously had no logging at all; initialize it like the other
+    // binaries (RUST_LOG wins, else Info) (Tier 2 #6).
+    super_stt_shared::logging::init();
+
     // Honor SUPER_STT_KEYRING_MOCK before any session-token access so
     // automated shells / CI (and our own integration tests) don't block on
     // the system secret service. No-op when the env var is unset.
@@ -65,7 +69,13 @@ async fn main() -> Result<()> {
                     Arg::new("stop-mode")
                         .long("stop-mode")
                         .help("Override the configured stop mode")
-                        .value_parser(["silence_only", "silence_and_manual", "manual_only"]),
+                        // Drive the accepted values from the shared wire-enum
+                        // table so they can't drift from the daemon (Tier 2 #8).
+                        .value_parser(clap::builder::PossibleValuesParser::new(
+                            super_stt_shared::models::recording_stop_mode::RecordingStopMode::WIRE_VARIANTS
+                                .iter()
+                                .copied(),
+                        )),
                 ),
         )
         .subcommand(Command::new("stop").about("Stop an in-flight daemon-mic recording"))

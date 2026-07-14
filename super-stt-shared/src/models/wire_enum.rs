@@ -27,6 +27,11 @@ macro_rules! wire_enum_strings {
             pub fn as_wire_str(self) -> &'static str {
                 match self { $( Self::$variant => $wire, )+ }
             }
+
+            /// Every accepted wire/config token, in declaration order. Lets a
+            /// CLI build its `value_parser` (or help text) from the single
+            /// table instead of re-listing the strings.
+            pub const WIRE_VARIANTS: &'static [&'static str] = &[ $( $wire, )+ ];
         }
 
         impl ::std::fmt::Display for $ty {

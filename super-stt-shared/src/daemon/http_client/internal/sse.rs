@@ -1,5 +1,54 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use futures_util::{Stream, StreamExt};
+use http_body_util::BodyStream;
+use hyper::body::Incoming;
+
+/// Frame an SSE response body into blocks and map each block — plus any
+/// body-read / non-UTF-8 error — to the caller's event type `T`. The loop
+/// skeleton (accumulate frames, split on the blank-line boundary, decode,
+/// dispatch) is identical for the `/transcribe` and `/events` client streams;
+/// callers supply only the per-block parser and the error constructor.
+pub(crate) fn block_stream<T, P, E>(
+    body: Incoming,
+    parse_block: P,
+    on_error: E,
+) -> impl Stream<Item = T>
+where
+    P: Fn(&str) -> Option<T>,
+    E: Fn(String) -> T,
+{
+    let mut body_stream = BodyStream::new(body);
+    async_stream::stream! {
+        let mut buffer: Vec<u8> = Vec::new();
+        while let Some(frame_res) = body_stream.next().await {
+            let frame = match frame_res {
+                Ok(f) => f,
+                Err(e) => {
+                    yield on_error(format!("body read error: {e}"));
+                    return;
+                }
+            };
+            if let Ok(data) = frame.into_data() {
+                buffer.extend_from_slice(&data);
+                while let Some(boundary) = find_blank_line(&buffer) {
+                    let block_bytes: Vec<u8> = buffer.drain(..boundary.end).collect();
+                    let block_text = match std::str::from_utf8(&block_bytes[..boundary.start]) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            yield on_error(format!("non-utf8 SSE block: {e}"));
+                            continue;
+                        }
+                    };
+                    if let Some(ev) = parse_block(block_text) {
+                        yield ev;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Returned span describes the bytes belonging to ONE SSE block.
 /// `start` is the byte index of the blank line, `end` is one past the
 /// final `\n` that closes the block.

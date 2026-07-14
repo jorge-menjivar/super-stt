@@ -65,7 +65,7 @@ fn build_events_request(
         .header("host", "stt.local")
         .header("accept", "text/event-stream")
         .header("authorization", format!("Bearer {token}"))
-        .body(transport::RequestBody::Empty(Empty::new()))
+        .body(http_body_util::Either::Left(Empty::new()))
         .map_err(|e| format!("Failed to build request: {e}"))
 }
 
@@ -76,49 +76,14 @@ fn build_events_request(
 fn parse_widget_event_stream(
     response: hyper::Response<hyper::body::Incoming>,
 ) -> impl futures_util::Stream<Item = WidgetEvent> + Send + 'static {
-    use http_body_util::BodyStream;
-    use hyper::body::Frame;
-    let body_stream = BodyStream::new(response.into_body());
-    async_stream::stream! {
-        let mut buffer: Vec<u8> = Vec::new();
-        let mut body_stream = body_stream;
-        use futures_util::StreamExt;
-        while let Some(frame_res) = body_stream.next().await {
-            let frame: Frame<_> = match frame_res {
-                Ok(f) => f,
-                Err(e) => {
-                    yield WidgetEvent {
-                        name: "error".to_string(),
-                        payload: serde_json::json!({
-                            "message": format!("body read error: {e}"),
-                        }),
-                    };
-                    return;
-                }
-            };
-            if let Ok(data) = frame.into_data() {
-                buffer.extend_from_slice(&data);
-                while let Some(boundary) = sse::find_blank_line(&buffer) {
-                    let block_bytes: Vec<u8> = buffer.drain(..boundary.end).collect();
-                    let block_text = match std::str::from_utf8(&block_bytes[..boundary.start]) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            yield WidgetEvent {
-                                name: "error".to_string(),
-                                payload: serde_json::json!({
-                                    "message": format!("non-utf8 SSE block: {e}"),
-                                }),
-                            };
-                            continue;
-                        }
-                    };
-                    if let Some(ev) = parse_widget_sse_block(block_text) {
-                        yield ev;
-                    }
-                }
-            }
+    // Shared SSE framing loop (Tier 2 #8); this stream maps each block to a
+    // `WidgetEvent` and body/UTF-8 errors to an `error`-named event.
+    sse::block_stream(response.into_body(), parse_widget_sse_block, |message| {
+        WidgetEvent {
+            name: "error".to_string(),
+            payload: serde_json::json!({ "message": message }),
         }
-    }
+    })
 }
 
 /// Parse one SSE block into a [`WidgetEvent`].

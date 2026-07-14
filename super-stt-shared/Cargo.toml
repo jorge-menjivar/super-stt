@@ -17,6 +17,8 @@ async-stream = "0.3.6"
     cpal = { workspace = true, optional = true }
     # Notification service dependencies
     dashmap.workspace = true
+dirs.workspace = true
+env_logger.workspace = true
 futures-util.workspace = true
     # Audio processing (optional feature)
     hound = { workspace = true, optional = true }
@@ -25,7 +27,7 @@ hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
 keyring.workspace = true
     libc.workspace = true
-    log.workspace = true
+log.workspace = true
     rubato = { workspace = true, optional = true }
     serde.workspace = true
     serde_json.workspace = true

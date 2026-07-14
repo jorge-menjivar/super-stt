@@ -20,7 +20,9 @@ impl From<Side> for VisualizationSide {
 }
 
 fn main() -> cosmic::iced::Result {
-    env_logger::init();
+    // `Info` default (the bare `env_logger::init()` here defaulted to `error`,
+    // making the applet effectively silent vs its siblings) (Tier 2 #6).
+    super_stt_shared::logging::init();
     log::info!("Starting Super STT applet with version {VERSION}");
 
     let matches = Command::new("super-stt-cosmic-applet")

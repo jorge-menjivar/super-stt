@@ -18,6 +18,14 @@ use std::time::Duration;
 /// logs and rate-limiters can attribute traffic.
 pub const USER_AGENT: &str = concat!("super-stt/", env!("CARGO_PKG_VERSION"));
 
+/// Install the `ring` rustls crypto provider — the workspace uses
+/// `reqwest`/`rustls` with no bundled provider, so every binary must install one
+/// once before its first request (these client builders deliberately don't).
+/// Idempotent: the first call wins, later ones are ignored.
+pub fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Client for small, quick requests (release metadata, `index.json`, manifest
 /// assets): a 20 s overall timeout and a bounded redirect chain.
 ///

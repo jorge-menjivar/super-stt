@@ -58,7 +58,7 @@ pub struct BuildFailure {
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
     // Workspace reqwest uses rustls without a bundled provider; install one.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    super_stt_forge::install_crypto_provider();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match Args::parse().command {
         Command::Build(args) => run_build(args).await,

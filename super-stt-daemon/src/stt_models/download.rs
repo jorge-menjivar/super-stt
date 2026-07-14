@@ -221,7 +221,8 @@ pub async fn download_files(
     tracker: Option<&Arc<DownloadProgressTracker>>,
     starting_file_index: usize,
 ) -> Result<()> {
-    crate::install_crypto_provider();
+    // The provider is installed once in `main` before any download runs, so no
+    // redundant install here (Tier 2 #8).
     let client = super_stt_forge::http::download_client();
 
     for (offset, item) in items.iter().enumerate() {

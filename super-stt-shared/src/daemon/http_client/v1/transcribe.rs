@@ -14,12 +14,11 @@ pub struct TranscribeOptions {
     pub wait: bool,
 }
 
-/// One event from the `/transcribe` NDJSON stream.
+/// One event from the `/transcribe` Server-Sent Events stream.
 ///
 /// Matches the daemon's wire-level event types — `preview` for
 /// in-flight text, `done` for the final transcription, `error` for a
-/// daemon-side failure. Mirrors the Mistral realtime event-stream
-/// pattern (one typed JSON object per line).
+/// daemon-side failure — each an SSE block of `event:` / `data:` lines.
 #[derive(Debug, Clone)]
 pub enum TranscribeEvent {
     /// Incremental preview text (full text so far, not a delta).
@@ -33,7 +32,7 @@ pub enum TranscribeEvent {
 }
 
 /// `POST /transcribe` — start a daemon-mic recording. Non-streaming
-/// variant: collapses the entire NDJSON event stream into a single
+/// variant: collapses the entire SSE event stream into a single
 /// final result.
 ///
 /// # Errors
@@ -86,9 +85,6 @@ pub async fn transcribe_stream(
     token: &str,
     opts: TranscribeOptions,
 ) -> HttpResult<impl futures_util::Stream<Item = TranscribeEvent> + Send + 'static> {
-    use http_body_util::BodyStream;
-    use hyper::body::Frame;
-
     let mut data = serde_json::json!({
         "write_mode": opts.write_mode,
         "wait":       opts.wait,
@@ -122,46 +118,15 @@ pub async fn transcribe_stream(
         return Err(HttpError::Other(message));
     }
 
-    // Parse Server-Sent Events as they arrive. Each event is a block
-    // of `field: value\n` lines terminated by a blank line (`\n\n`).
-    // We collect bytes into a buffer and split on the blank-line
-    // boundary; for each block we extract the `event:` and `data:`
-    // fields and emit a typed `TranscribeEvent`.
-    let body_stream = BodyStream::new(response.into_body());
-    let event_stream = async_stream::stream! {
-        let mut buffer: Vec<u8> = Vec::new();
-        let mut body_stream = body_stream;
-        use futures_util::StreamExt;
-        while let Some(frame_res) = body_stream.next().await {
-            let frame: Frame<_> = match frame_res {
-                Ok(f) => f,
-                Err(e) => {
-                    yield TranscribeEvent::Error(format!("body read error: {e}"));
-                    return;
-                }
-            };
-            if let Ok(data) = frame.into_data() {
-                buffer.extend_from_slice(&data);
-                while let Some(boundary) = sse::find_blank_line(&buffer) {
-                    let block_bytes: Vec<u8> = buffer.drain(..boundary.end).collect();
-                    let block_text = match std::str::from_utf8(&block_bytes[..boundary.start]) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            yield TranscribeEvent::Error(format!(
-                                "non-utf8 SSE block: {e}"
-                            ));
-                            continue;
-                        }
-                    };
-                    if let Some(ev) = parse_sse_block(block_text) {
-                        yield ev;
-                    }
-                }
-            }
-        }
-    };
-
-    Ok(event_stream)
+    // Parse Server-Sent Events as they arrive: each event is a block of
+    // `field: value\n` lines terminated by a blank line. The framing loop is
+    // shared with `/events` via `sse::block_stream` (Tier 2 #8); here it maps
+    // each block to a typed `TranscribeEvent`.
+    Ok(sse::block_stream(
+        response.into_body(),
+        parse_sse_block,
+        TranscribeEvent::Error,
+    ))
 }
 
 fn parse_sse_block(block: &str) -> Option<TranscribeEvent> {

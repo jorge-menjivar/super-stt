@@ -30,7 +30,6 @@ toml = "1"
 url = "2"
 super-stt-registry-types = { path = "../super-stt-registry-types" }
 super-stt-forge = { version = "0.1.4-beta.2", path = "../super-stt-forge" }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 [dev-dependencies]
 mockito = "1"

@@ -89,49 +89,8 @@ pub(crate) fn auth_err(status: StatusCode, message: &str, reason: &str) -> Respo
     error_response(status, message, reason)
 }
 
-/// The complete set of scope tokens this daemon understands, in wire
-/// (`snake_case`) form. A token may be granted any non-empty subset.
-/// Source of truth for `/auth/request` validation; mirrors the scope
-/// catalog in `docs/protocol/auth.md`.
-pub(crate) const KNOWN_SCOPES: &[&str] = &[
-    "transcribe",
-    "settings",
-    "secrets",
-    "status",
-    "recording_events",
-    "audio_visualization",
-    "global_transcriptions",
-    "daemon_status",
-];
-
-/// True if `s` is a recognized scope token.
-pub(crate) fn is_known_scope(s: &str) -> bool {
-    KNOWN_SCOPES.contains(&s)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn known_scopes_are_recognized() {
-        for s in KNOWN_SCOPES {
-            assert!(is_known_scope(s), "{s} should be a known scope");
-        }
-    }
-
-    #[test]
-    fn old_personas_and_garbage_are_rejected() {
-        for s in ["client", "widget", "", "Settings", "transcribe ", "global"] {
-            assert!(!is_known_scope(s), "{s:?} must not be a known scope");
-        }
-    }
-
-    #[test]
-    fn secrets_is_a_known_scope() {
-        assert!(
-            is_known_scope("secrets"),
-            "secrets must be an accepted scope"
-        );
-    }
-}
+/// The auth scope catalog now lives in `super-stt-shared` so the daemon and the
+/// consent dialog share one list (Tier 2 #8). Re-exported for the existing
+/// `/auth/request` validation call site; the catalog's own tests live in
+/// `super_stt_shared::daemon::scopes`.
+pub(crate) use super_stt_shared::daemon::scopes::is_known_scope;

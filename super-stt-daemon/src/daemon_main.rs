@@ -15,23 +15,6 @@ use log::{error, info, warn};
 use std::path::PathBuf;
 use super_stt_shared::theme::AudioTheme;
 
-/// Initialize the `env_logger`. Respects `RUST_LOG`; otherwise sets the
-/// level from the `--verbose` flag.
-fn init_logging(verbose: bool) {
-    if std::env::var("RUST_LOG").is_ok() {
-        env_logger::init();
-    } else {
-        let log_level = if verbose {
-            log::LevelFilter::Debug
-        } else {
-            log::LevelFilter::Info
-        };
-        env_logger::Builder::from_default_env()
-            .filter_level(log_level)
-            .init();
-    }
-}
-
 /// Resolve the per-session overrides set on the command line. An override
 /// is `Some` only when the user passed the flag explicitly — when not
 /// set, the daemon falls back to whatever is in the config file.
@@ -88,8 +71,18 @@ async fn spawn_http_listener(daemon: &SuperSTTDaemon) -> Result<tokio::task::Joi
 /// Panics if the daemon fails to initialize.
 pub async fn run() -> Result<()> {
     let matches = cli::build().get_matches();
+    let verbose = matches.get_flag("verbose");
 
-    // Load saved configuration first
+    // Init logging BEFORE loading config so a "config invalid, reset to
+    // defaults" warning emitted during the load is actually captured, instead
+    // of being dropped before any logger exists (Tier 2 #6).
+    super_stt_shared::logging::init_with(if verbose {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    });
+
+    // Load saved configuration
     let config = DaemonConfig::load();
 
     // CLI flag overrides the saved preferred model for this session;
@@ -101,7 +94,6 @@ pub async fn run() -> Result<()> {
 
     let device = matches.get_one::<String>("device").unwrap();
     let force_cpu = device == "cpu";
-    let verbose = matches.get_flag("verbose");
 
     let audio_theme =
         if matches.value_source("audio-theme") == Some(clap::parser::ValueSource::CommandLine) {
@@ -110,8 +102,6 @@ pub async fn run() -> Result<()> {
         } else {
             config.audio.theme
         };
-
-    init_logging(verbose);
 
     info!("Starting Super STT Daemon");
     info!("Model: {model}");

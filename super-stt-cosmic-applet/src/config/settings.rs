@@ -65,14 +65,7 @@ impl Default for AppletConfig {
 impl AppletConfig {
     /// Get the config file path for a specific applet variant
     fn get_config_path(variant: &str) -> PathBuf {
-        let config_dir = dirs::config_dir()
-            .unwrap_or_else(|| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-                PathBuf::from(home).join(".config")
-            })
-            .join("super-stt");
-
-        config_dir.join(format!("applet-{variant}.toml"))
+        super_stt_shared::paths::config_dir().join(format!("applet-{variant}.toml"))
     }
 
     /// Parse applet config `content`, falling back to defaults on a parse

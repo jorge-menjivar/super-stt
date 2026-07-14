@@ -23,11 +23,16 @@ pub fn generate_secure_client_id(component: &str) -> String {
     format!("{component}-{pid}-{timestamp}-{uuid}")
 }
 
-/// Build a validated socket path `$XDG_RUNTIME_DIR/stt/<filename>` with
-/// path-traversal / prefix / length checks and a `/tmp/stt/<filename>`
-/// fallback.
-fn secure_socket_path(filename: &str) -> std::path::PathBuf {
-    let fallback = || std::path::PathBuf::from(format!("/tmp/stt/{filename}"));
+/// Build a validated runtime path `$XDG_RUNTIME_DIR/stt/<relative>` with
+/// path-traversal / prefix / length checks on the runtime dir and a
+/// `/tmp/stt/<relative>` fallback. `relative` is a caller-controlled subpath
+/// (a bare filename, or e.g. `backends/<name>.sock`) joined after `stt/`.
+///
+/// Shared entry point for every runtime socket so callers can't bypass the
+/// SSRF/traversal guards with a hand-rolled `$XDG_RUNTIME_DIR` join.
+#[must_use]
+pub fn secure_runtime_path(relative: &str) -> std::path::PathBuf {
+    let fallback = || std::path::PathBuf::from(format!("/tmp/stt/{relative}"));
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
         .unwrap_or_else(|_| format!("/run/user/{}", unsafe { libc::getuid() }));
 
@@ -46,12 +51,10 @@ fn secure_socket_path(filename: &str) -> std::path::PathBuf {
 
     let path = std::path::PathBuf::from(runtime_dir)
         .join("stt")
-        .join(filename);
+        .join(relative);
     if let Ok(canonical) = path.canonicalize() {
         if !canonical.starts_with("/run/user/") && !canonical.starts_with("/tmp/") {
-            log::warn!(
-                "Canonical {filename} socket path outside allowed directories, using fallback"
-            );
+            log::warn!("Canonical runtime path {relative} outside allowed directories, fallback");
             return fallback();
         }
         canonical
@@ -74,7 +77,7 @@ fn secure_socket_path(filename: &str) -> std::path::PathBuf {
 /// - Security event logging
 #[must_use]
 pub fn get_secure_socket_path() -> std::path::PathBuf {
-    secure_socket_path("super-stt.sock")
+    secure_runtime_path("super-stt.sock")
 }
 
 /// Get the path of the HTTP-protocol Unix socket (`super-stt-http.sock`).
@@ -84,7 +87,7 @@ pub fn get_secure_socket_path() -> std::path::PathBuf {
 /// side-by-side; clients pick whichever one matches their protocol.
 #[must_use]
 pub fn get_http_socket_path() -> std::path::PathBuf {
-    secure_socket_path("super-stt-http.sock")
+    secure_runtime_path("super-stt-http.sock")
 }
 
 #[cfg(test)]

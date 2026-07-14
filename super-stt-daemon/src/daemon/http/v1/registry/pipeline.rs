@@ -98,9 +98,7 @@ pub(super) fn spawn_install_pipeline(
                 PathBuf::from,
             )
         };
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("super-stt/install");
+        let cache_dir = super_stt_shared::paths::cache_dir().join("install");
 
         let events = Arc::clone(&daemon.events);
         let install_id_ev = install_id.clone();

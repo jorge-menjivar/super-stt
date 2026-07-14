@@ -233,13 +233,7 @@ pub fn list_models(backends: &[DiscoveredBackend]) -> Vec<(String, Provider, Str
 /// The default backends search directory: `<data_dir>/super-stt/backends`.
 #[must_use]
 pub fn default_backends_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            PathBuf::from(home).join(".local/share")
-        })
-        .join("super-stt")
-        .join("backends")
+    super_stt_shared::paths::data_dir().join("backends")
 }
 
 #[cfg(test)]

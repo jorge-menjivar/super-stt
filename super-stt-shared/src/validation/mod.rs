@@ -11,7 +11,9 @@ pub use inputs::{
     validate_limit, validate_optional_string, validate_required_string, validate_sample_rate,
     validate_string,
 };
-pub use paths::{generate_secure_client_id, get_http_socket_path, get_secure_socket_path};
+pub use paths::{
+    generate_secure_client_id, get_http_socket_path, get_secure_socket_path, secure_runtime_path,
+};
 
 /// Validation errors for better error reporting
 #[derive(Debug, thiserror::Error)]

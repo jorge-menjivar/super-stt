@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
     anyhow.workspace = true
     dirs.workspace = true
-    env_logger.workspace = true
     futures-util.workspace = true
     i18n-embed.workspace = true
     i18n-embed-fl.workspace = true

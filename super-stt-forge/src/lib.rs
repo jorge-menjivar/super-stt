@@ -4,6 +4,7 @@
 mod github;
 pub mod http;
 pub use github::Github;
+pub use http::install_crypto_provider;
 
 use async_trait::async_trait;
 use super_stt_registry_types::forge::Forge;
@@ -131,25 +132,33 @@ pub fn client(forge: Forge) -> Box<dyn ForgeClient> {
     }
 }
 
-/// Install the ring crypto provider for rustls.
-/// Safe to call multiple times — returns `Ok` on first call, `Err` on
-/// subsequent (which we ignore).
-#[cfg(test)]
-pub(crate) fn install_crypto_provider() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-}
-
 /// Whether an operator-provided API base URL may be used: `https://`, or a
 /// loopback `http://` for local testing. Anything else is rejected so adapters
-/// fall back to their secure default.
+/// fall back to their secure default. Shared with the daemon's registry client
+/// (`SUPER_STT_REGISTRY_URL` / `GITHUB_API_BASE` gating).
 #[must_use]
-pub(crate) fn accept_base_url(url: &str) -> bool {
+pub fn accept_base_url(url: &str) -> bool {
     if let Some(rest) = url.strip_prefix("https://") {
         !rest.is_empty()
     } else if let Some(rest) = url.strip_prefix("http://") {
         rest.starts_with("localhost") || rest.starts_with("127.0.0.1") || rest.starts_with("[::1]")
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod base_url_tests {
+    use super::accept_base_url;
+
+    #[test]
+    fn accepts_https_and_loopback_http_only() {
+        assert!(accept_base_url("https://api.github.com"));
+        assert!(accept_base_url("http://localhost:8787"));
+        assert!(accept_base_url("http://127.0.0.1:9000"));
+        assert!(!accept_base_url("http://evil.example.com"));
+        assert!(!accept_base_url("ftp://x"));
+        assert!(!accept_base_url("https://"));
     }
 }
 

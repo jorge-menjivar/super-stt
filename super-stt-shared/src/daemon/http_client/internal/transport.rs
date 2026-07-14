@@ -12,34 +12,11 @@ use serde::de::DeserializeOwned;
 /// URL on the wire is `/v1/ping`, `/v1/transcribe`, etc.
 pub(crate) const API_PREFIX: &str = "/v1";
 
-/// Body type wrapper so we can use either an empty body (GET) or a JSON body
-/// (POST) through the same hyper builder.
-pub(crate) enum RequestBody {
-    Empty(Empty<Bytes>),
-    Full(Full<Bytes>),
-}
-
-impl hyper::body::Body for RequestBody {
-    type Data = Bytes;
-    type Error = hyper::Error;
-
-    fn poll_frame(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, hyper::Error>>> {
-        // SAFETY: pin projection — RequestBody is a plain enum of two
-        // body types and we only forward to their poll_frame.
-        let this = unsafe { self.get_unchecked_mut() };
-        match this {
-            RequestBody::Empty(b) => unsafe { std::pin::Pin::new_unchecked(b) }
-                .poll_frame(cx)
-                .map(|opt| opt.map(|r| r.map_err(|never| match never {}))),
-            RequestBody::Full(b) => unsafe { std::pin::Pin::new_unchecked(b) }
-                .poll_frame(cx)
-                .map(|opt| opt.map(|r| r.map_err(|never| match never {}))),
-        }
-    }
-}
+/// Body type so a GET/DELETE (empty) and a POST (JSON) share one hyper request
+/// type. `http_body_util::Either` supplies the `Body` impl — both arms are
+/// `Bytes` bodies with an `Infallible` error — replacing a hand-rolled `unsafe`
+/// pin projection (this crate's only `unsafe`).
+pub(crate) type RequestBody = http_body_util::Either<Empty<Bytes>, Full<Bytes>>;
 
 pub(crate) fn build_get(path: &str, token: Option<&str>) -> Result<Request<RequestBody>, String> {
     let mut builder = Request::builder()
@@ -50,7 +27,7 @@ pub(crate) fn build_get(path: &str, token: Option<&str>) -> Result<Request<Reque
         builder = builder.header("authorization", format!("Bearer {t}"));
     }
     builder
-        .body(RequestBody::Empty(Empty::new()))
+        .body(http_body_util::Either::Left(Empty::new()))
         .map_err(|e| format!("Failed to build request: {e}"))
 }
 
@@ -70,7 +47,9 @@ pub(crate) fn build_post_json(
         builder = builder.header("authorization", format!("Bearer {t}"));
     }
     builder
-        .body(RequestBody::Full(Full::new(Bytes::from(body_bytes))))
+        .body(http_body_util::Either::Right(Full::new(Bytes::from(
+            body_bytes,
+        ))))
         .map_err(|e| format!("Failed to build request: {e}"))
 }
 
@@ -86,7 +65,7 @@ pub(crate) fn build_delete(
         builder = builder.header("authorization", format!("Bearer {t}"));
     }
     builder
-        .body(RequestBody::Empty(Empty::new()))
+        .body(http_body_util::Either::Left(Empty::new()))
         .map_err(|e| format!("Failed to build request: {e}"))
 }
 

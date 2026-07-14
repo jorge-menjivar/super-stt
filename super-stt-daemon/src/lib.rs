@@ -19,8 +19,7 @@ pub use daemon_main::run;
 mod daemon_main;
 mod num_cast;
 
-/// Install the ring crypto provider for rustls.
-/// Safe to call multiple times — returns Ok on first call, Err on subsequent (which we ignore).
-pub fn install_crypto_provider() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-}
+/// Re-export the shared rustls provider installer from `super-stt-forge`, so
+/// `main` and the tests install the provider through one implementation that
+/// lives beside the reqwest client factory.
+pub use super_stt_forge::install_crypto_provider;

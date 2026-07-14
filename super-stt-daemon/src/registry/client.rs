@@ -62,6 +62,7 @@ impl Client {
         }
     }
 
+    #[must_use]
     pub fn from_env() -> Self {
         let url = match std::env::var("SUPER_STT_REGISTRY_URL") {
             Ok(v) if crate::registry::accept_base_url(&v) => v,
@@ -71,9 +72,7 @@ impl Client {
             }
             Err(_) => DEFAULT_URL.into(),
         };
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("super-stt");
+        let cache_dir = super_stt_shared::paths::cache_dir();
         let _ = std::fs::create_dir_all(&cache_dir);
         Self::new(url, cache_dir.join("registry-index.json"), DEFAULT_TTL)
     }

@@ -22,8 +22,6 @@ base64 = "0.22.1"
         "applet",
         "tokio",
     ] }
-    dirs.workspace = true
-    env_logger.workspace = true
     futures-util.workspace = true
     libc.workspace = true
     log.workspace = true

@@ -22,9 +22,9 @@ workspace = true
         "wayland",
         "winit",
     ] }
-env_logger.workspace = true
 libc.workspace = true
 log.workspace = true
+super-stt-shared = { version = "0.1.4-beta.2", path = "../super-stt-shared" }
 
 [dev-dependencies]
 libc.workspace = true

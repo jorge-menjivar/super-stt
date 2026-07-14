@@ -100,10 +100,18 @@ impl SubprocessBackend {
         }
 
         // Socket under the runtime dir (pathname socket — survives PrivateNetwork).
-        let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-        let socket_dir = PathBuf::from(&runtime).join("stt/backends");
+        // Route through the shared validated helper so it gets the same
+        // traversal/prefix/length guards as the daemon's own sockets, instead
+        // of a raw `$XDG_RUNTIME_DIR` join (Tier 2 #7).
+        let socket = super_stt_shared::validation::secure_runtime_path(&format!(
+            "backends/{}.sock",
+            sanitize(model_name)
+        ));
+        let socket_dir = socket.parent().map_or_else(
+            || PathBuf::from("/tmp/stt/backends"),
+            std::path::Path::to_path_buf,
+        );
         std::fs::create_dir_all(&socket_dir)?;
-        let socket = socket_dir.join(format!("{}.sock", sanitize(model_name)));
         let _ = std::fs::remove_file(&socket);
 
         let binary = backend_dir.join(&manifest.backend.entrypoint);

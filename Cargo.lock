@@ -6605,7 +6605,6 @@ version = "0.1.4-beta.2"
 dependencies = [
  "anyhow",
  "dirs",
- "env_logger",
  "futures-util",
  "i18n-embed",
  "i18n-embed-fl",
@@ -6649,10 +6648,10 @@ dependencies = [
 name = "super-stt-consent"
 version = "0.1.4-beta.2"
 dependencies = [
- "env_logger",
  "libc",
  "libcosmic",
  "log",
+ "super-stt-shared",
 ]
 
 [[package]]
@@ -6661,8 +6660,6 @@ version = "0.1.4-beta.2"
 dependencies = [
  "base64",
  "clap",
- "dirs",
- "env_logger",
  "futures-util",
  "libc",
  "libcosmic",
@@ -6689,7 +6686,6 @@ dependencies = [
  "dashmap",
  "dirs",
  "enigo",
- "env_logger",
  "flate2",
  "futures",
  "futures-util",
@@ -6766,7 +6762,6 @@ dependencies = [
  "mockito",
  "reqwest",
  "ring",
- "rustls",
  "semver",
  "serde",
  "serde_json",
@@ -6804,6 +6799,8 @@ dependencies = [
  "clap",
  "cpal",
  "dashmap",
+ "dirs",
+ "env_logger",
  "futures-util",
  "hound",
  "http-body-util",

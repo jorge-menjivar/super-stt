@@ -211,6 +211,28 @@ fn permissions_for_scope(scope: &str) -> &'static [&'static str] {
     }
 }
 
+#[cfg(test)]
+mod scope_conformance {
+    use super::{constants, permissions_for_scope};
+
+    /// Every scope the daemon accepts must have a specific consent description.
+    /// A daemon scope that falls through to `UNKNOWN_SCOPE_PERMISSIONS` would
+    /// render the "unknown scope — deny is safe" warning on a legitimate prompt,
+    /// so this pins the two lists together (Tier 2 #8).
+    #[test]
+    fn every_known_scope_has_specific_permissions() {
+        for scope in super_stt_shared::daemon::scopes::KNOWN_SCOPES {
+            assert!(
+                !std::ptr::eq(
+                    permissions_for_scope(scope),
+                    constants::UNKNOWN_SCOPE_PERMISSIONS
+                ),
+                "scope `{scope}` has no specific consent description; add an arm to permissions_for_scope"
+            );
+        }
+    }
+}
+
 /// Union of the per-scope bullet lists for every scope the app asked
 /// for, de-duplicated and order-preserving. Falls back to the unknown
 /// bullet if the set is empty.
@@ -346,13 +368,7 @@ fn read_env() -> AuthRequestPayload {
 }
 
 fn main() -> cosmic::iced::Result {
-    if std::env::var("RUST_LOG").is_ok() {
-        env_logger::init();
-    } else {
-        env_logger::Builder::from_default_env()
-            .filter_level(log::LevelFilter::Info)
-            .init();
-    }
+    super_stt_shared::logging::init();
 
     install_termination_handlers();
     maybe_spawn_auto_approve_timer();

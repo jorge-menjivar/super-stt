@@ -152,14 +152,7 @@ impl Default for DaemonConfig {
 impl DaemonConfig {
     /// Get the config file path
     fn get_config_path() -> PathBuf {
-        let config_dir = dirs::config_dir()
-            .unwrap_or_else(|| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-                PathBuf::from(home).join(".config")
-            })
-            .join("super-stt");
-
-        config_dir.join("daemon.toml")
+        super_stt_shared::paths::config_dir().join("daemon.toml")
     }
 
     /// Parse config file `content` into a [`DaemonConfig`], falling back to
