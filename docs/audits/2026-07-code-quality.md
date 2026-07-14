@@ -477,11 +477,16 @@ Three patterns account for the majority of findings:
   drop, so an early `?` from `resolve_url` / `download_to_file` / validation no longer
   leaks the parts already fetched. The explicit post-loop cleanup is gone.
 
-### [ ] 30. 🔴 Consent: the auto-approve env path ships in release builds *(security)*
+### [x] 30. 🔴 Consent: the auto-approve env path ships in release builds *(security)*
 
 - **Where:** `STT_AUTH_AUTO_APPROVE_AFTER_MS` (`consent/src/main.rs:288-318`).
 - **Impact:** makes the human trust gate self-approve.
 - **Fix:** gate behind `#[cfg(debug_assertions)]` or a test feature.
+- **Resolved (branch `refactor/audit-tier1-30-31`):** `maybe_spawn_auto_approve_timer`
+  is now `#[cfg(debug_assertions)]`; release builds get a `#[cfg(not(...))]` no-op
+  stub, so the env-var bypass of the human trust gate is compiled out of shipped
+  binaries entirely. `cargo test` builds with `debug_assertions` on, so the
+  `http_smoke_full` integration test (its only user) still works.
 
 ### [ ] 31. 🟠 Daemon: "update" uses string equality, so it happily downgrades
 

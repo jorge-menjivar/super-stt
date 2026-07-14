@@ -292,7 +292,11 @@ fn install_termination_handlers() {
 /// it auto-approves itself.
 ///
 /// This is intended for integration tests / CI smoke runs, NOT for
-/// production. The auto-approval bypasses any user input.
+/// production. The auto-approval bypasses any user input, so the whole
+/// path is compiled out of release builds — a shipped consent gate must
+/// never be able to self-approve from an env var (Tier 1 #30). `cargo test`
+/// builds with `debug_assertions` on, so the smoke tests keep working.
+#[cfg(debug_assertions)]
 fn maybe_spawn_auto_approve_timer() {
     let Ok(raw) = std::env::var("STT_AUTH_AUTO_APPROVE_AFTER_MS") else {
         return;
@@ -316,6 +320,10 @@ fn maybe_spawn_auto_approve_timer() {
         }
     });
 }
+
+/// Release builds never auto-approve — the env-var bypass is debug/test only.
+#[cfg(not(debug_assertions))]
+fn maybe_spawn_auto_approve_timer() {}
 
 struct AuthRequestPayload {
     app_name: String,
