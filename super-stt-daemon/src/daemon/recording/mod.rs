@@ -145,10 +145,7 @@ impl SuperSTTDaemon {
 
         // Phase 4: final transcription.
         self.emit_transcribing_started();
-        let transcription_result = match self
-            .transcribe_with_spinner(typer, &full_audio_data, write_mode)
-            .await
-        {
+        let transcription_result = match self.transcribe_final(&full_audio_data).await {
             Ok(text) => text,
             Err(e) => {
                 // A transcription failure is not typed into the user's focused

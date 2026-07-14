@@ -890,7 +890,7 @@ Tier 2 #4/#6/#8.
   `format_sse_frame` used by both the bounded fan-out and the unbounded
   `emit_sse_event`.
 
-### [ ] 9. 🟡 Daemon: minor items
+### [x] 9. 🟡 Daemon: minor items
 
 - Five identical `emit_*` DBus wrappers (`services/dbus.rs:131-198`).
 - Dead spinner scaffolding in `transcribe_with_spinner`
@@ -899,6 +899,23 @@ Tier 2 #4/#6/#8.
 - Keyring sessions-blob accessors bypass `kv_get`/`kv_set` with a second mock
   mechanism (`keyring.rs:157-247`).
 - Stringly `Result<_, String>` in keyring/download-progress.
+- **Resolved (branch `refactor/audit-tier3-9-11`):**
+  - The five `emit_*` DBus wrappers collapse to an `emit_signal!` macro (they
+    differed only in the signal method + event type; a generic async helper can't
+    express it — the closure would return a future borrowing the emitter). The
+    repeated object path is now an `OBJECT_PATH` const, reused by `.at(..)` too.
+  - `transcribe_with_spinner` → `transcribe_final`: the spinner apparatus was
+    entirely dead (`spinner_handle` never assigned, cancel/counter never read), and
+    the `_typer`/`_write_mode` params were unused — all removed.
+  - Deleted the one-use `PipeExt` trait; the single `.pipe(Ok)` is now `Ok(..)`.
+- **Deferred (follow-up, Tier 3 #36):** the keyring sessions-blob → `kv_get`/`kv_set`
+  unification and the `Result<_, String>` → typed-error conversion. The first changes
+  session-persistence behavior under `SUPER_STT_KEYRING_MOCK` (the sessions blob would
+  move from the keyring-crate mock to the process-global `mock_store`), which the
+  `http_smoke_full` restart test exercises — wants its own verified change. The second
+  is a type-system change rippling through every keyring/download-progress caller
+  (including the async wrappers added in Tier 3 #4) for marginal benefit; better as a
+  focused pass than bundled here.
 
 ### [ ] 10. 🟡 App: group the flat ~90-variant `Message` enum into sub-enums
 
@@ -1080,6 +1097,22 @@ Tier 2 #4/#6/#8.
   a one-time startup blocking read.
 - **Fix:** async `Simulator` (threads the `Typer`/preview loop off the `std::Mutex`
   guard); a dedicated session-persist task fed over a channel.
+
+### [ ] 36. 🟡 Daemon: keyring cleanup deferred from Tier 3 #9
+
+- **Where:** the sessions-blob accessors (`keyring.rs` `get_sessions_blob`/
+  `set_sessions_blob`) build `keyring::Entry` directly and rely on
+  `install_mock_if_requested` (the keyring-crate credential-builder mock), a second
+  mock mechanism alongside the process-global `mock_store` that `kv_get`/`kv_set` use.
+  Plus the stringly `Result<_, String>` across keyring and download-progress.
+- **Why split:** routing the sessions blob through `kv_get`/`kv_set` changes its
+  behavior under `SUPER_STT_KEYRING_MOCK` (persists in-process via `mock_store`
+  instead of the isolated-per-`Entry` keyring mock), which the `http_smoke_full`
+  restart test exercises — a verified change, not a drive-by. Typed errors ripple
+  through every keyring/download-progress caller (incl. the Tier 3 #4 async wrappers)
+  for marginal benefit.
+- **Fix:** route sessions through `kv_get`/`kv_set` and delete
+  `install_mock_if_requested`; introduce a small keyring error enum.
 
 ---
 

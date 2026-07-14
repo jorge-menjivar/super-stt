@@ -98,6 +98,31 @@ impl SuperSTTDBusService {
     }
 }
 
+/// Object path the interface is served at (and the target of every signal).
+const OBJECT_PATH: &str = "/com/github/jorge_menjivar/SuperSTT";
+
+/// Define an `emit_*` wrapper that looks up the served interface and fires one
+/// of the `#[zbus(signal)]` methods. The five wrappers differ only in the
+/// signal method and its event type, so generate them from one template. A
+/// generic async helper can't express this cleanly (the closure would return a
+/// future borrowing the emitter), so a macro is the idiomatic dedup.
+macro_rules! emit_signal {
+    ($(#[$meta:meta])* $method:ident => $signal:ident($event:ty)) => {
+        $(#[$meta])*
+        ///
+        /// # Errors
+        /// Returns an error if the signal cannot be emitted.
+        pub async fn $method(&self, event: $event) -> Result<()> {
+            let object_server = self.connection.object_server();
+            let iface_ref = object_server
+                .interface::<_, SuperSTTDBusService>(OBJECT_PATH)
+                .await?;
+            SuperSTTDBusService::$signal(iface_ref.signal_emitter(), event).await?;
+            Ok(())
+        }
+    };
+}
+
 pub struct DBusManager {
     connection: Connection,
 }
@@ -118,84 +143,36 @@ impl DBusManager {
         // Serve the interface
         connection
             .object_server()
-            .at("/com/github/jorge_menjivar/SuperSTT", SuperSTTDBusService)
+            .at(OBJECT_PATH, SuperSTTDBusService)
             .await?;
 
         Ok(Self { connection })
     }
 
-    /// Emit a signal indicating that listening has started.
-    ///
-    /// # Errors
-    /// This function will return an error if the signal cannot be emitted.
-    pub async fn emit_listening_started(&self, event: ListeningEvent) -> Result<()> {
-        let object_server = self.connection.object_server();
-        let iface_ref = object_server
-            .interface::<_, SuperSTTDBusService>("/com/github/jorge_menjivar/SuperSTT")
-            .await?;
+    emit_signal!(
+        /// Emit a signal indicating that listening has started.
+        emit_listening_started => listening_started(ListeningEvent)
+    );
 
-        SuperSTTDBusService::listening_started(iface_ref.signal_emitter(), event).await?;
-        Ok(())
-    }
+    emit_signal!(
+        /// Emit a signal indicating that listening has stopped.
+        emit_listening_stopped => listening_stopped(ListeningStoppedEvent)
+    );
 
-    /// Emit a signal indicating that listening has stopped.
-    ///
-    /// # Errors
-    /// This function will return an error if the signal cannot be emitted.
-    pub async fn emit_listening_stopped(&self, event: ListeningStoppedEvent) -> Result<()> {
-        let object_server = self.connection.object_server();
-        let iface_ref = object_server
-            .interface::<_, SuperSTTDBusService>("/com/github/jorge_menjivar/SuperSTT")
-            .await?;
+    emit_signal!(
+        /// Emit a signal indicating that transcription has started.
+        emit_transcription_started => transcription_started(TranscriptionStartedEvent)
+    );
 
-        SuperSTTDBusService::listening_stopped(iface_ref.signal_emitter(), event).await?;
-        Ok(())
-    }
+    emit_signal!(
+        /// Emit a signal indicating that transcription has completed.
+        emit_transcription_completed => transcription_completed(TranscriptionCompletedEvent)
+    );
 
-    /// Emit a signal indicating that transcription has started.
-    ///
-    /// # Errors
-    /// This function will return an error if the signal cannot be emitted.
-    pub async fn emit_transcription_started(&self, event: TranscriptionStartedEvent) -> Result<()> {
-        let object_server = self.connection.object_server();
-        let iface_ref = object_server
-            .interface::<_, SuperSTTDBusService>("/com/github/jorge_menjivar/SuperSTT")
-            .await?;
-
-        SuperSTTDBusService::transcription_started(iface_ref.signal_emitter(), event).await?;
-        Ok(())
-    }
-
-    /// Emit a signal indicating that transcription has completed.
-    ///
-    /// # Errors
-    /// This function will return an error if the signal cannot be emitted.
-    pub async fn emit_transcription_completed(
-        &self,
-        event: TranscriptionCompletedEvent,
-    ) -> Result<()> {
-        let object_server = self.connection.object_server();
-        let iface_ref = object_server
-            .interface::<_, SuperSTTDBusService>("/com/github/jorge_menjivar/SuperSTT")
-            .await?;
-
-        SuperSTTDBusService::transcription_completed(iface_ref.signal_emitter(), event).await?;
-        Ok(())
-    }
-
-    /// Emit a signal for real-time audio level updates.
-    ///
-    /// # Errors
-    /// This function will return an error if the signal cannot be emitted.
-    pub async fn emit_audio_level(&self, event: AudioLevelEvent) -> Result<()> {
-        let object_server = self.connection.object_server();
-        let iface_ref = object_server
-            .interface::<_, SuperSTTDBusService>("/com/github/jorge_menjivar/SuperSTT")
-            .await?;
-
-        SuperSTTDBusService::audio_level(iface_ref.signal_emitter(), event).await?;
-        Ok(())
-    }
+    emit_signal!(
+        /// Emit a signal for real-time audio level updates.
+        emit_audio_level => audio_level(AudioLevelEvent)
+    );
 
     pub fn connection(&self) -> &Connection {
         &self.connection

@@ -372,7 +372,7 @@ impl DaemonAudioRecorder {
             optimal_config.max_sample_rate()
         };
 
-        optimal_config.with_sample_rate(target_rate).pipe(Ok)
+        Ok(optimal_config.with_sample_rate(target_rate))
     }
 
     /// Play start recording sound using current theme and wait for it to
@@ -516,19 +516,5 @@ impl DaemonAudioRecorder {
     #[must_use]
     pub fn get_audio_buffer_ref(&self) -> Arc<Mutex<VecDeque<f32>>> {
         Arc::clone(&self.audio_buffer)
-    }
-}
-trait PipeExt<T> {
-    fn pipe<F, U>(self, f: F) -> U
-    where
-        F: FnOnce(T) -> U;
-}
-
-impl<T> PipeExt<T> for T {
-    fn pipe<F, U>(self, f: F) -> U
-    where
-        F: FnOnce(T) -> U,
-    {
-        f(self)
     }
 }
