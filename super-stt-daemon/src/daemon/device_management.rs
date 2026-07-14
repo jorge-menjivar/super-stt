@@ -213,12 +213,11 @@ impl SuperSTTDaemon {
                 "timestamp": Utc::now().to_rfc3339(),
             }));
 
-        // Unload current model (free memory)
-        {
-            let mut model_guard = self.model.write().await;
-            *model_guard = None;
-            info!("Current model unloaded for device switch");
-        }
+        // Unload current model (free memory). Route through the shared graceful
+        // path so the backend is `shutdown()` outside the write lock rather than
+        // dropped under it — a subprocess `Drop` can block for seconds freeing
+        // GPU memory, which would stall every reader (Tier 3 #2).
+        self.unload_current_model().await;
     }
 
     /// Handle successful device switch
@@ -231,8 +230,6 @@ impl SuperSTTDaemon {
         source: &str,
         previous_device: &str,
     ) -> DaemonResponse {
-        let actual_device = crate::daemon::types::normalize_device(&model_instance.device());
-
         // Store the reloaded model. The backend serving it can be uninstalled
         // concurrently with the switch, so `resolve_definition` may now return
         // `None` — fail the request gracefully (leaving the daemon idle) rather
@@ -250,19 +247,13 @@ impl SuperSTTDaemon {
                  uninstalled during the device switch)"
             ));
         };
-        *self.model.write().await = Some(crate::daemon::types::LoadedModel {
-            definition,
-            instance: model_instance,
-        });
+        let actual_device = self.finalize_loaded_model(definition, model_instance).await;
 
-        // Update both preferred and actual device after successful reload
+        // Update the preferred device after successful reload (the actual
+        // device was already recorded by `finalize_loaded_model`).
         {
             let mut w = self.preferred_device.write().await;
             *w = device.to_string();
-        }
-        {
-            let mut w = self.actual_device.write().await;
-            w.clone_from(&actual_device);
         }
 
         // Update the config with new device preference and save to disk
@@ -340,10 +331,6 @@ impl SuperSTTDaemon {
             .await
         {
             Ok(model_instance) => {
-                // Update both preferred and actual device after successful recovery
-                let recovery_actual_device =
-                    crate::daemon::types::normalize_device(&model_instance.device());
-
                 let Some(definition) = self
                     .resolve_definition(model_to_reload, provider, source)
                     .await
@@ -357,17 +344,12 @@ impl SuperSTTDaemon {
                          model {model_to_reload} is no longer available."
                     ));
                 };
-                *self.model.write().await = Some(crate::daemon::types::LoadedModel {
-                    definition,
-                    instance: model_instance,
-                });
+                // Install the recovered model and record its actual device.
+                let recovery_actual_device =
+                    self.finalize_loaded_model(definition, model_instance).await;
                 {
                     let mut w = self.preferred_device.write().await;
                     *w = previous_device.to_string();
-                }
-                {
-                    let mut w = self.actual_device.write().await;
-                    w.clone_from(&recovery_actual_device);
                 }
 
                 // Update the config to revert to previous device

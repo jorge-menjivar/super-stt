@@ -124,7 +124,10 @@ impl SuperSTTDaemon {
             }));
     }
 
-    pub(super) async fn unload_current_model(&self) {
+    // `pub(in crate::daemon)` so the device-switch paths (a sibling module)
+    // route their unload through this graceful path instead of dropping the
+    // model under the write lock (Tier 3 #2).
+    pub(in crate::daemon) async fn unload_current_model(&self) {
         // Take the loaded model OUT of the lock first, then release the lock
         // before calling `shutdown()` — `shutdown()` may take several seconds
         // (e.g. SIGTERM to a CUDA-loaded subprocess that has to free GPU
@@ -142,6 +145,26 @@ impl SuperSTTDaemon {
             drop(loaded);
             info!("Current model unloaded");
         }
+    }
+
+    /// Install a freshly-loaded model as the active one: record its normalized
+    /// device label and write the `LoadedModel` into the slot, returning that
+    /// label. The caller must have already emptied the slot gracefully via
+    /// [`unload_current_model`], so this assignment drops nothing under the
+    /// write lock. Shared by the model-switch and device-switch finalize paths
+    /// (Tier 3 #2).
+    pub(in crate::daemon) async fn finalize_loaded_model(
+        &self,
+        definition: super_stt_shared::models::registry::ModelDefinition,
+        instance: Box<dyn Transcribe>,
+    ) -> String {
+        let actual_device = normalize_device(&instance.device());
+        *self.actual_device.write().await = actual_device.clone();
+        *self.model.write().await = Some(crate::daemon::types::LoadedModel {
+            definition,
+            instance,
+        });
+        actual_device
     }
 
     /// Unconditional unload used by the daemon's shutdown path. Bypasses the

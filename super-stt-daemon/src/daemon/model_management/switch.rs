@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::daemon::types::{LoadedModel, SuperSTTDaemon, normalize_device};
+use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::backends;
 use crate::stt_models::transcribe::Transcribe;
 use chrono::Utc;
@@ -258,12 +258,7 @@ impl SuperSTTDaemon {
         definition: ModelDefinition,
         instance: Box<dyn Transcribe>,
     ) -> DaemonResponse {
-        let actual_device = normalize_device(&instance.device());
-        *self.actual_device.write().await = actual_device.clone();
-        *self.model.write().await = Some(LoadedModel {
-            definition,
-            instance,
-        });
+        let actual_device = self.finalize_loaded_model(definition, instance).await;
         {
             let mut config_guard = self.config.write().await;
             config_guard.update_preferred_model(model.clone(), provider.clone(), source.clone());

@@ -754,12 +754,21 @@ Tier 2 #4/#6/#8.
   different, not duplication — so a `V1Transport` trait bought nothing over the two
   free functions. Added unit tests for the shared build/parse.
 
-### [ ] 2. 🟠 Daemon: device-switch success/recovery duplicate ~120 lines and bypass graceful unload
+### [x] 2. 🟠 Daemon: device-switch success/recovery duplicate ~120 lines and bypass graceful unload
 
 - **Where:** `device_management.rs:236-321,361-421` vs `switch.rs:229-257`.
 - **Problem:** both bypass `unload_current_model()`'s graceful shutdown, dropping
   the model under the write lock.
 - **Fix:** one `finalize_loaded_model()`; route unload through the real path.
+- **Resolved (branch `refactor/audit-tier3-1-4`):** added
+  `finalize_loaded_model()` (normalize device → record actual device → install the
+  `LoadedModel`, returning the device label); the model-switch finalize and both
+  device-switch finalize sites (success + recovery) now call it instead of
+  re-implementing the normalize/model-set/actual-device triple. `prepare_device_switch`
+  no longer drops the model under the write lock — it routes through
+  `unload_current_model()`, so the backend is `shutdown()` outside the lock like every
+  other unload path. `unload_current_model`/`finalize_loaded_model` are
+  `pub(in crate::daemon)` so the sibling device-switch module can reach them.
 
 ### [x] 3. 🟠 Daemon: config persistence has three idioms
 
