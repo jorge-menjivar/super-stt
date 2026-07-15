@@ -95,7 +95,7 @@ impl AppModel {
                     return None;
                 }
                 let mut tasks = vec![self.load_primary_language()];
-                if let Some((source, model)) = self.model_language_for.clone() {
+                if let Some((source, model)) = self.language.model_language_for.clone() {
                     tasks.push(self.load_model_language(source, model));
                 }
                 Some(Task::batch(tasks))

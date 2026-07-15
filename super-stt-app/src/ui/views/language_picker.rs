@@ -9,28 +9,27 @@ use crate::ui::messages::{LanguageMessage, Message};
 
 pub fn sheet(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
-    let q = app.language_picker_query.to_lowercase();
+    let q = app.language.language_picker_query.to_lowercase();
 
     // Build the candidate (tag, label) list for the active mode. Special
     // entries stay pinned at the top; the language entries are sorted
     // alphabetically by display name.
     let mut pinned: Vec<(Option<String>, String)> = Vec::new();
     let mut langs: Vec<(Option<String>, String)> = Vec::new();
-    if let Some((ref src, ref mdl)) = app.language_picker_target {
+    if let Some((ref src, ref mdl)) = app.language.language_picker_target {
         // Per-model sheet.
         pinned.push((None, "Follow global".to_string())); // clear → DELETE
         pinned.push((Some("auto".to_string()), friendly_name("auto"))); // "Auto-detect"
         // Supported languages from the resolution block — but only when the
         // block belongs to this exact (source, model) pair (stale-block guard).
-        if app.model_language_for.as_ref() == Some(&(src.clone(), mdl.clone()))
-            && let Some(block) = &app.model_language
-            && let Some(arr) = block.get("supported").and_then(|v| v.as_array())
+        if app.language.model_language_for.as_ref() == Some(&(src.clone(), mdl.clone()))
+            && let Some(block) = &app.language.model_language
         {
-            for tag in arr.iter().filter_map(|v| v.as_str()) {
+            for tag in &block.supported {
                 if tag.eq_ignore_ascii_case("auto") {
                     continue; // already pinned as "Auto-detect"
                 }
-                langs.push((Some(tag.to_string()), friendly_name(tag)));
+                langs.push((Some(tag.clone()), friendly_name(tag)));
             }
         }
     } else {
@@ -57,13 +56,13 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
         .collect();
 
     // Search field pinned at the top.
-    let search = text_input("Search languages…", &app.language_picker_query)
+    let search = text_input("Search languages…", &app.language.language_picker_query)
         .on_input(|s| Message::Language(LanguageMessage::LanguagePickerQueryChanged(s)))
         .width(Length::Fill);
 
     let mut list = column::with_capacity(rows.len()).spacing(spacing.space_xxs);
     for (tag, label) in rows {
-        let msg = if let Some((ref src, ref mdl)) = app.language_picker_target {
+        let msg = if let Some((ref src, ref mdl)) = app.language.language_picker_target {
             Message::Language(LanguageMessage::ModelLanguageSelected {
                 source: src.clone(),
                 model: mdl.clone(),

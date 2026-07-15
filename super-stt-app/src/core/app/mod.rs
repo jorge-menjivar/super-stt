@@ -15,7 +15,7 @@ use crate::ui::messages::{DaemonMessage, Message, ModelsPageMessage, ShellMessag
 use cosmic::app::context_drawer;
 use cosmic::iced::Subscription;
 use cosmic::prelude::*;
-use cosmic::widget::{menu, nav_bar, segmented_button};
+use cosmic::widget::{menu, nav_bar};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use super_stt_shared::models::provider::Provider;
@@ -141,42 +141,11 @@ pub struct AppModel {
     pub custom_models_dir: Option<String>,
     pub custom_models_dir_input: String,
 
-    // Models page UI state
-    /// Installed / Download tab bar for the Models page (active tab carries a
-    /// [`ModelsTab`] as its data).
-    pub models_tabs: segmented_button::SingleSelectModel,
-    /// Source of the currently-selected (active) backend, shown in the card
-    /// above the tabs. `None` when the daemon is idle.
-    pub active_backend: Option<String>,
-    /// Model the user has picked in the active-backend card's dropdown but
-    /// hasn't yet committed via the Load button. Cleared once a model is
-    /// loaded or the user changes backends.
-    pub staged_model: Option<String>,
-    /// Device the user has picked for the staged model (CPU / CUDA / Metal,
-    /// or `"none"` for an online model that needs no device choice). Cleared
-    /// alongside [`Self::staged_model`].
-    pub staged_device: Option<String>,
-    /// The backend whose configuration sub-view is open, if any (`source`).
-    pub configure_backend: Option<String>,
+    // Models page UI state (tabs, active-backend card selection/staging, menus).
+    pub models_page: crate::state::models_page::ModelsPageState,
 
-    // Transcription language state.
-    /// Global Primary Language from the daemon (None = unset). Display-only cache.
-    pub primary_language: Option<String>,
-    /// Resolution block from `GET /backends/{source}/models/{model}/language`
-    /// for the model identified by `model_language_for`.
-    pub model_language: Option<serde_json::Value>,
-    /// Which `(source, model)` pair `model_language` belongs to. Guards
-    /// stale-block display: only use `model_language` when this matches
-    /// the target `(source, model)`.
-    pub model_language_for: Option<(String, String)>,
-    /// The `(source, model)` pair the open per-model language sheet configures.
-    /// `None` when the sheet is in global mode.
-    pub language_picker_target: Option<(String, String)>,
-    /// Live query text for the language search sheet.
-    pub language_picker_query: String,
-    /// `source` of the installed-backend card whose overflow ("⋯") menu is
-    /// open, if any. Only one is open at a time.
-    pub installed_menu_open: Option<String>,
+    // Transcription language state (global Primary Language + per-model picker).
+    pub language: crate::state::language::LanguageState,
 
     // Installed-backend catalog and per-backend configuration state.
     /// Backends discovered by the daemon, with the models/secrets/options
@@ -351,7 +320,7 @@ impl cosmic::Application for AppModel {
         // (e.g. the Models page's "Add backend" / configuration drawer) and
         // any open per-card overflow menu.
         self.core.window.show_context = false;
-        self.installed_menu_open = None;
+        self.models_page.installed_menu_open = None;
 
         self.update_title()
     }

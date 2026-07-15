@@ -2,11 +2,13 @@
 
 //! Application state and domain models.
 
+pub mod language;
 pub mod models;
+pub mod models_page;
 pub mod registry;
 
 // Re-export commonly used types
 pub use models::{
-    ActionError, AudioTheme, ContextPage, DaemonStatus, ErrorScope, MenuAction, ModelsTab, Page,
-    RecordingStatus,
+    ActionError, AudioTheme, ContextPage, DaemonStatus, ErrorScope, LanguageResolution, MenuAction,
+    ModelsTab, Page, RecordingStatus,
 };

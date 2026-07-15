@@ -228,7 +228,7 @@ pub(super) enum ModelStatus {
 /// that drives the in-card warning rows is also what flips the dot's color.
 pub(super) fn model_status(app: &AppModel) -> ModelStatus {
     classify_model_status(
-        app.active_backend.as_deref(),
+        app.models_page.active_backend.as_deref(),
         &app.backends,
         &app.backend_secret_configured,
         &app.current_model,

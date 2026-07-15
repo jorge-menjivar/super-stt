@@ -21,23 +21,7 @@ use super::surface::muted_text_color;
 /// [`load_backend_sheet`]. Fills the page so it sits centered.
 pub(super) fn no_backend_empty_state<'a>() -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
-    let accent: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
-    let mut fill = accent;
-    fill.a = 0.16;
-
-    let ring = widget::container(icons::phosphor_tinted(icons::BRAIN, 34.0, accent))
-        .center_x(Length::Fixed(72.0))
-        .center_y(Length::Fixed(72.0))
-        .class(cosmic::theme::Container::custom(move |theme| {
-            cosmic::iced_widget::container::Style {
-                background: Some(cosmic::iced::Background::Color(fill)),
-                border: cosmic::iced::Border {
-                    radius: theme.cosmic().corner_radii.radius_m.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        }));
+    let ring = super::active::glyph_tile(72.0, 34.0, true);
 
     let col = widget::column::with_capacity(4)
         .align_x(Alignment::Center)
@@ -70,7 +54,7 @@ pub(super) fn no_backend_empty_state<'a>() -> Element<'a, Message> {
 pub fn load_backend_sheet(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let muted = muted_text_color();
-    let active = app.active_backend.as_deref();
+    let active = app.models_page.active_backend.as_deref();
 
     let mut col = widget::column::with_capacity(app.backends.len() + 1)
         .spacing(spacing.space_xs)
@@ -142,19 +126,12 @@ fn load_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, 
         .class(cosmic::theme::Container::custom(move |theme| {
             let cosmic = theme.cosmic();
             let component = &theme.current_container().component;
-            let border_color = if is_active {
-                let mut a: cosmic::iced::Color = cosmic.accent.base.into();
-                a.a = 0.55;
-                a
-            } else {
-                component.divider.into()
-            };
             cosmic::iced_widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(component.base.into())),
                 border: cosmic::iced::Border {
                     radius: cosmic.corner_radii.radius_s.into(),
                     width: 1.0,
-                    color: border_color,
+                    color: super::surface::accent_border_color(theme, is_active),
                 },
                 ..Default::default()
             }

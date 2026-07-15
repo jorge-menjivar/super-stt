@@ -80,6 +80,36 @@ pub(super) fn toolbar_container<'a>(
         .into()
 }
 
+/// The border color a selectable panel takes: a translucent accent when
+/// active, else the neutral divider. Shared by the active-backend card and the
+/// load-sheet backend rows so "selected" reads the same everywhere.
+pub(super) fn accent_border_color(theme: &cosmic::Theme, active: bool) -> cosmic::iced::Color {
+    if active {
+        let mut a: cosmic::iced::Color = theme.cosmic().accent.base.into();
+        a.a = 0.55;
+        a
+    } else {
+        theme.current_container().component.divider.into()
+    }
+}
+
+/// The shared "pill" container style: list-container fill, a hairline divider
+/// border, and an extra-large corner radius (no shadow). Used by the header
+/// pills and the segmented-control track.
+pub(super) fn pill_surface(theme: &cosmic::Theme) -> cosmic::iced_widget::container::Style {
+    let cosmic = theme.cosmic();
+    let component = &theme.current_container().component;
+    cosmic::iced_widget::container::Style {
+        background: Some(cosmic::iced::Background::Color(component.base.into())),
+        border: cosmic::iced::Border {
+            radius: cosmic.corner_radii.radius_xl.into(),
+            width: 1.0,
+            color: component.divider.into(),
+        },
+        ..Default::default()
+    }
+}
+
 /// Wrap a card's content column in the shared card surface: a panel matching
 /// the list-container fill, lifted with a soft border, rounded corners, and a
 /// subtle shadow. The active backend's card takes an accent border to set it
@@ -94,13 +124,7 @@ pub(super) fn card_surface<'a>(
         .class(cosmic::theme::Container::custom(move |theme| {
             let cosmic = theme.cosmic();
             let component = &theme.current_container().component;
-            let border_color = if active {
-                let mut a: cosmic::iced::Color = cosmic.accent.base.into();
-                a.a = 0.55;
-                a
-            } else {
-                component.divider.into()
-            };
+            let border_color = accent_border_color(theme, active);
             cosmic::iced_widget::container::Style {
                 icon_color: Some(component.on.into()),
                 text_color: Some(component.on.into()),

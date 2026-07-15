@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::AppModel;
-use crate::daemon::client::list_backends;
 use crate::ui::messages::{BackendMessage, Message, ModelsPageMessage};
 use cosmic::prelude::*;
 
@@ -177,14 +176,7 @@ impl AppModel {
                 self.registry.install_errors.remove(&source);
                 // Refresh the installed-backends list so the new install
                 // shows up in the Installed tab.
-                Task::perform(list_backends(), |result| match result {
-                    Ok(backends) => cosmic::Action::App(Message::Backend(
-                        BackendMessage::BackendsLoaded(backends),
-                    )),
-                    Err(e) => cosmic::Action::App(Message::Backend(BackendMessage::BackendsError(
-                        e.to_string(),
-                    ))),
-                })
+                crate::core::app::handlers::tasks::reload_backends()
             }
 
             ModelsPageMessage::InstallFailed {

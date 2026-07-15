@@ -21,30 +21,41 @@ use super::fmt::vram_warning;
 use super::status::unmet_requirements;
 use super::surface::{card_divider, card_surface};
 
-/// The leading glyph tile shared by every backend card: a soft accent-tinted
-/// rounded square holding the "models" brain glyph. Gives each card a
-/// consistent anchor on the left that lines up with the two-line name/source
-/// block beside it.
-pub(super) fn backend_glyph_tile<'a>() -> Element<'a, Message> {
+/// A soft accent-tinted rounded square holding the "models" brain glyph.
+/// `tile` is the square's side, `glyph` the icon size; `radius_medium` picks the
+/// larger corner radius for the big empty-state ring vs. the small card tile.
+pub(super) fn glyph_tile<'a>(tile: f32, glyph: f32, radius_medium: bool) -> Element<'a, Message> {
     let accent: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
     let mut fill = accent;
     fill.a = 0.16;
-    let size = 40.0_f32;
 
-    widget::container(icons::phosphor_tinted(icons::BRAIN, 22.0, accent))
-        .center_x(Length::Fixed(size))
-        .center_y(Length::Fixed(size))
+    widget::container(icons::phosphor_tinted(icons::BRAIN, glyph, accent))
+        .center_x(Length::Fixed(tile))
+        .center_y(Length::Fixed(tile))
         .class(cosmic::theme::Container::custom(move |theme| {
+            let radii = theme.cosmic().corner_radii;
             cosmic::iced_widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(fill)),
                 border: cosmic::iced::Border {
-                    radius: theme.cosmic().corner_radii.radius_s.into(),
+                    radius: if radius_medium {
+                        radii.radius_m
+                    } else {
+                        radii.radius_s
+                    }
+                    .into(),
                     ..Default::default()
                 },
                 ..Default::default()
             }
         }))
         .into()
+}
+
+/// The leading glyph tile shared by every backend card: gives each card a
+/// consistent anchor on the left that lines up with the two-line name/source
+/// block beside it.
+pub(super) fn backend_glyph_tile<'a>() -> Element<'a, Message> {
+    glyph_tile(40.0, 22.0, false)
 }
 
 /// Assemble a backend card's header: the leading glyph tile, a two-line name +
@@ -82,7 +93,7 @@ pub(super) fn backend_header(
 /// `None` for a mono-lingual model so the caller can skip the push entirely.
 ///
 /// The button label reflects the current per-model resolution block when
-/// `app.model_language_for` matches `(backend.source, selected_model)`;
+/// `app.language.model_language_for` matches `(backend.source, selected_model)`;
 /// otherwise it falls back to a neutral `"Language"` label (block not yet
 /// fetched — stale-block guard). It opens the language picker for this model.
 fn language_button<'a>(
@@ -100,31 +111,31 @@ fn language_button<'a>(
 
     // Build the trigger label from the resolution block — but only when the
     // block belongs to this exact (source, model) pair (stale-block guard).
-    let label =
-        if app.model_language_for.as_ref() == Some(&(source.clone(), selected_model.to_string())) {
-            if let Some(block) = &app.model_language {
-                let effective = block.get("effective").and_then(serde_json::Value::as_str);
-                let source_str = block
-                    .get("source")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("default");
-                let primary = block
-                    .get("primary")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("");
-                match (effective, source_str) {
-                    (Some(tag), "override") => crate::ui::languages::friendly_name(tag),
-                    (Some(tag), "global") => {
-                        format!("{} · global", crate::ui::languages::friendly_name(tag))
-                    }
-                    _ => format!("{} · default", crate::ui::languages::friendly_name(primary)),
-                }
+    let label = if app.language.model_language_for.as_ref()
+        == Some(&(source.clone(), selected_model.to_string()))
+    {
+        if let Some(block) = &app.language.model_language {
+            let source_str = if block.source.is_empty() {
+                "default"
             } else {
-                "Language".to_string()
+                block.source.as_str()
+            };
+            match (block.effective.as_deref(), source_str) {
+                (Some(tag), "override") => crate::ui::languages::friendly_name(tag),
+                (Some(tag), "global") => {
+                    format!("{} · global", crate::ui::languages::friendly_name(tag))
+                }
+                _ => format!(
+                    "{} · default",
+                    crate::ui::languages::friendly_name(&block.primary)
+                ),
             }
         } else {
             "Language".to_string()
-        };
+        }
+    } else {
+        "Language".to_string()
+    };
 
     Some(
         widget::button::standard(label)
@@ -300,14 +311,14 @@ pub(super) fn vram_shortfall(
 /// model's VRAM estimate vs. the primary GPU's free memory (falling back to
 /// its total when the daemon didn't report free).
 pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Option<(u64, u64)> {
-    let model_name = app.staged_model.as_deref()?;
+    let model_name = app.models_page.staged_model.as_deref()?;
     let model = backend.models.iter().find(|m| m.name == model_name)?;
     let gpu_available = app
         .gpu_info
         .first()
         .map(|g| g.free_bytes.unwrap_or(g.total_bytes));
     vram_shortfall(
-        app.staged_device.as_deref(),
+        app.models_page.staged_device.as_deref(),
         model.estimated_vram_bytes,
         gpu_available,
     )
@@ -325,9 +336,9 @@ pub(super) fn staged_model_picker<'a>(
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
-    // Model dropdown — staged picks live in `app.staged_model`, not loaded.
+    // Model dropdown — staged picks live in `app.models_page.staged_model`, not loaded.
     let model_names: Vec<String> = backend.models.iter().map(|m| m.name.clone()).collect();
-    let staged_model = app.staged_model.as_deref();
+    let staged_model = app.models_page.staged_model.as_deref();
     let model_index = staged_model.and_then(|m| model_names.iter().position(|n| n == m));
     let model_names_pick = model_names.clone();
     // Model select takes twice the width of the device select (2:1 flex ratio).
@@ -355,6 +366,7 @@ pub(super) fn staged_model_picker<'a>(
     if show_device_picker {
         let devices: Vec<String> = staged_model_supports.unwrap_or(&[]).to_vec();
         let device_index = app
+            .models_page
             .staged_device
             .as_deref()
             .and_then(|d| devices.iter().position(|x| x == d));
@@ -380,8 +392,8 @@ pub(super) fn staged_model_picker<'a>(
     // Load button — enabled only when a model is staged AND (the staged
     // device is set OR the model is the online-only `"none"` one, where
     // there is no device to pick).
-    let staged_ok = app.staged_model.is_some()
-        && (app.staged_device.is_some()
+    let staged_ok = app.models_page.staged_model.is_some()
+        && (app.models_page.staged_device.is_some()
             || staged_model_supports.is_some_and(|d| d == ["none".to_string()]));
     let load_button = button::suggested("Load model")
         .leading_icon(icons::phosphor_handle(icons::PLAY))

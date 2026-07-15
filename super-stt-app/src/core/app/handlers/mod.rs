@@ -9,3 +9,4 @@ mod models_page;
 mod recording;
 mod settings;
 mod shell;
+pub(in crate::core::app) mod tasks;

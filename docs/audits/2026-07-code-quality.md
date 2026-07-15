@@ -978,26 +978,43 @@ Tier 2 #4/#6/#8.
 - **Resolved (PR #274):** the triple now lives in one `clear_loaded_model()` helper
   in `small_state.rs`; the call sites delegate to it.
 
-### [ ] 13. 🟡 App: shared task builders
+### [x] 13. 🟡 App: shared task builders
 
 - **Where:** registry catalog fetch, `list_backends` reload, and ping are re-rolled
   at 3–4 sites each.
 - **Fix:** `fetch_registry_catalog()`, `reload_backends()`, `ping_task()` beside
   the existing `build_load_settings_tasks()`.
+- **Resolved (branch `refactor/audit-tier3-13-17`):** moved `build_load_settings_tasks`
+  into a new `handlers/tasks.rs` and added `ping_task()`, `reload_backends()`, and
+  `fetch_registry_catalog(refresh: bool)` beside it. The 3 ping sites (+ startup), 3
+  `list_backends` reloads, and 3 registry-catalog fetches now call the shared builders
+  (the one `refresh`-then-`list` site passes `refresh: true`).
 
-### [ ] 14. 🟡 App: type the language payload
+### [x] 14. 🟡 App: type the language payload
 
 - **Where:** `model_language: Option<serde_json::Value>` parsed field-by-field in
   two views (`core/app/mod.rs:162-168`, `ui/views/models/active.rs:100-125`,
   `ui/views/language_picker.rs:25-35`).
 - **Fix:** deserialize a `LanguageResolution` struct at the client boundary.
+- **Resolved (branch `refactor/audit-tier3-13-17`):** added a `LanguageResolution`
+  struct (`state`) deserialized in the `get_/set_/clear_model_language` client fns; the
+  field, the `ModelLanguageLoaded` payload, and the two views now use typed
+  `effective`/`source`/`primary`/`supported` fields instead of `.get("...")` on a
+  `serde_json::Value`.
 
-### [ ] 15. 🟡 App: split `AppModel` (~45 fields)
+### [x] 15. 🟡 App: split `AppModel` (~45 fields)
 
 - **Fix:** extract `ModelsPageState` and `LanguageState` following the existing
   `RegistryState` template.
+- **Resolved (branch `refactor/audit-tier3-13-17`):** extracted `state::language::LanguageState`
+  (5 fields) and `state::models_page::ModelsPageState` (6 fields: the tab bar +
+  active-backend selection/staging/menu flags) as `RegistryState`-style sub-structs
+  embedded as `AppModel.language` / `AppModel.models_page`; `ModelsPageState::default`
+  builds the Installed/Browse tabs. All `self.<field>` / `app.<field>` accesses moved to
+  `self.language.<field>` / `self.models_page.<field>`. Model/device/backend-catalog
+  state stayed on `AppModel` (touched by `small_state.rs` / the global header).
 
-### [ ] 16. 🟡 App: style helpers duplicated across models views
+### [x] 16. 🟡 App: style helpers duplicated across models views
 
 - **Where:** accent-border card closure, glyph tile, and panel style each
   duplicated 2–3× (`surface.rs:94-126` vs `load_sheet.rs:138-157`;
@@ -1005,8 +1022,18 @@ Tier 2 #4/#6/#8.
   `installed.rs:176-203`, `chips.rs:297-311`); older pages still use emoji status
   glyphs vs the newer icon vocabulary (`connection.rs:13-18`,
   `recording.rs:54-63`).
+- **Resolved (branch `refactor/audit-tier3-13-17`):** hoisted `accent_border_color(active)`
+  and `pill_surface()` into `models/surface.rs` (used by the card + load-sheet row, and
+  the header pill + chips track respectively), and parameterized the glyph tile as
+  `glyph_tile(tile, glyph, radius_medium)` reused by `backend_glyph_tile` and the
+  empty-state ring. **Deferred:** the emoji→icon status-glyph migration
+  (`connection.rs`/`recording.rs`) — a visual redesign that needs new SVG assets, not a
+  dedup; and the full `card_surface`/overflow-menu unification (would shift radii/shadows).
 
-### [ ] 17. 🟡 App: `ui/views/models/download.rs:282` shows `{err:?}` Debug output to users
+### [x] 17. 🟡 App: `ui/views/models/download.rs:282` shows `{err:?}` Debug output to users
+
+- **Resolved (branch `refactor/audit-tier3-13-17`):** gave `InstallError` (shared) a
+  `Display` impl with human-readable phrasing; the Browse card now shows `Failed: {err}`.
 
 ### [ ] 18. 🟡 Applet: merge the bar renderers
 

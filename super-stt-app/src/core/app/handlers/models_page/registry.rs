@@ -11,24 +11,9 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         match message {
             ModelsPageMessage::RefreshRegistry => {
-                // Always fetch the full annotated catalog; filtering is
-                // client-side so the toggles never need a round-trip.
-                let filters = crate::daemon::registry::ListFilters {
-                    include_incompatible: Some(true),
-                    ..Default::default()
-                };
-                Task::perform(
-                    async move {
-                        let _ = crate::daemon::registry::refresh().await;
-                        crate::daemon::registry::list(&filters).await
-                    },
-                    |r| {
-                        cosmic::Action::App(Message::ModelsPage(match r {
-                            Ok(resp) => ModelsPageMessage::RegistryListLoaded(resp),
-                            Err(e) => ModelsPageMessage::RegistryListFailed(e.to_string()),
-                        }))
-                    },
-                )
+                // Refresh the index, then fetch the full annotated catalog;
+                // filtering is client-side so the toggles never need a round-trip.
+                crate::core::app::handlers::tasks::fetch_registry_catalog(true)
             }
 
             ModelsPageMessage::RegistryListLoaded(resp) => {

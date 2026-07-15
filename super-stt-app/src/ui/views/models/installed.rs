@@ -64,7 +64,7 @@ pub(super) fn installed_card<'a>(
 
     // Overflow ("⋯") menu: the optional Update, then Uninstall. Configure left
     // the menu to become a visible button beside it.
-    let menu_open = app.installed_menu_open.as_deref() == Some(source.as_str());
+    let menu_open = app.models_page.installed_menu_open.as_deref() == Some(source.as_str());
     let trigger = button::icon(icons::phosphor_handle(icons::DOTS_THREE_VERTICAL)).on_press(
         Message::ModelsPage(ModelsPageMessage::ToggleInstalledMenu(source.clone())),
     );

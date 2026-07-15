@@ -11,16 +11,17 @@ use crate::ui::messages::{Message, ModelsPageMessage};
 /// Replaces the native `tab_bar`'s raised-button look, which read as separate
 /// buttons.
 ///
-/// Still driven by `app.models_tabs`, so clicking a tab emits the same
+/// Still driven by `app.models_page.models_tabs`, so clicking a tab emits the same
 /// [`ModelsPageMessage::ModelsTabActivated`] the segmented-button model expects.
 pub(super) fn models_tab_switcher(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
-    let active = app.models_tabs.active();
+    let active = app.models_page.models_tabs.active();
 
     let mut row = widget::row::with_capacity(2).spacing(spacing.space_xxs);
-    for entity in app.models_tabs.iter().collect::<Vec<_>>() {
+    for entity in app.models_page.models_tabs.iter().collect::<Vec<_>>() {
         let is_active = entity == active;
         let label = app
+            .models_page
             .models_tabs
             .text(entity)
             .map(ToOwned::to_owned)

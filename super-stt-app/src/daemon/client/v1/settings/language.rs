@@ -58,7 +58,10 @@ pub async fn clear_primary_language() -> HttpResult<()> {
 /// Returns the full resolution `Value` (object with `effective`, `source`,
 /// `multilingual`, `supported`, `primary`, `override`), or `Value::Null`
 /// when the model is not found.
-pub async fn get_model_language(source: String, model: String) -> HttpResult<serde_json::Value> {
+pub async fn get_model_language(
+    source: String,
+    model: String,
+) -> HttpResult<crate::state::LanguageResolution> {
     with_settings_token(move |socket, token| {
         let (source, model) = (source.clone(), model.clone());
         async move {
@@ -67,7 +70,13 @@ pub async fn get_model_language(source: String, model: String) -> HttpResult<ser
                 transport::settings_get(socket, &token, &path).await?,
                 "get_model_language",
             )?;
-            Ok(resp.language.unwrap_or(serde_json::Value::Null))
+            // Deserialize the block into a typed resolution here at the boundary;
+            // an absent or malformed block yields the empty default rather than
+            // being poked field-by-field in the views.
+            Ok(resp
+                .language
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default())
         }
     })
     .await
@@ -80,7 +89,7 @@ pub async fn set_model_language(
     source: String,
     model: String,
     language: String,
-) -> HttpResult<serde_json::Value> {
+) -> HttpResult<crate::state::LanguageResolution> {
     with_settings_token(move |socket, token| {
         let (source, model, language) = (source.clone(), model.clone(), language.clone());
         async move {
@@ -95,7 +104,10 @@ pub async fn set_model_language(
                 .await?,
                 "set_model_language",
             )?;
-            Ok(resp.language.unwrap_or(serde_json::Value::Null))
+            Ok(resp
+                .language
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default())
         }
     })
     .await
@@ -104,7 +116,10 @@ pub async fn set_model_language(
 /// Clear a specific model's language override
 /// (HTTP `DELETE /backends/{source}/models/{model}/language`).
 /// Returns the updated resolution block.
-pub async fn clear_model_language(source: String, model: String) -> HttpResult<serde_json::Value> {
+pub async fn clear_model_language(
+    source: String,
+    model: String,
+) -> HttpResult<crate::state::LanguageResolution> {
     with_settings_token(move |socket, token| {
         let (source, model) = (source.clone(), model.clone());
         async move {
@@ -113,7 +128,10 @@ pub async fn clear_model_language(source: String, model: String) -> HttpResult<s
                 transport::settings_delete(socket, &token, &path).await?,
                 "clear_model_language",
             )?;
-            Ok(resp.language.unwrap_or(serde_json::Value::Null))
+            Ok(resp
+                .language
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default())
         }
     })
     .await

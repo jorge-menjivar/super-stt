@@ -63,3 +63,18 @@ pub enum InstallError {
     /// with the index entry.
     ManifestInvalid,
 }
+
+impl std::fmt::Display for InstallError {
+    /// Human-readable phrasing for the install-failure reason, so clients can
+    /// surface it directly instead of printing the `Debug` variant name.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Incompatible => "no compatible asset for this system",
+            Self::DownloadFailed => "download failed",
+            Self::AssetHashMismatch => "the downloaded file failed its integrity check",
+            Self::TarballUnsafe => "the archive contained unsafe paths",
+            Self::InstallIoError => "a filesystem error occurred during install",
+            Self::ManifestInvalid => "the backend manifest was missing or invalid",
+        })
+    }
+}

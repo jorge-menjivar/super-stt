@@ -296,19 +296,9 @@ pub(super) fn chip_group(
     // with a small inset so the active chip visually sits within it.
     let track = widget::container(segments)
         .padding(3)
-        .class(cosmic::theme::Container::custom(|theme| {
-            let cosmic = theme.cosmic();
-            let component = &theme.current_container().component;
-            cosmic::iced_widget::container::Style {
-                background: Some(cosmic::iced::Background::Color(component.base.into())),
-                border: cosmic::iced::Border {
-                    radius: cosmic.corner_radii.radius_xl.into(),
-                    width: 1.0,
-                    color: component.divider.into(),
-                },
-                ..Default::default()
-            }
-        }));
+        .class(cosmic::theme::Container::custom(
+            super::surface::pill_surface,
+        ));
 
     row![
         text::caption(label.to_uppercase()).class(cosmic::theme::Text::Color(muted)),

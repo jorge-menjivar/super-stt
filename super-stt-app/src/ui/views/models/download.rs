@@ -287,7 +287,7 @@ pub(super) fn download_card<'a>(
 
     let note: Element<'a, Message> = if let Some(s) = in_flight {
         match (&s.error, s.bytes_total) {
-            (Some(err), _) => text::caption(format!("Failed: {err:?}"))
+            (Some(err), _) => text::caption(format!("Failed: {err}"))
                 .class(cosmic::theme::Text::Color(muted))
                 .into(),
             (None, Some(total)) if total > 0 => {

@@ -73,10 +73,11 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         match message {
             ModelsPageMessage::ModelsTabActivated(entity) => {
-                self.models_tabs.activate(entity);
+                self.models_page.models_tabs.activate(entity);
                 // Trigger initial registry fetch when the Download tab is opened
                 // for the first time (backends empty and no prior refresh attempt).
                 let switched_to_download = self
+                    .models_page
                     .models_tabs
                     .data::<ModelsTab>(entity)
                     .is_some_and(|t| *t == ModelsTab::Download);
@@ -84,21 +85,7 @@ impl AppModel {
                     && self.registry.backends.is_empty()
                     && self.registry.last_refresh.is_none()
                 {
-                    // Fetch the full annotated catalog (including incompatible
-                    // entries); all filtering is applied client-side.
-                    let filters = crate::daemon::registry::ListFilters {
-                        include_incompatible: Some(true),
-                        ..Default::default()
-                    };
-                    return Task::perform(
-                        async move { crate::daemon::registry::list(&filters).await },
-                        |r| {
-                            cosmic::Action::App(Message::ModelsPage(match r {
-                                Ok(resp) => ModelsPageMessage::RegistryListLoaded(resp),
-                                Err(e) => ModelsPageMessage::RegistryListFailed(e.to_string()),
-                            }))
-                        },
-                    );
+                    return crate::core::app::handlers::tasks::fetch_registry_catalog(false);
                 }
                 Task::none()
             }
@@ -109,7 +96,7 @@ impl AppModel {
                 // device to the model's first supported entry (so a single-
                 // device model needs no extra click; multi-device models
                 // surface the dropdown).
-                let source = self.active_backend.clone();
+                let source = self.models_page.active_backend.clone();
                 let device = source.as_ref().and_then(|src| {
                     self.backends
                         .iter()
@@ -121,8 +108,8 @@ impl AppModel {
                         .first()
                         .cloned()
                 });
-                self.staged_model = Some(model.clone());
-                self.staged_device = device;
+                self.models_page.staged_model = Some(model.clone());
+                self.models_page.staged_device = device;
                 // Fetch the per-model language block at selection time so the
                 // active-backend card can show the language control before Load.
                 // Wire point 2: model staged (StageActiveModel).
@@ -134,7 +121,7 @@ impl AppModel {
             }
 
             ModelsPageMessage::StageActiveDevice(device) => {
-                self.staged_device = Some(device);
+                self.models_page.staged_device = Some(device);
                 Task::none()
             }
 
@@ -146,8 +133,8 @@ impl AppModel {
                 // state immediately; the daemon's `ready` event with
                 // `model_loaded: false` is the source of truth.
                 self.clear_loaded_model();
-                self.staged_model = None;
-                self.staged_device = None;
+                self.models_page.staged_model = None;
+                self.models_page.staged_device = None;
                 self.model_operation_state = ModelOperationState::Ready;
                 Task::perform(unload_active_model(), |result| match result {
                     Ok(_) => cosmic::Action::None,
@@ -162,11 +149,11 @@ impl AppModel {
     }
 
     fn handle_load_staged_model(&mut self) -> Task<cosmic::Action<Message>> {
-        let Some(source) = self.active_backend.clone() else {
+        let Some(source) = self.models_page.active_backend.clone() else {
             log::warn!("LoadStagedModel ignored — no active backend");
             return Task::none();
         };
-        let Some(model) = self.staged_model.clone() else {
+        let Some(model) = self.models_page.staged_model.clone() else {
             log::warn!("LoadStagedModel ignored — no staged model");
             return Task::none();
         };
@@ -193,7 +180,8 @@ impl AppModel {
         let device_to_set = if online {
             None
         } else {
-            self.staged_device
+            self.models_page
+                .staged_device
                 .clone()
                 .filter(|d| d != "none" && *d != self.current_device)
         };
@@ -243,24 +231,24 @@ impl AppModel {
                 // Open the per-backend configuration as a right-side sheet over
                 // the current list (active card or Installed tab), instead of a
                 // full-page takeover. Also closes the card's overflow menu.
-                self.configure_backend = Some(source);
+                self.models_page.configure_backend = Some(source);
                 self.context_page = ContextPage::ConfigureBackend;
                 self.core.window.show_context = true;
-                self.installed_menu_open = None;
+                self.models_page.installed_menu_open = None;
                 // Start the sheet without a stale save-error banner.
                 self.action_error = None;
                 Task::none()
             }
 
             ModelsPageMessage::CloseBackendConfig => {
-                self.configure_backend = None;
+                self.models_page.configure_backend = None;
                 self.core.window.show_context = false;
                 self.action_error = None;
                 Task::none()
             }
 
             ModelsPageMessage::ActiveBackendLoaded(source) => {
-                self.active_backend = source;
+                self.models_page.active_backend = source;
                 Task::none()
             }
 
@@ -288,10 +276,10 @@ impl AppModel {
                 // Select the backend WITHOUT loading a model — the card moves
                 // to the top fixed header, any model from a different backend
                 // is unloaded. (`set_model` is the way to also load a model.)
-                if self.active_backend.as_deref() == Some(source.as_str()) {
+                if self.models_page.active_backend.as_deref() == Some(source.as_str()) {
                     return Task::none();
                 }
-                self.active_backend = Some(source.clone());
+                self.models_page.active_backend = Some(source.clone());
                 self.clear_loaded_model();
                 self.model_operation_state = ModelOperationState::Ready;
                 // Activation comes from the Models page's "Load a backend" sheet;
@@ -309,10 +297,10 @@ impl AppModel {
                 // Optimistically clear the active backend + loaded model; the
                 // daemon goes idle. (Rejected only mid-recording — an edge case
                 // that self-heals on the next refresh.)
-                self.active_backend = None;
+                self.models_page.active_backend = None;
                 self.clear_loaded_model();
                 self.model_operation_state = ModelOperationState::Ready;
-                self.configure_backend = None;
+                self.models_page.configure_backend = None;
                 // Close the configuration sheet if it was open for this backend.
                 self.core.window.show_context = false;
                 Task::perform(clear_active_backend(), |_| cosmic::Action::None)
@@ -320,16 +308,16 @@ impl AppModel {
 
             ModelsPageMessage::ToggleInstalledMenu(source) => {
                 // Toggle this card's overflow menu; opening one closes any other.
-                if self.installed_menu_open.as_deref() == Some(source.as_str()) {
-                    self.installed_menu_open = None;
+                if self.models_page.installed_menu_open.as_deref() == Some(source.as_str()) {
+                    self.models_page.installed_menu_open = None;
                 } else {
-                    self.installed_menu_open = Some(source);
+                    self.models_page.installed_menu_open = Some(source);
                 }
                 Task::none()
             }
 
             ModelsPageMessage::CloseInstalledMenu => {
-                self.installed_menu_open = None;
+                self.models_page.installed_menu_open = None;
                 Task::none()
             }
 

@@ -45,19 +45,7 @@ pub use load_sheet::load_backend_sheet;
 pub(crate) fn header_pill<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     widget::container(content.into())
         .padding([8, 12])
-        .class(cosmic::theme::Container::custom(|theme| {
-            let cosmic = theme.cosmic();
-            let component = &theme.current_container().component;
-            cosmic::iced_widget::container::Style {
-                background: Some(cosmic::iced::Background::Color(component.base.into())),
-                border: cosmic::iced::Border {
-                    radius: cosmic.corner_radii.radius_xl.into(),
-                    width: 1.0,
-                    color: component.divider.into(),
-                },
-                ..Default::default()
-            }
-        }))
+        .class(cosmic::theme::Container::custom(surface::pill_surface))
         .into()
 }
 
@@ -190,6 +178,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
     // The active backend's card when one is selected (and still installed);
     // otherwise the empty state that opens the "Load a backend" sheet.
     let body = match app
+        .models_page
         .active_backend
         .as_deref()
         .and_then(|source| app.backends.iter().find(|b| b.source == source))
@@ -211,6 +200,7 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
 /// backends (no activation); Browse installs new ones.
 pub fn library_page(app: &AppModel) -> Element<'_, Message> {
     let active_tab = app
+        .models_page
         .models_tabs
         .active_data::<ModelsTab>()
         .copied()

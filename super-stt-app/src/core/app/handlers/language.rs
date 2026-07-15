@@ -12,8 +12,8 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         match message {
             LanguageMessage::OpenLanguagePicker { model } => {
-                self.language_picker_target = model;
-                self.language_picker_query.clear();
+                self.language.language_picker_target = model;
+                self.language.language_picker_query.clear();
                 self.context_page = ContextPage::LanguagePicker;
                 self.core.window.show_context = true;
                 Task::none()
@@ -23,15 +23,15 @@ impl AppModel {
                 Task::none()
             }
             LanguageMessage::LanguagePickerQueryChanged(q) => {
-                self.language_picker_query = q;
+                self.language.language_picker_query = q;
                 Task::none()
             }
             LanguageMessage::PrimaryLanguageLoaded(lang) => {
-                self.primary_language = lang;
+                self.language.primary_language = lang;
                 Task::none()
             }
             LanguageMessage::PrimaryLanguageSelected(choice) => {
-                self.primary_language.clone_from(&choice);
+                self.language.primary_language.clone_from(&choice);
                 self.core.window.show_context = false;
                 Task::perform(
                     async move {
@@ -55,8 +55,8 @@ impl AppModel {
                 model,
                 block,
             } => {
-                self.model_language = Some(block);
-                self.model_language_for = Some((source, model));
+                self.language.model_language = Some(block);
+                self.language.model_language_for = Some((source, model));
                 Task::none()
             }
             LanguageMessage::ModelLanguageSelected {

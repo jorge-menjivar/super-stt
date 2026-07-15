@@ -318,7 +318,7 @@ pub enum LanguageMessage {
     ModelLanguageLoaded {
         source: String,
         model: String,
-        block: serde_json::Value,
+        block: crate::state::LanguageResolution,
     },
     /// User picked a per-model override.
     /// `choice = None` → Follow global (DELETE override);

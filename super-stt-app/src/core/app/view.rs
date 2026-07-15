@@ -94,7 +94,7 @@ impl AppModel {
             // Language picker sheet — a search-box + scrollable selectable list
             // for setting the global Primary Language or the active-model override.
             ContextPage::LanguagePicker => {
-                let title = if self.language_picker_target.is_some() {
+                let title = if self.language.language_picker_target.is_some() {
                     "Model language"
                 } else {
                     "Primary Language"
@@ -117,6 +117,7 @@ impl AppModel {
                         Some(Page::Models | Page::Library)
                     );
                 let backend = self
+                    .models_page
                     .configure_backend
                     .as_ref()
                     .and_then(|src| self.backends.iter().find(|b| &b.source == src));
@@ -155,7 +156,7 @@ impl AppModel {
                 &self.audio_themes,
                 &self.selected_audio_theme,
                 self.volume,
-                self.primary_language.as_deref(),
+                self.language.primary_language.as_deref(),
                 self.action_error_for(crate::state::ErrorScope::Customization),
             ),
             Page::Recording => views::recording::page(

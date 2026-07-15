@@ -2,11 +2,11 @@
 
 use crate::core::app::AppModel;
 use crate::daemon::client::{
-    clear_backend_option, clear_backend_secret, list_backend_secrets, list_backends,
-    set_backend_option, set_backend_secret,
+    clear_backend_option, clear_backend_secret, list_backend_secrets, set_backend_option,
+    set_backend_secret,
 };
 use crate::state::ErrorScope;
-use crate::ui::messages::{BackendMessage, Message, ModelsPageMessage};
+use crate::ui::messages::{BackendMessage, Message};
 use cosmic::prelude::*;
 use super_stt_shared::daemon::http_client::HttpError;
 use super_stt_shared::models::provider::Provider;
@@ -87,22 +87,8 @@ impl AppModel {
                 // by source). Guarded so it fires a single time; the Browse tab's
                 // own first-open trigger then short-circuits.
                 if self.registry.backends.is_empty() && self.registry.last_refresh.is_none() {
-                    let filters = crate::daemon::registry::ListFilters {
-                        include_incompatible: Some(true),
-                        ..Default::default()
-                    };
-                    tasks.push(Task::perform(
-                        async move { crate::daemon::registry::list(&filters).await },
-                        |r| {
-                            cosmic::Action::App(match r {
-                                Ok(resp) => {
-                                    Message::ModelsPage(ModelsPageMessage::RegistryListLoaded(resp))
-                                }
-                                Err(e) => Message::ModelsPage(
-                                    ModelsPageMessage::RegistryListFailed(e.to_string()),
-                                ),
-                            })
-                        },
+                    tasks.push(crate::core::app::handlers::tasks::fetch_registry_catalog(
+                        false,
                     ));
                 }
                 Task::batch(tasks)
@@ -121,16 +107,7 @@ impl AppModel {
                 Task::none()
             }
 
-            BackendMessage::BackendsReload => {
-                Task::perform(list_backends(), |result| match result {
-                    Ok(backends) => cosmic::Action::App(Message::Backend(
-                        BackendMessage::BackendsLoaded(backends),
-                    )),
-                    Err(e) => cosmic::Action::App(Message::Backend(BackendMessage::BackendsError(
-                        e.to_string(),
-                    ))),
-                })
-            }
+            BackendMessage::BackendsReload => crate::core::app::handlers::tasks::reload_backends(),
 
             _ => Task::none(),
         }

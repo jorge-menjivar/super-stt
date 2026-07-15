@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::daemon::client::{load_audio_themes, ping_daemon};
-use crate::state::{AudioTheme, ContextPage, DaemonStatus, ModelsTab, RecordingStatus};
+use crate::daemon::client::load_audio_themes;
+use crate::state::{AudioTheme, ContextPage, DaemonStatus, RecordingStatus};
 use crate::ui::icons;
-use crate::ui::messages::{DaemonMessage, Message, ModelMessage, RecordingMessage};
+use crate::ui::messages::{Message, ModelMessage, RecordingMessage};
 use cosmic::prelude::*;
-use cosmic::widget::{nav_bar, segmented_button};
+use cosmic::widget::nav_bar;
 use std::collections::HashMap;
 use super_stt_shared::models::provider::Provider;
 
@@ -51,21 +51,6 @@ fn build_nav() -> nav_bar::Model {
     nav
 }
 
-/// Builds the Models-page tab bar with Installed and Browse tabs.
-fn build_models_tabs() -> segmented_button::SingleSelectModel {
-    let mut models_tabs = segmented_button::SingleSelectModel::default();
-    models_tabs
-        .insert()
-        .text("Installed")
-        .data(ModelsTab::Installed)
-        .activate();
-    models_tabs
-        .insert()
-        .text("Browse")
-        .data(ModelsTab::Download);
-    models_tabs
-}
-
 /// Builds the initial batch of startup tasks (audio themes, daemon ping, data load).
 fn initial_load_tasks(
     title_command: Task<cosmic::Action<Message>>,
@@ -78,12 +63,7 @@ fn initial_load_tasks(
     });
 
     // Try to ping the daemon on startup
-    let initial_ping = Task::perform(ping_daemon(), |result| {
-        cosmic::Action::App(match result {
-            Ok(_) => Message::Daemon(DaemonMessage::DaemonConnected),
-            Err(e) => Message::Daemon(DaemonMessage::DaemonError(e)),
-        })
-    });
+    let initial_ping = crate::core::app::handlers::tasks::ping_task();
 
     // Load initial data (models + device info) on startup
     let load_initial_data = Task::perform(
@@ -104,7 +84,6 @@ impl AppModel {
         _flags: (),
     ) -> (Self, Task<cosmic::Action<Message>>) {
         let nav = build_nav();
-        let models_tabs = build_models_tabs();
 
         // Construct the app model with the runtime's core.
         let mut app = AppModel {
@@ -157,19 +136,10 @@ impl AppModel {
             custom_models_dir_input: String::new(),
 
             // Models page UI state
-            models_tabs,
-            active_backend: None,
-            staged_model: None,
-            staged_device: None,
-            configure_backend: None,
-            installed_menu_open: None,
+            models_page: crate::state::models_page::ModelsPageState::default(),
 
             // Transcription language state
-            primary_language: None,
-            model_language: None,
-            model_language_for: None,
-            language_picker_target: None,
-            language_picker_query: String::new(),
+            language: crate::state::language::LanguageState::default(),
 
             // Backend catalog + per-backend configuration state
             backends: Vec::new(),
