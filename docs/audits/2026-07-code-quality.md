@@ -1154,19 +1154,27 @@ Tier 2 #4/#6/#8.
   client (all funnel through it) agree; the daemon's `spawn_http_listener` dropped
   its private env read. `transport.md` updated to drop the "on the daemon" scoping.
 
-### [ ] 32. 🟡 Indexer: `registry_toml.rs:31-33` doc claims `BTreeMap` preserves file order (it sorts by key)
+### [x] 32. 🟡 Indexer: `registry_toml.rs:31-33` doc claims `BTreeMap` preserves file order (it sorts by key)
 
-### [ ] 33. 🟡 Tooling: Cargo convention drift
+- **Fix:** corrected the doc — a `BTreeMap` iterates in sorted id order, not file
+  declaration order.
+
+### [x] 33. 🟡 Tooling: Cargo convention drift
 
 - **Where:** the indexer redeclares loose versions (`anyhow = "1"`, `clap = "4"`);
   the CLI mixes `workspace = true` with loose pins.
-- **Fix:** use `[workspace.dependencies]` throughout.
+- **Fix:** every dep the workspace already centralizes now inherits via
+  `.workspace = true` (indexer: anyhow/chrono/clap/env_logger/log/reqwest/serde/
+  serde_json/thiserror/tokio/toml; CLI: clap). Genuinely indexer-only deps
+  (flate2/futures/hex/ring/semver/tar/url) stay local — they don't drift.
 
-### [ ] 34. 🟡 Indexer: rename the indexer's `ResolveError` for grep-ability
+### [x] 34. 🟡 Indexer: rename the indexer's `ResolveError` for grep-ability
 
 - The three same-named `ResolveError` enums (custom_repo / local_dir / indexer
   resolve) are distinct concepts, not duplication — at most rename the indexer's.
   Same verdict for `Host` ×2 and `VisualizationConfig` ×2: no action needed.
+- **Fix:** renamed the indexer's to `ReleaseResolveError` (contained to
+  `resolve.rs`).
 
 ### [ ] 35. 🟠 Daemon: remaining blocking work (split off Tier 3 #4)
 

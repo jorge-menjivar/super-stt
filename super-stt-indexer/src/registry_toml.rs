@@ -28,7 +28,8 @@ pub enum ParseError {
     PrefixOverlap { a: String, b: String, repo: String },
 }
 
-/// Parsed registry file: id → entry, preserving the file's order.
+/// Parsed registry file: id → entry. Backed by a `BTreeMap`, so iteration is in
+/// sorted id order — not the file's declaration order.
 #[derive(Debug, Clone)]
 pub struct Registry(pub BTreeMap<String, Entry>);
 

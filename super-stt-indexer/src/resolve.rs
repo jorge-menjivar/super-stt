@@ -16,7 +16,7 @@ pub struct Resolved {
 }
 
 #[derive(Debug, Error)]
-pub enum ResolveError {
+pub enum ReleaseResolveError {
     #[error("no releases on `{repo}`")]
     NoReleases { repo: String },
     #[error("no release tag matches prefix `{prefix}`")]
@@ -31,7 +31,7 @@ pub async fn resolve(
     client: &dyn ForgeClient,
     repo: &RepoRef,
     entry: &Entry,
-) -> Result<Resolved, ResolveError> {
+) -> Result<Resolved, ReleaseResolveError> {
     let releases = if entry.tag_prefix.is_some() {
         client.list_releases(repo).await?
     } else {
@@ -40,13 +40,13 @@ pub async fn resolve(
     select_release(releases, entry)
 }
 
-fn select_release(releases: Vec<Release>, entry: &Entry) -> Result<Resolved, ResolveError> {
+fn select_release(releases: Vec<Release>, entry: &Entry) -> Result<Resolved, ReleaseResolveError> {
     let max_cap = entry
         .max_version
         .as_deref()
         .map(parse_semver)
         .transpose()
-        .map_err(|tag| ResolveError::BadSemver { tag, prefix: None })?;
+        .map_err(|tag| ReleaseResolveError::BadSemver { tag, prefix: None })?;
 
     let mut best: Option<(Version, Release)> = None;
     for r in releases {
@@ -81,8 +81,8 @@ fn select_release(releases: Vec<Release>, entry: &Entry) -> Result<Resolved, Res
         }
     }
     let (version, release) = best.ok_or_else(|| match &entry.tag_prefix {
-        Some(p) => ResolveError::NoMatchingPrefix { prefix: p.clone() },
-        None => ResolveError::NoReleases {
+        Some(p) => ReleaseResolveError::NoMatchingPrefix { prefix: p.clone() },
+        None => ReleaseResolveError::NoReleases {
             repo: entry.repo.clone(),
         },
     })?;
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn errors_when_no_match() {
         let err = select_release(vec![rel("v1.0.0")], &entry(Some("xyz-"), None)).unwrap_err();
-        assert!(matches!(err, ResolveError::NoMatchingPrefix { .. }));
+        assert!(matches!(err, ReleaseResolveError::NoMatchingPrefix { .. }));
     }
 
     #[test]
@@ -186,7 +186,7 @@ mod tests {
     fn prefix_requires_digit_boundary() {
         // Prefix `a` must not match `a-1.0.0` (a separator, not a digit, follows).
         let err = select_release(vec![rel("a-1.0.0")], &entry(Some("a"), None)).unwrap_err();
-        assert!(matches!(err, ResolveError::NoMatchingPrefix { .. }));
+        assert!(matches!(err, ReleaseResolveError::NoMatchingPrefix { .. }));
         // But `a-` does match it.
         let r = select_release(vec![rel("a-1.0.0")], &entry(Some("a-"), None)).unwrap();
         assert_eq!(r.version, Version::new(1, 0, 0));

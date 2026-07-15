@@ -10,24 +10,27 @@ description = "Cron-driven indexer that builds index.json from registry.toml"
 workspace = true
 
 [dependencies]
-anyhow = "1"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
+# Shared version pins inherited from [workspace.dependencies].
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+env_logger.workspace = true
+log.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+# Indexer-only dependencies (not used elsewhere in the workspace).
 flate2 = "1"
 futures = "0.3"
 hex = "0.4"
-log = "0.4"
-env_logger = "0.11"
-reqwest = { workspace = true }
 ring = "0.17"
 semver = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 tar = "0.4"
-thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
-toml = "1"
 url = "2"
+# Workspace path crates.
 super-stt-registry-types = { path = "../super-stt-registry-types" }
 super-stt-forge = { version = "0.1.4-beta.2", path = "../super-stt-forge" }
 
