@@ -343,12 +343,6 @@ impl VisualizationColorConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ThemeConfig {
-    pub visualization_theme: VisualizationTheme,
-    pub visualization_color_config: VisualizationColorConfig,
-}
-
 #[cfg(test)]
 mod working_animation_theme_tests {
     use super::WorkingAnimationTheme;

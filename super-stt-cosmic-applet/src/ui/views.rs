@@ -2,10 +2,7 @@
 use crate::{
     app::Message,
     config::AppletConfig,
-    models::{
-        state::{DaemonConnectionState, IsOpen},
-        theme::ThemeConfig,
-    },
+    models::state::{DaemonConnectionState, IsOpen},
     ui::sections::{
         app_info::create_app_info_section, launch::create_launch_section,
         settings::section::create_applet_settings_section, status::create_status_section,
@@ -23,7 +20,6 @@ use cosmic::{
 pub struct PopupContentParams<'a> {
     pub daemon_state: &'a DaemonConnectionState,
     pub is_open: &'a IsOpen,
-    pub theme_config: &'a ThemeConfig,
     pub config: &'a AppletConfig,
     pub icon_alignment_model: &'a SingleSelectModel,
     pub theme_selector_model: &'a SingleSelectModel,
@@ -44,7 +40,6 @@ pub fn create_popup_content<'a>(params: &PopupContentParams<'a>) -> Element<'a, 
         if matches!(params.daemon_state, DaemonConnectionState::Connected) {
             create_applet_settings_section(
                 params.config,
-                params.theme_config,
                 params.is_open,
                 params.icon_alignment_model,
                 params.theme_selector_model,

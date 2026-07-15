@@ -1035,30 +1035,32 @@ Tier 2 #4/#6/#8.
 - **Resolved (branch `refactor/audit-tier3-13-17`):** gave `InstallError` (shared) a
   `Display` impl with human-readable phrasing; the Browse card now shows `Failed: {err}`.
 
-### [ ] 18. 🟡 Applet: merge the bar renderers
+### [x] 18. 🟡 Applet: merge the bar renderers
 
 - **Where:** `equalizer.rs:36-106` and `centered_bars.rs:35-104` differ only in the
   y-anchor; the side-split band selection is triplicated (+`waveform.rs:102-107`).
 - **Fix:** one renderer with an anchor enum + `visible_band_range` helper; hoist
   `get_color_with_theme` out of the per-bar loop (recomputed 32×/frame).
 
-### [ ] 19. 🟡 Applet: single daemon identity module
+### [x] 19. 🟡 Applet: single daemon identity module
 
 - **Where:** AppId/name/scopes defined in both `daemon/client.rs:14-19` and
   `app/subscription.rs:26-28`; display names already disagree, and the
   shared-token-cache invariant is enforced by eyeball.
 
-### [ ] 20. 🟡 Applet: one config source of truth
+### [x] 20. 🟡 Applet: one config source of truth
 
 - **Where:** `theme_config` mirrors `config.visualization.*` and both must be
   updated by hand (`app/mod.rs:38,46`, `update.rs:194-203,427-441`); the settings
   UI reads adjacent selectors from different structs (`settings/section.rs:70-71`).
 - **Fix:** delete `ThemeConfig`.
 
-### [ ] 21. 🟡 Applet: collapse the seven `update_*` config methods
+### [x] 21. 🟡 Applet: collapse the seven `update_*` config methods
 
 - **Where:** `config/settings.rs:130-183`.
-- **Fix:** one closure-based `update()`; store `variant` in the struct.
+- **Fix:** one closure-based `update()`; `save()` derives the variant from
+  `visualization.side` (fixed per binary at load) instead of threading a
+  `variant` string, so the `variant_name` field drops entirely.
 
 ### [ ] 22. 🟡 Applet: type `icon_alignment`
 

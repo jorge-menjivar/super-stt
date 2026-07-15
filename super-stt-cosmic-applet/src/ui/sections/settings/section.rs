@@ -16,7 +16,6 @@ use crate::{
     app::Message,
     config::AppletConfig,
     models::state::IsOpen,
-    models::theme::ThemeConfig,
     ui::sections::settings::components::visualization_theme::{
         create_visualization_color_selector, create_visualization_theme_selector,
         create_working_animation_selector,
@@ -25,7 +24,6 @@ use crate::{
 
 pub fn create_applet_settings_section<'a>(
     config: &AppletConfig,
-    theme_config: &ThemeConfig,
     is_open: &IsOpen,
     icon_alignment_model: &'a SingleSelectModel,
     theme_selector_model: &'a SingleSelectModel,
@@ -67,10 +65,10 @@ pub fn create_applet_settings_section<'a>(
                     .spacing(spacing.space_xxs)
                     .apply(Element::from)
                 ),
-                create_visualization_theme_selector(&theme_config.visualization_theme, is_open),
+                create_visualization_theme_selector(&config.visualization.theme, is_open),
                 create_working_animation_selector(config.visualization.working_animation, is_open),
                 create_visualization_color_selector(
-                    &theme_config.visualization_color_config,
+                    &config.visualization.colors,
                     is_open,
                     theme_selector_model,
                     selected_theme_for_config

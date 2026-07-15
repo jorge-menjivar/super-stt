@@ -86,7 +86,6 @@ impl SuperSttApplet {
         let content = create_popup_content(&PopupContentParams {
             daemon_state: &self.daemon_state,
             is_open: &self.is_open,
-            theme_config: &self.theme_config,
             config: &self.config,
             icon_alignment_model: &self.icon_alignment_model,
             theme_selector_model: &self.theme_selector_model,

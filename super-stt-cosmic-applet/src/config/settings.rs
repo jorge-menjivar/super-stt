@@ -94,8 +94,11 @@ impl AppletConfig {
         config
     }
 
-    /// Save configuration to disk for a specific variant
-    pub fn save(&self, variant: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// Save configuration to disk. The variant (which file to write) is derived
+    /// from `visualization.side`, which `load` fixes to the binary-specific
+    /// value — so callers no longer thread a `variant` string around.
+    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let variant = Self::get_variant_name(&self.visualization.side);
         let config_path = Self::get_config_path(variant);
 
         // Create config directory if it doesn't exist
@@ -110,68 +113,22 @@ impl AppletConfig {
         Ok(())
     }
 
+    /// Apply an in-place mutation and persist it. Replaces the fan-out of
+    /// `update_*` setters (Applet Tier 3 #21): `config.update(|c| c.ui.show_icon
+    /// = v)` mutates then saves, logging (not propagating) a write failure.
+    pub fn update(&mut self, mutate: impl FnOnce(&mut Self)) {
+        mutate(self);
+        if let Err(e) = self.save() {
+            error!("Failed to save config: {e}");
+        }
+    }
+
     /// Get the variant name based on `VisualizationSide`
     pub fn get_variant_name(vis_side: &VisualizationSide) -> &'static str {
         match vis_side {
             VisualizationSide::Full => "full",
             VisualizationSide::Left => "left",
             VisualizationSide::Right => "right",
-        }
-    }
-
-    /// Update visualization theme and save to disk
-    pub fn update_visualization_theme(&mut self, theme: VisualizationTheme, variant: &str) {
-        self.visualization.theme = theme;
-        if let Err(e) = self.save(variant) {
-            error!("Failed to save config after visualization theme update: {e}");
-        }
-    }
-
-    /// Update the working animation theme and save to disk.
-    pub fn update_working_animation(&mut self, theme: WorkingAnimationTheme, variant: &str) {
-        self.visualization.working_animation = theme;
-        if let Err(e) = self.save(variant) {
-            error!("Failed to save config after working animation update: {e}");
-        }
-    }
-
-    /// Update just the applet width and save to disk
-    pub fn update_applet_width(&mut self, width: u32, variant: &str) {
-        self.ui.applet_width = width;
-        if let Err(e) = self.save(variant) {
-            error!("Failed to save config after applet width update: {e}");
-        }
-    }
-
-    /// Update just the icon visibility and save to disk
-    pub fn update_show_icon(&mut self, show_icon: bool, variant: &str) {
-        self.ui.show_icon = show_icon;
-        if let Err(e) = self.save(variant) {
-            error!("Failed to save config after icon visibility update: {e}");
-        }
-    }
-
-    /// Update just the icon alignment and save to disk
-    pub fn update_icon_alignment(&mut self, icon_alignment: String, variant: &str) {
-        self.ui.icon_alignment = icon_alignment;
-        if let Err(e) = self.save(variant) {
-            error!("Failed to save config after icon alignment update: {e}");
-        }
-    }
-
-    /// Update just the show visualization setting and save to disk
-    pub fn update_show_visualizations(&mut self, show_visualizations: bool, variant: &str) {
-        self.ui.show_visualization = show_visualizations;
-        if let Err(e) = self.save(variant) {
-            error!("Failed to save config after show visualization update: {e}");
-        }
-    }
-
-    /// Update visualization colors and save to disk
-    pub fn update_visualization_colors(&mut self, colors: VisualizationColorConfig, variant: &str) {
-        self.visualization.colors = colors;
-        if let Err(e) = self.save(variant) {
-            error!("Failed to save config after visualization colors update: {e}");
         }
     }
 }

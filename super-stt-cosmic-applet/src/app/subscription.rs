@@ -5,9 +5,9 @@ use log::{info, warn};
 use std::pin::Pin;
 
 use crate::app::Message;
+use crate::daemon::identity;
 use crate::util::f64_to_f32;
 use super_stt_shared::daemon::http_client::WidgetEvent;
-use super_stt_shared::daemon::session::AppId;
 use super_stt_shared::daemon::widget_subscription::{
     WidgetSubscriptionConfig, WidgetSubscriptionUpdate, run_widget_subscription,
 };
@@ -19,19 +19,6 @@ pub(super) const PING_INTERVAL_SECS: u64 = 5;
 /// Wrapper for `Subscription::run_with` so the subscription restarts when the counter changes.
 #[derive(Hash)]
 pub(super) struct UdpSubscriptionId(pub(super) u64);
-
-/// Stable identity used to cache the applet's widget-scope session
-/// token under `(super-stt-session, super-stt-cosmic-applet)`. Mirrors
-/// the layout the CLI and settings app already use.
-pub(super) const APPLET_APP_ID: AppId = AppId("super-stt-cosmic-applet");
-const APPLET_APP_NAME: &str = "Super STT COSMIC Applet";
-const APPLET_SCOPES: &[&str] = &["recording_events", "audio_visualization"];
-const APPLET_TOPICS: &[&str] = &[
-    "recording_state",
-    "frequency_bands",
-    "transcribing_started",
-    "transcribing_stopped",
-];
 
 /// Subscribes to the daemon's `GET /events` SSE stream and forwards
 /// each event as a typed [`Message`]. The subscription is self-healing
@@ -45,10 +32,10 @@ pub(super) fn applet_events_subscription(
 ) -> Pin<Box<dyn Stream<Item = Message> + Send>> {
     Box::pin(cosmic::iced::stream::channel(100, async |mut channel| {
         let config = WidgetSubscriptionConfig::new(
-            APPLET_APP_ID,
-            APPLET_APP_NAME,
-            APPLET_SCOPES,
-            APPLET_TOPICS,
+            identity::APP_ID,
+            identity::APP_NAME,
+            identity::SCOPES,
+            identity::TOPICS,
         );
         let mut updates = Box::pin(run_widget_subscription(get_http_socket_path(), config));
         info!("Widget subscription starting");
@@ -157,14 +144,14 @@ mod widget_subscription_mapping_tests {
 
     #[test]
     fn applet_scopes_cover_subscribed_topics() {
-        // Guard the hand-maintained APPLET_SCOPES / APPLET_TOPICS lists: every
+        // Guard the hand-maintained identity SCOPES / TOPICS lists: every
         // subscribed topic must be granted by a requested scope, or the daemon
         // refuses the whole stream with `403 scope_denied`. The mapping lives
         // in super-stt-shared and is pinned to the daemon's `Topic::required_scope`.
         assert_eq!(
             super_stt_shared::daemon::widget_subscription::uncovered_topic(
-                APPLET_SCOPES,
-                APPLET_TOPICS,
+                identity::SCOPES,
+                identity::TOPICS,
             ),
             None,
         );

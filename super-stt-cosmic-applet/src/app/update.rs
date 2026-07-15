@@ -12,8 +12,8 @@ use cosmic::{
 use log::{info, warn};
 
 use super::SuperSttApplet;
-use super::subscription::APPLET_APP_ID;
 use crate::app::Message;
+use crate::daemon::identity::APP_ID;
 use crate::daemon::{RetryStrategy, ping_daemon, ping_daemon_with_status};
 use crate::models::state::{DaemonConnectionState, IsOpen, RecordingState};
 use crate::models::theme::{VisualizationColor, VisualizationTheme, WorkingAnimationTheme};
@@ -190,9 +190,8 @@ impl SuperSttApplet {
     }
 
     fn set_visualization_theme(&mut self, theme: VisualizationTheme) -> cosmic_app::Task<Message> {
-        self.theme_config.visualization_theme = theme.clone();
         self.config
-            .update_visualization_theme(theme.clone(), &self.variant_name);
+            .update(|c| c.visualization.theme = theme.clone());
         self.visualization.update_theme(theme);
         self.visualization
             .update_audio_level(self.audio_level, self.is_speech_detected);
@@ -202,7 +201,7 @@ impl SuperSttApplet {
 
     fn set_working_animation(&mut self, theme: WorkingAnimationTheme) -> cosmic_app::Task<Message> {
         self.config
-            .update_working_animation(theme, &self.variant_name);
+            .update(|c| c.visualization.working_animation = theme);
         self.working_animation.update_theme(theme);
         self.is_open = IsOpen::None;
         cosmic_app::Task::none()
@@ -275,7 +274,7 @@ impl SuperSttApplet {
         // Drop any cached token (in-memory + keyring) so the next
         // subscription cycle hits the daemon's /auth/request and spawns
         // a fresh consent prompt.
-        if let Err(e) = session::forget(APPLET_APP_ID) {
+        if let Err(e) = session::forget(APP_ID) {
             warn!("Failed to forget session before retry: {e}");
         }
         // Restart the iced subscription so the dropped helper task
@@ -382,7 +381,7 @@ impl SuperSttApplet {
     }
 
     fn set_applet_width(&mut self, width: u32) -> cosmic_app::Task<Message> {
-        self.config.update_applet_width(width, &self.variant_name);
+        self.config.update(|c| c.ui.applet_width = width);
         // Refresh the visualization so it adapts to the new size.
         self.visualization.clear();
         self.visualization
@@ -391,7 +390,7 @@ impl SuperSttApplet {
     }
 
     fn set_show_icon(&mut self, show_icon: bool) -> cosmic_app::Task<Message> {
-        self.config.update_show_icon(show_icon, &self.variant_name);
+        self.config.update(|c| c.ui.show_icon = show_icon);
         cosmic_app::Task::none()
     }
 
@@ -407,13 +406,12 @@ impl SuperSttApplet {
             "start"
         };
         self.config
-            .update_icon_alignment(alignment.to_string(), &self.variant_name);
+            .update(|c| c.ui.icon_alignment = alignment.to_string());
         cosmic_app::Task::none()
     }
 
     fn set_show_visualizations(&mut self, show: bool) -> cosmic_app::Task<Message> {
-        self.config
-            .update_show_visualizations(show, &self.variant_name);
+        self.config.update(|c| c.ui.show_visualization = show);
         cosmic_app::Task::none()
     }
 
@@ -422,12 +420,10 @@ impl SuperSttApplet {
         color: VisualizationColor,
         is_dark: bool,
     ) -> cosmic_app::Task<Message> {
-        self.theme_config
-            .visualization_color_config
-            .set_color(color, is_dark);
-        let updated_colors = self.theme_config.visualization_color_config.clone();
+        let mut updated_colors = self.config.visualization.colors.clone();
+        updated_colors.set_color(color, is_dark);
         self.config
-            .update_visualization_colors(updated_colors.clone(), &self.variant_name);
+            .update(|c| c.visualization.colors = updated_colors.clone());
         self.working_animation.update_colors(updated_colors.clone());
         self.visualization.update_colors(updated_colors);
         cosmic_app::Task::none()

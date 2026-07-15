@@ -10,7 +10,7 @@ use crate::app::Message;
 use crate::config::AppletConfig;
 use crate::daemon::{RetryStrategy, ping_daemon};
 use crate::models::state::{DaemonConnectionState, IsOpen, RecordingState};
-use crate::models::theme::{ThemeConfig, VisualizationSide};
+use crate::models::theme::VisualizationSide;
 use crate::ui::components::sound_visualization::VisualizationComponent;
 use crate::ui::components::working_animation_component::WorkingAnimationComponent;
 use super_stt_shared::validation::get_http_socket_path;
@@ -49,13 +49,8 @@ impl SuperSttApplet {
         core: cosmic::app::Core,
         visualization_side: VisualizationSide,
     ) -> (Self, cosmic_app::Task<Message>) {
-        let variant_name = AppletConfig::get_variant_name(&visualization_side).to_string();
-        let config = AppletConfig::load(&variant_name, visualization_side.clone());
-
-        let theme_config = ThemeConfig {
-            visualization_theme: config.visualization.theme.clone(),
-            visualization_color_config: config.visualization.colors.clone(),
-        };
+        let variant_name = AppletConfig::get_variant_name(&visualization_side);
+        let config = AppletConfig::load(variant_name, visualization_side.clone());
 
         let visualization = VisualizationComponent::new(
             0.0,
@@ -87,13 +82,11 @@ impl SuperSttApplet {
             audio_level: 0.0,
             is_speech_detected: false,
             is_open: IsOpen::None,
-            theme_config,
             udp_restart_counter: 0,
             visualization,
             working_animation,
             working_anim_start: None,
             config,
-            variant_name,
             icon_alignment_model,
             icon_alignment_start,
             icon_alignment_center,

@@ -2,7 +2,7 @@
 use crate::config::FREQUENCY_NORMALIZATION_MAX;
 use crate::models::theme::VisualizationSide;
 use crate::ui::components::visualizations::{
-    DrawContext, VisualizationConfig, VisualizationRenderer,
+    DrawContext, VisualizationConfig, VisualizationRenderer, visible_band_range,
 };
 use crate::util::{f32_to_usize, usize_to_f32};
 use cosmic::iced::{
@@ -99,12 +99,8 @@ impl WaveformVisualization {
         side: &VisualizationSide,
         effective_bounds: Rectangle,
     ) -> Vec<(f32, f32)> {
-        let total_bands = frequency_data.bands.len().min(32);
-        let (bands_to_show, band_start_index) = match side {
-            VisualizationSide::Left => (total_bands / 2, 0),
-            VisualizationSide::Right => (total_bands / 2, total_bands / 2),
-            VisualizationSide::Full => (total_bands, 0),
-        };
+        let (bands_to_show, band_start_index) =
+            visible_band_range(side, frequency_data.bands.len());
 
         let normalization_factor = 1.0 / FREQUENCY_NORMALIZATION_MAX;
         let max_height = self.config.max_element_height(effective_bounds.height);

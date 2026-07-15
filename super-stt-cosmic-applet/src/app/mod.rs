@@ -21,7 +21,7 @@ pub use messages::*;
 use crate::config::AppletConfig;
 use crate::daemon::RetryStrategy;
 use crate::models::state::{DaemonConnectionState, IsOpen, RecordingState};
-use crate::models::theme::{ThemeConfig, VisualizationSide};
+use crate::models::theme::VisualizationSide;
 use crate::ui::components::sound_visualization::VisualizationComponent;
 use crate::ui::components::working_animation_component::WorkingAnimationComponent;
 use subscription::{PING_INTERVAL_SECS, UdpSubscriptionId, applet_events_subscription};
@@ -35,7 +35,6 @@ pub struct SuperSttApplet {
     audio_level: f32,
     is_speech_detected: bool,
     is_open: IsOpen,
-    theme_config: ThemeConfig,
     udp_restart_counter: u64,
     visualization: VisualizationComponent,
     working_animation: WorkingAnimationComponent,
@@ -43,7 +42,6 @@ pub struct SuperSttApplet {
     /// transcribing, used to derive the animation's elapsed time.
     working_anim_start: Option<Instant>,
     config: AppletConfig,
-    variant_name: String,
     icon_alignment_model: SingleSelectModel,
     icon_alignment_start: Entity,
     icon_alignment_center: Entity,

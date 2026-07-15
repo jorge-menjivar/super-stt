@@ -7,16 +7,10 @@
 //! subscription to `GET /events` is handled separately by
 //! `super_stt_shared::daemon::widget_subscription::run_widget_subscription`.
 
+use crate::daemon::identity::{APP_ID, APP_NAME, SCOPES};
 use std::path::PathBuf;
 use super_stt_shared::daemon::http_client;
-use super_stt_shared::daemon::session::{self, AppId};
-
-const APP_ID: AppId = AppId("super-stt-cosmic-applet");
-const APP_NAME: &str = "Super STT Applet";
-/// Scope set the applet requests. Shared with the `/events` subscription
-/// (same `AppId` token): `recording_events` for the recording indicator,
-/// `audio_visualization` for the frequency-band meter.
-const SCOPES: &[&str] = &["recording_events", "audio_visualization"];
+use super_stt_shared::daemon::session;
 
 /// What the applet's update loop expects from `ping_daemon_with_status`.
 /// In the legacy protocol the daemon could report
