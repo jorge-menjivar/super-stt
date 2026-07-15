@@ -21,17 +21,21 @@ impl std::fmt::Display for VisualizationTheme {
     }
 }
 
-impl VisualizationTheme {
-    pub fn from_str(s: &str) -> Self {
+impl std::str::FromStr for VisualizationTheme {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "pulse" => VisualizationTheme::Pulse,
-            "b_equalizer" => VisualizationTheme::BottomEqualizer,
-            "c_equalizer" => VisualizationTheme::CenteredEqualizer,
-            "waveform" => VisualizationTheme::Waveform,
-            _ => VisualizationTheme::default(),
+            "pulse" => Ok(VisualizationTheme::Pulse),
+            "b_equalizer" => Ok(VisualizationTheme::BottomEqualizer),
+            "c_equalizer" => Ok(VisualizationTheme::CenteredEqualizer),
+            "waveform" => Ok(VisualizationTheme::Waveform),
+            _ => Err(()),
         }
     }
+}
 
+impl VisualizationTheme {
     pub fn pretty_name(&self) -> String {
         match self {
             VisualizationTheme::Pulse => "Pulse".to_string(),
@@ -64,16 +68,20 @@ impl std::fmt::Display for WorkingAnimationTheme {
     }
 }
 
-impl WorkingAnimationTheme {
-    pub fn from_str(s: &str) -> Self {
+impl std::str::FromStr for WorkingAnimationTheme {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "droplet" => WorkingAnimationTheme::Droplet,
-            "comet" => WorkingAnimationTheme::Comet,
-            "dots" => WorkingAnimationTheme::Dots,
-            _ => WorkingAnimationTheme::default(),
+            "droplet" => Ok(WorkingAnimationTheme::Droplet),
+            "comet" => Ok(WorkingAnimationTheme::Comet),
+            "dots" => Ok(WorkingAnimationTheme::Dots),
+            _ => Err(()),
         }
     }
+}
 
+impl WorkingAnimationTheme {
     pub fn pretty_name(self) -> String {
         match self {
             WorkingAnimationTheme::Droplet => "Droplet".to_string(),
@@ -125,6 +133,61 @@ impl VisualizationSide {
     }
 }
 
+/// Where the panel icon sits when visualizations are hidden. Persisted in the
+/// applet config as its snake-case wire id (`start`/`center`/`end`) and mapped
+/// to an iced [`Alignment`] at render time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IconAlignment {
+    Start,
+    Center,
+    #[default]
+    End,
+}
+
+impl IconAlignment {
+    /// Human-facing label for the segmented selector.
+    pub fn pretty_name(self) -> &'static str {
+        match self {
+            IconAlignment::Start => "Start",
+            IconAlignment::Center => "Center",
+            IconAlignment::End => "End",
+        }
+    }
+
+    /// Map to the iced cross-axis alignment used when placing the panel icon.
+    pub fn to_alignment(self) -> cosmic::iced::Alignment {
+        match self {
+            IconAlignment::Start => cosmic::iced::Alignment::Start,
+            IconAlignment::Center => cosmic::iced::Alignment::Center,
+            IconAlignment::End => cosmic::iced::Alignment::End,
+        }
+    }
+}
+
+impl std::fmt::Display for IconAlignment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IconAlignment::Start => write!(f, "start"),
+            IconAlignment::Center => write!(f, "center"),
+            IconAlignment::End => write!(f, "end"),
+        }
+    }
+}
+
+impl std::str::FromStr for IconAlignment {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "start" => Ok(IconAlignment::Start),
+            "center" => Ok(IconAlignment::Center),
+            "end" => Ok(IconAlignment::End),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum VisualizationColor {
     #[default]
@@ -161,83 +224,46 @@ pub enum VisualizationColor {
     PastelLavender,
 }
 
-impl std::fmt::Display for VisualizationColor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VisualizationColor::SystemAccent => write!(f, "System Accent"),
-            VisualizationColor::White => write!(f, "White"),
-            VisualizationColor::Black => write!(f, "Black"),
-            VisualizationColor::Gray => write!(f, "Light Gray"),
-            VisualizationColor::DarkGray => write!(f, "Dark Gray"),
-            VisualizationColor::Blue => write!(f, "Blue"),
-            VisualizationColor::DarkBlue => write!(f, "Dark Blue"),
-            VisualizationColor::Green => write!(f, "Green"),
-            VisualizationColor::DarkGreen => write!(f, "Dark Green"),
-            VisualizationColor::Orange => write!(f, "Orange"),
-            VisualizationColor::DarkOrange => write!(f, "Dark Orange"),
-            VisualizationColor::Purple => write!(f, "Purple"),
-            VisualizationColor::DarkPurple => write!(f, "Dark Purple"),
-            VisualizationColor::Red => write!(f, "Red"),
-            VisualizationColor::DarkRed => write!(f, "Dark Red"),
-            VisualizationColor::Cyan => write!(f, "Cyan"),
-            VisualizationColor::DarkCyan => write!(f, "Dark Cyan"),
-            VisualizationColor::Pink => write!(f, "Pink"),
-            VisualizationColor::DarkPink => write!(f, "Dark Pink"),
-            VisualizationColor::Violet => write!(f, "Violet"),
-            VisualizationColor::DarkViolet => write!(f, "Dark Violet"),
-            VisualizationColor::PastelBlue => write!(f, "Pastel Blue"),
-            VisualizationColor::PastelGreen => write!(f, "Pastel Green"),
-            VisualizationColor::PastelOrange => write!(f, "Pastel Orange"),
-            VisualizationColor::PastelPurple => write!(f, "Pastel Purple"),
-            VisualizationColor::PastelRed => write!(f, "Pastel Red"),
-            VisualizationColor::PastelCyan => write!(f, "Pastel Cyan"),
-            VisualizationColor::PastelPink => write!(f, "Pastel Pink"),
-            VisualizationColor::PastelYellow => write!(f, "Pastel Yellow"),
-            VisualizationColor::PastelMagenta => write!(f, "Pastel Magenta"),
-            VisualizationColor::PastelLavender => write!(f, "Pastel Lavender"),
-        }
-    }
-}
-
-impl From<std::string::String> for VisualizationColor {
-    fn from(input: String) -> Self {
-        match input.as_str() {
-            "white" => VisualizationColor::White,
-            "black" => VisualizationColor::Black,
-            "gray" => VisualizationColor::Gray,
-            "dark_gray" => VisualizationColor::DarkGray,
-            "blue" => VisualizationColor::Blue,
-            "dark_blue" => VisualizationColor::DarkBlue,
-            "green" => VisualizationColor::Green,
-            "dark_green" => VisualizationColor::DarkGreen,
-            "orange" => VisualizationColor::Orange,
-            "dark_orange" => VisualizationColor::DarkOrange,
-            "purple" => VisualizationColor::Purple,
-            "dark_purple" => VisualizationColor::DarkPurple,
-            "red" => VisualizationColor::Red,
-            "dark_red" => VisualizationColor::DarkRed,
-            "cyan" => VisualizationColor::Cyan,
-            "dark_cyan" => VisualizationColor::DarkCyan,
-            "pink" => VisualizationColor::Pink,
-            "dark_pink" => VisualizationColor::DarkPink,
-            "violet" => VisualizationColor::Violet,
-            "dark_violet" => VisualizationColor::DarkViolet,
-            "pastel_blue" => VisualizationColor::PastelBlue,
-            "pastel_green" => VisualizationColor::PastelGreen,
-            "pastel_orange" => VisualizationColor::PastelOrange,
-            "pastel_purple" => VisualizationColor::PastelPurple,
-            "pastel_red" => VisualizationColor::PastelRed,
-            "pastel_cyan" => VisualizationColor::PastelCyan,
-            "pastel_pink" => VisualizationColor::PastelPink,
-            "pastel_yellow" => VisualizationColor::PastelYellow,
-            "pastel_magenta" => VisualizationColor::PastelMagenta,
-            "pastel_lavender" => VisualizationColor::PastelLavender,
-            _ => VisualizationColor::SystemAccent,
-        }
-    }
-}
-
 impl VisualizationColor {
+    /// Human-facing label shown under each colour swatch. UI-only — the enum
+    /// persists via serde (variant name), so this is a pretty name, not a wire
+    /// id. Matches the `pretty_name()` idiom used by the other theme enums.
+    pub fn pretty_name(&self) -> &'static str {
+        match self {
+            VisualizationColor::SystemAccent => "System Accent",
+            VisualizationColor::White => "White",
+            VisualizationColor::Black => "Black",
+            VisualizationColor::Gray => "Light Gray",
+            VisualizationColor::DarkGray => "Dark Gray",
+            VisualizationColor::Blue => "Blue",
+            VisualizationColor::DarkBlue => "Dark Blue",
+            VisualizationColor::Green => "Green",
+            VisualizationColor::DarkGreen => "Dark Green",
+            VisualizationColor::Orange => "Orange",
+            VisualizationColor::DarkOrange => "Dark Orange",
+            VisualizationColor::Purple => "Purple",
+            VisualizationColor::DarkPurple => "Dark Purple",
+            VisualizationColor::Red => "Red",
+            VisualizationColor::DarkRed => "Dark Red",
+            VisualizationColor::Cyan => "Cyan",
+            VisualizationColor::DarkCyan => "Dark Cyan",
+            VisualizationColor::Pink => "Pink",
+            VisualizationColor::DarkPink => "Dark Pink",
+            VisualizationColor::Violet => "Violet",
+            VisualizationColor::DarkViolet => "Dark Violet",
+            VisualizationColor::PastelBlue => "Pastel Blue",
+            VisualizationColor::PastelGreen => "Pastel Green",
+            VisualizationColor::PastelOrange => "Pastel Orange",
+            VisualizationColor::PastelPurple => "Pastel Purple",
+            VisualizationColor::PastelRed => "Pastel Red",
+            VisualizationColor::PastelCyan => "Pastel Cyan",
+            VisualizationColor::PastelPink => "Pastel Pink",
+            VisualizationColor::PastelYellow => "Pastel Yellow",
+            VisualizationColor::PastelMagenta => "Pastel Magenta",
+            VisualizationColor::PastelLavender => "Pastel Lavender",
+        }
+    }
+
     pub fn to_rgb(&self) -> [f32; 3] {
         match self {
             VisualizationColor::SystemAccent => [0.5, 0.5, 0.5],
@@ -354,19 +380,54 @@ mod working_animation_theme_tests {
             WorkingAnimationTheme::Comet,
             WorkingAnimationTheme::Dots,
         ] {
-            assert_eq!(WorkingAnimationTheme::from_str(&t.to_string()), t);
+            assert_eq!(t.to_string().parse::<WorkingAnimationTheme>(), Ok(t));
         }
     }
 
     #[test]
-    fn unknown_falls_back_to_default() {
-        assert_eq!(
-            WorkingAnimationTheme::from_str("nope"),
-            WorkingAnimationTheme::default()
-        );
+    fn unknown_is_rejected() {
+        assert_eq!("nope".parse::<WorkingAnimationTheme>(), Err(()));
         assert_eq!(
             WorkingAnimationTheme::default(),
             WorkingAnimationTheme::Droplet
         );
+    }
+}
+
+#[cfg(test)]
+mod icon_alignment_tests {
+    use super::IconAlignment;
+
+    #[test]
+    fn display_from_str_round_trip() {
+        for a in [
+            IconAlignment::Start,
+            IconAlignment::Center,
+            IconAlignment::End,
+        ] {
+            assert_eq!(a.to_string().parse::<IconAlignment>(), Ok(a));
+        }
+    }
+
+    #[test]
+    fn wire_ids_are_snake_case_lowercase() {
+        assert_eq!(IconAlignment::Start.to_string(), "start");
+        assert_eq!(IconAlignment::Center.to_string(), "center");
+        assert_eq!(IconAlignment::End.to_string(), "end");
+    }
+
+    #[test]
+    fn unknown_is_rejected_and_default_is_end() {
+        assert_eq!("middle".parse::<IconAlignment>(), Err(()));
+        assert_eq!(IconAlignment::default(), IconAlignment::End);
+    }
+
+    #[test]
+    fn serde_uses_the_wire_id() {
+        // The config persists the lowercase wire id, not the PascalCase variant.
+        let json = serde_json::to_string(&IconAlignment::Center).expect("serialize");
+        assert_eq!(json, "\"center\"");
+        let back: IconAlignment = serde_json::from_str("\"end\"").expect("deserialize");
+        assert_eq!(back, IconAlignment::End);
     }
 }

@@ -10,23 +10,28 @@ use crate::app::Message;
 use crate::config::AppletConfig;
 use crate::daemon::{RetryStrategy, ping_daemon};
 use crate::models::state::{DaemonConnectionState, IsOpen, RecordingState};
-use crate::models::theme::VisualizationSide;
+use crate::models::theme::{IconAlignment, VisualizationSide};
 use crate::ui::components::sound_visualization::VisualizationComponent;
 use crate::ui::components::working_animation_component::WorkingAnimationComponent;
 use super_stt_shared::validation::get_http_socket_path;
 
-/// Build the icon-alignment selector and activate the entry named by
-/// the stored `start`/`center`/`end` config value.
-fn build_icon_alignment_model(active: &str) -> (SingleSelectModel, Entity, Entity, Entity) {
+/// Build the icon-alignment selector and activate the entry for the stored
+/// [`IconAlignment`].
+fn build_icon_alignment_model(
+    active: IconAlignment,
+) -> (SingleSelectModel, Entity, Entity, Entity) {
     let mut model = SingleSelectModel::default();
-    let start = model.insert().text("Start").id();
-    let center = model.insert().text("Center").id();
-    let end = model.insert().text("End").id();
-    match active {
-        "center" => model.activate(center),
-        "end" => model.activate(end),
-        _ => model.activate(start),
-    }
+    let start = model.insert().text(IconAlignment::Start.pretty_name()).id();
+    let center = model
+        .insert()
+        .text(IconAlignment::Center.pretty_name())
+        .id();
+    let end = model.insert().text(IconAlignment::End.pretty_name()).id();
+    model.activate(match active {
+        IconAlignment::Start => start,
+        IconAlignment::Center => center,
+        IconAlignment::End => end,
+    });
     (model, start, center, end)
 }
 
@@ -67,7 +72,7 @@ impl SuperSttApplet {
         );
 
         let (icon_alignment_model, icon_alignment_start, icon_alignment_center, icon_alignment_end) =
-            build_icon_alignment_model(config.ui.icon_alignment.as_str());
+            build_icon_alignment_model(config.ui.icon_alignment);
 
         let is_dark = cosmic::theme::active().cosmic().is_dark;
         let (theme_selector_model, theme_selector_light, theme_selector_dark) =

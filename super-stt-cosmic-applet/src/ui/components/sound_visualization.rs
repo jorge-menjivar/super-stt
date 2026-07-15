@@ -139,8 +139,9 @@ impl VisualizationComponent {
 
 impl<'a> From<VisualizationComponent> for Element<'a, Message> {
     fn from(visualization: VisualizationComponent) -> Element<'a, Message> {
-        // Use applet width as cache key to force redraw when size changes
-        Canvas::new(visualization.clone())
+        // `visualization` is already owned (the caller clones out of `&self`),
+        // so hand it straight to the canvas — no second clone.
+        Canvas::new(visualization)
             .width(cosmic::iced::Length::Fill)
             .height(cosmic::iced::Length::Fill)
             .into()

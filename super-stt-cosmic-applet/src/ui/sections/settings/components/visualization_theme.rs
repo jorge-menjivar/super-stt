@@ -44,7 +44,7 @@ pub fn create_visualization_theme_selector<'a>(
         selected_theme.pretty_name(),
         &options,
         Message::RevealerToggle(IsOpen::VisualizationTheme),
-        |theme_str| Message::SetVisualizationTheme(VisualizationTheme::from_str(&theme_str)),
+        |theme_str| Message::SetVisualizationTheme(theme_str.parse().unwrap_or_default()),
     )
     .apply(Element::from)
 }
@@ -73,7 +73,7 @@ pub fn create_working_animation_selector<'a>(
         selected.pretty_name(),
         &options,
         Message::RevealerToggle(IsOpen::WorkingAnimation),
-        |anim_str| Message::SetWorkingAnimation(WorkingAnimationTheme::from_str(&anim_str)),
+        |anim_str| Message::SetWorkingAnimation(anim_str.parse().unwrap_or_default()),
     )
     .apply(Element::from)
 }

@@ -65,11 +65,7 @@ impl SuperSttApplet {
 
             let (applet_padding, _) = self.core.applet.suggested_padding(false);
 
-            let icon_alignment = match self.config.ui.icon_alignment.as_str() {
-                "center" => Alignment::Center,
-                "end" => Alignment::End,
-                _ => Alignment::Start,
-            };
+            let icon_alignment = self.config.ui.icon_alignment.to_alignment();
 
             let icon_button = transparent_icon_button(
                 icon_bytes,

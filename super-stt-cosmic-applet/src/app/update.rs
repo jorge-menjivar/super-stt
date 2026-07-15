@@ -9,14 +9,16 @@ use cosmic::{
     },
     widget::segmented_button::Entity,
 };
-use log::{info, warn};
+use log::{debug, info, warn};
 
 use super::SuperSttApplet;
 use crate::app::Message;
 use crate::daemon::identity::APP_ID;
-use crate::daemon::{RetryStrategy, ping_daemon, ping_daemon_with_status};
+use crate::daemon::{RetryStrategy, ping_daemon};
 use crate::models::state::{DaemonConnectionState, IsOpen, RecordingState};
-use crate::models::theme::{VisualizationColor, VisualizationTheme, WorkingAnimationTheme};
+use crate::models::theme::{
+    IconAlignment, VisualizationColor, VisualizationTheme, WorkingAnimationTheme,
+};
 use super_stt_shared::daemon::session;
 
 impl SuperSttApplet {
@@ -25,14 +27,10 @@ impl SuperSttApplet {
             Message::TogglePopup => self.toggle_popup(),
             Message::CloseRequested(id) => self.close_popup(id),
             Message::DaemonConnected => self.daemon_connected(),
-            Message::PingResponse { .. } => self.ping_response(),
+            Message::PingResponse => self.ping_response(),
             Message::DaemonError(err) => self.daemon_error(&err),
             Message::ScheduleRetry => self.schedule_retry(),
-            Message::RecordingStateChanged(state) => self.recording_state_changed(state),
             Message::RevealerToggle(src) => self.revealer_toggle(src),
-            Message::AudioLevelUpdate { level, is_speech } => {
-                self.audio_level_update(level, is_speech)
-            }
             Message::SetVisualizationTheme(theme) => self.set_visualization_theme(theme),
             Message::SetWorkingAnimation(theme) => self.set_working_animation(theme),
             Message::WidgetRecordingState(is_recording) => {
@@ -41,7 +39,6 @@ impl SuperSttApplet {
             Message::WidgetFrequencyBands {
                 bands,
                 total_energy,
-                ..
             } => self.widget_frequency_bands(&bands, total_energy),
             Message::WidgetTranscribingStarted => {
                 // Guard against out-of-order delivery: only enter Processing
@@ -112,6 +109,12 @@ impl SuperSttApplet {
     }
 
     fn daemon_connected(&mut self) -> cosmic_app::Task<Message> {
+        // Log the connect only on the actual transition — this fires from both
+        // a successful (re)connect ping and the subscription's `Connected`
+        // update, which would otherwise double-log at startup.
+        if self.daemon_state != DaemonConnectionState::Connected {
+            info!("Connected to daemon");
+        }
         self.daemon_state = DaemonConnectionState::Connected;
         self.retry_strategy.reset();
         // The widget /events subscription is self-healing
@@ -125,10 +128,10 @@ impl SuperSttApplet {
     }
 
     fn ping_response(&mut self) -> cosmic_app::Task<Message> {
-        // A successful `/v1/ping` always means the daemon is reachable —
-        // the HTTP protocol carries no separate "connection inactive"
-        // path (the legacy protocol did). Always flip to Connected.
-        info!("Daemon ping successful and connection is active - daemon may be idle");
+        // Fires on every periodic liveness ping (~5 s) while connected — pure
+        // steady state, so log at debug. A successful HTTP `/ping` means the
+        // daemon is reachable; keep the connection live and reset backoff.
+        debug!("Daemon ping OK");
         self.daemon_state = DaemonConnectionState::Connected;
         self.retry_strategy.reset();
         cosmic_app::Task::none()
@@ -149,7 +152,7 @@ impl SuperSttApplet {
     fn schedule_retry(&mut self) -> cosmic_app::Task<Message> {
         self.retry_strategy.should_retry(); // Always true; increments the attempt counter.
         let delay = self.retry_strategy.next_delay();
-        info!(
+        debug!(
             "Scheduling daemon connection retry {} in {:?}",
             self.retry_strategy.attempt, delay
         );
@@ -162,30 +165,12 @@ impl SuperSttApplet {
         )
     }
 
-    fn recording_state_changed(&mut self, state: RecordingState) -> cosmic_app::Task<Message> {
-        if matches!(
-            (&self.recording_state, &state),
-            (RecordingState::Processing, RecordingState::Idle)
-        ) {
-            info!("Transcription completed: Processing -> Idle");
-        }
-        self.set_recording_state(state);
-        cosmic_app::Task::none()
-    }
-
     fn revealer_toggle(&mut self, is_open_src: IsOpen) -> cosmic_app::Task<Message> {
         self.is_open = if self.is_open == is_open_src {
             IsOpen::None
         } else {
             is_open_src
         };
-        cosmic_app::Task::none()
-    }
-
-    fn audio_level_update(&mut self, level: f32, is_speech: bool) -> cosmic_app::Task<Message> {
-        self.audio_level = level;
-        self.is_speech_detected = is_speech;
-        self.visualization.update_audio_level(level, is_speech);
         cosmic_app::Task::none()
     }
 
@@ -292,7 +277,7 @@ impl SuperSttApplet {
             self.daemon_state = DaemonConnectionState::Connecting;
             info!("Manual retry initiated by user");
         }
-        info!(
+        debug!(
             "Retrying daemon connection (attempt {})...",
             self.retry_strategy.attempt
         );
@@ -300,7 +285,7 @@ impl SuperSttApplet {
             cosmic::Action::App(match result {
                 Ok(_) => Message::DaemonConnected,
                 Err(e) => {
-                    info!("Retry failed: {e}");
+                    debug!("Retry failed: {e}");
                     Message::ScheduleRetry
                 }
             })
@@ -309,27 +294,21 @@ impl SuperSttApplet {
 
     fn ping_timeout(&mut self) -> cosmic_app::Task<Message> {
         if self.daemon_state == DaemonConnectionState::Connected {
-            return cosmic_app::Task::perform(
-                ping_daemon_with_status(self.socket_path.clone()),
-                |result| {
-                    cosmic::Action::App(match result {
-                        Ok(response) => Message::PingResponse {
-                            message: response.message,
-                            connection_active: response.connection_active,
-                        },
-                        Err(e) => {
-                            warn!("Daemon ping failed: {e}");
-                            Message::DaemonError(format!("Connection lost: {e}"))
-                        }
-                    })
-                },
-            );
+            return cosmic_app::Task::perform(ping_daemon(self.socket_path.clone()), |result| {
+                cosmic::Action::App(match result {
+                    Ok(_) => Message::PingResponse,
+                    Err(e) => {
+                        warn!("Daemon ping failed: {e}");
+                        Message::DaemonError(format!("Connection lost: {e}"))
+                    }
+                })
+            });
         }
         if self.daemon_state == DaemonConnectionState::Connecting && self.retry_strategy.attempt > 5
         {
             // The retry strategy already drives reconnection during the
             // initial connect; just log occasionally.
-            info!(
+            debug!(
                 "Still attempting to connect (attempt {})...",
                 self.retry_strategy.attempt
             );
@@ -397,16 +376,15 @@ impl SuperSttApplet {
     fn set_icon_alignment(&mut self, entity: Entity) -> cosmic_app::Task<Message> {
         self.icon_alignment_model.activate(entity);
         let alignment = if entity == self.icon_alignment_start {
-            "start"
+            IconAlignment::Start
         } else if entity == self.icon_alignment_center {
-            "center"
+            IconAlignment::Center
         } else if entity == self.icon_alignment_end {
-            "end"
+            IconAlignment::End
         } else {
-            "start"
+            IconAlignment::Start
         };
-        self.config
-            .update(|c| c.ui.icon_alignment = alignment.to_string());
+        self.config.update(|c| c.ui.icon_alignment = alignment);
         cosmic_app::Task::none()
     }
 

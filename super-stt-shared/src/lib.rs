@@ -16,24 +16,3 @@ pub use models::*;
 pub use utils::audio as audio_utils;
 
 pub use audio::*;
-
-/// Macro to conditionally provide GPU device options based on CUDA feature availability
-#[macro_export]
-macro_rules! device_options {
-    () => {{
-        let mut devices = vec!["cpu".to_string()];
-        #[cfg(feature = "cuda")]
-        {
-            devices.push("cuda".to_string());
-        }
-        devices
-    }};
-}
-
-/// Check if CUDA support is available at compile time
-#[macro_export]
-macro_rules! has_cuda_support {
-    () => {
-        cfg!(feature = "cuda")
-    };
-}

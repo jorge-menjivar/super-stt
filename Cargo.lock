@@ -6795,14 +6795,9 @@ version = "0.1.4-beta.2"
 dependencies = [
  "anyhow",
  "async-stream",
- "chrono",
- "clap",
- "cpal",
- "dashmap",
  "dirs",
  "env_logger",
  "futures-util",
- "hound",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -6818,7 +6813,6 @@ dependencies = [
  "super-stt-registry-types",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
  "uuid",
 ]
 

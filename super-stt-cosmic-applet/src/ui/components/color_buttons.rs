@@ -170,7 +170,7 @@ pub fn create_color_button(
         )
         .on_press(message)
         .interaction(cosmic::iced::mouse::Interaction::Pointer),
-        container(text(vis_color.to_string())).apply(Element::from),
+        container(text(vis_color.pretty_name())).apply(Element::from),
         cosmic::widget::tooltip::Position::Bottom,
     )
     .into()

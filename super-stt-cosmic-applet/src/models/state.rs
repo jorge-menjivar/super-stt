@@ -25,5 +25,4 @@ pub enum IsOpen {
     VisualizationTheme,
     WorkingAnimation,
     VisualizationColors,
-    AppletSettings,
 }

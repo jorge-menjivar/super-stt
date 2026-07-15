@@ -12,16 +12,6 @@ use std::path::PathBuf;
 use super_stt_shared::daemon::http_client;
 use super_stt_shared::daemon::session;
 
-/// What the applet's update loop expects from `ping_daemon_with_status`.
-/// In the legacy protocol the daemon could report
-/// `connection_active = false` separately from a successful ping; the
-/// HTTP `/ping` route is just 200-or-not, so a successful response
-/// always implies `connection_active = true`.
-pub struct PingResponse {
-    pub message: String,
-    pub connection_active: bool,
-}
-
 /// Run an HTTP-protocol operation with the cached widget-scope token.
 /// On `invalid_session` the cache is invalidated and the operation
 /// retries once with a fresh consent flow. Delegates the retry
@@ -54,19 +44,4 @@ pub async fn ping_daemon(socket_path: PathBuf) -> Result<String, String> {
         http_client::ping(sock, &token).await
     })
     .await
-}
-
-/// Ping the daemon and report whether the connection should be
-/// considered active. Mirrors the legacy two-field response; under
-/// HTTP, a successful ping always means `connection_active = true`.
-///
-/// # Errors
-///
-/// Same conditions as [`ping_daemon`].
-pub async fn ping_daemon_with_status(socket_path: PathBuf) -> Result<PingResponse, String> {
-    let message = ping_daemon(socket_path).await?;
-    Ok(PingResponse {
-        message,
-        connection_active: true,
-    })
 }

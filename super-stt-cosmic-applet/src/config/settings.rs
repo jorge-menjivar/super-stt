@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::VisualizationSide;
-use crate::models::theme::{VisualizationColorConfig, VisualizationTheme, WorkingAnimationTheme};
+use crate::models::theme::{
+    IconAlignment, VisualizationColorConfig, VisualizationTheme, WorkingAnimationTheme,
+};
 use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -35,9 +37,12 @@ pub struct VisualizationConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiConfig {
-    pub last_popup_state: String, // Store as string for simplicity
     pub show_icon: bool,
-    pub icon_alignment: String,
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub icon_alignment: IconAlignment,
     pub applet_width: u32,        // Width in pixels
     pub show_visualization: bool, // Whether to show visualizations when recording
 }
@@ -52,9 +57,8 @@ impl Default for AppletConfig {
                 working_animation: WorkingAnimationTheme::default(),
             },
             ui: UiConfig {
-                last_popup_state: "None".to_string(),
                 show_icon: true,
-                icon_alignment: "end".to_string(),
+                icon_alignment: IconAlignment::End,
                 applet_width: 120,        // Default width in pixels
                 show_visualization: true, // Default to showing visualizations when recording
             },
@@ -185,7 +189,9 @@ mod working_animation_config_tests {
 #[cfg(test)]
 mod upgrade_compat_tests {
     use super::AppletConfig;
-    use crate::models::theme::{VisualizationColor, VisualizationTheme, WorkingAnimationTheme};
+    use crate::models::theme::{
+        IconAlignment, VisualizationColor, VisualizationTheme, WorkingAnimationTheme,
+    };
 
     /// The committed v0.1.3 `applet-full.toml` fixture. The canonical copy lives
     /// in the on-disk corpus so the release gate and these detailed assertions
@@ -209,7 +215,7 @@ mod upgrade_compat_tests {
             VisualizationColor::Blue
         );
         assert_eq!(cfg.ui.applet_width, 150);
-        assert_eq!(cfg.ui.icon_alignment, "end");
+        assert_eq!(cfg.ui.icon_alignment, IconAlignment::End);
         // New field materializes at its default.
         assert_eq!(
             cfg.visualization.working_animation,
@@ -257,6 +263,9 @@ mod upgrade_compat_tests {
 
     #[test]
     fn applet_bad_theme_falls_back_preserving_rest() {
+        // `last_popup_state` is an old, since-removed field; serde must ignore
+        // it (forward compat) rather than reject the whole config. `icon_alignment`
+        // carries a bad value and must fall back to its default without erroring.
         let toml_str = r#"
 [visualization]
 theme = "Nonexistent"
@@ -269,12 +278,13 @@ dark_colors = "PastelGreen"
 [ui]
 last_popup_state = "None"
 show_icon = true
-icon_alignment = "end"
+icon_alignment = "sideways"
 applet_width = 150
 show_visualization = true
 "#;
         let cfg: AppletConfig = toml::from_str(toml_str).expect("must parse, not error");
         assert_eq!(cfg.visualization.theme, VisualizationTheme::default()); // reset
+        assert_eq!(cfg.ui.icon_alignment, IconAlignment::default()); // bad value → default
         assert_eq!(
             cfg.visualization.colors.light_colors,
             VisualizationColor::Blue

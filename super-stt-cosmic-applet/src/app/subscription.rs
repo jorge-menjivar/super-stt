@@ -104,7 +104,6 @@ fn widget_event_to_message(evt: WidgetEvent) -> Message {
         ),
         "frequency_bands" => Message::WidgetFrequencyBands {
             bands: b64_to_f32_vec(p.get("bands_b64").and_then(Value::as_str)),
-            sample_rate: f64_to_f32(p.get("sample_rate").and_then(Value::as_f64).unwrap_or(0.0)),
             total_energy: f64_to_f32(p.get("total_energy").and_then(Value::as_f64).unwrap_or(0.0)),
         },
         "revoked" => Message::WidgetRevoked(

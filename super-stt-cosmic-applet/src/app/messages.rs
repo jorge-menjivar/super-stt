@@ -2,7 +2,7 @@
 use cosmic::{iced::window, widget::segmented_button::Entity};
 
 use crate::models::{
-    state::{IsOpen, RecordingState},
+    state::IsOpen,
     theme::{VisualizationColor, VisualizationTheme, WorkingAnimationTheme},
 };
 
@@ -12,17 +12,11 @@ pub enum Message {
     CloseRequested(window::Id),
     DaemonConnected,
     DaemonError(String),
-    RecordingStateChanged(RecordingState),
-    AudioLevelUpdate {
-        level: f32,
-        is_speech: bool,
-    },
     /// `recording_state` event from the daemon's `/events` SSE stream.
     WidgetRecordingState(bool),
     /// `frequency_bands` event — pre-computed visualization bands.
     WidgetFrequencyBands {
         bands: Vec<f32>,
-        sample_rate: f32,
         total_energy: f32,
     },
     /// `transcribing_started` event — the daemon began decoding captured audio.
@@ -49,10 +43,8 @@ pub enum Message {
     RetryConnection,
     ScheduleRetry,
     PingTimeout,
-    PingResponse {
-        message: String,
-        connection_active: bool,
-    },
+    /// A periodic liveness ping succeeded while already connected.
+    PingResponse,
     OpenGitHub,
     LaunchApp,
     RevealerToggle(IsOpen),

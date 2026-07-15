@@ -12,16 +12,9 @@ workspace = true
     # Core shared dependencies
     anyhow.workspace = true
 async-stream = "0.3.6"
-    chrono.workspace = true
-    clap.workspace = true
-    cpal = { workspace = true, optional = true }
-    # Notification service dependencies
-    dashmap.workspace = true
 dirs.workspace = true
 env_logger.workspace = true
 futures-util.workspace = true
-    # Audio processing (optional feature)
-    hound = { workspace = true, optional = true }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
@@ -43,10 +36,9 @@ super-stt-registry-types = { path = "../super-stt-registry-types" }
         "rt-multi-thread",
         "time",
     ] }
-tokio-stream = { version = "0.1.18", features = ["sync"] }
     uuid.workspace = true
 
 [features]
     default = []
     analysis = ["spectrum-analyzer"]
-    audio = ["cpal", "hound", "rubato"]
+    audio = ["rubato"]

@@ -1062,32 +1062,36 @@ Tier 2 #4/#6/#8.
   `visualization.side` (fixed per binary at load) instead of threading a
   `variant` string, so the `variant_name` field drops entirely.
 
-### [ ] 22. 🟡 Applet: type `icon_alignment`
+### [x] 22. 🟡 Applet: type `icon_alignment`
 
 - **Where:** three hand-written string mappings (`init.rs:22-33`,
   `update.rs:405-419`, `view.rs:68-72`).
-- **Fix:** standardize the theme enums on one conversion idiom (currently inherent
-  `from_str` / `FromStr` / `From<String>` mixed, with `Display` meaning wire-id for
-  some and pretty-name for others).
+- **Fix:** introduced an `IconAlignment` enum (serde snake-case wire id +
+  `deserialize_or_default`) replacing the bare `String`, so the three mappings are
+  typed. Unified the from-wire idiom: `VisualizationTheme`/`WorkingAnimationTheme`
+  moved from inherent `from_str` to the `FromStr` trait (matching
+  `VisualizationSide` and `IconAlignment`); `VisualizationColor`'s pretty `Display`
+  became `pretty_name()` (the UI-label idiom) and its caller-less `From<String>`
+  was dropped, leaving Color a serde-only enum with no wire round-trip.
 
-### [ ] 23. 🟡 Applet: legacy-protocol vestiges (~100 lines)
+### [x] 23. 🟡 Applet: legacy-protocol vestiges (~100 lines)
 
 - Unsendable `RecordingStateChanged`/`AudioLevelUpdate` messages, `PingResponse`
   fields fully discarded, unused `sample_rate` decode, caller-less
   `From<String> for VisualizationColor`, never-constructed
   `IsOpen::AppletSettings`, write-only `UiConfig.last_popup_state`.
 
-### [ ] 24. 🟡 Applet: logging noise
+### [x] 24. 🟡 Applet: logging noise
 
 - **Where:** `info!` per successful 5 s ping forever (`update.rs:133`) with stale
   legacy phrasing; the retry path mixes info/warn.
 - **Fix:** log transitions at info, steady-state at debug.
 
-### [ ] 25. 🟡 Applet: double clone per frame + stale comment in the visualization `Element` conversion
+### [x] 25. 🟡 Applet: double clone per frame + stale comment in the visualization `Element` conversion
 
 - **Where:** `sound_visualization.rs:140-148`.
 
-### [ ] 26. 🟡 Shared: dead public API + unused deps
+### [x] 26. 🟡 Shared: dead public API + unused deps
 
 - **Where:** `get_secure_socket_path` + `generate_secure_client_id` (zero
   consumers; `get_http_socket_path` doc still claims dual listeners),

@@ -32,7 +32,7 @@ rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] 
     strum_macros.workspace = true
 super-stt-registry-types = { version = "0.1.4-beta.2", path = "../super-stt-registry-types" }
     # Workspace dependencies
-    super-stt-shared = { path = "../super-stt-shared", features = ["analysis"] }
+    super-stt-shared = { path = "../super-stt-shared" }
     tokio.workspace = true
     # Configuration
     toml.workspace = true
