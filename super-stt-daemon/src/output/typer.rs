@@ -180,14 +180,14 @@ impl Typer {
     /// characters** (chars typed minus chars deleted) so callers accounting in
     /// chars stay consistent — mixing this with a byte length would drift on any
     /// multibyte text.
-    pub fn apply_simple_diff(&mut self, old_text: &str, new_text: &str) -> isize {
+    pub async fn apply_simple_diff(&mut self, old_text: &str, new_text: &str) -> isize {
         // Safety checks
         if old_text == new_text {
             return 0;
         }
 
         if old_text.is_empty() && !new_text.is_empty() {
-            if let Err(e) = self.keyboard_simulator.type_text(new_text) {
+            if let Err(e) = self.keyboard_simulator.type_text(new_text).await {
                 debug!("Failed to type new text: {e}");
             }
             return isize::try_from(new_text.chars().count()).unwrap_or(isize::MAX);
@@ -217,10 +217,10 @@ impl Typer {
         );
 
         // Backspace to the first different position
-        let _ = self.keyboard_simulator.backspace_n(chars_to_delete);
+        let _ = self.keyboard_simulator.backspace_n(chars_to_delete).await;
 
         // Type the new part
-        let _ = self.keyboard_simulator.type_text(&text_to_type);
+        let _ = self.keyboard_simulator.type_text(&text_to_type).await;
 
         // Net screen delta in chars: what we added minus what we removed.
         isize::try_from(chars_to_type).unwrap_or(isize::MAX)
@@ -228,7 +228,7 @@ impl Typer {
     }
 
     /// Update preview text using two-phase approach
-    pub fn update_preview(&mut self, new_text: &str, actually_typed: &mut String) {
+    pub async fn update_preview(&mut self, new_text: &str, actually_typed: &mut String) {
         let processed_text = preprocess_text(new_text, true);
 
         info!(
@@ -272,16 +272,16 @@ impl Typer {
         );
 
         // Apply the update to screen
-        self.apply_text_update(&display_text, actually_typed);
+        self.apply_text_update(&display_text, actually_typed).await;
         self.state.prev_text = processed_text;
     }
 
     /// Process final text (completed sentence) - Uses full session audio
-    pub fn process_final_text(&mut self, transcription_result: &str) {
+    pub async fn process_final_text(&mut self, transcription_result: &str) {
         // No preview typing, type directly
         let processed_text = preprocess_text(transcription_result, false);
         let final_text = format!("{processed_text} ");
-        if let Err(e) = self.keyboard_simulator.type_text(&final_text) {
+        if let Err(e) = self.keyboard_simulator.type_text(&final_text).await {
             warn!("Failed to type final transcription: {e}");
         } else {
             info!("Step 6 complete: Final transcription typed directly");
@@ -306,7 +306,7 @@ impl Typer {
     }
 
     /// Apply text update to screen (common logic)
-    fn apply_text_update(&mut self, new_text: &str, actually_typed: &mut String) {
+    async fn apply_text_update(&mut self, new_text: &str, actually_typed: &mut String) {
         info!(
             "Typing logic: old_typed='{}', new_display='{}'",
             actually_typed.chars().take(30).collect::<String>(),
@@ -319,17 +319,23 @@ impl Typer {
                 "Screen empty, typing new text: '{}'",
                 new_text.chars().take(30).collect::<String>()
             );
-            let _ = self.keyboard_simulator.type_text(&format!("{new_text} "));
+            let _ = self
+                .keyboard_simulator
+                .type_text(&format!("{new_text} "))
+                .await;
         } else if new_text.starts_with(actually_typed.as_str())
             && new_text.len() > actually_typed.len()
         {
             // Perfect extension — append only the new suffix.
             let suffix = &new_text[actually_typed.len()..];
             info!("Perfect extension, adding suffix: '{suffix}'");
-            let _ = self.keyboard_simulator.type_text(&format!("{suffix} "));
+            let _ = self
+                .keyboard_simulator
+                .type_text(&format!("{suffix} "))
+                .await;
         } else {
             // Replacement — backspace to the first difference and retype.
-            let net_change = self.apply_simple_diff(actually_typed, new_text);
+            let net_change = self.apply_simple_diff(actually_typed, new_text).await;
             info!("Diff replacement: net {net_change} char(s)");
         }
 
@@ -345,7 +351,7 @@ impl Typer {
     }
 
     /// Clear all typed text and reset state
-    pub fn clear_preview(&mut self, actually_typed: &mut String) {
+    pub async fn clear_preview(&mut self, actually_typed: &mut String) {
         info!("clear_preview called with actually_typed: '{actually_typed}'");
 
         if actually_typed.is_empty() {
@@ -356,7 +362,7 @@ impl Typer {
         let chars_to_delete = actually_typed.chars().count();
         info!("Backspacing {chars_to_delete} characters");
 
-        if let Err(e) = self.keyboard_simulator.backspace_n(chars_to_delete) {
+        if let Err(e) = self.keyboard_simulator.backspace_n(chars_to_delete).await {
             warn!("Failed to backspace preview text: {e}");
         } else {
             info!("Successfully backspaced {chars_to_delete} characters");

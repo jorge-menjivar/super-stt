@@ -11,12 +11,18 @@ use cosmic::prelude::*;
 use futures_util::StreamExt;
 use super_stt_shared::daemon::http_client::HttpError;
 
-/// Build a Customization-scoped banner message for a failed audio-settings save.
-fn customization_error(e: &HttpError) -> Message {
-    Message::SettingActionFailed {
-        scope: ErrorScope::Customization,
+/// Build the audio-theme rollback message: restore the captured pre-save theme
+/// fields and raise a Customization banner (audit Tier 3 #37).
+fn audio_theme_save_failed(
+    prev_selected: AudioTheme,
+    prev_non_silent: AudioTheme,
+    e: &HttpError,
+) -> Message {
+    Message::Recording(RecordingMessage::AudioThemeSaveFailed {
+        prev_selected,
+        prev_non_silent,
         message: e.to_string(),
-    }
+    })
 }
 
 impl AppModel {
@@ -33,9 +39,11 @@ impl AppModel {
 
             RecordingMessage::AudioFeedbackToggled(_)
             | RecordingMessage::AudioThemeSelected(_)
+            | RecordingMessage::AudioThemeSaveFailed { .. }
             | RecordingMessage::AudioThemesLoaded(_)
             | RecordingMessage::VolumeChanged(_)
             | RecordingMessage::VolumeCommit
+            | RecordingMessage::VolumeSaveFailed { .. }
             | RecordingMessage::WidgetAudioLevel { .. }
             | RecordingMessage::WidgetRecordingState(_) => self.handle_audio_messages(message),
         }
@@ -105,6 +113,11 @@ impl AppModel {
             RecordingMessage::AudioFeedbackToggled(enabled) => {
                 // Clear any stale Customization banner as the user retries.
                 self.clear_action_error(ErrorScope::Customization);
+                // Capture the pre-optimistic values so a failed save can roll
+                // the UI back instead of leaving it stuck on the value the
+                // daemon rejected (audit Tier 3 #37).
+                let prev_selected = self.selected_audio_theme;
+                let prev_non_silent = self.last_non_silent_theme;
                 let theme = if enabled {
                     self.last_non_silent_theme
                 } else {
@@ -112,26 +125,50 @@ impl AppModel {
                 };
                 self.selected_audio_theme = theme;
                 // Success is a no-op (the optimistic value already holds); a
-                // failure surfaces a scoped banner instead of flipping the whole
-                // app to the connection-error page (Tier 1 #13). Reusing
-                // `DaemonConnected` here also used to trigger a full settings
-                // refetch on every toggle (Tier 1 #14).
-                Task::perform(set_audio_theme(theme), |result| match result {
+                // failure restores the prior value and surfaces a scoped banner
+                // instead of flipping the whole app to the connection-error page
+                // (Tier 1 #13). Reusing `DaemonConnected` here also used to
+                // trigger a full settings refetch on every toggle (Tier 1 #14).
+                Task::perform(set_audio_theme(theme), move |result| match result {
                     Ok(_) => cosmic::Action::None,
-                    Err(e) => cosmic::Action::App(customization_error(&e)),
+                    Err(e) => cosmic::Action::App(audio_theme_save_failed(
+                        prev_selected,
+                        prev_non_silent,
+                        &e,
+                    )),
                 })
             }
 
             RecordingMessage::AudioThemeSelected(theme) => {
                 self.clear_action_error(ErrorScope::Customization);
+                let prev_selected = self.selected_audio_theme;
+                let prev_non_silent = self.last_non_silent_theme;
                 self.selected_audio_theme = theme;
                 if theme != AudioTheme::Silent {
                     self.last_non_silent_theme = theme;
                 }
-                Task::perform(set_and_test_audio_theme(theme), |result| match result {
-                    Ok(_) => cosmic::Action::None,
-                    Err(e) => cosmic::Action::App(customization_error(&e)),
-                })
+                Task::perform(
+                    set_and_test_audio_theme(theme),
+                    move |result| match result {
+                        Ok(_) => cosmic::Action::None,
+                        Err(e) => cosmic::Action::App(audio_theme_save_failed(
+                            prev_selected,
+                            prev_non_silent,
+                            &e,
+                        )),
+                    },
+                )
+            }
+
+            RecordingMessage::AudioThemeSaveFailed {
+                prev_selected,
+                prev_non_silent,
+                message,
+            } => {
+                self.selected_audio_theme = prev_selected;
+                self.last_non_silent_theme = prev_non_silent;
+                self.set_action_error(ErrorScope::Customization, message);
+                Task::none()
             }
 
             RecordingMessage::AudioThemesLoaded(themes) => {
@@ -149,10 +186,32 @@ impl AppModel {
 
             RecordingMessage::VolumeCommit => {
                 self.clear_action_error(ErrorScope::Customization);
-                Task::perform(set_volume(self.volume), |result| match result {
+                // The drag already clobbered `self.volume`, so the rollback
+                // target is the last committed value. Advance it optimistically
+                // and capture the prior committed value for a possible rollback
+                // (audit Tier 3 #37).
+                let prev_volume = self.last_committed_volume;
+                let new_volume = self.volume;
+                self.last_committed_volume = new_volume;
+                Task::perform(set_volume(new_volume), move |result| match result {
                     Ok(()) => cosmic::Action::None,
-                    Err(e) => cosmic::Action::App(customization_error(&e)),
+                    Err(e) => cosmic::Action::App(Message::Recording(
+                        RecordingMessage::VolumeSaveFailed {
+                            prev_volume,
+                            message: e.to_string(),
+                        },
+                    )),
                 })
+            }
+
+            RecordingMessage::VolumeSaveFailed {
+                prev_volume,
+                message,
+            } => {
+                self.volume = prev_volume;
+                self.last_committed_volume = prev_volume;
+                self.set_action_error(ErrorScope::Customization, message);
+                Task::none()
             }
 
             RecordingMessage::WidgetAudioLevel { level, is_speech } => {

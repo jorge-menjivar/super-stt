@@ -135,6 +135,18 @@ pub enum ModelsPageMessage {
     /// Select a backend as active without loading a model — the card moves to
     /// the top, any model from a different backend is unloaded.
     SelectBackend(String),
+    /// A `SelectBackend` activation POST failed: restore the previously-active
+    /// backend and surface the model-card error (audit Tier 3 #37).
+    BackendSelectFailed {
+        prev_active: Option<String>,
+        message: String,
+    },
+    /// A `LoadStagedModel` switch failed: restore the previously-current device
+    /// and surface the model-card error (audit Tier 3 #37).
+    StagedModelLoadFailed {
+        prev_device: String,
+        message: String,
+    },
     /// Deselect the active backend (unload its model → daemon idle).
     DeselectBackend,
     /// Active backend `source` loaded from the daemon (None = idle).
@@ -342,11 +354,25 @@ pub enum RecordingMessage {
     AudioFeedbackToggled(bool),
     AudioThemeSelected(AudioTheme),
     AudioThemesLoaded(Vec<AudioTheme>),
+    /// A theme/feedback save failed: restore the optimistically-set theme
+    /// fields to the captured pre-save values and raise a scoped banner
+    /// (audit Tier 3 #37).
+    AudioThemeSaveFailed {
+        prev_selected: AudioTheme,
+        prev_non_silent: AudioTheme,
+        message: String,
+    },
     /// A drag tick: updates the local slider value only (no daemon POST).
     VolumeChanged(u8),
     /// The slider was released: commit the current value to the daemon once,
     /// rather than one POST per drag tick (Tier 1 #19).
     VolumeCommit,
+    /// A volume commit failed: restore the slider to the last committed value
+    /// and raise a scoped banner (audit Tier 3 #37).
+    VolumeSaveFailed {
+        prev_volume: u8,
+        message: String,
+    },
     /// `frequency_bands` event from the daemon's `/events` SSE stream
     /// — already converted to (`display_level_percent`, `is_speech`) so
     /// the settings UI can drive its meter unchanged.

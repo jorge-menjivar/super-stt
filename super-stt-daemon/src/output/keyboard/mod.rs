@@ -85,15 +85,21 @@ impl Simulator {
         }
     }
 
-    /// Type text using the active backend.
+    /// Type text using the active backend. Async so the portal backend awaits
+    /// its D-Bus calls directly and the blocking backends yield the worker
+    /// (audit Tier 3 #35).
     ///
     /// # Errors
     /// Returns an error if the backend fails to simulate key input.
-    pub fn type_text(&mut self, text: &str) -> Result<()> {
+    pub async fn type_text(&mut self, text: &str) -> Result<()> {
         match self {
-            Self::WaylandProtocol(b) => b.type_text(text),
-            Self::Ydotool(_) => YdotoolBackend::type_text(text),
-            Self::XdgPortal(b) => b.type_text(text),
+            // The enigo/ydotool backends are synchronous and `!Send`; run them
+            // under `block_in_place` so their handle never crosses an await and
+            // the runtime spins up a replacement worker rather than stalling. The
+            // portal backend is genuinely async — await it directly.
+            Self::WaylandProtocol(b) => tokio::task::block_in_place(|| b.type_text(text)),
+            Self::Ydotool(_) => tokio::task::block_in_place(|| YdotoolBackend::type_text(text)),
+            Self::XdgPortal(b) => b.type_text(text).await,
         }
     }
 
@@ -101,14 +107,14 @@ impl Simulator {
     ///
     /// # Errors
     /// Returns an error if the backend fails to simulate key input.
-    pub fn backspace_n(&mut self, n: usize) -> Result<()> {
+    pub async fn backspace_n(&mut self, n: usize) -> Result<()> {
         match self {
             Self::WaylandProtocol(b) => {
-                b.backspace_n(n);
+                tokio::task::block_in_place(|| b.backspace_n(n));
                 Ok(())
             }
-            Self::Ydotool(_) => YdotoolBackend::backspace_n(n),
-            Self::XdgPortal(b) => b.backspace_n(n),
+            Self::Ydotool(_) => tokio::task::block_in_place(|| YdotoolBackend::backspace_n(n)),
+            Self::XdgPortal(b) => b.backspace_n(n).await,
         }
     }
 }

@@ -16,22 +16,30 @@ use std::sync::{Mutex, OnceLock};
 
 const SERVICE_NAME: &str = "super-stt";
 
-/// When `SUPER_STT_KEYRING_MOCK` is set, route session-blob keyring access to
-/// an in-memory mock store instead of the system secret service.
-///
-/// The integration tests spawn the daemon as a subprocess and CI runs
-/// headless, where there is no unlocked system keyring — touching the real
-/// secret service there blocks on an unlock prompt or fails. This must be
-/// called once at daemon startup, before any keyring access, as it sets the
-/// process-wide default credential builder.
-///
-/// Backend-secret access uses `mock_store()` instead and does not go through
-/// this builder.
-pub fn install_mock_if_requested() {
-    if std::env::var_os("SUPER_STT_KEYRING_MOCK").is_some() {
-        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
-        // Runs before the logger is initialized, so use stderr directly.
-        eprintln!("SUPER_STT_KEYRING_MOCK set — using an in-memory keyring (test/CI only)");
+/// Errors from keyring access. A small typed enum replacing the previous
+/// stringly `Result<_, String>`; every variant's `Display` preserves the
+/// account context and underlying cause so existing `{e}` interpolations read
+/// the same (audit Tier 3 #36).
+#[derive(Debug, thiserror::Error)]
+pub enum KeyringError {
+    /// Opening, reading, writing, or deleting a system-keyring entry failed.
+    #[error("keyring access failed for {account}: {source}")]
+    Backend {
+        account: String,
+        #[source]
+        source: keyring::Error,
+    },
+    /// The `spawn_blocking` keyring task panicked or was cancelled.
+    #[error("keyring task failed: {0}")]
+    Task(String),
+}
+
+impl KeyringError {
+    fn backend(account: &str, source: keyring::Error) -> Self {
+        Self::Backend {
+            account: account.to_string(),
+            source,
+        }
     }
 }
 
@@ -78,7 +86,7 @@ fn mock_store() -> Option<&'static Mutex<HashMap<String, String>>> {
 }
 
 /// Read one keyring account (mock store under test/mock, else the real keyring).
-fn kv_get(account: &str) -> Result<Option<String>, String> {
+fn kv_get(account: &str) -> Result<Option<String>, KeyringError> {
     if let Some(store) = mock_store() {
         return Ok(store
             .lock()
@@ -87,16 +95,16 @@ fn kv_get(account: &str) -> Result<Option<String>, String> {
             .cloned());
     }
     let entry = keyring::Entry::new(SERVICE_NAME, account)
-        .map_err(|e| format!("Failed to access keyring entry for {account}: {e}"))?;
+        .map_err(|e| KeyringError::backend(account, e))?;
     match entry.get_password() {
         Ok(p) => Ok(Some(p)),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("Failed to read keyring entry {account}: {e}")),
+        Err(e) => Err(KeyringError::backend(account, e)),
     }
 }
 
 /// Write one keyring account (mock store under test/mock, else the real keyring).
-fn kv_set(account: &str, value: &str) -> Result<(), String> {
+fn kv_set(account: &str, value: &str) -> Result<(), KeyringError> {
     if let Some(store) = mock_store() {
         store
             .lock()
@@ -105,15 +113,15 @@ fn kv_set(account: &str, value: &str) -> Result<(), String> {
         return Ok(());
     }
     let entry = keyring::Entry::new(SERVICE_NAME, account)
-        .map_err(|e| format!("Failed to access keyring entry for {account}: {e}"))?;
+        .map_err(|e| KeyringError::backend(account, e))?;
     entry
         .set_password(value)
-        .map_err(|e| format!("Failed to store keyring entry {account}: {e}"))
+        .map_err(|e| KeyringError::backend(account, e))
 }
 
 /// Delete one keyring account; absent is success (mock store under test/mock,
 /// else the real keyring).
-fn kv_delete(account: &str) -> Result<(), String> {
+fn kv_delete(account: &str) -> Result<(), KeyringError> {
     if let Some(store) = mock_store() {
         store
             .lock()
@@ -122,10 +130,10 @@ fn kv_delete(account: &str) -> Result<(), String> {
         return Ok(());
     }
     let entry = keyring::Entry::new(SERVICE_NAME, account)
-        .map_err(|e| format!("Failed to access keyring entry for {account}: {e}"))?;
+        .map_err(|e| KeyringError::backend(account, e))?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("Failed to delete keyring entry {account}: {e}")),
+        Err(e) => Err(KeyringError::backend(account, e)),
     }
 }
 
@@ -135,7 +143,7 @@ fn kv_delete(account: &str) -> Result<(), String> {
 /// # Errors
 ///
 /// Returns an error if the keyring is unavailable or access fails.
-pub fn get_backend_secret(source: &str, name: &str) -> Result<Option<String>, String> {
+pub fn get_backend_secret(source: &str, name: &str) -> Result<Option<String>, KeyringError> {
     kv_get(&backend_secret_account(source, name)).map_err(|e| {
         warn!(
             "Failed to read backend secret {} ({}): {e}",
@@ -154,10 +162,7 @@ pub fn get_backend_secret(source: &str, name: &str) -> Result<Option<String>, St
 /// # Errors
 ///
 /// Returns an error if the keyring is unavailable or access fails.
-pub fn get_sessions_blob() -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new(SERVICE_NAME, SESSIONS_KEY)
-        .map_err(|e| format!("Failed to access keyring entry for sessions: {e}"))?;
-
+pub fn get_sessions_blob() -> Result<Option<String>, KeyringError> {
     // Surface the read before it happens: on a *locked* keyring this call
     // blocks on the secret-service unlock prompt, potentially for a long
     // time. Logging first means a stalled startup is explained in the
@@ -167,18 +172,21 @@ pub fn get_sessions_blob() -> Result<Option<String>, String> {
         "Reading the persisted session store from the system keyring; if the keyring \
          is locked, the daemon will wait here until it is unlocked"
     );
-    match entry.get_password() {
-        Ok(blob) => {
+    // The sessions blob is just another keyring account, so route it through
+    // `kv_get` — one mock mechanism (the process-global store), not a second
+    // one via the credential-builder mock (audit Tier 3 #36).
+    match kv_get(SESSIONS_KEY) {
+        Ok(Some(blob)) => {
             debug!("Loaded persisted session blob from keyring");
             Ok(Some(blob))
         }
-        Err(keyring::Error::NoEntry) => {
+        Ok(None) => {
             debug!("No persisted session blob in keyring (fresh install)");
             Ok(None)
         }
         Err(e) => {
             warn!("Failed to read session blob from keyring: {e}");
-            Err(format!("Failed to read session blob: {e}"))
+            Err(e)
         }
     }
 }
@@ -187,7 +195,7 @@ pub fn get_sessions_blob() -> Result<Option<String>, String> {
 ///
 /// # Errors
 /// Returns an error if the keyring is unavailable or the write fails.
-pub fn set_backend_secret(source: &str, name: &str, value: &str) -> Result<(), String> {
+pub fn set_backend_secret(source: &str, name: &str, value: &str) -> Result<(), KeyringError> {
     kv_set(&backend_secret_account(source, name), value)
 }
 
@@ -195,7 +203,7 @@ pub fn set_backend_secret(source: &str, name: &str, value: &str) -> Result<(), S
 ///
 /// # Errors
 /// Returns an error if the keyring is unavailable or the delete fails.
-pub fn delete_backend_secret(source: &str, name: &str) -> Result<(), String> {
+pub fn delete_backend_secret(source: &str, name: &str) -> Result<(), KeyringError> {
     kv_delete(&backend_secret_account(source, name))
 }
 
@@ -203,7 +211,7 @@ pub fn delete_backend_secret(source: &str, name: &str) -> Result<(), String> {
 ///
 /// # Errors
 /// Returns an error if the keyring is unavailable or access fails.
-pub fn has_backend_secret(source: &str, name: &str) -> Result<bool, String> {
+pub fn has_backend_secret(source: &str, name: &str) -> Result<bool, KeyringError> {
     Ok(kv_get(&backend_secret_account(source, name))?.is_some())
 }
 
@@ -219,10 +227,10 @@ pub fn has_backend_secret(source: &str, name: &str) -> Result<bool, String> {
 pub async fn get_backend_secret_async(
     source: String,
     name: String,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, KeyringError> {
     tokio::task::spawn_blocking(move || get_backend_secret(&source, &name))
         .await
-        .map_err(|e| format!("keyring task failed: {e}"))?
+        .map_err(|e| KeyringError::Task(e.to_string()))?
 }
 
 /// Async form of [`set_backend_secret`], run on a blocking thread.
@@ -233,30 +241,30 @@ pub async fn set_backend_secret_async(
     source: String,
     name: String,
     value: String,
-) -> Result<(), String> {
+) -> Result<(), KeyringError> {
     tokio::task::spawn_blocking(move || set_backend_secret(&source, &name, &value))
         .await
-        .map_err(|e| format!("keyring task failed: {e}"))?
+        .map_err(|e| KeyringError::Task(e.to_string()))?
 }
 
 /// Async form of [`delete_backend_secret`], run on a blocking thread.
 ///
 /// # Errors
 /// Returns an error if the keyring is unavailable or the delete fails.
-pub async fn delete_backend_secret_async(source: String, name: String) -> Result<(), String> {
+pub async fn delete_backend_secret_async(source: String, name: String) -> Result<(), KeyringError> {
     tokio::task::spawn_blocking(move || delete_backend_secret(&source, &name))
         .await
-        .map_err(|e| format!("keyring task failed: {e}"))?
+        .map_err(|e| KeyringError::Task(e.to_string()))?
 }
 
 /// Async form of [`has_backend_secret`], run on a blocking thread.
 ///
 /// # Errors
 /// Returns an error if the keyring is unavailable or access fails.
-pub async fn has_backend_secret_async(source: String, name: String) -> Result<bool, String> {
+pub async fn has_backend_secret_async(source: String, name: String) -> Result<bool, KeyringError> {
     tokio::task::spawn_blocking(move || has_backend_secret(&source, &name))
         .await
-        .map_err(|e| format!("keyring task failed: {e}"))?
+        .map_err(|e| KeyringError::Task(e.to_string()))?
 }
 
 #[cfg(test)]
@@ -277,6 +285,17 @@ mod tests {
         assert!(!has_backend_secret(src, name).unwrap());
         delete_backend_secret(src, name).unwrap(); // idempotent
     }
+
+    /// The sessions blob now routes through `kv_*`, so a set-then-get shares the
+    /// process-global mock store and round-trips in-process (audit Tier 3 #36).
+    /// Before, the two accessors built isolated `keyring::Entry` credentials
+    /// under the builder mock and could not share state.
+    #[test]
+    fn sessions_blob_roundtrips_through_kv() {
+        let blob = r#"{"version":2,"sessions":{}}"#;
+        set_sessions_blob(blob).unwrap();
+        assert_eq!(get_sessions_blob().unwrap().as_deref(), Some(blob));
+    }
 }
 
 /// Write the daemon's HTTP session blob to the keyring. The value is
@@ -286,14 +305,10 @@ mod tests {
 /// # Errors
 ///
 /// Returns an error if the keyring is unavailable or the write fails.
-pub fn set_sessions_blob(value: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new(SERVICE_NAME, SESSIONS_KEY)
-        .map_err(|e| format!("Failed to access keyring entry for sessions: {e}"))?;
-
-    entry
-        .set_password(value)
-        .map_err(|e| format!("Failed to store session blob: {e}"))?;
-
+pub fn set_sessions_blob(value: &str) -> Result<(), KeyringError> {
+    // Route through `kv_set` for the same reason as `get_sessions_blob`: one
+    // mock mechanism, one entry-construction path (audit Tier 3 #36).
+    kv_set(SESSIONS_KEY, value)?;
     debug!("Persisted session blob to keyring");
     Ok(())
 }

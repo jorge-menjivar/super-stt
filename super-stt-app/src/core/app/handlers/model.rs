@@ -121,13 +121,7 @@ impl AppModel {
             }
 
             ModelMessage::ModelError(err) => {
-                warn!("Model operation failed: {err}");
-                let home = std::env::var("HOME").unwrap_or_default();
-                let sanitized = sanitize_home(&err, &home);
-                self.model_operation_state = ModelOperationState::Error { message: sanitized };
-                // A failed switch leaves the daemon idle (no model) — the
-                // backend stays selected, but no model is loaded.
-                self.clear_loaded_model();
+                self.set_model_error(&err);
                 Task::none()
             }
 
@@ -135,6 +129,19 @@ impl AppModel {
             // arm; nothing to do here.
             ModelMessage::LoadInitialData => Task::none(),
         }
+    }
+
+    /// Surface a failed model operation on the Models card and drop the loaded
+    /// model, sanitizing any `$HOME` path out of the message. Shared by the
+    /// `ModelError` sink and the optimistic-rollback handlers (audit Tier 3 #37).
+    pub(in crate::core::app) fn set_model_error(&mut self, err: &str) {
+        warn!("Model operation failed: {err}");
+        let home = std::env::var("HOME").unwrap_or_default();
+        let sanitized = sanitize_home(err, &home);
+        self.model_operation_state = ModelOperationState::Error { message: sanitized };
+        // A failed switch leaves the daemon idle (no model) — the backend stays
+        // selected, but no model is loaded.
+        self.clear_loaded_model();
     }
 
     /// Snapshot the daemon's current model, tagging the result with the

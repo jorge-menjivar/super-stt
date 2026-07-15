@@ -261,9 +261,27 @@ impl SuperSTTDaemon {
                 let _ = tx.send(processed);
             }
 
-            // Type on screen if in write mode
-            if write_mode && let Ok(mut actually_typed_guard) = session.actually_typed.lock() {
-                typer.update_preview(&text, &mut actually_typed_guard);
+            // Type on screen if in write mode. The typing is now async, and the
+            // `actually_typed` guard is a `!Send` `std::Mutex` guard that cannot
+            // be held across an `.await`. Take the mirror string out in a scope
+            // that drops the guard before typing, then write it back — safe
+            // because `update_preview` and `clear_preview` both run under
+            // `&mut Typer` and never overlap (audit Tier 3 #35). Skip on a
+            // poisoned lock, as before.
+            let taken = if write_mode {
+                session
+                    .actually_typed
+                    .lock()
+                    .ok()
+                    .map(|mut g| std::mem::take(&mut *g))
+            } else {
+                None
+            };
+            if let Some(mut actually_typed) = taken {
+                typer.update_preview(&text, &mut actually_typed).await;
+                if let Ok(mut g) = session.actually_typed.lock() {
+                    *g = actually_typed;
+                }
             }
         }
 
@@ -302,15 +320,24 @@ impl SuperSTTDaemon {
                 .preview_typing_enabled
                 .load(std::sync::atomic::Ordering::Relaxed);
             if preview_enabled {
-                if let Ok(mut actually_typed_guard) = session.actually_typed.lock() {
-                    info!(
-                        "Clearing preview text: '{}'",
-                        actually_typed_guard.chars().take(50).collect::<String>()
-                    );
-                    typer.clear_preview(&mut actually_typed_guard);
-                    info!("Preview cleared, actually_typed is now: '{actually_typed_guard}'");
+                // Take the mirror out in a scope that drops the `!Send` guard
+                // before the async backspacing (audit Tier 3 #35).
+                let taken = if let Ok(mut g) = session.actually_typed.lock() {
+                    Some(std::mem::take(&mut *g))
                 } else {
                     warn!("Failed to acquire actually_typed lock for clearing preview");
+                    None
+                };
+                if let Some(mut actually_typed) = taken {
+                    info!(
+                        "Clearing preview text: '{}'",
+                        actually_typed.chars().take(50).collect::<String>()
+                    );
+                    typer.clear_preview(&mut actually_typed).await;
+                    info!("Preview cleared, actually_typed is now: '{actually_typed}'");
+                    if let Ok(mut g) = session.actually_typed.lock() {
+                        *g = actually_typed;
+                    }
                 }
             } else {
                 debug!("Preview typing was disabled, no preview to clear");

@@ -30,6 +30,8 @@ impl AppModel {
             ModelsPageMessage::OpenBackendConfig(_)
             | ModelsPageMessage::CloseBackendConfig
             | ModelsPageMessage::SelectBackend(_)
+            | ModelsPageMessage::BackendSelectFailed { .. }
+            | ModelsPageMessage::StagedModelLoadFailed { .. }
             | ModelsPageMessage::DeselectBackend
             | ModelsPageMessage::ActiveBackendLoaded(_)
             | ModelsPageMessage::RefreshGpuInfo
@@ -186,6 +188,10 @@ impl AppModel {
                 .filter(|d| d != "none" && *d != self.current_device)
         };
 
+        // Capture the pre-switch device so a failed switch rolls it back rather
+        // than leaving the UI on a device the daemon never adopted (audit
+        // Tier 3 #37).
+        let prev_device = self.current_device.clone();
         self.set_model_loading(model.clone(), "Initiating model switch...".to_string());
         if let Some(dev) = &device_to_set {
             self.current_device.clone_from(dev);
@@ -208,9 +214,12 @@ impl AppModel {
                         provider: provider_label.clone(),
                         source: source_label.clone(),
                     })),
-                    Err(e) => {
-                        cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string())))
-                    }
+                    Err(e) => cosmic::Action::App(Message::ModelsPage(
+                        ModelsPageMessage::StagedModelLoadFailed {
+                            prev_device: prev_device.clone(),
+                            message: e.to_string(),
+                        },
+                    )),
                 },
             ),
             Task::perform(
@@ -279,18 +288,43 @@ impl AppModel {
                 if self.models_page.active_backend.as_deref() == Some(source.as_str()) {
                     return Task::none();
                 }
+                // Capture the prior selection so a failed activation rolls the
+                // card back instead of showing a backend the daemon rejected
+                // (audit Tier 3 #37).
+                let prev_active = self.models_page.active_backend.take();
                 self.models_page.active_backend = Some(source.clone());
                 self.clear_loaded_model();
                 self.model_operation_state = ModelOperationState::Ready;
                 // Activation comes from the Models page's "Load a backend" sheet;
                 // dismiss it now that a choice was made.
                 self.core.window.show_context = false;
-                Task::perform(set_active_backend(source), |result| match result {
+                Task::perform(set_active_backend(source), move |result| match result {
                     Ok(()) => cosmic::Action::None,
-                    Err(e) => {
-                        cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string())))
-                    }
+                    Err(e) => cosmic::Action::App(Message::ModelsPage(
+                        ModelsPageMessage::BackendSelectFailed {
+                            prev_active: prev_active.clone(),
+                            message: e.to_string(),
+                        },
+                    )),
                 })
+            }
+
+            ModelsPageMessage::BackendSelectFailed {
+                prev_active,
+                message,
+            } => {
+                self.models_page.active_backend = prev_active;
+                self.set_model_error(&message);
+                Task::none()
+            }
+
+            ModelsPageMessage::StagedModelLoadFailed {
+                prev_device,
+                message,
+            } => {
+                self.current_device = prev_device;
+                self.set_model_error(&message);
+                Task::none()
             }
 
             ModelsPageMessage::DeselectBackend => {

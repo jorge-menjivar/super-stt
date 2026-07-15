@@ -21,6 +21,11 @@ impl EnigoBackend {
         })
     }
 
+    /// Synchronous: enigo's handle holds raw xkbcommon pointers (`!Send`) and
+    /// the work blocks (per-chunk sleeps between `text()` calls). The
+    /// [`Simulator`](super::Simulator) enum runs this under `block_in_place` so
+    /// the handle never crosses an `.await` point — no thread migration mid-type
+    /// (audit Tier 3 #35).
     pub fn type_text(&mut self, text: &str) -> Result<()> {
         let mut i = 0;
         let chars: Vec<char> = text.chars().collect();

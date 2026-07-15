@@ -162,7 +162,7 @@ impl SuperSTTDaemon {
         // Phase 5: type the final transcript.
         if write_mode {
             info!("Writing transcription via {}", typer.write_method_name());
-            typer.process_final_text(&transcription_result);
+            typer.process_final_text(&transcription_result).await;
         }
 
         // Phase 6: finalize the cycle.

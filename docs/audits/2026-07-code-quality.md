@@ -1176,7 +1176,7 @@ Tier 2 #4/#6/#8.
 - **Fix:** renamed the indexer's to `ReleaseResolveError` (contained to
   `resolve.rs`).
 
-### [ ] 35. 🟠 Daemon: remaining blocking work (split off Tier 3 #4)
+### [x] 35. 🟠 Daemon: remaining blocking work (split off Tier 3 #4)
 
 - **Where:** the keyboard `Simulator` path — portal `notify_keysym` spins up an OS
   thread + a fresh current-thread tokio runtime per keysym
@@ -1192,10 +1192,19 @@ Tier 2 #4/#6/#8.
   `mint`/`revoke`; correctness wants a single-writer persist task (a detached
   `spawn_blocking` per call would race the on-disk ordering), and `load_persisted` is
   a one-time startup blocking read.
-- **Fix:** async `Simulator` (threads the `Typer`/preview loop off the `std::Mutex`
-  guard); a dedicated session-persist task fed over a channel.
+- **Fix:** async `Simulator` — the portal backend awaits `NotifyKeyboardKeysym` on
+  its owned zbus connection (no per-keysym thread/runtime); the sync, `!Send`
+  enigo/ydotool backends run under `block_in_place` in the enum so their handle
+  never crosses an await. `Typer::{update_preview,clear_preview,process_final_text}`
+  and the diff helpers are async; the two `std::Mutex<String>` sites take the mirror
+  string out (in a guard-dropping scope) before the async typing and write it back —
+  safe because both run under `&mut Typer` and never overlap. Session persistence
+  moved to a single-writer `SessionPersister` task fed over an `mpsc` channel:
+  `mint`/`revoke`/`validate` submit a snapshot (non-blocking), the task coalesces
+  bursts and writes via `spawn_blocking` sequentially (correct on-disk order, off the
+  request worker).
 
-### [ ] 36. 🟡 Daemon: keyring cleanup deferred from Tier 3 #9
+### [x] 36. 🟡 Daemon: keyring cleanup deferred from Tier 3 #9
 
 - **Where:** the sessions-blob accessors (`keyring.rs` `get_sessions_blob`/
   `set_sessions_blob`) build `keyring::Entry` directly and rely on
@@ -1208,10 +1217,15 @@ Tier 2 #4/#6/#8.
   restart test exercises — a verified change, not a drive-by. Typed errors ripple
   through every keyring/download-progress caller (incl. the Tier 3 #4 async wrappers)
   for marginal benefit.
-- **Fix:** route sessions through `kv_get`/`kv_set` and delete
-  `install_mock_if_requested`; introduce a small keyring error enum.
+- **Fix:** `get_sessions_blob`/`set_sessions_blob` now route through
+  `kv_get`/`kv_set` (one mock mechanism), `install_mock_if_requested` is deleted, and
+  a `KeyringError` enum (Display-preserving) replaces the stringly `Result<_,String>`
+  across keyring + its async wrappers. The real-keyring storage key is unchanged
+  (`("super-stt","stt-sessions")`) and no non-ignored test restarts the daemon, so no
+  restart behavior changed. Download-progress's two single-message `Result<_,String>`
+  are left as-is (not keyring errors; typing them is churn for no benefit).
 
-### [ ] 37. 🟡 App: roll back optimistic UI state on save failure (split off Tier 3 #11)
+### [x] 37. 🟡 App: roll back optimistic UI state on save failure (split off Tier 3 #11)
 
 - **Where:** the optimistic-then-banner sites — audio theme / feedback
   (`handlers/recording.rs`), volume commit (same), `SelectBackend` /
@@ -1223,8 +1237,15 @@ Tier 2 #4/#6/#8.
   message (and volume needs a stored last-committed value, since the drag already
   overwrote `self.volume`). The drift also self-heals on the next reconnect refetch
   (`VolumeLoaded`/`CurrentAudioThemeLoaded`/`ActiveBackendLoaded`).
-- **Fix:** capture the prior value at the optimistic set and restore it in a
-  dedicated failure message that also raises the banner.
+- **Fix:** each site captures its prior value(s) at the optimistic set and threads
+  them through a dedicated per-site failure message that restores them and raises the
+  banner: audio theme/feedback → `AudioThemeSaveFailed`; volume → `VolumeSaveFailed`
+  plus a new `last_committed_volume` field (the drag clobbers `volume`, so the
+  rollback target is stored separately and kept in sync on `VolumeLoaded`);
+  `SelectBackend` → `BackendSelectFailed`; `LoadStagedModel` → `StagedModelLoadFailed`
+  (both restore via a shared `set_model_error` helper). Handler-level tests aren't
+  feasible without the cosmic `Core` harness (the app has none); the restores are
+  simple field assignments verified by the compiler.
 
 ---
 

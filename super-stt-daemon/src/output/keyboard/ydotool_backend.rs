@@ -21,6 +21,9 @@ impl YdotoolBackend {
             .is_ok_and(|o| o.status.success())
     }
 
+    /// Synchronous: shells out to a blocking `ydotool` subprocess. The
+    /// [`Simulator`](super::Simulator) enum runs this under `block_in_place` so
+    /// it doesn't stall a runtime worker (audit Tier 3 #35).
     pub fn type_text(text: &str) -> Result<()> {
         if text.is_empty() {
             return Ok(());

@@ -14,8 +14,8 @@ const REQUEST_IFACE: &str = "org.freedesktop.portal.Request";
 const XKB_KEY_BACKSPACE: i32 = 0xFF08;
 
 pub struct XdgPortalBackend {
-    /// The async zbus connection, used from sync context via a dedicated
-    /// single-threaded executor so we never block a tokio worker.
+    /// The async zbus connection. The typing path awaits keysym calls on it
+    /// directly (audit Tier 3 #35), so no per-keysym thread/runtime is needed.
     connection: zbus::Connection,
     session_path: OwnedObjectPath,
 }
@@ -116,61 +116,47 @@ impl XdgPortalBackend {
 
     /// Send a keysym press or release via the portal.
     ///
-    /// This is called from sync code running on a tokio worker thread, so we
-    /// cannot use `block_on`.  Instead we send via `call_noreply` on a
-    /// one-shot `std::thread` to avoid blocking the async runtime.
-    fn notify_keysym(&self, keysym: i32, state: u32) -> Result<()> {
-        let conn = self.connection.clone();
-        let session = self.session_path.clone();
-
-        // Run the async D-Bus call on a short-lived thread that is allowed
-        // to block.  The overhead is negligible compared to the key event
-        // latency itself.
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("mini runtime");
-                rt.block_on(async {
-                    let proxy =
-                        zbus::Proxy::new(&conn, PORTAL_BUS, PORTAL_PATH, REMOTE_DESKTOP_IFACE)
-                            .await?;
-                    let options: HashMap<&str, Value<'_>> = HashMap::new();
-                    proxy
-                        .call_noreply(
-                            "NotifyKeyboardKeysym",
-                            &(session.as_ref(), options, keysym, state),
-                        )
-                        .await?;
-                    Ok::<(), zbus::Error>(())
-                })
-            })
-            .join()
-            .expect("keysym thread panicked")
+    /// Issued directly on the backend's owned async `Connection`. The typing
+    /// path is async end-to-end (audit Tier 3 #35), so this no longer spins up a
+    /// one-shot thread + current-thread runtime per keysym just to escape a sync
+    /// caller — it simply awaits the D-Bus call on the runtime.
+    async fn notify_keysym(&self, keysym: i32, state: u32) -> Result<()> {
+        let proxy = zbus::Proxy::new(
+            &self.connection,
+            PORTAL_BUS,
+            PORTAL_PATH,
+            REMOTE_DESKTOP_IFACE,
+        )
+        .await?;
+        let options: HashMap<&str, Value<'_>> = HashMap::new();
+        proxy
+            .call_noreply(
+                "NotifyKeyboardKeysym",
+                &(self.session_path.as_ref(), options, keysym, state),
+            )
+            .await
             .map_err(|e| anyhow::anyhow!("NotifyKeyboardKeysym failed: {e}"))
-        })
     }
 
-    pub fn type_text(&mut self, text: &str) -> Result<()> {
+    pub async fn type_text(&mut self, text: &str) -> Result<()> {
         for ch in text.chars() {
             let (needs_shift, keysym) = char_to_keysym(ch);
             if needs_shift {
-                self.notify_keysym(XKB_KEY_SHIFT_L, 1)?;
+                self.notify_keysym(XKB_KEY_SHIFT_L, 1).await?;
             }
-            self.notify_keysym(keysym, 1)?;
-            self.notify_keysym(keysym, 0)?;
+            self.notify_keysym(keysym, 1).await?;
+            self.notify_keysym(keysym, 0).await?;
             if needs_shift {
-                self.notify_keysym(XKB_KEY_SHIFT_L, 0)?;
+                self.notify_keysym(XKB_KEY_SHIFT_L, 0).await?;
             }
         }
         Ok(())
     }
 
-    pub fn backspace_n(&mut self, n: usize) -> Result<()> {
+    pub async fn backspace_n(&mut self, n: usize) -> Result<()> {
         for _ in 0..n {
-            self.notify_keysym(XKB_KEY_BACKSPACE, 1)?;
-            self.notify_keysym(XKB_KEY_BACKSPACE, 0)?;
+            self.notify_keysym(XKB_KEY_BACKSPACE, 1).await?;
+            self.notify_keysym(XKB_KEY_BACKSPACE, 0).await?;
         }
         Ok(())
     }

@@ -136,6 +136,10 @@ pub struct AppModel {
 
     // Master volume (0-100)
     pub volume: u8,
+    /// Last value successfully committed to (or loaded from) the daemon. The
+    /// rollback target when a `VolumeCommit` save fails, since the live drag has
+    /// already overwritten `volume` (audit Tier 3 #37).
+    pub last_committed_volume: u8,
 
     // Custom models directory
     pub custom_models_dir: Option<String>,

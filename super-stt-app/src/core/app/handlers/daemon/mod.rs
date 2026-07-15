@@ -217,6 +217,9 @@ impl AppModel {
 
             DaemonMessage::VolumeLoaded(vol) => {
                 self.volume = vol;
+                // Keep the rollback target aligned with the daemon's value so a
+                // later failed commit rolls back to what's actually persisted.
+                self.last_committed_volume = vol;
                 Task::none()
             }
 

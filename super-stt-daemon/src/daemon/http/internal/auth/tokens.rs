@@ -8,6 +8,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 /// Schema version for the persisted sessions blob. Bump on any breaking
 /// change to `TokenMeta`'s on-disk shape so an older daemon can refuse
@@ -52,13 +53,108 @@ fn allow_no_keyring() -> bool {
     std::env::var(ALLOW_NO_KEYRING_ENV).is_ok_and(|v| v == "1")
 }
 
+/// Single-writer handle for persisting the sessions map to the keyring.
+///
+/// `mint`/`revoke`/`validate` are sync fns called from async request handlers;
+/// writing the whole map to the keyring inline blocks a runtime worker on `DBus`
+/// I/O, and two concurrent mutations dropping their `Mutex` guard before writing
+/// would race the on-disk order. Funnelling every snapshot through one task over
+/// this channel keeps the blocking write off the request path *and* serializes
+/// the writes so the last submitted snapshot is the last one written (audit
+/// Tier 3 #35).
+#[derive(Clone)]
+pub(crate) struct SessionPersister {
+    tx: mpsc::UnboundedSender<HashMap<String, TokenMeta>>,
+}
+
+impl SessionPersister {
+    /// Spawn the single-writer persist task and return a submit handle. In
+    /// `cargo test` builds no task is spawned (unit tests must not touch the
+    /// developer's keyring); submissions become no-ops as the receiver is
+    /// dropped.
+    fn spawn() -> Self {
+        let (tx, rx) = mpsc::unbounded_channel::<HashMap<String, TokenMeta>>();
+        #[cfg(not(test))]
+        tokio::spawn(persist_loop(rx));
+        #[cfg(test)]
+        drop(rx);
+        Self { tx }
+    }
+
+    /// Submit the latest sessions snapshot for persistence. Best-effort: a
+    /// closed channel (test builds) just means the write is skipped — the
+    /// in-memory map stays authoritative.
+    fn submit(&self, snapshot: HashMap<String, TokenMeta>) {
+        let _ = self.tx.send(snapshot);
+    }
+}
+
+/// The persist task: receive snapshots, coalesce a burst down to the newest
+/// (older snapshots are strict subsets of the state the newest represents), and
+/// write each sequentially so on-disk order matches submission order.
+#[cfg(not(test))]
+async fn persist_loop(mut rx: mpsc::UnboundedReceiver<HashMap<String, TokenMeta>>) {
+    while let Some(mut latest) = rx.recv().await {
+        while let Ok(newer) = rx.try_recv() {
+            latest = newer;
+        }
+        persist_snapshot(latest).await;
+    }
+}
+
+/// Serialize one snapshot and write it to the keyring on a blocking thread.
+/// Runs inside the single persist task, so writes are already serialized.
+///
+/// **Failure suppression.** A locked or denied keyring fails every write;
+/// without a cooldown a busy mint/revoke loop would re-prompt the user every
+/// few seconds. After one failure we suppress further writes for
+/// [`KEYRING_FAILURE_COOLDOWN`]; the in-memory map stays authoritative and a
+/// later success clears the flag.
+#[cfg(not(test))]
+async fn persist_snapshot(snapshot: HashMap<String, TokenMeta>) {
+    if keyring_writes_in_cooldown() {
+        return;
+    }
+    let payload = SessionsFile {
+        version: SESSIONS_SCHEMA_VERSION,
+        sessions: snapshot,
+    };
+    let json = match serde_json::to_string(&payload) {
+        Ok(j) => j,
+        Err(e) => {
+            warn!("Failed to serialize sessions blob: {e}");
+            return;
+        }
+    };
+    // The keyring write is blocking DBus I/O; keep it off the task's async
+    // executor. The task awaits it, so writes stay strictly ordered.
+    match tokio::task::spawn_blocking(move || crate::keyring::set_sessions_blob(&json)).await {
+        Ok(Ok(())) => clear_keyring_failure_flag(),
+        Ok(Err(e)) => {
+            warn!(
+                "Failed to persist sessions blob: {e}; suppressing further keyring writes for {}s",
+                KEYRING_FAILURE_COOLDOWN.as_secs()
+            );
+            mark_keyring_failure();
+        }
+        Err(e) => warn!("Session persist task panicked: {e}"),
+    }
+}
+
 /// Persistent store of issued session tokens. The in-memory `HashMap`
 /// is the hot lookup path; every mutation also writes the whole map
 /// back to the system keyring under `(super-stt, stt-sessions)` so a
 /// daemon restart re-hydrates the same set of valid tokens.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct TokenStore {
     pub(crate) inner: Arc<Mutex<HashMap<String, TokenMeta>>>,
+    persist: SessionPersister,
+}
+
+impl Default for TokenStore {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -95,8 +191,17 @@ impl TokenStore {
     /// # Errors
     /// Returns an error when the system keyring is unavailable and
     /// [`ALLOW_NO_KEYRING_ENV`] is not set, so the daemon aborts startup.
+    /// An empty store with a live persist task (production) / no-op persister
+    /// (test builds).
+    fn empty() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+            persist: SessionPersister::spawn(),
+        }
+    }
+
     pub(crate) fn load_persisted() -> anyhow::Result<Self> {
-        let store = Self::default();
+        let store = Self::empty();
 
         let blob = match crate::keyring::get_sessions_blob() {
             Ok(Some(b)) => b,
@@ -190,45 +295,6 @@ impl TokenStore {
     /// smoke test in `tests/http_smoke_full.rs` (which exercises this
     /// crate built without the `test` cfg flag).
     ///
-    /// Takes a snapshot by value so the caller can drop its `Mutex`
-    /// guard *before* calling — keyring writes go through `DBus` and
-    /// can stall for seconds when the keyring is locked, and holding
-    /// `TokenStore::inner` across that stall would serialize every
-    /// authenticated request behind it.
-    fn flush_snapshot(snapshot: HashMap<String, TokenMeta>) {
-        if cfg!(test) {
-            return;
-        }
-        if keyring_writes_in_cooldown() {
-            // Suppressed — last write failed within the cooldown
-            // window. In-memory state is still authoritative.
-            return;
-        }
-        let payload = SessionsFile {
-            version: SESSIONS_SCHEMA_VERSION,
-            sessions: snapshot,
-        };
-        let json = match serde_json::to_string(&payload) {
-            Ok(j) => j,
-            Err(e) => {
-                warn!("Failed to serialize sessions blob: {e}");
-                return;
-            }
-        };
-        match crate::keyring::set_sessions_blob(&json) {
-            Ok(()) => {
-                clear_keyring_failure_flag();
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to persist sessions blob: {e}; suppressing further keyring writes for {}s",
-                    KEYRING_FAILURE_COOLDOWN.as_secs()
-                );
-                mark_keyring_failure();
-            }
-        }
-    }
-
     pub(crate) fn mint(
         &self,
         app_name: &str,
@@ -250,7 +316,7 @@ impl TokenStore {
             tokens.insert(token.clone(), meta);
             tokens.clone()
         };
-        Self::flush_snapshot(snapshot);
+        self.persist.submit(snapshot);
         (token, expires_at)
     }
 
@@ -273,7 +339,7 @@ impl TokenStore {
             }
         };
         if let Some(snapshot) = maybe_snapshot {
-            Self::flush_snapshot(snapshot);
+            self.persist.submit(snapshot);
         }
         result
     }
@@ -293,7 +359,7 @@ impl TokenStore {
             }
         };
         if let Some(snapshot) = maybe_snapshot {
-            Self::flush_snapshot(snapshot);
+            self.persist.submit(snapshot);
         }
     }
 }
@@ -316,8 +382,9 @@ mod tests {
     //! unknown-token path, mint correctness, and revocation. `validate`
     //! and `revoke` are the gates every authenticated request and the
     //! `/events` exe-watch path rely on, so they're exercised directly
-    //! here. `flush_snapshot` is a no-op under `cfg!(test)` (see its
-    //! doc comment), so none of these touch the system keyring.
+    //! here. Under `cfg!(test)` no persist task is spawned and the
+    //! `SessionPersister` receiver is dropped, so mint/revoke submissions
+    //! are no-ops — none of these touch the system keyring.
     use super::{TokenMeta, TokenStore};
     use chrono::{Duration as ChronoDuration, Utc};
     use std::path::PathBuf;
