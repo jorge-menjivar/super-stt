@@ -12,6 +12,8 @@
 pub mod backends;
 pub mod dispatch;
 pub mod download;
+pub mod model_definition;
+pub use model_definition::ModelDefinition;
 #[cfg(feature = "subprocess-backends")]
 pub mod subprocess;
 pub mod transcribe;

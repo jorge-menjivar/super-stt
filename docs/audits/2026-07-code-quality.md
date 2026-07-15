@@ -1101,37 +1101,58 @@ Tier 2 #4/#6/#8.
   `analysis` feature and uses nothing from it. These survive lints because
   pub/macros are exempt.
 
-### [ ] 27. 🟡 Shared: `DaemonResponse` god-struct
+### [x] 27. 🟡 Shared: `DaemonResponse` god-struct
 
 - **Where:** 30+ optional fields, ~150 lines of mechanical `with_*` builders;
   `gpu_info: Option<Value>` while both sides use the typed `GpuInfo` in the same
   file (double conversion in `app/daemon/client/v1/settings/backends.rs:116-126`).
-- **Fix:** type the field; the broader restructure overlaps Tier 2 #3.
+- **Fix:** typed `gpu_info` as `Option<Vec<GpuInfo>>` (the field carries a JSON
+  *array*, so `Vec<GpuInfo>` — not `Option<GpuInfo>` — preserves the byte-identical
+  wire shape; docs unchanged). `with_gpu_info` takes `Vec<GpuInfo>`, the writer
+  drops its `to_value`, and the reader's `from_value` double-conversion collapses
+  to `unwrap_or_default()`. The broader god-struct restructure stays under
+  Tier 2 #3 (done) and is out of scope here.
 
-### [ ] 28. 🟡 Shared: `ModelDefinition` is daemon-only yet documented as shared
+### [x] 28. 🟡 Shared: `ModelDefinition` is daemon-only yet documented as shared
 
 - **Where:** `models/registry.rs`; it also re-encodes registry-types'
   `Device`/`is_online` invariants stringly.
-- **Fix:** move to the daemon or type the field.
+- **Fix:** moved it to `super-stt-daemon/src/stt_models/model_definition.rs` (no
+  wire/protocol type embeds it; zero client crates touched) *and* typed
+  `supported_devices: Vec<Device>` — `is_online()` is now
+  `contains(&Device::None)`, and `validate_supported_devices` returns `Vec<Device>`
+  directly (the stringify moved to the one wire boundary that needs it). Deleting
+  the emptied `models/registry.rs` also removes the `registry` half of #29's
+  collision.
 
-### [ ] 29. 🟡 Shared: glob-export shadowing
+### [x] 29. 🟡 Shared: glob-export shadowing
 
 - **Where:** `pub use models::*` (`lib.rs:11`) is shadowed by top-level
   `registry`/`audio` modules — two same-named module pairs with unrelated content,
   one of each unreachable via the glob.
-- **Fix:** rename the inner modules and use explicit re-exports.
+- **Fix:** replaced the blanket `pub use models::*` with an explicit
+  `pub use models::theme` (the only crate-root short-form actually consumed) and
+  renamed `models::audio` → `models::audio_level` (2 daemon call sites) to clear
+  the `audio` collision; the `registry` collision is gone with #28's move.
 
-### [ ] 30. 🟡 Shared: two audio validators with divergent limits
+### [x] 30. 🟡 Shared: two audio validators with divergent limits
 
 - **Where:** `utils/audio.rs:29-59` (300 s cap) vs `validation/inputs.rs:80-119` +
   `limits.rs` (30 min); the padding-attack check reports `AudioTooLarge` for a
   content problem.
+- **Fix:** one source of truth in `limits.rs` — `MAX_AUDIO_DURATION_SECS` (30 min,
+  matching `docs/SECURITY.md`) with `MAX_AUDIO_SAMPLES` derived from it; both
+  validators reference it (`validate_audio` no longer hard-codes 300 s / 96 kHz).
+  The padding-attack check now returns a new `SuspiciousAudioContent` variant
+  instead of the misleading `AudioTooLarge`.
 
-### [ ] 31. 🟡 Shared: `SUPER_STT_HTTP_SOCKET` is honored only by the daemon
+### [x] 31. 🟡 Shared: `SUPER_STT_HTTP_SOCKET` is honored only by the daemon
 
 - **Where:** `daemon_main.rs:68-71` — no client reads it, so setting it strands
   every client.
-- **Fix:** support it in the client or delete it.
+- **Fix:** `get_http_socket_path()` now honors the override, so daemon and every
+  client (all funnel through it) agree; the daemon's `spawn_http_listener` dropped
+  its private env read. `transport.md` updated to drop the "on the daemon" scoping.
 
 ### [ ] 32. 🟡 Indexer: `registry_toml.rs:31-33` doc claims `BTreeMap` preserves file order (it sorts by key)
 

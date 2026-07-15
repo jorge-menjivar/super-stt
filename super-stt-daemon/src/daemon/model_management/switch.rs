@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::types::SuperSTTDaemon;
+use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends;
 use crate::stt_models::transcribe::Transcribe;
 use chrono::Utc;
 use log::{error, info, warn};
 use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_stt_shared::models::provider::Provider;
-use super_stt_shared::models::registry::ModelDefinition;
 
 impl SuperSTTDaemon {
     /// Handle get current model command.

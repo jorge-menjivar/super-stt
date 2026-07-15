@@ -80,7 +80,7 @@ pub struct DaemonResponse {
     // GPU inventory (GET /gpu_info): array of `GpuInfo` objects.
     // See docs/protocol/endpoints/v1/gpu_info.md.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub gpu_info: Option<Value>,
+    pub gpu_info: Option<Vec<GpuInfo>>,
 
     // Connection status fields
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -339,7 +339,7 @@ impl DaemonResponse {
     }
 
     #[must_use]
-    pub fn with_gpu_info(mut self, gpu_info: Value) -> Self {
+    pub fn with_gpu_info(mut self, gpu_info: Vec<GpuInfo>) -> Self {
         self.gpu_info = Some(gpu_info);
         self
     }

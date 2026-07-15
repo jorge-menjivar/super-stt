@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use log::{error, info, warn};
 
+use crate::stt_models::ModelDefinition;
 use super_stt_shared::models::provider::Provider;
-use super_stt_shared::models::registry::ModelDefinition;
 
 use manifest::{Device, Manifest, ModelEntry, Opt, Secret};
 
@@ -155,15 +155,15 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
 }
 
 /// Validate a model's declared `supported_devices`. Returns the de-duplicated
-/// wire-form device list on success.
+/// device list on success.
 ///
 /// Rules (hard-fail at discovery on any violation):
 /// - Field is required: an empty list is rejected. (Unknown device names are
 ///   already rejected at parse by the `Device` enum.)
-/// - The sentinel `"none"` (online/remote model with no local compute) must
-///   be the only entry when present — mixing it with local devices is a
+/// - The sentinel [`Device::None`] (online/remote model with no local compute)
+///   must be the only entry when present — mixing it with local devices is a
 ///   contradiction.
-fn validate_supported_devices(entry: &ModelEntry) -> anyhow::Result<Vec<String>> {
+fn validate_supported_devices(entry: &ModelEntry) -> anyhow::Result<Vec<Device>> {
     if entry.supported_devices.is_empty() {
         anyhow::bail!("empty 'supported_devices' — declare at least one device");
     }
@@ -179,7 +179,7 @@ fn validate_supported_devices(entry: &ModelEntry) -> anyhow::Result<Vec<String>>
             seen.push(*d);
         }
     }
-    Ok(seen.iter().map(ToString::to_string).collect())
+    Ok(seen)
 }
 
 /// Locate the backend and model definition matching `(name, provider, source)`.

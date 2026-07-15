@@ -5,7 +5,7 @@ use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
-use super_stt_shared::models::audio::AudioLevel;
+use super_stt_shared::models::audio_level::AudioLevel;
 use tokio::sync::broadcast;
 
 /// Process mono audio samples for recording state and levels.

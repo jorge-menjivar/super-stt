@@ -31,7 +31,11 @@ impl SuperSTTDaemon {
                     .map(|m| BackendModel {
                         name: m.name.clone(),
                         provider: m.provider.to_string(),
-                        supported_devices: m.supported_devices.clone(),
+                        supported_devices: m
+                            .supported_devices
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect(),
                         estimated_vram_bytes: m.estimated_vram_bytes,
                         multilingual: m.is_multilingual,
                         supported_languages: m.supported_languages.clone(),

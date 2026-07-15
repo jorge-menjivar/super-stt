@@ -89,11 +89,11 @@ pub(crate) async fn dispatch_transcription(
 mod tests {
     use super::*;
     use crate::daemon::types::LoadedModel;
+    use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
     use std::sync::Mutex;
     use std::time::Duration;
     use super_stt_shared::models::provider::Provider;
-    use super_stt_shared::models::registry::ModelDefinition;
 
     /// What the fake backend returns from `transcribe_audio`.
     #[derive(Clone)]
@@ -165,7 +165,7 @@ mod tests {
             supported_languages: vec!["en".to_string()],
             estimated_vram_bytes: 0,
             processing_interval: Duration::from_secs(1),
-            supported_devices: vec!["cpu".to_string()],
+            supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
             realtime: false,
         };
         let instance = Box::new(FakeModel {

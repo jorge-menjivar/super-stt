@@ -42,7 +42,7 @@ pub(crate) fn normalize_device(label: &str) -> String {
 /// owns the name, provider, source, and architecture; nothing has to be
 /// re-derived at read sites.
 pub struct LoadedModel {
-    pub definition: super_stt_shared::models::registry::ModelDefinition,
+    pub definition: crate::stt_models::ModelDefinition,
     pub instance: Box<dyn crate::stt_models::transcribe::Transcribe>,
 }
 
@@ -101,7 +101,7 @@ impl SuperSTTDaemon {
         name: &str,
         provider: &Provider,
         source: &str,
-    ) -> Option<super_stt_shared::models::registry::ModelDefinition> {
+    ) -> Option<crate::stt_models::ModelDefinition> {
         let backends = self.backends.read().await;
         backends::find_model(&backends, name, provider, source).map(|(_, def)| def.clone())
     }

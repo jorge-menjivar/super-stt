@@ -27,6 +27,8 @@ pub fn apply_pre_emphasis(audio: &mut [f32]) {
 ///
 /// Returns an error if the audio data is invalid.
 pub fn validate_audio(audio_data: &[f32], sample_rate: u32) -> Result<()> {
+    use crate::validation::limits;
+
     if audio_data.is_empty() {
         return Err(anyhow::anyhow!("Audio data is empty"));
     }
@@ -35,7 +37,7 @@ pub fn validate_audio(audio_data: &[f32], sample_rate: u32) -> Result<()> {
         return Err(anyhow::anyhow!("Invalid sample rate: 0"));
     }
 
-    if sample_rate > 96000 {
+    if sample_rate > limits::MAX_SAMPLE_RATE {
         return Err(anyhow::anyhow!("Sample rate too high: {sample_rate}Hz"));
     }
 
@@ -48,11 +50,14 @@ pub fn validate_audio(audio_data: &[f32], sample_rate: u32) -> Result<()> {
         ));
     }
 
+    // Duration cap shares the single source of truth with the protocol-layer
+    // sample-count guard (`validation::limits`), so both layers agree.
     let len = u32::try_from(audio_data.len()).unwrap_or(u32::MAX);
     let duration_seconds = f64::from(len) / f64::from(sample_rate);
-    if duration_seconds > 300.0 {
+    let max_secs = f64::from(limits::MAX_AUDIO_DURATION_SECS);
+    if duration_seconds > max_secs {
         return Err(anyhow::anyhow!(
-            "Audio too long: {duration_seconds:.1}s (max 300s)"
+            "Audio too long: {duration_seconds:.1}s (max {max_secs:.0}s)"
         ));
     }
 

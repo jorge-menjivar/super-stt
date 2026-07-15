@@ -155,7 +155,7 @@ impl SuperSTTDaemon {
     /// (Tier 3 #2).
     pub(in crate::daemon) async fn finalize_loaded_model(
         &self,
-        definition: super_stt_shared::models::registry::ModelDefinition,
+        definition: crate::stt_models::ModelDefinition,
         instance: Box<dyn Transcribe>,
     ) -> String {
         let actual_device = normalize_device(&instance.device());

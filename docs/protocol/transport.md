@@ -30,8 +30,10 @@ where `SO_PEERCRED` isn't available — see
 [auth.md](./auth.md#tcp-bound-clients).
 
 The socket path can be overridden via the `SUPER_STT_HTTP_SOCKET`
-environment variable on the daemon (tests use this to bind a unique
-socket per run).
+environment variable (tests use this to bind a unique socket per run).
+The daemon and every in-tree client resolve the path through the same
+helper, so the override applies to both ends — set it in a shared
+environment and the daemon listener and its clients stay in agreement.
 
 The daemon serves the same routes on both transports.
 

@@ -110,7 +110,7 @@ processing_interval_ms = 2000
     assert_eq!(def.source, "github.com/super-stt/openai");
     assert_eq!(
         def.supported_devices,
-        vec!["none".to_string()],
+        vec![super_stt_registry_types::manifest::Device::None],
         "online model carries its declared supported_devices"
     );
 
@@ -127,7 +127,10 @@ processing_interval_ms = 2000
     assert_eq!(vox.processing_interval, Duration::from_millis(2000));
     assert_eq!(
         vox.supported_devices,
-        vec!["cpu".to_string(), "cuda".to_string()],
+        vec![
+            super_stt_registry_types::manifest::Device::Cpu,
+            super_stt_registry_types::manifest::Device::Cuda
+        ],
         "local model carries its declared supported_devices"
     );
 
@@ -302,7 +305,7 @@ supported_devices = ["none", "cpu"]
 /// slash and a root-only path both return `None` (no usable handle).
 #[test]
 fn dir_name_returns_final_component() {
-    use super_stt_shared::models::registry::ModelDefinition;
+    use crate::stt_models::ModelDefinition;
 
     fn fake_backend(dir: PathBuf) -> DiscoveredBackend {
         DiscoveredBackend {
@@ -494,7 +497,10 @@ processing_interval_ms = 1500
     assert_eq!(b.entrypoint, "qwen3-asr");
     assert_eq!(
         def.supported_devices,
-        vec!["cpu".to_string(), "cuda".to_string()]
+        vec![
+            super_stt_registry_types::manifest::Device::Cpu,
+            super_stt_registry_types::manifest::Device::Cuda
+        ]
     );
 
     let (_, big) = find_model(
@@ -511,7 +517,7 @@ processing_interval_ms = 1500
 /// `dedup_sources` keeps first-seen order and drops later duplicates.
 #[test]
 fn dedup_sources_keeps_first_occurrence() {
-    use super_stt_shared::models::registry::ModelDefinition;
+    use crate::stt_models::ModelDefinition;
     fn fake(dir: &str, source: &str) -> DiscoveredBackend {
         DiscoveredBackend {
             dir: PathBuf::from(dir),

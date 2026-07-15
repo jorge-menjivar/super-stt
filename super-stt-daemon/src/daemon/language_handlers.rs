@@ -10,8 +10,8 @@ use chrono::Utc;
 
 use crate::daemon::language::resolve_language;
 use crate::daemon::types::SuperSTTDaemon;
+use crate::stt_models::ModelDefinition;
 use super_stt_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
-use super_stt_shared::models::registry::ModelDefinition;
 
 impl SuperSTTDaemon {
     /// Broadcast that a setting changed so subscribed clients re-resolve any

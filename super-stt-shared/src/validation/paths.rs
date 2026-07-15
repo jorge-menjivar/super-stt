@@ -41,12 +41,22 @@ pub fn secure_runtime_path(relative: &str) -> std::path::PathBuf {
     }
 }
 
-/// Get the path of the HTTP-protocol Unix socket (`super-stt-http.sock`) in
-/// `$XDG_RUNTIME_DIR/stt/`. This is the daemon's sole client-facing listener;
-/// all clients connect here. Path construction goes through
-/// [`secure_runtime_path`], which applies the traversal / prefix / length guards.
+/// Get the path of the HTTP-protocol Unix socket (`super-stt-http.sock`) — the
+/// daemon's sole client-facing listener, which all clients connect to.
+///
+/// A non-empty `SUPER_STT_HTTP_SOCKET` overrides the path verbatim (tests use
+/// this to bind a unique socket per run without touching `$XDG_RUNTIME_DIR`).
+/// Both the daemon and every client resolve their path through here, so the
+/// override applies uniformly — set it and both ends agree. When unset, the
+/// path is `$XDG_RUNTIME_DIR/stt/super-stt-http.sock` via [`secure_runtime_path`],
+/// which applies the traversal / prefix / length guards.
 #[must_use]
 pub fn get_http_socket_path() -> std::path::PathBuf {
+    if let Some(override_path) = std::env::var_os("SUPER_STT_HTTP_SOCKET")
+        && !override_path.is_empty()
+    {
+        return std::path::PathBuf::from(override_path);
+    }
     secure_runtime_path("super-stt-http.sock")
 }
 
@@ -93,6 +103,33 @@ mod tests {
 
         unsafe {
             std::env::remove_var("XDG_RUNTIME_DIR");
+        }
+    }
+
+    #[test]
+    fn http_socket_path_honors_env_override() {
+        // A non-empty override is returned verbatim so the daemon and its
+        // clients — all resolving through this helper — agree on the path.
+        unsafe {
+            std::env::set_var("SUPER_STT_HTTP_SOCKET", "/tmp/stt/custom-run.sock");
+        }
+        assert_eq!(
+            get_http_socket_path(),
+            std::path::PathBuf::from("/tmp/stt/custom-run.sock")
+        );
+
+        // Empty override is ignored — falls back to the runtime-dir path.
+        unsafe {
+            std::env::set_var("SUPER_STT_HTTP_SOCKET", "");
+        }
+        assert!(
+            get_http_socket_path()
+                .to_string_lossy()
+                .ends_with("super-stt-http.sock")
+        );
+
+        unsafe {
+            std::env::remove_var("SUPER_STT_HTTP_SOCKET");
         }
     }
 }

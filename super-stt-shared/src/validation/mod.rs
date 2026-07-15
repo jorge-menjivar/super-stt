@@ -22,6 +22,9 @@ pub enum ValidationError {
     #[error("Audio data too large: {samples} > {max} samples")]
     AudioTooLarge { samples: usize, max: usize },
 
+    #[error("Suspicious audio content: {samples} samples with a uniform padding pattern")]
+    SuspiciousAudioContent { samples: usize },
+
     #[error("Invalid sample rate: {rate} (must be {min}-{max} Hz)")]
     InvalidSampleRate { rate: u32, min: u32, max: u32 },
 

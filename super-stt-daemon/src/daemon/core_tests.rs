@@ -543,11 +543,11 @@ async fn set_model_local_works_without_online_toggle() {
 /// override is reflected in an option's effective `value`. Keyring-free.
 #[tokio::test]
 async fn list_backends_catalog_and_option_override() {
+    use crate::stt_models::ModelDefinition;
     use crate::stt_models::backends::DiscoveredBackend;
     use crate::stt_models::backends::manifest::{Opt, OptionDefault, OptionType, Secret};
     use std::time::Duration;
     use super_stt_shared::models::provider::Provider;
-    use super_stt_shared::models::registry::ModelDefinition;
 
     let daemon = test_daemon().await;
     let source = "github.com/super-stt/openai";
@@ -581,7 +581,7 @@ async fn list_backends_catalog_and_option_override() {
             supported_languages: vec!["en".to_string()],
             estimated_vram_bytes: 0,
             processing_interval: Duration::from_secs(1),
-            supported_devices: vec!["none".to_string()],
+            supported_devices: vec![super_stt_registry_types::manifest::Device::None],
             realtime: false,
         }],
     };
@@ -627,10 +627,10 @@ fn fixture_backend(
     name: &str,
     model_name: &str,
 ) -> crate::stt_models::backends::DiscoveredBackend {
+    use crate::stt_models::ModelDefinition;
     use crate::stt_models::backends::DiscoveredBackend;
     use std::time::Duration;
     use super_stt_shared::models::provider::Provider;
-    use super_stt_shared::models::registry::ModelDefinition;
 
     DiscoveredBackend {
         dir: std::path::PathBuf::from("/tmp").join(dir_name),
@@ -650,7 +650,7 @@ fn fixture_backend(
             supported_languages: vec!["en".to_string()],
             estimated_vram_bytes: 0,
             processing_interval: Duration::from_secs(1),
-            supported_devices: vec!["none".to_string()],
+            supported_devices: vec![super_stt_registry_types::manifest::Device::None],
             realtime: false,
         }],
     }
@@ -669,14 +669,13 @@ async fn get_active_backend_returns_null_when_idle() {
     );
 }
 
-/// `handle_get_gpu_info` always succeeds and returns a JSON array (empty on
-/// headless/CI hosts). Hardware-independent: asserts the shape only.
+/// `handle_get_gpu_info` always succeeds and returns the typed GPU list (empty
+/// on headless/CI hosts). Hardware-independent: asserts presence only.
 #[tokio::test]
 async fn get_gpu_info_returns_success_array() {
     let resp = SuperSTTDaemon::handle_get_gpu_info().await;
     assert_eq!(resp.status, "success");
-    let gpu_info = resp.gpu_info.expect("gpu_info present");
-    assert!(gpu_info.is_array(), "gpu_info must be a JSON array");
+    assert!(resp.gpu_info.is_some(), "gpu_info must be present");
 }
 
 /// Real-hardware check: the daemon reports a non-empty, well-formed GPU
@@ -688,31 +687,20 @@ async fn get_gpu_info_returns_success_array() {
 async fn gpu_info_reports_real_hardware() {
     let resp = SuperSTTDaemon::handle_get_gpu_info().await;
     assert_eq!(resp.status, "success");
-    let gpu_info = resp.gpu_info.expect("gpu_info present");
+    let gpus = resp.gpu_info.expect("gpu_info present");
     eprintln!(
         "daemon gpu_info = {}",
-        serde_json::to_string_pretty(&gpu_info).unwrap()
+        serde_json::to_string_pretty(&gpus).unwrap()
     );
-    let gpus = gpu_info.as_array().expect("gpu_info must be an array");
     assert!(!gpus.is_empty(), "expected at least one GPU on this host");
     const VENDORS: [&str; 5] = ["nvidia", "amd", "intel", "apple", "unknown"];
-    for gpu in gpus {
+    for gpu in &gpus {
+        assert!(!gpu.name.is_empty(), "each GPU needs a non-empty name");
+        assert!(gpu.total_bytes > 0, "each GPU needs total_bytes > 0");
         assert!(
-            gpu.get("name")
-                .and_then(|v| v.as_str())
-                .is_some_and(|s| !s.is_empty()),
-            "each GPU needs a non-empty name"
-        );
-        assert!(
-            gpu.get("total_bytes")
-                .and_then(serde_json::Value::as_u64)
-                .is_some_and(|n| n > 0),
-            "each GPU needs total_bytes > 0"
-        );
-        let vendor = gpu.get("vendor").and_then(|v| v.as_str()).unwrap_or("");
-        assert!(
-            VENDORS.contains(&vendor),
-            "vendor {vendor:?} must be a known snake_case tag"
+            VENDORS.contains(&gpu.vendor.as_str()),
+            "vendor {:?} must be a known snake_case tag",
+            gpu.vendor
         );
     }
 }
@@ -893,10 +881,10 @@ impl crate::stt_models::transcribe::Transcribe for MockTranscribe {
 /// `handle_set_active_backend`.
 async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
     use crate::daemon::types::LoadedModel;
+    use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::ModelInfoData;
     use std::time::Duration;
     use super_stt_shared::models::provider::Provider;
-    use super_stt_shared::models::registry::ModelDefinition;
 
     let provider = Provider::from("openai");
     let definition = ModelDefinition {
@@ -908,7 +896,7 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
         supported_languages: vec!["en".to_string()],
         estimated_vram_bytes: 0,
         processing_interval: Duration::from_secs(1),
-        supported_devices: vec!["none".to_string()],
+        supported_devices: vec![super_stt_registry_types::manifest::Device::None],
         realtime: false,
     };
     let info = ModelInfoData::new(name, provider, source, true, true, Duration::from_secs(1));
@@ -1235,10 +1223,10 @@ impl crate::stt_models::transcribe::Transcribe for ScriptedTranscribe {
 /// produces.
 async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Result<String, ()>) {
     use crate::daemon::types::LoadedModel;
+    use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::ModelInfoData;
     use std::time::Duration;
     use super_stt_shared::models::provider::Provider;
-    use super_stt_shared::models::registry::ModelDefinition;
 
     let provider = Provider::from("local_whisper");
     let definition = ModelDefinition {
@@ -1250,7 +1238,7 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
         supported_languages: vec!["en".to_string()],
         estimated_vram_bytes: 0,
         processing_interval: Duration::from_secs(1),
-        supported_devices: vec!["cpu".to_string()],
+        supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
         realtime: false,
     };
     let info = ModelInfoData::new(

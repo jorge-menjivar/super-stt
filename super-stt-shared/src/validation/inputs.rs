@@ -85,16 +85,17 @@ pub fn validate_audio_data(audio_data: &[f32]) -> Result<(), ValidationError> {
         });
     }
 
-    // Additional check for suspicious patterns that could indicate an attack
+    // Additional check for suspicious patterns that could indicate an attack.
+    // This is a content problem, not a size overflow (the buffer is within the
+    // size cap), so report it as such rather than AudioTooLarge.
     if audio_data.len() > 1_000_000 {
         // Check if all values are the same (possible padding attack)
         if audio_data
             .windows(2)
             .all(|w| (w[0] - w[1]).abs() < f32::EPSILON)
         {
-            return Err(ValidationError::AudioTooLarge {
+            return Err(ValidationError::SuspiciousAudioContent {
                 samples: audio_data.len(),
-                max: limits::MAX_AUDIO_SAMPLES,
             });
         }
     }
@@ -260,13 +261,19 @@ mod tests {
         let audio = vec![0.5f32; 1000];
         assert!(validate_audio_data(&audio).is_ok());
 
-        // Too large
+        // Too large → size error.
         let large_audio = vec![0.5f32; limits::MAX_AUDIO_SAMPLES + 1];
-        assert!(validate_audio_data(&large_audio).is_err());
+        assert!(matches!(
+            validate_audio_data(&large_audio),
+            Err(ValidationError::AudioTooLarge { .. })
+        ));
 
-        // Suspicious pattern (all same values)
+        // Uniform padding within the size cap → content error, not AudioTooLarge.
         let suspicious_audio = vec![0.5f32; 2_000_000];
-        assert!(validate_audio_data(&suspicious_audio).is_err());
+        assert!(matches!(
+            validate_audio_data(&suspicious_audio),
+            Err(ValidationError::SuspiciousAudioContent { .. })
+        ));
     }
 
     #[test]

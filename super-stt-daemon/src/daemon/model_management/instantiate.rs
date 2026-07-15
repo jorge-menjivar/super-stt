@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::types::SuperSTTDaemon;
+use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use crate::stt_models::transcribe::Transcribe;
 use anyhow::{Result, anyhow, bail};
 use super_stt_shared::models::provider::Provider;
-use super_stt_shared::models::registry::ModelDefinition;
 
 impl SuperSTTDaemon {
     /// Build a running backend instance for `(name, provider, source)` plus its

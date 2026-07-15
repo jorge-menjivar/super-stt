@@ -12,7 +12,6 @@ use crate::config::DaemonConfig;
 use crate::daemon::types::{DeviceOverride, SuperSTTDaemon};
 use anyhow::Result;
 use log::{error, info, warn};
-use std::path::PathBuf;
 use super_stt_shared::theme::AudioTheme;
 
 /// Resolve the per-session overrides set on the command line. An override
@@ -44,14 +43,13 @@ fn resolve_cli_overrides(
 /// shutdown signal fires, the daemon treats itself as unreachable and
 /// exits with a non-zero status.
 ///
-/// `SUPER_STT_HTTP_SOCKET` overrides the default path; tests use this to
-/// bind a unique socket without overriding `$XDG_RUNTIME_DIR` (which would
-/// break the Wayland connection for spawned consent helpers).
+/// The socket path is resolved by `get_http_socket_path`, which honors the
+/// `SUPER_STT_HTTP_SOCKET` override (tests use this to bind a unique socket
+/// without overriding `$XDG_RUNTIME_DIR`, which would break the Wayland
+/// connection for spawned consent helpers). Clients resolve through the same
+/// helper, so daemon and clients always agree on the path.
 async fn spawn_http_listener(daemon: &SuperSTTDaemon) -> Result<tokio::task::JoinHandle<()>> {
-    let http_socket_path = std::env::var("SUPER_STT_HTTP_SOCKET").ok().map_or_else(
-        super_stt_shared::validation::get_http_socket_path,
-        PathBuf::from,
-    );
+    let http_socket_path = super_stt_shared::validation::get_http_socket_path();
     crate::daemon::http::start_http_server(
         std::sync::Arc::new(daemon.clone()),
         http_socket_path,

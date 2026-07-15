@@ -114,7 +114,6 @@ pub async fn clear_active_backend() -> HttpResult<()> {
 
 /// GPU inventory + memory (HTTP `GET /gpu_info`). Empty when no GPU is detected.
 pub async fn get_gpu_info() -> HttpResult<Vec<super_stt_shared::models::protocol::GpuInfo>> {
-    use super_stt_shared::models::protocol::GpuInfo;
     log::debug!("get_gpu_info: requesting GET /gpu_info");
     let result = with_settings_token(|socket, token| async move {
         let resp = transport::settings_get(socket, &token, "/gpu_info").await?;
@@ -124,11 +123,9 @@ pub async fn get_gpu_info() -> HttpResult<Vec<super_stt_shared::models::protocol
             resp.gpu_info
         );
         let resp = require_success(resp, "get_gpu_info")?;
-        match resp.gpu_info {
-            Some(v) => serde_json::from_value::<Vec<GpuInfo>>(v)
-                .map_err(|e| HttpError::Other(format!("parse gpu_info: {e}"))),
-            None => Ok(Vec::new()),
-        }
+        // The field is already typed `Option<Vec<GpuInfo>>` on the wire, so no
+        // second parse is needed — absent means no GPUs.
+        Ok(resp.gpu_info.unwrap_or_default())
     })
     .await;
     match &result {

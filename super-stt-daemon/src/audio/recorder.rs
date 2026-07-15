@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use super_stt_shared::AudioAnalyzer;
 use super_stt_shared::audio_utils::ResampleQuality;
-use super_stt_shared::models::audio::AudioLevel;
+use super_stt_shared::models::audio_level::AudioLevel;
 use super_stt_shared::theme::AudioTheme;
 use super_stt_shared::utils::audio::resample;
 use tokio::sync::broadcast;

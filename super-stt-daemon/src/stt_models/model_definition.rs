@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Resolved model identity shared across the daemon, clients, and protocol.
+//! Resolved model identity used throughout the daemon.
 //!
 //! [`ModelDefinition`] is the unified description of a single model a backend
-//! serves. Models are no longer compiled into the daemon; they are discovered
-//! at runtime from installed backends (each backend ships a `backend.toml`
+//! serves. Models are not compiled into the daemon; they are discovered at
+//! runtime from installed backends (each backend ships a `backend.toml`
 //! declaring its `[[models]]`). The daemon builds a `ModelDefinition` for every
 //! discovered model and uses it everywhere a fully resolved model is needed.
+//! This type is daemon-internal — it never crosses the wire (client-facing
+//! model metadata flows through the protocol types in `super-stt-shared`).
 //!
 //! ## Identity
 //!
@@ -14,20 +16,19 @@
 //! - `name` — the model's wire name (e.g. `whisper-1`, `voxtral-mini`).
 //! - `provider` — the engine family / routing class ([`Provider`]).
 //! - `source` — the repo id of the backend that serves the model, e.g.
-//!   `github.com/super-stt/openai`. This replaces the old `SourceKind` enum:
-//!   two backends can serve a model with the same `(name, provider)` and the
-//!   `source` keeps them distinct.
+//!   `github.com/super-stt/openai`. Two backends can serve a model with the same
+//!   `(name, provider)` and the `source` keeps them distinct.
 
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use crate::models::provider::Provider;
+use super_stt_registry_types::manifest::Device;
+use super_stt_shared::models::provider::Provider;
 
 /// Fully resolved description of a single model served by a backend.
 ///
 /// Built by the daemon from a discovered backend's `backend.toml` entry; not a
 /// static catalog. `source` carries the serving backend's repo id.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ModelDefinition {
     /// Wire-level model name.
     pub name: String,
@@ -47,10 +48,10 @@ pub struct ModelDefinition {
     pub estimated_vram_bytes: u64,
     /// Suggested minimum interval between real-time processing chunks.
     pub processing_interval: Duration,
-    /// Devices the model can be loaded onto, in wire form (`cpu`, `cuda`,
-    /// `metal`, or the sentinel `none` for remote/online models, which must be
-    /// the only entry when present). Non-empty and validated at discovery.
-    pub supported_devices: Vec<String>,
+    /// Devices the model can be loaded onto. The sentinel [`Device::None`]
+    /// (remote/online model with no local compute) must be the only entry when
+    /// present. Non-empty and validated at discovery.
+    pub supported_devices: Vec<Device>,
     /// Whether this model is reached over the realtime WebSocket path
     /// (`/v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`.
     pub realtime: bool,
@@ -58,11 +59,11 @@ pub struct ModelDefinition {
 
 impl ModelDefinition {
     /// Whether the model is served by a remote API with no local compute —
-    /// encoded by the `none` sentinel in `supported_devices` (the only entry
-    /// when present). This is the single source of the online/local
+    /// encoded by the [`Device::None`] sentinel in `supported_devices` (the only
+    /// entry when present). This is the single source of the online/local
     /// distinction; `provider` is a free-form label and carries no such meaning.
     #[must_use]
     pub fn is_online(&self) -> bool {
-        self.supported_devices.iter().any(|d| d == "none")
+        self.supported_devices.contains(&Device::None)
     }
 }

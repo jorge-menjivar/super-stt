@@ -429,8 +429,7 @@ impl SuperSTTDaemon {
         })
         .await
         .unwrap_or_default();
-        let value = serde_json::to_value(&gpus).unwrap_or(serde_json::Value::Null);
-        DaemonResponse::success().with_gpu_info(value)
+        DaemonResponse::success().with_gpu_info(gpus)
     }
 }
 
