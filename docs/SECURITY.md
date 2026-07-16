@@ -17,41 +17,40 @@ Based on comprehensive security reviews completed in August 2025, Super STT demo
 
 **Security Assessment**: Production-ready with excellent security controls implemented.
 
-## Socket Permissions
+## Socket Access Control
 
-### Production Mode (Default)
-- **Permissions**: `0660` (read/write for owner and group)
-- **Group**: `stt` 
-- **Access**: Only the daemon owner and members of the `stt` group can connect
+The daemon listens on a Unix domain socket at
+`$XDG_RUNTIME_DIR/stt/super-stt-http.sock`. Access is restricted to the user
+running the daemon — there is **no** shared `stt` group and no group membership
+to configure. Two independent layers enforce this:
 
-### Development Mode
-- **Permissions**: `0666` (world accessible)
-- **Enable**: Automatically enabled in debug builds (`cargo build`)
-- **Warning**: Only use for local development, never in production
+1. **Per-user runtime directory.** `$XDG_RUNTIME_DIR` (typically
+   `/run/user/<uid>`) is created by the system with `0700` permissions, so no
+   other local user can even traverse into it to reach the socket.
+2. **Same-UID peer check.** Every request is checked against the connecting
+   peer's UID (`SO_PEERCRED`); a peer whose UID differs from the daemon's is
+   rejected. A process that somehow reached the socket still cannot use it
+   unless it runs as the same user.
 
-## Group-Based Access Control
+### Socket permissions
 
-The installation process creates an `stt` system group. Users who need to access the Super STT daemon must be members of this group.
+| Build | Mode | Notes |
+| --- | --- | --- |
+| Release (default) | `0660` | Owner + the daemon user's primary group. The socket is **not** chgrp'd to any shared group. |
+| Debug (`cargo build`) | `0666` | Local development only; the `0700` runtime dir still keeps it unreachable by other users. |
 
-### Setup
-```bash
-# Automatic during installation
-just install-daemon
+### Authorization
 
-# Or manual setup
-sudo groupadd stt
-sudo usermod -a -G stt $USER
-# Log out and back in for changes to take effect
-```
+Reaching the socket is not the same as being authorized. Privileged operations
+(keyboard injection, settings, secrets) require a per-request session token
+carrying user-approved scopes, minted through a one-time consent prompt and
+bound to the client's executable path. See
+[`protocol/auth.md`](protocol/auth.md) for the token and scope model.
 
 ### Verification
 ```bash
-# Check your groups
-groups
-
-# Verify socket permissions
-ls -la $XDG_RUNTIME_DIR/stt/super-stt.sock
-# Should show: srw-rw---- ... user stt ... super-stt.sock
+ls -la "$XDG_RUNTIME_DIR/stt/super-stt-http.sock"
+# srw-rw---- ... <you> <your-primary-group> ... super-stt-http.sock
 ```
 
 ## Security Features
@@ -91,7 +90,7 @@ ls -la $XDG_RUNTIME_DIR/stt/super-stt.sock
 
 ### 6. Process Isolation
 - **User service**: Runs under user account, not root
-- **Group separation**: Multi-user systems can control access via group membership
+- **Per-user socket**: Owner-only `$XDG_RUNTIME_DIR` plus a same-UID peer check — no cross-user access, no shared group
 - **Socket permissions**: Enforced at filesystem level
 - **Process authentication**: SO_PEERCRED verification for privileged operations
 
@@ -129,18 +128,19 @@ just install-daemon
 ```
 
 ### For Multi-User Systems
-1. Ensure only trusted users are in the `stt` group
-2. Consider using separate user accounts for the daemon
-3. Monitor group membership: `getent group stt`
+The daemon is strictly per-user: its socket lives in the owner's
+`$XDG_RUNTIME_DIR` and every request is rejected unless the peer's UID matches
+the daemon's. Each user runs their own daemon instance — there is no shared
+access to configure and no `stt` group.
 
 ### For Development
 Debug builds automatically use relaxed security for development convenience:
 ```bash
 # Debug build - automatically skips process authentication
-cargo run --bin super-stt
+cargo run --bin super-stt-daemon
 
 # Release build - enforces full security model
-cargo run --release --bin super-stt
+cargo run --release --bin super-stt-daemon
 ```
 
 ## Threat Model
@@ -150,7 +150,7 @@ cargo run --release --bin super-stt
 - ✅ Remote network attacks (localhost-only UDP binding)
 - ✅ Unauthorized keyboard injection (process authentication with SO_PEERCRED)
 - ✅ Arbitrary command injection via keyboard
-- ✅ Privilege escalation (runs as user service with group controls)
+- ✅ Privilege escalation (runs as an unprivileged user service)
 - ✅ Memory exhaustion attacks (comprehensive input validation)
 - ✅ Connection flooding attacks (rate limiting and connection limits)
 - ✅ JSON bomb attacks (size and depth validation)
@@ -160,7 +160,7 @@ cargo run --release --bin super-stt
 
 ### Assumptions
 - Physical access to the machine is trusted
-- Users in the `stt` group are trusted
+- The user running the daemon is trusted (the socket is same-user only)
 - System has standard Unix permission enforcement
 - Development builds are only used in secure development environments
 
@@ -173,10 +173,12 @@ journalctl --user -u super-stt -f
 ```
 
 ### Revoke Access
-Remove a user from the stt group:
+Authorization is per-client consent tokens, not group membership. Forget the
+cached token (forcing the client to re-request consent on its next call) with:
 ```bash
-sudo gpasswd -d username stt
+stt logout
 ```
+Or stop the daemon (below) to drop all in-memory sessions.
 
 ### Emergency Shutdown
 ```bash
@@ -223,8 +225,7 @@ cargo audit
 
 ### Production Deployment Requirements
 - [ ] Use release builds (`cargo build --release`)
-- [ ] Configure `stt` group membership properly
-- [ ] Verify socket permissions are 0660
+- [ ] Verify the socket is same-user (owner-only `$XDG_RUNTIME_DIR`, mode 0660)
 - [ ] Review systemd service hardening settings
 - [ ] Monitor logs for authentication failures
 
@@ -236,7 +237,7 @@ After=sound.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/super-stt --socket %t/stt/super-stt.sock
+ExecStart=%h/.local/bin/super-stt-daemon
 Restart=on-failure
 RestartSec=5
 

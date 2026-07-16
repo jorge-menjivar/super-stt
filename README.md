@@ -239,10 +239,12 @@ journalctl --user -u super-stt -n 50
 ```
 
 #### "sg: group 'stt' does not exist" / "Operation not permitted"
-The installer expects an `stt` group. Fix:
+This comes from an older install. The current daemon does not use an `stt`
+group — the socket lives in your per-user `$XDG_RUNTIME_DIR` and is same-user
+only. Remove the stale build and reinstall:
 ```bash
-sudo groupadd stt && sudo usermod -a -G stt $(whoami)
-# then log out and back in
+just uninstall   # or: rm -f ~/.local/bin/super-stt*
+just install
 ```
 
 ## 🔧 Development

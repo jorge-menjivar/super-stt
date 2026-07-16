@@ -27,7 +27,7 @@
 - Format TOML with Taplo (`taplo.toml`) when editing manifests.
 
 ## Testing Guidelines
-- Runtime/UX tests: Python against daemon socket at `/run/user/$UID/stt/super-stt.sock`.
+- Runtime/UX tests: Python against daemon socket at `/run/user/$UID/stt/super-stt-http.sock`.
   - Example: `python3 test_download_progress.py` (ensure daemon is running).
 - Rust unit tests live next to code (`#[cfg(test)]`) or in `tests/` per crate.
 - For protocol changes, add tests in `super-stt-shared` first.

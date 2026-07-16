@@ -37,7 +37,7 @@ wrapper_dst := user_bin_dir / wrapper_name
 
 # App files
 app_desktop_file_name := 'super-stt-app.desktop'
-app_desktop_file_src := 'super-stt-app' / 'resources' / 'app.desktop'
+app_desktop_file_src := 'super-stt-app' / 'resources' / app_desktop_file_name
 app_icon_src := 'super-stt-app' / 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'super-stt-app.svg'
 app_desktop_file_dst := user_desktop_dir / app_desktop_file_name
 app_icon_dst := user_icons_dir / 'super-stt-app.svg'
@@ -442,12 +442,6 @@ install-daemon *args:
 
     echo "Installing Super STT daemon as user service..."
 
-    # Setup stt group for secure socket access
-    if [ -f "scripts/setup-stt-group.sh" ]; then
-        echo "Setting up stt group for secure access..."
-        bash scripts/setup-stt-group.sh || true
-    fi
-
     # Install binary
     echo "Installing daemon binary to {{ daemon_dst }}"
     mkdir -p {{ user_bin_dir }}
@@ -469,6 +463,14 @@ install-daemon *args:
     echo "Installing consent helper to {{ consent_dst }}"
     install -m755 {{ consent_src }} {{ consent_dst }}
 
+    # Install the CLI alongside the daemon. The `stt` wrapper created below
+    # execs the CLI (client commands like `record`/`stop` live there, not in
+    # the daemon binary), so the wrapper is broken without it.
+    if ! just install-cli; then
+        echo "❌ CLI installation failed"
+        exit 1
+    fi
+
     # Create user directories
     echo "Creating user directories..."
     mkdir -p {{ run_dir }}
@@ -482,7 +484,7 @@ install-daemon *args:
     # Add model parameter to ExecStart if specified
     if [[ -n "$model" ]]; then
         echo "Configuring daemon to use model: $model"
-        sed -i "s|--socket %t/stt/super-stt.sock|--socket %t/stt/super-stt.sock --model $model|" {{ service_dst }}
+        sed -i "s|ExecStart=%h/.local/bin/super-stt-daemon|ExecStart=%h/.local/bin/super-stt-daemon --model $model|" {{ service_dst }}
     fi
 
     # Create the `stt` convenience wrapper (for keyboard shortcuts like
@@ -497,10 +499,10 @@ install-daemon *args:
     # owner (same user) can access regardless of group membership.
     echo "Creating wrapper script at {{ wrapper_dst }}"
     echo '#!/bin/bash' > {{ wrapper_dst }}
-    echo '# Super STT convenience wrapper — invokes super-stt-daemon directly.' >> {{ wrapper_dst }}
+    echo '# Super STT convenience wrapper — invokes super-stt-cli directly.' >> {{ wrapper_dst }}
     echo '# Used by keyboard shortcuts (e.g. Super+Space → "stt record --write").' >> {{ wrapper_dst }}
     echo '' >> {{ wrapper_dst }}
-    echo 'exec {{ daemon_dst }} "$@"' >> {{ wrapper_dst }}
+    echo 'exec {{ cli_dst }} "$@"' >> {{ wrapper_dst }}
     chmod +x {{ wrapper_dst }}
 
     # Setup COSMIC keyboard shortcut if available
@@ -593,11 +595,6 @@ install *args:
 
     if ! just install-app; then
         echo "❌ App installation failed"
-        exit 1
-    fi
-
-    if ! just install-cli; then
-        echo "❌ CLI installation failed"
         exit 1
     fi
 
