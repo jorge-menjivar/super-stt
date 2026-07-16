@@ -42,27 +42,31 @@ To stop an in-flight daemon-mic capture, see
   // value falls back to its primary_language.
   "language":    "en",
 
-  "data": {
-    // Stream incremental `event: preview` SSE frames before the
-    // final `event: done`. Default: false.
-    "stream_realtime": true,
+  // All remaining options are top-level fields of the request body.
+  //
+  // Default false. true = hold the response open until the transcription
+  // is delivered (`200 text/event-stream`); false = fire-and-forget
+  // (`202 { "message": "Recording started" }`, recording runs in the
+  // background — stop it with POST /transcribe/stop).
+  "wait":            true,
 
-    // Mic-capture options (ignored when audio_data is present).
-    // Default false. When true the final transcription is typed
-    // into the focused window via the configured WriteMethod.
-    "write_mode":      false,
+  // Stream incremental `event: preview` SSE frames before the final
+  // `event: done` (only with wait:true). Default: false. Independent of
+  // write-mode typing.
+  "stream_realtime": true,
 
-    // Per-request override for the configured stop mode. One of:
-    //   "silence_only" | "silence_and_manual" | "manual_only"
-    "stop_mode":       "manual_only",
+  // Mic-capture options (ignored when audio_data is present).
+  // Default false. When true the final transcription is typed into the
+  // focused window via the configured WriteMethod.
+  "write_mode":      false,
 
-    // Default false. true = hold the response open until the
-    // transcription is delivered.
-    "wait":            true,
+  // Per-request override for the configured stop mode. One of:
+  //   "silence_only" | "silence_and_manual" | "manual_only"
+  "stop_mode":       "manual_only",
 
-    // Per-request override for the preview_typing config flag.
-    "preview":         true
-  }
+  // Per-request override for the preview_typing config flag (on-screen
+  // typing of incremental preview text).
+  "preview":         true
 }
 ```
 

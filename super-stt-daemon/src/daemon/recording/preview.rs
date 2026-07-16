@@ -132,13 +132,17 @@ impl SuperSTTDaemon {
             }
             last_preview = Instant::now();
 
-            // Skip the preview-transcription work entirely when the
-            // preview-typing setting is off.
-            if !self
+            // Run the preview-transcription work if a client is streaming
+            // preview frames (a preview slot is claimed via `stream_realtime`)
+            // OR preview-typing is on. Skip only when neither consumer wants
+            // incremental results — the two are decoupled (a client can stream
+            // preview without on-screen typing, and vice versa).
+            let streaming = self.preview_text.read().await.is_some();
+            let typing = self
                 .preview_typing_enabled
-                .load(std::sync::atomic::Ordering::Relaxed)
-            {
-                debug!("Preview typing is disabled, skipping audio processing and transcription");
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if !streaming && !typing {
+                debug!("No preview client and preview-typing off; skipping preview transcription");
                 continue;
             }
 
@@ -278,7 +282,15 @@ impl SuperSTTDaemon {
             // because `update_preview` and `clear_preview` both run under
             // `&mut Typer` and never overlap (audit Tier 3 #35). Skip on a
             // poisoned lock, as before.
-            let taken = if write_mode {
+            // Type on screen only when write-mode AND preview-typing are both
+            // active. The loop may be running purely to stream preview frames to
+            // a client (`stream_realtime`) with preview-typing off, in which case
+            // it must not type.
+            let type_on_screen = write_mode
+                && self
+                    .preview_typing_enabled
+                    .load(std::sync::atomic::Ordering::Relaxed);
+            let taken = if type_on_screen {
                 session
                     .actually_typed
                     .lock()

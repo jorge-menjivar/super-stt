@@ -405,7 +405,7 @@ Five clusters account for most of the findings:
   set with the doc (add `metal` or drop it); either produce `cuda_unavailable` or document
   the silent-CPU-fallback (the doc currently self-contradicts).
 
-### [ ] 8. 🟠 Protocol: `POST /transcribe` response shapes and the `stream_realtime` field diverge from the docs
+### [x] 8. 🟠 Protocol: `POST /transcribe` response shapes and the `stream_realtime` field diverge from the docs
 
 - **Where:** the handler unconditionally returns 200 `text/event-stream`
   (`http/v1/transcribe.rs:353-358`); `stream_realtime` is never read; preview is gated on
@@ -420,6 +420,23 @@ Five clusters account for most of the findings:
 - **Fix:** either read `stream_realtime` in `cmd_record` and honor the 202/200-JSON shapes,
   or rewrite the docs to the actual behavior (always 200 SSE; preview via `preview`) and drop
   `stream_realtime` + its error from the contract.
+- **Resolved (branch `refactor/audit2-cleanup`, chose "implement the documented contract"):**
+  `POST /transcribe` now honors all four cases. `wait:false` → `202
+  {message:"Recording started"}` with the recording **detached** from the connection (runs in
+  the background, stopped via `POST /transcribe/stop`; write-mode still types the result);
+  `wait:true` → `200` SSE ending in `done`, and `stream_realtime:true` additionally streams
+  `preview` frames. `stream_realtime` is decoupled from preview-typing at the handler by
+  claiming the shared preview slot only when set (`recording/preview.rs` runs the loop when a
+  slot is claimed **or** preview-typing is on, and types only when write-mode **and**
+  preview-typing are on). The `wait:true` SSE path keeps "client disconnect → stop the
+  recording" intact (Phase-2 `manual_stop_tx` signal). Client-side: `TranscribeOptions` gained
+  `stream_realtime`; the shared `transcribe()` parses the `202` JSON for `wait:false` (the CLI
+  already handled a `None` transcription); the app sends `stream_realtime:true` to keep its
+  live-preview panel. Two review-caught minors folded in: aligned the docs' request-body
+  example to the actual **flat** top-level option shape (`transcribe.md`/`transport.md` had
+  nested them under `data`, which the daemon never read for `write_mode`/`stop_mode`/`preview`),
+  and documented the fire-and-forget `202`'s optimistic (no-completion-guarantee) semantics on
+  the busy-race. The pre-existing busy-check TOCTOU is left as-is (Tier 3 #6).
 
 ### [ ] 9. 🟠 API design: `daemon_status_changed` payload is an untyped hand-matched contract whose keys have already drifted
 

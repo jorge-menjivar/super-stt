@@ -6,12 +6,34 @@ use crate::models::protocol::DaemonResponse;
 use std::path::PathBuf;
 
 /// Options for [`transcribe`]. v1 only wires the daemon-mic capture path
-/// (no `audio_data`); pre-captured audio is a follow-up.
+/// (no `audio_data`); pre-captured audio is handled by the daemon's
+/// `POST /transcribe` when a client sends a top-level `audio_data` array.
 #[derive(Debug, Default, Clone)]
 pub struct TranscribeOptions {
     pub write_mode: bool,
     pub stop_mode: Option<String>,
+    /// Hold the connection open for the result. `true` → the daemon streams
+    /// SSE and returns the final transcription; `false` → fire-and-forget, the
+    /// daemon returns `202 {message:"Recording started"}` and records in the
+    /// background (stop it via [`transcribe_stop`]).
     pub wait: bool,
+    /// Stream incremental `event: preview` SSE frames before the final `done`
+    /// (only meaningful with `wait: true`). Independent of write-mode typing.
+    pub stream_realtime: bool,
+}
+
+/// Build the `POST /transcribe` request body from options. Mic-capture options
+/// are sent at the top level (the daemon reads them from the request body).
+fn record_body(opts: &TranscribeOptions) -> serde_json::Value {
+    let mut data = serde_json::json!({
+        "write_mode":      opts.write_mode,
+        "wait":            opts.wait,
+        "stream_realtime": opts.stream_realtime,
+    });
+    if let Some(mode) = &opts.stop_mode {
+        data["stop_mode"] = serde_json::Value::String(mode.clone());
+    }
+    data
 }
 
 /// One event from the `/transcribe` Server-Sent Events stream.
@@ -44,6 +66,12 @@ pub async fn transcribe(
     opts: TranscribeOptions,
 ) -> HttpResult<DaemonResponse> {
     use futures_util::StreamExt;
+    // Fire-and-forget: the daemon returns a single `202` JSON ack, not an SSE
+    // stream, so parse the response directly instead of reading events.
+    if !opts.wait {
+        let req = transport::build_post_json("/transcribe", &record_body(&opts), Some(token))?;
+        return transport::send_request::<DaemonResponse>(&socket_path, req).await;
+    }
     let mut stream = Box::pin(transcribe_stream(socket_path, token, opts).await?);
     let mut last_preview = String::new();
     while let Some(event) = stream.next().await {
@@ -85,14 +113,7 @@ pub async fn transcribe_stream(
     token: &str,
     opts: TranscribeOptions,
 ) -> HttpResult<impl futures_util::Stream<Item = TranscribeEvent> + Send + 'static> {
-    let mut data = serde_json::json!({
-        "write_mode": opts.write_mode,
-        "wait":       opts.wait,
-    });
-    if let Some(mode) = opts.stop_mode {
-        data["stop_mode"] = serde_json::Value::String(mode);
-    }
-    let req = transport::build_post_json("/transcribe", &data, Some(token))?;
+    let req = transport::build_post_json("/transcribe", &record_body(&opts), Some(token))?;
 
     let response = transport::open(&socket_path, req, Some(transport::REQUEST_TIMEOUT)).await?;
 

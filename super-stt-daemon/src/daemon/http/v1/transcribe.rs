@@ -156,29 +156,6 @@ async fn run_realtime_session(socket: axum::extract::ws::WebSocket, daemon: Arc<
     let _ = relay_out.await;
 }
 
-/// `POST /transcribe` — start a daemon-mic recording, streaming named
-/// SSE events back as the recording progresses. Same pattern modern
-/// LLM streaming APIs (`OpenAI`, Anthropic, Mistral chat, Google Gemini)
-/// use: POST with options in the body, response is `text/event-stream`.
-///
-/// Wire shape:
-///
-/// ```text
-/// event: preview
-/// data: {"text":"hello"}
-///
-/// event: preview
-/// data: {"text":"hello world"}
-///
-/// event: done
-/// data: {"transcription":"hello world"}
-/// ```
-///
-/// On daemon-side error a single `event: error\ndata: {"message":"..."}`
-/// frame is emitted instead. The stream always ends with one of
-/// `done` / `error` and the connection closes. Closing the
-/// connection mid-stream cancels the recording (the daemon detects
-/// the disconnect on its next write attempt).
 /// Build the raw bytes of one SSE `event: <name>\ndata: <json>\n\n` frame.
 /// `serde_json::to_string` never embeds raw newlines, so the JSON fits on the
 /// single `data:` line by construction. Shared by the unbounded `/transcribe`
@@ -207,18 +184,19 @@ fn next_preview_slot_id() -> u64 {
     COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Whether the request asks for streaming preview frames via `stream_realtime`.
-/// Per the contract it lives under `data`; a flat top-level form is also
-/// accepted so the check is robust to either body shape.
-fn wants_stream_realtime(body: &serde_json::Value) -> bool {
+/// Read an optional bool control field (`stream_realtime`, `wait`) from a
+/// request body. Per the contract these live under `data`; a flat top-level
+/// form is also accepted so the check is robust to either body shape. Absent →
+/// `default`.
+fn body_flag(body: &serde_json::Value, key: &str, default: bool) -> bool {
     let nested = body
         .get("data")
-        .and_then(|d| d.get("stream_realtime"))
+        .and_then(|d| d.get(key))
         .and_then(serde_json::Value::as_bool);
-    body.get("stream_realtime")
+    body.get(key)
         .and_then(serde_json::Value::as_bool)
         .or(nested)
-        .unwrap_or(false)
+        .unwrap_or(default)
 }
 
 /// Pre-captured one-shot: transcribe a supplied `audio_data` buffer without
@@ -226,7 +204,7 @@ fn wants_stream_realtime(body: &serde_json::Value) -> bool {
 /// coded error). Rejects `stream_realtime` combined with `audio_data` per the
 /// contract.
 async fn transcribe_precaptured(s: &AppState, body: serde_json::Value) -> axum::response::Response {
-    if wants_stream_realtime(&body) {
+    if body_flag(&body, "stream_realtime", false) {
         return json_response(&DaemonResponse::error_with_code(
             ErrorCode::InvalidValue,
             "stream_realtime_with_audio_data",
@@ -241,6 +219,16 @@ async fn transcribe_precaptured(s: &AppState, body: serde_json::Value) -> axum::
     json_response(&resp).into_response()
 }
 
+/// `POST /transcribe`. One endpoint, four use cases dispatched on the body
+/// (see `docs/protocol/endpoints/v1/transcribe.md`):
+/// - top-level `audio_data` → pre-captured one-shot, `200` JSON `{transcription}`;
+/// - mic `wait:false` → fire-and-forget, `202 {message:"Recording started"}`;
+/// - mic `wait:true`, `stream_realtime:false` → `200` SSE with a single `done`;
+/// - mic `wait:true`, `stream_realtime:true` → `200` SSE, `preview` frames then `done`.
+///
+/// On the SSE paths a daemon-side failure arrives as a single `error` frame and
+/// closing the connection stops the recording. A start while already recording
+/// returns `409 recording_in_progress`.
 pub(crate) async fn transcribe(
     State(s): State<AppState>,
     body: Option<axum::Json<serde_json::Value>>,
@@ -262,9 +250,20 @@ pub(crate) async fn transcribe(
     transcribe_mic(s, data).await
 }
 
-/// Daemon-mic capture path: start a fresh recording and stream named SSE events
-/// (`preview` / `done` / `error`) back as it progresses.
+/// Daemon-mic capture path. Response shape follows the `wait`/`stream_realtime`
+/// controls (see `docs/protocol/endpoints/v1/transcribe.md`):
+/// - `wait:false` → `202 {message:"Recording started"}`, recording detaches and
+///   runs in the background (stop via `POST /transcribe/stop`).
+/// - `wait:true` → `200 text/event-stream`, ending with `done`/`error`;
+///   `stream_realtime:true` additionally streams incremental `preview` frames.
+///   Closing the connection stops the recording.
 async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::response::Response {
+    // Read the response-shape controls before `data` is moved into the request.
+    // Absent `wait` → fire-and-forget per the contract.
+    let wait = data.as_ref().is_some_and(|b| body_flag(b, "wait", false));
+    let stream_realtime = data
+        .as_ref()
+        .is_some_and(|b| body_flag(b, "stream_realtime", false));
     let req = build_request("record", data);
 
     // Reject with `409 recording_in_progress` if a cycle is already
@@ -277,6 +276,51 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
         return recording_in_progress_response();
     }
 
+    // Fire-and-forget: detach the recording from this connection and return
+    // `202` immediately. The recording owns its busy/stop lifecycle (stopped via
+    // `POST /transcribe/stop`); write-mode still types the result on completion.
+    //
+    // The `202` is optimistic and carries no completion guarantee (by design):
+    // the busy check above is a plain read, and the authoritative claim is inside
+    // `setup_recording_session`. A request that loses that race after passing the
+    // read still gets `202`, but its detached task is rejected as busy and only
+    // logs — there is no open connection to report on, unlike the SSE path which
+    // emits an `error` frame. Acceptable for a fire-and-forget contract.
+    if !wait {
+        let daemon = Arc::clone(&s.daemon);
+        tokio::spawn(async move {
+            let resp = daemon.handle_command(req).await;
+            if resp.status != "success" {
+                log::warn!(
+                    "fire-and-forget recording ended with error: {:?}",
+                    resp.message
+                );
+            }
+        });
+        let ack = DaemonResponse::success().with_message("Recording started".to_string());
+        let body = serde_json::to_string(&ack)
+            .unwrap_or_else(|_| String::from("{\"status\":\"success\"}"));
+        return (
+            StatusCode::ACCEPTED,
+            [("content-type", "application/json")],
+            body,
+        )
+            .into_response();
+    }
+
+    transcribe_mic_sse(&s, req, stream_realtime)
+}
+
+/// `wait:true` mic capture: drive the recording while streaming SSE back on the
+/// response body. Ends with `done`/`error`; `stream_realtime` gates the
+/// incremental `preview` frames (via the shared preview slot). Closing the
+/// connection signals the recording to stop. Returns immediately; the recording
+/// is driven by the spawned task.
+fn transcribe_mic_sse(
+    s: &AppState,
+    req: super_stt_shared::models::protocol::DaemonRequest,
+    stream_realtime: bool,
+) -> axum::response::Response {
     // mpsc channel that produces SSE byte chunks into the HTTP response body.
     let (line_tx, line_rx) =
         tokio::sync::mpsc::unbounded_channel::<Result<axum::body::Bytes, std::io::Error>>();
@@ -300,7 +344,14 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
         // frame rather than clobbering the winner's stream.
         let (preview_tx, mut preview_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let slot_id = next_preview_slot_id();
-        {
+        // Claim the shared preview slot only when the client asked to stream
+        // preview frames (`stream_realtime`). Otherwise the response carries just
+        // the terminal `done`/`error`. When we claim, do it atomically: if
+        // another `/transcribe` already holds it we lost the busy-check race
+        // (the check above is a plain read), so bail with an error frame rather
+        // than clobbering the winner's stream. When we don't claim, keep the
+        // sender alive so `preview_rx.recv()` pends (never yields `None`).
+        let _retained_tx = if stream_realtime {
             let mut slot = daemon.preview_text.write().await;
             if slot.is_some() {
                 let _ = emit_sse_event(
@@ -311,7 +362,10 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
                 return;
             }
             *slot = Some((slot_id, preview_tx));
-        }
+            None
+        } else {
+            Some(preview_tx)
+        };
 
         let cmd_fut = daemon.handle_command(req);
         let mut cmd_fut = std::pin::pin!(cmd_fut);

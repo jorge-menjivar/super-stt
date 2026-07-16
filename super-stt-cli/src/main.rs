@@ -199,6 +199,9 @@ async fn cmd_record(
             write_mode,
             stop_mode,
             wait,
+            // The CLI prints the final result (or fire-and-forgets); it does not
+            // render incremental preview, so it never asks to stream it.
+            stream_realtime: false,
         },
     )
     .await?;

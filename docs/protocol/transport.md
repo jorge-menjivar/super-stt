@@ -53,8 +53,9 @@ Content-Length: 178
   "audio_data":  null,
   "sample_rate": null,
   "language":    "en",
-  "data":        { "wait": true, "stream_realtime": true,
-                   "stop_mode": "manual_only" }
+  "wait":        true,
+  "stream_realtime": true,
+  "stop_mode":   "manual_only"
 }
 ```
 
