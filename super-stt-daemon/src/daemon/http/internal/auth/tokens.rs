@@ -53,6 +53,53 @@ fn allow_no_keyring() -> bool {
     std::env::var(ALLOW_NO_KEYRING_ENV).is_ok_and(|v| v == "1")
 }
 
+/// A message to the single-writer persist task.
+// Both fields are only read in `persist_loop`, which is `#[cfg(not(test))]`; the
+// constructors compile in test builds too, so the fields read as dead code under
+// `cargo test`. They're live in production — suppress the test-only lint.
+#[cfg_attr(test, allow(dead_code))]
+enum PersistMsg {
+    /// Persist this sessions snapshot (coalesced with any newer ones).
+    Snapshot(HashMap<String, TokenMeta>),
+    /// Drain the backlog, write the latest snapshot, then signal completion via
+    /// the oneshot. The shutdown path uses this so a token minted or revoked in
+    /// the final moments is durably written before `process::exit` skips the
+    /// task (audit 2 Tier 1 #5).
+    Flush(tokio::sync::oneshot::Sender<()>),
+}
+
+/// Process-global handle to the live persist task's channel. Registered when the
+/// single production `TokenStore` is created ([`SessionPersister::spawn`], only
+/// in non-test builds). [`flush_persisted_sessions`] uses it to drain queued
+/// writes on shutdown. `None` in `cargo test` builds (no task is spawned) and
+/// until the production store exists.
+static PERSIST_FLUSH: std::sync::OnceLock<mpsc::UnboundedSender<PersistMsg>> =
+    std::sync::OnceLock::new();
+
+/// Drain any queued session snapshots to the keyring before the daemon exits.
+///
+/// The persist task is fire-and-forget; the shutdown path's `process::exit`
+/// would otherwise skip it, losing a token minted or revoked in the sub-second
+/// window before shutdown (audit 2 Tier 1 #5). Bounded by `timeout` so a stalled
+/// keyring (a D-Bus unlock prompt) can't hang shutdown indefinitely.
+pub(crate) async fn flush_persisted_sessions(timeout: Duration) {
+    let Some(tx) = PERSIST_FLUSH.get() else {
+        return; // no production persist task (test build, or store never created)
+    };
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+    if tx.send(PersistMsg::Flush(ack_tx)).is_err() {
+        return; // persist task already ended
+    }
+    match tokio::time::timeout(timeout, ack_rx).await {
+        Ok(Ok(())) => info!("Session store flushed to keyring on shutdown"),
+        Ok(Err(_)) => {} // ack sender dropped: task ended without acking
+        Err(_) => warn!(
+            "Session-store flush timed out after {}s on shutdown; queued writes may be lost",
+            timeout.as_secs()
+        ),
+    }
+}
+
 /// Single-writer handle for persisting the sessions map to the keyring.
 ///
 /// `mint`/`revoke`/`validate` are sync fns called from async request handlers;
@@ -61,10 +108,11 @@ fn allow_no_keyring() -> bool {
 /// would race the on-disk order. Funnelling every snapshot through one task over
 /// this channel keeps the blocking write off the request path *and* serializes
 /// the writes so the last submitted snapshot is the last one written (audit
-/// Tier 3 #35).
+/// Tier 3 #35). Callers submit under the in-memory lock so channel order matches
+/// lock order (audit 2 Tier 1 #4).
 #[derive(Clone)]
 pub(crate) struct SessionPersister {
-    tx: mpsc::UnboundedSender<HashMap<String, TokenMeta>>,
+    tx: mpsc::UnboundedSender<PersistMsg>,
 }
 
 impl SessionPersister {
@@ -73,9 +121,15 @@ impl SessionPersister {
     /// developer's keyring); submissions become no-ops as the receiver is
     /// dropped.
     fn spawn() -> Self {
-        let (tx, rx) = mpsc::unbounded_channel::<HashMap<String, TokenMeta>>();
+        let (tx, rx) = mpsc::unbounded_channel::<PersistMsg>();
         #[cfg(not(test))]
-        tokio::spawn(persist_loop(rx));
+        {
+            tokio::spawn(persist_loop(rx));
+            // Register the first (production) persister so the shutdown path can
+            // drain it. Production creates exactly one `TokenStore` (AppState's);
+            // any later store keeps its own channel but won't be flushed.
+            let _ = PERSIST_FLUSH.set(tx.clone());
+        }
         #[cfg(test)]
         drop(rx);
         Self { tx }
@@ -85,20 +139,33 @@ impl SessionPersister {
     /// closed channel (test builds) just means the write is skipped — the
     /// in-memory map stays authoritative.
     fn submit(&self, snapshot: HashMap<String, TokenMeta>) {
-        let _ = self.tx.send(snapshot);
+        let _ = self.tx.send(PersistMsg::Snapshot(snapshot));
     }
 }
 
-/// The persist task: receive snapshots, coalesce a burst down to the newest
-/// (older snapshots are strict subsets of the state the newest represents), and
-/// write each sequentially so on-disk order matches submission order.
+/// The persist task: receive messages, coalesce a burst of snapshots down to the
+/// newest (older snapshots are strict subsets of the state the newest
+/// represents), write it, then ack any flush request in the same batch — so a
+/// shutdown flush is acked only after the latest state is on disk.
 #[cfg(not(test))]
-async fn persist_loop(mut rx: mpsc::UnboundedReceiver<HashMap<String, TokenMeta>>) {
-    while let Some(mut latest) = rx.recv().await {
-        while let Ok(newer) = rx.try_recv() {
-            latest = newer;
+async fn persist_loop(mut rx: mpsc::UnboundedReceiver<PersistMsg>) {
+    while let Some(first) = rx.recv().await {
+        let mut latest: Option<HashMap<String, TokenMeta>> = None;
+        let mut flush_ack: Option<tokio::sync::oneshot::Sender<()>> = None;
+        let mut msg = Some(first);
+        while let Some(m) = msg {
+            match m {
+                PersistMsg::Snapshot(s) => latest = Some(s),
+                PersistMsg::Flush(ack) => flush_ack = Some(ack),
+            }
+            msg = rx.try_recv().ok();
         }
-        persist_snapshot(latest).await;
+        if let Some(snapshot) = latest {
+            persist_snapshot(snapshot).await;
+        }
+        if let Some(ack) = flush_ack {
+            let _ = ack.send(());
+        }
     }
 }
 
@@ -275,11 +342,12 @@ impl TokenStore {
         Ok(store)
     }
 
-    /// Persist the current sessions map to the keyring. Callers must
-    /// pass the locked guard so we can flush under the same lock that
-    /// guards the in-memory map (no torn writes vs concurrent mints).
-    /// Failures are logged but not propagated — the in-memory state is
-    /// still authoritative for the lifetime of the daemon.
+    /// Mint a fresh 30-day session token for `(app_name, scopes, exe_path)`,
+    /// insert it into the in-memory map, and submit the updated snapshot to the
+    /// persist task. The submit happens under the lock so the persist channel's
+    /// order matches lock order (audit 2 Tier 1 #4). Persistence failures are
+    /// logged but not propagated — the in-memory map stays authoritative for the
+    /// lifetime of the daemon.
     ///
     /// **Failure suppression.** A locked or denied keyring will fail
     /// every write; without a cooldown, a busy session-mint loop would
@@ -311,37 +379,38 @@ impl TokenStore {
             issued_at: now,
             expires_at,
         };
-        let snapshot = {
+        {
             let mut tokens = self.inner.lock().unwrap();
             tokens.insert(token.clone(), meta);
-            tokens.clone()
-        };
-        self.persist.submit(snapshot);
+            // Submit under the lock so the persist channel's order matches lock
+            // order. An off-lock submit can invert (two mutations serialize on
+            // the Mutex yet reach the channel out of order) and the coalescer
+            // would then write a stale subset snapshot — resurrecting a revoked
+            // token across restart. `submit` is a non-blocking channel send (the
+            // keyring I/O happens off-thread in the persist task), so it's safe
+            // to hold the std Mutex across it (audit 2 Tier 1 #4).
+            self.persist.submit(tokens.clone());
+        }
         (token, expires_at)
     }
 
     pub(crate) fn validate(&self, token: &str) -> Result<TokenMeta, &'static str> {
-        // Two-phase: drop the lock before flushing to avoid holding it
-        // across keyring DBus I/O. The expired-removal flush is best-effort
-        // — if the keyring write fails, the in-memory state is already
-        // correct and the cooldown mechanism handles transient failures.
-        let (result, maybe_snapshot) = {
-            let mut tokens = self.inner.lock().unwrap();
-            let Some(meta) = tokens.get(token).cloned() else {
-                return Err("unknown");
-            };
-            if meta.expires_at < Utc::now() {
-                tokens.remove(token);
-                let snapshot = tokens.clone();
-                (Err("expired"), Some(snapshot))
-            } else {
-                (Ok(meta), None)
-            }
+        // Submit the expired-eviction snapshot under the lock so the persist
+        // channel's order matches lock order (audit 2 Tier 1 #4). `submit` is a
+        // non-blocking channel send — the keyring DBus I/O happens off-thread in
+        // the persist task, not here — so it's safe to hold the std Mutex across
+        // it. The write is best-effort: the in-memory state is already correct
+        // and the cooldown mechanism handles transient keyring failures.
+        let mut tokens = self.inner.lock().unwrap();
+        let Some(meta) = tokens.get(token).cloned() else {
+            return Err("unknown");
         };
-        if let Some(snapshot) = maybe_snapshot {
-            self.persist.submit(snapshot);
+        if meta.expires_at < Utc::now() {
+            tokens.remove(token);
+            self.persist.submit(tokens.clone());
+            return Err("expired");
         }
-        result
+        Ok(meta)
     }
 
     /// Drop a session token immediately and persist the change. Used by
@@ -350,16 +419,10 @@ impl TokenStore {
     /// the session, so the daemon revokes the token, emits a `revoked`
     /// SSE event, and closes the stream. Idempotent.
     pub(crate) fn revoke(&self, token: &str) {
-        let maybe_snapshot = {
-            let mut tokens = self.inner.lock().unwrap();
-            if tokens.remove(token).is_some() {
-                Some(tokens.clone())
-            } else {
-                None
-            }
-        };
-        if let Some(snapshot) = maybe_snapshot {
-            self.persist.submit(snapshot);
+        let mut tokens = self.inner.lock().unwrap();
+        if tokens.remove(token).is_some() {
+            // Submit under the lock — see `mint` (audit 2 Tier 1 #4).
+            self.persist.submit(tokens.clone());
         }
     }
 }

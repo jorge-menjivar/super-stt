@@ -78,11 +78,27 @@ fn backend_secret_account(source: &str, name: &str) -> String {
 /// fall back to the system keyring.
 fn mock_store() -> Option<&'static Mutex<HashMap<String, String>>> {
     static STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-    if cfg!(test) || std::env::var_os("SUPER_STT_KEYRING_MOCK").is_some() {
+    if cfg!(test) || keyring_mock_env_set() {
         Some(STORE.get_or_init(|| Mutex::new(HashMap::new())))
     } else {
         None
     }
+}
+
+/// Whether `SUPER_STT_KEYRING_MOCK` requests the in-memory store. Honored only
+/// in debug builds (tests / CI); a release binary ignores the env var entirely
+/// so a stray or injected variable can't reroute every backend API key and the
+/// session store into a non-persistent, unencrypted in-process map (audit 2
+/// Tier 1 #6). Mirrors the release gating of the consent-timer bypass
+/// (audit Tier 1 #30).
+#[cfg(debug_assertions)]
+fn keyring_mock_env_set() -> bool {
+    std::env::var_os("SUPER_STT_KEYRING_MOCK").is_some()
+}
+
+#[cfg(not(debug_assertions))]
+fn keyring_mock_env_set() -> bool {
+    false
 }
 
 /// Read one keyring account (mock store under test/mock, else the real keyring).

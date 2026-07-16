@@ -22,7 +22,8 @@ impl AppModel {
             ModelMessage::AvailableModelsLoaded(_)
             | ModelMessage::CurrentModelLoaded { .. }
             | ModelMessage::ModelChanged { .. }
-            | ModelMessage::ModelError(_) => self.handle_model_results(message),
+            | ModelMessage::ModelError(_)
+            | ModelMessage::CurrentModelFetchFailed { .. } => self.handle_model_results(message),
         }
     }
 
@@ -125,6 +126,24 @@ impl AppModel {
                 Task::none()
             }
 
+            ModelMessage::CurrentModelFetchFailed { epoch, error } => {
+                // A stale snapshot fetch that failed must not clobber live state:
+                // if a `model_switched` advanced the epoch after this fetch was
+                // issued, the fresher truth already arrived — log and keep it,
+                // never `clear_loaded_model()` on a superseded fetch error
+                // (audit 2 Tier 1 #8).
+                if epoch != self.current_model_epoch {
+                    info!(
+                        "Ignoring stale get_current_model failure (epoch {epoch} != {}); \
+                         keeping live model state: {error}",
+                        self.current_model_epoch
+                    );
+                    return Task::none();
+                }
+                self.set_model_error(&error);
+                Task::none()
+            }
+
             // Startup load is driven by the sibling `handle_model_load_commands`
             // arm; nothing to do here.
             ModelMessage::LoadInitialData => Task::none(),
@@ -161,7 +180,10 @@ impl AppModel {
                     epoch,
                 }))
             }
-            Err(e) => cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string()))),
+            Err(e) => cosmic::Action::App(Message::Model(ModelMessage::CurrentModelFetchFailed {
+                epoch,
+                error: e.to_string(),
+            })),
         })
     }
 }

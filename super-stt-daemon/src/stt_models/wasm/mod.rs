@@ -307,50 +307,64 @@ impl WasmBackend {
     }
 
     /// Serve a one-shot transcription for a realtime-only model by driving an
-    /// internal realtime session over the buffered audio. The consumer channel
-    /// is unbounded and the guest reads all audio, commits, then drains the
-    /// upstream — so we pre-load `start` + PCM16 frames + `stop` *before*
-    /// invoking the session and collect only the final `done` transcript
-    /// *after* it returns. No concurrent feeder, so this is safe even from the
-    /// synchronous (`block_on`) `transcribe_audio` call sites.
+    /// internal realtime session over the buffered audio. We pre-build `start` +
+    /// PCM16 frames + `stop` and feed them from a concurrent task into the
+    /// bounded consumer channel while the session drains it, then collect only
+    /// the final `done` transcript *after* it returns. The feeder captures no
+    /// `self`, so this stays valid even from the synchronous (`block_on`)
+    /// `transcribe_audio` call sites.
     #[cfg(feature = "wasm-backends")]
     #[allow(clippy::cast_possible_truncation)] // intentional f32 -> i16 PCM clamp
     async fn transcribe_via_realtime(&self, audio: &[f32], sample_rate: u32) -> Result<String> {
-        use ws_host::{ConsumerStreamTransport, WsFrame};
+        use ws_host::{CONSUMER_INCOMING_CAPACITY, ConsumerStreamTransport, WsFrame};
 
         // 16-bit PCM, mono, LE. Mistral's `input_audio_buffer.append` caps a
         // single message at 262144 raw bytes; 16384 samples (32768 bytes) per
         // frame stays well under it.
         const FRAME_SAMPLES: usize = 16384;
 
-        let (incoming_tx, incoming_rx) = tokio::sync::mpsc::unbounded_channel::<WsFrame>();
+        let (incoming_tx, incoming_rx) =
+            tokio::sync::mpsc::channel::<WsFrame>(CONSUMER_INCOMING_CAPACITY);
         let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::unbounded_channel::<WsFrame>();
 
-        // Pre-load the consumer side: start, the audio as PCM16 binary chunks,
+        // Pre-build the consumer frames: start, the audio as PCM16 binary chunks,
         // then stop. The guest breaks on `stop`, so no further consumer recv.
-        let send = |frame| {
-            incoming_tx
-                .send(frame)
-                .map_err(|_| anyhow!("realtime channel closed"))
-        };
-        send(WsFrame::Text(format!(
+        let mut frames = Vec::with_capacity(audio.len() / FRAME_SAMPLES + 2);
+        frames.push(WsFrame::Text(format!(
             "{{\"type\":\"start\",\"sample_rate\":{sample_rate}}}"
-        )))?;
+        )));
         for chunk in audio.chunks(FRAME_SAMPLES) {
             let mut pcm = Vec::with_capacity(chunk.len() * 2);
             for &s in chunk {
                 let v = (s.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
                 pcm.extend_from_slice(&v.to_le_bytes());
             }
-            send(WsFrame::Binary(pcm))?;
+            frames.push(WsFrame::Binary(pcm));
         }
-        send(WsFrame::Text("{\"type\":\"stop\"}".to_string()))?;
+        frames.push(WsFrame::Text("{\"type\":\"stop\"}".to_string()));
+
+        // `incoming` is now bounded (audit 2 Tier 1 #7), so feed it from a task
+        // that runs concurrently with the session draining it — a synchronous
+        // pre-load would deadlock once the frame count exceeds the capacity. The
+        // feeder captures no `self`, so it's valid even from the sync `block_on`
+        // `transcribe_audio` call sites. Errors still surface through the session
+        // result below, not the feeder.
+        let feeder = tokio::spawn(async move {
+            for frame in frames {
+                if incoming_tx.send(frame).await.is_err() {
+                    break; // session ended / dropped the receiver early
+                }
+            }
+        });
 
         let transport = ConsumerStreamTransport {
             incoming: incoming_rx,
             outgoing: outgoing_tx,
         };
         self.realtime_session(transport).await?;
+        // Session returned → the guest consumed every frame (or aborted); reap
+        // the feeder so it can't outlive this call.
+        let _ = feeder.await;
 
         // The session has returned, so every frame the guest emitted (previews
         // plus the terminal `done`/`error`) is buffered. Return only the final

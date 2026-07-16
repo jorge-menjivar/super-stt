@@ -15,7 +15,9 @@ use std::time::Duration;
 
 use super_stt_daemon::stt_models::transcribe::Transcribe;
 use super_stt_daemon::stt_models::wasm::WasmBackend;
-use super_stt_daemon::stt_models::wasm::ws_host::{ConsumerStreamTransport, WsFrame};
+use super_stt_daemon::stt_models::wasm::ws_host::{
+    CONSUMER_INCOMING_CAPACITY, ConsumerStreamTransport, WsFrame,
+};
 
 /// Path to the prebuilt mock realtime component
 /// (`just build-mock-wasm-realtime-backend`).
@@ -54,7 +56,10 @@ async fn realtime_orchestration_against_mock() {
 
     // Realtime: drive one session. The mock emits a preview then a done frame
     // after reading the consumer's `start` frame, then closes — no upstream.
-    let (consumer_tx, consumer_rx) = tokio::sync::mpsc::unbounded_channel::<WsFrame>();
+    // `incoming` is a bounded channel (audit 2 Tier 1 #7); the consumer side is
+    // now `mpsc::Sender::send(..).await`.
+    let (consumer_tx, consumer_rx) =
+        tokio::sync::mpsc::channel::<WsFrame>(CONSUMER_INCOMING_CAPACITY);
     let (guest_tx, mut guest_rx) = tokio::sync::mpsc::unbounded_channel::<WsFrame>();
     let transport = ConsumerStreamTransport {
         incoming: consumer_rx,
@@ -66,9 +71,11 @@ async fn realtime_orchestration_against_mock() {
             .send(WsFrame::Text(
                 r#"{"type":"start","sample_rate":16000}"#.to_string(),
             ))
+            .await
             .unwrap();
         consumer_tx
             .send(WsFrame::Text(r#"{"type":"stop"}"#.to_string()))
+            .await
             .unwrap();
         // Keep the sender alive until the session ends so the guest's first recv
         // (the start frame) doesn't race an early channel close.

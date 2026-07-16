@@ -140,7 +140,7 @@ Five clusters account for most of the findings:
   mic-path response shapes (202 fire-and-forget, `stream_realtime`-gates-preview) are a
   separate finding and were left behavially unchanged.
 
-### [ ] 3. 🟠 Daemon: record-start parks a tokio worker on cpal enumeration + a `std::thread::sleep` verification spin
+### [x] 3. 🟠 Daemon: record-start parks a tokio worker on cpal enumeration + a `std::thread::sleep` verification spin
 
 - **Where:** `setup_recording_session` (async, awaited from the `POST /v1/transcribe`
   task) → `DaemonAudioRecorder::new_with_theme` (`recorder.rs:194`) →
@@ -158,8 +158,15 @@ Five clusters account for most of the findings:
 - **Fix:** wrap recorder construction and `detect_default_input_sample_rate` in
   `spawn_blocking` (mirror `handle_get_gpu_info`), or fold setup into the already-spawned
   blocking recorder task; replace the `std::thread::sleep` spin with an off-runtime wait.
+- **Resolved (branch `refactor/audit2-tier1-3-9`):** recorder construction
+  (`DaemonAudioRecorder::new_with_theme`, which runs the cpal warm-up and the
+  `std::thread::sleep` device-verification spin) now runs on `spawn_blocking` inside
+  `setup_recording_session`, and `detect_default_input_sample_rate` (made an associated fn —
+  it reads no instance state) runs on `spawn_blocking` in `spawn_recorder`. The busy-flag
+  lifecycle and the 16kHz detection fallback are unchanged; the spin now parks a dedicated
+  blocking thread instead of a runtime worker.
 
-### [ ] 4. 🟠 Daemon: `SessionPersister` submits snapshots after releasing the lock — a revoked token can resurrect across restart *(security)*
+### [x] 4. 🟠 Daemon: `SessionPersister` submits snapshots after releasing the lock — a revoked token can resurrect across restart *(security)*
 
 - **Where:** `mint` (`tokens.rs:315-319`), `validate`-eviction (`:329-342`), and `revoke`
   (`:354-362`) build the snapshot under the `inner` Mutex, then call
@@ -181,8 +188,15 @@ Five clusters account for most of the findings:
   have the persist task read the authoritative map under the same lock instead of
   accepting caller-captured snapshots. A monotonic seq stamped under the lock + keep-highest
   in the loop also works.
+- **Resolved (branch `refactor/audit2-tier1-3-9`):** `mint`/`validate`/`revoke` now call
+  `self.persist.submit(...)` *while holding* the `inner` Mutex. `submit` is a non-blocking
+  `UnboundedSender::send` (the keyring DBus write happens off-thread in the persist task, not
+  here), so it's safe under the std Mutex and makes the persist-channel order match lock
+  order — a mutation that serializes first on the Mutex now also reaches the channel first,
+  so the coalescer can no longer persist a stale subset snapshot and resurrect a revoked
+  token across restart.
 
-### [ ] 5. 🟠 Daemon: session-token persistence is never drained on shutdown (durability regression from the async rewrite)
+### [x] 5. 🟠 Daemon: session-token persistence is never drained on shutdown (durability regression from the async rewrite)
 
 - **Where:** `mint`/`validate`/`revoke` call `self.persist.submit(snapshot)` →
   `tx.send()` into an unbounded channel drained by `persist_loop` (`tokens.rs:96-103`).
@@ -199,8 +213,16 @@ Five clusters account for most of the findings:
 - **Fix:** give `SessionPersister` an explicit flush/close handshake (keep a `JoinHandle`
   or flush-sentinel + oneshot ack); in the shutdown path drop the submit handles and await
   the persist task (bounded by a timeout) before `process::exit`.
+- **Resolved (branch `refactor/audit2-tier1-3-9`):** the persist channel now carries a typed
+  `PersistMsg` (`Snapshot | Flush(oneshot)`); `persist_loop` coalesces a burst to the latest
+  snapshot, writes it, then acks any flush in the same batch — so the ack means "the latest
+  state is on disk". A process-global `PERSIST_FLUSH` handle is registered when the
+  production `TokenStore` is created, and the shutdown path calls
+  `flush_persisted_sessions(5s)` after `shutdown_unload` and before `process::exit`, bounded
+  so a locked keyring can't hang shutdown. Combined with #4's submit-under-lock ordering, a
+  token minted or revoked in the final moments is now durably written.
 
-### [ ] 6. 🟠 Daemon: runtime env bypasses (`SUPER_STT_AUTO_APPROVE`, `SUPER_STT_KEYRING_MOCK`) are honored in release builds *(security)*
+### [x] 6. 🟠 Daemon: runtime env bypasses (`SUPER_STT_AUTO_APPROVE`, `SUPER_STT_KEYRING_MOCK`) are honored in release builds *(security)*
 
 - **Where:** `auth_request` reads `AUTO_APPROVE_ENV` with a plain runtime
   `std::env::var(...)` (`http/v1/auth/request.rs:154`) and, when set, skips
@@ -216,8 +238,14 @@ Five clusters account for most of the findings:
   non-persistent plaintext in-process map with no encryption at rest.
 - **Fix:** gate both behind `#[cfg(debug_assertions)]` with release no-op stubs (as #30
   did), or behind a dedicated `test-hooks` cargo feature the integration tests enable.
+- **Resolved (branch `refactor/audit2-tier1-3-9`):** both bypasses are now behind
+  `#[cfg(debug_assertions)]` with `#[cfg(not(debug_assertions))]` no-op stubs (mirroring
+  #30) — `SUPER_STT_AUTO_APPROVE` via a gated `auto_approve` binding in `auth_request`, and
+  `SUPER_STT_KEYRING_MOCK` via a gated `keyring_mock_env_set()` helper feeding `mock_store()`.
+  A release binary ignores both env vars entirely; `cargo test` builds the daemon in the dev
+  profile (debug_assertions on), so the integration tests that rely on them are unaffected.
 
-### [ ] 7. 🟠 Daemon: realtime WebSocket bridge feeds the guest through an unbounded channel with no backpressure; sessions are unbounded
+### [x] 7. 🟠 Daemon: realtime WebSocket bridge feeds the guest through an unbounded channel with no backpressure; sessions are unbounded
 
 - **Where:** `run_realtime_session` creates the incoming bridge as
   `mpsc::unbounded_channel` (`http/v1/transcribe.rs:47`); `relay_in` (`:63-78`) forwards
@@ -232,8 +260,17 @@ Five clusters account for most of the findings:
   watchdog.
 - **Fix:** use a bounded mpsc and let `relay_in` apply backpressure (await send, or
   drop-oldest on `Full`); cap concurrent realtime sessions with a try-acquire semaphore.
+- **Resolved (branch `refactor/audit2-tier1-3-9`):** the consumer→guest `incoming` channel
+  is now bounded (`CONSUMER_INCOMING_CAPACITY = 256`) and `relay_in` awaits the send, so a
+  fast client applies TCP backpressure instead of growing an unbounded buffer; concurrent
+  realtime sessions are capped by a static `Semaphore` (`MAX_REALTIME_SESSIONS = 4`)
+  `try_acquire`d in the handler *before* the upgrade (over-cap → `503
+  realtime_sessions_busy`), with the permit held for the session's lifetime. The batch
+  `transcribe_via_realtime` pre-load (which fills the channel before the session drains it)
+  now feeds from a concurrent task so the bounded channel can't deadlock it. Both realtime
+  WASM mock tests pass.
 
-### [ ] 8. 🟠 App: `fetch_current_model` error path bypasses the epoch guard and destructively clears live model state
+### [x] 8. 🟠 App: `fetch_current_model` error path bypasses the epoch guard and destructively clears live model state
 
 - **Where:** `fetch_current_model` tags success with `current_model_epoch` and
   `CurrentModelLoaded` drops a stale snapshot (`handlers/model.rs:93`), but the **error**
@@ -247,8 +284,15 @@ Five clusters account for most of the findings:
   authoritative state.
 - **Fix:** thread the captured epoch into the error branch; drop (or only log) the failure
   when the epoch has advanced — never `clear_loaded_model()` on a stale-epoch fetch error.
+- **Resolved (branch `refactor/audit2-tier1-3-9`):** `fetch_current_model`'s error branch now
+  emits a new `CurrentModelFetchFailed { epoch, error }` (the epoch captured when the fetch
+  was issued) instead of the unguarded `ModelError`; the handler calls `set_model_error`
+  (which clears the loaded model) only when the epoch still matches, otherwise it
+  logs-and-drops — a transient `get_current_model` failure that resolves after a live
+  `model_switched` no longer wipes the fresh state. The genuine-error producers
+  (`list_available_models`, the models page) keep using `ModelError`.
 
-### [ ] 9. 🟠 Daemon: online-model rejection returns uncoded 500 instead of the documented `400 online_models_disabled`
+### [x] 9. 🟠 Daemon: online-model rejection returns uncoded 500 instead of the documented `400 online_models_disabled`
 
 - **Where:** the gate at `model_management/switch.rs:209-213` returns
   `DaemonResponse::error("Online models are disabled…")` with no `error_code`;
@@ -260,6 +304,11 @@ Five clusters account for most of the findings:
   Tier 2 #3 is dead.
 - **Fix:** emit `DaemonResponse::error_with_code(ErrorCode::OnlineModelsDisabled, …)` at
   `switch.rs:210`.
+- **Resolved (branch `refactor/audit2-tier1-3-9`):** the gate now returns
+  `DaemonResponse::error_with_code(ErrorCode::OnlineModelsDisabled, …)` — a 400 code matching
+  `active_model.md`. The message text is unchanged, so the existing `core_tests.rs`
+  assertions still hold. (`OnlineModelsDisabled` was the last remaining zero-producer of the
+  three 400 codes flagged across Tier 1 #9 / Tier 2 #7 → only this one is in scope here.)
 
 ### [x] 10. 🟠 Install: `just install-daemon --model X` silently drops the model (sed targets a nonexistent `--socket` flag)
 

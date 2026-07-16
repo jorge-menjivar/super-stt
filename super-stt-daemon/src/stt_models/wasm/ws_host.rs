@@ -67,14 +67,20 @@ impl WsStreamResource {
     }
 }
 
+/// Capacity of the consumer→guest `incoming` channel. Bounds per-session memory:
+/// a client streaming audio faster than the guest drains it applies TCP
+/// backpressure rather than growing an unbounded buffer (audit 2 Tier 1 #7).
+pub const CONSUMER_INCOMING_CAPACITY: usize = 256;
+
 /// The host-side bridge between the consumer-facing axum WebSocket and the
 /// guest's realtime session. The axum endpoint task owns the opposite ends of
 /// these channels: it forwards frames it reads off the consumer socket into
 /// `incoming`, and writes frames the guest emits on `outgoing` back to the
 /// consumer.
 pub struct ConsumerStreamTransport {
-    /// Frames arriving FROM the consumer (axum) TO the guest.
-    pub incoming: tokio::sync::mpsc::UnboundedReceiver<WsFrame>,
+    /// Frames arriving FROM the consumer (axum) TO the guest. Bounded
+    /// ([`CONSUMER_INCOMING_CAPACITY`]) so a fast producer can't exhaust memory.
+    pub incoming: tokio::sync::mpsc::Receiver<WsFrame>,
     /// Frames the guest sends OUT to the consumer (axum forwards them).
     pub outgoing: tokio::sync::mpsc::UnboundedSender<WsFrame>,
 }

@@ -479,7 +479,7 @@ impl DaemonAudioRecorder {
     /// # Errors
     ///
     /// Returns an error if no input device/config is available.
-    pub fn detect_default_input_sample_rate(&self) -> Result<u32> {
+    pub fn detect_default_input_sample_rate() -> Result<u32> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()

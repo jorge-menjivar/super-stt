@@ -48,8 +48,17 @@ impl SuperSTTDaemon {
         // Get a reference to the recorder's internal audio buffer for direct preview access
         let preview_buffer = recorder.get_audio_buffer_ref();
 
-        // Detect the actual device sample rate for correct buffer calculations
-        let device_sample_rate = recorder.detect_default_input_sample_rate().unwrap_or(16000); // fallback to 16kHz if detection fails
+        // Detect the actual device sample rate for correct buffer calculations.
+        // This opens the cpal default input device, so run it on a blocking
+        // thread rather than the async worker (audit 2 Tier 1 #3). Falls back to
+        // 16kHz if detection (or the task) fails.
+        let device_sample_rate = tokio::task::spawn_blocking(
+            crate::audio::recorder::DaemonAudioRecorder::detect_default_input_sample_rate,
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or(16000);
 
         // Start the recorder in its own thread
         let recorder_handle = tokio::spawn({

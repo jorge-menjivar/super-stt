@@ -23,6 +23,19 @@ use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 #[cfg(feature = "wasm-backends")]
 const REALTIME_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
 
+/// Maximum concurrent realtime WS sessions. Each holds the model read lock and a
+/// bounded input buffer; without a cap, any authorized transcribe-scope client
+/// could open sessions without limit (memory + lock pressure). A new connection
+/// beyond this is rejected with `503` before the upgrade (audit 2 Tier 1 #7).
+#[cfg(feature = "wasm-backends")]
+const MAX_REALTIME_SESSIONS: usize = 4;
+
+/// Permits for [`MAX_REALTIME_SESSIONS`]. `try_acquire` in the handler rejects
+/// excess connections rather than queueing them.
+#[cfg(feature = "wasm-backends")]
+static REALTIME_SESSIONS: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(MAX_REALTIME_SESSIONS);
+
 /// `GET /v1/transcribe/realtime` — upgrade the connection and bridge it to the
 /// active model's realtime session.
 #[cfg(feature = "wasm-backends")]
@@ -30,23 +43,42 @@ pub(crate) async fn realtime_ws_handler(
     ws: axum::extract::ws::WebSocketUpgrade,
     State(state): State<AppState>,
 ) -> Response {
+    // Claim a session permit before upgrading so an over-cap client gets a clean
+    // `503` instead of an upgraded socket that's immediately closed. The permit
+    // is moved into the session task and released when it ends (audit 2 Tier 1 #7).
+    let Ok(permit) = REALTIME_SESSIONS.try_acquire() else {
+        log::warn!(
+            "realtime WS rejected: {MAX_REALTIME_SESSIONS} concurrent sessions already active"
+        );
+        return (StatusCode::SERVICE_UNAVAILABLE, "realtime_sessions_busy").into_response();
+    };
     let daemon = Arc::clone(&state.daemon);
-    ws.on_upgrade(move |socket| run_realtime_session(socket, daemon))
+    ws.on_upgrade(move |socket| run_realtime_session(socket, daemon, permit))
 }
 
 /// Drive one realtime session: split the consumer socket, bridge each half to
 /// the guest's consumer-stream channels, and invoke `realtime_session` while
 /// holding the model read lock.
 #[cfg(feature = "wasm-backends")]
-async fn run_realtime_session(socket: axum::extract::ws::WebSocket, daemon: Arc<SuperSTTDaemon>) {
-    use crate::stt_models::wasm::ws_host::{ConsumerStreamTransport, WsFrame};
+async fn run_realtime_session(
+    socket: axum::extract::ws::WebSocket,
+    daemon: Arc<SuperSTTDaemon>,
+    // Held for the session's lifetime; dropping it frees a `REALTIME_SESSIONS`
+    // permit for the next connection (audit 2 Tier 1 #7).
+    _permit: tokio::sync::SemaphorePermit<'static>,
+) {
+    use crate::stt_models::wasm::ws_host::{
+        CONSUMER_INCOMING_CAPACITY, ConsumerStreamTransport, WsFrame,
+    };
     use axum::extract::ws::Message;
     use futures::{SinkExt, StreamExt};
     use tokio::sync::mpsc;
 
     // Channels bridging the consumer socket and the guest's consumer-stream.
-    // incoming: consumer -> guest ; outgoing: guest -> consumer.
-    let (incoming_tx, incoming_rx) = mpsc::unbounded_channel::<WsFrame>();
+    // incoming: consumer -> guest (bounded, so a fast client applies backpressure
+    // instead of growing memory) ; outgoing: guest -> consumer (unbounded — the
+    // guest produces bounded output and we never want to stall it).
+    let (incoming_tx, incoming_rx) = mpsc::channel::<WsFrame>(CONSUMER_INCOMING_CAPACITY);
     let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel::<WsFrame>();
     let transport = ConsumerStreamTransport {
         incoming: incoming_rx,
@@ -72,7 +104,10 @@ async fn run_realtime_session(socket: axum::extract::ws::WebSocket, daemon: Arc<
                 // Ping/Pong are answered by axum automatically; ignore them.
                 Message::Ping(_) | Message::Pong(_) => continue,
             };
-            if incoming_tx.send(frame).is_err() {
+            // Bounded send: awaits when the guest is behind, so we stop reading
+            // the socket and the client's TCP send blocks — backpressure instead
+            // of unbounded buffering (audit 2 Tier 1 #7).
+            if incoming_tx.send(frame).await.is_err() {
                 break;
             }
         }

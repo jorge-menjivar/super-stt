@@ -194,11 +194,20 @@ impl SuperSTTDaemon {
             *busy_guard = true;
         }
 
-        // Create audio recorder with current theme and volume
+        // Create audio recorder with current theme and volume. Construction runs
+        // the cpal cold-start (default host/output device/config) and a
+        // `std::thread::sleep` device-verification spin — up to ~1.6s of real
+        // blocking on a cold start. Run it on a blocking thread so it doesn't
+        // park a runtime worker and stall concurrent SSE/event/status handling
+        // exactly when the user starts talking (audit 2 Tier 1 #3).
         let current_theme = self.get_audio_theme();
         let current_volume = self.get_volume_f32();
-        let mut recorder = DaemonAudioRecorder::new_with_theme(current_theme, current_volume)
-            .context("Failed to create audio recorder")?;
+        let mut recorder = tokio::task::spawn_blocking(move || {
+            DaemonAudioRecorder::new_with_theme(current_theme, current_volume)
+        })
+        .await
+        .context("Audio recorder construction task panicked")?
+        .context("Failed to create audio recorder")?;
 
         // Initialize the recorder for threaded operation
         recorder.prepare_for_threaded_recording();

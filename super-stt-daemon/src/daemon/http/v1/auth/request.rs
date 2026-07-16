@@ -150,9 +150,15 @@ pub(crate) async fn auth_request(
                 reason::USER_DENIED_CACHED,
             )
         } else {
-            // Auto-approve if the daemon is in test/CI mode.
+            // Auto-approve if the daemon is in test/CI mode. Honored only in
+            // debug builds: compiled out of release so a stray/injected env var
+            // can't silently defeat the human consent gate in a shipped binary
+            // (audit 2 Tier 1 #6; mirrors the #30 consent-timer release gating).
+            #[cfg(debug_assertions)]
             let auto_approve = std::env::var(crate::daemon::http::server::AUTO_APPROVE_ENV)
                 .is_ok_and(|v| v == "1");
+            #[cfg(not(debug_assertions))]
+            let auto_approve = false;
 
             let decision = if auto_approve {
                 let auto_approve_env = crate::daemon::http::server::AUTO_APPROVE_ENV;

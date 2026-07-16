@@ -205,9 +205,13 @@ impl SuperSTTDaemon {
         };
 
         // Online models must be explicitly enabled — gated after resolution
-        // since online-ness is a property of the resolved model.
+        // since online-ness is a property of the resolved model. Emit the
+        // documented `400 online_models_disabled` code so clients can show the
+        // "enable online models" affordance instead of treating an uncoded 500
+        // as a crash (audit 2 Tier 1 #9).
         if is_online && !self.config.read().await.online.allow_online_models {
-            return DaemonResponse::error(
+            return DaemonResponse::error_with_code(
+                ErrorCode::OnlineModelsDisabled,
                 "Online models are disabled. Enable 'Allow Online Models' in settings first.",
             );
         }

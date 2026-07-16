@@ -106,6 +106,16 @@ pub enum ModelMessage {
         source: String,
     },
     ModelError(String),
+    /// A `fetch_current_model` snapshot query failed. Carries the
+    /// `current_model_epoch` captured when the fetch was issued: the handler
+    /// clears the loaded model only if the epoch is unchanged. If a live
+    /// `model_switched` advanced the epoch since, the failure is stale and is
+    /// logged-and-dropped rather than clobbering the fresher state — the same
+    /// guard `CurrentModelLoaded` applies to its success path (audit 2 Tier 1 #8).
+    CurrentModelFetchFailed {
+        epoch: u64,
+        error: String,
+    },
 }
 
 /// Models-page UI: tabs, active-backend card, GPU readout, backend
