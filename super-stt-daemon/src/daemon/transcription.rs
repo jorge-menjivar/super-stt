@@ -13,6 +13,7 @@ impl SuperSTTDaemon {
         audio_data: Vec<f32>,
         sample_rate: u32,
         client_id: String,
+        language: Option<String>,
     ) -> DaemonResponse {
         info!("Processing transcription request from client: {client_id}");
 
@@ -46,7 +47,9 @@ impl SuperSTTDaemon {
         };
 
         // Run the model inference (online or blocking path)
-        let transcription_result = self.run_transcription(processed_audio).await;
+        let transcription_result = self
+            .run_transcription(processed_audio, language.as_deref())
+            .await;
 
         // Handle the result of the transcription task
         match transcription_result {
@@ -120,9 +123,22 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// Resolve the effective language for the currently-loaded model from
-    /// config. `None` means "omit `language`" (model uses its primary).
-    pub(crate) async fn resolve_active_language(&self) -> Option<String> {
+    /// Resolve the effective language for the currently-loaded model.
+    /// `request_override` is an optional per-request language (BCP-47 or
+    /// `"auto"`) from an external `POST /v1/transcribe`. Per the
+    /// transcription-language design it takes precedence over all configured
+    /// resolution and is **passed straight through** — the backend validates it
+    /// (it is not re-adapted against the model's supported set). When it is
+    /// `None`, fall back to the configured resolution (per-model language →
+    /// primary language → model default). A returned `None` means "omit
+    /// `language`" (the model uses its primary).
+    pub(crate) async fn resolve_active_language(
+        &self,
+        request_override: Option<&str>,
+    ) -> Option<String> {
+        if let Some(lang) = request_override {
+            return Some(lang.to_string());
+        }
         let def = {
             let guard = self.model.read().await;
             guard.as_ref().map(|loaded| loaded.definition.clone())?
@@ -145,8 +161,9 @@ impl SuperSTTDaemon {
     async fn run_transcription(
         &self,
         processed_audio: Vec<f32>,
+        request_language: Option<&str>,
     ) -> Result<Result<(String, std::time::Duration), anyhow::Error>, tokio::task::JoinError> {
-        let language = self.resolve_active_language().await;
+        let language = self.resolve_active_language(request_language).await;
         let start_time = std::time::Instant::now();
 
         match dispatch_transcription(&self.model, processed_audio, 16000, language).await {

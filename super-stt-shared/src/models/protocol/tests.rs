@@ -476,3 +476,34 @@ fn response_active_backend_absent_is_skipped() {
         "skip_serializing_if=Option::is_none should omit the field"
     );
 }
+
+#[test]
+fn transcribe_command_carries_audio_sample_rate_and_language() {
+    let mut request = make_request("transcribe", None);
+    request.audio_data = Some(vec![0.1, -0.1, 0.2]);
+    request.sample_rate = Some(16000);
+    request.language = Some("en".to_string());
+    match Command::try_from(request).expect("transcribe command should parse") {
+        Command::Transcribe {
+            audio_data,
+            sample_rate,
+            language,
+            ..
+        } => {
+            assert_eq!(audio_data.len(), 3);
+            assert_eq!(sample_rate, 16000);
+            assert_eq!(language.as_deref(), Some("en"));
+        }
+        _ => panic!("expected Command::Transcribe"),
+    }
+}
+
+#[test]
+fn record_command_carries_language_override() {
+    let mut request = make_request("record", Some(json!({ "write_mode": false })));
+    request.language = Some("fr".to_string());
+    match Command::try_from(request).expect("record command should parse") {
+        Command::Record { language, .. } => assert_eq!(language.as_deref(), Some("fr")),
+        _ => panic!("expected Command::Record"),
+    }
+}

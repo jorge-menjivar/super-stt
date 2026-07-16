@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, json_response};
+use crate::daemon::http::internal::helpers::dispatch::{
+    build_request, build_transcribe_request, dispatch, json_response,
+};
 use crate::daemon::http::internal::helpers::responses::recording_in_progress_response;
 use crate::daemon::http::state::AppState;
 // Only the wasm-backends realtime handler references the daemon type / bare
@@ -12,7 +14,7 @@ use axum::response::IntoResponse;
 #[cfg(feature = "wasm-backends")]
 use axum::response::Response;
 use std::sync::Arc;
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 
 /// Abort a realtime session whose consumer has sent no frame for this long.
 /// During an active session the client streams audio continuously, so an idle
@@ -205,11 +207,64 @@ fn next_preview_slot_id() -> u64 {
     COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Whether the request asks for streaming preview frames via `stream_realtime`.
+/// Per the contract it lives under `data`; a flat top-level form is also
+/// accepted so the check is robust to either body shape.
+fn wants_stream_realtime(body: &serde_json::Value) -> bool {
+    let nested = body
+        .get("data")
+        .and_then(|d| d.get("stream_realtime"))
+        .and_then(serde_json::Value::as_bool);
+    body.get("stream_realtime")
+        .and_then(serde_json::Value::as_bool)
+        .or(nested)
+        .unwrap_or(false)
+}
+
+/// Pre-captured one-shot: transcribe a supplied `audio_data` buffer without
+/// touching the microphone and return a single JSON `{ transcription }` (or a
+/// coded error). Rejects `stream_realtime` combined with `audio_data` per the
+/// contract.
+async fn transcribe_precaptured(s: &AppState, body: serde_json::Value) -> axum::response::Response {
+    if wants_stream_realtime(&body) {
+        return json_response(&DaemonResponse::error_with_code(
+            ErrorCode::InvalidValue,
+            "stream_realtime_with_audio_data",
+        ))
+        .into_response();
+    }
+    let req = match build_transcribe_request(body) {
+        Ok(req) => req,
+        Err(resp) => return json_response(&resp).into_response(),
+    };
+    let resp = dispatch(&s.daemon, req).await;
+    json_response(&resp).into_response()
+}
+
 pub(crate) async fn transcribe(
     State(s): State<AppState>,
     body: Option<axum::Json<serde_json::Value>>,
 ) -> impl IntoResponse {
     let data = body.map(|axum::Json(v)| v);
+
+    // Pre-captured audio path: a top-level `audio_data` array means "transcribe
+    // this supplied buffer" — the daemon must NOT touch the microphone. Returns
+    // a single JSON result rather than the SSE recording stream below.
+    let has_audio = data
+        .as_ref()
+        .and_then(|b| b.get("audio_data"))
+        .is_some_and(|v| !v.is_null());
+    if has_audio {
+        return transcribe_precaptured(&s, data.unwrap_or(serde_json::Value::Null))
+            .await
+            .into_response();
+    }
+    transcribe_mic(s, data).await
+}
+
+/// Daemon-mic capture path: start a fresh recording and stream named SSE events
+/// (`preview` / `done` / `error`) back as it progresses.
+async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::response::Response {
     let req = build_request("record", data);
 
     // Reject with `409 recording_in_progress` if a cycle is already

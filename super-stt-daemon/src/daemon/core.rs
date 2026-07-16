@@ -16,8 +16,9 @@ impl SuperSTTDaemon {
                 audio_data,
                 sample_rate,
                 client_id,
+                language,
             } => {
-                self.handle_transcribe(audio_data, sample_rate, client_id)
+                self.handle_transcribe(audio_data, sample_rate, client_id, language)
                     .await
             }
             Command::Ping { client_id } => self.handle_ping(client_id),
@@ -26,9 +27,10 @@ impl SuperSTTDaemon {
                 write_mode,
                 stop_mode,
                 preview,
+                language,
                 ..
             } => {
-                self.handle_record_command(write_mode, stop_mode, preview)
+                self.handle_record_command(write_mode, stop_mode, preview, language)
                     .await
             }
             Command::SetAudioTheme { theme } => self.handle_set_audio_theme(theme),
@@ -92,6 +94,7 @@ impl SuperSTTDaemon {
         write_mode: bool,
         stop_mode: Option<super_stt_shared::models::recording_stop_mode::RecordingStopMode>,
         preview: Option<bool>,
+        language: Option<String>,
     ) -> DaemonResponse {
         // Resolve effective mode: per-request override or daemon config default
         let effective_mode = if let Some(mode) = stop_mode {
@@ -153,7 +156,7 @@ impl SuperSTTDaemon {
 
         let mut typer = Typer::new(simulator);
         let response = self
-            .handle_record_internal(&mut typer, write_mode, effective_mode)
+            .handle_record_internal(&mut typer, write_mode, effective_mode, language.as_deref())
             .await;
 
         // Restore original preview setting.

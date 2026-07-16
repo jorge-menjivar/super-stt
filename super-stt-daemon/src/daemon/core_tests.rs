@@ -1268,7 +1268,7 @@ async fn handle_transcribe_returns_backend_text() {
     seed_scripted_model(&daemon, true, Ok("hello world".to_string())).await;
 
     let resp = daemon
-        .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string())
+        .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string(), None)
         .await;
 
     assert_eq!(resp.status, "success");
@@ -1285,7 +1285,7 @@ async fn handle_transcribe_reports_backend_failure_as_error() {
     seed_scripted_model(&daemon, true, Err(())).await;
 
     let resp = daemon
-        .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string())
+        .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string(), None)
         .await;
 
     assert_eq!(resp.status, "error");
@@ -1303,7 +1303,7 @@ async fn handle_transcribe_errors_when_no_model_loaded() {
     let daemon = test_daemon().await;
 
     let resp = daemon
-        .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string())
+        .handle_transcribe(one_second_of_audio(), 16000, "c1".to_string(), None)
         .await;
 
     assert_eq!(resp.status, "error");

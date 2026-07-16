@@ -7,7 +7,11 @@ use log::{debug, error, info, warn};
 
 impl SuperSTTDaemon {
     /// Transcribe a chunk of audio data for preview
-    pub(super) async fn transcribe_audio_chunk(&self, audio_data: &[f32]) -> Result<String> {
+    pub(super) async fn transcribe_audio_chunk(
+        &self,
+        audio_data: &[f32],
+        request_language: Option<&str>,
+    ) -> Result<String> {
         debug!(
             "Processing {} samples for preview transcription",
             audio_data.len()
@@ -39,7 +43,7 @@ impl SuperSTTDaemon {
             processed_audio.len()
         );
 
-        let language = self.resolve_active_language().await;
+        let language = self.resolve_active_language(request_language).await;
 
         // Preview is best-effort: a backend failure or missing model yields an
         // empty string rather than surfacing an error to the recording flow.
@@ -62,13 +66,17 @@ impl SuperSTTDaemon {
     /// Run the final transcription pass over the full recording. Unlike the
     /// best-effort preview path, a backend failure here surfaces to the caller
     /// as an `Err` (it must not look like silence).
-    pub(super) async fn transcribe_final(&self, audio_data: &[f32]) -> Result<String> {
+    pub(super) async fn transcribe_final(
+        &self,
+        audio_data: &[f32],
+        request_language: Option<&str>,
+    ) -> Result<String> {
         let processed_audio = self
             .audio_processor
             .process_audio(audio_data, 16000)
             .context("Failed to process audio")?;
 
-        let language = self.resolve_active_language().await;
+        let language = self.resolve_active_language(request_language).await;
         let start_time = std::time::Instant::now();
 
         match dispatch_transcription(&self.model, processed_audio, 16000, language).await {

@@ -78,6 +78,7 @@ fn cmd_transcribe(request: &DaemonRequest) -> Result<Command, String> {
         audio_data,
         sample_rate,
         client_id,
+        language: request.language.clone(),
     })
 }
 
@@ -121,6 +122,7 @@ fn cmd_record(request: &DaemonRequest) -> Result<Command, String> {
         stop_mode,
         wait,
         preview,
+        language: request.language.clone(),
     })
 }
 

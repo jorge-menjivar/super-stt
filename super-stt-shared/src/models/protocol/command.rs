@@ -9,6 +9,9 @@ pub enum Command {
         audio_data: Vec<f32>,
         sample_rate: u32,
         client_id: String,
+        /// Optional per-request language override (BCP-47 or `"auto"`). `None`
+        /// falls back to the active model's configured language.
+        language: Option<String>,
     },
     Ping {
         client_id: Option<String>,
@@ -19,6 +22,9 @@ pub enum Command {
         stop_mode: Option<RecordingStopMode>,
         wait: bool,
         preview: Option<bool>,
+        /// Optional per-request language override (BCP-47 or `"auto"`). `None`
+        /// falls back to the active model's configured language.
+        language: Option<String>,
     },
     SetAudioTheme {
         theme: String,

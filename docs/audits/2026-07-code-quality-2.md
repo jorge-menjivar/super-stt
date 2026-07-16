@@ -82,7 +82,7 @@ Five clusters account for most of the findings:
 
 ## Tier 1 — defects worth fixing
 
-### [ ] 1. 🔴 Install: `just install` builds a `stt` wrapper that execs the daemon, so `stt record --write` fails
+### [x] 1. 🔴 Install: `just install` builds a `stt` wrapper that execs the daemon, so `stt record --write` fails
 
 - **Where:** `justfile:503` writes the wrapper as `exec {{ daemon_dst }} "$@"`
   (→ `super-stt-daemon`); the recipe installs a COSMIC shortcut spawning
@@ -99,8 +99,13 @@ Five clusters account for most of the findings:
   correctly (`exec super-stt-cli`), so the two install paths diverge.
 - **Fix:** change `justfile:503` to `exec {{ cli_dst }} "$@"` and have `install-daemon`
   run `install-cli`.
+- **Resolved (branch `refactor/audit2-cleanup`):** the wrapper now execs `{{ cli_dst }}`
+  (`super-stt-cli`, which owns the `record` subcommand) and its comment says so;
+  `install-daemon` now runs `install-cli` before writing the wrapper (mirroring the
+  bundled consent-helper step), so the target binary always exists. Dropped the
+  now-redundant `install-cli` call from the top-level `install` recipe.
 
-### [ ] 2. 🔴 Protocol: `POST /v1/transcribe` silently discards documented `audio_data`/`sample_rate`/`language`; pre-captured-audio requests open the mic instead
+### [x] 2. 🔴 Protocol: `POST /v1/transcribe` silently discards documented `audio_data`/`sample_rate`/`language`; pre-captured-audio requests open the mic instead
 
 - **Where:** the handler builds its command via `build_request("record", data)`, and
   `build_request` hard-codes `audio_data: None`, `sample_rate: None`, `language: None`
@@ -119,6 +124,21 @@ Five clusters account for most of the findings:
   `transcribe` command with the buffer populated, and thread `language` through
   `cmd_record`; or delete the three fields from the docs and the dead `cmd_transcribe`
   HTTP contract. `build_request` must stop unconditionally nulling them for this route.
+- **Resolved (branch `refactor/audit2-cleanup`):** implemented the documented behavior
+  (the daemon's offline `handle_transcribe` already existed and was wired to
+  `Command::Transcribe`; only the HTTP handler never reached it). `POST /v1/transcribe`
+  now branches on a top-level `audio_data` array → `build_transcribe_request` (moves the
+  buffer out, reads `sample_rate`/`language`) → offline transcription → `200 JSON
+  {status, transcription}`, never touching the mic; a bad `audio_data` is `400`, and
+  `audio_data` + `stream_realtime` is rejected `400 stream_realtime_with_audio_data`. The
+  mic SSE path is unchanged (extracted into `transcribe_mic`). The per-request `language`
+  override (previously inert) is threaded through both transcription paths; per the
+  transcription-language design an explicit request language is passed straight through to
+  the backend (not re-adapted against the model's supported set) — a review-caught
+  precedence bug in the first attempt, now fixed. Added unit tests for the command
+  language-threading and `build_transcribe_request`. **Out of scope (Tier 2 #8):** the
+  mic-path response shapes (202 fire-and-forget, `stream_realtime`-gates-preview) are a
+  separate finding and were left behavially unchanged.
 
 ### [ ] 3. 🟠 Daemon: record-start parks a tokio worker on cpal enumeration + a `std::thread::sleep` verification spin
 
@@ -241,7 +261,7 @@ Five clusters account for most of the findings:
 - **Fix:** emit `DaemonResponse::error_with_code(ErrorCode::OnlineModelsDisabled, …)` at
   `switch.rs:210`.
 
-### [ ] 10. 🟠 Install: `just install-daemon --model X` silently drops the model (sed targets a nonexistent `--socket` flag)
+### [x] 10. 🟠 Install: `just install-daemon --model X` silently drops the model (sed targets a nonexistent `--socket` flag)
 
 - **Where:** `justfile:485` runs
   `sed -i "s|--socket %t/stt/super-stt.sock|… --model $model|"` on the installed unit.
@@ -252,6 +272,9 @@ Five clusters account for most of the findings:
   requested model; the daemon starts with the saved/default preference, no error.
 - **Fix:** append `--model $model` to the actual `super-stt-daemon` ExecStart line
   (the daemon reads `-m/--model`); drop the obsolete `--socket` text.
+- **Resolved (branch `refactor/audit2-cleanup`):** the sed now targets the real
+  `ExecStart=%h/.local/bin/super-stt-daemon` line and appends `--model $model` (verified
+  against the packaged unit); the obsolete `--socket` pattern is gone.
 
 ---
 
@@ -274,7 +297,7 @@ Five clusters account for most of the findings:
   (cross-ref `auth.md`), keep SO_PEERCRED only in its real role (resolving the peer exe for
   the prompt + the uid-mismatch check), and reconcile the "No remote access" claim.
 
-### [ ] 2. 🟠 Security/Install: the `stt`-group access-control model is documented and provisioned by installers but does not exist in the daemon
+### [x] 2. 🟠 Security/Install: the `stt`-group access-control model is documented and provisioned by installers but does not exist in the daemon
 
 - **Where:** `scripts/setup-stt-group.sh:58-61` (creates the group, prints "Only members
   of 'stt' group can connect"), `install-stable.sh:198-208`, `SECURITY.md:20-55`
@@ -292,8 +315,18 @@ Five clusters account for most of the findings:
 - **Fix:** delete `setup-stt-group.sh` and its `justfile`/`install-stable.sh` invocations;
   rewrite the `SECURITY.md`/`README` group section to describe the real same-uid + consent
   model and the correct socket name.
+- **Resolved (branch `refactor/audit2-cleanup`):** deleted `scripts/setup-stt-group.sh` and
+  removed the `install-daemon` invocation. Rewrote `SECURITY.md`'s socket/group sections
+  (Socket Access Control, Best Practices, Threat Model, Incident Response, Process Isolation,
+  Deployment Checklist) to the real per-user model — owner-only `$XDG_RUNTIME_DIR`, same-UID
+  peer check, consent-token authorization, correct `super-stt-http.sock` name — and updated
+  the README troubleshooting note. **Scoped out deliberately:** `install-stable.sh`'s own
+  inline `setup_stt_group` is left intact — that script installs the *legacy* single
+  `super-stt` binary whose `sg stt -c` wrapper genuinely needs the group; touching it would
+  break legacy installs. The broader SO_PEERCRED auth-model rewrite (Tier 2 #1) and the
+  `super-stt --socket` systemd example (Tier 2 #3) are separate findings, untouched here.
 
-### [ ] 3. 🟠 Docs: `SECURITY.md` operational commands reference a nonexistent `super-stt` binary, `--socket` flag, and wrong socket filename
+### [x] 3. 🟠 Docs: `SECURITY.md` operational commands reference a nonexistent `super-stt` binary, `--socket` flag, and wrong socket filename
 
 - **Where:** `docs/SECURITY.md:239` (`ExecStart=%h/.local/bin/super-stt --socket
   %t/stt/super-stt.sock`), `:140,143` (`cargo run --bin super-stt`), `:53` (socket path).
@@ -305,6 +338,16 @@ Five clusters account for most of the findings:
   fails to start; the socket-verification command inspects a path that never exists.
 - **Fix:** `super-stt` → `super-stt-daemon`, drop `--socket` (or document
   `SUPER_STT_HTTP_SOCKET`), fix the socket path.
+- **Resolved (branch `refactor/audit2-cleanup`):** the systemd `ExecStart` is now
+  `%h/.local/bin/super-stt-daemon` (no `--socket`, matching the packaged unit), and both
+  `cargo run --bin super-stt` dev lines are `super-stt-daemon`. The `:53` socket-verification
+  path was already corrected to `super-stt-http.sock` in the Tier 2 #2 rewrite. Also fixed the
+  same wrong-socket-name (`super-stt.sock`) in `AGENTS.md`. The `systemctl`/`journalctl -u
+  super-stt` commands are left as-is — `super-stt` is the correct *unit* name (`service_name`),
+  distinct from the `super-stt-daemon` binary. **Out of scope (flagged, not a #3 item):** the
+  "Recommended Systemd Hardening" block still lists `ProtectHome=true`/`ProtectSystem=strict`,
+  which are incompatible with a `--user` service whose binary lives in `~/.local/bin` and whose
+  socket lives in `/run/user/<uid>`; making that block actually startable is a separate fix.
 
 ### [ ] 4. 🟠 Docs/CLI: README advertises a `--write-method` flag and `--stop-mode manual` value the CLI rejects
 
@@ -750,7 +793,7 @@ Five clusters account for most of the findings:
 
 ### Dependencies & packaging
 
-### [ ] 26. 🟠 `just install-app` points at a desktop file that was renamed away — the manual install breaks after copying the binary
+### [x] 26. 🟠 `just install-app` points at a desktop file that was renamed away — the manual install breaks after copying the binary
 
 - **Where:** `app_desktop_file_src := 'super-stt-app'/'resources'/'app.desktop'` (`justfile:40`),
   used at `:334`. The file is now `super-stt-app/resources/super-stt-app.desktop` (the shell
@@ -759,6 +802,9 @@ Five clusters account for most of the findings:
   `install: cannot stat '…/app.desktop'`, leaving a half-installed app (no desktop entry, no icon).
 - **Fix:** update `justfile:40` to `…/'super-stt-app.desktop'` (matching the
   `app_desktop_file_name` constant already at `:39`).
+- **Resolved (branch `refactor/audit2-cleanup`):** `app_desktop_file_src` now reuses the
+  `app_desktop_file_name` constant (`'super-stt-app'/'resources'/app_desktop_file_name`), so
+  it resolves to the real `super-stt-app.desktop` and can't drift from the name again.
 
 ### [ ] 27. 🟡 Workspace `tokio` pins `"full"`, so every crate's per-feature narrowing is dead
 

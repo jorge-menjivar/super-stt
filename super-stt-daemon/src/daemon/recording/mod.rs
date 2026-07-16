@@ -37,6 +37,7 @@ impl SuperSTTDaemon {
         typer: &mut Typer,
         write_mode: bool,
         stop_mode: RecordingStopMode,
+        request_language: Option<&str>,
     ) -> DaemonResponse {
         // Check if already busy - prevent multiple simultaneous recordings
         {
@@ -52,7 +53,7 @@ impl SuperSTTDaemon {
 
         // Wait for recording to complete and return the transcription.
         match self
-            .record_and_transcribe(typer, write_mode, stop_mode)
+            .record_and_transcribe(typer, write_mode, stop_mode, request_language)
             .await
         {
             // Cycle completed successfully (empty text = no speech, still success).
@@ -111,6 +112,7 @@ impl SuperSTTDaemon {
         typer: &mut Typer,
         write_mode: bool,
         stop_mode: RecordingStopMode,
+        request_language: Option<&str>,
     ) -> Result<Result<String, String>> {
         info!("Starting direct audio recording in daemon with simplified architecture");
 
@@ -120,7 +122,8 @@ impl SuperSTTDaemon {
         self.emit_recording_started(write_mode).await;
 
         // Phase 2: stream preview transcriptions while capturing.
-        self.run_preview_loop(&session, typer, write_mode).await;
+        self.run_preview_loop(&session, typer, write_mode, request_language)
+            .await;
 
         // Phase 3: await the recorder; the mic releases here.
         let full_audio_data = match self
@@ -145,7 +148,10 @@ impl SuperSTTDaemon {
 
         // Phase 4: final transcription.
         self.emit_transcribing_started();
-        let transcription_result = match self.transcribe_final(&full_audio_data).await {
+        let transcription_result = match self
+            .transcribe_final(&full_audio_data, request_language)
+            .await
+        {
             Ok(text) => text,
             Err(e) => {
                 // A transcription failure is not typed into the user's focused

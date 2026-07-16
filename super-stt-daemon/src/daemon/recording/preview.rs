@@ -85,6 +85,7 @@ impl SuperSTTDaemon {
         session: &RecordingSession,
         typer: &mut Typer,
         write_mode: bool,
+        request_language: Option<&str>,
     ) {
         // Poll for recorder completion at a fine cadence so the mic actually
         // stopping is noticed within ~100ms — letting `recording_stopped` and
@@ -149,7 +150,13 @@ impl SuperSTTDaemon {
                 // Returns true when resampling failed; nothing else to do this
                 // tick either way — the next attempt is a full interval later.
                 let _ = self
-                    .resample_and_emit_preview(session, audio_data, typer, write_mode)
+                    .resample_and_emit_preview(
+                        session,
+                        audio_data,
+                        typer,
+                        write_mode,
+                        request_language,
+                    )
                     .await;
             }
         }
@@ -206,6 +213,7 @@ impl SuperSTTDaemon {
         audio_data: Vec<f32>,
         typer: &mut Typer,
         write_mode: bool,
+        request_language: Option<&str>,
     ) -> bool {
         // Resample to 16kHz if needed (same as final recording does)
         let resampled_audio = if session.device_sample_rate == 16000 {
@@ -242,7 +250,9 @@ impl SuperSTTDaemon {
             "Starting preview transcription with {} samples",
             resampled_audio.len()
         );
-        if let Ok(text) = self.transcribe_audio_chunk(&resampled_audio).await
+        if let Ok(text) = self
+            .transcribe_audio_chunk(&resampled_audio, request_language)
+            .await
             && !text.trim().is_empty()
         {
             let processed = crate::output::preview::preprocess_text(&text, true);
