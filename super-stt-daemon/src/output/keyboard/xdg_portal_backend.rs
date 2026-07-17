@@ -14,9 +14,13 @@ const REQUEST_IFACE: &str = "org.freedesktop.portal.Request";
 const XKB_KEY_BACKSPACE: i32 = 0xFF08;
 
 pub struct XdgPortalBackend {
-    /// The async zbus connection. The typing path awaits keysym calls on it
-    /// directly (audit Tier 3 #35), so no per-keysym thread/runtime is needed.
-    connection: zbus::Connection,
+    /// The `RemoteDesktop` portal proxy, built once and reused for every keysym
+    /// press/release (audit 2 Tier 3 #1). `type_text` issues 2–4 keysym calls per
+    /// char and the preview loop re-types the growing transcript each tick, so
+    /// rebuilding the proxy per call meant constant D-Bus match-rule churn on the
+    /// interactive path. The proxy holds its own clone of the async connection, so
+    /// the portal session stays alive for the backend's lifetime.
+    proxy: zbus::Proxy<'static>,
     session_path: OwnedObjectPath,
 }
 
@@ -56,10 +60,17 @@ impl XdgPortalBackend {
 
         let session_path = Self::setup_session(&conn).await?;
 
+        // Build the RemoteDesktop proxy once and reuse it for every keysym
+        // (audit 2 Tier 3 #1). The `&'static str` bus/path/interface constants
+        // make this a `Proxy<'static>`, and it clones the connection internally.
+        let proxy = zbus::Proxy::new(&conn, PORTAL_BUS, PORTAL_PATH, REMOTE_DESKTOP_IFACE)
+            .await
+            .context("Failed to create RemoteDesktop proxy")?;
+
         info!("XDG Desktop Portal write method ready (session: {session_path})");
 
         Ok(Self {
-            connection: conn,
+            proxy,
             session_path,
         })
     }
@@ -121,15 +132,8 @@ impl XdgPortalBackend {
     /// one-shot thread + current-thread runtime per keysym just to escape a sync
     /// caller — it simply awaits the D-Bus call on the runtime.
     async fn notify_keysym(&self, keysym: i32, state: u32) -> Result<()> {
-        let proxy = zbus::Proxy::new(
-            &self.connection,
-            PORTAL_BUS,
-            PORTAL_PATH,
-            REMOTE_DESKTOP_IFACE,
-        )
-        .await?;
         let options: HashMap<&str, Value<'_>> = HashMap::new();
-        proxy
+        self.proxy
             .call_noreply(
                 "NotifyKeyboardKeysym",
                 &(self.session_path.as_ref(), options, keysym, state),

@@ -191,15 +191,22 @@ async fn run_realtime_session(
     let _ = relay_out.await;
 }
 
-/// Build the raw bytes of one SSE `event: <name>\ndata: <json>\n\n` frame.
-/// `serde_json::to_string` never embeds raw newlines, so the JSON fits on the
-/// single `data:` line by construction. Shared by the unbounded `/transcribe`
-/// stream ([`emit_sse_event`]) and the bounded `/events` fan-out.
-pub(crate) fn format_sse_frame(event: &str, data: &serde_json::Value) -> axum::body::Bytes {
+/// Build the raw bytes of one SSE `event: <name>\ndata: <json>\n\n` frame from an
+/// already-serialized JSON `data:` string. `data` must be single-line (no raw
+/// newlines) — `serde_json::to_string` guarantees this. This is the canonical
+/// framer; the `/events` fan-out uses it directly with the string
+/// `AnyReceiver::recv_json_str` produces (audit 2 Tier 3 #4).
+pub(crate) fn format_sse_frame_str(event: &str, data: &str) -> axum::body::Bytes {
     let mut bytes = format!("event: {event}\ndata: ").into_bytes();
-    bytes.extend_from_slice(serde_json::to_string(data).unwrap_or_default().as_bytes());
+    bytes.extend_from_slice(data.as_bytes());
     bytes.extend_from_slice(b"\n\n");
     axum::body::Bytes::from(bytes)
+}
+
+/// [`format_sse_frame_str`] for a `serde_json::Value` payload — the unbounded
+/// `/transcribe` stream ([`emit_sse_event`]) still holds `Value`s.
+pub(crate) fn format_sse_frame(event: &str, data: &serde_json::Value) -> axum::body::Bytes {
+    format_sse_frame_str(event, &serde_json::to_string(data).unwrap_or_default())
 }
 
 /// Emit a single SSE frame onto the unbounded `/transcribe` stream. Returns

@@ -233,27 +233,37 @@ impl SuperSTTDaemon {
             debug!("No resampling needed, device already at 16kHz");
             audio_data
         } else {
-            debug!(
-                "Resampling from {}Hz to 16kHz for preview",
-                session.device_sample_rate
-            );
-            match super_stt_shared::utils::audio::resample(
-                &audio_data,
-                session.device_sample_rate,
-                16000,
-                super_stt_shared::audio_utils::ResampleQuality::Fast,
-            ) {
-                Ok(resampled) => {
+            let device_rate = session.device_sample_rate;
+            debug!("Resampling from {device_rate}Hz to 16kHz for preview");
+            // Resampling is synchronous CPU work over up to ~5s of capture each
+            // tick (and the whole recording on the final drain); run it on a
+            // blocking thread rather than parking the request's async worker
+            // (audit 2 Tier 3 #2).
+            let input_len = audio_data.len();
+            match tokio::task::spawn_blocking(move || {
+                super_stt_shared::utils::audio::resample(
+                    &audio_data,
+                    device_rate,
+                    16000,
+                    super_stt_shared::audio_utils::ResampleQuality::Fast,
+                )
+            })
+            .await
+            {
+                Ok(Ok(resampled)) => {
                     debug!(
-                        "Resampled {} samples to {} samples",
-                        audio_data.len(),
+                        "Resampled {input_len} samples to {} samples",
                         resampled.len()
                     );
                     resampled
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     warn!("Failed to resample preview audio: {e}");
                     return true; // Signal caller to `continue` to next iteration
+                }
+                Err(e) => {
+                    warn!("Preview resample task panicked: {e}");
+                    return true;
                 }
             }
         };

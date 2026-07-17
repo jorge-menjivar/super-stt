@@ -623,7 +623,7 @@ Five clusters account for most of the findings:
 
 ### Daemon — blocking work & performance
 
-### [ ] 1. 🟠 XDG portal typing backend rebuilds a fresh `zbus::Proxy` on every keysym press/release *(perf)*
+### [x] 1. 🟠 XDG portal typing backend rebuilds a fresh `zbus::Proxy` on every keysym press/release *(perf)*
 
 - **Where:** `notify_keysym` does `zbus::Proxy::new(…)` per call
   (`output/keyboard/xdg_portal_backend.rs:123-130`); `type_text` calls it 2–4× per char,
@@ -635,8 +635,13 @@ Five clusters account for most of the findings:
   interactive path.
 - **Fix:** build the `RemoteDesktop` proxy once in `XdgPortalBackend::new()` (or cache it in a
   field) and reuse it; it's immutable for the session.
+- **Resolved (branch `refactor/audit2-tier3-1-5`):** the `RemoteDesktop` proxy is now built
+  once in `new()` and stored as a `Proxy<'static>` field (the `&'static str` bus/path/interface
+  constants make the lifetime `'static`; the proxy holds its own clone of the async connection,
+  so the session stays alive and the separate `connection` field was dropped). `notify_keysym`
+  reuses it — no per-keysym proxy construct/drop or D-Bus match-rule churn on the typing path.
 
-### [ ] 2. 🟡 Preview loop resamples audio synchronously on the request's async worker every tick *(blocking)*
+### [x] 2. 🟡 Preview loop resamples audio synchronously on the request's async worker every tick *(blocking)*
 
 - **Where:** `resample_and_emit_preview` calls `utils::audio::resample(...)`
   (`recording/preview.rs:219`) on the async worker before handing the chunk to
@@ -645,16 +650,26 @@ Five clusters account for most of the findings:
   to 5s of capture on the worker, and the final drain resamples the whole recording.
 - **Fix:** fold the resample into the existing transcription `spawn_blocking`, or
   `spawn_blocking` the resample itself.
+- **Resolved (branch `refactor/audit2-tier3-1-5`):** `resample_and_emit_preview` now runs the
+  16kHz resample inside `tokio::task::spawn_blocking` (the audio Vec is moved in, the result
+  awaited). The skip-this-tick behavior is preserved on a resample error and now also on a task
+  panic; the already-16kHz fast path still returns the audio unchanged with no offload.
 
-### [ ] 3. 🟡 Registry index cache does blocking `std::fs` + JSON (de)serialization inside the async refresh path *(blocking)*
+### [x] 3. 🟡 Registry index cache does blocking `std::fs` + JSON (de)serialization inside the async refresh path *(blocking)*
 
 - **Where:** `Client::refresh` is async but `load_from_disk` (`std::fs::read`,
   `registry/client.rs:177`) + `serde_json`, `persist` (`:185-195`), and `from_env`'s
   `create_dir_all` (`:76`) are synchronous.
 - **Fix:** move the file IO + serialization behind `spawn_blocking`/`tokio::fs`, keeping only
   the in-memory `RwLock` swap on the async path.
+- **Resolved (branch `refactor/audit2-tier3-1-5`):** `load_from_disk` and `persist` became free
+  functions that `Client::refresh` runs inside `spawn_blocking` (only the in-memory `RwLock`
+  swap stays on the async path; join errors map to `ClientError::Io`). `from_env`'s eager
+  `create_dir_all` is gone — `persist_to_disk` now creates the parent dir (on the blocking
+  thread) before `write_atomic`, so the cache dir is created lazily on first successful fetch
+  rather than synchronously at construction.
 
-### [ ] 4. 🟡 SSE fan-out serializes every event twice (struct → Value → String) per subscriber *(perf)*
+### [x] 4. 🟡 SSE fan-out serializes every event twice (struct → Value → String) per subscriber *(perf)*
 
 - **Where:** `AnyReceiver::recv_json` does `serde_json::to_value(evt)` (`events.rs:350`); the
   forwarder then `serde_json::to_string`s that `Value` in `format_sse_frame`
@@ -665,8 +680,17 @@ Five clusters account for most of the findings:
 - **Fix:** for the statically-typed topics, serialize the typed event directly to the SSE
   `data:` string and skip the `Value` hop; the three genuinely-heterogeneous topics
   (`daemon_status_changed`, `download_progress`, `registry_install`) keep the current path.
+- **Resolved (branch `refactor/audit2-tier3-1-5`):** `AnyReceiver::recv_json_str` serializes
+  each event straight to its JSON `data:` string (`serde_json::to_string`), dropping the
+  throwaway `Value` for the typed topics — `format_sse_frame_str` is the new canonical framer
+  and the `/events` forwarder uses the String path (the old `recv_json`/`format_sse_frame` are
+  kept: `recv_json` as a `#[cfg(test)]` wrapper, `format_sse_frame` delegating for the
+  `/transcribe` stream). The 3 heterogeneous topics still serialize their `Value` (identical
+  bytes). One deliberate change: a typed `f32` now renders in its own shortest form (`0.95`)
+  rather than the f64-widened `0.949999988079071` the `to_value` hop produced — both parse to
+  the same value, and no consumer/test string-matches the frames.
 
-### [ ] 5. 🟡 Audio input callback clones the mono buffer (i16: allocates a throwaway intermediate) on the RT thread every chunk *(perf)*
+### [x] 5. 🟡 Audio input callback clones the mono buffer (i16: allocates a throwaway intermediate) on the RT thread every chunk *(perf)*
 
 - **Where:** `process_audio_data_f32_with_streaming` does
   `samples_tx.send(mono_samples.clone())` (`audio/processing.rs:106`) before passing
@@ -676,6 +700,12 @@ Five clusters account for most of the findings:
   allocation there risks buffer overruns / dropped input.
 - **Fix:** compute what `process_audio_samples` needs first, then **move** `mono_samples` into
   the send; for i16, downmix directly from the `&[i16]` slice into a single mono Vec.
+- **Resolved (branch `refactor/audit2-tier3-1-5`):** both streaming callbacks now call
+  `process_audio_samples(&mono_samples, …)` first and then **move** `mono_samples` into
+  `samples_tx.send(…)` — no clone. The i16 path downmixes directly from the `&[i16]` slice into
+  one mono `Vec<f32>` (numerically identical: `f32::from(s)/32768.0` averaged per channel),
+  replacing the throwaway interleaved-f32 Vec + downmix Vec + clone (three allocations → one)
+  on the audio RT thread.
 
 ### [ ] 6. 🟡 `spawn_recorder` installs the manual-stop channel before the authoritative busy claim, so a losing race nulls the winner's stop channel *(concurrency)*
 

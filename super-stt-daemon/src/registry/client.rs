@@ -73,7 +73,8 @@ impl Client {
             Err(_) => DEFAULT_URL.into(),
         };
         let cache_dir = super_stt_shared::paths::cache_dir();
-        let _ = std::fs::create_dir_all(&cache_dir);
+        // The cache dir is created lazily by `persist_to_disk` on the first
+        // successful fetch (on a blocking thread), not eagerly here (Tier 3 #3).
         Self::new(url, cache_dir.join("registry-index.json"), DEFAULT_TTL)
     }
 
@@ -116,7 +117,12 @@ impl Client {
         let etag = {
             let need_load = self.state.read().is_none();
             if need_load {
-                if let Some((idx, etag)) = self.load_from_disk()? {
+                // Read + parse the on-disk cache off the async worker (Tier 3 #3).
+                let cache_path = self.cache_path.clone();
+                let loaded = tokio::task::spawn_blocking(move || load_from_disk(&cache_path))
+                    .await
+                    .map_err(|e| ClientError::Io(std::io::Error::other(e)))??;
+                if let Some((idx, etag)) = loaded {
                     self.state.write().replace(Cached {
                         index: idx,
                         etag: etag.clone(),
@@ -166,35 +172,57 @@ impl Client {
             fetched_at: SystemTime::now(),
         };
         self.state.write().replace(cached.clone());
-        self.persist(&cached, &bytes)?;
+        // Serialize + atomic-write the cache off the async worker (Tier 3 #3).
+        let cache_path = self.cache_path.clone();
+        let etag = cached.etag.clone();
+        let fetched_at = cached.fetched_at;
+        tokio::task::spawn_blocking(move || persist_to_disk(&cache_path, etag, fetched_at, &bytes))
+            .await
+            .map_err(|e| ClientError::Io(std::io::Error::other(e)))??;
         Ok(index)
     }
+}
 
-    fn load_from_disk(&self) -> Result<Option<(Index, Option<String>)>, ClientError> {
-        if !self.cache_path.exists() {
-            return Ok(None);
-        }
-        let bytes = std::fs::read(&self.cache_path)?;
-        let file: CacheFile = serde_json::from_slice(&bytes)?;
-        let mut index: Index = serde_json::from_value(file.index)?;
-        retain_safe_backends(&mut index);
-        warn_if_client_too_old(&index);
-        Ok(Some((index, file.etag)))
+/// Read + parse the on-disk index cache. Synchronous `std::fs` + `serde_json`, so
+/// the async refresh path runs it on a blocking thread (audit 2 Tier 3 #3).
+fn load_from_disk(
+    cache_path: &std::path::Path,
+) -> Result<Option<(Index, Option<String>)>, ClientError> {
+    if !cache_path.exists() {
+        return Ok(None);
     }
+    let bytes = std::fs::read(cache_path)?;
+    let file: CacheFile = serde_json::from_slice(&bytes)?;
+    let mut index: Index = serde_json::from_value(file.index)?;
+    retain_safe_backends(&mut index);
+    warn_if_client_too_old(&index);
+    Ok(Some((index, file.etag)))
+}
 
-    fn persist(&self, c: &Cached, body: &[u8]) -> Result<(), ClientError> {
-        let file = CacheFile {
-            etag: c.etag.clone(),
-            fetched_at_secs: c
-                .fetched_at
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            index: serde_json::from_slice(body)?,
-        };
-        super_stt_registry_types::fs::write_atomic(&self.cache_path, &serde_json::to_vec(&file)?)?;
-        Ok(())
+/// Serialize + atomic-write the index cache. Synchronous, so the async refresh
+/// path runs it on a blocking thread (audit 2 Tier 3 #3).
+fn persist_to_disk(
+    cache_path: &std::path::Path,
+    etag: Option<String>,
+    fetched_at: SystemTime,
+    body: &[u8],
+) -> Result<(), ClientError> {
+    let file = CacheFile {
+        etag,
+        fetched_at_secs: fetched_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        index: serde_json::from_slice(body)?,
+    };
+    // `write_atomic` writes `<path>.tmp` beside the target, so the parent must
+    // exist. Creating it here (on the blocking thread) instead of eagerly in the
+    // sync `from_env` constructor keeps that I/O off the async path too (Tier 3 #3).
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
+    super_stt_registry_types::fs::write_atomic(cache_path, &serde_json::to_vec(&file)?)?;
+    Ok(())
 }
 
 #[cfg(test)]

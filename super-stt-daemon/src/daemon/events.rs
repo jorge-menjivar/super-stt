@@ -348,24 +348,36 @@ impl EventBus {
 }
 
 impl AnyReceiver {
-    /// Receive the next event for this topic. Returns the wire topic
-    /// name and a `serde_json::Value` payload, ready for the SSE
-    /// formatter. Bubbles `RecvError` so the handler can decide whether
-    /// to log+continue (lag) or close (closed).
+    /// Receive the next event for this topic as `(wire_name, json_data)`, where
+    /// `json_data` is the serialized SSE `data:` payload ready for the frame
+    /// formatter. Bubbles `RecvError` so the handler can log+continue (lag) or
+    /// close (closed).
+    ///
+    /// The typed topics are serialized straight to their JSON string, skipping the
+    /// throwaway `serde_json::Value` the old path built (audit 2 Tier 3 #4) —
+    /// notably `frequency_bands`, emitted at the audio-callback rate, where every
+    /// visualization subscriber otherwise paid a discarded `Value` allocation plus
+    /// a second full serialization per frame. The 3 heterogeneous topics already
+    /// carry a `Value`; serializing it here is the same work the old
+    /// `format_sse_frame` did.
+    ///
+    /// Note: a typed `f32` now serializes in its own shortest round-trip form
+    /// (e.g. `0.95`) rather than the f64-widened form the `to_value` hop produced
+    /// (`0.949999988079071`); both parse back to the same value.
     ///
     /// # Errors
-    /// Returns `RecvError::Lagged(n)` when the receiver fell behind the
-    /// channel capacity (the SSE handler logs and resyncs). Returns
-    /// `RecvError::Closed` when all senders have been dropped.
-    pub async fn recv_json(
+    /// Returns `RecvError::Lagged(n)` when the receiver fell behind the channel
+    /// capacity (the SSE handler logs and resyncs). Returns `RecvError::Closed`
+    /// when all senders have been dropped.
+    pub async fn recv_json_str(
         &mut self,
-    ) -> Result<(&'static str, serde_json::Value), broadcast::error::RecvError> {
+    ) -> Result<(&'static str, String), broadcast::error::RecvError> {
         macro_rules! recv_arm {
             ($rx:ident, $topic:ident) => {{
                 let evt = $rx.recv().await?;
                 Ok((
                     Topic::$topic.as_str(),
-                    serde_json::to_value(evt).unwrap_or_default(),
+                    serde_json::to_string(&evt).unwrap_or_default(),
                 ))
             }};
         }
@@ -378,19 +390,23 @@ impl AnyReceiver {
             Self::FrequencyBands(rx) => recv_arm!(rx, FrequencyBands),
             Self::PartialStt(rx) => recv_arm!(rx, PartialStt),
             Self::FinalStt(rx) => recv_arm!(rx, FinalStt),
-            Self::DaemonStatusChanged(rx) => {
-                let value = rx.recv().await?;
-                Ok((Topic::DaemonStatusChanged.as_str(), value))
-            }
-            Self::DownloadProgress(rx) => {
-                let value = rx.recv().await?;
-                Ok((Topic::DownloadProgress.as_str(), value))
-            }
-            Self::RegistryInstall(rx) => {
-                let value = rx.recv().await?;
-                Ok((Topic::RegistryInstall.as_str(), value))
-            }
+            Self::DaemonStatusChanged(rx) => recv_arm!(rx, DaemonStatusChanged),
+            Self::DownloadProgress(rx) => recv_arm!(rx, DownloadProgress),
+            Self::RegistryInstall(rx) => recv_arm!(rx, RegistryInstall),
         }
+    }
+
+    /// [`recv_json_str`](Self::recv_json_str) parsed back into a
+    /// `serde_json::Value` — used by tests that assert on structured fields.
+    ///
+    /// # Errors
+    /// See [`recv_json_str`](Self::recv_json_str).
+    #[cfg(test)]
+    pub async fn recv_json(
+        &mut self,
+    ) -> Result<(&'static str, serde_json::Value), broadcast::error::RecvError> {
+        let (name, json) = self.recv_json_str().await?;
+        Ok((name, serde_json::from_str(&json).unwrap_or_default()))
     }
 }
 

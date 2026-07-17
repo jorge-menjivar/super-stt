@@ -3,7 +3,7 @@ use crate::daemon::http::internal::auth::middleware::AuthContext;
 use crate::daemon::http::internal::auth::tokens::TokenStore;
 use crate::daemon::http::internal::helpers::responses::{invalid_session, reason, scope_denied};
 use crate::daemon::http::state::{AppState, PeerInfo};
-use crate::daemon::http::v1::transcribe::format_sse_frame;
+use crate::daemon::http::v1::transcribe::format_sse_frame_str;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -28,9 +28,9 @@ type SseSender = tokio::sync::mpsc::Sender<Result<axum::body::Bytes, std::io::Er
 /// `false` only when the receiver is gone (client disconnected), so the caller
 /// tears down. A full channel drops the frame — the reader is stalled, so shed
 /// it — and returns `true`.
-fn try_emit_sse_event(tx: &SseSender, event: &str, data: &serde_json::Value) -> bool {
+fn try_emit_sse_event(tx: &SseSender, event: &str, data: &str) -> bool {
     use tokio::sync::mpsc::error::TrySendError;
-    match tx.try_send(Ok(format_sse_frame(event, data))) {
+    match tx.try_send(Ok(format_sse_frame_str(event, data))) {
         Ok(()) => true,
         Err(TrySendError::Full(_)) => {
             log::warn!("widget SSE backpressured; dropped a {event} frame");
@@ -127,7 +127,8 @@ pub(crate) async fn events(
         &serde_json::json!({
             "client_id": uuid::Uuid::new_v4().to_string(),
             "subscribed_to": topic_names,
-        }),
+        })
+        .to_string(),
     );
 
     spawn_events_keepalive_and_exe_watch(
@@ -203,7 +204,7 @@ fn spawn_topic_forwarder(
             tokio::select! {
                 biased;
                 () = cancel.cancelled() => break,
-                res = rx.recv_json() => {
+                res = rx.recv_json_str() => {
                     match res {
                         Ok((name, payload)) => {
                             if !try_emit_sse_event(&tx, name, &payload) {
@@ -275,7 +276,7 @@ fn spawn_events_keepalive_and_exe_watch(
                     let _ = try_emit_sse_event(
                         &tx,
                         "revoked",
-                        &serde_json::json!({ "reason": "exe_changed" }),
+                        &serde_json::json!({ "reason": "exe_changed" }).to_string(),
                     );
                     tokens.revoke(&token_str);
                     cancel.cancel();
