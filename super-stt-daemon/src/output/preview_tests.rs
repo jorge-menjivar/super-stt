@@ -17,6 +17,21 @@ fn test_preprocess_text() {
 }
 
 #[test]
+fn preprocess_text_strips_unsafe_control_and_format_chars() {
+    // Non-whitespace C0/C1 controls (ESC, BEL, NUL, backspace) are removed.
+    assert_eq!(preprocess_text("he\u{1b}[31mllo\u{07}", true), "He[31mllo");
+    assert_eq!(preprocess_text("a\u{00}b\u{08}c", true), "Abc");
+    // Bidi overrides and zero-width chars are removed.
+    assert_eq!(preprocess_text("ab\u{202e}cd", true), "Abcd");
+    assert_eq!(preprocess_text("wor\u{200b}d", true), "Word");
+    // Real whitespace (newline/tab) is preserved as a word separator, not glued.
+    assert_eq!(
+        preprocess_text("hello\nworld\tfoo", true),
+        "Hello world foo"
+    );
+}
+
+#[test]
 fn test_is_simple_extension() {
     assert!(is_simple_extension("hello", "hello world"));
     assert!(is_simple_extension("", "hello"));

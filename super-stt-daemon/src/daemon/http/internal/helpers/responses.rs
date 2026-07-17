@@ -36,6 +36,11 @@ pub(crate) mod reason {
     pub(crate) const USER_DENIED: &str = "user_denied";
     pub(crate) const USER_DISMISSED: &str = "user_dismissed";
     pub(crate) const POPUP_FAILED: &str = "popup_failed";
+    /// The daemon could not resolve the peer's executable (`SO_PEERCRED`/pid
+    /// missing, or `/proc/<pid>/exe` unreadable), so it can't verify *which*
+    /// binary is asking — consent requires a verifiable binary, so it fails
+    /// closed (audit 2 Tier 3 #9).
+    pub(crate) const PEER_UNVERIFIABLE: &str = "peer_unverifiable";
 }
 
 pub(crate) fn invalid_session(reason: &'static str) -> Response {

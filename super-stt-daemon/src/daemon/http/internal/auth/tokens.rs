@@ -53,18 +53,20 @@ fn allow_no_keyring() -> bool {
     std::env::var(ALLOW_NO_KEYRING_ENV).is_ok_and(|v| v == "1")
 }
 
-/// A message to the single-writer persist task.
-// Both fields are only read in `persist_loop`, which is `#[cfg(not(test))]`; the
-// constructors compile in test builds too, so the fields read as dead code under
-// `cargo test`. They're live in production — suppress the test-only lint.
+/// A signal to the single-writer persist task. The sessions snapshot itself is
+/// NOT carried here — it lives in the [`SessionPersister`]'s capacity-1
+/// latest-wins mailbox, so a burst of mutations while a keyring write is stalled
+/// can't queue full-map clones (audit 2 Tier 3 #7). These messages are tiny.
+// `Flush`'s field is only read in `persist_loop` (`#[cfg(not(test))]`), but the
+// constructor compiles under test too, so it reads as dead code there.
 #[cfg_attr(test, allow(dead_code))]
 enum PersistMsg {
-    /// Persist this sessions snapshot (coalesced with any newer ones).
-    Snapshot(HashMap<String, TokenMeta>),
-    /// Drain the backlog, write the latest snapshot, then signal completion via
-    /// the oneshot. The shutdown path uses this so a token minted or revoked in
-    /// the final moments is durably written before `process::exit` skips the
-    /// task (audit 2 Tier 1 #5).
+    /// A snapshot is pending in the mailbox; drain and write it.
+    Wake,
+    /// Write the latest pending snapshot, then signal completion via the oneshot.
+    /// The shutdown path uses this so a token minted or revoked in the final
+    /// moments is durably written before `process::exit` skips the task (audit 2
+    /// Tier 1 #5).
     Flush(tokio::sync::oneshot::Sender<()>),
 }
 
@@ -109,9 +111,15 @@ pub(crate) async fn flush_persisted_sessions(timeout: Duration) {
 /// this channel keeps the blocking write off the request path *and* serializes
 /// the writes so the last submitted snapshot is the last one written (audit
 /// Tier 3 #35). Callers submit under the in-memory lock so channel order matches
-/// lock order (audit 2 Tier 1 #4).
+/// lock order (audit 2 Tier 1 #4). The snapshot rides in a capacity-1 latest-wins
+/// mailbox (`pending`) rather than the channel, so a stalled keyring write can't
+/// back up a queue of full-map clones (audit 2 Tier 3 #7).
 #[derive(Clone)]
 pub(crate) struct SessionPersister {
+    /// Capacity-1, latest-wins mailbox holding the not-yet-written snapshot.
+    /// Older snapshots are strict subsets of the newest, so replacing is safe.
+    pending: Arc<Mutex<Option<HashMap<String, TokenMeta>>>>,
+    /// Tiny wake/flush signals (no snapshot payload).
     tx: mpsc::UnboundedSender<PersistMsg>,
 }
 
@@ -122,9 +130,10 @@ impl SessionPersister {
     /// dropped.
     fn spawn() -> Self {
         let (tx, rx) = mpsc::unbounded_channel::<PersistMsg>();
+        let pending: Arc<Mutex<Option<HashMap<String, TokenMeta>>>> = Arc::new(Mutex::new(None));
         #[cfg(not(test))]
         {
-            tokio::spawn(persist_loop(rx));
+            tokio::spawn(persist_loop(rx, Arc::clone(&pending)));
             // Register the first (production) persister so the shutdown path can
             // drain it. Production creates exactly one `TokenStore` (AppState's);
             // any later store keeps its own channel but won't be flushed.
@@ -132,35 +141,51 @@ impl SessionPersister {
         }
         #[cfg(test)]
         drop(rx);
-        Self { tx }
+        Self { pending, tx }
     }
 
-    /// Submit the latest sessions snapshot for persistence. Best-effort: a
-    /// closed channel (test builds) just means the write is skipped — the
-    /// in-memory map stays authoritative.
+    /// Submit the latest sessions snapshot for persistence. Replaces any
+    /// not-yet-written snapshot in the capacity-1 mailbox (latest wins) and
+    /// signals the task only on the empty→pending transition, so at most one wake
+    /// is ever in flight (audit 2 Tier 3 #7). Best-effort: a closed channel (test
+    /// builds) just means the write is skipped — the in-memory map stays
+    /// authoritative.
     fn submit(&self, snapshot: HashMap<String, TokenMeta>) {
-        let _ = self.tx.send(PersistMsg::Snapshot(snapshot));
+        let newly_pending = {
+            let mut slot = self.pending.lock().unwrap();
+            let was_empty = slot.is_none();
+            *slot = Some(snapshot);
+            was_empty
+        };
+        if newly_pending {
+            let _ = self.tx.send(PersistMsg::Wake);
+        }
     }
 }
 
-/// The persist task: receive messages, coalesce a burst of snapshots down to the
-/// newest (older snapshots are strict subsets of the state the newest
-/// represents), write it, then ack any flush request in the same batch — so a
-/// shutdown flush is acked only after the latest state is on disk.
+/// The persist task: on each wake, drain the signal backlog (collecting any flush
+/// request), take the latest snapshot from the capacity-1 mailbox, write it, then
+/// ack the flush — so a shutdown flush is acked only after the latest state is on
+/// disk.
 #[cfg(not(test))]
-async fn persist_loop(mut rx: mpsc::UnboundedReceiver<PersistMsg>) {
+async fn persist_loop(
+    mut rx: mpsc::UnboundedReceiver<PersistMsg>,
+    pending: Arc<Mutex<Option<HashMap<String, TokenMeta>>>>,
+) {
     while let Some(first) = rx.recv().await {
-        let mut latest: Option<HashMap<String, TokenMeta>> = None;
         let mut flush_ack: Option<tokio::sync::oneshot::Sender<()>> = None;
         let mut msg = Some(first);
         while let Some(m) = msg {
-            match m {
-                PersistMsg::Snapshot(s) => latest = Some(s),
-                PersistMsg::Flush(ack) => flush_ack = Some(ack),
+            if let PersistMsg::Flush(ack) = m {
+                flush_ack = Some(ack);
             }
             msg = rx.try_recv().ok();
         }
-        if let Some(snapshot) = latest {
+        // Take the latest pending snapshot (capacity-1, latest-wins). A new
+        // `submit` after this take re-arms `pending` and sends a fresh Wake, so
+        // nothing is lost.
+        let snapshot = pending.lock().unwrap().take();
+        if let Some(snapshot) = snapshot {
             persist_snapshot(snapshot).await;
         }
         if let Some(ack) = flush_ack {

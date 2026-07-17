@@ -18,20 +18,20 @@ impl SuperSTTDaemon {
         stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
     ) -> Result<RecordingSession> {
         let silence_detection_disabled = !stop_mode.silence_detection_enabled();
-
-        // Create a broadcast channel so any recording can be stopped externally.
-        let (stop_tx, stop_rx) = tokio::sync::broadcast::channel(1);
-        *self.manual_stop_tx.write().await = Some(stop_tx);
         info!("🎛️ Recording mode: {stop_mode}");
 
-        // Set up recording state and create recorder
-        let mut recorder = match self.setup_recording_session(write_mode).await {
-            Ok(recorder) => recorder,
-            Err(e) => {
-                *self.manual_stop_tx.write().await = None;
-                return Err(e);
-            }
-        };
+        // Claim `busy` FIRST (setup_recording_session does the atomic
+        // check-and-set), and only then install the external stop channel.
+        // Installing `manual_stop_tx` before the claim let a losing racer
+        // overwrite it — and its cleanup then null it — leaving the *winning*
+        // recording with no stop channel (unstoppable until the 1-minute
+        // timeout) (audit 2 Tier 3 #6). A losing racer now returns here via `?`
+        // without ever touching `manual_stop_tx`.
+        let mut recorder = self.setup_recording_session(write_mode).await?;
+
+        // Create a broadcast channel so this recording can be stopped externally.
+        let (stop_tx, stop_rx) = tokio::sync::broadcast::channel(1);
+        *self.manual_stop_tx.write().await = Some(stop_tx);
 
         // Get model processing interval from current model
         let model_processing_interval = {

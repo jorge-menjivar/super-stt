@@ -5,6 +5,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// Global cap of one on-screen consent popup at a time. See
+/// [`ask_user_for_consent`] — without it a same-uid client could drive hundreds
+/// of concurrent exclusive-keyboard dialogs (255 distinct consent keys) and lock
+/// the desktop (audit 2 Tier 3 #10).
+static CONSENT_POPUP: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
 /// Identifies the consent flow uniquely: (`exe_path`, normalized
 /// `scopes`). The user verifies a *binary*, not a self-reported display
 /// name, so the deny / dedup key is keyed on the kernel-resolved
@@ -74,6 +80,20 @@ pub(crate) enum ConsentDecision {
 /// Spawn the `super-stt-consent` helper binary, wait up to 60s for the
 /// user's decision. The helper writes one of `allow` / `deny` / `dismissed`
 /// to stdout and exits.
+/// Read the consent helper's single-line verdict from its stdout.
+async fn read_consent_decision(stdout: tokio::process::ChildStdout) -> ConsentDecision {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let mut reader = BufReader::new(stdout).lines();
+    match reader.next_line().await {
+        Ok(Some(line)) => match line.trim() {
+            "allow" => ConsentDecision::Allow,
+            "deny" => ConsentDecision::Deny,
+            _ => ConsentDecision::Dismissed,
+        },
+        _ => ConsentDecision::Dismissed,
+    }
+}
+
 pub(crate) async fn ask_user_for_consent(
     app_name: &str,
     scopes: &[String],
@@ -84,6 +104,19 @@ pub(crate) async fn ask_user_for_consent(
     // so we don't emit a second, redundant warning here.
     let Some(helper) = locate_consent_helper() else {
         return ConsentDecision::PopupFailed;
+    };
+
+    // Serialize popups globally: at most one consent dialog on screen at a time
+    // (audit 2 Tier 3 #10). `/auth/request` is unauthenticated and outside the
+    // rate limiter, and the 8 scopes yield 255 distinct `(exe, scopes)` consent
+    // keys — each bypassing the per-key dedup — so without this cap a same-uid
+    // process could stack hundreds of concurrent exclusive-keyboard overlays and
+    // lock the desktop. Excess requests wait for the permit rather than opening
+    // in parallel. Acquired before the spawn and held while the dialog is on
+    // screen; released before the untimed reap below so a wedged helper can't
+    // wedge all consent.
+    let Ok(popup_permit) = CONSENT_POPUP.acquire().await else {
+        return ConsentDecision::PopupFailed; // semaphore closed (never in practice)
     };
 
     let mut cmd = tokio::process::Command::new(&helper);
@@ -106,21 +139,14 @@ pub(crate) async fn ask_user_for_consent(
         return ConsentDecision::PopupFailed;
     };
 
-    let read_decision = async move {
-        use tokio::io::{AsyncBufReadExt, BufReader};
-        let mut reader = BufReader::new(stdout).lines();
-        match reader.next_line().await {
-            Ok(Some(line)) => match line.trim() {
-                "allow" => ConsentDecision::Allow,
-                "deny" => ConsentDecision::Deny,
-                _ => ConsentDecision::Dismissed,
-            },
-            _ => ConsentDecision::Dismissed,
-        }
-    };
-
-    let result = tokio::time::timeout(Duration::from_mins(1), read_decision).await;
+    let result = tokio::time::timeout(Duration::from_mins(1), read_consent_decision(stdout)).await;
     let _ = child.start_kill();
+    // The dialog is being torn down, so release the global one-popup permit
+    // *before* the reap. `child.wait()` is untimed; holding the sole global
+    // permit across it would let a helper that somehow doesn't reap promptly
+    // (a pathological uninterruptible-sleep) wedge all consent daemon-wide.
+    // Releasing first keeps the popup cap intact while the reap still completes.
+    drop(popup_permit);
     let _ = child.wait().await;
 
     result.unwrap_or(ConsentDecision::Dismissed)
@@ -205,35 +231,38 @@ fn verify_helper_metadata(_: &Path) -> Result<(), &'static str> {
 }
 
 /// Resolve the calling process's executable path from the
-/// `axum::Extension<PeerInfo>` attached by the accept loop. Returns
-/// the canonical path on success, `PathBuf::from("<unknown>")` on any
-/// failure — and **logs the specific reason** so we can tell, from
-/// the journal, whether the issue is missing peer credentials
-/// (`SO_PEERCRED` not supported, peer process gone), a missing pid in
-/// the credential struct, or a kernel-level denial of the
-/// `/proc/<pid>/exe` readlink (Yama `ptrace_scope`, systemd
-/// `ProtectProc=`, sandboxed daemon, etc.).
-pub(crate) fn resolve_peer_exe(peer: Option<&axum::Extension<PeerInfo>>) -> PathBuf {
+/// `axum::Extension<PeerInfo>` attached by the accept loop. Returns `Some(path)`
+/// on success and `None` when the peer can't be identified — a missing
+/// `PeerInfo`/pid (`SO_PEERCRED` unsupported, peer process gone) or a
+/// kernel-denied `/proc/<pid>/exe` readlink (Yama `ptrace_scope`, systemd
+/// `ProtectProc=`, a sandboxed daemon, pid recycling).
+///
+/// The caller **must fail closed** on `None`: the consent model verifies a
+/// *binary*, so an unidentifiable peer must not be prompted for (a
+/// `<unknown>`-labelled dialog is meaningless to approve) nor minted a token
+/// bound to a bogus identity that the `/events` exe-watch would then spuriously
+/// revoke (audit 2 Tier 3 #9). Each failure is logged with its specific reason.
+pub(crate) fn resolve_peer_exe(peer: Option<&axum::Extension<PeerInfo>>) -> Option<PathBuf> {
     let Some(peer) = peer else {
         log::warn!(
-            "auth_request: no PeerInfo extension attached — daemon won't be able to identify the requesting binary"
+            "auth_request: no PeerInfo extension attached — cannot identify the requesting binary"
         );
-        return PathBuf::from("<unknown>");
+        return None;
     };
     let Some(pid) = peer.0.pid else {
         log::warn!(
             "auth_request: PeerInfo had no pid (SO_PEERCRED returned no credentials); cannot resolve exe"
         );
-        return PathBuf::from("<unknown>");
+        return None;
     };
     let path = format!("/proc/{pid}/exe");
     match std::fs::read_link(&path) {
-        Ok(p) => p,
+        Ok(p) => Some(p),
         Err(e) => {
             log::warn!(
                 "auth_request: read_link({path}) failed: {e}; cannot identify peer pid {pid}"
             );
-            PathBuf::from("<unknown>")
+            None
         }
     }
 }

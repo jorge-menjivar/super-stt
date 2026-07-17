@@ -28,6 +28,31 @@ pub(crate) struct AuthOk {
     pub(crate) expires_at: String,
 }
 
+/// `403 user_denied_cached` if the user previously clicked Deny for this exact
+/// `(exe_path, scopes)` pair in this daemon's lifetime, else `None`. Checked both
+/// up front and again under the consent lock (a concurrent caller may have been
+/// denied while we queued behind their popup); `context` labels which.
+fn cached_deny_response(
+    state: &AppState,
+    consent_key: &ConsentKey,
+    context: &str,
+) -> Option<Response> {
+    if !state.deny_cache.contains(consent_key) {
+        return None;
+    }
+    let (exe_path, scopes) = consent_key;
+    log::info!(
+        "auth_request denied from cache ({context}): exe={} scopes={}",
+        exe_path.display(),
+        scopes.join(" ")
+    );
+    Some(auth_err(
+        StatusCode::FORBIDDEN,
+        "auth_denied",
+        reason::USER_DENIED_CACHED,
+    ))
+}
+
 pub(crate) async fn auth_request(
     State(state): State<AppState>,
     peer: Option<axum::Extension<PeerInfo>>,
@@ -71,12 +96,19 @@ pub(crate) async fn auth_request(
         }
     }
 
-    // Resolve the calling binary via /proc/<pid>/exe. Log each
-    // failure mode separately so we can tell whether the issue is
-    // missing peer credentials, a missing pid, or a kernel/proc
-    // permission denial. Falls back to "<unknown>" so the popup still
-    // has something to display.
-    let exe_path = resolve_peer_exe(peer.as_ref());
+    // Resolve the calling binary via /proc/<pid>/exe. If it can't be resolved
+    // (missing peer credentials/pid, or a kernel/proc permission denial), fail
+    // closed: consent verifies a *binary*, so we refuse rather than prompt with
+    // an unverifiable `<unknown>` identity or mint a token bound to it (audit 2
+    // Tier 3 #9). Each failure mode is logged inside `resolve_peer_exe`.
+    let Some(exe_path) = resolve_peer_exe(peer.as_ref()) else {
+        log::warn!("auth_request rejected: could not verify the requesting binary (fail-closed)");
+        return auth_err(
+            StatusCode::FORBIDDEN,
+            "auth_denied",
+            reason::PEER_UNVERIFIABLE,
+        );
+    };
 
     // Helper to build the success response for a (token, expires_at)
     // pair. Used by both reuse-scan paths (fast and slow) and the
@@ -106,23 +138,13 @@ pub(crate) async fn auth_request(
 
     let consent_key: ConsentKey = (exe_path.clone(), scopes.clone());
 
-    // Sticky-deny short-circuit. If the user previously clicked Deny
-    // for this exact (exe_path, scope) pair in this daemon's
-    // lifetime, reject immediately without spawning another popup.
-    // The cache is cleared by daemon restart; there's no other reset
-    // path on purpose. `app_name` is not part of the key because a
-    // misbehaving client could otherwise rotate it to bypass deny.
-    if state.deny_cache.contains(&consent_key) {
-        log::info!(
-            "auth_request denied from cache (user previously denied): exe={} scopes={}",
-            exe_path.display(),
-            scopes.join(" ")
-        );
-        return auth_err(
-            StatusCode::FORBIDDEN,
-            "auth_denied",
-            reason::USER_DENIED_CACHED,
-        );
+    // Sticky-deny short-circuit. If the user previously clicked Deny for this
+    // exact (exe_path, scope) pair in this daemon's lifetime, reject immediately
+    // without spawning another popup. The cache is cleared by daemon restart;
+    // there's no other reset path on purpose. `app_name` is not part of the key
+    // because a misbehaving client could otherwise rotate it to bypass deny.
+    if let Some(resp) = cached_deny_response(&state, &consent_key, "user previously denied") {
+        return resp;
     }
 
     // Serialize concurrent first-time requests for the same identity
@@ -135,20 +157,10 @@ pub(crate) async fn auth_request(
     let response = {
         let _guard = lock.lock().await;
 
-        // Re-check the deny cache: a concurrent caller for the same
-        // pair may have been denied while we were queued behind
-        // their popup.
-        if state.deny_cache.contains(&consent_key) {
-            log::info!(
-                "auth_request denied from cache (concurrent caller denied): exe={} scopes={}",
-                exe_path.display(),
-                scopes.join(" ")
-            );
-            auth_err(
-                StatusCode::FORBIDDEN,
-                "auth_denied",
-                reason::USER_DENIED_CACHED,
-            )
+        // Re-check the deny cache: a concurrent caller for the same pair may
+        // have been denied while we were queued behind their popup.
+        if let Some(resp) = cached_deny_response(&state, &consent_key, "concurrent caller denied") {
+            resp
         } else {
             // Auto-approve if the daemon is in test/CI mode. Honored only in
             // debug builds: compiled out of release so a stray/injected env var

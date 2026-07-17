@@ -165,10 +165,13 @@ pub async fn start_http_server(
                     }
                 };
                 let peer_cred = stream.peer_cred().ok();
+                // An out-of-range pid becomes `None` (not `0`) so it fails closed
+                // in `resolve_peer_exe` rather than resolving `/proc/0/exe`
+                // (audit 2 Tier 3 #9).
                 let resolved_process_id = peer_cred
                     .as_ref()
                     .and_then(tokio::net::unix::UCred::pid)
-                    .map(|p| u32::try_from(p).unwrap_or(0));
+                    .and_then(|p| u32::try_from(p).ok());
                 let resolved_user_id = peer_cred.as_ref().map(tokio::net::unix::UCred::uid);
                 let peer = PeerInfo {
                     pid: resolved_process_id,

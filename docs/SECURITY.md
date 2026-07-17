@@ -59,6 +59,7 @@ ls -la "$XDG_RUNTIME_DIR/stt/super-stt-http.sock"
 - **Consent-gated authorization**: Auto-typing is the per-request `write_mode` flag on `POST /transcribe` (or the daemon's configured write mode). Reaching that endpoint at all requires a consent-minted session token with the `transcribe` scope — so a client can only type after the user approved it through the one-time consent prompt. There is no separate keyboard/write scope; it is the same `transcribe` scope dictation uses. See [Authorization](#authorization) and [`protocol/auth.md`](protocol/auth.md)
 - **Peer identity for the prompt**: `SO_PEERCRED` + `/proc/<pid>/exe` tell the consent prompt *which binary* is asking and reject cross-UID peers; this identifies the caller, it is not by itself the authorization
 - **Debug-only test bypass**: The consent auto-approval used by tests/CI (`SUPER_STT_AUTO_APPROVE`) is compiled out of release builds
+- **Output sanitization**: Backend transcription output is untrusted, so before it is typed the daemon strips non-whitespace control codes (ESC/BEL/NUL/backspace), Unicode bidi overrides, and zero-width characters — a terminal escape sequence or a bidi spoof in a transcript can't reach the focused window
 - **Limited scope**: Only types actual transcription results
 
 ### 2. Network Isolation

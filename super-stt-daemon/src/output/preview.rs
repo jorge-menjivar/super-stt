@@ -6,11 +6,29 @@
 //! [`Typer`](crate::output::typer::Typer) state machine. Keeping them separate
 //! makes them exhaustively unit-testable without a keyboard `Simulator`.
 
-/// Preprocess text - normalize, remove ellipses, capitalize
+/// A character that must never reach the keyboard simulator. Backend
+/// transcription output is untrusted (audit 2 Tier 3 #8): a non-whitespace C0/C1
+/// control code (ESC, BEL, NUL, backspace, …) could drive a terminal escape
+/// sequence, and a Unicode bidi override or zero-width char could visually spoof
+/// or hide text in an editor. Ordinary whitespace (`\n`/`\r`/`\t`) is preserved
+/// here and folded into single spaces by [`preprocess_text`]'s normalization.
+fn is_unsafe_to_type(c: char) -> bool {
+    (c.is_control() && !c.is_whitespace())
+        // Bidi overrides + isolates (LRO/RLO/PDF, LRI/RLI/FSI/PDI).
+        || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+        // Zero-width space/joiner/non-joiner + BOM.
+        || matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')
+}
+
+/// Preprocess text - sanitize, normalize, remove ellipses, capitalize
 #[must_use]
 pub(crate) fn preprocess_text(text: &str, is_preview: bool) -> String {
+    // Strip characters that must never be typed into the focused window before
+    // any other processing (audit 2 Tier 3 #8).
+    let sanitized: String = text.chars().filter(|&c| !is_unsafe_to_type(c)).collect();
+
     // Remove leading whitespaces
-    let mut text = text.trim_start().to_string();
+    let mut text = sanitized.trim_start().to_string();
 
     // Remove starting ellipses if present
     if text.starts_with("...") {

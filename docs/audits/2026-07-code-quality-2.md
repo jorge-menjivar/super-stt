@@ -707,7 +707,7 @@ Five clusters account for most of the findings:
   replacing the throwaway interleaved-f32 Vec + downmix Vec + clone (three allocations → one)
   on the audio RT thread.
 
-### [ ] 6. 🟡 `spawn_recorder` installs the manual-stop channel before the authoritative busy claim, so a losing race nulls the winner's stop channel *(concurrency)*
+### [x] 6. 🟡 `spawn_recorder` installs the manual-stop channel before the authoritative busy claim, so a losing race nulls the winner's stop channel *(concurrency)*
 
 - **Where:** `*self.manual_stop_tx = Some(stop_tx)` at `recording/preview.rs:24`, before
   `setup_recording_session`'s check-and-set of `busy` (`recording/mod.rs:182-188`); the loser's
@@ -717,8 +717,12 @@ Five clusters account for most of the findings:
   leaving it unstoppable (toggle reports "in progress", disconnect stop is a no-op, the 1-minute
   timeout finds `None`) until restart.
 - **Fix:** claim `busy` first and install `manual_stop_tx` only after the claim succeeds.
+- **Resolved (branch `refactor/audit2-tier3-6-10`):** `spawn_recorder` now calls
+  `setup_recording_session` (the atomic `busy` check-and-set) **first** and installs
+  `manual_stop_tx` only after that succeeds — a losing racer returns via `?` without ever
+  touching the channel, so it can no longer null the winner's stop channel.
 
-### [ ] 7. 🟡 Session-persist channel is unbounded and accumulates full-map snapshots while a keyring write is stalled *(resources)*
+### [x] 7. 🟡 Session-persist channel is unbounded and accumulates full-map snapshots while a keyring write is stalled *(resources)*
 
 - **Where:** `mpsc::unbounded_channel` (`tokens.rs:76`); `persist_loop` only coalesces after
   `persist_snapshot` returns (`:97-102`), which awaits `spawn_blocking(set_sessions_blob)`
@@ -728,10 +732,17 @@ Five clusters account for most of the findings:
   Tier 3 #8 bounded for the `/events` SSE channel, left unbounded here.
 - **Fix:** bound to a capacity-1 "latest wins" mailbox (older snapshots are strict subsets), or
   refuse to enqueue while a write is in cooldown/in-flight.
+- **Resolved (branch `refactor/audit2-tier3-6-10`):** the snapshot no longer rides in the
+  channel. `SessionPersister` holds a capacity-1 latest-wins mailbox
+  (`pending: Arc<Mutex<Option<HashMap>>>`); `submit` replaces it (older snapshots are strict
+  subsets) and sends a tiny `Wake` only on the empty→pending transition, so at most one wake is
+  in flight and a burst during a stalled keyring write can't queue full-map clones. The
+  `persist_loop` drains the wake/flush signals, `take()`s the mailbox, writes it, then acks any
+  flush — preserving the Tier 1 #5 shutdown-durability handshake.
 
 ### Daemon — security & correctness
 
-### [ ] 8. 🟡 Write-mode types untrusted backend output into the focused window with no control-character sanitization *(security)*
+### [x] 8. 🟡 Write-mode types untrusted backend output into the focused window with no control-character sanitization *(security)*
 
 - **Where:** `preprocess_text` only trims/collapses whitespace + capitalizes
   (`output/preview.rs:11-43`); `process_final_text` types the result directly
@@ -743,8 +754,16 @@ Five clusters account for most of the findings:
 - **Fix:** strip/reject control (and optionally bidi/zero-width) chars before the simulator in
   both `update_preview` and `process_final_text`; align the `SECURITY.md` claim with what's
   enforced.
+- **Resolved (branch `refactor/audit2-tier3-6-10`):** `preprocess_text` — the single choke point
+  both the preview (`update_preview`) and final (`process_final_text`) typing paths run through —
+  now strips, before any other processing, non-whitespace C0/C1 control codes (ESC/BEL/NUL/
+  backspace/…), Unicode bidi overrides + isolates (U+202A–202E, U+2066–2069), and zero-width
+  chars (U+200B/C/D, U+FEFF). Real whitespace (`\n`/`\r`/`\t`) is preserved so words aren't glued
+  and the existing normalization still collapses runs. Added a unit test; added an
+  output-sanitization bullet to `SECURITY.md` so the "control character filtering" claim holds
+  end-to-end.
 
-### [ ] 9. 🟠 Consent flow prompts with an unverifiable `<unknown>` binary instead of failing closed *(security)*
+### [x] 9. 🟠 Consent flow prompts with an unverifiable `<unknown>` binary instead of failing closed *(security)*
 
 - **Where:** `resolve_peer_exe()` falls back to `PathBuf::from("<unknown>")` when the pid is
   absent or the `/proc/<pid>/exe` readlink fails (`auth/consent.rs:223-238`); `request.rs:79`
@@ -760,8 +779,14 @@ Five clusters account for most of the findings:
 - **Fix:** treat an unresolved exe as fail-closed (return a deny/`PopupFailed`, or refuse to
   mint); represent it as `Option<PathBuf>`/an explicit enum so callers can't treat the sentinel
   as a real identity.
+- **Resolved (branch `refactor/audit2-tier3-6-10`):** `resolve_peer_exe` now returns
+  `Option<PathBuf>` — `None` (not `PathBuf("<unknown>")`) on a missing `PeerInfo`/pid or a
+  `/proc/<pid>/exe` readlink failure. `auth_request` fails closed on `None` with
+  `403 peer_unverifiable` before any popup, consent-key, or mint, so an unidentifiable peer can
+  no longer be prompted for or minted a token bound to a bogus identity. Also hardened the peer
+  pid coercion in `server.rs` (an out-of-range pid becomes `None`, not `0` → `/proc/0/exe`).
 
-### [ ] 10. 🟡 `/auth/request` has no rate limit and no popup concurrency cap *(security)*
+### [x] 10. 🟡 `/auth/request` has no rate limit and no popup concurrency cap *(security)*
 
 - **Where:** `ConsentLocks` dedups only on `(exe_path, normalized-scopes)`
   (`consent.rs:42-47`); `/auth/request` is mounted outside every `require_rate_limit` group
@@ -773,6 +798,13 @@ Five clusters account for most of the findings:
   trusted security UI; the deny-cache is no defense (every subset is a fresh key).
 - **Fix:** a global semaphore (capacity 1) around popup spawning so at most one dialog is on
   screen, and/or a per-peer rate limit returning a transient error instead of spawning.
+- **Resolved (branch `refactor/audit2-tier3-6-10`):** added a process-global
+  `static CONSENT_POPUP: Semaphore(1)` acquired at the top of `ask_user_for_consent` and held
+  (RAII) across the spawn + up-to-60s decision, so at most one consent dialog is ever on screen
+  regardless of how many distinct `(exe, scopes)` keys a client fires. Excess requests wait for
+  the permit (bounded by the per-popup timeout) instead of stacking exclusive-keyboard overlays,
+  so the desktop-lockout DoS is closed. (Kept the per-peer rate limit as the untaken "or"
+  alternative — `/auth/request` stays outside the request-quota limiter by design.)
 
 ### [ ] 11. 🟡 Consent dialog headlines the attacker-controlled `app_name` with no "unverified" framing *(security)*
 
