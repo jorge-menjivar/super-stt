@@ -17,10 +17,5 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-http-body-util = "0.1"
-hyper = { version = "1", features = ["client", "http1"] }
-hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
 super-stt-shared = { path = "../super-stt-shared" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }

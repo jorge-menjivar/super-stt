@@ -247,3 +247,24 @@ fn cmd_logout() -> Result<()> {
     println!("Cached session token removed. Next invocation will trigger re-consent.");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SCOPES;
+    use super_stt_shared::daemon::scopes::is_known_scope;
+
+    /// The CLI's requested scope set must be a subset of the daemon's shared
+    /// catalog. Without this, a wire-scope rename in `scopes::KNOWN_SCOPES`
+    /// would leave `SCOPES` requesting a token the daemon rejects, and the
+    /// break would only surface at runtime as a failed `/auth/request`. Mirrors
+    /// the consent binary's `scope_conformance` guard (audit 2 Tier 3 #33).
+    #[test]
+    fn requested_scopes_are_known() {
+        for scope in SCOPES {
+            assert!(
+                is_known_scope(scope),
+                "CLI requests scope `{scope}` that is not in scopes::KNOWN_SCOPES"
+            );
+        }
+    }
+}

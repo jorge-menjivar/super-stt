@@ -6635,11 +6635,6 @@ version = "0.1.4-beta.2"
 dependencies = [
  "anyhow",
  "clap",
- "http-body-util",
- "hyper",
- "hyper-util",
- "serde",
- "serde_json",
  "super-stt-shared",
  "tokio",
 ]

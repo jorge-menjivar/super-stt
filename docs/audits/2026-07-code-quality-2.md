@@ -1038,7 +1038,7 @@ Five clusters account for most of the findings:
 
 ### CLI
 
-### [ ] 32. 🟡 super-stt-cli declares 5 unused dependencies (hyper, hyper-util, http-body-util, serde, serde_json)
+### [x] 32. 🟡 super-stt-cli declares 5 unused dependencies (hyper, hyper-util, http-body-util, serde, serde_json)
 
 - **Where:** `super-stt-cli/Cargo.toml:20-24`; the single-file crate references none of them (all
   network calls go through `super_stt_shared::daemon::http_client`).
@@ -1046,14 +1046,19 @@ Five clusters account for most of the findings:
   CLI hand-rolls a transport, inviting the reimplementation the shared client prevents.
 - **Fix:** `cargo remove -p super-stt-cli hyper hyper-util http-body-util serde serde_json`
   (keep anyhow, clap, tokio, super-stt-shared).
+- **Resolved:** `cargo remove`d all five from `super-stt-cli/Cargo.toml`; only the CLI's
+  dependency edges dropped from `Cargo.lock` (daemon/shared still pull hyper). Crate builds clean.
 
-### [ ] 33. 🟡 CLI-requested SCOPES are hardcoded literals with no conformance guard against the shared catalog
+### [x] 33. 🟡 CLI-requested SCOPES are hardcoded literals with no conformance guard against the shared catalog
 
 - **Where:** `SCOPES: &[&str] = &["transcribe", "status"]` (`super-stt-cli/src/main.rs:27`) — the
   set is correct/least-privilege, but has no link to `scopes::KNOWN_SCOPES`.
 - **Problem:** Tier 2 #8 added a conformance test for the consent binary's scope list; the CLI's
   requested-scope list got no equivalent, so a wire-scope rename fails only at runtime.
 - **Fix:** add a `#[test]` (or debug_assert) asserting `SCOPES.iter().all(|s| scopes::is_known_scope(s))`.
+- **Resolved:** added `#[cfg(test)] mod tests::requested_scopes_are_known` in `main.rs` asserting every
+  entry of `SCOPES` passes `scopes::is_known_scope`, mirroring the consent binary's `scope_conformance`
+  guard. A wire-scope rename now breaks the CLI at `cargo test` instead of at runtime.
 
 ### i18n
 
@@ -1083,21 +1088,27 @@ Five clusters account for most of the findings:
 
 ### Install scripts
 
-### [ ] 36. 🟡 Shell installers leak their `mktemp` working dir (tarball + extracted binaries) on every run
+### [x] 36. 🟡 Shell installers leak their `mktemp` working dir (tarball + extracted binaries) on every run
 
 - **Where:** `install-stable.sh:27` creates `TEMP_DIR` but its cleanup trap is commented out
   (`:679`); `install-beta.sh:51` has no trap.
 - **Impact:** each install/update leaves a `/tmp/tmp.XXXX` holding the multi-hundred-MB tarball +
   binaries until reboot.
 - **Fix:** add `trap 'rm -rf "$TEMP_DIR"' EXIT` after `TEMP_DIR` is set in both.
+- **Resolved:** added `trap 'rm -rf "$TEMP_DIR"' EXIT` immediately after `mktemp -d` in both scripts
+  (fires on early `set -e` failures too); dropped the stale commented-out trap in `install-stable.sh`.
 
-### [ ] 37. 🟡 `uninstall.sh` does not remove the PATH export the installers append to the shell rc
+### [x] 37. 🟡 `uninstall.sh` does not remove the PATH export the installers append to the shell rc
 
 - **Where:** `update_path` appends `export PATH="$HOME/.local/bin:$PATH"` to `.bashrc`/`.zshrc`
   (`install-stable.sh:360-365`, `install-beta.sh:381-386`); `uninstall.sh` never touches the rc.
 - **Impact:** install/uninstall asymmetry — a leftover `export PATH` line survives a full
   uninstall, unmentioned by the "What is PRESERVED" notice.
 - **Fix:** strip the exact appended line on uninstall, or list it under the preserved-state notice.
+- **Resolved (root cause):** fixed the write side instead — `update_path` in both installers no longer
+  edits `.bashrc`/`.zshrc` at all; it only warns the user to add `~/.local/bin` to PATH if it's missing.
+  With nothing appended, the install/uninstall asymmetry is gone and `uninstall.sh` needs no rc edits.
+  Per-user decision: installers must never touch the user's shell profile files.
 
 ---
 

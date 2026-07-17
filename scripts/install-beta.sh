@@ -49,6 +49,10 @@ INSTALL_OPTION="all"
 INTERACTIVE=true
 
 TEMP_DIR=$(mktemp -d)
+# Clean up the tarball + extracted binaries on any exit, including early
+# failures under `set -e`; otherwise each run leaks a multi-hundred-MB
+# /tmp/tmp.XXXX until reboot.
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
 echo "Temp directory: $TEMP_DIR"
 
@@ -361,30 +365,17 @@ install_service() {
     fi
 }
 
-# Update PATH if needed
+# Warn if the install dir isn't on PATH. We deliberately do NOT edit the
+# user's shell profile: rc files are the user's to manage, and an auto-append
+# has no clean uninstall counterpart. Assume `~/.local/bin` is already on PATH
+# (the XDG default) and just tell the user how to add it if it isn't.
 update_path() {
     local bin_dir="$1"
 
     if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
-        print_warn "Add $bin_dir to your PATH:"
+        print_warn "$bin_dir is not on your PATH."
+        print_warn "Add this line to your shell profile (e.g. ~/.bashrc or ~/.zshrc):"
         print_warn "  export PATH=\"$bin_dir:\$PATH\""
-
-        # Try to add to shell config for user installations
-        if [[ "$bin_dir" == "$HOME"* ]]; then
-            SHELL_CONFIG=""
-            if [ -f "$HOME/.bashrc" ]; then
-                SHELL_CONFIG="$HOME/.bashrc"
-            elif [ -f "$HOME/.zshrc" ]; then
-                SHELL_CONFIG="$HOME/.zshrc"
-            fi
-
-            if [ -n "$SHELL_CONFIG" ]; then
-                if ! grep -q "$bin_dir" "$SHELL_CONFIG"; then
-                    echo "export PATH=\"$bin_dir:\$PATH\"" >> "$SHELL_CONFIG"
-                    print_info "Added PATH update to $SHELL_CONFIG"
-                fi
-            fi
-        fi
     fi
 }
 
