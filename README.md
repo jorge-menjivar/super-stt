@@ -77,10 +77,12 @@ Controls how transcribed text is typed into the focused application. Auto-detect
 | **ydotool**                    | Uses ydotool virtual input (requires ydotoold running)                    |
 | **Wayland Protocol**           | Direct Wayland input simulation via the compositor                        |
 
-Both settings can be changed in the desktop app under Settings, or per-recording via CLI flags:
+Both settings can be changed in the desktop app under Settings. The stop mode
+can also be set per-recording on the CLI; the write method is configured only in
+the app or daemon config (it is not a per-recording flag):
 
 ```bash
-stt record --write --stop-mode manual --write-method ydotool
+stt record --write --stop-mode manual_only
 ```
 
 ## 🤖 Supported Models
@@ -110,11 +112,12 @@ If your computer does not have enough resources for local models, you can send y
 
 #### Enabling Online Models
 
+Online providers are installed as backends, then configured with an API key:
+
 1. Open the Super STT app
-2. Navigate to **Online Models** in the sidebar
-3. Enable the **Allow Online Models** toggle
-4. Enter your API key for the provider you want to use (keys are stored in your system keyring)
-5. Go to **Models**, open the model selector, and choose an online model
+2. Go to **Library → Browse** and install the provider's backend (Mistral, OpenAI, or Deepgram)
+3. On the **Installed** tab, open that backend's **Configure** sheet and enter your API key (stored in your system keyring)
+4. Go to **Models**, open the model selector, and choose an online model to load it
 
 API keys are stored securely in your system keyring (GNOME Keyring, KWallet, etc.) 
 

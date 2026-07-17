@@ -101,6 +101,12 @@ check-features:
     RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features --features subprocess-backends
     RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features --features wasm-backends
     RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features
+    # Compile (don't run) the subprocess transport integration test + its
+    # mock_backend fixture so a refactor breaking SubprocessBackend can't pass CI
+    # green. Running it needs a systemd --user session (SUPER_STT_TEST_SUBPROCESS=1)
+    # that hosted runners lack — unlike the WASM mock it can't run hermetically —
+    # but compiling it keeps it from bit-rotting (audit 2 Tier 2 #13).
+    RUSTFLAGS="-D warnings" cargo test -p super-stt-daemon --features test-fixtures --no-run --test subprocess_mock
 
 # Check formatting without modifying files
 fmt-check:

@@ -15,15 +15,12 @@ use crate::download_stream::{StreamError, stream_body_to_writer};
 use crate::registry::compat::Selection;
 use crate::registry::index_schema::{IndexAsset, IndexBackend};
 use super_stt_registry_types::verify::{
-    sha256_matches, tar_budget_step, tar_entry_unsafe_reason, unpack_cap,
+    MAX_MANIFEST_BYTES, sha256_matches, tar_budget_step, tar_entry_unsafe_reason, unpack_cap,
 };
 
 /// Absolute ceiling on a single downloaded asset when its size is not declared
 /// in the index. Declared sizes are honored directly (plus a small margin).
 const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-/// Ceiling for the `backend.toml` manifest asset — manifests are tiny; this
-/// only bounds a hostile or mistaken upload.
-const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 /// Slack allowed over a declared asset size before a download is rejected.
 const DOWNLOAD_SIZE_MARGIN: u64 = 1024 * 1024;
 /// The byte ceiling for a download given the index-declared `expected_size`
@@ -581,7 +578,12 @@ fn verify_manifest_bytes(
     let text = std::str::from_utf8(bytes)
         .map_err(|_| reject("not valid UTF-8"))?
         .to_string();
-    let m: Manifest = toml::from_str(&text).map_err(|e| reject(&format!("parse: {e}")))?;
+    // `Manifest::parse` (not raw `toml::from_str`) so install-time verification
+    // shares the canonical parser's safety guards — entrypoint + per-file
+    // `destination` traversal rejection and the `file`-xor-`parts` / empty-`file`
+    // normalization — instead of hand-reimplementing only a subset here. A future
+    // guard added to `parse` then applies here automatically (audit 2 Tier 2 #11).
+    let m = Manifest::parse(&text).map_err(|e| reject(&format!("parse: {e}")))?;
     validate_runtime(&m).map_err(|e| reject(&format!("validation: {e}")))?;
     if m.backend.source != entry.source {
         return Err(reject(&format!(
@@ -589,10 +591,10 @@ fn verify_manifest_bytes(
             m.backend.source, entry.source
         )));
     }
-    if m.backend.entrypoint != entry.entrypoint
-        || !super_stt_shared::registry::is_safe_relative_path(&m.backend.entrypoint)
-    {
-        return Err(reject("entrypoint inconsistent or unsafe"));
+    // Index-consistency check only — the entrypoint's path safety is already
+    // enforced by `Manifest::parse` above.
+    if m.backend.entrypoint != entry.entrypoint {
+        return Err(reject("entrypoint inconsistent with index"));
     }
     Ok(text)
 }

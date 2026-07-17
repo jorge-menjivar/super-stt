@@ -4,7 +4,7 @@ use crate::core::app::{AppModel, DeviceState, ModelOperationState};
 use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message};
 use cosmic::prelude::*;
 use log::{debug, info, warn};
-use super_stt_shared::models::protocol::NotificationEvent;
+use super_stt_shared::models::protocol::{DaemonStatusEvent, NotificationEvent};
 use super_stt_shared::models::provider::Provider;
 
 impl AppModel {
@@ -51,47 +51,64 @@ impl AppModel {
         event: &NotificationEvent,
     ) -> Option<Task<cosmic::Action<Message>>> {
         info!("Received daemon event: {:?}", event.data);
-        let status = event.data.get("status").and_then(|s| s.as_str())?;
-        match status {
-            "ready" => self.handle_daemon_ready_event(event),
-            "device_switch_error" | "error" => self.handle_daemon_device_error_event(event),
-            "model_switched" => self.handle_daemon_model_switched_event(event),
-            "switching_device" => {
-                info!("Received switching_device event: {:?}", event.data);
-                // Keep device_state as Switching and wait for "ready" event
-                // This event just confirms the switch is in progress
+        // Typed deserialize replaces the former hand-matched `.get("status")` /
+        // `.get("<field>")` reads: a field rename/typo is now a compile error, not
+        // a silent no-op (audit 2 Tier 2 #9). The injected `timestamp` key is
+        // ignored; an unrecognized or malformed event yields `None`.
+        let event = match serde_json::from_value::<DaemonStatusEvent>(event.data.clone()) {
+            Ok(ev) => ev,
+            Err(e) => {
+                info!("Unhandled/unparseable daemon status event: {e}");
+                return None;
+            }
+        };
+        match event {
+            DaemonStatusEvent::Ready {
+                model_loaded,
+                actual_device,
+                ..
+            } => {
+                self.handle_daemon_ready(actual_device.as_deref(), model_loaded);
+                None
+            }
+            DaemonStatusEvent::DeviceSwitchError { error, .. } => {
+                Some(self.handle_daemon_device_error(&error))
+            }
+            DaemonStatusEvent::ModelSwitched {
+                model_name,
+                provider,
+                source,
+                ..
+            } => Some(self.handle_daemon_model_switched(&model_name, &provider, &source)),
+            DaemonStatusEvent::SwitchingDevice { target_device, .. } => {
+                info!("Received switching_device event -> {target_device}");
+                // Keep device_state as Switching and wait for the `ready` event;
+                // this event just confirms the switch is in progress.
                 if !matches!(self.device_state, DeviceState::Switching { .. }) {
                     warn!("Received switching_device event but not in switching state");
-                    if let Some(to_device) = event.data.get("to_device").and_then(|d| d.as_str()) {
-                        self.set_device_switching(
-                            to_device.to_string(),
-                            "Switching device...".to_string(),
-                        );
-                    }
+                    self.set_device_switching(target_device, "Switching device...".to_string());
                 }
                 None
             }
-            "loading_model_for_device" => {
-                info!("Received loading_model_for_device event: {:?}", event.data);
-                if let (Some(target_device), Some(model)) = (
-                    event.data.get("target_device").and_then(|d| d.as_str()),
-                    event.data.get("model").and_then(|m| m.as_str()),
-                ) {
-                    let status_message = format!(
-                        "Loading {} on {}...",
-                        model,
-                        if target_device == "cpu" { "CPU" } else { "GPU" }
-                    );
-                    self.set_device_switching(target_device.to_string(), status_message);
-                }
+            DaemonStatusEvent::LoadingModelForDevice {
+                model,
+                target_device,
+            } => {
+                info!("Received loading_model_for_device event: {model} on {target_device}");
+                let status_message = format!(
+                    "Loading {} on {}...",
+                    model,
+                    if target_device == "cpu" { "CPU" } else { "GPU" }
+                );
+                self.set_device_switching(target_device, status_message);
                 None
             }
-            "settings_changed" => {
-                // A setting changed — possibly from another client, or the
-                // global Primary Language this very client just set. Re-fetch
-                // the language state so a per-model button that follows the
-                // global value, and the global card, reflect the new value.
-                if event.data.get("setting").and_then(|s| s.as_str()) != Some("language") {
+            DaemonStatusEvent::SettingsChanged { setting } => {
+                // A setting changed — possibly from another client, or the global
+                // Primary Language this very client just set. Re-fetch the language
+                // state so a per-model button that follows the global value, and
+                // the global card, reflect the new value.
+                if setting != "language" {
                     return None;
                 }
                 let mut tasks = vec![self.load_primary_language()];
@@ -100,19 +117,21 @@ impl AppModel {
                 }
                 Some(Task::batch(tasks))
             }
-            _ => {
-                info!("Received unhandled daemon status: {status}");
-                None
-            }
+            // No app-side effect today (matches the prior `_` fall-through): the
+            // load-start and active-backend-changed notifications don't drive UI
+            // state here.
+            DaemonStatusEvent::LoadingModel { .. }
+            | DaemonStatusEvent::ActiveBackendChanged { .. } => None,
         }
     }
 
-    pub(in crate::core::app) fn handle_daemon_ready_event(
+    pub(in crate::core::app) fn handle_daemon_ready(
         &mut self,
-        event: &NotificationEvent,
-    ) -> Option<Task<cosmic::Action<Message>>> {
+        actual_device: Option<&str>,
+        model_loaded: bool,
+    ) {
         // Handle device readiness
-        if let Some(actual_device) = event.data.get("actual_device").and_then(|d| d.as_str()) {
+        if let Some(actual_device) = actual_device {
             info!(
                 "Received ready event: current_device={} -> {}",
                 self.current_device, actual_device
@@ -127,12 +146,7 @@ impl AppModel {
         }
 
         // Handle model readiness - clear switching state
-        if event
-            .data
-            .get("model_loaded")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
+        if model_loaded {
             info!("Received ready event: model loading completed");
             info!(
                 "Model state before ready event: {:?}",
@@ -144,69 +158,57 @@ impl AppModel {
                 self.model_operation_state
             );
         }
-        None
     }
 
-    pub(in crate::core::app) fn handle_daemon_device_error_event(
+    pub(in crate::core::app) fn handle_daemon_device_error(
         &mut self,
-        event: &NotificationEvent,
-    ) -> Option<Task<cosmic::Action<Message>>> {
-        warn!("Received device switch error event: {:?}", event.data);
+        error: &str,
+    ) -> Task<cosmic::Action<Message>> {
+        warn!("Received device switch error event: {error}");
         // Reset device state from switching to ready
         if matches!(self.device_state, DeviceState::Switching { .. }) {
             info!("Device switch failed, reverting to ready state");
         }
         self.device_state = DeviceState::Ready;
-        if let Some(error_msg) = event.data.get("error").and_then(|e| e.as_str()) {
-            let error_message = error_msg.to_string();
-            // Show error to user
-            return Some(Task::perform(async move { error_message }, |msg| {
-                cosmic::Action::App(Message::Device(DeviceMessage::DeviceError(msg)))
-            }));
-        }
-        None
+        let error_message = error.to_string();
+        // Show error to user
+        Task::perform(async move { error_message }, |msg| {
+            cosmic::Action::App(Message::Device(DeviceMessage::DeviceError(msg)))
+        })
     }
 
-    pub(in crate::core::app) fn handle_daemon_model_switched_event(
+    pub(in crate::core::app) fn handle_daemon_model_switched(
         &mut self,
-        event: &NotificationEvent,
-    ) -> Option<Task<cosmic::Action<Message>>> {
-        if let Some(model_name) = event.data.get("model_name").and_then(|m| m.as_str()) {
-            let model = model_name.to_string();
-            let provider = event
-                .data
-                .get("provider")
-                .and_then(|p| p.as_str())
-                .and_then(|s| s.parse::<Provider>().ok())
-                .unwrap_or_else(|| self.current_provider.clone());
-            let source = event
-                .data
-                .get("source")
-                .and_then(|p| p.as_str())
-                .map_or_else(|| self.current_source.clone(), str::to_string);
-            info!(
-                "Received model_switched event: current_model={:?} -> {:?} via {provider} ({source})",
-                self.current_model, model
-            );
-            // A live identity change supersedes any in-flight reconnect
-            // snapshot: bump the epoch so a stale get_current_model response
-            // can't revert this.
-            self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
-            self.current_model.clone_from(&model);
-            self.current_provider = provider;
-            self.current_source.clone_from(&source);
-            self.model_operation_state = ModelOperationState::Ready;
-            info!("Model state updated to Ready after model_switched event");
-            // Mirror CurrentModelLoaded/ModelChanged: fetch the per-model
-            // language block so the active-backend card's language button shows
-            // the model's resolved language instead of the neutral "Language"
-            // label. A client that learns the active model only via this
-            // broadcast — e.g. the settings app reconnecting after a daemon
-            // restart, where the startup load now emits model_switched — would
-            // otherwise leave model_language_for unset.
-            return Some(self.load_model_language(source, model));
-        }
-        None
+        model_name: &str,
+        provider: &str,
+        source: &str,
+    ) -> Task<cosmic::Action<Message>> {
+        let model = model_name.to_string();
+        // The wire carries the provider's `Display` form; fall back to the current
+        // provider if it doesn't parse (forward-compat with an unknown provider).
+        let provider = provider
+            .parse::<Provider>()
+            .unwrap_or_else(|_| self.current_provider.clone());
+        let source = source.to_string();
+        info!(
+            "Received model_switched event: current_model={:?} -> {:?} via {provider} ({source})",
+            self.current_model, model
+        );
+        // A live identity change supersedes any in-flight reconnect snapshot: bump
+        // the epoch so a stale get_current_model response can't revert this.
+        self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
+        self.current_model.clone_from(&model);
+        self.current_provider = provider;
+        self.current_source.clone_from(&source);
+        self.model_operation_state = ModelOperationState::Ready;
+        info!("Model state updated to Ready after model_switched event");
+        // Mirror CurrentModelLoaded/ModelChanged: fetch the per-model language
+        // block so the active-backend card's language button shows the model's
+        // resolved language instead of the neutral "Language" label. A client that
+        // learns the active model only via this broadcast — e.g. the settings app
+        // reconnecting after a daemon restart, where the startup load now emits
+        // model_switched — would otherwise leave model_language_for unset.
+        self.load_model_language(source, model)
     }
 
     pub(in crate::core::app) fn process_download_progress_event(

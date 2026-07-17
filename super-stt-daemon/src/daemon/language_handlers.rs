@@ -6,12 +6,10 @@
 //! installed model whether or not it is currently loaded. See
 //! `docs/protocol/endpoints/v1/backends/model-language.md`.
 
-use chrono::Utc;
-
 use crate::daemon::language::resolve_language;
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::ModelDefinition;
-use super_stt_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
+use super_stt_shared::models::protocol::{Command, DaemonResponse, DaemonStatusEvent, ErrorCode};
 
 impl SuperSTTDaemon {
     /// Broadcast that a setting changed so subscribed clients re-resolve any
@@ -20,11 +18,9 @@ impl SuperSTTDaemon {
     /// topic clients already subscribe to; `setting` names what changed.
     fn publish_settings_changed(&self, setting: &str) {
         self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "settings_changed",
-                "setting": setting,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+            .publish_daemon_status(DaemonStatusEvent::SettingsChanged {
+                setting: setting.to_string(),
+            });
     }
 
     pub async fn handle_get_primary_language(&self) -> DaemonResponse {

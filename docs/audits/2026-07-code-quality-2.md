@@ -329,7 +329,7 @@ Five clusters account for most of the findings:
 
 ## Tier 2 — contract & documentation drift
 
-### [ ] 1. 🟠 Docs: `SECURITY.md` describes an obsolete SO_PEERCRED/binary-verification auth model and omits the actual token/scope/consent model
+### [x] 1. 🟠 Docs: `SECURITY.md` describes an obsolete SO_PEERCRED/binary-verification auth model and omits the actual token/scope/consent model
 
 - **Where:** `docs/SECURITY.md:59-72,159` ("Write mode requires verification that the
   client is the legitimate stt binary", "Unix peer credentials…", "Binary verification…",
@@ -345,6 +345,15 @@ Five clusters account for most of the findings:
 - **Fix:** rewrite the auth sections to describe the token/scope/consent model
   (cross-ref `auth.md`), keep SO_PEERCRED only in its real role (resolving the peer exe for
   the prompt + the uid-mismatch check), and reconcile the "No remote access" claim.
+- **Resolved (branch `refactor/audit2-tier2`):** rewrote the stale "Security Features"
+  sections (Keyboard Input Protection, Network Isolation, the former "Process Authentication"
+  → "Consent & Peer Identity", Process Isolation) and the Threat Model / testing bullets to
+  the real model: consent-minted per-request session tokens carrying user-approved scopes
+  (via `super-stt-consent`), with `SO_PEERCRED`/`/proc/<pid>/exe` in their true role
+  (identify the caller for the prompt + reject cross-UID peers), cross-referencing
+  `protocol/auth.md`. Replaced the self-contradicting "No remote access / Network connections
+  impossible" with "no inbound listener — Unix-socket only", reconciled against the documented
+  outbound-HTTPS backend-install surface.
 
 ### [x] 2. 🟠 Security/Install: the `stt`-group access-control model is documented and provisioned by installers but does not exist in the daemon
 
@@ -398,7 +407,7 @@ Five clusters account for most of the findings:
   which are incompatible with a `--user` service whose binary lives in `~/.local/bin` and whose
   socket lives in `/run/user/<uid>`; making that block actually startable is a separate fix.
 
-### [ ] 4. 🟠 Docs/CLI: README advertises a `--write-method` flag and `--stop-mode manual` value the CLI rejects
+### [x] 4. 🟠 Docs/CLI: README advertises a `--write-method` flag and `--stop-mode manual` value the CLI rejects
 
 - **Where:** `README.md:83` (`stt record --write --stop-mode manual --write-method
   ydotool`), `:61,80-84`.
@@ -413,8 +422,11 @@ Five clusters account for most of the findings:
 - **Fix:** `--stop-mode manual` → `manual_only`, delete `--write-method ydotool`, and state
   that write method is app/config-only (not a per-recording CLI flag) — or add it to
   `TranscribeOptions` + clap if per-recording override is intended.
+- **Resolved (branch `refactor/audit2-tier2`):** the README example is now `stt record --write
+  --stop-mode manual_only`; the `--write-method ydotool` flag is dropped and the surrounding
+  prose states the write method is set in the app or daemon config, not per-recording.
 
-### [ ] 5. 🟡 Docs: README "Enabling Online Models" references an "Online Models" sidebar page that no longer exists
+### [x] 5. 🟡 Docs: README "Enabling Online Models" references an "Online Models" sidebar page that no longer exists
 
 - **Where:** `README.md:111-117` ("Navigate to Online Models in the sidebar…").
 - **Problem:** the sidebar now has Models, Library, Customization (`init.rs:21-33`); online
@@ -422,8 +434,12 @@ Five clusters account for most of the findings:
   Configure-sheet secret flow (`ui/messages.rs:263-294`), not a dedicated page.
 - **Fix:** update the section to the current IA (install the provider from Library/Browse,
   open its Configure sheet for the API key) and correct the sidebar page names.
+- **Resolved (branch `refactor/audit2-tier2`):** the "Enabling Online Models" steps now read:
+  install the provider's backend from **Library → Browse**, open its **Configure** sheet (from
+  the Installed tab) to enter the API key, then pick the online model from **Models** — matching
+  the real backend-install + secret-flow IA (no "Online Models" sidebar page).
 
-### [ ] 6. 🟠 Protocol: `error_code` is absent from the registry, backend-option, secret, and model-language error envelopes
+### [x] 6. 🟠 Protocol: `error_code` is absent from the registry, backend-option, secret, and model-language error envelopes
 
 - **Where:** `backends/mod.rs:28-35` (`json_error` → `{status:"error", message:<code>}`,
   no `error_code`) covers option/secret/model-language; `registry/mod.rs:21-39`
@@ -438,8 +454,15 @@ Five clusters account for most of the findings:
   envelope unification is incomplete.
 - **Fix:** route these errors through the `error_code` envelope (or add `error_code` +
   `status:"error"` to `json_error`/`registry_error`); update the per-endpoint error tables.
+- **Resolved (branch `refactor/audit2-tier2`):** `json_error` now emits
+  `{status:"error", error_code, message}` (with a new `json_error_msg` sibling for the one
+  keyring-unavailable site that carries a distinct human message), and `registry_error`/
+  `registry_error_msg` now add `status:"error"` + `error_code` while retaining the legacy
+  `error` key for back-compat. So the backend option/secret/model-language and registry
+  surfaces all carry `error_code` per `transport.md`. The registry envelope test was updated
+  to field-level assertions.
 
-### [ ] 7. 🟠 Protocol: `active_device` error contract has drifted from the ErrorCode enum and the daemon
+### [x] 7. 🟠 Protocol: `active_device` error contract has drifted from the ErrorCode enum and the daemon
 
 - **Where:** `device_management.rs:131-135`; `active_device.md:66-69`.
 - **Problem:** (1) an unrecognized device is rejected with an uncoded error → 500, but the
@@ -453,6 +476,12 @@ Five clusters account for most of the findings:
 - **Fix:** add an `InvalidDevice` (400) variant and emit it; reconcile the accepted-device
   set with the doc (add `metal` or drop it); either produce `cuda_unavailable` or document
   the silent-CPU-fallback (the doc currently self-contradicts).
+- **Resolved (branch `refactor/audit2-tier2`):** added `ErrorCode::InvalidDevice` (400) and
+  emit it from `validate_device_switch_request` (was an uncoded 500). Dropped `metal` from
+  `active_device.md` (the daemon accepts only `cpu`/`cuda`), and replaced the never-emitted
+  `400 cuda_unavailable` row with an explicit note that requesting CUDA on a CUDA-less host is
+  **not** an error — the daemon silently falls back to CPU (surfaced via `actual_device`). The
+  `CudaUnavailable` variant is kept as reserved surface (documented as such).
 
 ### [x] 8. 🟠 Protocol: `POST /transcribe` response shapes and the `stream_realtime` field diverge from the docs
 
@@ -487,7 +516,7 @@ Five clusters account for most of the findings:
   and documented the fire-and-forget `202`'s optimistic (no-completion-guarantee) semantics on
   the busy-race. The pre-existing busy-check TOCTOU is left as-is (Tier 3 #6).
 
-### [ ] 9. 🟠 API design: `daemon_status_changed` payload is an untyped hand-matched contract whose keys have already drifted
+### [x] 9. 🟠 API design: `daemon_status_changed` payload is an untyped hand-matched contract whose keys have already drifted
 
 - **Where:** built inline with `serde_json::json!` string keys
   (`lifecycle.rs:108-124`, `device_management.rs:208-214,310-311`, `switch.rs:115-120`) and
@@ -505,8 +534,17 @@ Five clusters account for most of the findings:
 - **Fix:** define a `#[serde(tag="status")]` `DaemonStatusEvent` enum in shared with typed
   fields (`Provider`, `Device`); construct/deserialize it on both sides; normalize
   `to_device`/`target_device`; pin the schemas in `docs/protocol/scopes/daemon_status.md`.
+- **Resolved (branch `refactor/audit2-tier2`):** added a `#[serde(tag="status",
+  rename_all="snake_case")]` `DaemonStatusEvent` enum in shared (8 variants). All four daemon
+  producers (`lifecycle`, `device_management`, `switch`, `language_handlers`) now construct it
+  and publish via a typed `publish_daemon_status` (which injects `timestamp`, mirroring
+  `publish_download_progress`); the app consumer deserializes it with `from_value` and matches
+  the enum instead of hand-reading `.get("status")`/`.get("<field>")`. `to_device` is
+  normalized to `target_device` (matches `loading_model_for_device`). Pinned the per-variant
+  schema in `daemon_status.md`. Validated by unit tests + the
+  `language_change_broadcasts_settings_changed` integration test.
 
-### [ ] 10. 🟠 Duplication: `MAX_MANIFEST_BYTES` is triplicated across the indexer, install, and custom-repo paths
+### [x] 10. 🟠 Duplication: `MAX_MANIFEST_BYTES` is triplicated across the indexer, install, and custom-repo paths
 
 - **Where:** `super-stt-indexer/src/assets.rs:22` (`u64`, enforced at publish),
   `registry/install.rs:26` (`u64`, at install-time manifest download),
@@ -518,8 +556,12 @@ Five clusters account for most of the findings:
   cleanly yet fail every install at 256 KiB.
 - **Fix:** hoist a single `MAX_MANIFEST_BYTES` into `registry-types::verify` beside the
   tarball budgets; reference it from all three (casting to `usize` where needed).
+- **Resolved (branch `refactor/audit2-tier2`):** added `pub const MAX_MANIFEST_BYTES: u64` to
+  `registry-types::verify` (beside the tarball budgets); the indexer, `install.rs`, and
+  `custom_repo.rs` now import it and dropped their local copies — `custom_repo.rs`'s `usize`
+  copy became the shared `u64`, removing its `as u64` casts.
 
-### [ ] 11. 🟡 Duplication: install-time manifest verification uses raw `toml::from_str` instead of `Manifest::parse`
+### [x] 11. 🟡 Duplication: install-time manifest verification uses raw `toml::from_str` instead of `Manifest::parse`
 
 - **Where:** `verify_manifest_bytes` does `toml::from_str::<Manifest>(&text)`
   (`registry/install.rs:584`) then re-implements only the entrypoint-safety subset inline
@@ -532,8 +574,13 @@ Five clusters account for most of the findings:
   silently won't apply at install verification.
 - **Fix:** use `Manifest::parse(&text)` and drop the inline re-check, keeping only the
   install-specific index-consistency assertions.
+- **Resolved (branch `refactor/audit2-tier2`):** `verify_manifest_bytes` now calls
+  `Manifest::parse(&text)` (inheriting the entrypoint + per-file `destination` traversal
+  guards and the `file`-xor-`parts`/empty-`file` normalization) and dropped the redundant
+  inline `is_safe_relative_path` re-check; the install-only checks (`validate_runtime`, source
+  and entrypoint-vs-index consistency) are kept.
 
-### [ ] 12. 🟡 Protocol/Docs: undocumented endpoint `POST /v1/active_model/reload`
+### [x] 12. 🟡 Protocol/Docs: undocumented endpoint `POST /v1/active_model/reload`
 
 - **Where:** registered at `http/v1/settings/mod.rs:102-105` → `reload_active_model`
   (dispatches `Command::ReloadActiveModel`).
@@ -542,8 +589,13 @@ Five clusters account for most of the findings:
 - **Fix:** add a `reload.md` sibling (or a section in `active_model.md`) documenting scope,
   semantics, success response, and the recording/switch conflict errors; or remove the route
   if it isn't part of the external contract.
+- **Resolved (branch `refactor/audit2-tier2`):** added
+  `docs/protocol/endpoints/v1/active_model/reload.md` (sibling of `cancel.md`) documenting the
+  `settings` scope, the synchronous re-instantiate semantics, both 200 shapes (reloaded /
+  nothing-loaded), the `model_switched`+`ready` broadcast, and the errors
+  (401/403/409 `recording_in_progress`/500 reload-failed).
 
-### [ ] 13. 🟠 Tests/CI: subprocess transport orchestration is never compiled or run anywhere in CI
+### [x] 13. 🟠 Tests/CI: subprocess transport orchestration is never compiled or run anywhere in CI
 
 - **Where:** `super-stt-daemon/tests/subprocess_mock.rs` is gated by
   `#![cfg(all(feature="subprocess-backends", feature="test-fixtures"))]` **and** an
@@ -558,6 +610,12 @@ Five clusters account for most of the findings:
   step that compiles it (`cargo test --features test-fixtures --no-run --test subprocess_mock`
   or `just check --all-targets --all-features`); document that runtime coverage is
   systemd-gated.
+- **Resolved (branch `refactor/audit2-tier2`):** `just check-features` (run by `just ci` and
+  the GitHub CI Clippy job) now compiles the subprocess mock + its `mock_backend` fixture with
+  `cargo test --features test-fixtures --no-run --test subprocess_mock` under `-D warnings`, so
+  a `SubprocessBackend` refactor can no longer bit-rot undetected. A comment records that
+  *running* it is still systemd-gated (`SUPER_STT_TEST_SUBPROCESS=1`), which hosted runners
+  lack — so it can't run hermetically like the WASM mock.
 
 ---
 

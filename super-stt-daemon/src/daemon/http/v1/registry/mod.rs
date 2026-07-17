@@ -11,29 +11,35 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 
-/// Registry error envelope: `{ "error": <code> }` at `status`.
+/// Registry error envelope: `{ "status": "error", "error_code": <code>, "error": <code> }`
+/// at `status`.
 ///
-/// The registry endpoints deliberately use a stable, machine-readable `error`
-/// code (see the failure-mode tables in
-/// `docs/protocol/endpoints/v1/registry/*.md`) rather than the
-/// `{ "status": "error", "message": … }` house style used elsewhere. This
-/// helper is the single place that shape is built.
+/// The registry endpoints historically used a bare `{ "error": <code> }` shape.
+/// `error_code` (and `status`) are now emitted alongside the retained `error`
+/// key so the whole surface honors `transport.md`'s "`error_code` present on
+/// every error" contract without breaking clients that read `error` (audit 2
+/// Tier 2 #6). This helper is the single place that shape is built.
 pub(crate) fn registry_error(status: StatusCode, code: &str) -> Response {
     (
         status,
         [("content-type", "application/json")],
-        serde_json::json!({ "error": code }).to_string(),
+        serde_json::json!({ "status": "error", "error_code": code, "error": code }).to_string(),
     )
         .into_response()
 }
 
-/// Registry error envelope with a human-readable `message`:
-/// `{ "error": <code>, "message": <message> }`.
+/// [`registry_error`] with a human-readable `message`.
 pub(crate) fn registry_error_msg(status: StatusCode, code: &str, message: &str) -> Response {
     (
         status,
         [("content-type", "application/json")],
-        serde_json::json!({ "error": code, "message": message }).to_string(),
+        serde_json::json!({
+            "status": "error",
+            "error_code": code,
+            "error": code,
+            "message": message,
+        })
+        .to_string(),
     )
         .into_response()
 }
@@ -51,14 +57,17 @@ mod tests {
         (status, String::from_utf8(bytes.to_vec()).expect("utf8"))
     }
 
-    /// The registry error envelope is the documented `{ "error": <code> }`
-    /// machine-readable shape (see docs/protocol/endpoints/v1/registry/*.md) —
-    /// distinct from the `{ "status": "error", "message": … }` house style.
+    /// The registry error envelope now carries the machine-readable `error_code`
+    /// (and `status`) per transport.md, while retaining the legacy `error` key so
+    /// existing clients keep working (audit 2 Tier 2 #6).
     #[tokio::test]
-    async fn registry_error_uses_documented_envelope() {
+    async fn registry_error_carries_error_code_and_legacy_key() {
         let (status, body) = body_of(registry_error(StatusCode::NOT_FOUND, "not_found")).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
-        assert_eq!(body, r#"{"error":"not_found"}"#);
+        let v: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(v["status"], "error");
+        assert_eq!(v["error_code"], "not_found");
+        assert_eq!(v["error"], "not_found"); // retained for back-compat
 
         let (status, body) = body_of(registry_error_msg(
             StatusCode::BAD_REQUEST,
@@ -67,9 +76,13 @@ mod tests {
         ))
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+        let v: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(v["status"], "error");
+        assert_eq!(v["error_code"], "bad_request");
+        assert_eq!(v["error"], "bad_request");
         assert_eq!(
-            body,
-            r#"{"error":"bad_request","message":"provide exactly one of source, repo_url, local_path"}"#
+            v["message"],
+            "provide exactly one of source, repo_url, local_path"
         );
     }
 }

@@ -2,9 +2,8 @@
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};
 use crate::stt_models::transcribe::Transcribe;
 use anyhow::Result;
-use chrono::Utc;
 use log::{error, info, warn};
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
 use super_stt_shared::models::provider::Provider;
 
 impl SuperSTTDaemon {
@@ -70,22 +69,18 @@ impl SuperSTTDaemon {
 
     pub fn broadcast_model_loading_status(&self, model: &str) {
         self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "loading_model",
-                "new_model": model,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+            .publish_daemon_status(DaemonStatusEvent::LoadingModel {
+                new_model: model.to_string(),
+            });
     }
 
     /// Broadcast model loading status specifically for device switching.
     pub fn broadcast_device_model_loading_status(&self, model: &str, target_device: &str) {
         self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "loading_model_for_device",
-                "model": model,
-                "target_device": target_device,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+            .publish_daemon_status(DaemonStatusEvent::LoadingModelForDevice {
+                model: model.to_string(),
+                target_device: target_device.to_string(),
+            });
     }
 
     /// Announce that `model` is now the active, loaded model. Emits the
@@ -104,24 +99,19 @@ impl SuperSTTDaemon {
         source: &str,
         actual_device: &str,
     ) {
-        let timestamp = Utc::now().to_rfc3339();
         self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "model_switched",
-                "model_name": name,
-                "provider": provider.to_string(),
-                "source": source,
-                "actual_device": actual_device,
-                "timestamp": timestamp,
-            }));
-        self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "ready",
-                "model_loaded": true,
-                "model_name": name,
-                "actual_device": actual_device,
-                "timestamp": timestamp,
-            }));
+            .publish_daemon_status(DaemonStatusEvent::ModelSwitched {
+                model_name: name.to_string(),
+                provider: provider.to_string(),
+                source: source.to_string(),
+                actual_device: actual_device.to_string(),
+            });
+        self.events.publish_daemon_status(DaemonStatusEvent::Ready {
+            model_loaded: true,
+            model_name: Some(name.to_string()),
+            actual_device: Some(actual_device.to_string()),
+            preferred_device: None,
+        });
     }
 
     // `pub(in crate::daemon)` so the device-switch paths (a sibling module)
@@ -204,12 +194,12 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after unloading model: {e}");
         }
-        self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "ready",
-                "model_loaded": false,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+        self.events.publish_daemon_status(DaemonStatusEvent::Ready {
+            model_loaded: false,
+            model_name: None,
+            actual_device: None,
+            preferred_device: None,
+        });
         let msg = dropped.map_or_else(|| "Model unloaded".to_string(), |n| format!("Unloaded {n}"));
         info!("{msg}");
         DaemonResponse::success().with_message(msg)

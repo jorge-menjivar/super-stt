@@ -12,14 +12,13 @@
 //! `docs/protocol/endpoints/v1/registry/install.md`) reflects this.
 
 use super_stt_registry_types::manifest::{Kind, Manifest, ManifestError};
+use super_stt_registry_types::verify::MAX_MANIFEST_BYTES;
 use thiserror::Error;
 
 use crate::registry::index_schema::{
     IndexAsset, IndexAssets, IndexBackend, IndexSubprocessAsset, id_from_source,
 };
 use super_stt_forge::{ForgeClient, ReleaseAsset, RepoRef};
-
-const MAX_MANIFEST_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
@@ -70,7 +69,7 @@ pub async fn resolve(
         .iter()
         .find(|a| a.name == "backend.toml")
         .ok_or_else(|| ResolveError::AssetMissing("backend.toml".into()))?;
-    if manifest_asset.size > MAX_MANIFEST_BYTES as u64 {
+    if manifest_asset.size > MAX_MANIFEST_BYTES {
         return Err(ResolveError::ManifestTooLarge);
     }
     let manifest_url = manifest_asset.download_url.clone();
@@ -79,7 +78,7 @@ pub async fn resolve(
     // real cap during the transfer: `download` streams and aborts the moment the
     // body would exceed it, rather than buffering an unbounded body first.
     let manifest_bytes = client
-        .download(&manifest_url, MAX_MANIFEST_BYTES as u64)
+        .download(&manifest_url, MAX_MANIFEST_BYTES)
         .await
         .map_err(|e| match e {
             super_stt_forge::ForgeError::TooLarge { .. } => ResolveError::ManifestTooLarge,

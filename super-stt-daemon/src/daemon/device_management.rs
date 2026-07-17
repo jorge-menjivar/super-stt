@@ -2,9 +2,8 @@
 
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::transcribe::Transcribe;
-use chrono::Utc;
 use log::{error, info, warn};
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
 
 impl SuperSTTDaemon {
     /// Handle set device command - switch between CPU and CUDA
@@ -127,12 +126,15 @@ impl SuperSTTDaemon {
 
     /// Validate device switch request and return early response if validation fails
     async fn validate_device_switch_request(&self, device: &str) -> Option<DaemonResponse> {
-        // Validate device parameter
+        // Validate device parameter. Emit the documented `400 invalid_device`
+        // code so clients can distinguish a bad request from a server failure
+        // (an uncoded error maps to 500) — audit 2 Tier 2 #7.
         if device != "cpu" && device != "cuda" {
             warn!("Invalid device specified: {device}");
-            return Some(DaemonResponse::error(&format!(
-                "Invalid device '{device}'. Must be 'cpu' or 'cuda'"
-            )));
+            return Some(DaemonResponse::error_with_code(
+                ErrorCode::InvalidDevice,
+                &format!("Invalid device '{device}'. Must be 'cpu' or 'cuda'"),
+            ));
         }
 
         // Check current preferred and actual devices
@@ -205,13 +207,11 @@ impl SuperSTTDaemon {
     async fn prepare_device_switch(&self, from_device: &str, to_device: &str, model: &str) {
         // Broadcast device switching status to settings subscribers
         self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "switching_device",
-                "from_device": from_device,
-                "to_device": to_device,
-                "model": model,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+            .publish_daemon_status(DaemonStatusEvent::SwitchingDevice {
+                from_device: from_device.to_string(),
+                target_device: to_device.to_string(),
+                model: model.to_string(),
+            });
 
         // Unload current model (free memory). Route through the shared graceful
         // path so the backend is `shutdown()` outside the write lock rather than
@@ -277,15 +277,12 @@ impl SuperSTTDaemon {
         info!("Device switch completed: {previous_device} -> {device} (actual: {actual_device})");
 
         // Broadcast ready status with new device
-        self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "ready",
-                "model_loaded": true,
-                "preferred_device": device,
-                "actual_device": actual_device,
-                "model_name": model_to_reload,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+        self.events.publish_daemon_status(DaemonStatusEvent::Ready {
+            model_loaded: true,
+            model_name: Some(model_to_reload.to_string()),
+            actual_device: Some(actual_device.clone()),
+            preferred_device: Some(device.to_string()),
+        });
 
         DaemonResponse::success()
             .with_device(actual_device)
@@ -306,13 +303,11 @@ impl SuperSTTDaemon {
 
         // Broadcast error status
         self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "device_switch_error",
-                "error": error.to_string(),
-                "failed_device": device,
-                "model": model_to_reload,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+            .publish_daemon_status(DaemonStatusEvent::DeviceSwitchError {
+                error: error.to_string(),
+                failed_device: device.to_string(),
+                model: model_to_reload.to_string(),
+            });
 
         // Check if shutdown is in progress before attempting recovery
         let mut shutdown_rx = self.shutdown_tx.subscribe();
@@ -368,15 +363,12 @@ impl SuperSTTDaemon {
                 );
 
                 // Broadcast ready status after successful recovery
-                self.events
-                    .publish_daemon_status_changed(serde_json::json!({
-                        "status": "ready",
-                        "model_loaded": true,
-                        "preferred_device": previous_device,
-                        "actual_device": recovery_actual_device,
-                        "model_name": model_to_reload,
-                        "timestamp": Utc::now().to_rfc3339(),
-                    }));
+                self.events.publish_daemon_status(DaemonStatusEvent::Ready {
+                    model_loaded: true,
+                    model_name: Some(model_to_reload.to_string()),
+                    actual_device: Some(recovery_actual_device.clone()),
+                    preferred_device: Some(previous_device.to_string()),
+                });
 
                 DaemonResponse::error(&format!(
                     "Failed to switch to device '{device}': {error}. Reverted to previous device '{recovery_actual_device}'."

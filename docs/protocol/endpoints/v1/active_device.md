@@ -30,9 +30,9 @@ Content-Type: application/json
 }
 ```
 
-| Field    | Type   | Required | Notes                              |
-|----------|--------|----------|------------------------------------|
-| `device` | string | yes      | One of `"cpu"`, `"cuda"`, `"metal"` |
+| Field    | Type   | Required | Notes                        |
+|----------|--------|----------|------------------------------|
+| `device` | string | yes      | One of `"cpu"`, `"cuda"`     |
 
 **Response (200):**
 
@@ -61,14 +61,20 @@ but the load fell back). When no model is loaded the response
 returns synchronously and no `ready` event is emitted — the
 preference takes effect on the next model load.
 
-**Errors:**
+**Errors:** the device-validation failure carries its machine-readable
+identifier in `error_code` (see [transport.md](../../transport.md)); the standard
+auth failures carry theirs in `message`, as elsewhere.
 
-| HTTP | `message`             | Meaning                                                       |
-|------|-----------------------|---------------------------------------------------------------|
-| 400  | `cuda_unavailable`    | `device: "cuda"` requested on a host with no CUDA support      |
-| 400  | `invalid_device`      | `device` wasn't one of `cpu`, `cuda`, `metal`                  |
-| 401  | `invalid_session`     | Token unknown / expired / `exe_changed`                        |
-| 403  | `scope_denied`        | Token lacks the `settings` scope                               |
+| HTTP | Identifier        | Carried in   | Meaning                                 |
+|------|-------------------|--------------|-----------------------------------------|
+| 400  | `invalid_device`  | `error_code` | `device` wasn't one of `cpu`, `cuda`    |
+| 401  | `invalid_session` | `message`    | Token unknown / expired / `exe_changed` |
+| 403  | `scope_denied`    | `message`    | Token lacks the `settings` scope        |
+
+Requesting `device: "cuda"` on a host without CUDA is **not** an error — the
+daemon accepts it and silently falls back to CPU (surfaced by the resolved
+`actual_device` in the `ready` event and the next `GET /active_device`). It does
+not emit `cuda_unavailable`.
 
 ## `GET /active_device`
 

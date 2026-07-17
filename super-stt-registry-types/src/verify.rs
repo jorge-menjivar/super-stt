@@ -16,6 +16,12 @@ pub const MAX_TARBALL_TOTAL_FLOOR: u64 = 4 * 1024 * 1024 * 1024;
 /// ML libraries stays far below this; a zip-bomb is far above it.
 pub const MAX_DECOMP_RATIO: u64 = 5;
 
+/// Ceiling for a `backend.toml` manifest asset — manifests are tiny; this only
+/// bounds a hostile or mistaken upload. Enforced identically at publish (the
+/// indexer), install-time download, and custom-repo resolve, so a manifest that
+/// passes publishing also installs (mirrors the tarball budgets above).
+pub const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
+
 /// The uncompressed-output ceiling for an archive of `archive_size` compressed
 /// bytes: scales with the input but never drops below the floor.
 #[must_use]

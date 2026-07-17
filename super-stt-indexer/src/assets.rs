@@ -10,16 +10,15 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use ring::digest::{Context, SHA256};
-use super_stt_registry_types::verify::{tar_budget_step, tar_entry_unsafe_reason, unpack_cap};
+use super_stt_registry_types::verify::{
+    MAX_MANIFEST_BYTES, tar_budget_step, tar_entry_unsafe_reason, unpack_cap,
+};
 use thiserror::Error;
 
 /// Ceiling for a single release asset — a `file` or one part of a multi-part
 /// archive. Matches GitHub's 2 GiB per-asset release limit; a larger archive
 /// must be split into `parts`.
 pub const MAX_ASSET_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-/// Ceiling for a `backend.toml` manifest asset — manifests are tiny; this only
-/// bounds a hostile or mistaken upload.
-pub const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
 
 #[derive(Debug, Error)]

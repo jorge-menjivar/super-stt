@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::{decode_source, find_backend, json_error, ok};
+use super::{decode_source, find_backend, json_error, json_error_msg, ok};
 use crate::daemon::http::state::AppState;
 use axum::Router;
 use axum::extract::{Path, State};
@@ -127,9 +127,10 @@ fn secret_result(
     if resp.status == "success" {
         ok(&serde_json::json!({ "status": "success", "configured": configured }))
     } else {
-        json_error(
+        json_error_msg(
             StatusCode::SERVICE_UNAVAILABLE,
-            resp.message.as_deref().unwrap_or("keyring_unavailable"),
+            "keyring_unavailable",
+            resp.message.as_deref().unwrap_or("keyring is unavailable"),
         )
     }
 }

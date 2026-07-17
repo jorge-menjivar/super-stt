@@ -3,9 +3,8 @@ use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends;
 use crate::stt_models::transcribe::Transcribe;
-use chrono::Utc;
 use log::{error, info, warn};
-use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
 use super_stt_shared::models::provider::Provider;
 
 impl SuperSTTDaemon {
@@ -113,11 +112,9 @@ impl SuperSTTDaemon {
             warn!("Failed to persist config after active-backend set: {e}");
         }
         self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "active_backend_changed",
-                "source": source,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+            .publish_daemon_status(DaemonStatusEvent::ActiveBackendChanged {
+                source: Some(source.clone()),
+            });
         info!("Active backend set to {source}");
 
         let payload = self
@@ -151,11 +148,7 @@ impl SuperSTTDaemon {
             warn!("Failed to persist config after active-backend clear: {e}");
         }
         self.events
-            .publish_daemon_status_changed(serde_json::json!({
-                "status": "active_backend_changed",
-                "source": serde_json::Value::Null,
-                "timestamp": Utc::now().to_rfc3339(),
-            }));
+            .publish_daemon_status(DaemonStatusEvent::ActiveBackendChanged { source: None });
         info!("Active backend cleared (daemon idle)");
         DaemonResponse::success().with_message("Active backend cleared".to_string())
     }

@@ -56,21 +56,21 @@ ls -la "$XDG_RUNTIME_DIR/stt/super-stt-http.sock"
 ## Security Features
 
 ### 1. Keyboard Input Protection
-- **Process authentication**: Write mode requires verification that the client is the legitimate stt binary
-- **Unix socket credentials**: Uses peer credential verification to authenticate processes
-- **Debug/release separation**: Authentication automatically disabled in debug builds for development
+- **Consent-gated authorization**: Auto-typing is the per-request `write_mode` flag on `POST /transcribe` (or the daemon's configured write mode). Reaching that endpoint at all requires a consent-minted session token with the `transcribe` scope — so a client can only type after the user approved it through the one-time consent prompt. There is no separate keyboard/write scope; it is the same `transcribe` scope dictation uses. See [Authorization](#authorization) and [`protocol/auth.md`](protocol/auth.md)
+- **Peer identity for the prompt**: `SO_PEERCRED` + `/proc/<pid>/exe` tell the consent prompt *which binary* is asking and reject cross-UID peers; this identifies the caller, it is not by itself the authorization
+- **Debug-only test bypass**: The consent auto-approval used by tests/CI (`SUPER_STT_AUTO_APPROVE`) is compiled out of release builds
 - **Limited scope**: Only types actual transcription results
 
-### 2. Network Isolation  
-- **UDP localhost-only**: Audio streaming bound to `127.0.0.1`
-- **No remote access**: Network connections impossible
-- **Read-only broadcast**: Only sends visualization data
+### 2. Network Isolation
+- **No inbound network surface**: The daemon listens only on a per-user Unix domain socket under `$XDG_RUNTIME_DIR/stt/` — there is no TCP or UDP listener, so no host on the network can connect to it
+- **Local visualization**: Audio-visualization frames are delivered as Server-Sent Events over that same Unix socket, not broadcast on the network
+- **Outbound only for backend installs**: The daemon reaches the network solely to fetch backends over HTTPS from the registry / GitHub — see [Daemon outbound network surface](#daemon-outbound-network-surface) below
 
-### 3. Process Authentication
-- **Unix peer credentials**: Verifies connecting process PID, UID, and executable path
-- **Binary verification**: Ensures only the legitimate stt binary can trigger write mode
-- **Compile-time security**: Uses `cfg!(debug_assertions)` to automatically disable in debug builds
-- **Fallback checks**: Validates process name if path verification fails
+### 3. Consent &amp; Peer Identity
+- **Session tokens + scopes**: Every request other than `/auth/request` requires a `Bearer` session token; each token carries the user-approved scopes that gate what it may do (`transcribe`, `settings`, `secrets`, `status`, and the event-topic scopes — see [`protocol/auth.md`](protocol/auth.md) for the full catalog)
+- **One-time consent**: Tokens are minted by the `super-stt-consent` helper — a popup naming the requesting binary (resolved via `SO_PEERCRED`) and the scopes it asks for, which the user approves or denies
+- **Same-UID only**: A peer whose UID differs from the daemon's is rejected before any prompt
+- See [`protocol/auth.md`](protocol/auth.md) for the full token, scope, and consent contract
 
 ### 4. Input Validation and DoS Protection
 - **Comprehensive validation**: All external inputs validated with strict limits
@@ -92,7 +92,7 @@ ls -la "$XDG_RUNTIME_DIR/stt/super-stt-http.sock"
 - **User service**: Runs under user account, not root
 - **Per-user socket**: Owner-only `$XDG_RUNTIME_DIR` plus a same-UID peer check — no cross-user access, no shared group
 - **Socket permissions**: Enforced at filesystem level
-- **Process authentication**: SO_PEERCRED verification for privileged operations
+- **Peer identity**: `SO_PEERCRED` resolves the peer UID (same-UID enforced) and exe path (shown in the consent prompt) — the authorization itself is the consent-minted session token and its scopes
 
 ## Daemon outbound network surface
 
@@ -146,9 +146,9 @@ cargo run --release --bin super-stt-daemon
 ## Threat Model
 
 ### Protected Against
-- ✅ Unauthorized local users accessing the daemon
-- ✅ Remote network attacks (localhost-only UDP binding)
-- ✅ Unauthorized keyboard injection (process authentication with SO_PEERCRED)
+- ✅ Unauthorized local users accessing the daemon (owner-only socket + same-UID peer check)
+- ✅ Remote network attacks (no inbound listener — Unix-socket only, no TCP/UDP port)
+- ✅ Unauthorized keyboard injection (reachable only with a consent-minted `transcribe`-scope token; auto-typing itself is the per-request `write_mode` flag)
 - ✅ Arbitrary command injection via keyboard
 - ✅ Privilege escalation (runs as an unprivileged user service)
 - ✅ Memory exhaustion attacks (comprehensive input validation)
@@ -156,7 +156,7 @@ cargo run --release --bin super-stt-daemon
 - ✅ JSON bomb attacks (size and depth validation)
 - ✅ Directory traversal attacks (path validation)
 - ✅ Audio data injection attacks (sample validation and pattern detection)
-- ✅ Process impersonation (binary path and name verification)
+- ✅ Cross-user access (same-UID peer check; the consent prompt names the caller's exe)
 
 ### Assumptions
 - Physical access to the machine is trusted
@@ -199,7 +199,7 @@ systemctl --user disable super-stt
 - ✅ Resource exhaustion protection testing
 - ✅ Path traversal attack testing
 - ✅ Memory safety analysis
-- ✅ Process authentication verification
+- ✅ Consent-token / scope authorization verification
 
 ### Continuous Security
 - Regular dependency security audits via `cargo audit`

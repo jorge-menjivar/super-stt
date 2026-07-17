@@ -313,6 +313,24 @@ impl EventBus {
         let _ = self.daemon_status_changed.send(data);
     }
 
+    /// Publish a typed [`DaemonStatusEvent`], injecting the `timestamp` every
+    /// event carries (mirroring [`Self::publish_download_progress`]). Serializing
+    /// the enum is the single construction path, so producers no longer hand-build
+    /// `json!` maps whose keys can silently drift (audit 2 Tier 2 #9).
+    pub fn publish_daemon_status(
+        &self,
+        event: super_stt_shared::models::protocol::DaemonStatusEvent,
+    ) {
+        let mut payload = serde_json::to_value(event).unwrap_or_else(|_| serde_json::json!({}));
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "timestamp".into(),
+                serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+            );
+        }
+        self.publish_daemon_status_changed(payload);
+    }
+
     /// Publish a `download_progress` event. Payload is the JSON shape
     /// the legacy `notification_manager.broadcast_event("download_progress",...)`
     /// used — the keys of `DownloadProgress` plus a `timestamp`. Requires

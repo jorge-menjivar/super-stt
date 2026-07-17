@@ -30,8 +30,12 @@ pub enum ErrorCode {
     InvalidModel,
     /// No installed backend has the named source.
     InvalidBackend,
-    /// A CUDA device was requested but CUDA is unavailable.
+    /// A CUDA device was requested but CUDA is unavailable. Reserved: the daemon
+    /// currently falls back to CPU silently rather than emitting this (see
+    /// `active_device.md`).
     CudaUnavailable,
+    /// The requested `device` wasn't one the daemon accepts (`cpu`/`cuda`).
+    InvalidDevice,
     /// An online model was requested while online models are disabled.
     OnlineModelsDisabled,
     /// An unrecognized audio-theme name.
@@ -63,6 +67,7 @@ impl ErrorCode {
             Self::InvalidModel
             | Self::InvalidBackend
             | Self::CudaUnavailable
+            | Self::InvalidDevice
             | Self::OnlineModelsDisabled
             | Self::InvalidAudioTheme
             | Self::UnsupportedLanguage
