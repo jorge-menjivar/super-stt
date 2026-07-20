@@ -69,17 +69,85 @@ pub(crate) fn build_delete(
         .map_err(|e| format!("Failed to build request: {e}"))
 }
 
-/// Extract the `data.reason` field from a 401 response body. Falls
-/// back to `"unknown"` if the body is malformed. Centralized so the
-/// three `invalid_session` sites stay consistent.
-pub(crate) fn parse_invalid_session_reason(body: &[u8]) -> String {
+/// Extract the `data.reason` field from an error body, falling back to
+/// `fallback` when the body is malformed or carries no reason.
+pub(crate) fn parse_reason(body: &[u8], fallback: &str) -> String {
     let parsed: serde_json::Value = serde_json::from_slice(body).unwrap_or(serde_json::Value::Null);
     parsed
         .get("data")
         .and_then(|d| d.get("reason"))
         .and_then(|r| r.as_str())
-        .unwrap_or("unknown")
+        .unwrap_or(fallback)
         .to_string()
+}
+
+/// The `data.reason` of a 401 body. Centralized so the `invalid_session`
+/// sites stay consistent.
+pub(crate) fn parse_invalid_session_reason(body: &[u8]) -> String {
+    parse_reason(body, "unknown")
+}
+
+/// **The** conversion from a non-success response to a typed [`HttpError`].
+///
+/// Every non-2xx path funnels through here so the rule lives in one place.
+/// It previously did not: four call sites each re-derived it, and the typed
+/// `send_request` path omitted the check entirely — handing error envelopes to
+/// the success-type deserializer, which then blamed whichever success field it
+/// found missing (a rate-limited uninstall surfaced as ``missing field
+/// `uninstalled` at line 1 column 43``).
+///
+/// `401` keeps its own variant because callers re-authenticate on it; every
+/// other status is an operational failure described by [`daemon_error`].
+///
+/// Note `/auth/request` deliberately does *not* use this: a 4xx there means the
+/// user declined consent, which is [`HttpError::AuthDenied`], not a daemon
+/// error.
+#[must_use]
+pub fn error_for_status(status: hyper::StatusCode, body: &[u8]) -> HttpError {
+    if status == hyper::StatusCode::UNAUTHORIZED {
+        return HttpError::InvalidSession {
+            reason: parse_invalid_session_reason(body),
+        };
+    }
+    daemon_error(status, body)
+}
+
+/// Build an [`HttpError`] from a non-success, non-401 response body.
+///
+/// The daemon answers failures with one of several `{"status":"error", …}`
+/// envelopes, all of which name the failure in `error_code` (the stable
+/// machine identifier — `error` is the registry envelope's legacy spelling of
+/// the same value) and/or `message` (human text). None of them share a shape
+/// with any endpoint's success type, so a non-2xx body must be turned into an
+/// error rather than deserialized.
+///
+/// Prefer [`error_for_status`] — it adds the `401` case. This is separate only
+/// so the daemon's envelope-contract test can assert on the operational
+/// mapping directly.
+#[must_use]
+pub fn daemon_error(status: hyper::StatusCode, body: &[u8]) -> HttpError {
+    let parsed: serde_json::Value = serde_json::from_slice(body).unwrap_or(serde_json::Value::Null);
+    let field = |key: &str| {
+        parsed
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    let code = field("error_code").or_else(|| field("error"));
+    let detail = match (code, field("message")) {
+        // Envelopes that carry no human text set `message` to the code itself;
+        // don't say it twice.
+        (Some(code), Some(message)) if code == message => Some(code),
+        (Some(code), Some(message)) => Some(format!("{code}: {message}")),
+        (Some(text), None) | (None, Some(text)) => Some(text),
+        (None, None) => None,
+    };
+    let status = status.as_u16();
+    HttpError::Other(detail.map_or_else(
+        || format!("daemon returned HTTP {status}"),
+        |detail| format!("{detail} (HTTP {status})"),
+    ))
 }
 
 /// Map non-success statuses on the `/events` subscribe call to the
@@ -94,16 +162,7 @@ pub(crate) async fn check_subscribe_status(
         return Ok(response);
     }
     let body = collect_body(response).await?;
-    if status == hyper::StatusCode::UNAUTHORIZED {
-        return Err(HttpError::InvalidSession {
-            reason: parse_invalid_session_reason(&body),
-        });
-    }
-    let parsed: serde_json::Value =
-        serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-    Err(HttpError::Other(format!(
-        "events subscribe failed (status {status}): {parsed}"
-    )))
+    Err(error_for_status(status, &body))
 }
 
 /// Upper bound on how long a **non-interactive** request waits for the
@@ -208,10 +267,11 @@ pub(crate) async fn send_request_with_timeout<T: DeserializeOwned>(
     let response = open(socket_path, req, timeout).await?;
     let status = response.status();
     let body = collect_body(response).await?;
-    if status == hyper::StatusCode::UNAUTHORIZED {
-        return Err(HttpError::InvalidSession {
-            reason: parse_invalid_session_reason(&body),
-        });
+    // Only a 2xx body is an instance of `T`. Deserializing an error envelope
+    // into the success type reports a missing success field instead of the
+    // failure the daemon actually named — see [`error_for_status`].
+    if !status.is_success() {
+        return Err(error_for_status(status, &body));
     }
     serde_json::from_slice::<T>(&body)
         .map_err(|e| HttpError::Other(format!("Failed to parse response: {e}")))
@@ -319,4 +379,90 @@ pub async fn delete_json<T: DeserializeOwned>(
 ) -> HttpResult<T> {
     let req = build_delete(path, Some(token))?;
     send_request::<T>(&socket_path, req).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::daemon_error;
+    use hyper::StatusCode;
+
+    /// A non-2xx body must never reach the `T` deserializer. The daemon's
+    /// error envelopes don't share a shape with the endpoint's success type,
+    /// so parsing one as `T` reports whichever success field happened to be
+    /// missing — burying the actual cause. This is the regression that made a
+    /// rate-limited uninstall surface as
+    /// ``missing field `uninstalled` at line 1 column 43``.
+    #[test]
+    fn non_success_status_reports_the_daemon_identifier_not_a_parse_error() {
+        let e = daemon_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            br#"{"status":"error","message":"rate_limited"}"#,
+        );
+        assert_eq!(e.to_string(), "rate_limited (HTTP 429)");
+        assert!(
+            !e.to_string().contains("missing field"),
+            "the endpoint's success schema must not be blamed for a daemon error"
+        );
+    }
+
+    /// The registry envelope carries the identifier in `error_code`, plus the
+    /// legacy `error` spelling of the same value. One mention is enough.
+    #[test]
+    fn registry_envelope_uses_error_code_without_repeating_the_legacy_key() {
+        let e = daemon_error(
+            StatusCode::NOT_FOUND,
+            br#"{"status":"error","error_code":"not_found","error":"not_found"}"#,
+        );
+        assert_eq!(e.to_string(), "not_found (HTTP 404)");
+    }
+
+    /// When the daemon supplies both a stable code and a human message, keep
+    /// both: the code is what a maintainer greps for, the message is what tells
+    /// the user *why* (e.g. the underlying io error behind `remove_failed`).
+    #[test]
+    fn code_and_message_are_both_preserved() {
+        let e = daemon_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            br#"{"status":"error","error_code":"remove_failed","error":"remove_failed","message":"Permission denied (os error 13)"}"#,
+        );
+        assert_eq!(
+            e.to_string(),
+            "remove_failed: Permission denied (os error 13) (HTTP 500)"
+        );
+    }
+
+    /// `dispatch_command` answers with a `DaemonResponse` whose `message` is
+    /// the human text callers used to surface via `require_success`. That text
+    /// must survive the earlier status check.
+    #[test]
+    fn daemon_response_error_keeps_its_human_message() {
+        let e = daemon_error(
+            StatusCode::BAD_REQUEST,
+            br#"{"status":"error","message":"Model not loaded","error_code":"model_not_loaded"}"#,
+        );
+        assert_eq!(
+            e.to_string(),
+            "model_not_loaded: Model not loaded (HTTP 400)"
+        );
+    }
+
+    /// A body that isn't the expected envelope at all (empty, HTML from a
+    /// stray proxy, truncated JSON) still has to name the status rather than
+    /// invent a field-level complaint.
+    #[test]
+    fn unrecognized_body_falls_back_to_the_bare_status() {
+        assert_eq!(
+            daemon_error(StatusCode::BAD_GATEWAY, b"").to_string(),
+            "daemon returned HTTP 502"
+        );
+        assert_eq!(
+            daemon_error(StatusCode::FORBIDDEN, b"<html>nope</html>").to_string(),
+            "daemon returned HTTP 403"
+        );
+        // Present-but-empty strings are as useless as absent ones.
+        assert_eq!(
+            daemon_error(StatusCode::CONFLICT, br#"{"status":"error","message":""}"#).to_string(),
+            "daemon returned HTTP 409"
+        );
+    }
 }

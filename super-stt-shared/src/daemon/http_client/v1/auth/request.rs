@@ -44,16 +44,13 @@ pub async fn auth_request(
     let status = response.status();
     let body = transport::collect_body(response).await?;
 
+    // Deliberately not `transport::error_for_status`: a 4xx here means the user
+    // declined consent (or the daemon refused to ask), which callers handle as
+    // `AuthDenied` with a reason — not as an operational daemon error.
     if !status.is_success() {
-        let parsed: serde_json::Value =
-            serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-        let reason = parsed
-            .get("data")
-            .and_then(|d| d.get("reason"))
-            .and_then(|r| r.as_str())
-            .unwrap_or("auth_denied")
-            .to_string();
-        return Err(HttpError::AuthDenied { reason });
+        return Err(HttpError::AuthDenied {
+            reason: transport::parse_reason(&body, "auth_denied"),
+        });
     }
 
     serde_json::from_slice::<AuthOk>(&body)

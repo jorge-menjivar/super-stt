@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::super::internal::error::{HttpError, HttpResult};
+use super::super::internal::error::HttpResult;
 use super::super::internal::sse;
 use super::super::internal::transport;
 use crate::models::protocol::DaemonResponse;
@@ -118,25 +118,14 @@ pub async fn transcribe_stream(
     let response = transport::open(&socket_path, req, Some(transport::REQUEST_TIMEOUT)).await?;
 
     let status = response.status();
-    if status == hyper::StatusCode::UNAUTHORIZED {
-        let body = transport::collect_body(response).await?;
-        return Err(HttpError::InvalidSession {
-            reason: transport::parse_invalid_session_reason(&body),
-        });
-    }
     if !status.is_success() {
         // Non-2xx response (e.g. 409 `recording_in_progress`, 403
-        // `scope_denied`, 429 `rate_limited`). The body is JSON, not
-        // SSE — parse `{"message": "..."}` and surface it as
-        // `HttpError::Other` so the caller doesn't try to read it as
-        // an event stream and report "transcribe stream ended
-        // unexpectedly".
+        // `scope_denied`, 429 `rate_limited`). The body is the JSON error
+        // envelope, not SSE, so map it like every other non-2xx rather than
+        // letting the caller read it as an event stream and report
+        // "transcribe stream ended unexpectedly".
         let body = transport::collect_body(response).await?;
-        let message: String = serde_json::from_slice::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(str::to_owned))
-            .unwrap_or_else(|| format!("HTTP {status}"));
-        return Err(HttpError::Other(message));
+        return Err(transport::error_for_status(status, &body));
     }
 
     // Parse Server-Sent Events as they arrive: each event is a block of

@@ -2,6 +2,8 @@
 //! HTTP server for the daemon protocol. See `server.rs` for the listener
 //! and `v1/` for the versioned endpoint tree.
 
+#[cfg(test)]
+mod error_envelope_contract;
 mod internal;
 mod server;
 mod state;

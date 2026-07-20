@@ -34,4 +34,9 @@ pub mod transport {
         delete_json, get_json, post_json, settings_delete, settings_get, settings_post,
         settings_post_no_timeout,
     };
+
+    /// The single non-2xx-to-[`HttpError`] mapping, exported so the daemon's
+    /// envelope-contract test can assert that every error shape it emits is
+    /// one this client can actually read.
+    pub use super::internal::transport::{daemon_error, error_for_status};
 }
