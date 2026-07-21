@@ -23,6 +23,9 @@ pub enum ErrorCode {
     /// A cancel was requested but there is no switch/download to cancel
     /// (`POST /active_model/cancel`; see `active_model/cancel.md`).
     NoSwitchInProgress,
+    /// No model is loaded, so nothing can be transcribed. The request is
+    /// well-formed and succeeds once a model is loaded via `POST /active_model`.
+    ModelNotLoaded,
 
     // --- 400 Bad Request: the client gave the daemon something it couldn't
     // use. ---
@@ -63,7 +66,10 @@ impl ErrorCode {
     #[must_use]
     pub fn http_status(self) -> u16 {
         match self {
-            Self::RecordingInProgress | Self::DownloadInProgress | Self::NoSwitchInProgress => 409,
+            Self::RecordingInProgress
+            | Self::DownloadInProgress
+            | Self::NoSwitchInProgress
+            | Self::ModelNotLoaded => 409,
             Self::InvalidModel
             | Self::InvalidBackend
             | Self::CudaUnavailable
@@ -101,5 +107,17 @@ mod tests {
         assert_eq!(ErrorCode::InvalidAudioTheme.http_status(), 400);
         assert_eq!(ErrorCode::NotFound.http_status(), 404);
         assert_eq!(ErrorCode::Internal.http_status(), 500);
+    }
+
+    /// `model_not_loaded` is a state conflict, not bad input: the request is
+    /// well-formed and becomes valid once a model is loaded. It shares the 409
+    /// group with the other "daemon's current state forbids it" codes.
+    #[test]
+    fn model_not_loaded_is_a_state_conflict() {
+        assert_eq!(ErrorCode::ModelNotLoaded.http_status(), 409);
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::ModelNotLoaded).unwrap(),
+            r#""model_not_loaded""#
+        );
     }
 }
