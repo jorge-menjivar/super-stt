@@ -24,6 +24,11 @@ pub enum Simulator {
     WaylandProtocol(Box<EnigoBackend>),
     Ydotool(YdotoolBackend),
     XdgPortal(XdgPortalBackend),
+    /// Test-only backend that records what *would* have been typed. The three
+    /// real backends each need a live compositor or portal, so without this the
+    /// typing path cannot be asserted on at all.
+    #[cfg(test)]
+    Capture(std::sync::Arc<std::sync::Mutex<String>>),
 }
 
 // SAFETY: see Simulator doc comment — single-writer access enforced by daemon.
@@ -82,6 +87,8 @@ impl Simulator {
             Self::XdgPortal(_) => "XDG Desktop Portal",
             Self::Ydotool(_) => "ydotool",
             Self::WaylandProtocol(_) => "Wayland protocol",
+            #[cfg(test)]
+            Self::Capture(_) => "capture (test)",
         }
     }
 
@@ -100,6 +107,11 @@ impl Simulator {
             Self::WaylandProtocol(b) => tokio::task::block_in_place(|| b.type_text(text)),
             Self::Ydotool(_) => tokio::task::block_in_place(|| YdotoolBackend::type_text(text)),
             Self::XdgPortal(b) => b.type_text(text).await,
+            #[cfg(test)]
+            Self::Capture(buf) => {
+                buf.lock().expect("capture buffer poisoned").push_str(text);
+                Ok(())
+            }
         }
     }
 
@@ -115,6 +127,48 @@ impl Simulator {
             }
             Self::Ydotool(_) => tokio::task::block_in_place(|| YdotoolBackend::backspace_n(n)),
             Self::XdgPortal(b) => b.backspace_n(n).await,
+            #[cfg(test)]
+            Self::Capture(buf) => {
+                let mut guard = buf.lock().expect("capture buffer poisoned");
+                // Truncate by chars, not bytes — a real backspace removes one
+                // grapheme, and truncating mid-UTF-8 would panic.
+                let keep = guard.chars().count().saturating_sub(n);
+                *guard = guard.chars().take(keep).collect();
+                Ok(())
+            }
         }
+    }
+}
+
+#[cfg(test)]
+impl Simulator {
+    /// A simulator that accumulates typed text instead of driving a keyboard.
+    /// Returns the simulator and a handle to the accumulated text.
+    pub(crate) fn capture() -> (Self, std::sync::Arc<std::sync::Mutex<String>>) {
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        (Self::Capture(std::sync::Arc::clone(&buf)), buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Simulator;
+
+    /// The capture backend has to behave like a real one — text accumulates and
+    /// backspace removes trailing *characters* (not bytes) — or tests written
+    /// against it will not reflect what lands in a user's window.
+    #[tokio::test]
+    async fn capture_backend_accumulates_text_and_honors_backspace() {
+        let (mut sim, buf) = Simulator::capture();
+
+        sim.type_text("hello").await.expect("type");
+        sim.type_text(" wörld").await.expect("type");
+        assert_eq!(*buf.lock().unwrap(), "hello wörld");
+
+        // Multi-byte char must be removed whole.
+        sim.backspace_n(4).await.expect("backspace");
+        assert_eq!(*buf.lock().unwrap(), "hello w");
+
+        assert_eq!(sim.name(), "capture (test)");
     }
 }
