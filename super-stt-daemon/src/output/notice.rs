@@ -12,15 +12,12 @@
 pub(crate) const NO_MODEL_LOADED: &str = "[Super STT: no model loaded]";
 
 /// The recorder could not be spawned; capture never began.
-#[allow(dead_code)]
 pub(crate) const COULD_NOT_START_RECORDING: &str = "[Super STT: could not start recording]";
 
 /// Capture began but failed partway through.
-#[allow(dead_code)]
 pub(crate) const RECORDING_FAILED: &str = "[Super STT: recording failed]";
 
 /// Audio was captured but the model failed to transcribe it.
-#[allow(dead_code)]
 pub(crate) const TRANSCRIPTION_FAILED: &str = "[Super STT: transcription failed]";
 
 #[cfg(test)]

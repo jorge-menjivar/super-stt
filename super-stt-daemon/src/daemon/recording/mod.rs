@@ -102,6 +102,9 @@ impl SuperSTTDaemon {
                     let mut guard = self.busy.write().await;
                     *guard = false;
                 }
+                if write_mode {
+                    typer.type_notice(notice::COULD_NOT_START_RECORDING).await;
+                }
                 DaemonResponse::error(&format!("Recording failed: {e}"))
             }
         }
@@ -158,6 +161,9 @@ impl SuperSTTDaemon {
                 warn!("Recording capture failed: {e}");
                 self.finalize_recording_session("", false, Some(e.to_string()))
                     .await;
+                if write_mode {
+                    typer.type_notice(notice::RECORDING_FAILED).await;
+                }
                 return Ok(Err(format!("recording error: {e}")));
             }
         };
@@ -177,6 +183,9 @@ impl SuperSTTDaemon {
                 warn!("Final transcription failed: {e}");
                 self.finalize_recording_session("", false, Some(e.to_string()))
                     .await;
+                if write_mode {
+                    typer.type_notice(notice::TRANSCRIPTION_FAILED).await;
+                }
                 return Ok(Err(format!("STT error: {e}")));
             }
         };
