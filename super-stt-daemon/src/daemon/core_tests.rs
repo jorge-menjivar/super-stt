@@ -7,6 +7,8 @@ use crate::input::audio::AudioProcessor;
 use crate::resource_management::ResourceManager;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
+use super_stt_shared::models::protocol::ErrorCode;
+use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 use tokio::time::{Duration, timeout};
@@ -1314,5 +1316,47 @@ async fn handle_transcribe_errors_when_no_model_loaded() {
             .contains("Model not loaded"),
         "error message should name the missing model, got: {:?}",
         resp.message
+    );
+}
+
+/// The whole point of the preflight: no capture, no beeps, and the user is told
+/// in the field they are looking at.
+#[tokio::test]
+async fn record_with_no_model_types_a_notice_in_write_mode() {
+    let daemon = test_daemon().await;
+    let (sim, buf) = crate::output::keyboard::Simulator::capture();
+    let mut typer = crate::output::typer::Typer::new(sim);
+
+    let resp = daemon
+        .handle_record_internal(&mut typer, true, RecordingStopMode::ManualOnly, None)
+        .await;
+
+    assert_eq!(resp.status, "error");
+    assert_eq!(resp.error_code, Some(ErrorCode::ModelNotLoaded));
+    assert_eq!(*buf.lock().unwrap(), "[Super STT: no model loaded]");
+    // Capture must never have started.
+    assert!(
+        !*daemon.busy.read().await,
+        "preflight must not leave the daemon busy"
+    );
+}
+
+/// Without write mode there is no focused field to write into; the caller gets
+/// the error response and nothing is typed.
+#[tokio::test]
+async fn record_with_no_model_types_nothing_without_write_mode() {
+    let daemon = test_daemon().await;
+    let (sim, buf) = crate::output::keyboard::Simulator::capture();
+    let mut typer = crate::output::typer::Typer::new(sim);
+
+    let resp = daemon
+        .handle_record_internal(&mut typer, false, RecordingStopMode::ManualOnly, None)
+        .await;
+
+    assert_eq!(resp.error_code, Some(ErrorCode::ModelNotLoaded));
+    assert_eq!(
+        *buf.lock().unwrap(),
+        "",
+        "nothing may be typed outside write mode"
     );
 }
