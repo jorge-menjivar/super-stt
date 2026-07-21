@@ -20,6 +20,8 @@ run_dir := env('XDG_RUNTIME_DIR') / 'stt'
 log_dir := home_dir / '.local' / 'share' / 'stt' / 'logs'
 user_desktop_dir := home_dir / '.local' / 'share' / 'applications'
 user_icons_dir := home_dir / '.local' / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
+# Theme root, not the leaf dir: gtk-update-icon-cache indexes a whole theme.
+user_icon_theme_dir := home_dir / '.local' / 'share' / 'icons' / 'hicolor'
 
 # Binary paths
 app_src := 'target' / 'release' / app_name
@@ -351,7 +353,7 @@ install-app:
 
     # Update icon cache
     if command -v gtk-update-icon-cache &> /dev/null; then
-        gtk-update-icon-cache {{ user_icons_dir }} 2>/dev/null || true
+        gtk-update-icon-cache -f -t {{ user_icon_theme_dir }} 2>/dev/null || true
     fi
 
     echo "✓ Super STT app installed: {{ app_dst }}"
@@ -390,6 +392,16 @@ install-applet:
     mkdir -p {{ user_icons_dir }}
     echo "Installing applet icon..."
     install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
+
+    # Refresh the desktop/icon caches so the panel picks up the new applet
+    # entries without a relogin (mirrors install-app).
+    if command -v update-desktop-database &> /dev/null; then
+        update-desktop-database {{ user_desktop_dir }} 2>/dev/null || true
+    fi
+
+    if command -v gtk-update-icon-cache &> /dev/null; then
+        gtk-update-icon-cache -f -t {{ user_icon_theme_dir }} 2>/dev/null || true
+    fi
 
     echo "✓ COSMIC applet installed: {{ applet_dst }}"
     echo "✓ Desktop entries installed for panel integration:"
@@ -707,7 +719,7 @@ install-all *args:
         exit 1
     fi
 
-    if ! just install-cosmic-all; then
+    if ! just install-applet; then
         echo "❌ COSMIC applet installation failed"
         exit 1
     fi
@@ -735,7 +747,7 @@ uninstall-app:
 
     # Update icon cache
     if command -v gtk-update-icon-cache &> /dev/null; then
-        gtk-update-icon-cache {{ user_icons_dir }} 2>/dev/null || true
+        gtk-update-icon-cache -f -t {{ user_icon_theme_dir }} 2>/dev/null || true
     fi
 
     echo "✓ Super STT App uninstalled"
@@ -776,7 +788,7 @@ uninstall-daemon:
     # install contract.
     rm -f {{ consent_dst }}
 
-    rm -f "{{ user_bin_dir }}/stt"
+    rm -f {{ wrapper_dst }}
 
     # Remove directories (but preserve logs)
     rm -rf {{ run_dir }}
@@ -832,10 +844,15 @@ uninstall-cli:
     #!/usr/bin/env bash
     echo "Uninstalling Super STT CLI..."
     rm -f {{ cli_dst }}
+
+    # The `stt` wrapper is a thin exec of the CLI, so it is dead weight
+    # without it — left in place it stays on PATH and fails at exec time
+    # instead of reporting as uninstalled.
+    rm -f {{ wrapper_dst }}
     echo "✓ Super STT CLI uninstalled"
 
-# Uninstall daemon, app, applet, and CLI
-uninstall: uninstall-daemon uninstall-app uninstall-applet uninstall-cli
+# Uninstall daemon, app, applet, CLI, and consent helper
+uninstall: uninstall-daemon uninstall-app uninstall-applet uninstall-cli uninstall-consent
 
 # Start the daemon user service
 start-daemon:
