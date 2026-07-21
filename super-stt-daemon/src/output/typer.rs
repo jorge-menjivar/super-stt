@@ -5,7 +5,9 @@
 //! live in [`crate::output::preview`].
 
 use crate::output::keyboard::Simulator;
-use crate::output::preview::{find_common_prefix, find_tail_match_in_text, preprocess_text};
+use crate::output::preview::{
+    find_common_prefix, find_tail_match_in_text, is_unsafe_to_type, preprocess_text,
+};
 use log::{debug, info, warn};
 
 /// State for tracking preview updates
@@ -303,6 +305,37 @@ impl Typer {
 
         // Clear session for next recording
         self.state.full_session_text.clear();
+    }
+
+    /// Type a fixed daemon-authored notice into the focused window.
+    ///
+    /// Deliberately **not** `process_final_text`. That method mutates
+    /// transcript state (`last_transcription`, `prev_text`, `full_session_text`)
+    /// which feeds preview tail-matching on the next recording, and applies
+    /// transcript semantics — capitalization, a trailing period, a trailing
+    /// space — that a fixed marker must not inherit. A notice is typed verbatim
+    /// and leaves session state alone.
+    ///
+    /// Routed through the same `is_unsafe_to_type` filter as every other write
+    /// path (audit 2 Tier 3 #8). The callers pass constants, so this is a no-op
+    /// today; it is here so the property holds by construction.
+    pub async fn type_notice(&mut self, notice: &str) {
+        let sanitized: String = notice.chars().filter(|&c| !is_unsafe_to_type(c)).collect();
+        if let Err(e) = self.keyboard_simulator.type_text(&sanitized).await {
+            warn!("Failed to type notice: {e}");
+        } else {
+            info!("Typed failure notice: {sanitized}");
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn last_transcription_for_test(&self) -> &str {
+        &self.state.last_transcription
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prev_text_for_test(&self) -> &str {
+        &self.state.prev_text
     }
 
     /// Apply text update to screen (common logic)

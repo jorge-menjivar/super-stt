@@ -12,7 +12,7 @@
 /// sequence, and a Unicode bidi override or zero-width char could visually spoof
 /// or hide text in an editor. Ordinary whitespace (`\n`/`\r`/`\t`) is preserved
 /// here and folded into single spaces by [`preprocess_text`]'s normalization.
-fn is_unsafe_to_type(c: char) -> bool {
+pub(crate) fn is_unsafe_to_type(c: char) -> bool {
     (c.is_control() && !c.is_whitespace())
         // Bidi overrides + isolates (LRO/RLO/PDF, LRI/RLI/FSI/PDI).
         || matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')

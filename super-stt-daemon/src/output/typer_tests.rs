@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
+use crate::output::keyboard::Simulator;
+use crate::output::notice;
 
 // ---------------------------------------------------------------------------
 // State machine characterization (keyboard-free transitions)
@@ -70,4 +72,52 @@ fn update_with_stabilization_locks_common_prefix_across_two_texts() {
     assert_eq!(s.stabilized_text, "Hello ");
     // Session text was seeded by the first (longer) preview and not shrunk.
     assert_eq!(s.full_session_text, "Hello world");
+}
+
+// ---------------------------------------------------------------------------
+// type_notice (fixed failure markers)
+// ---------------------------------------------------------------------------
+
+/// The markers are constants we control, so the sanitizer is a no-op on them
+/// today. Assert it anyway: this is what keeps the property true by
+/// construction if someone edits the strings later.
+#[test]
+fn notice_constants_survive_the_sanitizer_unchanged() {
+    for n in notice::ALL {
+        let sanitized: String = n
+            .chars()
+            .filter(|&c| !crate::output::preview::is_unsafe_to_type(c))
+            .collect();
+        assert_eq!(
+            &sanitized, n,
+            "notice contains a character that must never be typed: {n:?}"
+        );
+    }
+}
+
+/// A notice is typed verbatim — no capitalization, no trailing period, no
+/// trailing space. `process_final_text` applies all three, which is exactly why
+/// a notice must not go through it.
+#[tokio::test]
+async fn type_notice_types_the_marker_verbatim() {
+    let (sim, buf) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    typer.type_notice(notice::NO_MODEL_LOADED).await;
+
+    assert_eq!(*buf.lock().unwrap(), "[Super STT: no model loaded]");
+}
+
+/// Transcript state feeds preview tail-matching on the *next* recording. If a
+/// notice landed in it, the typer would try to extend "[Super STT: …]" into the
+/// following sentence.
+#[tokio::test]
+async fn type_notice_leaves_transcript_state_untouched() {
+    let (sim, _buf) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    typer.type_notice(notice::TRANSCRIPTION_FAILED).await;
+
+    assert_eq!(typer.last_transcription_for_test(), "");
+    assert_eq!(typer.prev_text_for_test(), "");
 }
