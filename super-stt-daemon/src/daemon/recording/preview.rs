@@ -329,6 +329,47 @@ impl SuperSTTDaemon {
         false // Normal completion — do not skip the timeout check
     }
 
+    /// Erase preview text typed during Phase 2. Split out of
+    /// `collect_and_clear_preview` so the recorder-failure paths clear the field
+    /// too — otherwise a failed capture leaves half-typed preview text behind
+    /// for the failure notice to append to.
+    async fn clear_preview_text(
+        &self,
+        actually_typed: &Arc<std::sync::Mutex<String>>,
+        typer: &mut Typer,
+        write_mode: bool,
+    ) {
+        if !write_mode {
+            return;
+        }
+        if !self
+            .preview_typing_enabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            debug!("Preview typing was disabled, no preview to clear");
+            return;
+        }
+        // Take the mirror out in a scope that drops the `!Send` guard before the
+        // async backspacing (audit Tier 3 #35).
+        let taken = if let Ok(mut g) = actually_typed.lock() {
+            Some(std::mem::take(&mut *g))
+        } else {
+            warn!("Failed to acquire actually_typed lock for clearing preview");
+            None
+        };
+        if let Some(mut taken) = taken {
+            info!(
+                "Clearing preview text: '{}'",
+                taken.chars().take(50).collect::<String>()
+            );
+            typer.clear_preview(&mut taken).await;
+            info!("Preview cleared, actually_typed is now: '{taken}'");
+            if let Ok(mut g) = actually_typed.lock() {
+                *g = taken;
+            }
+        }
+    }
+
     /// Phase 3: await the recorder task to get the full audio data, clear the
     /// stop channel, and erase any preview text that was typed during Phase 2.
     pub(super) async fn collect_and_clear_preview(
@@ -342,10 +383,14 @@ impl SuperSTTDaemon {
             Ok(Ok(data)) => data,
             Ok(Err(e)) => {
                 *self.manual_stop_tx.write().await = None;
+                self.clear_preview_text(&session.actually_typed, typer, write_mode)
+                    .await;
                 return Err(e);
             }
             Err(e) => {
                 *self.manual_stop_tx.write().await = None;
+                self.clear_preview_text(&session.actually_typed, typer, write_mode)
+                    .await;
                 return Err(anyhow::anyhow!("Recorder task failed: {e}"));
             }
         };
@@ -356,34 +401,8 @@ impl SuperSTTDaemon {
         *self.manual_stop_tx.write().await = None;
 
         // Clear preview after recording is done (only if preview typing was enabled)
-        if write_mode {
-            let preview_enabled = self
-                .preview_typing_enabled
-                .load(std::sync::atomic::Ordering::Relaxed);
-            if preview_enabled {
-                // Take the mirror out in a scope that drops the `!Send` guard
-                // before the async backspacing (audit Tier 3 #35).
-                let taken = if let Ok(mut g) = session.actually_typed.lock() {
-                    Some(std::mem::take(&mut *g))
-                } else {
-                    warn!("Failed to acquire actually_typed lock for clearing preview");
-                    None
-                };
-                if let Some(mut actually_typed) = taken {
-                    info!(
-                        "Clearing preview text: '{}'",
-                        actually_typed.chars().take(50).collect::<String>()
-                    );
-                    typer.clear_preview(&mut actually_typed).await;
-                    info!("Preview cleared, actually_typed is now: '{actually_typed}'");
-                    if let Ok(mut g) = session.actually_typed.lock() {
-                        *g = actually_typed;
-                    }
-                }
-            } else {
-                debug!("Preview typing was disabled, no preview to clear");
-            }
-        }
+        self.clear_preview_text(&session.actually_typed, typer, write_mode)
+            .await;
 
         Ok(full_audio_data)
     }
