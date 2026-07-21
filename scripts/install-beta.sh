@@ -76,153 +76,6 @@ detect_arch() {
     esac
 }
 
-# Detect GPU compute capability
-detect_gpu_compute_cap() {
-    if ! command -v nvidia-smi &> /dev/null; then
-        return
-    fi
-
-    # Get GPU name and try to determine compute capability
-    local gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits 2>/dev/null | head -1)
-
-    if [ -z "$gpu_name" ]; then
-        return
-    fi
-
-    print_info "Detected GPU: $gpu_name" >&2
-
-    # Map GPU names to compute capabilities
-    case "$gpu_name" in
-        # SM 12.0 (Blackwell)
-        *"RTX 50"*|*"RTX PRO"*"Blackwell"*) echo "120" ;;
-
-        # SM 10.0 (Blackwell server)
-        *"B200"*|*"GB200"*) echo "100" ;;
-
-        # SM 9.0 (Hopper)
-        *"H100"*|*"H200"*|*"GH200"*) echo "90" ;;
-
-        # SM 8.9 (Ada Lovelace)
-        *"RTX 40"*|*"RTX Ada"*|*"L4"*|*"L40"*) echo "89" ;;
-
-        # SM 8.6 (Ampere consumer)
-        *"RTX 30"*|*"RTX A"[0-9]*|*"A40"*|*"A10"*|*"A16"*|*"A2"*) echo "86" ;;
-
-        # SM 8.0 (Ampere datacenter)
-        *"A100"*|*"A30"*) echo "80" ;;
-
-        # SM 7.5 (Turing)
-        *"RTX 20"*|*"TITAN RTX"*|*"QUADRO RTX"*|*"T4"*|*"T1000"*|*"T1200"*|*"T2000"*|*"T400"*|*"T500"*|*"T600"*|*"GTX 1650 Ti"*) echo "75" ;;
-
-        # Default fallback - use most compatible (SM 7.5)
-        *)
-            print_warn "Unknown GPU: $gpu_name - using SM 7.5 (most compatible)" >&2
-            echo "75"
-            ;;
-    esac
-}
-
-# Check for CUDA toolkit libraries
-check_cuda_libraries() {
-    # Check for essential CUDA libraries that candle-core needs
-    local required_libs=("libcurand.so" "libcublas.so" "libcufft.so" "libcusolver.so")
-    local missing_libs=()
-
-    for lib in "${required_libs[@]}"; do
-        if ! ldconfig -p 2>/dev/null | grep -q "$lib" && \
-           ! find /usr/local/cuda/lib* /usr/lib* /lib* -name "${lib}*" 2>/dev/null | grep -q .; then
-            missing_libs+=("$lib")
-        fi
-    done
-
-    if [ ${#missing_libs[@]} -eq 0 ]; then
-        return 0  # All libraries found
-    else
-        print_warn "Missing CUDA toolkit libraries: ${missing_libs[*]}" >&2
-        return 1  # Some libraries missing
-    fi
-}
-
-# Detect CUDA major version (12 or 13) based on installed libraries
-detect_cuda_major_version() {
-    # Check for CUDA 13 libraries first (newer)
-    if ldconfig -p 2>/dev/null | grep -q "libcublas.so.13" || \
-       find /usr/local/cuda/lib* /usr/lib* /lib* -name "libcublas.so.13*" 2>/dev/null | grep -q .; then
-        echo "13"
-        return
-    fi
-
-    # Check for CUDA 12 libraries
-    if ldconfig -p 2>/dev/null | grep -q "libcublas.so.12" || \
-       find /usr/local/cuda/lib* /usr/lib* /lib* -name "libcublas.so.12*" 2>/dev/null | grep -q .; then
-        echo "12"
-        return
-    fi
-
-    # Fallback: try to detect from nvcc or cuda version file
-    if command -v nvcc &> /dev/null; then
-        local nvcc_version=$(nvcc --version 2>/dev/null | grep "release" | sed 's/.*release \([0-9]*\)\..*/\1/')
-        if [ -n "$nvcc_version" ]; then
-            echo "$nvcc_version"
-            return
-        fi
-    fi
-
-    # Check CUDA version file
-    if [ -f /usr/local/cuda/version.txt ]; then
-        local cuda_ver=$(cat /usr/local/cuda/version.txt | grep -oP 'CUDA Version \K[0-9]+')
-        if [ -n "$cuda_ver" ]; then
-            echo "$cuda_ver"
-            return
-        fi
-    fi
-
-    # Default to CUDA 12 as it's more widely available
-    echo "12"
-}
-
-# Detect CUDA availability and compute capability
-detect_cuda() {
-    if command -v nvidia-smi &> /dev/null; then
-        print_info "NVIDIA GPU detected" >&2
-        if nvidia-smi --version &> /dev/null && nvidia-smi | grep -q "CUDA Version"; then
-            CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | sed 's/.*CUDA Version: \([0-9.]*\).*/\1/')
-            print_info "CUDA runtime $CUDA_VERSION detected" >&2
-
-            # Check if CUDA toolkit libraries are actually available
-            if ! check_cuda_libraries; then
-                print_warn "CUDA runtime detected but CUDA toolkit libraries missing" >&2
-                print_warn "Install CUDA toolkit to use GPU acceleration" >&2
-                echo "cpu"
-                return
-            fi
-
-            print_info "CUDA toolkit libraries found" >&2
-
-            # Detect CUDA major version (12 or 13)
-            local cuda_major=$(detect_cuda_major_version)
-            print_info "CUDA toolkit major version: $cuda_major" >&2
-
-            # Detect compute capability
-            local compute_cap=$(detect_gpu_compute_cap)
-
-            if [ -n "$compute_cap" ]; then
-                print_info "Using cuda${cuda_major}-sm${compute_cap} variant" >&2
-                echo "cuda${cuda_major}-sm${compute_cap}"
-            else
-                print_info "Using generic cuda${cuda_major}-sm75 variant" >&2
-                echo "cuda${cuda_major}-sm75"
-            fi
-        else
-            print_warn "NVIDIA GPU found but CUDA runtime not available - using CPU variant" >&2
-            echo "cpu"
-        fi
-    else
-        print_info "No NVIDIA GPU detected - using CPU variant" >&2
-        echo "cpu"
-    fi
-}
-
 # Install daemon, CLI, and the consent helper.
 #
 # The consent helper MUST live alongside the daemon binary —
@@ -499,7 +352,6 @@ show_menu() {
     echo ""
     echo "Detected system:"
     echo "  Architecture: $ARCH"
-    echo "  Optimal variant: $VARIANT"
     echo ""
     echo "What would you like to install?"
     echo ""
@@ -561,9 +413,9 @@ handle_menu() {
 # Show interactive menu if in interactive mode
 # Check if we have a controlling terminal (works better with piped input)
 if [ "$INTERACTIVE" = true ] && [ -t 2 ]; then
-    # Do minimal detection for menu display
+    # Minimal detection for menu display
     ARCH=$(detect_arch)
-    VARIANT=$(detect_cuda)
+    VARIANT="cpu"
 
     # Save current stdin and redirect to terminal for menu
     exec 3<&0
@@ -575,84 +427,14 @@ if [ "$INTERACTIVE" = true ] && [ -t 2 ]; then
     exec 3<&-
 fi
 
-# Check CUDA availability and warn user if needed
-check_cuda_availability() {
-    if [ "$1" = "all" ] || [ "$1" = "daemon" ]; then
-        if command -v nvidia-smi &> /dev/null; then
-            # NVIDIA GPU detected, check if CUDA toolkit is available
-            if nvidia-smi --version &> /dev/null && nvidia-smi | grep -q "CUDA Version"; then
-                local cuda_version=$(nvidia-smi | grep "CUDA Version" | sed 's/.*CUDA Version: \([0-9.]*\).*/\1/')
-
-                # Check for CUDA toolkit libraries
-                if ! check_cuda_libraries; then
-                    echo ""
-                    echo -e "${BLINK}${BOLD}${BG_YELLOW}${RED}  ⚠️  WARNING ⚠️  ${NC}"
-                    echo -e "${BOLD}${YELLOW}══════════════════════════════════════════════════════════${NC}"
-                    echo -e "${BOLD}${YELLOW}${NC}  ${BOLD}${RED}🚨🚨🚨 CUDA toolkit missing! 🚨🚨🚨${NC}  ${BOLD}${YELLOW}${NC}"
-                    echo -e "${BOLD}${YELLOW}══════════════════════════════════════════════════════════${NC}"
-                    print_warn ""
-                    print_warn "An NVIDIA GPU was detected, but no CUDA toolkit was found!"
-                    print_warn "Please install the CUDA toolkit to enable GPU acceleration:"
-                    print_warn ""
-
-                    # Detect distribution and show appropriate command
-                    if command -v apt-get &> /dev/null; then
-                        print_warn "  Ubuntu/PopOS/Debian:"
-                        print_warn "    sudo apt-get install nvidia-cuda-toolkit nvidia-cuda-toolkit-gcc"
-                    elif command -v dnf &> /dev/null; then
-                        print_warn "  Fedora:"
-                        print_warn "    sudo dnf install cuda cuda-devel"
-                    elif command -v pacman &> /dev/null; then
-                        print_warn "  Arch:"
-                        print_warn "    sudo pacman -S cuda cuda-tools"
-                    else
-                        print_warn "  Install CUDA toolkit for your distribution"
-                    fi
-                    print_warn ""
-                    print_warn "After installing the CUDA toolkit, run this script again to enable GPU acceleration."
-
-                    print_warn ""
-                    print_warn "Your system has:"
-                    print_warn "  ✅ NVIDIA GPU with driver"
-                    print_warn "  ✅ CUDA runtime $cuda_version"
-                    print_warn "  ❌ CUDA toolkit libraries (needed for GPU acceleration)"
-                    print_warn ""
-                    print_warn "Documentation: https://github.com/jorge-menjivar/super-stt#cuda-gpu-acceleration"
-                    print_warn ""
-
-                    if [ "$INTERACTIVE" = true ] && [ -t 2 ]; then
-                        echo -n "Continue with CPU-only installation? [y/N]: "
-                        read -r continue_cpu < /dev/tty
-                        if [[ ! "$continue_cpu" =~ ^[Yy]$ ]]; then
-                            print_info "Installation aborted. Install CUDA toolkit and run installer again for GPU acceleration."
-                            exit 0
-                        fi
-                        print_info "Continuing with CPU-only installation..."
-                    else
-                        print_warn "Non-interactive mode: continuing with CPU-only installation"
-                    fi
-                    print_warn ""
-                fi
-            fi
-        fi
-    fi
-}
-
 # Detect what we need based on install option
 ARCH=$(detect_arch)
 print_info "Detected architecture: $ARCH"
 
-# Check CUDA availability and warn user before proceeding
-check_cuda_availability "$INSTALL_OPTION"
 
-if [ "$INSTALL_OPTION" = "all" ] || [ "$INSTALL_OPTION" = "daemon" ]; then
-    # Need optimal daemon variant
-    VARIANT=$(detect_cuda)
-    print_info "Using variant: $VARIANT"
-else
-    # For app/applet-only, just use CPU variant (app/applet are identical in all variants)
-    VARIANT="cpu"
-fi
+# GPU residency lives in out-of-tree backends, so there is a single
+# CPU build for every install option.
+VARIANT="cpu"
 
 # Get the latest pre-release (beta) version if not specified.
 #
@@ -702,7 +484,7 @@ DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$TARBAL
 
 print_info "Downloading from: $DOWNLOAD_URL"
 
-# Download the tarball with fallback support
+# Download the tarball
 download_with_fallback() {
     local variant="$1"
     local arch="$2"
@@ -716,55 +498,6 @@ download_with_fallback() {
         return 0
     fi
 
-    # If specific compute capability failed, try fallbacks
-    # Variant format: cuda{12,13}-sm{75,80,86,89,90,100,120}
-    if [[ "$variant" =~ ^cuda([0-9]+)-sm([0-9]+)$ ]]; then
-        local cuda_ver="${BASH_REMATCH[1]}"
-        local sm_cap="${BASH_REMATCH[2]}"
-
-        # Try fallback to sm75 with same CUDA version
-        local base_variant="cuda${cuda_ver}-sm75"
-        if [ "$variant" != "$base_variant" ]; then
-            print_warn "Specific compute capability variant not found, trying $base_variant" >&2
-            tarball_name="super-stt-${arch}-${base_variant}-beta.tar.gz"
-            download_url="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$tarball_name"
-
-            if curl -L -f -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
-                echo "$tarball_name"
-                return 0
-            fi
-        fi
-
-        # Try alternative CUDA version (12 <-> 13)
-        local alt_cuda_ver
-        if [ "$cuda_ver" = "13" ]; then
-            alt_cuda_ver="12"
-        else
-            alt_cuda_ver="13"
-        fi
-
-        local alt_variant="cuda${alt_cuda_ver}-sm75"
-        print_warn "CUDA $cuda_ver variants not found, trying CUDA $alt_cuda_ver ($alt_variant)" >&2
-        tarball_name="super-stt-${arch}-${alt_variant}-beta.tar.gz"
-        download_url="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$tarball_name"
-
-        if curl -L -f -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
-            print_warn "Using CUDA $alt_cuda_ver build - may have compatibility issues" >&2
-            echo "$tarball_name"
-            return 0
-        fi
-
-        # Last resort: try CPU variant
-        print_warn "CUDA variants not found, falling back to CPU variant" >&2
-        tarball_name="super-stt-${arch}-cpu-beta.tar.gz"
-        download_url="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$tarball_name"
-
-        if curl -L -f -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
-            echo "$tarball_name"
-            return 0
-        fi
-    fi
-
     return 1
 }
 
@@ -772,16 +505,8 @@ download_with_fallback() {
 DOWNLOADED_TARBALL=$(download_with_fallback "$VARIANT" "$ARCH")
 
 if [ -z "$DOWNLOADED_TARBALL" ]; then
-    print_error "Failed to download any compatible beta variant"
-    print_error "Tried URLs:"
-    print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-${VARIANT}-beta.tar.gz"
-    if [[ "$VARIANT" =~ ^cuda([0-9]+)-sm([0-9]+)$ ]]; then
-        err_cuda_ver="${BASH_REMATCH[1]}"
-        err_alt_cuda_ver=$([[ "$err_cuda_ver" == "13" ]] && echo "12" || echo "13")
-        print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-cuda${err_cuda_ver}-sm75-beta.tar.gz"
-        print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-cuda${err_alt_cuda_ver}-sm75-beta.tar.gz"
-        print_error "  - https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-cpu-beta.tar.gz"
-    fi
+    print_error "Failed to download the beta tarball"
+    print_error "Tried: https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-${VARIANT}-beta.tar.gz"
     exit 1
 fi
 
@@ -832,13 +557,9 @@ print_info "Installation complete!"
 print_info ""
 print_info "Installed components:"
 
-# Determine the actual variant that was installed (strip the -beta suffix
-# so the printed name still matches the matrix in release-beta.yml).
-INSTALLED_VARIANT=$(echo "$DOWNLOADED_TARBALL" | sed 's/super-stt-.*-\(.*\)-beta\.tar\.gz/\1/')
-
 case $INSTALL_OPTION in
     "all")
-        print_info "  ✅ super-stt-daemon [$INSTALLED_VARIANT variant]"
+        print_info "  ✅ super-stt-daemon"
         print_info "  ✅ super-stt-cli"
         print_info "  ✅ super-stt-consent (auth popup helper)"
         print_info "  ✅ stt (convenience wrapper)"
@@ -849,7 +570,7 @@ case $INSTALL_OPTION in
         print_info "Run 'stt record --write' to get started"
         ;;
     "daemon")
-        print_info "  ✅ super-stt-daemon [$INSTALLED_VARIANT variant]"
+        print_info "  ✅ super-stt-daemon"
         print_info "  ✅ super-stt-cli"
         print_info "  ✅ super-stt-consent (auth popup helper)"
         print_info "  ✅ stt (convenience wrapper)"

@@ -132,15 +132,6 @@
     [workspace.lints.rust]
         unused_must_use = "deny"
 
-    [workspace.metadata.cross.build]
-        pre-build = [
-            "dpkg --add-architecture $CROSS_DEB_ARCH",
-            "apt-get update && apt-get --assume-yes install git libxkbcommon-dev:$CROSS_DEB_ARCH libwayland-dev:$CROSS_DEB_ARCH libxkbcommon-x11-dev:$CROSS_DEB_ARCH libegl1-mesa-dev:$CROSS_DEB_ARCH libfontconfig1-dev:$CROSS_DEB_ARCH libfreetype6-dev:$CROSS_DEB_ARCH libglib2.0-dev:$CROSS_DEB_ARCH libspeechd-dev:$CROSS_DEB_ARCH libxrandr-dev:$CROSS_DEB_ARCH libxinerama-dev:$CROSS_DEB_ARCH libxcursor-dev:$CROSS_DEB_ARCH libxi-dev:$CROSS_DEB_ARCH libxss-dev:$CROSS_DEB_ARCH libasound2-dev:$CROSS_DEB_ARCH  pkg-config libssl-dev:$CROSS_DEB_ARCH libdbus-1-dev:$CROSS_DEB_ARCH",
-        ]
-
-        [workspace.metadata.cross.build.env]
-            passthrough = ["BUILD_VARIANT", "CUDA_COMPUTE_CAP", "DOCKER_OPTS"]
-
 [profile.release]
     lto = true
     panic = "abort"

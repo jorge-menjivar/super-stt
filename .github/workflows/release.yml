@@ -1,14 +1,10 @@
 name: Release
 
-# Legacy stable workflow — builds the pre-protocol-rewrite layout
-# (single `super-stt` binary). Tags containing the word "beta" go to
-# release-beta.yml instead, which builds the new
-# daemon/CLI/consent-helper split.
-#
-# This workflow currently references `--bin super-stt`, which no
-# longer exists in the workspace. It is preserved so existing stable
-# releases stay reachable; cutting a new stable tag will need a
-# follow-up update once we're ready to promote the rewrite.
+# Stable release workflow. Builds the daemon/CLI/consent-helper split
+# plus the app and applet, CPU-only, and publishes a non-prerelease
+# GitHub release. Tags containing the word "beta" go to
+# release-beta.yml instead, which ships the same layout as a prerelease
+# with a `-beta` tarball suffix.
 
 on:
   push:
@@ -75,7 +71,7 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-latest
+            runner: ubuntu-24.04-arm
 
     runs-on: ${{ matrix.runner }}
 
@@ -96,16 +92,30 @@ jobs:
             target
           key: ${{ matrix.target }}-apps-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install cross (for cross-compilation)
-        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libegl1-mesa-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libasound2-dev \
+            libdbus-1-dev \
+            pkg-config
 
       - name: Build app binary
         run: |
-          cross build --release --target ${{ matrix.target }} --bin super-stt-app
+          cargo build --release --target ${{ matrix.target }} --bin super-stt-app
 
       - name: Build applet binary
         run: |
-          cross build --release --target ${{ matrix.target }} --bin super-stt-cosmic-applet
+          cargo build --release --target ${{ matrix.target }} --bin super-stt-cosmic-applet
 
       - name: Upload app binaries
         uses: actions/upload-artifact@v7
@@ -121,173 +131,13 @@ jobs:
     strategy:
       matrix:
         include:
-          # x86_64 builds - CPU only
+          # x86_64 and aarch64, both native (no cross). CPU only.
           - target: x86_64-unknown-linux-gnu
-            features: ""
             suffix: cpu
             runner: ubuntu-latest
-            cuda_cap: ""
-            cuda_image: ""
-
-          # x86_64 CUDA 12 builds with different compute capabilities
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda12-sm75
-            runner: ubuntu-latest
-            cuda_cap: "75" # RTX 2080, T4, Quadro RTX series
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda12-sm80
-            runner: ubuntu-latest
-            cuda_cap: "80" # A100, A30
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda12-sm86
-            runner: ubuntu-latest
-            cuda_cap: "86" # RTX 3060-3090, A40, RTX A2000-A6000
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda12-sm89
-            runner: ubuntu-latest
-            cuda_cap: "89" # RTX 4050-4090, RTX Ada series, L4, L40
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda12-sm90
-            runner: ubuntu-latest
-            cuda_cap: "90" # H100, H200, GH200
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-
-          # x86_64 CUDA 12 + cuDNN builds with different compute capabilities
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda12-cudnn-sm75
-            runner: ubuntu-latest
-            cuda_cap: "75" # RTX 2080, T4, Quadro RTX series
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda12-cudnn-sm80
-            runner: ubuntu-latest
-            cuda_cap: "80" # A100, A30
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda12-cudnn-sm86
-            runner: ubuntu-latest
-            cuda_cap: "86" # RTX 3060-3090, A40, RTX A2000-A6000
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda12-cudnn-sm89
-            runner: ubuntu-latest
-            cuda_cap: "89" # RTX 4050-4090, RTX Ada series, L4, L40
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda12-cudnn-sm90
-            runner: ubuntu-latest
-            cuda_cap: "90" # H100, H200, GH200
-            cuda_image: "nvidia/cuda:12.9.1-cudnn-devel-ubuntu22.04"
-
-          # x86_64 CUDA 13 builds with different compute capabilities
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda13-sm75
-            runner: ubuntu-latest
-            cuda_cap: "75" # RTX 2080, T4, Quadro RTX series
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda13-sm80
-            runner: ubuntu-latest
-            cuda_cap: "80" # A100, A30
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda13-sm86
-            runner: ubuntu-latest
-            cuda_cap: "86" # RTX 3060-3090, A40, RTX A2000-A6000
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda13-sm89
-            runner: ubuntu-latest
-            cuda_cap: "89" # RTX 4050-4090, RTX Ada series, L4, L40
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda13-sm90
-            runner: ubuntu-latest
-            cuda_cap: "90" # H100, H200, GH200
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda13-sm100
-            runner: ubuntu-latest
-            cuda_cap: "100" # B200, GB200
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda"
-            suffix: cuda13-sm120
-            runner: ubuntu-latest
-            cuda_cap: "120" # RTX 5050-5090, RTX PRO Blackwell series
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-
-          # x86_64 CUDA 13 + cuDNN builds with different compute capabilities
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda13-cudnn-sm75
-            runner: ubuntu-latest
-            cuda_cap: "75" # RTX 2080, T4, Quadro RTX series
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda13-cudnn-sm80
-            runner: ubuntu-latest
-            cuda_cap: "80" # A100, A30
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda13-cudnn-sm86
-            runner: ubuntu-latest
-            cuda_cap: "86" # RTX 3060-3090, A40, RTX A2000-A6000
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda13-cudnn-sm89
-            runner: ubuntu-latest
-            cuda_cap: "89" # RTX 4050-4090, RTX Ada series, L4, L40
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda13-cudnn-sm90
-            runner: ubuntu-latest
-            cuda_cap: "90" # H100, H200, GH200
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda13-cudnn-sm100
-            runner: ubuntu-latest
-            cuda_cap: "100" # B200, GB200
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-          - target: x86_64-unknown-linux-gnu
-            features: "cuda,cudnn"
-            suffix: cuda13-cudnn-sm120
-            runner: ubuntu-latest
-            cuda_cap: "120" # RTX 5050-5090, RTX PRO Blackwell series
-            cuda_image: "nvidia/cuda:13.0.2-cudnn-devel-ubuntu22.04"
-
-          # aarch64 builds - CPU only (CUDA not commonly used on ARM)
           - target: aarch64-unknown-linux-gnu
-            features: ""
             suffix: cpu
-            runner: ubuntu-latest
-            cuda_cap: ""
-            cuda_image: ""
+            runner: ubuntu-24.04-arm
 
     runs-on: ${{ matrix.runner }}
 
@@ -308,18 +158,34 @@ jobs:
             target
           key: ${{ matrix.target }}-${{ matrix.suffix }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install cross (for cross-compilation)
-        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libegl1-mesa-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libasound2-dev \
+            libdbus-1-dev \
+            pkg-config
 
-      - name: Build daemon binary
+      # Build the daemon, CLI, and consent helper in one cargo
+      # invocation. `--bin` filters keep the build narrow (apps were
+      # already built in `build-apps`).
+      - name: Build daemon + CLI + consent helper
         env:
           BUILD_VARIANT: ${{ matrix.suffix }}
-          CUDA_COMPUTE_CAP: ${{ matrix.cuda_cap }}
         run: |
-          if [ -n "${{ matrix.cuda_image }}" ]; then
-            export CROSS_TARGET_X86_64_UNKNOWN_LINUX_GNU_IMAGE="${{ matrix.cuda_image }}"
-          fi
-          cross build --release --target ${{ matrix.target }} --bin super-stt --features "${{ matrix.features }}"
+          cargo build --release --target ${{ matrix.target }} \
+            --bin super-stt-daemon \
+            --bin super-stt-cli \
+            --bin super-stt-consent
 
       - name: Download app binaries
         uses: actions/download-artifact@v8
@@ -330,7 +196,12 @@ jobs:
       - name: Create tarball
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/super-stt dist/
+          # Daemon, CLI, and consent helper. The consent helper MUST be in
+          # the same directory as the daemon — locate_consent_helper has no
+          # PATH fallback.
+          cp target/${{ matrix.target }}/release/super-stt-daemon dist/
+          cp target/${{ matrix.target }}/release/super-stt-cli dist/
+          cp target/${{ matrix.target }}/release/super-stt-consent dist/
           cp app-binaries/super-stt-app dist/
           cp app-binaries/super-stt-cosmic-applet dist/
 
@@ -349,7 +220,7 @@ jobs:
           # Remove any extra assets
           rm -rf dist/resources/assets
 
-          # Create tarball with architecture and feature suffix
+          # Create tarball with architecture and variant suffix
           tar -czf super-stt-${{ matrix.target }}-${{ matrix.suffix }}.tar.gz -C dist .
 
       - name: Upload artifact
