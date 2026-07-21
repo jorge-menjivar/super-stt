@@ -98,7 +98,9 @@ fn notice_constants_survive_the_sanitizer_unchanged() {
 /// A notice is typed verbatim — no capitalization, no trailing period, no
 /// trailing space. `process_final_text` applies all three, which is exactly why
 /// a notice must not go through it.
-#[tokio::test]
+// `start_paused` so the notice's key-release delay is virtual — this test
+// asserts what gets typed, not how long it waits.
+#[tokio::test(start_paused = true)]
 async fn type_notice_types_the_marker_verbatim() {
     let (sim, buf) = Simulator::capture();
     let mut typer = Typer::new(sim);
@@ -111,7 +113,9 @@ async fn type_notice_types_the_marker_verbatim() {
 /// Transcript state feeds preview tail-matching on the *next* recording. If a
 /// notice landed in it, the typer would try to extend "[Super STT: …]" into the
 /// following sentence.
-#[tokio::test]
+// `start_paused` so the notice's key-release delay is virtual — this test
+// asserts what gets typed, not how long it waits.
+#[tokio::test(start_paused = true)]
 async fn type_notice_leaves_transcript_state_untouched() {
     let (sim, _buf) = Simulator::capture();
     let mut typer = Typer::new(sim);
@@ -121,4 +125,28 @@ async fn type_notice_leaves_transcript_state_untouched() {
     assert_eq!(typer.state.last_transcription, "");
     assert_eq!(typer.state.prev_text, "");
     assert_eq!(typer.state.full_session_text, "");
+}
+
+/// A notice can be typed within milliseconds of the hotkey press (the no-model
+/// preflight rejects before capture starts), so the shortcut's modifiers are
+/// often still held. Typing then would deliver modified keystrokes and fire
+/// shortcuts in the user's application instead of inserting text. The wait must
+/// therefore happen BEFORE the text reaches the simulator, not after.
+///
+/// `start_paused` auto-advances tokio's clock while the runtime is idle, so
+/// this asserts the full delay elapsed without spending it in wall-clock time.
+#[tokio::test(start_paused = true)]
+async fn type_notice_waits_for_shortcut_keys_to_be_released_before_typing() {
+    let (sim, buf) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+    let start = tokio::time::Instant::now();
+
+    typer.type_notice(notice::NO_MODEL_LOADED).await;
+
+    assert!(
+        start.elapsed() >= std::time::Duration::from_secs(1),
+        "notice was typed after only {:?} — modifiers may still be held",
+        start.elapsed()
+    );
+    assert_eq!(*buf.lock().unwrap(), "[Super STT: no model loaded]");
 }

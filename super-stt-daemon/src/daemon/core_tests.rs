@@ -1317,7 +1317,9 @@ async fn handle_transcribe_errors_when_no_model_loaded() {
 
 /// The whole point of the preflight: no capture, no beeps, and the user is told
 /// in the field they are looking at.
-#[tokio::test]
+// `start_paused` so the notice's key-release delay is virtual — this asserts
+// what the preflight does, not how long the notice waits.
+#[tokio::test(start_paused = true)]
 async fn record_with_no_model_types_a_notice_in_write_mode() {
     let daemon = test_daemon().await;
     let (sim, buf) = crate::output::keyboard::Simulator::capture();
