@@ -40,31 +40,31 @@ fn target_triple() -> &'static str {
     "aarch64-unknown-linux-gnu"
 }
 
+/// CUDA properties come from `gpu-probe`, which owns the single process-wide
+/// NVML handle. Initializing NVML per call leaks a file descriptor each time,
+/// so this must not open its own — that is why the daemon has no direct
+/// `nvml-wrapper` dependency.
+///
+/// `gpu-probe` reports the parts separately and rejects the negative values a
+/// misbehaving driver can return; the packed `sm_XX` form is this crate's
+/// contract with `compat::select`, so it is assembled here.
 fn detect_cuda() -> Option<CudaHost> {
-    let nvml = nvml_wrapper::Nvml::init().ok()?;
-    let dev = nvml.device_by_index(0).ok()?;
-
-    // nvml-wrapper 0.12 returns `CudaComputeCapability { major: i32, minor: i32 }`.
-    let cc = dev.cuda_compute_capability().ok()?;
-    // Guard against negative values from a misbehaving driver.
-    if cc.major < 0 || cc.minor < 0 {
-        return None;
-    }
-    let cc_packed = cc.major.cast_unsigned() * 10 + cc.minor.cast_unsigned();
-
-    // `sys_cuda_driver_version()` returns a packed `i32`, e.g. 12090 for CUDA 12.9.
-    let cuda_version = nvml.sys_cuda_driver_version().ok()?;
-    if cuda_version <= 0 {
-        return None;
-    }
-    let runtime_major = (cuda_version / 1000).cast_unsigned();
-
-    let cudnn_present = detect_cudnn();
+    let host = gpu_probe::cuda_host()?;
     Some(CudaHost {
-        compute_capability: cc_packed,
-        runtime_major,
-        cudnn_present,
+        compute_capability: pack_sm(host.compute_capability.major, host.compute_capability.minor),
+        runtime_major: host.driver_version.major,
+        cudnn_present: detect_cudnn(),
     })
+}
+
+/// Pack a major/minor compute capability into the `sm_XX` form
+/// [`compat::select`](super::compat::select) matches an asset's `cuda_sm`
+/// against — 8 and 6 become 86, the same integer `nvidia-smi` renders as `8.6`.
+///
+/// Its own function because a wrong packing here silently mis-selects every
+/// CUDA asset rather than failing loudly.
+const fn pack_sm(major: u32, minor: u32) -> u32 {
+    major * 10 + minor
 }
 
 fn detect_cudnn() -> bool {
@@ -84,4 +84,24 @@ fn detect_cudnn() -> bool {
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pack_sm;
+
+    /// `compat::select` compares this packed integer against an asset's
+    /// `cuda_sm`, so the encoding is a contract with the registry metadata, not
+    /// an internal detail. A wrong packing mis-selects every CUDA asset
+    /// silently — nothing downstream would reject an implausible value.
+    #[test]
+    fn compute_capability_packs_to_the_sm_form_assets_declare() {
+        // An RTX 30-series host: nvidia-smi reports compute_cap 8.6, assets
+        // declare cuda_sm = 86.
+        assert_eq!(pack_sm(8, 6), 86);
+        // Two-digit minors do not occur in CUDA's scheme, but a single-digit
+        // minor must not lose its place: 9.0 is 90, never 9.
+        assert_eq!(pack_sm(9, 0), 90);
+        assert_eq!(pack_sm(12, 0), 120);
+    }
 }

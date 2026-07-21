@@ -2795,7 +2795,7 @@ dependencies = [
 [[package]]
 name = "gpu-probe"
 version = "0.1.0"
-source = "git+https://github.com/jorge-menjivar/gpu-probe#55a3e6fcafa0039cc1611c9bac91ff8d6d8d83c2"
+source = "git+https://github.com/jorge-menjivar/gpu-probe?rev=2912a8d8ca2d77aae511e60f824fcad1ab409892#2912a8d8ca2d77aae511e60f824fcad1ab409892"
 dependencies = [
  "nvml-wrapper",
 ]
@@ -6695,7 +6695,6 @@ dependencies = [
  "libc",
  "log",
  "mockito",
- "nvml-wrapper",
  "parking_lot",
  "reqwest",
  "ring",
