@@ -72,71 +72,9 @@ jobs:
       - name: Load old config fixtures
         run: just config-compat
 
-  build-apps:
-    name: Build App Binaries (Beta)
+  build:
+    name: Build Binaries (Beta)
     needs: config-compat
-    strategy:
-      matrix:
-        include:
-          # Pinned to 22.04 (glibc 2.35) for broad binary compatibility.
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-22.04
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-22.04-arm
-
-    runs-on: ${{ matrix.runner }}
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache dependencies
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.target }}-apps-beta-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libxkbcommon-x11-dev \
-            libegl1-mesa-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxss-dev \
-            libasound2-dev \
-            libdbus-1-dev \
-            pkg-config
-
-      - name: Build app binary
-        run: cargo build --release --target ${{ matrix.target }} --bin super-stt-app
-
-      - name: Build applet binary
-        run: cargo build --release --target ${{ matrix.target }} --bin super-stt-cosmic-applet
-
-      - name: Upload app binaries
-        uses: actions/upload-artifact@v7
-        with:
-          name: apps-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/super-stt-app
-            target/${{ matrix.target }}/release/super-stt-cosmic-applet
-
-  build-linux:
-    name: Build Linux Binaries (Beta)
-    needs: build-apps
     strategy:
       matrix:
         include:
@@ -185,23 +123,18 @@ jobs:
             libdbus-1-dev \
             pkg-config
 
-      # Build the daemon, CLI, and consent helper in one cargo
-      # invocation. `--bin` filters keep the build narrow (apps were
-      # already built in `build-apps`).
-      - name: Build daemon + CLI + consent helper
+      # Build all five binaries in one cargo invocation so the shared
+      # dependency graph compiles once, then assemble the tarball.
+      - name: Build binaries
         env:
           BUILD_VARIANT: ${{ matrix.suffix }}
         run: |
           cargo build --release --target ${{ matrix.target }} \
             --bin super-stt-daemon \
             --bin super-stt-cli \
-            --bin super-stt-consent
-
-      - name: Download app binaries
-        uses: actions/download-artifact@v8
-        with:
-          name: apps-${{ matrix.target }}
-          path: app-binaries
+            --bin super-stt-consent \
+            --bin super-stt-app \
+            --bin super-stt-cosmic-applet
 
       - name: Create tarball
         run: |
@@ -212,8 +145,8 @@ jobs:
           cp target/${{ matrix.target }}/release/super-stt-daemon dist/
           cp target/${{ matrix.target }}/release/super-stt-cli dist/
           cp target/${{ matrix.target }}/release/super-stt-consent dist/
-          cp app-binaries/super-stt-app dist/
-          cp app-binaries/super-stt-cosmic-applet dist/
+          cp target/${{ matrix.target }}/release/super-stt-app dist/
+          cp target/${{ matrix.target }}/release/super-stt-cosmic-applet dist/
 
           # Include systemd service files
           mkdir -p dist/systemd
@@ -243,7 +176,7 @@ jobs:
 
   create-release:
     name: Create Beta Release
-    needs: build-linux
+    needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
 
