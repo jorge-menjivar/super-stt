@@ -4,33 +4,63 @@ Thank you for your interest in contributing to Super STT! This document provides
 
 ## Development Setup
 
-1. **Prerequisites**:
-   - Rust 1.70+ (edition 2024)
-   - Just task runner: `cargo install just`
-   - CUDA (optional, for GPU acceleration)
+### Prerequisites
 
-2. **Clone and Build**:
-   ```bash
-   git clone https://github.com/jorge-menjivar/super-stt.git
-   cd super-stt
-   
-   # Install development version
-   just install-daemon
-   just install-app
-   just install-applet  # Optional
-   ```
+- A recent stable Rust toolchain (edition 2024).
+- The [`just`](https://github.com/casey/just) task runner: `cargo install just`.
+- System build dependencies, by distro:
 
-3. **Development Commands**:
-   ```bash
-   # Run daemon in development mode
-   just run-daemon
-   
-   # Run desktop app
-   just run-app
-   
-   # Run COSMIC applet
-   just run-applet
-   ```
+  ```bash
+  # Debian/Ubuntu/Pop!_OS
+  sudo apt install build-essential libxkbcommon-dev libasound2-dev pkg-config libssl-dev
+  # Fedora
+  sudo dnf install gcc gcc-c++ libxkbcommon-devel alsa-lib-devel pkgconf perl-FindBin perl-IPC-Cmd openssl-devel
+  # Arch
+  sudo pacman -S pkgconf openssl
+  ```
+
+  If a dependency is missing for your distro, a PR to update this list is welcome.
+
+### Clone and build
+
+```bash
+git clone https://github.com/jorge-menjivar/super-stt.git
+cd super-stt
+
+just install            # build and install everything, wired to systemd
+# …or one piece at a time:
+just install-daemon
+just install-app
+just install-applet     # COSMIC only
+```
+
+### Development commands
+
+```bash
+just run-daemon         # run the daemon in the foreground
+just run-app            # run the settings app
+just run-applet         # run the COSMIC applet
+just audit              # security audit (cargo audit)
+```
+
+## Workspace layout
+
+Super STT is a Rust workspace:
+
+| Crate                      | Role                                                              |
+|----------------------------|------------------------------------------------------------------|
+| `super-stt-daemon`         | The engine: installs backends, loads models, serves the protocol |
+| `super-stt-app`            | Desktop settings & management app                                |
+| `super-stt-cli`            | The `stt` command-line client                                    |
+| `super-stt-cosmic-applet`  | COSMIC panel applet with visualizations                          |
+| `super-stt-consent`        | Consent-popup helper for the auth handshake                      |
+| `super-stt-shared`         | Common types, protocol definitions, validation                   |
+| `super-stt-registry-types` | Shared backend registry / manifest types                         |
+| `super-stt-forge`          | Git-forge release sourcing for the registry                      |
+| `super-stt-indexer`        | CI tool that builds the published registry `index.json`          |
+
+The protocol and backend contract that clients and backend authors build
+against live in [`docs/protocol/`](./docs/protocol/).
 
 ## Code Style and Standards
 

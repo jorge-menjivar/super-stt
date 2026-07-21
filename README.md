@@ -4,9 +4,9 @@
 
 # Super STT
 
-**High-performance speech-to-text service for Linux**
+**Speak into any app on Linux. Your words appear as text.**
 
-*Easy to install • State-of-the-art Voice Models • Built in Rust • GPU Acceleration*
+*One shortcut to dictate anywhere • Any model from a growing library • An open protocol any app can build on • Built in Rust*
 
 [![coverage](https://img.shields.io/endpoint?url=https://jorge-menjivar.github.io/super-stt/coverage/coverage.json)](https://jorge-menjivar.github.io/super-stt/coverage/)
 
@@ -15,50 +15,59 @@
 https://github.com/user-attachments/assets/bbbe20c3-6802-4797-afc8-aa81d1b48415
 
 
+## What is Super STT?
+
+Super STT makes speech-to-text with automatic text input **trivial on Linux, for everyone**. Bind a shortcut (Super+Space by convention), speak, and your words are typed straight into whatever app is focused, e.g. your editor, browser, chat, terminal. No copy-paste, no fiddling.
+
+Under the hood it's two things:
+
+- **A model-agnostic engine.** A background daemon installs speech models from a **library** of backends (local or cloud), loads one, and keeps it warm for instant transcription. You pick the model that fits your hardware and swap it whenever you like.
+- **An open protocol.** The daemon speaks a documented HTTP protocol over a local socket, so *any* app, in any language, can request transcriptions, stream live audio visualizations, or drive recording, with per-app consent. Super STT's own desktop app, CLI, and COSMIC applet are just the first clients. See [Developers](#-developers).
+
 ## 🚀 Installation
 
-### Quick Install (Recommended)
-
-Install with our automated installer that detects your system and downloads pre-built binaries:
+**Quick install** - detects your system and downloads pre-built binaries:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh | bash
 ```
 
-You can also append `-s -- --beta` to the command to install the latest beta version.
+Append `-s -- --beta` for the latest beta.
 
-### Build from source
-
-If you want the very latest changes, build locally:
+**Build from source** - for the very latest changes (needs the [build prerequisites](./CONTRIBUTING.md#prerequisites)):
 
 ```bash
 git clone https://github.com/jorge-menjivar/super-stt.git
 cd super-stt
-just install                # CPU
-just install --cuda         # NVIDIA GPU
+just install
 ```
 
-`just install` builds and installs the daemon, CLI, consent helper, desktop app, and (on COSMIC) the panel applet, then enables the user systemd service. Run `just install-daemon`, `just install-app`, or `just install-applet` to install just one piece.
+Either way you get the daemon, the `stt` CLI, a consent helper, the desktop app, and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. On COSMIC the installer offers to bind Super+Space → `stt record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
 
-### What gets installed
+## ⌨️ Using it
 
-The install script does the following:
+```bash
+stt record --write # Record and transcribes. Types the result after silence is detected or you run the command again.
+```
 
-- Drop binaries in `~/.local/bin` (`super-stt-daemon`, `super-stt-cli`, `super-stt-app`, plus `super-stt-consent` and `super-stt-cosmic-applet` where applicable)
-- Set up a `systemctl --user` service for the daemon
-- Detect CUDA/cuDNN and pick the right GPU build automatically
-- Offer to wire up Super+Space → `stt record --write` on COSMIC
+Bind `stt record --write` to a key combo. Super+Space is the convention (the COSMIC installer does this for you; on other desktops add a custom shortcut for `~/.local/bin/stt record --write`). When you trigger it:
 
-The installer's menu lets you pick a subset (daemon only, app only, applet only).
+1. `stt` asks the running daemon to start transcribing from your mic.
+2. You speak; the daemon transcribes your audio.
+3. When you stop (on silence or a second trigger), it types the transcription into the focused app.
 
-> For protocol, auth, and security details, see [docs/](./docs/).
+Manage the daemon with the usual systemd controls:
 
+```bash
+systemctl --user start super-stt      # or: enable / status / restart
+journalctl --user -u super-stt -f     # follow logs
+```
 
-## Recording Modes
+### Recording modes
 
-### Stop Mode
+Two settings shape a session. Both live in the desktop app under **Settings** (or the daemon config); stop mode can also be set per-recording on the CLI.
 
-Controls how a recording session ends. Configurable via the app, CLI (`--stop-mode`), or daemon config. Assuming you have a shortcut mapped to execute `stt record --write`:
+**Stop mode** - how a recording ends:
 
 | Mode                           | Behavior                                              |
 |--------------------------------|-------------------------------------------------------|
@@ -66,201 +75,61 @@ Controls how a recording session ends. Configurable via the app, CLI (`--stop-mo
 | **Silence Only**               | Stops only when silence is detected                   |
 | **Manual Only**                | Stops only on a second shortcut press                 |
 
-### Write Method
-
-Controls how transcribed text is typed into the focused application. Auto-detection tries each method in order.
-
-| Method                         | Description                                                               |
-|--------------------------------|---------------------------------------------------------------------------|
-| **Auto** (default)             | Tries XDG Desktop Portal, then ydotool, then Wayland protocol             |
-| **XDG Desktop Portal**         | Uses the desktop's RemoteDesktop portal (requires one-time authorization) |
-| **ydotool**                    | Uses ydotool virtual input (requires ydotoold running)                    |
-| **Wayland Protocol**           | Direct Wayland input simulation via the compositor                        |
-
-Both settings can be changed in the desktop app under Settings. The stop mode
-can also be set per-recording on the CLI; the write method is configured only in
-the app or daemon config (it is not a per-recording flag):
-
 ```bash
 stt record --write --stop-mode manual_only
 ```
 
-## 🤖 Supported Models
+**Write method** - how text is injected: **Auto** (default) tries the XDG Desktop Portal, then ydotool, then direct Wayland input. Force a specific one in Settings if auto-detection picks wrong.
 
-### Local Models
-All processing happens on your device. No audio data leaves your machine.
+## 🤖 Models
 
-| Model                 | Notes                                      |
-|-----------------------|--------------------------------------------|
-| voxtral-mini          | State-of-the-art. **Recommended with GPU** |
-| voxtral-small         | State-of-the-art                           |
-| whisper-tiny          | **Default**                                |
-| whisper-base          | **Recommended with CPU**                   |
-| whisper-small         |                                            |
-| whisper-medium        |                                            |
-| whisper-large-v3      |                                            |
+Models come from a **library** of backends you install on demand. Open the app, go to **Library → Browse**, install a backend, and it appears in the model selector. Some run **locally** (your audio never leaves your machine); others are **online** providers you reach with your own API, which is stored securely in your system keyring (GNOME Keyring, KWallet, …).
 
-### Online Models
+### Recommended models
 
-If your computer does not have enough resources for local models, you can send your audio to third-party providers for transcription. Online models are **disabled by default** and require you to explicitly enable them.
+**Local** - everything stays on your device.
 
-| Provider | Models                                               |
-|----------|------------------------------------------------------|
-| Mistral  | voxtral-mini-latest                                  |
-| OpenAI   | whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe |
-| Deepgram | nova-3                                               |
+| Model              | Best for                                              |
+|--------------------|-------------------------------------------------------|
+| **Voxtral** (mini / small) | High accuracy; needs an **NVIDIA GPU** (CUDA). |
+| **Qwen3-ASR** (0.6b / 1.7b) | Fast, multilingual; runs on **CPU or an NVIDIA GPU** (CUDA). |
+| **Whisper** (tiny → large) | Versatile and battle-tested; `tiny`/`base` are great **CPU** defaults. |
 
-#### Enabling Online Models
+**Online** - bring your own API key.
 
-Online providers are installed as backends, then configured with an API key:
+| Provider   | Notable models                                       |
+|------------|------------------------------------------------------|
+| **Mistral**  | `voxtral-mini-latest`, plus a realtime Voxtral model |
+| **OpenAI**   | `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1` |
+| **Deepgram** | `nova-3`                                              |
 
-1. Open the Super STT app
-2. Go to **Library → Browse** and install the provider's backend (Mistral, OpenAI, or Deepgram)
-3. On the **Installed** tab, open that backend's **Configure** sheet and enter your API key (stored in your system keyring)
-4. Go to **Models**, open the model selector, and choose an online model to load it
+> **GPU acceleration** is a property of the model, not a separate build of the app. Install a GPU-capable backend (like Voxtral or Qwen3-ASR) and the daemon downloads the build matched to your NVIDIA GPU automatically. You just need an up-to-date driver.
 
-API keys are stored securely in your system keyring (GNOME Keyring, KWallet, etc.) 
+This is a snapshot. The app always shows the current catalog, published live at [`jorge-menjivar.github.io/super-stt/index.json`](https://jorge-menjivar.github.io/super-stt/index.json). Want a model that isn't there? Anyone can [publish one](./docs/protocol/README.md#add-your-own-model).
 
 <table>
 <tr>
-<td align="center"><strong>Online Models</strong><br><img src=".github/assets/online-models.png" width="320"></td>
-<td align="center"><strong>Model Selection</strong><br><img src=".github/assets/models-selection.png" width="320"></td>
+<td align="center"><strong>Model selection</strong><br><img src=".github/assets/models-selection.png" width="320"></td>
+<td align="center"><strong>Online providers</strong><br><img src=".github/assets/online-models.png" width="320"></td>
 </tr>
 </table>
 
-## Screenshots
-### Multiple Visualization Styles
-<table>
-<tr>
-<td align="center"><strong>Centered Bars</strong><br><img src=".github/assets/visualization-centered-bars.png" width="320"></td>
-<td align="center"><strong>Equalizer</strong><br><img src=".github/assets/visualization-equalizer.png" width="320"></td>
-<td align="center"><strong>Waveform</strong><br><img src=".github/assets/visualization-waveforms.png" width="320"></td>
-</tr>
-</table>
+## 🩺 Troubleshooting
 
-### Custom Colors
-<table>
-<tr>
-<td align="center"><strong>System Theme</strong><br><img src=".github/assets/color-options-system-theme.png" width="320"></td>
-<td align="center"><strong>Green</strong><br><img src=".github/assets/color-options-green.png" width="320"></td>
-</tr>
-</table>
+- **`stt: command not found`**: restart your terminal or run `export PATH="$HOME/.local/bin:$PATH"`.
+- **Daemon won't start / misbehaves**: check `journalctl --user -u super-stt -n 49`.
+- **A stale legacy build is interfering** (auth popup shows `Path: <unknown>`, or errors mention an `stt` group): remove the old binaries and reinstall: `just uninstall` (or `rm -f ~/.local/bin/super-stt*`), then `just install`.
 
-## ⌨️ Keyboard Shortcuts
 
-Bind `stt record --write` to a key combo (Super+Space is the convention). On COSMIC the installer offers to do this for you. For other desktops, add a custom shortcut through Settings (the full command is `~/.local/bin/stt record --write`).
+## 🧑‍💻 Developers
 
-## Prerequisites
+Super STT is built to be built on. The details live in developer-facing docs:
 
-### Debian/Ubuntu/Pop!_OS
-You may need to install the following dependencies:
+- **Build a client** — get transcriptions, event streams, or recording control into your own app, in any language, over the documented HTTP protocol → **[docs/protocol/](./docs/protocol/)**
+- **Add your own model** — package a speech model as a backend the daemon can install and run, then publish it to the catalog → **[docs/protocol/](./docs/protocol/)** and **[registry/README.md](./registry/README.md)**
+- **Contribute** — build from source, workspace layout, and the PR workflow → **[CONTRIBUTING.md](./CONTRIBUTING.md)**
 
-```sudo apt install build-essential libxkbcommon-dev libasound2-dev pkg-config libssl-dev```
-
-**If you find any missing make a pull request to update this list. Thanks!**
-
-### Fedora
-You may need to install the following dependencies:
-
-```sudo dnf install gcc gcc-c++ libxkbcommon-devel alsa-lib-devel pkgconf perl-FindBin perl-IPC-Cmd openssl-devel```
-
-**If you find any missing make a pull request to update this list. Thanks!**
-
-### Arch
-You may need to install the following dependencies:
-
-```sudo pacman -S pkgconf openssl```
-
-**If you find any missing make a pull request to update this list. Thanks!**
-
-### CUDA GPU Acceleration
-
-Super STT automatically detects and uses CUDA-enabled GPUs for acceleration. If you have an NVIDIA GPU, but the installation script cannot find the CUDA toolkit, you need to install it manually:
-
-#### Ubuntu/PopOS/Debian
-```bash
-sudo apt-get install nvidia-cuda-toolkit nvidia-cuda-toolkit-gcc
-```
-
-#### Fedora
-See [https://rpmfusion.org/Howto/CUDA](https://rpmfusion.org/Howto/CUDA)
-
-#### Arch Linux
-```bash
-sudo pacman -S cuda
-```
-
-**Note**: If you already have the CUDA toolkit installed, but the installation script still cannot find it, please create a new issue. Thanks!
-
-## How it works
-
-> **Note**: On first run, Super STT downloads the required AI model (~1-2GB). This may take a few minutes.
-
-When you press the shortcut:
-
-1. `stt` asks the running daemon to start transcribing from your mic.
-2. While you speak, the daemon types a live preview into whatever app is focused.
-3. When you stop speaking (or press the shortcut again, depending on stop mode), the daemon does a final pass for accuracy and replaces the preview with the final text.
-
-### Usage
-
-After installation, manage the daemon with:
-```bash
-# Start the daemon
-systemctl --user start super-stt
-
-# Enable auto-start with user session
-systemctl --user enable super-stt
-
-# Check status
-systemctl --user status super-stt
-
-# View logs
-journalctl --user -u super-stt -f
-```
-
-Then use the `stt` command:
-```bash
-# Record and transcribe
-stt record
-
-# Record, transcribe, and auto-type the result
-stt record --write
-```
-
-### Troubleshooting
-
-#### `stt` command not found
-The installer adds `~/.local/bin` to your PATH. Restart your terminal, or run `export PATH="$HOME/.local/bin:$PATH"`.
-
-#### Authorization popup shows "Path: <unknown>" or never appears
-A previously installed legacy build is shadowing the daemon. Run `just uninstall` from the source tree (or remove `~/.local/bin/super-stt*` manually) and reinstall.
-
-#### Daemon not starting
-```bash
-journalctl --user -u super-stt -n 50
-```
-
-#### "sg: group 'stt' does not exist" / "Operation not permitted"
-This comes from an older install. The current daemon does not use an `stt`
-group — the socket lives in your per-user `$XDG_RUNTIME_DIR` and is same-user
-only. Remove the stale build and reinstall:
-```bash
-just uninstall   # or: rm -f ~/.local/bin/super-stt*
-just install
-```
-
-## 🔧 Development
-
-```bash
-just run-daemon         # run the daemon in the foreground
-just run-app            # run the settings app
-just run-applet         # run the COSMIC applet
-just setup-cosmic-shortcut  # add Super+Space binding on COSMIC
-just audit              # security audit (cargo audit)
-```
-
-Architecture, protocol design, and security model live in [docs/](./docs/).
+Architecture and the security model live in **[docs/](./docs/)**.
 
 ---
 
