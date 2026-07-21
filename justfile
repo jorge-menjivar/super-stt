@@ -73,17 +73,17 @@ clean-vendor:
 clean-dist: clean clean-vendor
 
 # Compiles with debug profile
-# Usage: just build-debug [--cuda|--cudnn]
+# Usage: just build-debug
 build-debug *args:
     cargo build {{ args }}
 
 # Compiles with release profile
-# Usage: just build-release [--cuda|--cudnn]
+# Usage: just build-release
 build-release *args:
     cargo build --release {{ args }}
 
 # Compiles release profile with vendored dependencies
-# Usage: just build-vendored [--cuda|--cudnn]
+# Usage: just build-vendored
 build-vendored *args: vendor-extract
     just build-release --frozen --offline {{ args }}
 
@@ -137,8 +137,7 @@ schema-check:
 
 # Measure code coverage over the whole workspace (requires cargo-llvm-cov).
 # --remap-path-prefix keeps report paths relative, and tests/ is excluded so
-# only product code is counted. Default (CPU) features — `--all-features` would
-# pull in `cuda`, which needs a toolkit. Build the mock WASM backends first
+# only product code is counted. Build the mock WASM backends first
 # (just build-mock-wasm-backend{,-realtime}) so the daemon transport tests run
 # instead of self-skipping. Usage: just coverage [--html]
 coverage *args:
@@ -413,7 +412,7 @@ install-applet:
     echo "-- COSMIC Settings > Desktop > Panel > Configure panel applets > Add Applet"
 
 # Install the daemon (user installation)
-# Usage: just install-daemon [--cuda|--cudnn] [--model MODEL]
+# Usage: just install-daemon [--model MODEL]
 install-daemon *args:
     #!/usr/bin/env bash
     # Build the daemon first
@@ -435,21 +434,9 @@ install-daemon *args:
         fi
     done
 
-    if [[ "{{ args }}" == *"--cudnn"* ]]; then
-        if ! just build-daemon --features "cuda,cudnn"; then
-            echo "❌ Daemon build failed or was interrupted"
-            exit 1
-        fi
-    elif [[ "{{ args }}" == *"--cuda"* ]]; then
-        if ! just build-daemon --features "cuda"; then
-            echo "❌ Daemon build failed or was interrupted"
-            exit 1
-        fi
-    else
-        if ! just build-daemon; then
-            echo "❌ Daemon build failed or was interrupted"
-            exit 1
-        fi
+    if ! just build-daemon; then
+        echo "❌ Daemon build failed or was interrupted"
+        exit 1
     fi
 
     # Check if binary exists
@@ -602,10 +589,9 @@ install-daemon *args:
     systemctl --user enable {{ service_name }}
 
 # Install daemon, settings app, and CLI
-# Usage: just install [--cuda|--cudnn] [--model MODEL]
+# Usage: just install [--model MODEL]
 install *args:
     #!/usr/bin/env bash
-    # Check if cuDNN or CUDA is requested and call commands with the right args
     if ! just install-daemon {{ args }}; then
         echo "❌ Daemon installation failed"
         exit 1
@@ -711,7 +697,7 @@ setup-cosmic-shortcut:
     fi
 
 # Install everything (daemon, app, and COSMIC applet)
-# Usage: just install-all [--cuda|--cudnn] [--model MODEL]
+# Usage: just install-all [--model MODEL]
 install-all *args:
     #!/usr/bin/env bash
     if ! just install {{ args }}; then
