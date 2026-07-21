@@ -68,10 +68,11 @@ jobs:
     strategy:
       matrix:
         include:
+          # Pinned to 22.04 (glibc 2.35) for broad binary compatibility.
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
+            runner: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-22.04-arm
 
     runs-on: ${{ matrix.runner }}
 
@@ -131,13 +132,14 @@ jobs:
     strategy:
       matrix:
         include:
-          # x86_64 and aarch64, both native (no cross). CPU only.
+          # Native builds (no cross), pinned to 22.04 (glibc 2.35) so the
+          # binaries run on older distros, not just the newest. CPU only.
           - target: x86_64-unknown-linux-gnu
             suffix: cpu
-            runner: ubuntu-latest
+            runner: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
             suffix: cpu
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-22.04-arm
 
     runs-on: ${{ matrix.runner }}
 
