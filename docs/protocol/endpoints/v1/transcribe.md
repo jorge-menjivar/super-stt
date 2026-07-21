@@ -120,9 +120,17 @@ when a capture is already in progress.
 | 400  | `stream_realtime_with_audio_data`  | Request carried both `audio_data` and `stream_realtime: true`           |
 | 401  | `invalid_session`                  | Token unknown / expired / `exe_changed` — re-auth and retry             |
 | 403  | `scope_denied`                     | Token lacks the `transcribe` scope                                      |
+| 409  | `model_not_loaded`                 | No model is loaded, so no transcription is possible; load one via `POST /active_model` and retry |
 | 409  | `recording_in_progress`            | A daemon-mic capture was already running; check `busy` on `/status` and call `/transcribe/stop` instead |
 | 429  | `rate_limited`                     | Per-client rate limit hit; back off and retry                           |
 | 503  | `connection_rejected`              | Server refused the connection                                           |
+
+When the request set `write_mode: true`, a failure also types a short fixed
+notice into the focused window — for example `[Super STT: no model loaded]` —
+because a write-mode client is looking at a text field rather than at this
+response. The notice is a fixed daemon-authored string; backend-supplied error
+detail is never typed. The failure is still reported normally here and via the
+`error` SSE event, with an empty transcription.
 
 Once an SSE response has started (`200 text/event-stream`), late
 errors arrive as an in-stream `event: error` block followed by the
