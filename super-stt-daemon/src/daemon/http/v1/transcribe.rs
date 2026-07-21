@@ -337,8 +337,25 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
     // wire response is the established `409` shape below (mirroring
     // `recording_in_progress_response`) rather than whatever `handle_command`
     // itself produced.
+    //
+    // Re-check `busy` immediately before dispatching. `handle_command` routes
+    // a `record` command through `handle_record_command`, which treats an
+    // already-busy daemon as a TOGGLE and sends a stop signal to whatever
+    // recording is in flight (see `handle_record_command` in
+    // `daemon/core.rs`). The busy read above and the `model.is_none()` read
+    // just above this comment are two separate plain reads, so a legitimate
+    // recording can start (and the model can be unloaded out from under it)
+    // in the gap between them. If that happened, dispatching here would stop
+    // that unrelated in-flight recording — silently, and without telling its
+    // caller — merely because *this* request decided no model was loaded.
+    // Skip the dispatch in that case: no capture needs starting (one is
+    // already running), so nothing regresses by not calling
+    // `handle_record_internal` for this specific request; the `409` response
+    // below still stands.
     if s.daemon.model.read().await.is_none() {
-        let _ = s.daemon.handle_command(req).await;
+        if !*s.daemon.busy.read().await {
+            let _ = s.daemon.handle_command(req).await;
+        }
         return model_not_loaded_response();
     }
 

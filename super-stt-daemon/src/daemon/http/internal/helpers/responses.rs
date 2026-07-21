@@ -97,10 +97,17 @@ pub(crate) fn recording_in_progress_response() -> Response {
 /// the documented `409` is actually reachable
 /// (`docs/protocol/endpoints/v1/transcribe.md`). Load a model via
 /// `POST /active_model` and retry.
+///
+/// Carries `error_code: "model_not_loaded"` so this shape agrees with the
+/// pre-captured `audio_data` path's `409` for the same condition (built via
+/// `DaemonResponse::error_with_code(ErrorCode::ModelNotLoaded, ..)`) — both
+/// are the same documented error and must expose the same stable,
+/// machine-readable identifier (`docs/protocol/transport.md`).
 pub(crate) fn model_not_loaded_response() -> Response {
     let body = serde_json::json!({
-        "status":  "error",
-        "message": "model_not_loaded",
+        "status":     "error",
+        "error_code": "model_not_loaded",
+        "message":    "model_not_loaded",
     });
     (
         StatusCode::CONFLICT,
