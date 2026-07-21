@@ -118,6 +118,7 @@ async fn type_notice_leaves_transcript_state_untouched() {
 
     typer.type_notice(notice::TRANSCRIPTION_FAILED).await;
 
-    assert_eq!(typer.last_transcription_for_test(), "");
-    assert_eq!(typer.prev_text_for_test(), "");
+    assert_eq!(typer.state.last_transcription, "");
+    assert_eq!(typer.state.prev_text, "");
+    assert_eq!(typer.state.full_session_text, "");
 }

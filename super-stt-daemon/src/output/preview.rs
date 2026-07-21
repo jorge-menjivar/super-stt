@@ -20,12 +20,24 @@ pub(crate) fn is_unsafe_to_type(c: char) -> bool {
         || matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')
 }
 
+/// Strip every character [`is_unsafe_to_type`] flags. The single choke point
+/// untrusted text must cross before it can reach the keyboard simulator
+/// (audit 2 Tier 3 #8): both backend preview/final text (via
+/// [`preprocess_text`]) and the fixed failure notices
+/// ([`Typer::type_notice`](crate::output::typer::Typer::type_notice)) route
+/// through this function rather than each re-implementing the filter, so the
+/// property holds structurally instead of by convention.
+#[must_use]
+pub(crate) fn sanitize_for_typing(text: &str) -> String {
+    text.chars().filter(|&c| !is_unsafe_to_type(c)).collect()
+}
+
 /// Preprocess text - sanitize, normalize, remove ellipses, capitalize
 #[must_use]
 pub(crate) fn preprocess_text(text: &str, is_preview: bool) -> String {
     // Strip characters that must never be typed into the focused window before
     // any other processing (audit 2 Tier 3 #8).
-    let sanitized: String = text.chars().filter(|&c| !is_unsafe_to_type(c)).collect();
+    let sanitized: String = sanitize_for_typing(text);
 
     // Remove leading whitespaces
     let mut text = sanitized.trim_start().to_string();

@@ -6,7 +6,7 @@
 
 use crate::output::keyboard::Simulator;
 use crate::output::preview::{
-    find_common_prefix, find_tail_match_in_text, is_unsafe_to_type, preprocess_text,
+    find_common_prefix, find_tail_match_in_text, preprocess_text, sanitize_for_typing,
 };
 use log::{debug, info, warn};
 
@@ -316,26 +316,17 @@ impl Typer {
     /// space — that a fixed marker must not inherit. A notice is typed verbatim
     /// and leaves session state alone.
     ///
-    /// Routed through the same `is_unsafe_to_type` filter as every other write
-    /// path (audit 2 Tier 3 #8). The callers pass constants, so this is a no-op
-    /// today; it is here so the property holds by construction.
+    /// Routed through the same [`sanitize_for_typing`] choke point as every
+    /// other write path (audit 2 Tier 3 #8). The callers pass constants, so
+    /// this is a no-op today; it is here so the property holds by
+    /// construction.
     pub async fn type_notice(&mut self, notice: &str) {
-        let sanitized: String = notice.chars().filter(|&c| !is_unsafe_to_type(c)).collect();
+        let sanitized = sanitize_for_typing(notice);
         if let Err(e) = self.keyboard_simulator.type_text(&sanitized).await {
             warn!("Failed to type notice: {e}");
         } else {
             info!("Typed failure notice: {sanitized}");
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn last_transcription_for_test(&self) -> &str {
-        &self.state.last_transcription
-    }
-
-    #[cfg(test)]
-    pub(crate) fn prev_text_for_test(&self) -> &str {
-        &self.state.prev_text
     }
 
     /// Apply text update to screen (common logic)

@@ -90,6 +90,26 @@ pub(crate) fn recording_in_progress_response() -> Response {
         .into_response()
 }
 
+/// Pre-built `409 model_not_loaded` JSON response for the `/v1/transcribe`
+/// handler's daemon-mic paths. Mirrors [`recording_in_progress_response`]
+/// (same shape, same literal identifier as `message`): returned before the
+/// `202`/`200 text/event-stream` envelope below would otherwise commit, so
+/// the documented `409` is actually reachable
+/// (`docs/protocol/endpoints/v1/transcribe.md`). Load a model via
+/// `POST /active_model` and retry.
+pub(crate) fn model_not_loaded_response() -> Response {
+    let body = serde_json::json!({
+        "status":  "error",
+        "message": "model_not_loaded",
+    });
+    (
+        StatusCode::CONFLICT,
+        [("content-type", "application/json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
 pub(crate) fn auth_err(status: StatusCode, message: &str, reason: &str) -> Response {
     error_response(status, message, reason)
 }

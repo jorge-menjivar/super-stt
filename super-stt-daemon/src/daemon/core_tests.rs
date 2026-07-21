@@ -1298,8 +1298,10 @@ async fn handle_transcribe_reports_backend_failure_as_error() {
     );
 }
 
-/// With no model loaded, the one-shot path returns an error response naming
-/// the missing model.
+/// With no model loaded, the one-shot path returns a coded error response —
+/// `ErrorCode::ModelNotLoaded`, so an HTTP caller of the pre-captured
+/// `audio_data` path gets the same `409 model_not_loaded` as the daemon-mic
+/// paths (see docs/protocol/endpoints/v1/transcribe.md).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn handle_transcribe_errors_when_no_model_loaded() {
     let daemon = test_daemon().await;
@@ -1309,14 +1311,8 @@ async fn handle_transcribe_errors_when_no_model_loaded() {
         .await;
 
     assert_eq!(resp.status, "error");
-    assert!(
-        resp.message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Model not loaded"),
-        "error message should name the missing model, got: {:?}",
-        resp.message
-    );
+    assert_eq!(resp.error_code, Some(ErrorCode::ModelNotLoaded));
+    assert_eq!(resp.message.as_deref(), Some("model_not_loaded"));
 }
 
 /// The whole point of the preflight: no capture, no beeps, and the user is told

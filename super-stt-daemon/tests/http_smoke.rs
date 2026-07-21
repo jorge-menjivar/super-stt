@@ -186,7 +186,12 @@ async fn http_endpoints_respond() {
     );
 
     // --- POST /transcribe (fire-and-forget) ---
-    let resp = http_client::transcribe(
+    // Hermetic test harness => no backend installed => no model loaded, so
+    // the daemon now fails fast with `409 model_not_loaded` before
+    // committing to `202` (see docs/protocol/endpoints/v1/transcribe.md).
+    // Tolerate either that typed error or (should a backend somehow be
+    // present) a normal `202`/`200` response.
+    let result = http_client::transcribe(
         http_socket.clone(),
         &token,
         TranscribeOptions {
@@ -196,13 +201,18 @@ async fn http_endpoints_respond() {
             stream_realtime: false,
         },
     )
-    .await
-    .expect("transcribe should respond");
-    assert!(
-        resp.status == "success" || resp.status == "error",
-        "transcribe returned unknown status: {:?}",
-        resp.status
-    );
+    .await;
+    match result {
+        Ok(resp) => assert!(
+            resp.status == "success" || resp.status == "error",
+            "transcribe returned unknown status: {:?}",
+            resp.status
+        ),
+        Err(e) => assert!(
+            e.to_string().contains("model_not_loaded"),
+            "expected model_not_loaded, got: {e}"
+        ),
+    }
 
     // --- POST /transcribe/stop ---
     let resp = http_client::transcribe_stop(http_socket.clone(), &token)

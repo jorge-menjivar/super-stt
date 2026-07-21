@@ -2,7 +2,9 @@
 use crate::daemon::http::internal::helpers::dispatch::{
     build_request, build_transcribe_request, dispatch, json_response,
 };
-use crate::daemon::http::internal::helpers::responses::recording_in_progress_response;
+use crate::daemon::http::internal::helpers::responses::{
+    model_not_loaded_response, recording_in_progress_response,
+};
 use crate::daemon::http::state::AppState;
 // Only the wasm-backends realtime handler references the daemon type / bare
 // `Response`; gated so the subprocess-only and no-backend builds stay warning-clean.
@@ -270,7 +272,9 @@ async fn transcribe_precaptured(s: &AppState, body: serde_json::Value) -> axum::
 ///
 /// On the SSE paths a daemon-side failure arrives as a single `error` frame and
 /// closing the connection stops the recording. A start while already recording
-/// returns `409 recording_in_progress`.
+/// returns `409 recording_in_progress`; a start with no model loaded returns
+/// `409 model_not_loaded` (both mic sub-paths, before the `202`/SSE envelope
+/// commits).
 pub(crate) async fn transcribe(
     State(s): State<AppState>,
     body: Option<axum::Json<serde_json::Value>>,
@@ -294,6 +298,9 @@ pub(crate) async fn transcribe(
 
 /// Daemon-mic capture path. Response shape follows the `wait`/`stream_realtime`
 /// controls (see `docs/protocol/endpoints/v1/transcribe.md`):
+/// - already busy → `409 recording_in_progress`; no model loaded → `409
+///   model_not_loaded` — both checked (in that order) before either shape
+///   below commits.
 /// - `wait:false` → `202 {message:"Recording started"}`, recording detaches and
 ///   runs in the background (stop via `POST /transcribe/stop`).
 /// - `wait:true` → `200 text/event-stream`, ending with `done`/`error`;
@@ -316,6 +323,23 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
     // `/v1/transcribe/stop` to end an in-flight capture.
     if *s.daemon.busy.read().await {
         return recording_in_progress_response();
+    }
+
+    // Fail fast when no model is loaded: `handle_record_internal`'s own
+    // preflight (further down the stack) rejects this the same way
+    // regardless of `wait`, but only after the `202`/SSE envelope below has
+    // already committed — which is why `409 model_not_loaded` was previously
+    // unreachable here (see docs/protocol/endpoints/v1/transcribe.md). This is
+    // a plain read racing that authoritative preflight, same trade-off as the
+    // busy check above. Dispatch the real command anyway (cheap: no model
+    // means no capture starts) so a write-mode request's on-screen failure
+    // notice still fires exactly as it would deeper in the stack; only the
+    // wire response is the established `409` shape below (mirroring
+    // `recording_in_progress_response`) rather than whatever `handle_command`
+    // itself produced.
+    if s.daemon.model.read().await.is_none() {
+        let _ = s.daemon.handle_command(req).await;
+        return model_not_loaded_response();
     }
 
     // Fire-and-forget: detach the recording from this connection and return

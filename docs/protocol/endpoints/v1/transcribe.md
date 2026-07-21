@@ -129,8 +129,10 @@ When the request set `write_mode: true`, a failure also types a short fixed
 notice into the focused window — for example `[Super STT: no model loaded]` —
 because a write-mode client is looking at a text field rather than at this
 response. The notice is a fixed daemon-authored string; backend-supplied error
-detail is never typed. The failure is still reported normally here and via the
-`error` SSE event, with an empty transcription.
+detail is never typed. The failure is still reported normally — as the direct
+error response (e.g. `409 model_not_loaded`, checked and answered before the
+`202`/SSE envelope for a daemon-mic capture commits) or, once an SSE stream has
+started, via the `error` event — with an empty transcription.
 
 Once an SSE response has started (`200 text/event-stream`), late
 errors arrive as an in-stream `event: error` block followed by the
