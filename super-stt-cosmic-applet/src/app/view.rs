@@ -53,14 +53,17 @@ impl SuperSttApplet {
 
             self.core.applet.autosize_window(working_element).into()
         } else {
-            let icon_bytes = if !(self.daemon_state == DaemonConnectionState::Connected
+            // The error glyph is monochrome line art and must follow the panel
+            // theme to stay legible; the normal logo is full-color artwork that
+            // a theme tint would flatten into a silhouette.
+            let (icon_bytes, symbolic) = if !(self.daemon_state == DaemonConnectionState::Connected
                 || self.daemon_state == DaemonConnectionState::Connecting)
             {
-                ERROR_ICON
+                (ERROR_ICON, true)
             } else if self.config.ui.show_icon {
-                NORMAL_ICON
+                (NORMAL_ICON, false)
             } else {
-                TRANSPARENT_ICON
+                (TRANSPARENT_ICON, false)
             };
 
             let (applet_padding, _) = self.core.applet.suggested_padding(false);
@@ -69,6 +72,7 @@ impl SuperSttApplet {
 
             let icon_button = transparent_icon_button(
                 icon_bytes,
+                symbolic,
                 visualization_size,
                 applet_padding,
                 icon_alignment,
@@ -124,8 +128,17 @@ impl SuperSttApplet {
     }
 }
 
+/// Build the panel button wrapping `icon_bytes`.
+///
+/// `symbolic` selects how the SVG is colored. When set, the icon is recolored
+/// wholesale to the panel's on-background color, which suits monochrome line
+/// art. When unset, the SVG renders in its own colors: an explicit
+/// `svg::Style::color` is applied over the entire image regardless of the
+/// handle's symbolic flag, so full-color artwork must not be given a class at
+/// all or it collapses into a flat silhouette.
 fn transparent_icon_button<'a>(
     icon_bytes: &'static [u8],
+    symbolic: bool,
     visualization_size: Size,
     applet_padding: u16,
     alignment: Alignment,
@@ -133,19 +146,22 @@ fn transparent_icon_button<'a>(
     let icon_size =
         (visualization_size.height.min(visualization_size.width) * 0.6).clamp(16.0, 32.0);
 
+    let mut icon = widget::icon(widget::icon::from_svg_bytes(icon_bytes))
+        .width(Length::Fixed(icon_size))
+        .height(Length::Fixed(icon_size));
+
+    if symbolic {
+        icon = icon.class(theme::Svg::Custom(Rc::new(|theme| {
+            iced_widget::svg::Style {
+                color: Some(theme.cosmic().background.on.into()),
+            }
+        })));
+    }
+
     button::custom(
-        layer_container(
-            widget::icon(widget::icon::from_svg_bytes(icon_bytes))
-                .class(theme::Svg::Custom(Rc::new(|theme| {
-                    iced_widget::svg::Style {
-                        color: Some(theme.cosmic().background.on.into()),
-                    }
-                })))
-                .width(Length::Fixed(icon_size))
-                .height(Length::Fixed(icon_size)),
-        )
-        .align_x(alignment)
-        .center_y(Length::Fill),
+        layer_container(icon)
+            .align_x(alignment)
+            .center_y(Length::Fill),
     )
     .width(Length::Fixed(
         visualization_size.width + 2f32 * f32::from(applet_padding),

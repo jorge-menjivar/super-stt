@@ -27,9 +27,9 @@ pub const STOP: &[u8] = include_bytes!("../../resources/icons/phosphor/stop.svg"
 pub const GIT_BRANCH: &[u8] = include_bytes!("../../resources/icons/phosphor/git-branch.svg");
 pub const BOOKS: &[u8] = include_bytes!("../../resources/icons/phosphor/books.svg");
 
-/// The Super STT app logo (mic-with-"S"), themed via `currentColor`. Not a
-/// Phosphor glyph, so it lives at the app resources root rather than the
-/// phosphor set; shown beside the app name in the window header.
+/// The Super STT app logo, full-color artwork. Not a Phosphor glyph, so it
+/// lives at the app resources root rather than the phosphor set; shown beside
+/// the app name in the window header.
 pub const APP_LOGO: &[u8] = include_bytes!("../../resources/super-stt-icon.svg");
 
 /// Build a themable [`Icon`] from one of the embedded Phosphor SVGs.
@@ -104,16 +104,14 @@ pub fn phosphor_tinted(
     )
 }
 
-/// The Super STT logo ([`APP_LOGO`]) rendered at `size` px, tinted to `color`.
-/// The "S" stays a transparent cutout (its mask drives the alpha, which the
-/// symbolic recolor preserves); everything else takes `color`.
-pub fn app_logo(
-    size: f32,
-    color: cosmic::iced::Color,
-) -> cosmic::widget::Svg<'static, cosmic::Theme> {
-    tinted_svg(
-        APP_LOGO,
-        size,
-        cosmic::theme::Svg::custom(move |_| svg::Style { color: Some(color) }),
-    )
+/// The Super STT logo ([`APP_LOGO`]) rendered at `size` px in its own colors.
+///
+/// The artwork is multi-color, so it is deliberately neither marked symbolic
+/// nor given a tinting class: an explicit `svg::Style::color` is applied to the
+/// whole image regardless of the symbolic flag, which would flatten the logo to
+/// a single-color silhouette.
+pub fn app_logo(size: f32) -> cosmic::widget::Svg<'static, cosmic::Theme> {
+    cosmic::widget::Svg::<cosmic::Theme>::new(svg::Handle::from_memory(APP_LOGO))
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
 }
