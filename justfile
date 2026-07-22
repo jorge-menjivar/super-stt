@@ -12,16 +12,21 @@ applet_full_desktop_file_name := 'super-stt-cosmic-applet-full.desktop'
 applet_left_desktop_file_name := 'super-stt-cosmic-applet-left.desktop'
 applet_right_desktop_file_name := 'super-stt-cosmic-applet-right.desktop'
 
-# Installation paths
+# Installation paths — root-owned under /usr/local, matching the
+# release installers, so install/uninstall recipes escalate with sudo
+# for the copy/remove steps. `systemctl --user` calls stay unprivileged
+# (the daemon runs as the user; only the files are root-owned).
 home_dir := env('HOME')
-user_bin_dir := home_dir / '.local' / 'bin'
-user_systemd_dir := home_dir / '.config' / 'systemd' / 'user'
+install_prefix := '/usr/local'
+bin_dir := install_prefix / 'bin'
+# systemd *user* unit, but installed root-owned.
+systemd_unit_dir := '/usr/lib/systemd/user'
 run_dir := env('XDG_RUNTIME_DIR') / 'stt'
 log_dir := home_dir / '.local' / 'share' / 'stt' / 'logs'
-user_desktop_dir := home_dir / '.local' / 'share' / 'applications'
-user_icons_dir := home_dir / '.local' / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
+desktop_dir := install_prefix / 'share' / 'applications'
+icons_dir := install_prefix / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
 # Theme root, not the leaf dir: gtk-update-icon-cache indexes a whole theme.
-user_icon_theme_dir := home_dir / '.local' / 'share' / 'icons' / 'hicolor'
+icon_theme_dir := install_prefix / 'share' / 'icons' / 'hicolor'
 
 # Binary paths
 app_src := 'target' / 'release' / app_name
@@ -30,33 +35,33 @@ cli_src := 'target' / 'release' / cli_name
 consent_src := 'target' / 'release' / consent_name
 applet_src := 'target' / 'release' / applet_name
 debug_applet_src := 'target' / 'debug' / applet_name
-app_dst := user_bin_dir / app_name
-daemon_dst := user_bin_dir / daemon_bin_name
-cli_dst := user_bin_dir / cli_name
-consent_dst := user_bin_dir / consent_name
-applet_dst := user_bin_dir / applet_name
-wrapper_dst := user_bin_dir / wrapper_name
+app_dst := bin_dir / app_name
+daemon_dst := bin_dir / daemon_bin_name
+cli_dst := bin_dir / cli_name
+consent_dst := bin_dir / consent_name
+applet_dst := bin_dir / applet_name
+wrapper_dst := bin_dir / wrapper_name
 
 # App files
 app_desktop_file_name := 'super-stt-app.desktop'
 app_desktop_file_src := 'super-stt-app' / 'resources' / app_desktop_file_name
 app_icon_src := 'super-stt-app' / 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'super-stt-app.svg'
-app_desktop_file_dst := user_desktop_dir / app_desktop_file_name
-app_icon_dst := user_icons_dir / 'super-stt-app.svg'
+app_desktop_file_dst := desktop_dir / app_desktop_file_name
+app_icon_dst := icons_dir / 'super-stt-app.svg'
 
 # Applet files
 applet_full_desktop_file_src := 'super-stt-cosmic-applet' / 'resources' / applet_full_desktop_file_name
 applet_left_desktop_file_src := 'super-stt-cosmic-applet' / 'resources' / applet_left_desktop_file_name
 applet_right_desktop_file_src := 'super-stt-cosmic-applet' / 'resources' / applet_right_desktop_file_name
 applet_icon_src := 'super-stt-cosmic-applet' / 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'super-stt-cosmic-applet.svg'
-applet_full_desktop_file_dst := user_desktop_dir / applet_full_desktop_file_name
-applet_left_desktop_file_dst := user_desktop_dir / applet_left_desktop_file_name
-applet_right_desktop_file_dst := user_desktop_dir / applet_right_desktop_file_name
-applet_icon_dst := user_icons_dir / 'super-stt-cosmic-applet.svg'
+applet_full_desktop_file_dst := desktop_dir / applet_full_desktop_file_name
+applet_left_desktop_file_dst := desktop_dir / applet_left_desktop_file_name
+applet_right_desktop_file_dst := desktop_dir / applet_right_desktop_file_name
+applet_icon_dst := icons_dir / 'super-stt-cosmic-applet.svg'
 
 # Service file
 service_file := service_name + '.service'
-service_dst := user_systemd_dir / service_file
+service_dst := systemd_unit_dir / service_file
 
 # Default recipe which runs `just build-release`
 default: build-release
@@ -229,24 +234,33 @@ run-applet *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    # Ask for sudo up front and keep the timestamp alive in the
+    # background: the build can outlast sudo's credential cache, and a
+    # password prompt buried in build output is easy to miss.
+    sudo -v
+    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
+    sudo_keepalive=$!
+    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
+
     env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build --bin {{ applet_name }} {{ args }}
 
     echo "Installing Debug Super STT COSMIC applet..."
-    mkdir -p {{ user_bin_dir }}
-    install -m755 {{ debug_applet_src }} {{ applet_dst }}
+    sudo mkdir -p {{ bin_dir }}
+    sudo install -m755 {{ debug_applet_src }} {{ applet_dst }}
 
     # Install the debug desktop entries for panel integration
-    mkdir -p {{ user_desktop_dir }}
-
     echo "Installing desktop entries for COSMIC panel integration..."
-    install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
-    install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
-    install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
+    sudo install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
+    sudo install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
+    sudo install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
 
     # Install the applet icon
-    mkdir -p {{ user_icons_dir }}
     echo "Installing applet icon..."
-    install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
+    sudo install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
+
+    # Installs are done — don't keep the sudo timestamp fresh while the
+    # panel runs in the foreground.
+    kill "$sudo_keepalive" 2>/dev/null || true
 
     cosmic-panel
 
@@ -258,24 +272,33 @@ run-applet-kill *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    # Ask for sudo up front and keep the timestamp alive in the
+    # background: the build can outlast sudo's credential cache, and a
+    # password prompt buried in build output is easy to miss.
+    sudo -v
+    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
+    sudo_keepalive=$!
+    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
+
     env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build --bin {{ applet_name }} {{ args }}
 
     echo "Installing Debug Super STT COSMIC applet..."
-    mkdir -p {{ user_bin_dir }}
-    install -m755 {{ debug_applet_src }} {{ applet_dst }}
+    sudo mkdir -p {{ bin_dir }}
+    sudo install -m755 {{ debug_applet_src }} {{ applet_dst }}
 
     # Install the debug desktop entries for panel integration
-    mkdir -p {{ user_desktop_dir }}
-
     echo "Installing desktop entries for COSMIC panel integration..."
-    install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
-    install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
-    install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
+    sudo install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
+    sudo install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
+    sudo install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
 
     # Install the applet icon
-    mkdir -p {{ user_icons_dir }}
     echo "Installing applet icon..."
-    install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
+    sudo install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
+
+    # Installs are done — don't keep the sudo timestamp fresh while the
+    # panel runs in the foreground.
+    kill "$sudo_keepalive" 2>/dev/null || true
 
     # Restart cosmic panel for changes to take effect
     pkill -f cosmic-panel || true
@@ -361,9 +384,17 @@ check-wit-sync:
 gen-schemas:
     cargo run -p super-stt-registry-types --features schema --bin gen_schemas
 
-# Install the app (user-local installation)
+# Install the app (system installation under /usr/local)
 install-app:
     #!/usr/bin/env bash
+    # Ask for sudo up front and keep the timestamp alive in the
+    # background: the build can outlast sudo's credential cache, and a
+    # password prompt buried in build output is easy to miss.
+    sudo -v
+    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
+    sudo_keepalive=$!
+    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
+
     # Build the app first
     echo "Building app..."
     if ! just build-app; then
@@ -378,36 +409,42 @@ install-app:
     fi
 
     echo "Installing Super STT app to {{ app_dst }}"
-    mkdir -p {{ user_bin_dir }}
-    install -m755 {{ app_src }} {{ app_dst }}
+    sudo mkdir -p {{ bin_dir }}
+    sudo install -m755 {{ app_src }} {{ app_dst }}
 
     # Install the desktop entry for application menu
-    mkdir -p {{ user_desktop_dir }}
     echo "Installing desktop entry..."
-    install -Dm0644 {{ app_desktop_file_src }} {{ app_desktop_file_dst }}
+    sudo install -Dm0644 {{ app_desktop_file_src }} {{ app_desktop_file_dst }}
 
     # Install the app icon
-    mkdir -p {{ user_icons_dir }}
     echo "Installing app icon..."
-    install -Dm0644 {{ app_icon_src }} {{ app_icon_dst }}
+    sudo install -Dm0644 {{ app_icon_src }} {{ app_icon_dst }}
 
     # Update desktop database
     if command -v update-desktop-database &> /dev/null; then
-        update-desktop-database {{ user_desktop_dir }} 2>/dev/null || true
+        sudo update-desktop-database {{ desktop_dir }} 2>/dev/null || true
     fi
 
     # Update icon cache
     if command -v gtk-update-icon-cache &> /dev/null; then
-        gtk-update-icon-cache -f -t {{ user_icon_theme_dir }} 2>/dev/null || true
+        sudo gtk-update-icon-cache -f -t {{ icon_theme_dir }} 2>/dev/null || true
     fi
 
     echo "✓ Super STT app installed: {{ app_dst }}"
     echo "✓ Desktop entry installed: {{ app_desktop_file_dst }}"
     echo "✓ App icon installed: {{ app_icon_dst }}"
 
-# Install the cosmic applet (user-local installation)
+# Install the cosmic applet (system installation under /usr/local)
 install-applet:
     #!/usr/bin/env bash
+    # Ask for sudo up front and keep the timestamp alive in the
+    # background: the build can outlast sudo's credential cache, and a
+    # password prompt buried in build output is easy to miss.
+    sudo -v
+    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
+    sudo_keepalive=$!
+    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
+
     # Build the cosmic applet first
     echo "Building COSMIC applet..."
     if ! just build-applet; then
@@ -422,30 +459,27 @@ install-applet:
     fi
 
     echo "Installing Super STT COSMIC applet..."
-    mkdir -p {{ user_bin_dir }}
-    install -m755 {{ applet_src }} {{ applet_dst }}
+    sudo mkdir -p {{ bin_dir }}
+    sudo install -m755 {{ applet_src }} {{ applet_dst }}
 
     # Install the desktop entries for panel integration
-    mkdir -p {{ user_desktop_dir }}
-
     echo "Installing desktop entries for COSMIC panel integration..."
-    install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
-    install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
-    install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
+    sudo install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
+    sudo install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
+    sudo install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
 
     # Install the applet icon
-    mkdir -p {{ user_icons_dir }}
     echo "Installing applet icon..."
-    install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
+    sudo install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
 
     # Refresh the desktop/icon caches so the panel picks up the new applet
     # entries without a relogin (mirrors install-app).
     if command -v update-desktop-database &> /dev/null; then
-        update-desktop-database {{ user_desktop_dir }} 2>/dev/null || true
+        sudo update-desktop-database {{ desktop_dir }} 2>/dev/null || true
     fi
 
     if command -v gtk-update-icon-cache &> /dev/null; then
-        gtk-update-icon-cache -f -t {{ user_icon_theme_dir }} 2>/dev/null || true
+        sudo gtk-update-icon-cache -f -t {{ icon_theme_dir }} 2>/dev/null || true
     fi
 
     echo "✓ COSMIC applet installed: {{ applet_dst }}"
@@ -457,10 +491,20 @@ install-applet:
     echo "🚀 Ready to use! The applet can now be added to your COSMIC panel through:"
     echo "-- COSMIC Settings > Desktop > Panel > Configure panel applets > Add Applet"
 
-# Install the daemon (user installation)
+# Install the daemon (system installation under /usr/local; runs as a
+# systemd --user service)
 # Usage: just install-daemon [--model MODEL]
 install-daemon *args:
     #!/usr/bin/env bash
+    # Ask for sudo up front and keep the timestamp alive in the
+    # background: the builds (daemon, consent, CLI) can outlast sudo's
+    # credential cache, and a password prompt buried in build output is
+    # easy to miss.
+    sudo -v
+    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
+    sudo_keepalive=$!
+    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
+
     # Build the daemon first
     echo "Building daemon..."
 
@@ -495,8 +539,8 @@ install-daemon *args:
 
     # Install binary
     echo "Installing daemon binary to {{ daemon_dst }}"
-    mkdir -p {{ user_bin_dir }}
-    install -m755 {{ daemon_src }} {{ daemon_dst }}
+    sudo mkdir -p {{ bin_dir }}
+    sudo install -m755 {{ daemon_src }} {{ daemon_dst }}
 
     # Build + install the consent helper alongside the daemon. The
     # daemon's `locate_consent_helper` only looks for it next to its
@@ -512,7 +556,7 @@ install-daemon *args:
         exit 1
     fi
     echo "Installing consent helper to {{ consent_dst }}"
-    install -m755 {{ consent_src }} {{ consent_dst }}
+    sudo install -m755 {{ consent_src }} {{ consent_dst }}
 
     # Install the CLI alongside the daemon. The `stt` wrapper created below
     # execs the CLI (client commands like `record`/`stop` live there, not in
@@ -526,16 +570,21 @@ install-daemon *args:
     echo "Creating user directories..."
     mkdir -p {{ run_dir }}
     mkdir -p {{ log_dir }}
-    mkdir -p {{ user_systemd_dir }}
 
-    # Copy the service file from the repo
-    echo "Installing user systemd service file..."
-    cp super-stt-daemon/systemd/{{ service_file }} {{ service_dst }}
+    # Install the unit root-owned. Its bare ExecStart name resolves via
+    # systemd's fixed search path, which covers {{ bin_dir }}.
+    echo "Installing systemd user unit..."
+    sudo install -Dm0644 super-stt-daemon/systemd/{{ service_file }} {{ service_dst }}
+
+    # A unit left in ~/.config/systemd/user by an older install takes
+    # precedence over the packaged one — remove it or systemd keeps
+    # launching the stale ~/.local/bin binary.
+    rm -f "$HOME/.config/systemd/user/{{ service_file }}"
 
     # Add model parameter to ExecStart if specified
     if [[ -n "$model" ]]; then
         echo "Configuring daemon to use model: $model"
-        sed -i "s|ExecStart=%h/.local/bin/super-stt-daemon|ExecStart=%h/.local/bin/super-stt-daemon --model $model|" {{ service_dst }}
+        sudo sed -i "s|^ExecStart={{ daemon_bin_name }}$|ExecStart={{ daemon_bin_name }} --model $model|" {{ service_dst }}
     fi
 
     # Create the `stt` convenience wrapper (for keyboard shortcuts like
@@ -549,12 +598,14 @@ install-daemon *args:
     # socket file is owned `user:user-primary-group` with 0660, so the
     # owner (same user) can access regardless of group membership.
     echo "Creating wrapper script at {{ wrapper_dst }}"
-    echo '#!/bin/bash' > {{ wrapper_dst }}
-    echo '# Super STT convenience wrapper — invokes super-stt-cli directly.' >> {{ wrapper_dst }}
-    echo '# Used by keyboard shortcuts (e.g. Super+Space → "stt record --write").' >> {{ wrapper_dst }}
-    echo '' >> {{ wrapper_dst }}
-    echo 'exec {{ cli_dst }} "$@"' >> {{ wrapper_dst }}
-    chmod +x {{ wrapper_dst }}
+    wrapper_tmp=$(mktemp)
+    echo '#!/bin/bash' > "$wrapper_tmp"
+    echo '# Super STT convenience wrapper — invokes super-stt-cli directly.' >> "$wrapper_tmp"
+    echo '# Used by keyboard shortcuts (e.g. Super+Space → "stt record --write").' >> "$wrapper_tmp"
+    echo '' >> "$wrapper_tmp"
+    echo 'exec {{ cli_dst }} "$@"' >> "$wrapper_tmp"
+    sudo install -m755 "$wrapper_tmp" {{ wrapper_dst }}
+    rm -f "$wrapper_tmp"
 
     # Setup COSMIC keyboard shortcut if available
     # Setup COSMIC keyboard shortcut
@@ -567,7 +618,7 @@ install-daemon *args:
 
         if [[ ! "$add_shortcut" =~ ^[Nn]$ ]]; then
             mkdir -p "$COSMIC_SHORTCUTS_DIR"
-            stt_command="{{ user_bin_dir }}/stt record --write"
+            stt_command="{{ bin_dir }}/stt record --write"
 
             if [ -f "$COSMIC_SHORTCUTS_FILE" ] && [ -s "$COSMIC_SHORTCUTS_FILE" ]; then
                 if ! grep -q "Super STT" "$COSMIC_SHORTCUTS_FILE"; then
@@ -589,7 +640,6 @@ install-daemon *args:
                         echo '}' >> "$temp_file"
                         mv "$temp_file" "$COSMIC_SHORTCUTS_FILE"
                         rm -f "$COSMIC_SHORTCUTS_FILE.backup"
-                        rm -f "$COSMIC_SHORTCUTS_FILE.backup"
                     fi
                 fi
             else
@@ -606,18 +656,6 @@ install-daemon *args:
         fi
     fi || true
 
-    # Update PATH in user's shell config
-    shell_config="$HOME/.bashrc"
-    if [[ "$SHELL" == *"zsh"* ]]; then
-        shell_config="$HOME/.zshrc"
-    fi
-
-    if ! grep -q "{{ user_bin_dir }}" "$shell_config" 2>/dev/null; then
-        echo "Adding {{ user_bin_dir }} to PATH in $shell_config"
-        echo 'export PATH="{{ user_bin_dir }}:$PATH"' >> "$shell_config"
-        echo "⚠️  Restart your shell or run: source $shell_config"
-    fi
-
     echo "✓ Super STT installed to {{ daemon_dst }}"
     echo "✓ Wrapper script created at {{ wrapper_dst }}"
     echo "✓ Convenience shortcut 'stt' created"
@@ -631,7 +669,10 @@ install-daemon *args:
 
     echo "✓ Daemon installed successfully as user service!"
     echo ""
-    systemctl --user start {{ service_name }}
+    # `restart`, not `start`: start is a no-op on an already-running
+    # unit, which would leave a freshly installed binary unused (the old
+    # process keeps running from the deleted inode).
+    systemctl --user restart {{ service_name }}
     systemctl --user enable {{ service_name }}
 
 # Install daemon, settings app, and CLI
@@ -672,7 +713,7 @@ setup-cosmic-shortcut:
     mkdir -p "$COSMIC_SHORTCUTS_DIR"
 
     # Use the full path to the stt wrapper for reliability
-    stt_command="{{ user_bin_dir }}/stt record --write"
+    stt_command="{{ bin_dir }}/stt record --write"
 
     # Check if shortcuts file exists and has content
     if [ -f "$COSMIC_SHORTCUTS_FILE" ] && [ -s "$COSMIC_SHORTCUTS_FILE" ]; then
@@ -768,18 +809,18 @@ install-all *args:
 uninstall-app:
     #!/usr/bin/env bash
     echo "Uninstalling Super STT App..."
-    rm -f {{ app_dst }}
-    rm -f {{ app_desktop_file_dst }}
-    rm -f {{ app_icon_dst }}
+    sudo rm -f {{ app_dst }}
+    sudo rm -f {{ app_desktop_file_dst }}
+    sudo rm -f {{ app_icon_dst }}
 
     # Update desktop database
     if command -v update-desktop-database &> /dev/null; then
-        update-desktop-database {{ user_desktop_dir }} 2>/dev/null || true
+        sudo update-desktop-database {{ desktop_dir }} 2>/dev/null || true
     fi
 
     # Update icon cache
     if command -v gtk-update-icon-cache &> /dev/null; then
-        gtk-update-icon-cache -f -t {{ user_icon_theme_dir }} 2>/dev/null || true
+        sudo gtk-update-icon-cache -f -t {{ icon_theme_dir }} 2>/dev/null || true
     fi
 
     echo "✓ Super STT App uninstalled"
@@ -790,12 +831,12 @@ uninstall-app:
 uninstall-applet:
     #!/usr/bin/env bash
     echo "Uninstalling Super STT COSMIC applet..."
-    rm -f {{ applet_dst }}
-    rm -f {{ applet_full_desktop_file_dst }}
-    rm -f {{ applet_left_desktop_file_dst }}
-    rm -f {{ applet_right_desktop_file_dst }}
+    sudo rm -f {{ applet_dst }}
+    sudo rm -f {{ applet_full_desktop_file_dst }}
+    sudo rm -f {{ applet_left_desktop_file_dst }}
+    sudo rm -f {{ applet_right_desktop_file_dst }}
     # Remove the applet icon
-    rm -f {{ applet_icon_dst }}
+    sudo rm -f {{ applet_icon_dst }}
     echo "✓ COSMIC applet uninstalled"
     echo "✓ Desktop entries removed"
     echo "✓ Applet icon removed"
@@ -809,18 +850,19 @@ uninstall-daemon:
     systemctl --user stop {{ service_name }} || true
     systemctl --user disable {{ service_name }} || true
 
-    # Remove service file
-    rm -f {{ service_dst }}
+    # Remove service file (also any legacy user-local copy)
+    sudo rm -f {{ service_dst }}
+    rm -f "$HOME/.config/systemd/user/{{ service_file }}"
 
     # Remove binary
-    rm -f {{ daemon_dst }}
+    sudo rm -f {{ daemon_dst }}
 
     # Remove the co-located consent helper — without it the daemon
     # would deny every auth_request, so it's part of the daemon's
     # install contract.
-    rm -f {{ consent_dst }}
+    sudo rm -f {{ consent_dst }}
 
-    rm -f {{ wrapper_dst }}
+    sudo rm -f {{ wrapper_dst }}
 
     # Remove directories (but preserve logs)
     rm -rf {{ run_dir }}
@@ -834,6 +876,14 @@ uninstall-daemon:
 # Install just the consent helper (normally bundled with install-daemon)
 install-consent:
     #!/usr/bin/env bash
+    # Ask for sudo up front and keep the timestamp alive in the
+    # background: the build can outlast sudo's credential cache, and a
+    # password prompt buried in build output is easy to miss.
+    sudo -v
+    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
+    sudo_keepalive=$!
+    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
+
     if ! just build-consent; then
         echo "❌ Consent helper build failed"
         exit 1
@@ -842,20 +892,28 @@ install-consent:
         echo "❌ Consent helper binary not found at {{ consent_src }}"
         exit 1
     fi
-    mkdir -p {{ user_bin_dir }}
-    install -m755 {{ consent_src }} {{ consent_dst }}
+    sudo mkdir -p {{ bin_dir }}
+    sudo install -m755 {{ consent_src }} {{ consent_dst }}
     echo "✓ Consent helper installed: {{ consent_dst }}"
 
 # Uninstall the consent helper.
 uninstall-consent:
     #!/usr/bin/env bash
     echo "Uninstalling Super STT consent helper..."
-    rm -f {{ consent_dst }}
+    sudo rm -f {{ consent_dst }}
     echo "✓ Consent helper uninstalled"
 
-# Install the CLI binary (user-local installation)
+# Install the CLI binary (system installation under /usr/local)
 install-cli:
     #!/usr/bin/env bash
+    # Ask for sudo up front and keep the timestamp alive in the
+    # background: the build can outlast sudo's credential cache, and a
+    # password prompt buried in build output is easy to miss.
+    sudo -v
+    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
+    sudo_keepalive=$!
+    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
+
     echo "Building CLI..."
     if ! just build-cli; then
         echo "❌ CLI build failed or was interrupted"
@@ -867,20 +925,20 @@ install-cli:
         exit 1
     fi
 
-    mkdir -p {{ user_bin_dir }}
-    install -m755 {{ cli_src }} {{ cli_dst }}
+    sudo mkdir -p {{ bin_dir }}
+    sudo install -m755 {{ cli_src }} {{ cli_dst }}
     echo "✓ Super STT CLI installed: {{ cli_dst }}"
 
 # Uninstall the CLI binary
 uninstall-cli:
     #!/usr/bin/env bash
     echo "Uninstalling Super STT CLI..."
-    rm -f {{ cli_dst }}
+    sudo rm -f {{ cli_dst }}
 
     # The `stt` wrapper is a thin exec of the CLI, so it is dead weight
     # without it — left in place it stays on PATH and fails at exec time
     # instead of reporting as uninstalled.
-    rm -f {{ wrapper_dst }}
+    sudo rm -f {{ wrapper_dst }}
     echo "✓ Super STT CLI uninstalled"
 
 # Uninstall daemon, app, applet, CLI, and consent helper

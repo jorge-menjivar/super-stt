@@ -39,8 +39,10 @@ BG_YELLOW='\033[43m'
 BG_RED='\033[41m'
 NC='\033[0m'
 
-# Default values
-INSTALL_PREFIX="$HOME/.local"
+# Default values. Everything installs to root-owned system paths so a
+# user-level process can't tamper with the binaries or the unit file,
+# and /usr/local/bin is on PATH everywhere — no shell-profile edits.
+INSTALL_PREFIX="/usr/local"
 GITHUB_REPO="jorge-menjivar/super-stt"
 VERSION="latest"
 INSTALL_OPTION="all"
@@ -56,15 +58,38 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 
 echo "Temp directory: $TEMP_DIR"
 
-DESKTOP_DIR="$HOME/.local/share/applications"
-ICON_DIR="$HOME/.local/share/icons"
-METAINFO_DIR="$HOME/.local/share/metainfo"
-USER_SYSTEMD_DIR="$HOME/.config/systemd/user"
+DESKTOP_DIR="$INSTALL_PREFIX/share/applications"
+ICON_DIR="$INSTALL_PREFIX/share/icons/hicolor/scalable/apps"
+ICON_THEME_DIR="$INSTALL_PREFIX/share/icons/hicolor"
+METAINFO_DIR="$INSTALL_PREFIX/share/metainfo"
+# systemd *user* units, installed root-owned so a user-level process
+# can't rewrite ExecStart to point at its own binary.
+SYSTEMD_UNIT_DIR="/usr/lib/systemd/user"
+
+# Legacy (pre-/usr/local) per-user install locations. Cleaned up on
+# upgrade: ~/.local/bin usually precedes /usr/local/bin on PATH and a
+# stale copy would shadow the fresh install.
+LEGACY_BIN_DIR="$HOME/.local/bin"
+LEGACY_DESKTOP_DIR="$HOME/.local/share/applications"
+LEGACY_METAINFO_DIR="$HOME/.local/share/metainfo"
+LEGACY_SYSTEMD_DIR="$HOME/.config/systemd/user"
 
 # Print functions
 print_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 print_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Root is needed to write into /usr/local and /usr/lib/systemd/user.
+# The daemon itself still runs as your user via `systemctl --user`.
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+elif command -v sudo &> /dev/null; then
+    SUDO="sudo"
+else
+    print_error "This installer writes to $INSTALL_PREFIX and needs root privileges, but sudo is not available."
+    print_error "Re-run this script as root."
+    exit 1
+fi
 
 # Detect system architecture
 detect_arch() {
@@ -86,14 +111,13 @@ detect_arch() {
 install_daemon() {
     mkdir -p "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/stt"
     mkdir -p "$HOME/.local/share/stt/logs"
-    mkdir -p "$HOME/.config/systemd/user"
 
     print_info "Installing daemon, CLI, and consent helper..."
-    mkdir -p "$INSTALL_PREFIX/bin"
+    $SUDO mkdir -p "$INSTALL_PREFIX/bin"
 
-    install -m 755 "$TEMP_DIR/super-stt-daemon" "$INSTALL_PREFIX/bin/"
-    install -m 755 "$TEMP_DIR/super-stt-cli" "$INSTALL_PREFIX/bin/"
-    install -m 755 "$TEMP_DIR/super-stt-consent" "$INSTALL_PREFIX/bin/"
+    $SUDO install -m 755 "$TEMP_DIR/super-stt-daemon" "$INSTALL_PREFIX/bin/"
+    $SUDO install -m 755 "$TEMP_DIR/super-stt-cli" "$INSTALL_PREFIX/bin/"
+    $SUDO install -m 755 "$TEMP_DIR/super-stt-consent" "$INSTALL_PREFIX/bin/"
 
     # The `stt` convenience wrapper used by keyboard shortcuts (e.g.
     # Super+Space → `stt record --write`). Invokes the daemon binary
@@ -101,43 +125,56 @@ install_daemon() {
     # daemon's CLI peers breaks `/proc/<pid>/exe` readlinks across
     # the daemon ↔ client boundary because the kernel's
     # __ptrace_may_access check requires both UID AND GID to match.
-    cat > "$INSTALL_PREFIX/bin/stt" << EOF
+    cat > "$TEMP_DIR/stt-wrapper" << EOF
 #!/bin/bash
 # Super STT convenience wrapper — invokes super-stt-cli directly.
 # Used by keyboard shortcuts (e.g. Super+Space → "stt record --write").
 exec "$INSTALL_PREFIX/bin/super-stt-cli" "\$@"
 EOF
-    chmod 755 "$INSTALL_PREFIX/bin/stt"
+    $SUDO install -m 755 "$TEMP_DIR/stt-wrapper" "$INSTALL_PREFIX/bin/stt"
+
+    # Clear stale copies from the old per-user layout so they don't
+    # shadow the fresh install.
+    for bin in super-stt super-stt-daemon super-stt-cli super-stt-consent stt; do
+        if [ -e "$LEGACY_BIN_DIR/$bin" ]; then
+            rm -f "$LEGACY_BIN_DIR/$bin"
+            print_info "  removed legacy $LEGACY_BIN_DIR/$bin"
+        fi
+    done
 }
 
 # Install desktop app
 install_app() {
     print_info "Installing desktop app..."
-    mkdir -p "$INSTALL_PREFIX/bin"
+    $SUDO mkdir -p "$INSTALL_PREFIX/bin"
 
     # Install binary
-    install -m 755 "$TEMP_DIR/super-stt-app" "$INSTALL_PREFIX/bin/"
+    $SUDO install -m 755 "$TEMP_DIR/super-stt-app" "$INSTALL_PREFIX/bin/"
 
     print_info "Installing desktop integration files..."
 
     # Install desktop file
-    mkdir -p "$DESKTOP_DIR"
-    install -m 644 "$TEMP_DIR/resources/super-stt-app.desktop" "$DESKTOP_DIR/super-stt-app.desktop"
+    $SUDO install -Dm644 "$TEMP_DIR/resources/super-stt-app.desktop" "$DESKTOP_DIR/super-stt-app.desktop"
 
     # Install icon
-    mkdir -p "$ICON_DIR"
-    cp -r "$TEMP_DIR/resources/icons/hicolor/scalable/apps/super-stt-app.svg" "$ICON_DIR/"
+    $SUDO install -Dm644 "$TEMP_DIR/resources/icons/hicolor/scalable/apps/super-stt-app.svg" "$ICON_DIR/super-stt-app.svg"
 
     # Install metainfo
-    mkdir -p "$METAINFO_DIR"
     if [ -f "$TEMP_DIR/resources/super-stt-app.metainfo.xml" ]; then
-        install -m 644 "$TEMP_DIR/resources/super-stt-app.metainfo.xml" "$METAINFO_DIR/super-stt-app.metainfo.xml"
+        $SUDO install -Dm644 "$TEMP_DIR/resources/super-stt-app.metainfo.xml" "$METAINFO_DIR/super-stt-app.metainfo.xml"
     fi
 
     # Update icon cache
     if command -v gtk-update-icon-cache &> /dev/null; then
-        gtk-update-icon-cache -f -t "$ICON_DIR" 2>/dev/null || true
+        $SUDO gtk-update-icon-cache -f -t "$ICON_THEME_DIR" 2>/dev/null || true
     fi
+
+    # Clear the old per-user copies so launchers don't show duplicates.
+    rm -f "$LEGACY_BIN_DIR/super-stt-app"
+    rm -f "$LEGACY_DESKTOP_DIR/super-stt-app.desktop"
+    rm -f "$HOME/.local/share/icons/super-stt-app.svg" \
+        "$HOME/.local/share/icons/hicolor/scalable/apps/super-stt-app.svg"
+    rm -f "$LEGACY_METAINFO_DIR/super-stt-app.metainfo.xml"
 }
 
 # Install COSMIC applet
@@ -148,34 +185,44 @@ install_applet() {
     fi
 
     print_info "Installing COSMIC applet..."
-    mkdir -p "$INSTALL_PREFIX/bin"
+    $SUDO mkdir -p "$INSTALL_PREFIX/bin"
 
-    # Check if this is an update (binary already exists)
+    # Check if this is an update (binary already exists in either layout)
     local is_update=false
-    if [ -f "$INSTALL_PREFIX/bin/super-stt-cosmic-applet" ]; then
+    if [ -f "$INSTALL_PREFIX/bin/super-stt-cosmic-applet" ] || [ -f "$LEGACY_BIN_DIR/super-stt-cosmic-applet" ]; then
         is_update=true
     fi
 
     # Install binary
-    install -m 755 "$TEMP_DIR/super-stt-cosmic-applet" "$INSTALL_PREFIX/bin/"
+    $SUDO install -m 755 "$TEMP_DIR/super-stt-cosmic-applet" "$INSTALL_PREFIX/bin/"
 
     print_info "Installing COSMIC applet integration files..."
 
     # Install desktop files
-    mkdir -p "$DESKTOP_DIR"
     for desktop_file in "$TEMP_DIR/resources/super-stt-cosmic-applet-"*.desktop; do
         local filename=$(basename "$desktop_file")
-        install -m 644 "$desktop_file" "$DESKTOP_DIR/$filename"
+        $SUDO install -Dm644 "$desktop_file" "$DESKTOP_DIR/$filename"
     done
 
     # Install icon
-    mkdir -p "$ICON_DIR"
-    cp -r "$TEMP_DIR/resources/icons/hicolor/scalable/apps/super-stt-cosmic-applet.svg" "$ICON_DIR/"
+    $SUDO install -Dm644 "$TEMP_DIR/resources/icons/hicolor/scalable/apps/super-stt-cosmic-applet.svg" "$ICON_DIR/super-stt-cosmic-applet.svg"
 
     # Update icon cache
     if command -v gtk-update-icon-cache &> /dev/null; then
-        gtk-update-icon-cache -f -t "$ICON_DIR" 2>/dev/null || true
+        $SUDO gtk-update-icon-cache -f -t "$ICON_THEME_DIR" 2>/dev/null || true
     fi
+
+    # Clear the old per-user copies so they don't shadow this install
+    # (super-stt-applet-{full,left,right} are the pre-rewrite applet names).
+    rm -f "$LEGACY_BIN_DIR/super-stt-cosmic-applet" \
+        "$LEGACY_BIN_DIR/super-stt-applet-full" \
+        "$LEGACY_BIN_DIR/super-stt-applet-left" \
+        "$LEGACY_BIN_DIR/super-stt-applet-right"
+    rm -f "$LEGACY_DESKTOP_DIR/super-stt-cosmic-applet-full.desktop" \
+        "$LEGACY_DESKTOP_DIR/super-stt-cosmic-applet-left.desktop" \
+        "$LEGACY_DESKTOP_DIR/super-stt-cosmic-applet-right.desktop"
+    rm -f "$HOME/.local/share/icons/super-stt-cosmic-applet.svg" \
+        "$HOME/.local/share/icons/hicolor/scalable/apps/super-stt-cosmic-applet.svg"
 
     # Restart COSMIC panel so the updated applet binary is loaded
     if [ "$is_update" = true ] && pgrep -f cosmic-panel > /dev/null 2>&1; then
@@ -193,8 +240,17 @@ install_service() {
 
     print_info "Installing systemd service..."
 
-    mkdir -p "$USER_SYSTEMD_DIR"
-    cp "$TEMP_DIR/systemd/super-stt.service" "$USER_SYSTEMD_DIR/"
+    # Root-owned unit dir: a user-level process can't rewrite ExecStart.
+    $SUDO install -Dm644 "$TEMP_DIR/systemd/super-stt.service" "$SYSTEMD_UNIT_DIR/super-stt.service"
+
+    # A unit left in ~/.config/systemd/user by an older install takes
+    # precedence over the packaged one — remove it or systemd keeps
+    # launching the (now deleted) legacy ~/.local/bin binary.
+    if [ -f "$LEGACY_SYSTEMD_DIR/super-stt.service" ]; then
+        print_info "Removing legacy user-local systemd unit..."
+        rm -f "$LEGACY_SYSTEMD_DIR/super-stt.service"
+    fi
+
     systemctl --user daemon-reload
 
     # Enable and start (or restart) the service
@@ -218,20 +274,6 @@ install_service() {
     fi
 }
 
-# Warn if the install dir isn't on PATH. We deliberately do NOT edit the
-# user's shell profile: rc files are the user's to manage, and an auto-append
-# has no clean uninstall counterpart. Assume `~/.local/bin` is already on PATH
-# (the XDG default) and just tell the user how to add it if it isn't.
-update_path() {
-    local bin_dir="$1"
-
-    if [[ ":$PATH:" != *":$bin_dir:"* ]]; then
-        print_warn "$bin_dir is not on your PATH."
-        print_warn "Add this line to your shell profile (e.g. ~/.bashrc or ~/.zshrc):"
-        print_warn "  export PATH=\"$bin_dir:\$PATH\""
-    fi
-}
-
 # Configure COSMIC keyboard shortcut
 configure_cosmic_shortcut() {
     # Check if we're on COSMIC desktop
@@ -241,6 +283,13 @@ configure_cosmic_shortcut() {
 
     COSMIC_SHORTCUTS_DIR="$HOME/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1"
     COSMIC_SHORTCUTS_FILE="$COSMIC_SHORTCUTS_DIR/custom"
+
+    # Migrate a legacy shortcut that points at the removed
+    # ~/.local/bin wrapper.
+    if [ -f "$COSMIC_SHORTCUTS_FILE" ] && grep -q "$HOME/.local/bin/stt " "$COSMIC_SHORTCUTS_FILE"; then
+        sed -i "s|$HOME/.local/bin/stt |$INSTALL_PREFIX/bin/stt |g" "$COSMIC_SHORTCUTS_FILE"
+        print_info "Updated COSMIC shortcut to use $INSTALL_PREFIX/bin/stt"
+    fi
 
     # Ask user if they want to add the shortcut
     echo -n "Add COSMIC keyboard shortcut (Super+Space)? [Y/n]: "
@@ -516,6 +565,13 @@ print_info "Successfully downloaded: $DOWNLOADED_TARBALL"
 print_info "Extracting binaries..."
 tar -xzf "$TEMP_DIR/$DOWNLOADED_TARBALL" -C "$TEMP_DIR"
 
+# Make sure we can escalate before touching the system dirs; on a
+# fresh shell this prompts for the password once.
+if [ -n "$SUDO" ]; then
+    print_info "Root privileges are required to install into $INSTALL_PREFIX (the daemon still runs as your user)."
+    $SUDO -v
+fi
+
 # Install components based on selection
 case $INSTALL_OPTION in
     "all")
@@ -541,11 +597,6 @@ case $INSTALL_OPTION in
         install_applet
         ;;
 esac
-
-# Add to PATH if installing to non-standard location
-if [ "$INSTALL_PREFIX" != "/usr/local" ] && [ "$INSTALL_PREFIX" != "/usr" ]; then
-    update_path "$INSTALL_PREFIX/bin"
-fi
 
 # Configure COSMIC shortcut if daemon was installed and in interactive mode
 if [ "$INTERACTIVE" = true ] && ([ "$INSTALL_OPTION" = "all" ] || [ "$INSTALL_OPTION" = "daemon" ]); then

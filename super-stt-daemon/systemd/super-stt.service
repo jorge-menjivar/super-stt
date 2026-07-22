@@ -7,7 +7,10 @@ Requires=graphical-session.target
 [Service]
 Type=simple
 ExecStartPre=/bin/sh -c 'while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do sleep 0.1; done'
-ExecStart=%h/.local/bin/super-stt-daemon
+# Bare name: systemd resolves it against its fixed search path, so the
+# same unit works for /usr/local/bin (script install) and /usr/bin
+# (distro package) without editing.
+ExecStart=super-stt-daemon
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5

@@ -214,8 +214,9 @@ fn is_official_client_in(daemon_dir: &Path, exe_path: &Path) -> bool {
 ///
 /// On top of that, before returning the path:
 /// - We `canonicalize()` it, so symlink-swap shenanigans don't help.
-/// - We verify the resolved file is owned by the daemon's effective uid
-///   (catches "someone dropped a helper they own into the install dir").
+/// - We verify the resolved file is owned by root or the daemon's
+///   effective uid (catches "another local user dropped a helper they
+///   own into the install dir").
 /// - We verify it isn't world-writable.
 pub(crate) fn locate_consent_helper() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
@@ -259,15 +260,22 @@ pub(crate) fn locate_consent_helper() -> Option<PathBuf> {
 fn verify_helper_metadata(path: &Path) -> Result<(), &'static str> {
     use std::os::unix::fs::MetadataExt;
     let metadata = std::fs::metadata(path).map_err(|_| "cannot stat helper")?;
-    // Require the helper to be owned by the same uid the daemon runs
-    // as. This catches the case of another local user (or root)
-    // dropping a binary into the install dir.
     let our_uid = unsafe { libc::geteuid() };
-    if metadata.uid() != our_uid {
-        return Err("helper not owned by daemon's effective uid");
+    check_helper_metadata(metadata.uid(), our_uid, metadata.mode())
+}
+
+/// Testable core of [`verify_helper_metadata`]. Trust binaries owned by
+/// the daemon's own uid (source/dev installs) or by root (the packaged
+/// /usr/local/bin // /usr/bin install) — whoever controls root already
+/// controls the daemon binary itself, so root ownership adds no new
+/// attack surface. Anything else is another local user's drop-in.
+#[cfg(unix)]
+fn check_helper_metadata(owner_uid: u32, our_uid: u32, mode: u32) -> Result<(), &'static str> {
+    if owner_uid != our_uid && owner_uid != 0 {
+        return Err("helper not owned by root or the daemon's effective uid");
     }
     // Reject world-writable helpers — anyone could swap them out.
-    if metadata.mode() & 0o002 != 0 {
+    if mode & 0o002 != 0 {
         return Err("helper is world-writable");
     }
     Ok(())
@@ -318,6 +326,35 @@ pub(crate) fn resolve_peer_exe(peer: Option<&axum::Extension<PeerInfo>>) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `check_helper_metadata`: the ownership/permission gate shared by
+    /// the consent-helper lookup and the official-client trust check.
+    mod helper_metadata {
+        use super::super::check_helper_metadata;
+
+        #[test]
+        fn owned_by_daemon_uid_is_trusted() {
+            assert!(check_helper_metadata(1000, 1000, 0o755).is_ok());
+        }
+
+        #[test]
+        fn root_owned_is_trusted() {
+            // The packaged install (/usr/local/bin, /usr/bin) is
+            // root-owned; root could already replace the daemon binary
+            // itself, so this adds no new attack surface.
+            assert!(check_helper_metadata(0, 1000, 0o755).is_ok());
+        }
+
+        #[test]
+        fn other_local_user_is_rejected() {
+            assert!(check_helper_metadata(1001, 1000, 0o755).is_err());
+        }
+
+        #[test]
+        fn world_writable_is_rejected_even_when_root_owned() {
+            assert!(check_helper_metadata(0, 1000, 0o757).is_err());
+        }
+    }
 
     #[test]
     fn normalize_sorts_and_dedups() {

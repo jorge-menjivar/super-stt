@@ -42,7 +42,7 @@ cd super-stt
 just install
 ```
 
-Either way you get the daemon, the `stt` CLI, a consent helper, the desktop app, and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. On COSMIC the installer offers to bind Super+Space → `stt record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
+Either way you get the daemon, the `stt` CLI, a consent helper, the desktop app, and (on COSMIC) the panel applet, wired up as a `systemctl --user` service. Everything installs system-wide (root-owned, so the installer asks for sudo), while the daemon itself runs unprivileged in your user session. On COSMIC the installer offers to bind Super+Space → `stt record --write` for you. GPU acceleration comes from the model you run (see [Models](#-models)).
 
 ## ⌨️ Using it
 
@@ -50,7 +50,7 @@ Either way you get the daemon, the `stt` CLI, a consent helper, the desktop app,
 stt record --write # Record and transcribes. Types the result after silence is detected or you run the command again.
 ```
 
-Bind `stt record --write` to a key combo. Super+Space is the convention (the COSMIC installer does this for you; on other desktops add a custom shortcut for `~/.local/bin/stt record --write`). When you trigger it:
+Bind `stt record --write` to a key combo. Super+Space is the convention (the COSMIC installer does this for you; on other desktops add a custom shortcut for `stt record --write`). When you trigger it:
 
 1. `stt` asks the running daemon to start transcribing from your mic.
 2. You speak; the daemon transcribes your audio.
@@ -151,7 +151,7 @@ This is a snapshot. The app always shows the current catalog, published live at 
 
 ## 🩺 Troubleshooting
 
-- **`stt: command not found`**: restart your terminal or run `export PATH="$HOME/.local/bin:$PATH"`.
+- **`stt: command not found`**: binaries are installed system-wide and are on `PATH` by default — restart your terminal so it rehashes, and check the installer finished without errors.
 - **Daemon won't start / misbehaves**: check `journalctl --user -u super-stt -n 49`.
 - **A stale legacy build is interfering** (auth popup shows `Path: <unknown>`, or errors mention an `stt` group): remove the old binaries and reinstall: `just uninstall` (or `rm -f ~/.local/bin/super-stt*`), then `just install`.
 

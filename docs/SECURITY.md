@@ -14,6 +14,7 @@ Based on comprehensive security reviews completed in August 2025, Super STT demo
 - ✅ **Network Security**: Localhost-only UDP binding prevents remote attacks
 - ✅ **Resource Management**: Connection limits and rate limiting prevent abuse
 - ✅ **Path Security**: Comprehensive validation prevents directory traversal attacks
+- ✅ **Tamper-Resistant Install**: Binaries and the systemd user unit are installed root-owned in system paths; the daemon itself runs unprivileged in the user session
 
 **Security Assessment**: Production-ready with excellent security controls implemented.
 
@@ -158,11 +159,13 @@ cargo run --release --bin super-stt-daemon
 - ✅ Directory traversal attacks (path validation)
 - ✅ Audio data injection attacks (sample validation and pattern detection)
 - ✅ Cross-user access (same-UID peer check; the consent prompt names the caller's exe)
+- ✅ Silent replacement of the daemon binary or unit file by user-level processes (both are root-owned in system paths; modifying them requires privilege escalation)
 
 ### Assumptions
 - Physical access to the machine is trusted
 - The user running the daemon is trusted (the socket is same-user only)
 - System has standard Unix permission enforcement
+- `~/.config/systemd/user/` is not silently populated: a unit placed there overrides the packaged one (systemd precedence), so unit tampering at user level is detectable (`systemd-delta --user`) rather than impossible
 - Development builds are only used in secure development environments
 
 ## Incident Response
@@ -238,7 +241,7 @@ After=sound.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/super-stt-daemon
+ExecStart=super-stt-daemon
 Restart=on-failure
 RestartSec=5
 
