@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::http::internal::auth::consent::{
-    ConsentDecision, ConsentKey, ask_user_for_consent, normalize_scopes, resolve_peer_exe,
+    ConsentDecision, ConsentKey, ask_user_for_consent, is_official_client, normalize_scopes,
+    resolve_peer_exe,
 };
 use crate::daemon::http::internal::helpers::responses::{auth_err, is_known_scope, reason};
 use crate::daemon::http::state::{AppState, PeerInfo};
@@ -50,6 +51,37 @@ fn cached_deny_response(
         StatusCode::FORBIDDEN,
         "auth_denied",
         reason::USER_DENIED_CACHED,
+    ))
+}
+
+/// First-party short-circuit for `auth_request`: a trusted co-located
+/// client binary skips the popup and mints immediately. `None` means
+/// the peer is not first-party and the normal consent flow proceeds.
+fn official_client_response(
+    state: &AppState,
+    body: &AuthRequestBody,
+    scopes: &[String],
+    exe_path: &Path,
+    consent_key: ConsentKey,
+    ok_response: &dyn Fn(String, DateTime<Utc>) -> Response,
+) -> Option<Response> {
+    if !is_official_client(exe_path) {
+        return None;
+    }
+    log::info!(
+        "auth_request auto-approved for first-party client: app={} exe={} scopes={}",
+        body.app_name,
+        exe_path.display(),
+        scopes.join(" ")
+    );
+    Some(finalize_consent_decision(
+        ConsentDecision::Allow,
+        state,
+        body,
+        scopes,
+        exe_path,
+        consent_key,
+        ok_response,
     ))
 }
 
@@ -137,6 +169,21 @@ pub(crate) async fn auth_request(
     // consistent semantic is "request fresh consent".
 
     let consent_key: ConsentKey = (exe_path.clone(), scopes.clone());
+
+    // First-party binaries co-located with the daemon skip the popup
+    // (docs/protocol/auth.md § First-party clients); downstream is
+    // identical to a popup-approved grant. See `is_official_client`
+    // for the trust rationale.
+    if let Some(resp) = official_client_response(
+        &state,
+        &body,
+        &scopes,
+        &exe_path,
+        consent_key.clone(),
+        &ok_response,
+    ) {
+        return resp;
+    }
 
     // Sticky-deny short-circuit. If the user previously clicked Deny for this
     // exact (exe_path, scope) pair in this daemon's lifetime, reject immediately

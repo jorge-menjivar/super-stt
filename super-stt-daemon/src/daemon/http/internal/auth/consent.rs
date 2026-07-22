@@ -152,6 +152,54 @@ pub(crate) async fn ask_user_for_consent(
     result.unwrap_or(ConsentDecision::Dismissed)
 }
 
+/// Basenames of the first-party client binaries that skip the consent
+/// popup when co-located with the daemon binary. See
+/// [`is_official_client`] for the full trust check.
+const OFFICIAL_CLIENT_NAMES: [&str; 3] =
+    ["super-stt-app", "super-stt-cli", "super-stt-cosmic-applet"];
+
+/// First-party trust check: does `exe_path` denote one of our own
+/// client binaries, installed alongside the daemon binary itself?
+///
+/// Mirrors the [`locate_consent_helper`] security model — co-location
+/// with the daemon binary plus the same ownership/permission
+/// verification. Writing to the daemon's install directory is already
+/// sufficient to replace the daemon, so trusting exact-named sibling
+/// binaries adds no new attack surface. Returns a plain bool: failure
+/// is the common case (every third-party client) and is deliberately
+/// not logged here — the caller logs the rare success.
+pub(crate) fn is_official_client(exe_path: &Path) -> bool {
+    let Ok(daemon_exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(daemon_dir) = daemon_exe.parent() else {
+        return false;
+    };
+    is_official_client_in(daemon_dir, exe_path)
+}
+
+/// Testable core of [`is_official_client`] with the daemon's own
+/// directory injected. Fail-closed on every non-verifiable branch: a
+/// replaced-on-disk exe (`/proc/<pid>/exe` → "… (deleted)") or a
+/// symlink resolving outside `daemon_dir` fails canonicalization or
+/// the parent check and falls through to the normal consent flow.
+fn is_official_client_in(daemon_dir: &Path, exe_path: &Path) -> bool {
+    let (Ok(resolved), Ok(daemon_dir)) = (exe_path.canonicalize(), daemon_dir.canonicalize())
+    else {
+        return false;
+    };
+    let Some(name) = resolved.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if !OFFICIAL_CLIENT_NAMES.contains(&name) {
+        return false;
+    }
+    if resolved.parent() != Some(daemon_dir.as_path()) {
+        return false;
+    }
+    verify_helper_metadata(&resolved).is_ok()
+}
+
 /// Find the consent helper.
 ///
 /// **Security model.** The helper is only ever looked for **alongside the
@@ -286,5 +334,81 @@ mod tests {
         let a = normalize_scopes(&["settings".to_string(), "status".to_string()]);
         let b = normalize_scopes(&["status".to_string(), "settings".to_string()]);
         assert_eq!(a, b, "request order must not change the consent key");
+    }
+
+    /// First-party trust check (`is_official_client_in`): exact-name
+    /// allowlist + co-location with the daemon dir + metadata
+    /// verification, fail-closed on every non-verifiable branch.
+    mod official_client {
+        use super::super::is_official_client_in;
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::{Path, PathBuf};
+
+        fn write_executable(dir: &Path, name: &str, mode: u32) -> PathBuf {
+            let path = dir.join(name);
+            std::fs::write(&path, b"\x7fELF").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+            path
+        }
+
+        #[test]
+        fn official_name_co_located_is_trusted() {
+            let dir = tempfile::tempdir().unwrap();
+            let app = write_executable(dir.path(), "super-stt-app", 0o755);
+            assert!(is_official_client_in(dir.path(), &app));
+        }
+
+        #[test]
+        fn unlisted_name_co_located_is_rejected() {
+            let dir = tempfile::tempdir().unwrap();
+            let other = write_executable(dir.path(), "super-stt-extra", 0o755);
+            assert!(
+                !is_official_client_in(dir.path(), &other),
+                "co-location alone must not confer trust"
+            );
+        }
+
+        #[test]
+        fn official_name_in_foreign_dir_is_rejected() {
+            let daemon_dir = tempfile::tempdir().unwrap();
+            let foreign = tempfile::tempdir().unwrap();
+            let app = write_executable(foreign.path(), "super-stt-app", 0o755);
+            assert!(
+                !is_official_client_in(daemon_dir.path(), &app),
+                "an official name outside the daemon dir must not be trusted"
+            );
+        }
+
+        #[test]
+        fn world_writable_official_binary_is_rejected() {
+            let dir = tempfile::tempdir().unwrap();
+            let app = write_executable(dir.path(), "super-stt-cli", 0o757);
+            assert!(
+                !is_official_client_in(dir.path(), &app),
+                "a world-writable binary could be swapped by anyone"
+            );
+        }
+
+        #[test]
+        fn missing_exe_is_rejected() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(
+                !is_official_client_in(dir.path(), &dir.path().join("super-stt-app")),
+                "a nonexistent (e.g. replaced-on-disk) exe must fail closed"
+            );
+        }
+
+        #[test]
+        fn symlink_resolving_outside_daemon_dir_is_rejected() {
+            let daemon_dir = tempfile::tempdir().unwrap();
+            let foreign = tempfile::tempdir().unwrap();
+            let target = write_executable(foreign.path(), "super-stt-cli", 0o755);
+            let link = daemon_dir.path().join("super-stt-cli");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            assert!(
+                !is_official_client_in(daemon_dir.path(), &link),
+                "canonicalization must unmask a symlink escaping the daemon dir"
+            );
+        }
     }
 }

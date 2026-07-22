@@ -158,6 +158,8 @@ sequenceDiagram
         D-->>App: 403 auth_denied<br/>{ reason: "invalid_scope" }
     else throttled
         D-->>App: 403 auth_denied<br/>{ reason: "throttled" }
+    else first-party client binary (see First-party clients)
+        D-->>App: 200 { session_token, scopes, expires_at }
     else previously denied for this binary
         D-->>App: 403 auth_denied<br/>{ reason: "user_denied_cached" }
     else ok
@@ -195,6 +197,38 @@ request.
 libsecret/KWallet, the OS credential manager). Plaintext on disk
 defeats the design — any other process running as the same user
 can read it and impersonate the app.
+
+## First-party clients
+
+Super STT's own client binaries — `super-stt-app`, `super-stt-cli`,
+and `super-stt-cosmic-applet` — skip the consent popup. When one of
+them calls `POST /auth/request`, the daemon mints the session token
+immediately; the response is indistinguishable from a user-approved
+grant.
+
+A peer qualifies as first-party only when **all** of the following
+hold for its kernel-resolved executable (`/proc/<pid>/exe`,
+canonicalized):
+
+- Its basename is one of the three names above.
+- It resides in the same directory as the daemon's own binary.
+- It is owned by the daemon's effective uid and is not
+  world-writable.
+
+Any binary that fails any check — a symlink whose target resolves
+outside the daemon's directory, a replaced-on-disk executable that
+no longer canonicalizes, a copy in another location — goes through
+the normal consent flow instead.
+
+Writing to the daemon's install directory is already sufficient to
+replace the daemon itself, so trusting exact-named sibling binaries
+does not lower the bar an attacker must clear.
+
+Everything besides the skipped popup is unchanged: the token carries
+exactly the requested scopes, expires after 30 days, is bound to the
+binary's path, and is revoked by the `/events` exe-watch like any
+other token. A first-party client re-authenticating after an
+upgrade (`exe_changed`) therefore does so silently.
 
 ## Per-request authorization
 
@@ -309,10 +343,12 @@ A few non-obvious facts about how tokens behave on the wire:
 
 - **Tokens survive daemon restarts.** Your cached token will still
   be valid after the daemon restarts, up to the 30-day expiry.
-- **`/auth/request` always shows the popup.** There's no shortcut
-  for "I had a token once, give me a fresh one without prompting."
-  Cache the token client-side; only call `/auth/request` when you
-  don't have a valid one.
+- **`/auth/request` shows the popup for every third-party client.**
+  There's no shortcut for "I had a token once, give me a fresh one
+  without prompting." Cache the token client-side; only call
+  `/auth/request` when you don't have a valid one. First-party
+  clients are the only exception — see
+  [First-party clients](#first-party-clients).
 - **Sticky deny clears on daemon restart.** If the user denied you
   and you want to offer a "retry after daemon restart" UX, hint
   that they need to actually restart the daemon — the daemon's

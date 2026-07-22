@@ -1,7 +1,8 @@
 # `POST /auth/request`
 
-Trigger the consent popup and mint a fresh session token. This is
-the only endpoint a new client can call before it has a token.
+Mint a fresh session token, normally by triggering the consent
+popup. This is the only endpoint a new client can call before it
+has a token.
 
 See [auth.md](../../auth.md) for the broader handshake design and
 the full list of `auth_denied` reasons.
@@ -17,6 +18,10 @@ Spawn the consent popup. The user is shown the requesting binary's
 identity, the scopes being requested, and an Allow / Deny choice.
 The call blocks until the user chooses, dismisses, or the popup
 times out (60 s default).
+
+First-party client binaries are approved automatically, without a
+popup — see [First-party clients](../../../auth.md#first-party-clients)
+in auth.md.
 
 **Request:**
 
