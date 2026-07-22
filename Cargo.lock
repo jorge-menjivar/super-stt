@@ -2822,7 +2822,8 @@ dependencies = [
 [[package]]
 name = "gpu-probe"
 version = "0.1.0"
-source = "git+https://github.com/jorge-menjivar/gpu-probe?rev=2912a8d8ca2d77aae511e60f824fcad1ab409892#2912a8d8ca2d77aae511e60f824fcad1ab409892"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04f4ab092c87226808ad47c1e5559106c14d962243104f0fef3f29ad0e86e275"
 dependencies = [
  "nvml-wrapper",
 ]
