@@ -70,7 +70,7 @@ pub(super) fn vram_meter<'a>(used: u64, total: u64) -> Element<'a, Message> {
             } else {
                 cosmic.success.base.into()
             };
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(color)),
                 border: cosmic::iced::Border {
                     radius: (height / 2.0).into(),
@@ -86,7 +86,7 @@ pub(super) fn vram_meter<'a>(used: u64, total: u64) -> Element<'a, Message> {
         .class(cosmic::theme::Container::custom(move |theme| {
             let mut bg: cosmic::iced::Color = theme.cosmic().palette.neutral_5.into();
             bg.a = 0.25;
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(bg)),
                 border: cosmic::iced::Border {
                     radius: (height / 2.0).into(),
@@ -104,7 +104,7 @@ pub(super) fn vram_meter<'a>(used: u64, total: u64) -> Element<'a, Message> {
 pub(super) fn vram_warning<'a>(needed: u64, available: u64) -> Element<'a, Message> {
     use crate::ui::icons;
     use cosmic::iced::Alignment;
-    use cosmic::iced_widget::row;
+    use cosmic::iced::widget::row;
     use cosmic::widget::text;
 
     row![

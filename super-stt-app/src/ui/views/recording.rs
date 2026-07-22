@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::Element;
+use cosmic::iced::widget::row;
 use cosmic::iced::{Alignment, Length};
-use cosmic::iced_widget::row;
 use cosmic::widget::{self, button, settings, text};
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 
@@ -73,10 +73,8 @@ fn test_section<'a>(
 
     let audio_widget = row![
         record_button,
-        widget::progress_bar(
-            0.0..=1.0,
-            audio_level.max(if audio_level > 0.0 { 0.1 } else { 0.0 })
-        ),
+        widget::determinate_linear(audio_level.max(if audio_level > 0.0 { 0.1 } else { 0.0 }))
+            .width(Length::Fill),
     ]
     .align_y(Alignment::Center)
     .spacing(10);

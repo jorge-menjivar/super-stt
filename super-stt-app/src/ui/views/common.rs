@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Common components and utilities shared across views.
 
+use cosmic::iced::widget::row;
 use cosmic::iced::{Alignment, Length};
-use cosmic::iced_widget::row;
 use cosmic::widget::{self, text};
 use cosmic::{Apply, Element};
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::iced::Alignment;
-use cosmic::iced_widget::row;
+use cosmic::iced::widget::row;
 use cosmic::widget::{self, text};
 use cosmic::{Apply, Element};
 
@@ -62,7 +62,7 @@ pub(super) fn capability_chip(
     .apply(widget::container)
     .padding([spacing.space_xxxs, spacing.space_xs])
     .class(cosmic::theme::Container::custom(move |_| {
-        cosmic::iced_widget::container::Style {
+        cosmic::iced::widget::container::Style {
             background: Some(cosmic::iced::Background::Color(fill)),
             border: cosmic::iced::Border {
                 radius: radius.into(),
@@ -95,7 +95,7 @@ pub(super) fn count_chip(label: String) -> Element<'static, Message> {
         .apply(widget::container)
         .padding([spacing.space_xxxs, spacing.space_xs])
         .class(cosmic::theme::Container::custom(move |_| {
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(fill)),
                 border: cosmic::iced::Border {
                     radius: radius.into(),
@@ -134,7 +134,7 @@ pub(super) fn model_tag(name: String) -> Element<'static, Message> {
         .apply(widget::container)
         .padding([spacing.space_xxxs, spacing.space_xs])
         .class(cosmic::theme::Container::custom(move |_| {
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 border: cosmic::iced::Border {
                     radius: radius.into(),
                     width: 1.0,

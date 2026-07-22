@@ -61,7 +61,7 @@ pub(super) fn models_tab_switcher(app: &AppModel) -> Element<'_, Message> {
                     } else {
                         cosmic::iced::Color::TRANSPARENT
                     };
-                    cosmic::iced_widget::container::Style {
+                    cosmic::iced::widget::container::Style {
                         background: Some(cosmic::iced::Background::Color(bg)),
                         border: cosmic::iced::Border {
                             radius: [r[0], r[1], 0.0, 0.0].into(),

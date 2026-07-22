@@ -2,7 +2,7 @@
 //! About page view for the Super STT application.
 
 use cosmic::iced::Alignment;
-use cosmic::iced_widget::column;
+use cosmic::iced::widget::column;
 use cosmic::widget::{self, button};
 use cosmic::{Element, cosmic_theme, theme};
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::Element;
+use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
-use cosmic::iced_widget::{column, row};
 use cosmic::widget::{self, button, text};
 
 use crate::core::app::AppModel;
@@ -170,7 +170,7 @@ pub(super) fn installed_overflow_menu(
         .class(cosmic::theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
             let component = &theme.current_container().component;
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(component.base.into())),
                 border: cosmic::iced::Border {
                     radius: cosmic.corner_radii.radius_s.into(),

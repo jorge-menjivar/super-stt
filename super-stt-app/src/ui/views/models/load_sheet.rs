@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::Element;
+use cosmic::iced::widget::row;
 use cosmic::iced::{Alignment, Length};
-use cosmic::iced_widget::row;
 use cosmic::widget::{self, button, text};
 
 use crate::core::app::AppModel;
@@ -126,7 +126,7 @@ fn load_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, 
         .class(cosmic::theme::Container::custom(move |theme| {
             let cosmic = theme.cosmic();
             let component = &theme.current_container().component;
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(component.base.into())),
                 border: cosmic::iced::Border {
                     radius: cosmic.corner_radii.radius_s.into(),

@@ -15,9 +15,8 @@ use cosmic::{
     applet::padded_control,
     iced::{
         Length,
-        widget::{column, row},
+        widget::{Row, column, row},
     },
-    iced_widget::Row,
     theme,
     widget::{Space, segmented_button::SingleSelectModel, segmented_control, text},
 };

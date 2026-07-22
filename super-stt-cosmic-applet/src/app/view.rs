@@ -3,8 +3,7 @@ use std::rc::Rc;
 
 use cosmic::{
     Element,
-    iced::{Alignment, Length, Size},
-    iced_widget,
+    iced::{Alignment, Length, Size, widget as iced_widget},
     theme::{self, Button},
     widget::{self, button, container, layer_container, mouse_area},
 };
@@ -153,7 +152,7 @@ fn transparent_icon_button<'a>(
     if symbolic {
         icon = icon.class(theme::Svg::Custom(Rc::new(|theme| {
             iced_widget::svg::Style {
-                color: Some(theme.cosmic().background.on.into()),
+                color: Some(theme.cosmic().background(theme.transparent).on.into()),
             }
         })));
     }

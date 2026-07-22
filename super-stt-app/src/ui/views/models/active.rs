@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::Element;
+use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
-use cosmic::iced_widget::{column, row};
 use cosmic::widget::{self, button, text};
 use super_stt_shared::models::protocol::DownloadProgress;
 
@@ -34,7 +34,7 @@ pub(super) fn glyph_tile<'a>(tile: f32, glyph: f32, radius_medium: bool) -> Elem
         .center_y(Length::Fixed(tile))
         .class(cosmic::theme::Container::custom(move |theme| {
             let radii = theme.cosmic().corner_radii;
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(fill)),
                 border: cosmic::iced::Border {
                     radius: if radius_medium {
@@ -443,7 +443,7 @@ pub(super) fn card_download_progress<'a>(
     };
     column![
         text::body(line),
-        widget::progress_bar(0.0..=1.0, fraction.max(0.05)),
+        widget::determinate_linear(fraction.max(0.05)).width(Length::Fill),
         row![
             text::caption(bytes).width(Length::Fill),
             widget::button::destructive("Cancel")

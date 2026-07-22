@@ -31,7 +31,7 @@ pub(super) fn bordered_scroll_view<'a>(
         .height(Length::Fill)
         .class(cosmic::theme::Container::custom(|theme| {
             let component = &theme.current_container().component;
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 border: cosmic::iced::Border {
                     radius: theme.cosmic().corner_radii.radius_m.into(),
                     width: 1.0,
@@ -96,10 +96,10 @@ pub(super) fn accent_border_color(theme: &cosmic::Theme, active: bool) -> cosmic
 /// The shared "pill" container style: list-container fill, a hairline divider
 /// border, and an extra-large corner radius (no shadow). Used by the header
 /// pills and the segmented-control track.
-pub(super) fn pill_surface(theme: &cosmic::Theme) -> cosmic::iced_widget::container::Style {
+pub(super) fn pill_surface(theme: &cosmic::Theme) -> cosmic::iced::widget::container::Style {
     let cosmic = theme.cosmic();
     let component = &theme.current_container().component;
-    cosmic::iced_widget::container::Style {
+    cosmic::iced::widget::container::Style {
         background: Some(cosmic::iced::Background::Color(component.base.into())),
         border: cosmic::iced::Border {
             radius: cosmic.corner_radii.radius_xl.into(),
@@ -125,7 +125,7 @@ pub(super) fn card_surface<'a>(
             let cosmic = theme.cosmic();
             let component = &theme.current_container().component;
             let border_color = accent_border_color(theme, active);
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 icon_color: Some(component.on.into()),
                 text_color: Some(component.on.into()),
                 background: Some(cosmic::iced::Background::Color(component.base.into())),
@@ -242,7 +242,7 @@ pub(super) fn rounded_tooltip<'a>(
     cosmic::widget::tooltip::Tooltip::new(content, popup, position)
         .class(cosmic::theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 icon_color: None,
                 text_color: None,
                 background: Some(cosmic::iced::Background::Color(

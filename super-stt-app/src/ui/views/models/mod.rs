@@ -19,8 +19,8 @@ use surface::{bordered_scroll_view, muted_text_color, tab_bar_container, toolbar
 use tabs::models_tab_switcher;
 
 use cosmic::Element;
+use cosmic::iced::widget::row;
 use cosmic::iced::{Alignment, Length};
-use cosmic::iced_widget::row;
 use cosmic::widget::{self, text};
 
 use super::common::page_container;
@@ -94,7 +94,7 @@ pub(crate) fn status_pill(app: &AppModel) -> Element<'_, Message> {
         .width(Length::Fixed(size))
         .height(Length::Fixed(size))
         .class(cosmic::theme::Container::custom(move |theme| {
-            cosmic::iced_widget::container::Style {
+            cosmic::iced::widget::container::Style {
                 background: Some(cosmic::iced::Background::Color(color_fn(theme))),
                 border: cosmic::iced::Border {
                     radius: (size / 2.0).into(),

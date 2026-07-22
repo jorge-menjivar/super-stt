@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::Element;
+use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
-use cosmic::iced_widget::{column, row};
 use cosmic::widget::{self, settings, text};
 
 use crate::core::app::AppModel;
