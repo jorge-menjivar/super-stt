@@ -53,9 +53,16 @@ impl ResourceLimits {
     #[must_use]
     pub fn production() -> Self {
         Self {
-            max_connections: 20,             // More restrictive for production
-            max_requests_per_minute: 60,     // 1 request per second
-            max_requests_per_hour: 1800,     // 0.5 requests per second average
+            max_connections: 20, // More restrictive for production
+            // The first-party settings app's own background polling
+            // (5s keep-alive ping + 3s GPU refresh ≈ 32 req/min) plus the
+            // ~14-request batch every reconnect/page-load fires already
+            // approaches this ceiling; the limiter is a tight-loop backstop
+            // for a buggy local client, not a security boundary (the daemon
+            // binds a local Unix socket keyed per uid:pid), so it sits well
+            // above legitimate first-party peak rather than at 1 req/s.
+            max_requests_per_minute: 300,    // 5 requests per second
+            max_requests_per_hour: 7200,     // headroom above ~32 req/min baseline
             connection_timeout_seconds: 180, // 3 minutes
             rate_limit_window_seconds: 60,
         }
