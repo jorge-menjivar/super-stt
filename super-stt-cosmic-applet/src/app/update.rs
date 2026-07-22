@@ -3,10 +3,8 @@ use std::time::Instant;
 
 use cosmic::{
     app as cosmic_app,
-    iced::{
-        platform_specific::shell::wayland::commands::popup::{destroy_popup, get_popup},
-        window,
-    },
+    iced::window,
+    surface::{action as surface_action, surface_task},
     widget::segmented_button::Entity,
 };
 use log::{debug, info, warn};
@@ -84,21 +82,36 @@ impl SuperSttApplet {
         }
     }
 
+    /// Open or close the panel popup.
+    ///
+    /// Routed through `cosmic::surface` rather than the raw `get_popup` /
+    /// `destroy_popup` wayland commands so libcosmic tracks the surface: it
+    /// owns the popup's corner radii and its frosted-glass blur, and re-applies
+    /// both when the theme changes. A popup spawned directly is invisible to
+    /// that bookkeeping, which leaves it translucent with nothing blurred
+    /// behind it whenever the theme has frosted applets on.
     fn toggle_popup(&mut self) -> cosmic_app::Task<Message> {
         if let Some(p) = self.popup.take() {
-            return destroy_popup(p);
+            return surface_task(surface_action::destroy_popup(p));
         }
-        if let Some(main_window_id) = self.core.main_window_id() {
-            let new_id = window::Id::unique();
-            self.popup.replace(new_id);
-            let popup_settings =
-                self.core
+        let Some(main_window_id) = self.core.main_window_id() else {
+            warn!("Cannot toggle popup: main window ID not available");
+            return cosmic_app::Task::none();
+        };
+        surface_task(surface_action::app_popup::<Self>(
+            // Defaults: inherit the blur and corner radii libcosmic derives
+            // from the theme for an applet popup.
+            |_| surface_action::LiveSettings::default(),
+            move |app: &mut Self| {
+                let new_id = window::Id::unique();
+                app.popup.replace(new_id);
+                app.core
                     .applet
-                    .get_popup_settings(main_window_id, new_id, None, None, None);
-            return get_popup(popup_settings);
-        }
-        warn!("Cannot toggle popup: main window ID not available");
-        cosmic_app::Task::none()
+                    .get_popup_settings(main_window_id, new_id, None, None, None)
+            },
+            // No dedicated view: libcosmic falls back to `view_window`.
+            None,
+        ))
     }
 
     fn close_popup(&mut self, id: window::Id) -> cosmic_app::Task<Message> {

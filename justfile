@@ -122,6 +122,16 @@ fmt:
 test *args:
     cargo test {{ args }}
 
+# Run the #[ignore]'d GUI smoke tests. These spawn real libcosmic surfaces
+# against the live compositor, so they need a desktop session and can't run in
+# CI — but they're the only thing that catches a surface the compositor
+# rejects (e.g. a corner radius wider than an autosized layer surface, which
+# kills the client mid-handshake and turns every consent prompt into a silent
+# denial). Run them after touching any surface setup. Usage: just test-gui
+[doc("Run the GUI smoke tests against the live compositor (needs a desktop session)")]
+test-gui *args:
+    cargo test -p super-stt-consent --test gui_smoke -- --ignored --nocapture {{ args }}
+
 # Load every committed old-config fixture against the current config types.
 config-compat *args:
     cargo test -p super-stt-daemon --lib config {{ args }}
@@ -173,6 +183,42 @@ run-daemon *args:
 # Usage: just run-cli [ping|status|record|stop|logout] [args]
 run-cli *args:
     env RUST_BACKTRACE=full RUST_LOG=super_stt_cli=debug,super_stt_shared=debug cargo run --bin {{ cli_name }} -- {{ args }}
+
+# Run the consent dialog on its own, without the daemon. The dialog is
+# env-driven rather than argument-driven, so this fills in a plausible request;
+# pass scope names to change which permission bullets render. The decision
+# (allow / deny / dismissed) goes to stdout, same as the daemon would read.
+#
+# Heads up: the dialog is an overlay layer surface with an exclusive keyboard
+# grab, so it holds the keyboard until you click Allow or Deny — the mouse
+# still works. For a hands-free run, set STT_AUTH_AUTO_APPROVE_AFTER_MS and it
+# approves itself after that many milliseconds. That env var is debug-only; a
+# release build can never self-approve.
+#
+# For the automated version of this, see `just test-gui`.
+#
+# Usage: just run-consent [scope...]
+#   just run-consent
+#   just run-consent transcribe settings secrets
+#   STT_AUTH_AUTO_APPROVE_AFTER_MS=4000 just run-consent
+[doc("Run the consent dialog standalone. Usage: just run-consent [scope...]")]
+run-consent *scopes:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    scopes="{{ scopes }}"
+    # A spread of scopes so the dialog renders a representative bullet list.
+    [ -n "$scopes" ] || scopes="transcribe status settings"
+
+    echo "Scopes: $scopes"
+    # Quiet RUST_LOG: the default pulls in thousands of wgpu/zbus/wayland lines
+    # at startup and buries the dialog's own output.
+    env RUST_BACKTRACE=full \
+        RUST_LOG=super_stt_consent=debug,super_stt_shared=debug \
+        STT_AUTH_APP_NAME="Test App" \
+        STT_AUTH_SCOPES="$scopes" \
+        STT_AUTH_EXE_PATH="/usr/bin/test-app" \
+        cargo run --bin {{ consent_name }}
 
 # Run security audit to check for vulnerabilities
 audit:
