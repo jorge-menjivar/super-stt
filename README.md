@@ -107,12 +107,47 @@ Models come from a **library** of backends you install on demand. Open the app, 
 
 This is a snapshot. The app always shows the current catalog, published live at [`jorge-menjivar.github.io/super-stt/index.json`](https://jorge-menjivar.github.io/super-stt/index.json). Want a model that isn't there? Anyone can [publish one](./docs/protocol/README.md#add-your-own-model).
 
+## 🖼️ Screenshots
+
+**Models & backends** — load a backend, choose a model, and pick where it runs.
+
 <table>
 <tr>
-<td align="center"><strong>Model selection</strong><br><img src=".github/assets/models-selection.png" width="320"></td>
-<td align="center"><strong>Online providers</strong><br><img src=".github/assets/online-models.png" width="320"></td>
+<td align="center"><strong>Clean start</strong><br><img src=".github/assets/screenshots/app-1.png" width="270"></td>
+<td align="center"><strong>Load a backend</strong><br><img src=".github/assets/screenshots/app-2.png" width="270"></td>
+<td align="center"><strong>Pick a model</strong><br><img src=".github/assets/screenshots/app-3.png" width="270"></td>
+</tr>
+<tr>
+<td align="center"><strong>Run on CPU or GPU</strong><br><img src=".github/assets/screenshots/app-4.png" width="270"></td>
+<td align="center"><strong>Select language</strong><br><img src=".github/assets/screenshots/app-5.png" width="270"></td>
+<td></td>
 </tr>
 </table>
+
+**Library** — browse the catalog and manage what's installed.
+
+<table>
+<tr>
+<td align="center"><strong>Installed backends</strong><br><img src=".github/assets/screenshots/app-6.png" width="400"></td>
+<td align="center"><strong>Browse the catalog</strong><br><img src=".github/assets/screenshots/app-7.png" width="400"></td>
+</tr>
+</table>
+
+**Settings** — tune audio feedback, recording behavior, and text input.
+
+<table>
+<tr>
+<td align="center"><strong>Customization</strong><br><img src=".github/assets/screenshots/app-8.png" width="270"></td>
+<td align="center"><strong>Recording</strong><br><img src=".github/assets/screenshots/app-9.png" width="270"></td>
+<td align="center"><strong>Input simulation</strong><br><img src=".github/assets/screenshots/app-10.png" width="270"></td>
+</tr>
+</table>
+
+**Panel visualizer** — the COSMIC applet shows your mic input live in the panel, in three styles.
+
+<p align="center"><strong>Waveforms</strong><br><img src=".github/assets/screenshots/visualization-waveforms.png" width="100%"></p>
+<p align="center"><strong>Equalizer</strong><br><img src=".github/assets/screenshots/visualization-equalizer.png" width="100%"></p>
+<p align="center"><strong>Centered bars</strong><br><img src=".github/assets/screenshots/visualization-centered-bars.png" width="100%"></p>
 
 ## 🩺 Troubleshooting
 
