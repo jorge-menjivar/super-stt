@@ -68,20 +68,32 @@
         keyring = { version = "3", features = ["sync-secret-service"] }
         # System calls (for client singleton)
         libc = "0.2"
-        # Cosmic specific
+        # Cosmic specific. The lib target is `cosmic`, so this is `use cosmic::`
+        # in code despite the package being `libcosmic` — no rename needed.
+        #
+        # Pinned by rev: libcosmic has no releases, so an unpinned git dep
+        # silently drifts to whatever the default branch points at. That matters
+        # more than usual here — cosmic-theme versions its cosmic-config schema,
+        # so a revision far enough from the installed COSMIC reads a theme
+        # directory the desktop no longer writes and the UI quietly renders
+        # stock colors. Bump deliberately: change the rev, then
+        # `cargo update -p libcosmic`.
+        #
+        # Pinning costs a small duplication: cosmic-panel-config, which
+        # libcosmic pulls in for `applet`, depends on cosmic-config from this
+        # same repo *unpinned*, and cargo treats a pinned and unpinned source as
+        # two sources. So cosmic-config, cosmic-config-derive and build_helpers
+        # each compile twice, and `cargo tree -d` reports them. Harmless, and
+        # not ours to fix upstream.
+        #
+        # Features live on each member instead of here, since the consent helper
+        # wants a much smaller build than the app. `default-features` can only be
+        # turned off at the workspace level, so members opt into "default" by
+        # name rather than inheriting it.
         libcosmic = {
             git = "https://github.com/pop-os/libcosmic.git",
-            features = [
-                "a11y",
-                "applet",
-                "dbus-config",
-                "multi-window",
-                "single-instance",
-                "tokio",
-                "wayland",
-                "wgpu",
-                "winit",
-            ]
+            rev = "ef162b8e16ba4493e05c169cd56c7b9f77f0fda5",
+            default-features = false,
         }
         log = "0.4.29"
         open = "5.3.3"

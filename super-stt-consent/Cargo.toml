@@ -12,10 +12,10 @@
     path = "src/main.rs"
 
 [dependencies]
-    cosmic = {
-        package = "libcosmic",
-        git = "https://github.com/pop-os/libcosmic.git",
-        default-features = false,
+    # Deliberately lean: no "default", so the helper skips a11y, dbus-config
+    # and x11 that the app pulls in. It's a short-lived dialog.
+    libcosmic = {
+        workspace = true,
         features = [
             "autosize",
             "multi-window",

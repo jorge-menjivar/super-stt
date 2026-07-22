@@ -15,7 +15,21 @@
     i18n-embed-fl.workspace = true
     libc.workspace = true
     # COSMIC dependencies
+    # Dotted keys, not an inline table: `fluent_language_loader!` parses this
+    # manifest with a TOML 1.0 parser, which rejects a multi-line inline table.
     libcosmic.workspace = true
+    libcosmic.features = [
+        "default",
+        "a11y",
+        "applet",
+        "dbus-config",
+        "multi-window",
+        "single-instance",
+        "tokio",
+        "wayland",
+        "wgpu",
+        "winit",
+    ]
     log.workspace = true
     open.workspace = true
     rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
