@@ -598,6 +598,16 @@ case $INSTALL_OPTION in
         ;;
 esac
 
+# Nudge COSMIC's launcher caches (app grid + search backend): both scan
+# desktop entries at session start and miss entries added to a directory
+# they weren't watching. They respawn on demand and rescan. (-f because
+# cosmic-app-library exceeds pkill's 15-char comm-name limit.)
+if [ "$INSTALL_OPTION" != "daemon" ]; then
+    pkill -f '^cosmic-app-library$' 2>/dev/null || true
+    pkill -f '^cosmic-launcher$' 2>/dev/null || true
+    pkill -f '^pop-launcher( |$)' 2>/dev/null || true
+fi
+
 # Configure COSMIC shortcut if daemon was installed and in interactive mode
 if [ "$INTERACTIVE" = true ] && ([ "$INSTALL_OPTION" = "all" ] || [ "$INSTALL_OPTION" = "daemon" ]); then
     configure_cosmic_shortcut "$INSTALL_PREFIX"

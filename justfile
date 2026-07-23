@@ -430,6 +430,12 @@ install-app:
         sudo gtk-update-icon-cache -f -t {{ icon_theme_dir }} 2>/dev/null || true
     fi
 
+    # Nudge COSMIC's launcher caches (app grid + search backend) so the
+    # entry appears without a relogin; both respawn on demand and rescan.
+    pkill -f '^cosmic-app-library$' 2>/dev/null || true
+    pkill -f '^cosmic-launcher$' 2>/dev/null || true
+    pkill -f '^pop-launcher( |$)' 2>/dev/null || true
+
     echo "✓ Super STT app installed: {{ app_dst }}"
     echo "✓ Desktop entry installed: {{ app_desktop_file_dst }}"
     echo "✓ App icon installed: {{ app_icon_dst }}"
@@ -481,6 +487,12 @@ install-applet:
     if command -v gtk-update-icon-cache &> /dev/null; then
         sudo gtk-update-icon-cache -f -t {{ icon_theme_dir }} 2>/dev/null || true
     fi
+
+    # Nudge COSMIC's launcher caches (app grid + search backend) so the
+    # entries appear without a relogin; both respawn on demand and rescan.
+    pkill -f '^cosmic-app-library$' 2>/dev/null || true
+    pkill -f '^cosmic-launcher$' 2>/dev/null || true
+    pkill -f '^pop-launcher( |$)' 2>/dev/null || true
 
     echo "✓ COSMIC applet installed: {{ applet_dst }}"
     echo "✓ Desktop entries installed for panel integration:"
@@ -823,6 +835,11 @@ uninstall-app:
         sudo gtk-update-icon-cache -f -t {{ icon_theme_dir }} 2>/dev/null || true
     fi
 
+    # Drop the entry from COSMIC's launcher caches without a relogin.
+    pkill -f '^cosmic-app-library$' 2>/dev/null || true
+    pkill -f '^cosmic-launcher$' 2>/dev/null || true
+    pkill -f '^pop-launcher( |$)' 2>/dev/null || true
+
     echo "✓ Super STT App uninstalled"
     echo "✓ Desktop entry removed"
     echo "✓ App icon removed"
@@ -837,6 +854,12 @@ uninstall-applet:
     sudo rm -f {{ applet_right_desktop_file_dst }}
     # Remove the applet icon
     sudo rm -f {{ applet_icon_dst }}
+
+    # Drop the entries from COSMIC's launcher caches without a relogin.
+    pkill -f '^cosmic-app-library$' 2>/dev/null || true
+    pkill -f '^cosmic-launcher$' 2>/dev/null || true
+    pkill -f '^pop-launcher( |$)' 2>/dev/null || true
+
     echo "✓ COSMIC applet uninstalled"
     echo "✓ Desktop entries removed"
     echo "✓ Applet icon removed"

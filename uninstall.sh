@@ -168,6 +168,11 @@ if command -v update-desktop-database &> /dev/null; then
         $SUDO update-desktop-database "$SYSTEM_DESKTOP_DIR" 2>/dev/null || true
     fi
 fi
+# Nudge COSMIC's launcher caches so the removed entries disappear without
+# a relogin; both processes respawn on demand and rescan.
+pkill -f '^cosmic-app-library$' 2>/dev/null || true
+pkill -f '^cosmic-launcher$' 2>/dev/null || true
+pkill -f '^pop-launcher( |$)' 2>/dev/null || true
 
 # 7. COSMIC custom keyboard shortcut. Remove only if Super STT is the
 #    only entry; otherwise the user has other custom bindings we
