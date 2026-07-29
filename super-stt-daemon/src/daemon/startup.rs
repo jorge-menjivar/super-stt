@@ -246,6 +246,42 @@ impl SuperSTTDaemon {
         changed
     }
 
+    /// Record the backend serving `source` as the active one when nothing has
+    /// selected one yet, returning whether it changed anything.
+    ///
+    /// The startup path resolves its model from the legacy
+    /// `preferred_model`/`preferred_provider`/`preferred_source` config, which
+    /// carries no `active_backend` — a config written before that field
+    /// existed loads it as `None`. Without this the daemon transcribes
+    /// happily while `GET /active_backend` stays null, so the settings app
+    /// shows its "no backend loaded" empty state and `GET /models` (scoped to
+    /// the active backend) returns nothing.
+    ///
+    /// Guarded on `is_none()`, so it only ever fills a gap: an explicit
+    /// selection through `set_active_backend`/`set_model` always wins.
+    ///
+    /// Persisting is deliberately left to the caller. Keeping this free of
+    /// disk I/O is what lets it be unit-tested without writing over the user's
+    /// real config.
+    async fn adopt_active_backend_for(&self, source: &str) -> bool {
+        if self.active_backend.read().await.is_some() {
+            return false;
+        }
+        let dir_name = {
+            let backends = self.backends.read().await;
+            backends
+                .iter()
+                .find(|b| b.source == source)
+                .and_then(backends::dir_name)
+        };
+        let Some(dir) = dir_name else {
+            return false;
+        };
+        *self.active_backend.write().await = Some(dir.clone());
+        self.config.write().await.transcription.active_backend = Some(dir);
+        true
+    }
+
     async fn load_initial_model_and_broadcast(
         daemon: &SuperSTTDaemon,
         name: String,
@@ -261,24 +297,10 @@ impl SuperSTTDaemon {
 
         info!("model {name} via {provider} loaded successfully");
 
-        // Derive the active backend from the loaded model's source when the
-        // daemon started via the legacy `preferred_model`/`preferred_source`
-        // config (which don't set `active_backend`). Without this the app
-        // shows "no backend loaded" even though a model is actively running.
-        if daemon.active_backend.read().await.is_none() {
-            let backends = daemon.backends.read().await;
-            let dir_name = backends
-                .iter()
-                .find(|b| b.source == source)
-                .and_then(backends::dir_name);
-            drop(backends);
-            if let Some(ref dir) = dir_name {
-                *daemon.active_backend.write().await = Some(dir.clone());
-                daemon.config.write().await.transcription.active_backend = Some(dir.clone());
-                if let Err(e) = daemon.persist_config().await {
-                    warn!("Failed to persist active_backend after startup load: {e}");
-                }
-            }
+        if daemon.adopt_active_backend_for(&source).await
+            && let Err(e) = daemon.persist_config().await
+        {
+            warn!("Failed to persist active_backend after startup load: {e}");
         }
 
         // Capture the device label before moving `instance` into the shared
@@ -299,3 +321,7 @@ impl SuperSTTDaemon {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "startup_tests.rs"]
+mod tests;

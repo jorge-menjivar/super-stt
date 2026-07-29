@@ -1,44 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
-use crate::config::DaemonConfig;
-use crate::daemon::events::EventBus;
-use crate::download_progress::DownloadStateManager;
-use crate::input::audio::AudioProcessor;
-use crate::resource_management::ResourceManager;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, RwLock};
+use crate::daemon::types::test_daemon;
 use super_stt_shared::models::protocol::ErrorCode;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
-use super_stt_shared::theme::AudioTheme;
-use tokio::sync::broadcast;
 use tokio::time::{Duration, timeout};
-
-async fn test_daemon() -> SuperSTTDaemon {
-    let model = Arc::new(tokio::sync::RwLock::new(None));
-    let audio_processor = Arc::new(AudioProcessor::new());
-    let (shutdown_tx, _) = broadcast::channel(1);
-    SuperSTTDaemon {
-        model,
-        audio_processor,
-        shutdown_tx,
-        dbus_manager: None,
-        events: Arc::new(EventBus::new()),
-        audio_theme: Arc::new(RwLock::new(AudioTheme::default())),
-        volume: Arc::new(RwLock::new(100)),
-        busy: Arc::new(tokio::sync::RwLock::new(false)),
-        download_manager: Arc::new(DownloadStateManager::new()),
-        preferred_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
-        actual_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
-        config: Arc::new(tokio::sync::RwLock::new(DaemonConfig::default())),
-        resource_manager: Arc::new(ResourceManager::development()),
-        preview_typing_enabled: Arc::new(AtomicBool::new(false)),
-        manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
-        simulator: Arc::new(tokio::sync::RwLock::new(None)),
-        preview_text: Arc::new(tokio::sync::RwLock::new(None)),
-        backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-        active_backend: Arc::new(tokio::sync::RwLock::new(None)),
-    }
-}
 
 fn make_request(command: &str) -> DaemonRequest {
     DaemonRequest {

@@ -93,6 +93,38 @@ pub struct SuperSTTDaemon {
     pub active_backend: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
+/// A daemon wired up with inert defaults: no model, no backends, nothing
+/// selected, and a `DaemonConfig::default()` that is never written to disk.
+///
+/// Lives beside the struct so there is exactly one copy — a second would drift
+/// as fields are added (the compiler catches the drift, but only after someone
+/// has fixed the same literal twice).
+#[cfg(test)]
+pub(crate) async fn test_daemon() -> SuperSTTDaemon {
+    let (shutdown_tx, _) = broadcast::channel(1);
+    SuperSTTDaemon {
+        model: Arc::new(tokio::sync::RwLock::new(None)),
+        audio_processor: Arc::new(AudioProcessor::new()),
+        shutdown_tx,
+        dbus_manager: None,
+        events: Arc::new(EventBus::new()),
+        audio_theme: Arc::new(RwLock::new(AudioTheme::default())),
+        volume: Arc::new(RwLock::new(100)),
+        busy: Arc::new(tokio::sync::RwLock::new(false)),
+        download_manager: Arc::new(DownloadStateManager::new()),
+        preferred_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
+        actual_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
+        config: Arc::new(tokio::sync::RwLock::new(DaemonConfig::default())),
+        resource_manager: Arc::new(ResourceManager::development()),
+        preview_typing_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        manual_stop_tx: Arc::new(tokio::sync::RwLock::new(None)),
+        simulator: Arc::new(tokio::sync::RwLock::new(None)),
+        preview_text: Arc::new(tokio::sync::RwLock::new(None)),
+        backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        active_backend: Arc::new(tokio::sync::RwLock::new(None)),
+    }
+}
+
 impl SuperSTTDaemon {
     /// Resolve a wire-level `(name, provider, source)` triple into a
     /// [`ModelDefinition`] from the discovered backends. Returns `None` on miss.
