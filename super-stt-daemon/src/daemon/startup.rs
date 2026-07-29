@@ -13,6 +13,7 @@ use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::resource_management::ResourceManager;
 use crate::services::dbus::DBusManager;
+use crate::stt_models::backends;
 use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
@@ -259,6 +260,27 @@ impl SuperSTTDaemon {
             .await?;
 
         info!("model {name} via {provider} loaded successfully");
+
+        // Derive the active backend from the loaded model's source when the
+        // daemon started via the legacy `preferred_model`/`preferred_source`
+        // config (which don't set `active_backend`). Without this the app
+        // shows "no backend loaded" even though a model is actively running.
+        if daemon.active_backend.read().await.is_none() {
+            let backends = daemon.backends.read().await;
+            let dir_name = backends
+                .iter()
+                .find(|b| b.source == source)
+                .and_then(backends::dir_name);
+            drop(backends);
+            if let Some(ref dir) = dir_name {
+                *daemon.active_backend.write().await = Some(dir.clone());
+                daemon.config.write().await.transcription.active_backend = Some(dir.clone());
+                if let Err(e) = daemon.persist_config().await {
+                    warn!("Failed to persist active_backend after startup load: {e}");
+                }
+            }
+        }
+
         // Capture the device label before moving `instance` into the shared
         // `LoadedModel` — `ready` event consumers (e.g. the settings app's
         // current_device tracking) only update when `actual_device` is present.
