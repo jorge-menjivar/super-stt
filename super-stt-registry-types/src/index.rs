@@ -323,18 +323,32 @@ mod tests {
             processing_interval_ms: None,
             realtime: false,
             files: vec![],
+            provider: None,
         }
     }
 
+    /// Online-ness comes from the `none` device sentinel alone. `provider` is
+    /// a free-form legacy string that survives only to be echoed back on load
+    /// (see [`ModelEntry::provider`]), so a cloud-sounding value on a local
+    /// model — or none at all on a cloud one — must not move the answer.
     #[test]
     fn classify_marks_online_from_none_device_not_provider() {
-        // Online-ness is derived from the `none` device sentinel, not the
-        // (free-form) provider string.
+        let with_provider = |devices: &[Device], provider: &str| {
+            let mut m = model(devices);
+            m.provider = Some(provider.to_string());
+            m
+        };
+
         assert!(model_support(&[model(&[Device::None])]).online);
-        assert!(model_support(&[model(&[Device::None])]).online);
-        assert!(model_support(&[model(&[Device::None])]).online);
+        assert!(
+            model_support(&[with_provider(&[Device::None], "")]).online,
+            "a cloud model with no provider is still online"
+        );
         assert!(!model_support(&[model(&[Device::Cpu])]).online);
-        assert!(!model_support(&[model(&[Device::Cpu])]).online);
+        assert!(
+            !model_support(&[with_provider(&[Device::Cpu], "openai")]).online,
+            "a cloud-sounding provider must not make a local model online"
+        );
         assert!(!model_support(&[model(&[])]).online);
     }
 

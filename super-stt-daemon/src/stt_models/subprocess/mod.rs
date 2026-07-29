@@ -157,7 +157,9 @@ impl SubprocessBackend {
         };
 
         backend.wait_for_ping(Duration::from_secs(30)).await?;
-        backend.load(model_name, device_pref).await?;
+        backend
+            .load(model_name, model.provider.as_deref(), device_pref)
+            .await?;
         Ok(backend)
     }
 
@@ -180,12 +182,8 @@ impl SubprocessBackend {
 
     /// `POST /v1/load` then poll `/v1/status` until `ready` (or `error`),
     /// capturing the device label the backend reports.
-    async fn load(&mut self, name: &str, device_pref: &str) -> Result<()> {
-        let mut load = serde_json::json!({ "name": name });
-        if !device_pref.is_empty() {
-            load["device"] = serde_json::json!(device_pref);
-        }
-        let body = serde_json::to_vec(&load)?;
+    async fn load(&mut self, name: &str, provider: Option<&str>, device_pref: &str) -> Result<()> {
+        let body = serde_json::to_vec(&load_body(name, provider, device_pref))?;
         let (status, resp) = self
             .request("POST", "/v1/load", &json_headers(), body)
             .await?;
@@ -357,8 +355,33 @@ fn json_headers() -> Vec<(String, String)> {
     vec![("content-type".to_string(), "application/json".to_string())]
 }
 
+/// Build the `POST /v1/load` body. `name` is always present; `device` only
+/// when a preference is set, and `provider` only when the model's manifest
+/// declares one.
+///
+/// `provider` is a compatibility echo (see [`ModelEntry::provider`]): backends
+/// released against the earlier `(name, provider)` identity answer
+/// `400 invalid_model` for a load body that omits it, so whatever the manifest
+/// declares is forwarded verbatim.
+///
+/// [`ModelEntry::provider`]: crate::stt_models::backends::manifest::ModelEntry::provider
+fn load_body(name: &str, provider: Option<&str>, device_pref: &str) -> serde_json::Value {
+    let mut load = serde_json::json!({ "name": name });
+    if let Some(provider) = provider {
+        load["provider"] = serde_json::json!(provider);
+    }
+    if !device_pref.is_empty() {
+        load["device"] = serde_json::json!(device_pref);
+    }
+    load
+}
+
 fn sanitize(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

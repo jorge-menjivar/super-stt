@@ -38,6 +38,25 @@ impl SuperSTTDaemon {
         if pref_model.is_empty() {
             return None;
         }
+        // A config predating `preferred_source` names a model but not the
+        // backend serving it. Resolve it the same way the wire path does — from
+        // the selected backend — rather than scanning for the first backend
+        // that serves the name: two backends may serve the same name, and the
+        // scan order is `read_dir` order, so the daemon could come up on a
+        // different engine than the one the user chose. With no selection
+        // recorded either, stay idle and let the user pick.
+        let pref_source = if pref_source.is_empty() {
+            let Some(resolved) = self.active_backend_source().await else {
+                info!(
+                    "Startup model {pref_model} names no source and no backend is selected; \
+                     staying idle"
+                );
+                return None;
+            };
+            resolved
+        } else {
+            pref_source
+        };
         let backends = self.backends.read().await;
         let (_, def) = backends::find_model(&backends, &pref_model, &pref_source)?;
         // Online models need the online gate on to be usable; local models are

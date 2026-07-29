@@ -48,6 +48,21 @@ impl SuperSTTDaemon {
         self.guard_model_mutation("change the backend").await
     }
 
+    /// `source` (repo id) of the currently selected backend, or `None` when
+    /// none is selected — or when the selected install dir is no longer
+    /// discovered (the backend was uninstalled out from under the selection).
+    ///
+    /// `active_backend` stores the relative install dir, not the source, so
+    /// this is the mapping every "resolve an omitted `source`" path needs.
+    pub(crate) async fn active_backend_source(&self) -> Option<String> {
+        let dir_name = self.active_backend.read().await.clone()?;
+        let backends = self.backends.read().await;
+        backends
+            .iter()
+            .find(|b| backends::dir_name(b).as_deref() == Some(dir_name.as_str()))
+            .map(|b| b.source.clone())
+    }
+
     /// Build the `{source, name, model_loaded}` payload for the backend at the
     /// given relative install dir, or `None` if it isn't currently discovered.
     async fn active_backend_payload(&self, dir_name: &str) -> Option<serde_json::Value> {
@@ -163,10 +178,29 @@ impl SuperSTTDaemon {
             return resp;
         }
 
-        // Resolve against discovered backends; capture the concrete source +
-        // install dir so the backend is recorded even when the request left
-        // `source` empty. Online-ness is only knowable from the resolved model
-        // so capture it here.
+        // `source` is optional on the wire. A switch is a switch *within* a
+        // backend, so an omitted one resolves to the active backend rather than
+        // to whichever installed backend happens to serve `model` first — two
+        // backends may serve the same name, scan order is `read_dir` order, and
+        // the backend picked here is persisted below. With nothing selected
+        // there is no defensible guess, so the call fails.
+        let source = if source.is_empty() {
+            let Some(resolved) = self.active_backend_source().await else {
+                return DaemonResponse::error_with_code(
+                    ErrorCode::InvalidBackend,
+                    "No active backend to switch models within. \
+                     Select a backend first, or name the model's `source`.",
+                );
+            };
+            info!("Empty source resolved to the active backend: {resolved}");
+            resolved
+        } else {
+            source
+        };
+
+        // Resolve against discovered backends; capture the install dir so the
+        // backend is recorded below. Online-ness is only knowable from the
+        // resolved model, so capture it here too.
         let resolved = {
             let backends = self.backends.read().await;
             backends::find_model(&backends, &model, &source)
@@ -233,10 +267,11 @@ impl SuperSTTDaemon {
         definition: ModelDefinition,
         instance: Box<dyn Transcribe>,
     ) -> DaemonResponse {
+        let provider = definition.provider.clone();
         let actual_device = self.finalize_loaded_model(definition, instance).await;
         {
             let mut config_guard = self.config.write().await;
-            config_guard.update_preferred_model(model.clone(), source.clone());
+            config_guard.update_preferred_model(model.clone(), source.clone(), provider);
         }
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after model switch: {e}");

@@ -114,8 +114,8 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
         v["backends"][0]["options"][0]["default"],
         "https://api.y.example"
     );
-    // The fixture's only model is served by an online provider ("openai") —
-    // pins the Provider::Online → `online: true` mapping.
+    // The fixture's only model declares the `none` device sentinel — pins the
+    // `supported_devices = ["none"]` → `online: true` mapping.
     assert_eq!(v["backends"][0]["online"], true);
     // The manifest is pinned to the `backend.toml` release asset with a hash,
     // so the daemon installs those exact bytes.

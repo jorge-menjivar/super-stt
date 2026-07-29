@@ -29,11 +29,11 @@ pub(crate) fn normalize_device(label: &str) -> String {
 }
 
 /// A live model: its full resolved [`ModelDefinition`] plus the running
-/// inference instance. Replaces what used to be parallel
-/// `Arc<RwLock<Option<…>>>` slots for name, and instance — those
-/// always changed together and could drift during a switch. The definition
-/// owns the name, source, and architecture; nothing has to be
-/// re-derived at read sites.
+/// inference instance. A single slot rather than parallel
+/// `Arc<RwLock<Option<…>>>` slots for the name, the definition, and the
+/// instance — those always changed together and could drift during a switch.
+/// The definition owns the model's identity and capabilities, so nothing has
+/// to be re-derived at read sites.
 pub struct LoadedModel {
     pub definition: crate::stt_models::ModelDefinition,
     pub instance: Box<dyn crate::stt_models::transcribe::Transcribe>,
@@ -80,8 +80,8 @@ pub struct SuperSTTDaemon {
     pub preview_text: PreviewSlot,
     // Backends discovered from the backends directory.
     pub backends: Arc<tokio::sync::RwLock<Vec<DiscoveredBackend>>>,
-    // Active backend: the relative install dir (subdir of the backends dir) of
-    // the selected or None when idle. Runtime mirror of
+    // Active backend: the relative install dir (a subdir of the backends dir)
+    // of the selected backend, or None when idle. Runtime mirror of
     // `config.transcription.active_backend`.
     pub active_backend: Arc<tokio::sync::RwLock<Option<String>>>,
 }
@@ -119,8 +119,8 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
 }
 
 impl SuperSTTDaemon {
-    /// Resolve a wire-level `(name, source)` triple into a
-    /// [`ModelDefinition`] from the discovered backends. Returns `None` on miss.
+    /// Resolve a wire-level `(name, source)` pair into a [`ModelDefinition`]
+    /// from the discovered backends. Returns `None` on miss.
     pub async fn resolve_definition(
         &self,
         name: &str,

@@ -10,8 +10,16 @@ pair:
 - **`name`** — `whisper-1`, `voxtral-mini`, …
 - **`source`** — the repo id of the backend that serves the model
   (e.g. `github.com/super-stt/openai`), as returned by
-  [`GET /models`](./models.md). Empty/omitted selects the first installed
-  backend serving `name`.
+  [`GET /models`](./models.md). Empty/omitted resolves to the
+  [active backend](./active_backend.md); with no active backend the call fails
+  with `400 invalid_backend`.
+
+A model switch is a switch *within* a backend: `source` never has to be guessed.
+Two backends may serve the same `name`, so resolving an omitted `source` by
+scanning for whichever backend happens to serve it would pick an engine the
+caller did not ask for — and that choice is persisted as the active backend.
+Select the backend first with
+[`POST /active_backend`](./active_backend.md), or name `source` explicitly.
 
 Switching the model also sets the [active backend](./active_backend.md) to the
 model's `source`. If the model then fails to load (e.g. a missing secret), the
@@ -52,7 +60,7 @@ Content-Type: application/json
 | Field      | Type    | Required | Notes                                                                  |
 |------------|---------|----------|------------------------------------------------------------------------|
 | `model`    | string  | yes      | One of the names returned by [`GET /models`](./models.md)              |
-| `source`   | string  | no       | Repo id of the serving backend. Empty/omitted picks the first backend serving `model`. |
+| `source`   | string  | no       | Repo id of the serving backend. Empty/omitted resolves to the [active backend](./active_backend.md). |
 
 **Response (202):**
 
@@ -77,6 +85,7 @@ topics above.
 |------|----------------------------|-------------------------------------------------------------------------------|
 | 400  | `online_models_disabled`   | the model is online but [`allow_online_models`](./allow_online_models.md) is `false` |
 | 400  | `invalid_model`            | No installed backend serves `(model, source)`                       |
+| 400  | `invalid_backend`          | `source` was omitted and no [active backend](./active_backend.md) is selected |
 | 401  | `invalid_session`          | Token unknown / expired / `exe_changed`                                       |
 | 403  | `scope_denied`             | Token lacks the `settings` scope                                              |
 | 409  | `switch_in_progress`       | Another model switch is already running                                       |
@@ -109,6 +118,7 @@ Authorization: Bearer stt_…64hex…
     "current": {
       "model":    "voxtral-mini",
       "source":   "github.com/super-stt/voxtral",
+      "provider": "",               // always empty; see below
       "loaded":   true,
       "device":   "cuda"            // "cpu" / "cuda" / "metal" / "remote"
     },
@@ -134,6 +144,10 @@ Authorization: Bearer stt_…64hex…
   }
 }
 ```
+
+`current.provider` is always an empty string. It is emitted so clients that
+require the key can still parse the response, and carries no information —
+identify a model by `(name, source)` instead. It will be removed.
 
 **Phase values** (`switch.phase`):
 

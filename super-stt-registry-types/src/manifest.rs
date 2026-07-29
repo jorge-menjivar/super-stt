@@ -378,6 +378,24 @@ pub struct ModelEntry {
     /// before `POST /v1/load`. Cloud models declare none.
     #[serde(default)]
     pub files: Vec<FileSpec>,
+    /// Compatibility shim; not part of model identity, which is
+    /// `(name, source)`.
+    ///
+    /// `provider` used to be the third component of that key, and backends
+    /// released against the earlier contract compare it against their own
+    /// fixed value on `POST /v1/load` — answering `400 invalid_model` when it
+    /// does not match. Dropping the field from the parser would make every
+    /// such backend unloadable, so the value is kept solely to be echoed back
+    /// on load; the daemon reads no meaning from it (`is_online` comes from
+    /// `supported_devices`).
+    ///
+    /// It also has to stay in the generated schema: every published manifest
+    /// declares the key, and a closed `ModelEntry` without it flags all of
+    /// them as invalid in an editor bound to the schema.
+    ///
+    /// Delete the field once no supported backend validates the key.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 impl ModelEntry {

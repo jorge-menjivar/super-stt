@@ -292,6 +292,14 @@ processing_interval_ms = 1000
 | `estimated_vram_bytes`   | integer         | no       | Conservative GPU memory estimate. Default `0`; use `0` for cloud models. |
 | `processing_interval_ms` | integer         | no       | Suggested minimum interval between streaming passes, in ms.      |
 | `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. |
+| `provider`               | string          | no       | Compatibility field. Not part of model identity and read by nothing in the daemon; it is echoed back verbatim as `provider` in [`POST /v1/load`](./contract.md#post-v1load) so a backend that still validates it keeps loading. |
+
+> **Compatibility.** `provider` was part of model identity before it became
+> `(name, source)`. Backends released against the earlier contract compare the
+> `provider` in `POST /v1/load` against their own fixed value and answer
+> `400 invalid_model` on a mismatch, so a manifest declaring `provider` still
+> has it forwarded on load. New backends should omit it, and should not
+> validate it if they accept it.
 
 `multilingual`, `primary_language`, and `supported_languages` together
 describe language capability. When `multilingual` is `true`,

@@ -135,6 +135,14 @@ Content-Type: application/json
 |------------|--------|----------|----------------------------------------------------------------|
 | `name`     | string | yes      | A model `name` the backend declares in its configuration.           |
 | `device`   | string | no       | Preferred device: `cpu`, `cuda`, or `metal`. The backend may fall back; the actual device is reported by `GET /v1/status`. |
+| `provider` | string | no       | Present only when the model declares [`provider`](./config.md#models) in its configuration, echoed back verbatim. Carries no meaning to the daemon. |
+
+> **Compatibility.** `provider` was part of model identity before it became
+> `(name, source)`. Backends released against the earlier contract reject a
+> load whose `provider` does not match their own fixed value, so the daemon
+> still forwards the key for any model whose manifest declares it. A new
+> backend should ignore it: identity is `name`, and the daemon spawns one
+> backend per model.
 
 **Response (202):**
 

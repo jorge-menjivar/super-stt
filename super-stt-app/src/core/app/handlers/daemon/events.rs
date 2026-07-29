@@ -181,7 +181,7 @@ impl AppModel {
         let model = model_name.to_string();
         let source = source.to_string();
         info!(
-            "Received model_switched event: current_model={:?} -> {:?} via ({source})",
+            "Received model_switched event: current_model={:?} -> {:?} from source ({source})",
             self.current_model, model
         );
         // A live identity change supersedes any in-flight reconnect snapshot: bump

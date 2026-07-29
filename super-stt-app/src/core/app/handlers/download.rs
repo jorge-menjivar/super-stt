@@ -122,8 +122,8 @@ impl AppModel {
                 // the failed instantiate, so it's now idle (with the
                 // active backend still selected). Reflect that locally
                 // — no further set_model: an empty `previous_*` would
-                // resolve to "no installed backend serves  via
-                // local_whisper" and surface as a UI error.
+                // resolve to "no installed backend serves ''" and surface
+                // as a UI error.
                 self.model_operation_state = ModelOperationState::Ready;
                 self.clear_loaded_model();
                 Task::none()

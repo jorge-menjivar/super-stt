@@ -59,7 +59,7 @@ impl SuperSTTDaemon {
     }
 
     /// Handle list all available models command — every model served by an
-    /// installed backend, as `(name, source)` triples.
+    /// installed backend, as `(name, source)` pairs.
     pub async fn handle_list_models(&self) -> DaemonResponse {
         // Scoped to the active backend: only its models are switchable. The
         // full catalog of installed backends lives at `GET /backends`.

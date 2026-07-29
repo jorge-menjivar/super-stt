@@ -151,7 +151,8 @@ fn cmd_set_model(request: &DaemonRequest) -> Result<Command, String> {
         .ok_or("Model string is empty")?;
 
     // `source` is the serving backend's repo id. It is optional: when absent
-    // the daemon selects the first installed backend serving `model`.
+    // the daemon resolves it against the active backend, and rejects the switch
+    // when none is selected (see endpoints/v1/active_model.md).
     let source = data
         .and_then(|d| d.get("source"))
         .and_then(|v| v.as_str())

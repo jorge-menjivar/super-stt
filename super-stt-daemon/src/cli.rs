@@ -17,3 +17,7 @@ pub fn build() -> Command {
         .action(ArgAction::SetTrue)
     )
 }
+
+#[cfg(test)]
+#[path = "cli_tests.rs"]
+mod tests;

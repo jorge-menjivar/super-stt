@@ -50,6 +50,17 @@ pub struct ModelDefinition {
     /// Whether this model is reached over the realtime WebSocket path
     /// (`/v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`.
     pub realtime: bool,
+    /// Compatibility shim carried from
+    /// [`ModelEntry::provider`](super_stt_registry_types::manifest::ModelEntry::provider);
+    /// not part of identity, which is `(name, source)`.
+    ///
+    /// Nothing in the daemon routes on it. It exists so the selected model's
+    /// declared provider can be written back to `preferred_provider` in
+    /// `daemon.toml`, which daemons through v0.2.0 resolve their startup model
+    /// by — a value left stale there is as unusable to them as a missing one.
+    ///
+    /// Delete alongside `TranscriptionConfig::preferred_provider`.
+    pub provider: Option<String>,
 }
 
 impl ModelDefinition {

@@ -44,6 +44,23 @@ pub struct BackendInfo {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BackendModel {
     pub name: String,
+    /// Compatibility shim, mirroring [`IndexModel::provider`]. Always an empty
+    /// string; a model is identified by `(name, source)`.
+    ///
+    /// It cannot simply be dropped: clients through v0.2.0 declare it a
+    /// required `String` with no `#[serde(default)]`, so a payload without the
+    /// key fails to deserialize *in full* on every installed one of them — the
+    /// whole `GET /backends` catalog, not just this field. The settings UI then
+    /// lists no installed backends at all.
+    ///
+    /// `skip_deserializing` keeps it write-only: it is emitted for those
+    /// clients but never read back, so nothing here can start depending on it.
+    ///
+    /// Delete the field once no supported client requires the key.
+    ///
+    /// [`IndexModel::provider`]: super_stt_registry_types::index::IndexModel::provider
+    #[serde(default, skip_deserializing)]
+    pub provider: String,
     /// Devices the model can be loaded onto. Non-empty `snake_case` values
     /// from `["cpu", "cuda", "metal", "none"]`. The settings UI surfaces
     /// these as the device choice in the active-backend card; `"none"`
@@ -114,7 +131,54 @@ pub struct BackendOption {
 
 #[cfg(test)]
 mod tests {
-    use super::BackendInfo;
+    use super::{BackendInfo, BackendModel};
+
+    /// `GET /backends` must keep carrying `provider` on every model. Clients
+    /// through v0.2.0 declare it a required `String`, so a payload without it
+    /// fails to deserialize *in full* on every installed one of them: the
+    /// settings UI lists no backends, and no secret, option, or model switch
+    /// is reachable.
+    ///
+    /// This is the test that fails if the compatibility shim is deleted before
+    /// those clients have rolled over.
+    #[test]
+    fn the_backends_catalog_still_carries_the_provider_key() {
+        let m = BackendModel {
+            name: "whisper-1".into(),
+            provider: String::new(),
+            supported_devices: vec!["cpu".into()],
+            estimated_vram_bytes: 0,
+            multilingual: false,
+            supported_languages: Vec::new(),
+            primary_language: String::new(),
+            realtime: false,
+        };
+        let v = serde_json::to_value(&m).expect("serializes");
+        assert!(
+            v.get("provider").is_some(),
+            "GET /backends dropped `provider`; clients <= v0.2.0 cannot parse this: {v}"
+        );
+    }
+
+    /// The shim is write-only: a payload carrying a `provider` still parses,
+    /// and the value is not adopted. Nothing on this side may start reading a
+    /// key that is on its way out.
+    #[test]
+    fn an_incoming_provider_is_tolerated_but_not_read() {
+        let json = serde_json::json!({
+            "name": "whisper-1",
+            "provider": "local_whisper",
+            "supported_devices": ["cpu"],
+        });
+        let m: BackendModel = serde_json::from_value(json).expect("parses with `provider` present");
+        assert_eq!(m.name, "whisper-1");
+        assert_eq!(m.provider, "", "the shim must not adopt an incoming value");
+
+        let without = serde_json::json!({ "name": "whisper-1" });
+        let m: BackendModel =
+            serde_json::from_value(without).expect("parses with `provider` absent");
+        assert_eq!(m.provider, "");
+    }
 
     /// `GET /backends` reports each backend's `[network].allowed_hosts`; the
     /// "Online model" badge reads them straight off `BackendInfo`.

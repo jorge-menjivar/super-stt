@@ -65,24 +65,50 @@ pub(crate) async fn get_active_model(State(s): State<AppState>) -> impl IntoResp
         })
     });
 
-    let body = serde_json::json!({
-        "status": "success",
-        "active_model": {
-            "current": {
-                "model":    model_resp.current_model,
-                "source":   model_resp.current_source,
-                "loaded":   model_resp.model_loaded.unwrap_or(false),
-                "device":   device_resp.device.unwrap_or_else(|| "unknown".to_string()),
-            },
-            "switch": switch_payload,
-        }
-    });
+    let body = active_model_body(
+        model_resp.current_model.as_deref(),
+        model_resp.current_source.as_deref(),
+        model_resp.model_loaded.unwrap_or(false),
+        device_resp.device.as_deref().unwrap_or("unknown"),
+        switch_payload.as_ref(),
+    );
     (
         StatusCode::OK,
         [("content-type", "application/json")],
         body.to_string(),
     )
         .into_response()
+}
+
+/// Build the `GET /active_model` payload.
+///
+/// `current.provider` is a compatibility shim, same as the one on
+/// `GET /registry/backends` (see [`IndexModel::provider`]): it is always an
+/// empty string and carries no information — a model is identified by
+/// `(name, source)` — but clients through v0.2.0 unwrap the key and error out
+/// when it is absent, so the response would stop parsing for them entirely.
+///
+/// [`IndexModel::provider`]: super_stt_registry_types::index::IndexModel::provider
+fn active_model_body(
+    model: Option<&str>,
+    source: Option<&str>,
+    loaded: bool,
+    device: &str,
+    switch: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "status": "success",
+        "active_model": {
+            "current": {
+                "model":    model,
+                "source":   source,
+                "provider": "",
+                "loaded":   loaded,
+                "device":   device,
+            },
+            "switch": switch,
+        }
+    })
 }
 
 pub(crate) async fn cancel_set_active_model(State(s): State<AppState>) -> impl IntoResponse {
@@ -102,4 +128,54 @@ pub(crate) async fn unload_active_model(State(s): State<AppState>) -> impl IntoR
 
 pub(crate) async fn list_models(State(s): State<AppState>) -> impl IntoResponse {
     dispatch_command(&s.daemon, "list_models", None).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::active_model_body;
+
+    /// `GET /active_model` must keep carrying `current.provider`. Clients
+    /// through v0.2.0 unwrap the key and return an error when it is absent, so
+    /// dropping it does not degrade their Models page — it makes every
+    /// `get_current_model()` fail, leaving the UI stuck on "no model loaded"
+    /// while transcription works fine.
+    ///
+    /// This is the test that fails if the compatibility shim is deleted before
+    /// those clients have rolled over.
+    #[test]
+    fn the_response_still_carries_the_provider_key() {
+        let body = active_model_body(
+            Some("voxtral-mini"),
+            Some("github.com/super-stt/voxtral"),
+            true,
+            "cuda",
+            None,
+        );
+        let current = &body["active_model"]["current"];
+        assert!(
+            current.get("provider").is_some(),
+            "GET /active_model dropped `current.provider`; clients <= v0.2.0 error on this: {body}"
+        );
+        assert_eq!(
+            current["provider"], "",
+            "the shim carries no information — a model is (name, source)"
+        );
+    }
+
+    /// The idle payload is the one a client hits before any model is loaded,
+    /// so it has to satisfy the same clients. A shim emitted only on the
+    /// loaded path would still break their first poll.
+    #[test]
+    fn the_idle_response_carries_it_too() {
+        let body = active_model_body(None, None, false, "unknown", None);
+        let current = &body["active_model"]["current"];
+        assert!(
+            current.get("provider").is_some(),
+            "idle `GET /active_model` dropped `current.provider`: {body}"
+        );
+        assert!(
+            current["model"].is_null(),
+            "idle payload must null the model"
+        );
+    }
 }

@@ -30,6 +30,8 @@ impl SuperSTTDaemon {
                     .iter()
                     .map(|m| BackendModel {
                         name: m.name.clone(),
+                        // Compatibility shim; see `BackendModel::provider`.
+                        provider: String::new(),
                         supported_devices: m
                             .supported_devices
                             .iter()

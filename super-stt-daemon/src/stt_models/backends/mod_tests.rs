@@ -12,7 +12,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 /// A WASM backend (OpenAI-shaped) and a subprocess backend (Voxtral-shaped)
-/// are both discovered, and their models resolve by `(name, provider, source)`.
+/// are both discovered, and their models resolve by `(name, source)`.
 #[test]
 fn discovers_wasm_and_subprocess_backends() {
     let root = scratch("mixed");
@@ -96,7 +96,7 @@ processing_interval_ms = 2000
     assert!(oai.secrets[0].required);
     assert_eq!(oai.options.len(), 1);
 
-    // find_model resolves the triple; provider parses to the newtype.
+    // find_model resolves the pair against the declaring backend.
     let (b, def) = find_model(&backends, "whisper-1", "github.com/super-stt/openai")
         .expect("resolve whisper-1");
     assert_eq!(b.kind, "wasm");
@@ -107,9 +107,8 @@ processing_interval_ms = 2000
         "online model carries its declared supported_devices"
     );
 
-    // Empty source matches the first backend serving (name, provider).
-    let (_, vox) =
-        find_model(&backends, "voxtral-mini", "").expect("resolve voxtral-mini with empty source");
+    let (_, vox) = find_model(&backends, "voxtral-mini", "github.com/super-stt/voxtral")
+        .expect("resolve voxtral-mini");
     assert_eq!(vox.source, "github.com/super-stt/voxtral");
     assert_eq!(vox.estimated_vram_bytes, 8_589_934_592);
     assert_eq!(vox.processing_interval, Duration::from_millis(2000));
@@ -482,8 +481,12 @@ processing_interval_ms = 1500
         ]
     );
 
-    let (_, big) = find_model(&backends, "qwen3-asr-1.7b", "")
-        .expect("resolve qwen3-asr-1.7b with empty source");
+    let (_, big) = find_model(
+        &backends,
+        "qwen3-asr-1.7b",
+        "github.com/jorge-menjivar/super-stt/qwen3-asr",
+    )
+    .expect("resolve qwen3-asr-1.7b");
     assert_eq!(big.estimated_vram_bytes, 6_000_000_000);
     assert_eq!(big.processing_interval, Duration::from_millis(1500));
 }
@@ -514,4 +517,68 @@ fn dedup_sources_keeps_first_occurrence() {
     let out = dedup_sources(input);
     let dirs: Vec<_> = out.iter().filter_map(dir_name).collect();
     assert_eq!(dirs, vec!["a", "b", "d"]);
+}
+
+/// The regression: `find_model` used to treat an empty `source` as "any
+/// backend" and return the first one serving the name. Scan order is
+/// `read_dir` order, and `handle_set_model_impl` *persists* the backend it
+/// resolves — so the daemon could bind a model to a different engine between
+/// runs and keep that choice across restarts. Resolving an omitted `source`
+/// belongs to the caller (against the active backend); here it matches
+/// nothing.
+#[test]
+fn an_empty_source_resolves_nothing() {
+    use crate::stt_models::ModelDefinition;
+    use std::time::Duration as StdDuration;
+
+    fn serving(dir: &str, source: &str, model: &str) -> DiscoveredBackend {
+        DiscoveredBackend {
+            dir: PathBuf::from(dir),
+            source: source.to_string(),
+            name: dir.to_string(),
+            kind: "wasm".to_string(),
+            entrypoint: "x.wasm".to_string(),
+            allowed_hosts: Vec::new(),
+            secrets: Vec::new(),
+            options: Vec::new(),
+            models: vec![ModelDefinition {
+                name: model.to_string(),
+                source: source.to_string(),
+                is_multilingual: true,
+                primary_language: "en".to_string(),
+                supported_languages: vec!["en".to_string()],
+                estimated_vram_bytes: 0,
+                processing_interval: StdDuration::from_secs(1),
+                supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
+                realtime: false,
+                provider: None,
+            }],
+        }
+    }
+
+    // Two backends serving the same model name — the case the contract calls
+    // out as supported, and the one that made scan order load-bearing.
+    let backends = vec![
+        serving("zeta", "github.com/other/zeta", "whisper-tiny"),
+        serving("whisper", "github.com/super-stt/whisper", "whisper-tiny"),
+    ];
+
+    assert!(
+        find_model(&backends, "whisper-tiny", "").is_none(),
+        "an empty source must not silently bind to a scan-order winner"
+    );
+
+    // Each concrete source resolves to its own backend, regardless of order.
+    for (source, dir) in [
+        ("github.com/other/zeta", "zeta"),
+        ("github.com/super-stt/whisper", "whisper"),
+    ] {
+        let (b, def) = find_model(&backends, "whisper-tiny", source)
+            .unwrap_or_else(|| panic!("resolve whisper-tiny from {source}"));
+        assert_eq!(b.dir, PathBuf::from(dir));
+        assert_eq!(def.source, source);
+    }
+
+    // A source that serves a different name is still a miss.
+    assert!(find_model(&backends, "whisper-large", "github.com/other/zeta").is_none());
 }

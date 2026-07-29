@@ -164,22 +164,21 @@ impl AppModel {
             return Task::none();
         }
 
-        // For online models the staged device is `"none"` (the sentinel)
-        // and no `set_device` call is needed. Online-ness is derived from the
-        // model's `supported_devices` (the `none` sentinel).
-        let online = self
-            .backends
-            .iter()
-            .find(|b| b.source == source)
-            .and_then(|b| b.models.iter().find(|m| m.name == model))
-            .is_some_and(|m| m.supported_devices.iter().any(|d| d == "none"));
-        let device_to_set = if online {
-            None
-        } else {
-            self.models_page
-                .staged_device
-                .clone()
-                .filter(|d| d != "none" && *d != self.current_device)
+        let device_to_set = match staged_load_device(
+            &self.backends,
+            &source,
+            &model,
+            self.models_page.staged_device.as_deref(),
+            &self.current_device,
+        ) {
+            StagedLoad::NotInCatalog => {
+                log::warn!(
+                    "LoadStagedModel ignored — backend/model not in catalog: \
+                     source={source}, model={model}"
+                );
+                return Task::none();
+            }
+            StagedLoad::Switch { device_to_set } => device_to_set,
         };
 
         // Capture the pre-switch device so a failed switch rolls it back rather
@@ -349,5 +348,230 @@ impl AppModel {
 
             _ => Task::none(),
         }
+    }
+}
+
+/// What a Load click resolves to.
+#[derive(Debug, PartialEq, Eq)]
+enum StagedLoad {
+    /// The staged `(source, model)` is no longer in the installed-backend
+    /// catalog — the click is stale and must not reach the daemon.
+    NotInCatalog,
+    /// Switch to the staged model, first setting the device when `Some`.
+    Switch { device_to_set: Option<String> },
+}
+
+/// Resolve a Load click against the installed-backend catalog.
+///
+/// The catalog check is not merely an optimization. A backend can be
+/// uninstalled — or the catalog refreshed — between staging a model and
+/// clicking Load. Without it, a miss reads as "not online", the staged device
+/// is sent as a real `set_device`, and the daemon unloads the working model,
+/// reloads it on the new device, and *persists* that device — before the
+/// `set_model` that follows fails with `invalid_model`. The user ends up on a
+/// device they never chose, from a click that could not have succeeded.
+///
+/// For online models (the `none` sentinel in `supported_devices`) there is no
+/// device to set; otherwise the staged device is sent only when it actually
+/// differs from the current one.
+fn staged_load_device(
+    backends: &[crate::daemon::backends::BackendInfo],
+    source: &str,
+    model: &str,
+    staged_device: Option<&str>,
+    current_device: &str,
+) -> StagedLoad {
+    let Some(online) = backends
+        .iter()
+        .find(|b| b.source == source)
+        .and_then(|b| b.models.iter().find(|m| m.name == model))
+        .map(|m| m.supported_devices.iter().any(|d| d == "none"))
+    else {
+        return StagedLoad::NotInCatalog;
+    };
+    let device_to_set = if online {
+        None
+    } else {
+        staged_device
+            .filter(|d| *d != "none" && *d != current_device)
+            .map(ToString::to_string)
+    };
+    StagedLoad::Switch { device_to_set }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StagedLoad, staged_load_device};
+    use crate::daemon::backends::{BackendInfo, BackendModel};
+
+    fn backend(source: &str, model: &str, devices: &[&str]) -> BackendInfo {
+        BackendInfo {
+            source: source.to_string(),
+            name: "Test".to_string(),
+            kind: "wasm".to_string(),
+            allowed_hosts: Vec::new(),
+            models: vec![BackendModel {
+                name: model.to_string(),
+                provider: String::new(),
+                supported_devices: devices.iter().map(|d| (*d).to_string()).collect(),
+                estimated_vram_bytes: 0,
+                multilingual: false,
+                supported_languages: Vec::new(),
+                primary_language: String::new(),
+                realtime: false,
+            }],
+            secrets: Vec::new(),
+            options: Vec::new(),
+        }
+    }
+
+    /// The regression: a Load click for a pair that is no longer installed
+    /// must not reach the daemon at all. Treating the catalog miss as merely
+    /// "not online" sends a real `set_device` first, which unloads the working
+    /// model and persists a device the user never chose — and only then does
+    /// the `set_model` fail with `invalid_model`.
+    #[test]
+    fn a_stale_pair_sends_nothing() {
+        let installed = vec![backend(
+            "github.com/super-stt/whisper",
+            "whisper-tiny",
+            &["cuda"],
+        )];
+
+        // Backend uninstalled between staging and the click.
+        assert_eq!(
+            staged_load_device(
+                &installed,
+                "github.com/super-stt/gone",
+                "whisper-tiny",
+                Some("cuda"),
+                "cpu"
+            ),
+            StagedLoad::NotInCatalog,
+        );
+        // Backend still installed, but no longer serving that model.
+        assert_eq!(
+            staged_load_device(
+                &installed,
+                "github.com/super-stt/whisper",
+                "whisper-large",
+                Some("cuda"),
+                "cpu"
+            ),
+            StagedLoad::NotInCatalog,
+        );
+        // Nothing installed at all.
+        assert_eq!(
+            staged_load_device(
+                &[],
+                "github.com/super-stt/whisper",
+                "whisper-tiny",
+                Some("cuda"),
+                "cpu"
+            ),
+            StagedLoad::NotInCatalog,
+        );
+    }
+
+    /// A staged local model on a different device still sets it — the guard
+    /// must not swallow the case it sits in front of.
+    #[test]
+    fn a_local_model_on_a_new_device_sets_it() {
+        let installed = vec![backend(
+            "github.com/super-stt/whisper",
+            "whisper-tiny",
+            &["cpu", "cuda"],
+        )];
+        assert_eq!(
+            staged_load_device(
+                &installed,
+                "github.com/super-stt/whisper",
+                "whisper-tiny",
+                Some("cuda"),
+                "cpu"
+            ),
+            StagedLoad::Switch {
+                device_to_set: Some("cuda".to_string())
+            },
+        );
+    }
+
+    /// No `set_device` when it would be a no-op: the daemon is already on that
+    /// device, or none was staged.
+    #[test]
+    fn an_unchanged_device_is_not_resent() {
+        let installed = vec![backend(
+            "github.com/super-stt/whisper",
+            "whisper-tiny",
+            &["cpu", "cuda"],
+        )];
+        for staged in [Some("cpu"), None] {
+            assert_eq!(
+                staged_load_device(
+                    &installed,
+                    "github.com/super-stt/whisper",
+                    "whisper-tiny",
+                    staged,
+                    "cpu"
+                ),
+                StagedLoad::Switch {
+                    device_to_set: None
+                },
+                "staged={staged:?} must not resend the current device"
+            );
+        }
+    }
+
+    /// Online models carry the `none` sentinel and have no device to set;
+    /// a stale `none` staged against a local model is likewise never sent.
+    #[test]
+    fn an_online_model_sets_no_device() {
+        let online = vec![backend(
+            "github.com/super-stt/openai",
+            "whisper-1",
+            &["none"],
+        )];
+        assert_eq!(
+            staged_load_device(
+                &online,
+                "github.com/super-stt/openai",
+                "whisper-1",
+                Some("none"),
+                "cpu"
+            ),
+            StagedLoad::Switch {
+                device_to_set: None
+            },
+        );
+        // Even with a real device staged, an online model takes no device.
+        assert_eq!(
+            staged_load_device(
+                &online,
+                "github.com/super-stt/openai",
+                "whisper-1",
+                Some("cuda"),
+                "cpu"
+            ),
+            StagedLoad::Switch {
+                device_to_set: None
+            },
+        );
+        let local = vec![backend(
+            "github.com/super-stt/whisper",
+            "whisper-tiny",
+            &["cpu"],
+        )];
+        assert_eq!(
+            staged_load_device(
+                &local,
+                "github.com/super-stt/whisper",
+                "whisper-tiny",
+                Some("none"),
+                "cpu"
+            ),
+            StagedLoad::Switch {
+                device_to_set: None
+            },
+        );
     }
 }

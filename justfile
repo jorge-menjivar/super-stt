@@ -505,8 +505,8 @@ install-applet:
 
 # Install the daemon (system installation under /usr/local; runs as a
 # systemd --user service)
-# Usage: just install-daemon [--model MODEL]
-install-daemon *args:
+# Usage: just install-daemon
+install-daemon:
     #!/usr/bin/env bash
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the builds (daemon, consent, CLI) can outlast sudo's
@@ -519,22 +519,6 @@ install-daemon *args:
 
     # Build the daemon first
     echo "Building daemon..."
-
-    # Extract model parameter
-    model=""
-    args_array=({{ args }})
-    for i in "${!args_array[@]}"; do
-        if [[ "${args_array[$i]}" == "--model" ]]; then
-            # Next argument is the model name
-            if [[ $((i+1)) -lt ${#args_array[@]} ]]; then
-                model="${args_array[$((i+1))]}"
-            fi
-            break
-        elif [[ "${args_array[$i]}" == --model=* ]]; then
-            model="${args_array[$i]#--model=}"
-            break
-        fi
-    done
 
     if ! just build-daemon; then
         echo "❌ Daemon build failed or was interrupted"
@@ -585,6 +569,13 @@ install-daemon *args:
 
     # Install the unit root-owned. Its bare ExecStart name resolves via
     # systemd's fixed search path, which covers {{ bin_dir }}.
+    #
+    # Installed verbatim, and it must stay that way: the daemon takes no
+    # configuration on its command line (the model, its device, and the audio
+    # theme are all config / `POST /v1` state), so a flag appended to
+    # ExecStart is rejected by clap before the listener binds and the unit
+    # crash-loops under Restart=always. `every_shipped_execstart_parses`
+    # (super-stt-daemon/src/cli_tests.rs) fails if one is reintroduced here.
     echo "Installing systemd user unit..."
     sudo install -Dm0644 super-stt-daemon/systemd/{{ service_file }} {{ service_dst }}
 
@@ -592,12 +583,6 @@ install-daemon *args:
     # precedence over the packaged one — remove it or systemd keeps
     # launching the stale ~/.local/bin binary.
     rm -f "$HOME/.config/systemd/user/{{ service_file }}"
-
-    # Add model parameter to ExecStart if specified
-    if [[ -n "$model" ]]; then
-        echo "Configuring daemon to use model: $model"
-        sudo sed -i "s|^ExecStart={{ daemon_bin_name }}$|ExecStart={{ daemon_bin_name }} --model $model|" {{ service_dst }}
-    fi
 
     # Create the `stt` convenience wrapper (for keyboard shortcuts like
     # `stt record --write`). Note: we deliberately do NOT use `sg stt
@@ -688,10 +673,10 @@ install-daemon *args:
     systemctl --user enable {{ service_name }}
 
 # Install daemon, settings app, and CLI
-# Usage: just install [--model MODEL]
-install *args:
+# Usage: just install
+install:
     #!/usr/bin/env bash
-    if ! just install-daemon {{ args }}; then
+    if ! just install-daemon; then
         echo "❌ Daemon installation failed"
         exit 1
     fi
@@ -796,10 +781,10 @@ setup-cosmic-shortcut:
     fi
 
 # Install everything (daemon, app, and COSMIC applet)
-# Usage: just install-all [--model MODEL]
-install-all *args:
+# Usage: just install-all
+install-all:
     #!/usr/bin/env bash
-    if ! just install {{ args }}; then
+    if ! just install; then
         echo "❌ Core installation failed"
         exit 1
     fi

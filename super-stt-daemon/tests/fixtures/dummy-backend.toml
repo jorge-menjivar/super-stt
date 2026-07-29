@@ -31,7 +31,8 @@
 
 [[models]]
     name = "dummy-local"
-    # Keep invalid extra param to make sure it does not interfere with loading
+    # Keeps the legacy `provider` key covered: every published backend.toml
+    # declares it, and the daemon still echoes it back on `POST /v1/load`.
     provider = "local_dummy"
     primary_language = "en"
     supported_languages = ["en"]

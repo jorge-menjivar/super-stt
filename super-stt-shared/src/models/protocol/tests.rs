@@ -193,11 +193,11 @@ fn response_allow_online_models_skipped_when_none() {
 #[test]
 fn set_model_parses_online_models() {
     let cases: &[&str] = &[
-        ("whisper-1"),
-        ("gpt-4o-transcribe"),
-        ("gpt-4o-mini-transcribe"),
-        ("voxtral-mini-latest"),
-        ("nova-3"),
+        "whisper-1",
+        "gpt-4o-transcribe",
+        "gpt-4o-mini-transcribe",
+        "voxtral-mini-latest",
+        "nova-3",
     ];
     for model_name in cases {
         let request = make_request("set_model", Some(json!({ "model": model_name})));
@@ -206,7 +206,8 @@ fn set_model_parses_online_models() {
         match command {
             Command::SetModel { model, source } => {
                 assert_eq!(model.to_string(), *model_name);
-                // No source supplied → empty (daemon picks the backend).
+                // No source supplied → empty; the daemon resolves it against
+                // the active backend (see endpoints/v1/active_model.md).
                 assert_eq!(source, "");
             }
             _ => panic!("expected Command::SetModel for {model_name}"),

@@ -14,14 +14,6 @@ fn toml_to_json(text: &str) -> Value {
     toml::from_str(text).expect("valid TOML")
 }
 
-/// Keys a manifest may carry that the parsers ignore and the schema rejects.
-/// The split is deliberate — see `schema.rs`: parsers stay lenient so a
-/// manifest written against a newer contract still loads, while the editor
-/// schema is strict so a typo is caught where it is typed. A fixture that
-/// exercises the lenient side therefore has to have these stripped before it
-/// is measured against the strict one.
-const PARSER_TOLERATED_MODEL_KEYS: &[&str] = &["provider"];
-
 /// Every backend manifest shipped in-repo must match the published schema.
 /// This is what catches the schema drifting away from manifests people
 /// actually write, so it has to *have* inputs: it previously scanned
@@ -48,14 +40,7 @@ fn accepts_every_in_repo_backend_toml() {
         {
             continue;
         }
-        let mut doc = toml_to_json(&std::fs::read_to_string(&path).unwrap());
-        if let Some(models) = doc.get_mut("models").and_then(Value::as_array_mut) {
-            for model in models.iter_mut().filter_map(Value::as_object_mut) {
-                for key in PARSER_TOLERATED_MODEL_KEYS {
-                    model.remove(*key);
-                }
-            }
-        }
+        let doc = toml_to_json(&std::fs::read_to_string(&path).unwrap());
         let errors: Vec<String> = v.iter_errors(&doc).map(|e| format!("{e}")).collect();
         assert!(
             errors.is_empty(),
@@ -69,6 +54,62 @@ fn accepts_every_in_repo_backend_toml() {
         checked > 0,
         "no backend manifests found under {} — this test would pass while validating nothing",
         dir.display()
+    );
+}
+
+/// The in-repo fixtures are the only manifests this crate can reach, so they
+/// are also the only thing keeping the shipped shape covered. Every published
+/// backend declares `provider` on its models; if no fixture does, the
+/// acceptance test above stops exercising the one key most likely to be
+/// dropped from the schema by accident.
+#[test]
+fn a_fixture_still_exercises_the_provider_key() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("super-stt-daemon/tests/fixtures");
+    let covered = std::fs::read_dir(&dir)
+        .expect("daemon test fixtures directory")
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.ends_with("backend.toml"))
+        })
+        .any(|e| {
+            toml_to_json(&std::fs::read_to_string(e.path()).unwrap())
+                .get("models")
+                .and_then(Value::as_array)
+                .is_some_and(|models| models.iter().any(|m| m.get("provider").is_some()))
+        });
+    assert!(
+        covered,
+        "no fixture under {} declares a model `provider` — the schema's tolerance of the \
+         key every published manifest carries is no longer covered",
+        dir.display()
+    );
+}
+
+/// `provider` is a legacy identity component every published `backend.toml`
+/// still declares. `ModelEntry` is closed (`additionalProperties: false`), so
+/// dropping the field from the type does not merely stop reading it — it
+/// makes the *published* schema reject manifests the daemon and indexer both
+/// accept, flagging an error in every backend author's editor.
+///
+/// This is the test that fails if the field is removed from `ModelEntry`
+/// before the shipped manifests have rolled over.
+#[test]
+fn the_schema_still_accepts_the_legacy_provider_key() {
+    let v = backend_validator();
+    let mut doc = wasm_base();
+    doc["models"] = json!([{ "name": "m",
+        "provider": "local_whisper",
+        "primary_language": "en", "supported_languages": ["en"],
+        "supported_devices": ["cpu"] }]);
+    let errors: Vec<String> = v.iter_errors(&doc).map(|e| format!("{e}")).collect();
+    assert!(
+        errors.is_empty(),
+        "schema rejects the `provider` every published backend.toml declares: {errors:#?}"
     );
 }
 
