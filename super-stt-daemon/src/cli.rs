@@ -1,19 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use clap::ArgAction;
 use clap::{Command, arg, command};
-use std::sync::LazyLock;
-
-// Build variant (e.g., "cuda13-cudnn-sm89", "cuda12-sm75", "cpu")
-pub const BUILD_VARIANT: &str = env!("BUILD_VARIANT");
-
-// Version string including build variant
-pub static VERSION_STRING: LazyLock<String> =
-    LazyLock::new(|| format!("{} ({})", env!("CARGO_PKG_VERSION"), BUILD_VARIANT));
 
 #[must_use]
 pub fn build() -> Command {
     command!()
-    .version(VERSION_STRING.as_str())
     .about("🎙️ Super STT Daemon - Advanced Speech-to-text for Linux")
     .long_about(
         "A high-performance speech-to-text daemon that loads a STT model once and keeps it in memory, serving transcription requests over the HTTP protocol at $XDG_RUNTIME_DIR/stt/super-stt-http.sock. Use `super-stt-cli` (or the `stt` wrapper) to drive recordings."

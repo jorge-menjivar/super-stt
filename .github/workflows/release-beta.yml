@@ -11,7 +11,7 @@ name: Release (Beta)
 # Differences from release.yml:
 #   1. Tarball names get a `-beta` suffix so the two channels can
 #      coexist on the same GitHub releases page without colliding
-#      (`super-stt-x86_64-unknown-linux-gnu-cpu-beta.tar.gz`).
+#      (`super-stt-x86_64-unknown-linux-gnu-beta.tar.gz`).
 #   2. The GitHub release is created with `prerelease: true` so
 #      install-stable.sh's `/releases/latest` query continues to
 #      skip betas. install-beta.sh walks the full release list and
@@ -79,12 +79,10 @@ jobs:
       matrix:
         include:
           # Native builds (no cross), pinned to 22.04 (glibc 2.35) so the
-          # binaries run on older distros, not just the newest. CPU only.
+          # binaries run on older distros, not just the newest.
           - target: x86_64-unknown-linux-gnu
-            suffix: cpu
             runner: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
-            suffix: cpu
             runner: ubuntu-22.04-arm
 
     runs-on: ${{ matrix.runner }}
@@ -104,7 +102,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ matrix.target }}-${{ matrix.suffix }}-beta-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.target }}-beta-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install system dependencies
         run: |
@@ -126,8 +124,6 @@ jobs:
       # Build all five binaries in one cargo invocation so the shared
       # dependency graph compiles once, then assemble the tarball.
       - name: Build binaries
-        env:
-          BUILD_VARIANT: ${{ matrix.suffix }}
         run: |
           cargo build --release --target ${{ matrix.target }} \
             --bin super-stt-daemon \
@@ -166,13 +162,13 @@ jobs:
           # `-beta` suffix isolates this artifact from the stable
           # channel's tarballs (so a future stable release on the
           # same tag doesn't get clobbered).
-          tar -czf super-stt-${{ matrix.target }}-${{ matrix.suffix }}-beta.tar.gz -C dist .
+          tar -czf super-stt-${{ matrix.target }}-beta.tar.gz -C dist .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: super-stt-${{ matrix.target }}-${{ matrix.suffix }}-beta
-          path: super-stt-${{ matrix.target }}-${{ matrix.suffix }}-beta.tar.gz
+          name: super-stt-${{ matrix.target }}-beta
+          path: super-stt-${{ matrix.target }}-beta.tar.gz
 
   create-release:
     name: Create Beta Release

@@ -1,7 +1,7 @@
 name: Release
 
 # Stable release workflow. Builds the daemon/CLI/consent-helper split
-# plus the app and applet, CPU-only, and publishes a non-prerelease
+# plus the app and applet, and publishes a non-prerelease
 # GitHub release. Tags containing the word "beta" go to
 # release-beta.yml instead, which ships the same layout as a prerelease
 # with a `-beta` tarball suffix.
@@ -69,12 +69,10 @@ jobs:
       matrix:
         include:
           # Native builds (no cross), pinned to 22.04 (glibc 2.35) so the
-          # binaries run on older distros, not just the newest. CPU only.
+          # binaries run on older distros, not just the newest.
           - target: x86_64-unknown-linux-gnu
-            suffix: cpu
             runner: ubuntu-22.04
           - target: aarch64-unknown-linux-gnu
-            suffix: cpu
             runner: ubuntu-22.04-arm
 
     runs-on: ${{ matrix.runner }}
@@ -94,7 +92,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ matrix.target }}-${{ matrix.suffix }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install system dependencies
         run: |
@@ -116,8 +114,6 @@ jobs:
       # Build all five binaries in one cargo invocation so the shared
       # dependency graph compiles once, then assemble the tarball.
       - name: Build binaries
-        env:
-          BUILD_VARIANT: ${{ matrix.suffix }}
         run: |
           cargo build --release --target ${{ matrix.target }} \
             --bin super-stt-daemon \
@@ -153,14 +149,14 @@ jobs:
           # Remove any extra assets
           rm -rf dist/resources/assets
 
-          # Create tarball with architecture and variant suffix
-          tar -czf super-stt-${{ matrix.target }}-${{ matrix.suffix }}.tar.gz -C dist .
+          # Create tarball with architecture suffix
+          tar -czf super-stt-${{ matrix.target }}.tar.gz -C dist .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: super-stt-${{ matrix.target }}-${{ matrix.suffix }}
-          path: super-stt-${{ matrix.target }}-${{ matrix.suffix }}.tar.gz
+          name: super-stt-${{ matrix.target }}
+          path: super-stt-${{ matrix.target }}.tar.gz
 
   create-release:
     name: Create Release

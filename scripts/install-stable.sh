@@ -440,7 +440,6 @@ handle_menu() {
 if [ "$INTERACTIVE" = true ] && [ -t 2 ]; then
     # Minimal detection for menu display
     ARCH=$(detect_arch)
-    VARIANT="cpu"
 
     # Save current stdin and redirect to terminal for menu
     exec 3<&0
@@ -457,10 +456,6 @@ fi
 ARCH=$(detect_arch)
 print_info "Detected architecture: $ARCH"
 
-# GPU residency lives in out-of-tree backends, so there is a single
-# CPU build for every install option.
-VARIANT="cpu"
-
 # Get the latest release version if not specified
 if [ "$VERSION" = "latest" ]; then
     print_info "Fetching latest release version..."
@@ -474,37 +469,37 @@ fi
 
 print_info "Installing Super STT $VERSION"
 
-# Construct download URL
-TARBALL_NAME="super-stt-${ARCH}-${VARIANT}.tar.gz"
-DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$TARBALL_NAME"
-
-print_info "Downloading from: $DOWNLOAD_URL"
+# One tarball per architecture: `super-stt-<arch>.tar.gz`. Releases up to
+# v0.2.0 named the same artifact `super-stt-<arch>-cpu.tar.gz`, so
+# `--version` can still pin one of those tags; both names are tried.
+TARBALL_CANDIDATES="super-stt-${ARCH}.tar.gz super-stt-${ARCH}-cpu.tar.gz"
 
 # (TEMP_DIR cleanup trap is installed up top, right after `mktemp -d`.)
 
 # Download the tarball
-download_with_fallback() {
-    local variant="$1"
-    local arch="$2"
-    local tarball_name="super-stt-${arch}-${variant}.tar.gz"
-    local download_url="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$tarball_name"
+download_tarball() {
+    local tarball_name download_url
 
-    print_info "Trying to download: $tarball_name" >&2
+    for tarball_name in $TARBALL_CANDIDATES; do
+        download_url="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$tarball_name"
+        print_info "Trying to download: $download_url" >&2
 
-    if curl -L -f -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
-        echo "$tarball_name"
-        return 0
-    fi
+        if curl -L -f -o "$TEMP_DIR/$tarball_name" "$download_url" 2>/dev/null; then
+            echo "$tarball_name"
+            return 0
+        fi
+    done
 
     return 1
 }
 
-# Try to download with fallback support
-DOWNLOADED_TARBALL=$(download_with_fallback "$VARIANT" "$ARCH")
+DOWNLOADED_TARBALL=$(download_tarball)
 
 if [ -z "$DOWNLOADED_TARBALL" ]; then
     print_error "Failed to download the tarball"
-    print_error "Tried: https://github.com/$GITHUB_REPO/releases/download/$VERSION/super-stt-${ARCH}-${VARIANT}.tar.gz"
+    for candidate in $TARBALL_CANDIDATES; do
+        print_error "Tried: https://github.com/$GITHUB_REPO/releases/download/$VERSION/$candidate"
+    done
     exit 1
 fi
 

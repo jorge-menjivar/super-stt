@@ -13,7 +13,7 @@
 - Build release: `just build-release` (or `cargo build --release`).
 - Lint (clippy, pedantic): `just check` (or `cargo clippy --all-features`).
 - Run UI app: `just run-app`.
-- Run daemon: `just run-daemon --model whisper-small` (flags: `--cuda`, `--cudnn`).
+- Run daemon: `just run-daemon --model whisper-small`.
 - Run COSMIC applets: `just run-applets`.
 - Install locally: `just install-daemon`, `just install-app`, `just install-applets`.
 - Status/logs: `just status`, `just logs-daemon`.
