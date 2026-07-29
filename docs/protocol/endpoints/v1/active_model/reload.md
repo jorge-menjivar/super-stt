@@ -43,7 +43,7 @@ Content-Type: application/json
 }
 ```
 
-On success the daemon re-instantiates the same `(model, provider, source)` on the
+On success the daemon re-instantiates the same `(model, source)` on the
 current device preference and broadcasts `model_switched` then `ready` on
 [`/events?topics=daemon_status_changed`](../events.md) — identical to a completed
 switch, so subscribers converge on the same state.

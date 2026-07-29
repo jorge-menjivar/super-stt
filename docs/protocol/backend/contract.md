@@ -24,18 +24,17 @@ This document is the companion to:
 
 ## Model identity
 
-A model is identified by the `(name, provider, source)` triple — the same
-triple external clients use on
+A model is identified by the `(name, source)` pair — the same
+pair external clients use on
 [`/active_model`](../endpoints/v1/active_model.md):
 
 | Field      | Type   | Notes                                                                       |
 |------------|--------|-----------------------------------------------------------------------------|
 | `name`     | string | Wire model name, e.g. `whisper-tiny`, `voxtral-mini`, `nova-3`.             |
-| `provider` | string | Engine family + routing class: `local_whisper`, `local_voxtral`, `local_qwen3_asr`, `openai`, `mistral`, `deepgram`. |
 | `source`   | string | The **backend repository** that provides the model — a canonical repo id declared in the backend's configuration. |
 
 `source` names *which backend* a model comes from. Two backends may both
-implement `(whisper-tiny, local_whisper)`; they coexist and are
+implement `whisper-tiny`; they coexist and are
 disambiguated by `source`. The daemon derives a model's `source` from the
 `[backend].source` field of the configuration that declares it — see
 [config.md](./config.md).
@@ -128,7 +127,6 @@ Content-Type: application/json
 
 {
   "name":     "whisper-tiny",
-  "provider": "local_whisper",
   "device":   "cuda"
 }
 ```
@@ -136,7 +134,6 @@ Content-Type: application/json
 | Field      | Type   | Required | Notes                                                          |
 |------------|--------|----------|----------------------------------------------------------------|
 | `name`     | string | yes      | A model `name` the backend declares in its configuration.           |
-| `provider` | string | yes      | The model's `provider`.                                        |
 | `device`   | string | no       | Preferred device: `cpu`, `cuda`, or `metal`. The backend may fall back; the actual device is reported by `GET /v1/status`. |
 
 **Response (202):**
@@ -152,7 +149,7 @@ Content-Type: application/json
 
 | HTTP | `message`            | Meaning                                                       |
 |------|----------------------|---------------------------------------------------------------|
-| 400  | `invalid_model`      | `(name, provider)` is not implemented by this backend.        |
+| 400  | `invalid_model`      | `name` is not implemented by this backend.                    |
 | 409  | `already_loading`    | A load is already in progress.                                |
 | 503  | `device_unavailable` | The requested device cannot be initialized.                   |
 
@@ -178,8 +175,7 @@ Host: backend.local
   "state":    "loading",   // readiness: "starting" | "loading" | "ready" | "error"
   "progress": 0.42,        // present only while state == "loading"; 0.0–1.0
   "model": {               // present once a load has been requested
-    "name":     "whisper-tiny",
-    "provider": "local_whisper"
+    "name": "whisper-tiny"
   },
   "device":   "cuda",      // actual device in use: "cpu" | "cuda" | "metal"
   "reason":   null         // machine-readable cause; set when state == "error"
@@ -380,11 +376,11 @@ sequenceDiagram
     participant A as "Active backend"
     participant B as "Selected backend"
 
-    U->>D: select (name, provider, source)
+    U->>D: select (name, source)
     D->>D: ensure files present (download into backend dir)
     D->>A: terminate
     D->>B: spawn / instantiate
-    D->>B: POST /v1/load { name, provider, device }
+    D->>B: POST /v1/load { name, device }
     B-->>D: 202 Accepted
     loop until ready
         D->>B: GET /v1/status

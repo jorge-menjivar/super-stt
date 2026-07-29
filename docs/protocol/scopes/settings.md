@@ -88,7 +88,7 @@ sequenceDiagram
     D-->>App: 200 SSE stream
 
     Note over App,D: 4. User picks a different model
-    App->>D: POST /active_model<br/>{ model: "voxtral-mini", provider: "local_voxtral", source: "github.com/super-stt/voxtral" }
+    App->>D: POST /active_model<br/>{ model: "voxtral-mini", source: "github.com/super-stt/voxtral" }
     D-->>App: 202 { message: "Model switch started" }
 
     Note over App,D: 5. Switch progress arrives on the SSE stream

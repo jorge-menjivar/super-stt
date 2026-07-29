@@ -52,7 +52,7 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
       "supports_gpu": true,
       "supports_cpu": true,
       "models": [
-        { "name": "voxtral-mini", "provider": "voxtral",
+        { "name": "voxtral-mini", "provider": "",
           "supported_devices": ["cpu", "cuda"] }
       ],
       "secrets": [],
@@ -72,6 +72,10 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
   ]
 }
 ```
+
+`models[].provider` is always an empty string. It is emitted so clients that
+require the key can still parse the response, and carries no information —
+identify a model by `(name, source)` instead. It will be removed.
 
 Per-entry fields beyond what `index.json` carries:
 

@@ -2,7 +2,7 @@
 
 List the models the settings UI may switch to. Models are served by
 out-of-tree backends discovered on disk; each entry is identified by the
-triple `(name, provider, source)`, where `source` is the repo id of the
+pair `(name, source)`, where `source` is the repo id of the
 backend that serves it (see [`docs/protocol/backend/`](../../backend/)).
 
 The list is **scoped to the [active backend](./active_backend.md)** — it returns
@@ -35,15 +35,15 @@ Authorization: Bearer stt_…64hex…
 {
   "status": "success",
   "available_models": [
-    ["voxtral-mini", "local_voxtral", "github.com/super-stt/voxtral"],
-    ["whisper-1", "openai", "github.com/super-stt/openai"]
+    ["voxtral-mini", "github.com/super-stt/voxtral"],
+    ["whisper-1", "github.com/super-stt/openai"]
   ]
 }
 ```
 
 | Field              | Type            | Notes                                                                 |
 |--------------------|-----------------|-----------------------------------------------------------------------|
-| `available_models` | array of arrays | Each entry is the `[name, provider, source]` triple `POST /active_model` accepts. `source` is the serving backend's repo id. |
+| `available_models` | array of arrays | Each entry is the `[name, source]` pair `POST /active_model` accepts. `source` is the serving backend's repo id. |
 
 **Errors:**
 

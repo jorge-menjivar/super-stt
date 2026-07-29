@@ -1,8 +1,8 @@
 # `/active_backend`
 
-Read, select, and clear the **active backend** — the installed provider the
+Read, select, and clear the **active backend** — the installed backend the
 daemon is currently set to use. This is distinct from the
-[active model](./active_model.md): selecting a backend records *which provider*
+[active model](./active_model.md): selecting a backend records *which backend*
 is active and validates its installed files, but does **not** load a model, so
 it cannot fail for runtime reasons (a missing API key, a download). Loading a
 model — the step that can fail that way — happens through

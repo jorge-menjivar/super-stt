@@ -4,16 +4,14 @@ Read and switch the active STT model. Cancellation of an in-flight
 switch lives at [`POST /active_model/cancel`](./active_model/cancel.md);
 the catalog of available models lives at [`GET /models`](./models.md).
 
-The active model is identified by a `(name, provider, source)`
-triple:
+The active model is identified by a `(name, source)`
+pair:
 
 - **`name`** — `whisper-1`, `voxtral-mini`, …
-- **`provider`** — `local_whisper`, `local_voxtral`, `openai`,
-  `mistral`, or `deepgram`.
 - **`source`** — the repo id of the backend that serves the model
   (e.g. `github.com/super-stt/openai`), as returned by
   [`GET /models`](./models.md). Empty/omitted selects the first installed
-  backend serving `(name, provider)`.
+  backend serving `name`.
 
 Switching the model also sets the [active backend](./active_backend.md) to the
 model's `source`. If the model then fails to load (e.g. a missing secret), the
@@ -47,7 +45,6 @@ Content-Type: application/json
 
 {
   "model":    "whisper-1",
-  "provider": "openai",
   "source":   "github.com/super-stt/openai"
 }
 ```
@@ -55,8 +52,7 @@ Content-Type: application/json
 | Field      | Type    | Required | Notes                                                                  |
 |------------|---------|----------|------------------------------------------------------------------------|
 | `model`    | string  | yes      | One of the names returned by [`GET /models`](./models.md)              |
-| `provider` | string  | yes      | One of `local_whisper`, `local_voxtral`, `openai`, `mistral`, `deepgram` |
-| `source`   | string  | no       | Repo id of the serving backend. Empty/omitted picks the first backend serving `(model, provider)`. |
+| `source`   | string  | no       | Repo id of the serving backend. Empty/omitted picks the first backend serving `model`. |
 
 **Response (202):**
 
@@ -79,8 +75,8 @@ topics above.
 
 | HTTP | `message`                  | Meaning                                                                       |
 |------|----------------------------|-------------------------------------------------------------------------------|
-| 400  | `online_models_disabled`   | `provider` is online but [`allow_online_models`](./allow_online_models.md) is `false` |
-| 400  | `invalid_model`            | No installed backend serves `(model, provider, source)`                       |
+| 400  | `online_models_disabled`   | the model is online but [`allow_online_models`](./allow_online_models.md) is `false` |
+| 400  | `invalid_model`            | No installed backend serves `(model, source)`                       |
 | 401  | `invalid_session`          | Token unknown / expired / `exe_changed`                                       |
 | 403  | `scope_denied`             | Token lacks the `settings` scope                                              |
 | 409  | `switch_in_progress`       | Another model switch is already running                                       |
@@ -112,7 +108,6 @@ Authorization: Bearer stt_…64hex…
     // flight, and the new model once that switch succeeds.
     "current": {
       "model":    "voxtral-mini",
-      "provider": "local_voxtral",
       "source":   "github.com/super-stt/voxtral",
       "loaded":   true,
       "device":   "cuda"            // "cpu" / "cuda" / "metal" / "remote"

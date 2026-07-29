@@ -31,7 +31,7 @@ and read only the fields for that variant; unknown variants should be ignored.
 |----------------------------|---------------------------------------------------------------------------------------------|
 | `loading_model`            | `new_model` (string)                                                                        |
 | `loading_model_for_device` | `model` (string), `target_device` (string)                                                  |
-| `model_switched`           | `model_name` (string), `provider` (string), `source` (string), `actual_device` (string)     |
+| `model_switched`           | `model_name` (string), `source` (string), `actual_device` (string)                          |
 | `ready`                    | `model_loaded` (bool); optional `model_name`, `actual_device`, `preferred_device` (strings)  |
 | `switching_device`         | `from_device` (string), `target_device` (string), `model` (string)                          |
 | `device_switch_error`      | `error` (string), `failed_device` (string), `model` (string)                                |
