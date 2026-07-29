@@ -127,7 +127,15 @@ impl SubprocessBackend {
             std::process::id()
         );
 
-        systemd::spawn_systemd_unit(&unit, &binary, backend_dir, &socket_dir, &socket).await?;
+        systemd::spawn_systemd_unit(
+            &unit,
+            &binary,
+            backend_dir,
+            &socket_dir,
+            &socket,
+            &model.supported_devices,
+        )
+        .await?;
 
         let interval = model
             .processing_interval_ms

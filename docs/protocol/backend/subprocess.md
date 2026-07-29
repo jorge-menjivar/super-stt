@@ -67,7 +67,7 @@ unit. The backend cannot relax these restrictions; design against them:
 | `ProtectHome=yes`, `PrivateTmp=yes` | `$HOME` is inaccessible; `/tmp` is private.                  |
 | `NoNewPrivileges=yes`             | The process cannot acquire new privileges.                     |
 | `SystemCallFilter=@system-service` | A seccomp allowlist; privileged syscall groups are denied.    |
-| `DeviceAllow=<gpu nodes>`         | The GPU device nodes, granted only when a GPU device is requested. |
+| `PrivateDevices=yes`              | A private `/dev` with no GPU nodes, unless the model declares a GPU. |
 
 Two consequences worth stating plainly:
 
@@ -79,7 +79,14 @@ Two consequences worth stating plainly:
   the GPU device nodes, and the GPU driver is privileged kernel attack
   surface. This is inherent to GPU compute and is not closed by the sandbox;
   it is the reason untrusted, network-facing backends belong on the WASM
-  transport instead.
+  transport instead. The hole is opened only where it is needed, and the
+  manifest decides: a model whose `supported_devices` names `cuda` or `metal`
+  is spawned with the host `/dev`. A model that names neither — CPU-only, or
+  the `none` sentinel of a remote model — runs with a private `/dev` holding
+  only the pseudo-devices, so the GPU nodes are not there to open. The
+  sandbox is fixed when the unit spawns, which is before `load`, so the
+  `device` a load request asks for cannot widen it; declare every device the
+  model can use.
 
 A subprocess backend whose CUDA kernels are multi-architecture (for example a
 bundled PyTorch wheel) may publish a single CUDA asset that omits `cuda_sm`;
