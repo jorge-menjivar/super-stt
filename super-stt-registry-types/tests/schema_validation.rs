@@ -14,33 +14,62 @@ fn toml_to_json(text: &str) -> Value {
     toml::from_str(text).expect("valid TOML")
 }
 
+/// Keys a manifest may carry that the parsers ignore and the schema rejects.
+/// The split is deliberate — see `schema.rs`: parsers stay lenient so a
+/// manifest written against a newer contract still loads, while the editor
+/// schema is strict so a typo is caught where it is typed. A fixture that
+/// exercises the lenient side therefore has to have these stripped before it
+/// is measured against the strict one.
+const PARSER_TOLERATED_MODEL_KEYS: &[&str] = &["provider"];
+
+/// Every backend manifest shipped in-repo must match the published schema.
+/// This is what catches the schema drifting away from manifests people
+/// actually write, so it has to *have* inputs: it previously scanned
+/// `backends/`, which no longer exists, and passed while validating nothing.
+/// The count assertion at the end is what stops that recurring silently.
 #[test]
 fn accepts_every_in_repo_backend_toml() {
     let v = backend_validator();
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap();
-    // Backends are migrating to their own repos, so the in-repo set shrinks
-    // over time (and `backends/` may eventually disappear) — validate whatever
-    // manifests remain rather than asserting a fixed count. The schema's
-    // acceptance of a valid manifest is also covered by the inline cases in
-    // `allows_documented_optionals` / `rejects_contract_violations`.
-    let Ok(dir) = std::fs::read_dir(root.join("backends")) else {
-        return;
-    };
-    for entry in dir.flatten() {
-        let path = entry.path().join("backend.toml");
-        if !path.exists() {
+        .unwrap()
+        .join("super-stt-daemon/tests/fixtures");
+    let entries = std::fs::read_dir(&dir).expect("daemon test fixtures directory");
+
+    let mut checked = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Only manifests: the `Cargo.toml`s of the mock backends live in
+        // subdirectories, so a non-recursive `*backend.toml` match skips them.
+        if !path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with("backend.toml"))
+        {
             continue;
         }
-        let doc = toml_to_json(&std::fs::read_to_string(&path).unwrap());
+        let mut doc = toml_to_json(&std::fs::read_to_string(&path).unwrap());
+        if let Some(models) = doc.get_mut("models").and_then(Value::as_array_mut) {
+            for model in models.iter_mut().filter_map(Value::as_object_mut) {
+                for key in PARSER_TOLERATED_MODEL_KEYS {
+                    model.remove(*key);
+                }
+            }
+        }
         let errors: Vec<String> = v.iter_errors(&doc).map(|e| format!("{e}")).collect();
         assert!(
             errors.is_empty(),
             "{} schema errors: {errors:#?}",
             path.display()
         );
+        checked += 1;
     }
+
+    assert!(
+        checked > 0,
+        "no backend manifests found under {} — this test would pass while validating nothing",
+        dir.display()
+    );
 }
 
 #[test]
