@@ -4,10 +4,9 @@ use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use crate::stt_models::transcribe::Transcribe;
 use anyhow::{Result, anyhow, bail};
-use super_stt_shared::models::provider::Provider;
 
 impl SuperSTTDaemon {
-    /// Build a running backend instance for `(name, provider, source)` plus its
+    /// Build a running backend instance for `(name, source)` plus its
     /// resolved definition. Central routing point for all model loading.
     ///
     /// # Errors
@@ -16,14 +15,13 @@ impl SuperSTTDaemon {
     pub async fn instantiate_backend(
         &self,
         name: &str,
-        provider: &Provider,
         source: &str,
         device_pref: &str,
     ) -> Result<(Box<dyn Transcribe>, ModelDefinition)> {
         let (backend, def) = {
             let backends = self.backends.read().await;
-            let (b, d) = backends::find_model(&backends, name, provider, source)
-                .ok_or_else(|| anyhow!("no installed backend serves {name} via {provider}"))?;
+            let (b, d) = backends::find_model(&backends, name, source)
+                .ok_or_else(|| anyhow!("no installed backend serves {name}"))?;
             (b.clone(), d.clone())
         };
 
@@ -49,7 +47,6 @@ impl SuperSTTDaemon {
         let component = backend.dir.join(&backend.entrypoint);
         let info = ModelInfoData::new(
             def.name.clone(),
-            def.provider.clone(),
             def.source.clone(),
             def.is_multilingual,
             def.is_online(),

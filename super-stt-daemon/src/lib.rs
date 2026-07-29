@@ -19,7 +19,7 @@ pub use daemon_main::run;
 mod daemon_main;
 mod num_cast;
 
-/// Re-export the shared rustls provider installer from `super-stt-forge`, so
+/// Re-export the shared rustls installer from `super-stt-forge`, so
 /// `main` and the tests install the provider through one implementation that
 /// lives beside the reqwest client factory.
 pub use super_stt_forge::install_crypto_provider;

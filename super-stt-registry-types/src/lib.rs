@@ -9,7 +9,6 @@ pub mod fs;
 pub mod index;
 pub mod license;
 pub mod manifest;
-pub mod provider;
 mod safe_path;
 #[cfg(feature = "schema")]
 pub mod schema;

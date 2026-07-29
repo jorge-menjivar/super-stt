@@ -161,7 +161,6 @@ websocket = true
 
 [[models]]
 name = "voxtral-mini-transcribe-realtime-2602"
-provider = "mistral"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -186,7 +185,6 @@ description = "Test backend."
 
 [[models]]
 name = "voxtral-mini-latest"
-provider = "mistral"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -269,7 +267,6 @@ description = "Test backend."
 
 [[models]]
 name = "whisper-tiny"
-provider = "local_whisper"
 multilingual = true
 primary_language = "en"
 supported_languages = ["es", "fr"]
@@ -295,7 +292,6 @@ description = "Test backend."
 
 [[models]]
 name = "whisper-en"
-provider = "local_whisper"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en", "es"]
@@ -321,7 +317,6 @@ description = "Test backend."
 
 [[models]]
 name = "whisper-en"
-provider = "local_whisper"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
@@ -346,7 +341,6 @@ description = "Test backend."
 
 [[models]]
 name = "voxtral-mini-transcribe-realtime-2602"
-provider = "mistral"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]

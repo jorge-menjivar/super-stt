@@ -18,7 +18,6 @@ use cosmic::prelude::*;
 use cosmic::widget::{menu, nav_bar};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use super_stt_shared::models::provider::Provider;
 
 /// Unified model operation state that encompasses downloading, loading, and switching
 #[derive(Debug, Clone)]
@@ -90,12 +89,10 @@ pub struct AppModel {
     pub last_udp_data: std::time::Instant,
 
     // Model management state
-    /// Available models from daemon as `(name, provider, source)` tuples.
-    pub available_models: Vec<(String, Provider, String)>,
+    /// Available models from daemon as `(name, source)` tuples.
+    pub available_models: Vec<(String, String)>,
     /// Currently loaded model
     pub current_model: String,
-    /// Provider of the currently loaded model
-    pub current_provider: Provider,
     /// Source (serving backend repo id) of the currently loaded model
     pub current_source: String,
     /// Monotonic counter bumped every time a live daemon event (e.g.

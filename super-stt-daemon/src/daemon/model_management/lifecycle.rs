@@ -4,7 +4,6 @@ use crate::stt_models::transcribe::Transcribe;
 use anyhow::Result;
 use log::{error, info, warn};
 use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
-use super_stt_shared::models::provider::Provider;
 
 impl SuperSTTDaemon {
     /// Load a model on an explicit device (used during device switching).
@@ -14,14 +13,13 @@ impl SuperSTTDaemon {
     pub async fn load_model_with_target_device(
         &self,
         name: &str,
-        provider: &Provider,
         source: &str,
         target_device: &str,
     ) -> Result<Box<dyn Transcribe>> {
         info!("Loading model {name} with target device: {target_device}");
         self.broadcast_device_model_loading_status(name, target_device);
         let (instance, _def) = self
-            .instantiate_backend(name, provider, source, target_device)
+            .instantiate_backend(name, source, target_device)
             .await?;
         let actual = normalize_device(&instance.device());
         *self.actual_device.write().await = actual.clone();
@@ -37,27 +35,23 @@ impl SuperSTTDaemon {
         if let Some(resp) = self.guard_model_mutation("reload the model").await {
             return resp;
         }
-        let current = self.model.read().await.as_ref().map(|l| {
-            (
-                l.definition.name.clone(),
-                l.definition.provider.clone(),
-                l.definition.source.clone(),
-            )
-        });
-        let Some((name, provider, source)) = current else {
+        let current = self
+            .model
+            .read()
+            .await
+            .as_ref()
+            .map(|l| (l.definition.name.clone(), l.definition.source.clone()));
+        let Some((name, source)) = current else {
             return DaemonResponse::success().with_message("No active model to reload".to_string());
         };
 
-        info!("Reloading active model {name} via {provider} to apply configuration changes");
+        info!("Reloading active model {name} to apply configuration changes");
         self.broadcast_model_loading_status(&name);
         self.unload_current_model().await;
         let device_pref = self.preferred_device.read().await.clone();
-        match self
-            .instantiate_backend(&name, &provider, &source, &device_pref)
-            .await
-        {
+        match self.instantiate_backend(&name, &source, &device_pref).await {
             Ok((instance, definition)) => {
-                self.finalize_model_switch_success(name, provider, source, definition, instance)
+                self.finalize_model_switch_success(name, source, definition, instance)
                     .await
             }
             Err(e) => {
@@ -92,17 +86,10 @@ impl SuperSTTDaemon {
     /// `source` is included on the wire because a client reconnecting after a
     /// daemon restart has no prior `current_source` to fall back to; without it
     /// the model loads but the settings app keeps showing "no model loaded".
-    pub fn broadcast_model_active(
-        &self,
-        name: &str,
-        provider: &Provider,
-        source: &str,
-        actual_device: &str,
-    ) {
+    pub fn broadcast_model_active(&self, name: &str, source: &str, actual_device: &str) {
         self.events
             .publish_daemon_status(DaemonStatusEvent::ModelSwitched {
                 model_name: name.to_string(),
-                provider: provider.to_string(),
                 source: source.to_string(),
                 actual_device: actual_device.to_string(),
             });

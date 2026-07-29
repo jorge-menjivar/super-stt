@@ -44,9 +44,6 @@ pub struct BackendInfo {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BackendModel {
     pub name: String,
-    /// Provider string, e.g. `local_whisper` / `openai`. Parsed into a
-    /// [`crate::models::provider::Provider`] for selection.
-    pub provider: String,
     /// Devices the model can be loaded onto. Non-empty `snake_case` values
     /// from `["cpu", "cuda", "metal", "none"]`. The settings UI surfaces
     /// these as the device choice in the active-backend card; `"none"`

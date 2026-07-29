@@ -159,12 +159,6 @@ impl AppModel {
             log::warn!("LoadStagedModel ignored — no staged model");
             return Task::none();
         };
-        let Some(provider) = self.backend_model_provider(&source, &model) else {
-            log::warn!(
-                "LoadStagedModel: backend/model not in catalog: source={source}, model={model}"
-            );
-            return Task::none();
-        };
         if !self.is_model_ready() {
             log::warn!("Model operation already in progress — ignoring Load click");
             return Task::none();
@@ -172,7 +166,7 @@ impl AppModel {
 
         // For online models the staged device is `"none"` (the sentinel)
         // and no `set_device` call is needed. Online-ness is derived from the
-        // model's `supported_devices` (the `none` sentinel), not the provider.
+        // model's `supported_devices` (the `none` sentinel).
         let online = self
             .backends
             .iter()
@@ -199,19 +193,17 @@ impl AppModel {
 
         let model_label = model.clone();
         let source_label = source.clone();
-        let provider_label = provider.clone();
         Task::batch([
             Task::perform(
                 async move {
                     if let Some(dev) = device_to_set {
                         set_device(dev).await?;
                     }
-                    set_model(model, provider, source).await.map(|_| ())
+                    set_model(model, source).await.map(|_| ())
                 },
                 move |result| match result {
                     Ok(()) => cosmic::Action::App(Message::Model(ModelMessage::ModelChanged {
                         model: model_label.clone(),
-                        provider: provider_label.clone(),
                         source: source_label.clone(),
                     })),
                     Err(e) => cosmic::Action::App(Message::ModelsPage(

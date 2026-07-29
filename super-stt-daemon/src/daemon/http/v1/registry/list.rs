@@ -96,7 +96,9 @@ fn map_entry(
             .iter()
             .map(|m| RegistryModel {
                 name: m.name.clone(),
-                provider: m.provider.clone(),
+                // Compatibility shim; see `IndexModel::provider`. Clients
+                // through v0.2.0 require the key to parse this response.
+                provider: String::new(),
                 supported_devices: m.supported_devices.clone(),
             })
             .collect(),

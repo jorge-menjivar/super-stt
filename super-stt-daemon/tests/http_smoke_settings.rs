@@ -69,10 +69,6 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
-        .arg("--device")
-        .arg("cpu")
-        .arg("--audio-theme")
-        .arg("silent")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -484,7 +480,6 @@ async fn settings_scope_endpoints() {
         &settings_token,
         serde_json::json!({
             "model": "definitely-not-a-real-model-xyz",
-            "provider": "local_whisper",
             "source": "builtin",
         }),
     )

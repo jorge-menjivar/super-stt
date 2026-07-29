@@ -84,7 +84,6 @@ impl AppModel {
 
             ModelMessage::CurrentModelLoaded {
                 model,
-                provider,
                 source,
                 epoch,
             } => {
@@ -95,7 +94,6 @@ impl AppModel {
                     return Task::none();
                 }
                 self.current_model.clone_from(&model);
-                self.current_provider = provider;
                 self.current_source.clone_from(&source);
                 self.model_operation_state = ModelOperationState::Ready;
                 // Fetch the per-model language block now that a model is loaded.
@@ -103,17 +101,12 @@ impl AppModel {
                 self.load_model_language(source, model)
             }
 
-            ModelMessage::ModelChanged {
-                model,
-                provider,
-                source,
-            } => {
+            ModelMessage::ModelChanged { model, source } => {
                 // Authoritative result of a user-initiated switch — bump the
                 // epoch so any in-flight reconnect snapshot is discarded rather
                 // than reverting this.
                 self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
                 self.current_model.clone_from(&model);
-                self.current_provider = provider;
                 self.current_source.clone_from(&source);
                 self.model_operation_state = ModelOperationState::Ready;
                 // Fetch the per-model language block now that a model is loaded.
@@ -172,10 +165,9 @@ impl AppModel {
     pub(in crate::core::app) fn fetch_current_model(&self) -> Task<cosmic::Action<Message>> {
         let epoch = self.current_model_epoch;
         Task::perform(get_current_model(), move |result| match result {
-            Ok((model, provider, source)) => {
+            Ok((model, source)) => {
                 cosmic::Action::App(Message::Model(ModelMessage::CurrentModelLoaded {
                     model,
-                    provider,
                     source,
                     epoch,
                 }))

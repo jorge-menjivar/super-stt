@@ -389,7 +389,7 @@ async fn set_model_online_rejected_when_disabled() {
         since_timestamp: None,
         limit: None,
         event_type: None,
-        data: Some(serde_json::json!({ "model": "whisper-1", "provider": "openai" })),
+        data: Some(serde_json::json!({ "model": "whisper-1"})),
         language: None,
         enabled: None,
     };
@@ -514,7 +514,6 @@ async fn list_backends_catalog_and_option_override() {
     use crate::stt_models::backends::DiscoveredBackend;
     use crate::stt_models::backends::manifest::{Opt, OptionDefault, OptionType, Secret};
     use std::time::Duration;
-    use super_stt_shared::models::provider::Provider;
 
     let daemon = test_daemon().await;
     let source = "github.com/super-stt/openai";
@@ -541,7 +540,6 @@ async fn list_backends_catalog_and_option_override() {
         }],
         models: vec![ModelDefinition {
             name: "whisper-1".to_string(),
-            provider: Provider::from("openai"),
             source: source.to_string(),
             is_multilingual: true,
             primary_language: "en".to_string(),
@@ -597,7 +595,6 @@ fn fixture_backend(
     use crate::stt_models::ModelDefinition;
     use crate::stt_models::backends::DiscoveredBackend;
     use std::time::Duration;
-    use super_stt_shared::models::provider::Provider;
 
     DiscoveredBackend {
         dir: std::path::PathBuf::from("/tmp").join(dir_name),
@@ -610,7 +607,6 @@ fn fixture_backend(
         options: Vec::new(),
         models: vec![ModelDefinition {
             name: model_name.to_string(),
-            provider: Provider::from("openai"),
             source: source.to_string(),
             is_multilingual: true,
             primary_language: "en".to_string(),
@@ -804,7 +800,7 @@ async fn list_models_is_scoped_to_active_backend() {
     let models = response.available_models.expect("available_models");
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].0, "whisper-1");
-    assert_eq!(models[0].2, openai);
+    assert_eq!(models[0].1, openai);
 
     // Switch to Mistral → only its model.
     let _ = daemon.handle_set_active_backend(mistral.to_string()).await;
@@ -812,7 +808,7 @@ async fn list_models_is_scoped_to_active_backend() {
     let models = response.available_models.expect("available_models");
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].0, "voxtral-mini-latest");
-    assert_eq!(models[0].2, mistral);
+    assert_eq!(models[0].1, mistral);
 }
 
 /// Trivial in-process `Transcribe` impl used to seed the `model` lock so
@@ -851,12 +847,9 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
     use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::ModelInfoData;
     use std::time::Duration;
-    use super_stt_shared::models::provider::Provider;
 
-    let provider = Provider::from("openai");
     let definition = ModelDefinition {
         name: name.to_string(),
-        provider: provider.clone(),
         source: source.to_string(),
         is_multilingual: true,
         primary_language: "en".to_string(),
@@ -866,7 +859,7 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
         supported_devices: vec![super_stt_registry_types::manifest::Device::None],
         realtime: false,
     };
-    let info = ModelInfoData::new(name, provider, source, true, true, Duration::from_secs(1));
+    let info = ModelInfoData::new(name, source, true, true, Duration::from_secs(1));
     *daemon.model.write().await = Some(LoadedModel {
         definition,
         instance: Box::new(MockTranscribe { info }),
@@ -1120,7 +1113,7 @@ async fn active_backend_commands_dispatch_through_handle_command() {
 /// A successful model load — whether a user-initiated switch or the daemon's
 /// startup load of the persisted model — must broadcast a self-contained
 /// `model_switched` event carrying the model's full identity (`model_name`,
-/// `provider`, `source`) followed by the operational `ready` event. A settings
+/// `source`) followed by the operational `ready` event. A settings
 /// app reconnecting after a daemon restart has no prior `current_source` to
 /// fall back to, so `source` must be on the wire for it to mark the model
 /// loaded — otherwise the model loads (visible in logs / htop) but the UI keeps
@@ -1128,23 +1121,15 @@ async fn active_backend_commands_dispatch_through_handle_command() {
 #[tokio::test]
 async fn broadcast_model_active_carries_full_identity() {
     use crate::daemon::events::Topic;
-    use super_stt_shared::models::provider::Provider;
 
     let daemon = test_daemon().await;
     let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
 
-    let provider = Provider::from("mistral");
-    daemon.broadcast_model_active(
-        "voxtral-mini",
-        &provider,
-        "github.com/super-stt/mistral",
-        "cuda",
-    );
+    daemon.broadcast_model_active("voxtral-mini", "github.com/super-stt/mistral", "cuda");
 
     let (_topic, switched) = rx.recv_json().await.expect("model_switched event");
     assert_eq!(switched["status"], "model_switched");
     assert_eq!(switched["model_name"], "voxtral-mini");
-    assert_eq!(switched["provider"], provider.to_string());
     assert_eq!(switched["source"], "github.com/super-stt/mistral");
 
     let (_topic, ready) = rx.recv_json().await.expect("ready event");
@@ -1193,12 +1178,9 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
     use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::ModelInfoData;
     use std::time::Duration;
-    use super_stt_shared::models::provider::Provider;
 
-    let provider = Provider::from("local_whisper");
     let definition = ModelDefinition {
         name: "scripted".to_string(),
-        provider: provider.clone(),
         source: "github.com/super-stt/test".to_string(),
         is_multilingual: true,
         primary_language: "en".to_string(),
@@ -1210,7 +1192,6 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
     };
     let info = ModelInfoData::new(
         "scripted",
-        provider,
         "github.com/super-stt/test",
         true,
         online,

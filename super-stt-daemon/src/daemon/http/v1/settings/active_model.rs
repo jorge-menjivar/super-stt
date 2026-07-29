@@ -11,7 +11,6 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub(crate) struct SetActiveModelBody {
     pub(crate) model: String,
-    pub(crate) provider: String,
     #[serde(default)]
     pub(crate) source: Option<String>,
 }
@@ -22,7 +21,6 @@ pub(crate) async fn set_active_model(
 ) -> impl IntoResponse {
     let mut data = serde_json::json!({
         "model":    body.model,
-        "provider": body.provider,
     });
     if let Some(source) = body.source {
         data["source"] = serde_json::Value::String(source);
@@ -72,7 +70,6 @@ pub(crate) async fn get_active_model(State(s): State<AppState>) -> impl IntoResp
         "active_model": {
             "current": {
                 "model":    model_resp.current_model,
-                "provider": model_resp.current_provider,
                 "source":   model_resp.current_source,
                 "loaded":   model_resp.model_loaded.unwrap_or(false),
                 "device":   device_resp.device.unwrap_or_else(|| "unknown".to_string()),

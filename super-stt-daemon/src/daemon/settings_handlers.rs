@@ -137,8 +137,8 @@ impl SuperSTTDaemon {
             };
             if current_is_online {
                 info!("Online models disabled; reverting to a local model");
-                if let Some((name, provider, source)) = self.first_local_model().await {
-                    let resp = self.handle_set_model(name, provider, source).await;
+                if let Some((name, source)) = self.first_local_model().await {
+                    let resp = self.handle_set_model(name, source).await;
                     if resp.status != "success" {
                         warn!("Reverting to a local model failed; unloading the online model");
                         *self.model.write().await = None;

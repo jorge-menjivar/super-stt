@@ -8,7 +8,6 @@
 //! `match`es its sub-enum exhaustively — so a newly added variant is a compile
 //! error at both ends instead of silently falling through to `Task::none()`.
 
-use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 
@@ -90,10 +89,9 @@ pub enum DaemonMessage {
 #[derive(Debug, Clone)]
 pub enum ModelMessage {
     LoadInitialData, // Load models + device info at startup
-    AvailableModelsLoaded(Vec<(String, Provider, String)>),
+    AvailableModelsLoaded(Vec<(String, String)>),
     CurrentModelLoaded {
         model: String,
-        provider: Provider,
         source: String,
         /// `current_model_epoch` captured when this snapshot was requested.
         /// The handler applies the snapshot only if the epoch is unchanged —
@@ -102,7 +100,6 @@ pub enum ModelMessage {
     },
     ModelChanged {
         model: String,
-        provider: Provider,
         source: String,
     },
     ModelError(String),

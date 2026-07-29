@@ -6,9 +6,7 @@
 
 use crate::config::DaemonConfig;
 use crate::daemon::events::EventBus;
-use crate::daemon::types::{
-    DeviceOverride, LoadedModel, SharedLoadedModel, SuperSTTDaemon, normalize_device,
-};
+use crate::daemon::types::{LoadedModel, SharedLoadedModel, SuperSTTDaemon, normalize_device};
 use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
 use crate::resource_management::ResourceManager;
@@ -17,8 +15,6 @@ use crate::stt_models::backends;
 use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
-use super_stt_shared::models::provider::Provider;
-use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 
 /// Pre-assembled subsystem handles created during daemon startup.
@@ -75,18 +71,10 @@ impl SuperSTTDaemon {
     /// # Errors
     ///
     /// Returns an error if model loading fails.
-    pub async fn new(
-        stt_model_override: Option<String>,
-        device_override: Option<DeviceOverride>,
-        audio_theme_override: Option<AudioTheme>,
-    ) -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         info!("Initializing Super STT Daemon...");
 
-        let config = Self::load_and_persist_config(
-            stt_model_override,
-            device_override,
-            audio_theme_override,
-        );
+        let config = Self::load_and_persist_config();
 
         // Extract config fields needed for the struct before config is moved in.
         let preferred_device = config.device.preferred_device.clone();
@@ -122,54 +110,25 @@ impl SuperSTTDaemon {
             active_backend: Arc::new(tokio::sync::RwLock::new(active_backend)),
         };
 
-        daemon.post_init(device_override).await;
+        daemon.post_init().await;
 
         Ok(daemon)
     }
 
     /// Load the daemon config from disk, apply any CLI overrides, and persist
     /// back to disk if anything changed. Returns the ready-to-use config.
-    fn load_and_persist_config(
-        stt_model_override: Option<String>,
-        device_override: Option<DeviceOverride>,
-        audio_theme_override: Option<AudioTheme>,
-    ) -> DaemonConfig {
-        let mut config = DaemonConfig::load();
+    fn load_and_persist_config() -> DaemonConfig {
+        let config = DaemonConfig::load();
         info!("Loaded daemon configuration from disk");
-        let changed = Self::apply_cli_overrides_to_config(
-            &mut config,
-            stt_model_override,
-            device_override,
-            audio_theme_override,
-        );
-        if changed {
-            if let Err(e) = config.save() {
-                warn!("Failed to save updated daemon config: {e}");
-            } else {
-                info!("Updated daemon configuration saved to disk");
-            }
-        }
         config
     }
 
     /// Perform post-construction startup: discover backends, apply any
     /// temporary session-level device override, then kick off background
     /// loading of the startup model (if one is configured).
-    async fn post_init(&self, device_override: Option<DeviceOverride>) {
+    async fn post_init(&self) {
         // Discover installed backends.
         self.refresh_backends().await;
-
-        // Apply temporary device override for current session (not saved to config).
-        if matches!(device_override, Some(DeviceOverride::Cpu)) {
-            let mut preferred_device_guard = self.preferred_device.write().await;
-            if *preferred_device_guard != "cpu" {
-                info!(
-                    "Temporary session override: device preference {} -> cpu (not saved)",
-                    *preferred_device_guard
-                );
-                *preferred_device_guard = "cpu".to_string();
-            }
-        }
 
         // Load the configured startup model — if any — in the **background** so
         // the HTTP listener can come up immediately. A model load may download
@@ -178,20 +137,13 @@ impl SuperSTTDaemon {
         // finishes. Clients watch the `daemon_status_changed` SSE topic for the
         // `ready` transition. With no configured preference the daemon stays
         // idle until the user selects a model — it never auto-pulls a model.
-        if let Some((name, provider, source)) = self.pick_startup_model().await {
+        if let Some((name, source)) = self.pick_startup_model().await {
             let bg = self.clone();
             tokio::spawn(async move {
-                if let Err(e) = Self::load_initial_model_and_broadcast(
-                    &bg,
-                    name.clone(),
-                    provider.clone(),
-                    source,
-                )
-                .await
+                if let Err(e) =
+                    Self::load_initial_model_and_broadcast(&bg, name.clone(), source).await
                 {
-                    warn!(
-                        "Failed to load startup model {name} via {provider}: {e}; daemon is idle"
-                    );
+                    warn!("Failed to load startup model {name}: {e}; daemon is idle");
                     bg.download_manager.clear_download();
                 }
             });
@@ -200,57 +152,11 @@ impl SuperSTTDaemon {
         }
     }
 
-    fn apply_cli_overrides_to_config(
-        config: &mut DaemonConfig,
-        stt_model_override: Option<String>,
-        device_override: Option<DeviceOverride>,
-        audio_theme_override: Option<AudioTheme>,
-    ) -> bool {
-        let mut changed = false;
-        // Only override device preference if provided explicitly
-        if let Some(dev) = device_override {
-            let desired = match dev {
-                DeviceOverride::Cpu => "cpu",
-                DeviceOverride::Cuda => "cuda",
-            };
-            if config.device.preferred_device != desired {
-                info!(
-                    "CLI override: device preference {} -> {}",
-                    config.device.preferred_device, desired
-                );
-                config.device.preferred_device = desired.to_string();
-                changed = true;
-            }
-        }
-        if let Some(theme) = audio_theme_override
-            && config.audio.theme != theme
-        {
-            info!(
-                "CLI override: audio theme {:?} -> {:?}",
-                config.audio.theme, theme
-            );
-            config.audio.theme = theme;
-            changed = true;
-        }
-        if let Some(model) = stt_model_override
-            && config.transcription.preferred_model != model
-        {
-            info!(
-                "CLI override: model {:?} -> {:?}",
-                config.transcription.preferred_model, model
-            );
-            config.transcription.preferred_model = model;
-            changed = true;
-        }
-
-        changed
-    }
-
     /// Record the backend serving `source` as the active one when nothing has
     /// selected one yet, returning whether it changed anything.
     ///
     /// The startup path resolves its model from the legacy
-    /// `preferred_model`/`preferred_provider`/`preferred_source` config, which
+    /// `preferred_model`/`preferred_source` config, which
     /// carries no `active_backend` — a config written before that field
     /// existed loads it as `None`. Without this the daemon transcribes
     /// happily while `GET /active_backend` stays null, so the settings app
@@ -285,17 +191,16 @@ impl SuperSTTDaemon {
     async fn load_initial_model_and_broadcast(
         daemon: &SuperSTTDaemon,
         name: String,
-        provider: Provider,
         source: String,
     ) -> Result<()> {
         daemon.broadcast_model_loading_status(&name);
 
         let device_pref = daemon.preferred_device.read().await.clone();
         let (instance, definition) = daemon
-            .instantiate_backend(&name, &provider, &source, &device_pref)
+            .instantiate_backend(&name, &source, &device_pref)
             .await?;
 
-        info!("model {name} via {provider} loaded successfully");
+        info!("model {name} loaded successfully");
 
         if daemon.adopt_active_backend_for(&source).await
             && let Err(e) = daemon.persist_config().await
@@ -317,7 +222,7 @@ impl SuperSTTDaemon {
         // (`model_switched` + `ready`). The startup load formerly emitted only
         // `ready`, so a settings app reconnecting after a daemon restart never
         // learned which model became active and kept showing "no model loaded".
-        daemon.broadcast_model_active(&name, &provider, &source, &actual_device);
+        daemon.broadcast_model_active(&name, &source, &actual_device);
         Ok(())
     }
 }

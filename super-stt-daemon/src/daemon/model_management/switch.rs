@@ -5,7 +5,6 @@ use crate::stt_models::backends;
 use crate::stt_models::transcribe::Transcribe;
 use log::{error, info, warn};
 use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
-use super_stt_shared::models::provider::Provider;
 
 impl SuperSTTDaemon {
     /// Handle get current model command.
@@ -17,7 +16,6 @@ impl SuperSTTDaemon {
             info!("Current model requested: {name}");
             DaemonResponse::success()
                 .with_current_model(name.clone())
-                .with_current_provider(loaded.definition.provider.clone())
                 .with_current_source(loaded.definition.source.clone())
                 .with_message(format!("Current model: {name}"))
         } else {
@@ -154,44 +152,31 @@ impl SuperSTTDaemon {
     }
 
     /// Handle set model command — switch to a different model identified by
-    /// `(name, provider, source)`.
-    pub async fn handle_set_model(
-        &self,
-        model: String,
-        provider: Provider,
-        source: String,
-    ) -> DaemonResponse {
-        self.handle_set_model_impl(model, provider, source).await
+    /// `(name, source)`.
+    pub async fn handle_set_model(&self, model: String, source: String) -> DaemonResponse {
+        self.handle_set_model_impl(model, source).await
     }
 
-    async fn handle_set_model_impl(
-        &self,
-        model: String,
-        provider: Provider,
-        source: String,
-    ) -> DaemonResponse {
-        info!("Model switch requested: {model} via {provider} (source={source:?})");
-        if let Some(resp) = self
-            .preflight_model_switch(&model, &provider, &source)
-            .await
-        {
+    async fn handle_set_model_impl(&self, model: String, source: String) -> DaemonResponse {
+        info!("Model switch requested: {model} (source={source:?})");
+        if let Some(resp) = self.preflight_model_switch(&model, &source).await {
             return resp;
         }
 
         // Resolve against discovered backends; capture the concrete source +
         // install dir so the backend is recorded even when the request left
         // `source` empty. Online-ness is only knowable from the resolved model
-        // (the `provider` string no longer encodes it), so capture it here.
+        // so capture it here.
         let resolved = {
             let backends = self.backends.read().await;
-            backends::find_model(&backends, &model, &provider, &source)
+            backends::find_model(&backends, &model, &source)
                 .map(|(b, d)| (b.source.clone(), backends::dir_name(b), d.is_online()))
         };
         let Some((backend_source, backend_dir, is_online)) = resolved else {
             return DaemonResponse::error_with_code(
                 ErrorCode::InvalidModel,
                 &format!(
-                    "No installed backend serves {model} via {provider}. \
+                    "No installed backend serves {model}. \
                      Install the backend or check the model name."
                 ),
             );
@@ -227,18 +212,12 @@ impl SuperSTTDaemon {
         let device_pref = self.preferred_device.read().await.clone();
 
         match self
-            .instantiate_backend(&model, &provider, &backend_source, &device_pref)
+            .instantiate_backend(&model, &backend_source, &device_pref)
             .await
         {
             Ok((instance, definition)) => {
-                self.finalize_model_switch_success(
-                    model,
-                    provider,
-                    backend_source,
-                    definition,
-                    instance,
-                )
-                .await
+                self.finalize_model_switch_success(model, backend_source, definition, instance)
+                    .await
             }
             Err(e) => {
                 error!("Model switch failed: {e}");
@@ -250,7 +229,6 @@ impl SuperSTTDaemon {
     pub(super) async fn finalize_model_switch_success(
         &self,
         model: String,
-        provider: Provider,
         source: String,
         definition: ModelDefinition,
         instance: Box<dyn Transcribe>,
@@ -258,41 +236,33 @@ impl SuperSTTDaemon {
         let actual_device = self.finalize_loaded_model(definition, instance).await;
         {
             let mut config_guard = self.config.write().await;
-            config_guard.update_preferred_model(model.clone(), provider.clone(), source.clone());
+            config_guard.update_preferred_model(model.clone(), source.clone());
         }
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after model switch: {e}");
         }
-        self.broadcast_model_active(&model, &provider, &source, &actual_device);
-        info!("Switched to model: {model} via {provider}");
+        self.broadcast_model_active(&model, &source, &actual_device);
+        info!("Switched to model: {model}");
         DaemonResponse::success()
             .with_current_model(model.clone())
-            .with_current_provider(provider)
             .with_current_source(source)
             .with_message(format!("Successfully switched to model: {model}"))
     }
 
-    async fn preflight_model_switch(
-        &self,
-        model: &str,
-        provider: &Provider,
-        source: &str,
-    ) -> Option<DaemonResponse> {
+    async fn preflight_model_switch(&self, model: &str, source: &str) -> Option<DaemonResponse> {
         if let Some(resp) = self.guard_model_mutation("switch models").await {
             warn!("Model switch rejected - recording in progress");
             return Some(resp);
         }
         if let Some(loaded) = self.model.read().await.as_ref()
             && loaded.definition.name == model
-            && loaded.definition.provider == *provider
             && (source.is_empty() || loaded.definition.source == source)
         {
-            info!("Model switch skipped - already using {model} via {provider}");
+            info!("Model switch skipped - already using {model}");
             return Some(
                 DaemonResponse::success()
                     .with_message(format!("Already using model: {model}"))
                     .with_current_model(loaded.definition.name.clone())
-                    .with_current_provider(loaded.definition.provider.clone())
                     .with_current_source(loaded.definition.source.clone()),
             );
         }

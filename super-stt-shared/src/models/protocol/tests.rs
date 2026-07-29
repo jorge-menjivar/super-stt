@@ -192,28 +192,20 @@ fn response_allow_online_models_skipped_when_none() {
 
 #[test]
 fn set_model_parses_online_models() {
-    let cases: &[(&str, &str)] = &[
-        ("whisper-1", "openai"),
-        ("gpt-4o-transcribe", "openai"),
-        ("gpt-4o-mini-transcribe", "openai"),
-        ("voxtral-mini-latest", "mistral"),
-        ("nova-3", "deepgram"),
+    let cases: &[&str] = &[
+        ("whisper-1"),
+        ("gpt-4o-transcribe"),
+        ("gpt-4o-mini-transcribe"),
+        ("voxtral-mini-latest"),
+        ("nova-3"),
     ];
-    for (model_name, provider_str) in cases {
-        let request = make_request(
-            "set_model",
-            Some(json!({ "model": model_name, "provider": provider_str })),
-        );
+    for model_name in cases {
+        let request = make_request("set_model", Some(json!({ "model": model_name})));
         let command = Command::try_from(request)
             .unwrap_or_else(|e| panic!("set_model should parse {model_name}: {e}"));
         match command {
-            Command::SetModel {
-                model,
-                provider,
-                source,
-            } => {
+            Command::SetModel { model, source } => {
                 assert_eq!(model.to_string(), *model_name);
-                assert_eq!(provider.as_str(), *provider_str, "{model_name}");
                 // No source supplied → empty (daemon picks the backend).
                 assert_eq!(source, "");
             }
@@ -230,13 +222,8 @@ fn set_model_parses_local_name() {
     );
     let command = Command::try_from(request).expect("should parse");
     match command {
-        Command::SetModel {
-            model,
-            provider,
-            source,
-        } => {
+        Command::SetModel { model, source } => {
             assert_eq!(model, "whisper-tiny");
-            assert_eq!(provider.as_str(), "local_whisper");
             assert_eq!(source, "");
         }
         _ => panic!("expected Command::SetModel"),
@@ -260,16 +247,6 @@ fn set_model_passes_source_repo_through() {
         }
         _ => panic!("expected Command::SetModel"),
     }
-}
-
-#[test]
-fn set_model_rejects_missing_provider() {
-    let request = make_request("set_model", Some(json!({ "model": "whisper-tiny" })));
-    let result = Command::try_from(request);
-    assert!(
-        result.is_err(),
-        "set_model without provider should be rejected"
-    );
 }
 
 #[test]

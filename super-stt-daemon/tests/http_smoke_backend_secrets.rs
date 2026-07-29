@@ -86,7 +86,6 @@ required = true
 
 [[models]]
 name = "whisper-1"
-provider = "openai"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]
@@ -115,10 +114,6 @@ async fn start_daemon(scopes: &[&str]) -> (DaemonGuard, PathBuf, String) {
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
-        .arg("--device")
-        .arg("cpu")
-        .arg("--audio-theme")
-        .arg("silent")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

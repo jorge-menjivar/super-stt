@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use super_stt_shared::models::provider::Provider;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
@@ -75,13 +74,6 @@ pub struct OnlineConfig {
 pub struct TranscriptionConfig {
     #[serde(default)]
     pub preferred_model: String,
-    #[serde(
-        default,
-        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
-    )]
-    pub preferred_provider: Provider,
-    /// Repo id of the backend that serves the preferred model. Empty means the
-    /// daemon picks the first installed backend serving `(model, provider)`.
     #[serde(default)]
     pub preferred_source: String,
     #[serde(default)]
@@ -132,7 +124,6 @@ impl Default for DaemonConfig {
                 // Empty preference: the daemon loads the first usable model from
                 // whatever backends are discovered on disk.
                 preferred_model: String::new(),
-                preferred_provider: Provider::default(),
                 preferred_source: String::new(),
                 write_mode: false,             // Default to not auto-typing
                 preview_typing_enabled: false, // Default to disabled (beta feature)
@@ -237,10 +228,9 @@ impl DaemonConfig {
         self.audio.theme = theme;
     }
 
-    /// Update preferred model + provider + source.
-    pub fn update_preferred_model(&mut self, model: String, provider: Provider, source: String) {
+    /// Update preferred model + source.
+    pub fn update_preferred_model(&mut self, model: String, source: String) {
         self.transcription.preferred_model = model;
-        self.transcription.preferred_provider = provider;
         self.transcription.preferred_source = source;
     }
 

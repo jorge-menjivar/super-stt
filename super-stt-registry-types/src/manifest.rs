@@ -13,8 +13,6 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::provider::Provider;
-
 /// A backend's `backend.toml`: identity, packaging, network policy,
 /// secrets/options, and the models it provides.
 #[derive(Debug, Clone, Deserialize)]
@@ -344,16 +342,12 @@ impl fmt::Display for OptionDefault {
 }
 
 /// One `[[models]]` entry. Each model is identified on the wire by
-/// `(name, provider, source)`, where `source` is `[backend].source`.
+/// `(name, source)`, where `source` is `[backend].source`.
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ModelEntry {
     /// Wire model name.
     pub name: String,
-    /// Engine that serves the model — a free-form `snake_case` identity label
-    /// (any backend may define its own). Online vs local is determined by
-    /// [`ModelEntry::is_online`] (the `none` device sentinel), not by this.
-    pub provider: Provider,
     /// Whether the model accepts more than one language. Default `true`.
     /// When `false`, `supported_languages` must be exactly
     /// `[primary_language]`.
@@ -672,42 +666,6 @@ mod tests {
     }
 
     #[test]
-    fn provider_is_free_form_but_must_be_snake_case() {
-        let manifest = |provider: &str| {
-            format!(
-                r#"
-                [backend]
-                source = "github.com/x/y"
-                name = "Y"
-                version = "1.0.0"
-                kind = "wasm"
-                entrypoint = "y.wasm"
-                contract = "v1"
-                description = "Test backend."
-
-                [[models]]
-                name = "m"
-                provider = "{provider}"
-                primary_language = "en"
-                supported_languages = ["en"]
-                supported_devices = ["none"]
-                "#
-            )
-        };
-        // Any well-formed identifier is accepted — a backend may serve any
-        // provider, not only a fixed set.
-        for ok in ["anthropic", "groq", "local_whisper", "my_custom_engine"] {
-            let m = Manifest::parse(&manifest(ok)).unwrap_or_else(|e| panic!("{ok}: {e}"));
-            assert_eq!(m.models[0].provider.as_str(), ok);
-        }
-        // A malformed value (uppercase / hyphen) is rejected at parse.
-        for bad in ["Anthropic", "local-whisper"] {
-            let err = Manifest::parse(&manifest(bad)).unwrap_err().to_string();
-            assert!(err.contains("provider"), "{bad}: got {err}");
-        }
-    }
-
-    #[test]
     fn rejects_unsafe_entrypoint() {
         // "a/b" is a *valid* relative path ("bin/launcher" style) — only
         // absolute and traversing values are rejected.
@@ -732,6 +690,41 @@ mod tests {
         }
     }
 
+    /// A `[[models]]` table may carry keys this crate does not read, and
+    /// `provider` is the one published backends actually ship. The parser must
+    /// keep ignoring it: a manifest is fetched from a backend's release at
+    /// index time, so rejecting an unread key would drop every already-released
+    /// backend out of the index rather than fail some local build.
+    ///
+    /// Concretely, this is the test that fails if `deny_unknown_fields` is ever
+    /// added to `ModelEntry`.
+    #[test]
+    fn a_model_carrying_an_unread_provider_key_still_parses() {
+        let m = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "subprocess"
+            entrypoint = "y"
+            contract = "v1"
+            description = "Test backend."
+
+            [[models]]
+            name = "m1"
+            provider = "local_whisper"
+            primary_language = "en"
+            supported_languages = ["en"]
+            supported_devices = ["cpu"]
+            "#,
+        )
+        .expect("a manifest declaring `provider` must still parse");
+        assert_eq!(m.models.len(), 1);
+        assert_eq!(m.models[0].name, "m1");
+        assert_eq!(m.models[0].supported_devices, vec![Device::Cpu]);
+    }
+
     #[test]
     fn file_spec_parses_inline_and_block_forms() {
         // The inline-table array and the `[[models.files]]` block form are the
@@ -750,7 +743,6 @@ mod tests {
 
             [[models]]
             name = "m1"
-            provider = "local_whisper"
             primary_language = "en"
             supported_languages = ["en"]
             supported_devices = ["cpu"]
@@ -760,7 +752,6 @@ mod tests {
 
             [[models]]
             name = "m2"
-            provider = "local_whisper"
             primary_language = "en"
             supported_languages = ["en"]
             supported_devices = ["cpu"]
@@ -797,7 +788,6 @@ mod tests {
 
                 [[models]]
                 name = "m"
-                provider = "local_whisper"
                 primary_language = "en"
                 supported_languages = ["en"]
                 supported_devices = ["cpu"]

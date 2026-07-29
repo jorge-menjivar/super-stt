@@ -37,7 +37,7 @@ impl SuperSTTDaemon {
         // Get context for the device switch. The model can be unloaded
         // concurrently between the `is_none()` check above and this read — treat
         // "gone" as "nothing to reload" and just record the preference.
-        let Some((current_preferred, model_to_reload, provider, source, is_online)) =
+        let Some((current_preferred, model_to_reload, source, is_online)) =
             self.get_device_switch_context(&device).await
         else {
             return self.update_device_preference_only(&device).await;
@@ -67,7 +67,7 @@ impl SuperSTTDaemon {
 
         // Try to reload model with the requested device, but cancel if shutdown occurs
         let load_result = tokio::select! {
-            result = self.load_model_with_target_device(&model_to_reload, &provider, &source, &device) => {
+            result = self.load_model_with_target_device(&model_to_reload, &source, &device) => {
                 result
             }
             _ = shutdown_rx.recv() => {
@@ -82,7 +82,6 @@ impl SuperSTTDaemon {
                     model_instance,
                     &device,
                     &model_to_reload,
-                    &provider,
                     &source,
                     &current_preferred,
                 )
@@ -93,7 +92,6 @@ impl SuperSTTDaemon {
                     e,
                     &device,
                     &model_to_reload,
-                    &provider,
                     &source,
                     &current_preferred,
                 )
@@ -169,38 +167,24 @@ impl SuperSTTDaemon {
     async fn get_device_switch_context(
         &self,
         _device: &str,
-    ) -> Option<(
-        String,
-        String,
-        super_stt_shared::models::provider::Provider,
-        String,
-        bool,
-    )> {
+    ) -> Option<(String, String, String, bool)> {
         // Read the model that needs to be reloaded. It was present when the
         // caller checked, but the lock is released in between, so a concurrent
         // unload (a reload or a backend uninstall) can leave it `None` — return
         // that instead of panicking. Online-ness is read from the loaded model
-        // (which implements `ModelInfo`) — the `provider` string no longer
-        // encodes it.
-        let (model_to_reload, provider, source, is_online) = {
+        // (which implements `ModelInfo`).
+        let (model_to_reload, source, is_online) = {
             let guard = self.model.read().await;
             guard.as_ref().map(|loaded| {
                 (
                     loaded.definition.name.clone(),
-                    loaded.definition.provider.clone(),
                     loaded.definition.source.clone(),
                     loaded.definition.is_online(),
                 )
             })
         }?;
         let current_preferred = self.preferred_device.read().await.clone();
-        Some((
-            current_preferred,
-            model_to_reload,
-            provider,
-            source,
-            is_online,
-        ))
+        Some((current_preferred, model_to_reload, source, is_online))
     }
 
     /// Prepare for device switch by broadcasting status and unloading current model
@@ -226,7 +210,6 @@ impl SuperSTTDaemon {
         model_instance: Box<dyn Transcribe>,
         device: &str,
         model_to_reload: &str,
-        provider: &super_stt_shared::models::provider::Provider,
         source: &str,
         previous_device: &str,
     ) -> DaemonResponse {
@@ -234,10 +217,7 @@ impl SuperSTTDaemon {
         // concurrently with the switch, so `resolve_definition` may now return
         // `None` — fail the request gracefully (leaving the daemon idle) rather
         // than panicking on the capture thread.
-        let Some(definition) = self
-            .resolve_definition(model_to_reload, provider, source)
-            .await
-        else {
+        let Some(definition) = self.resolve_definition(model_to_reload, source).await else {
             error!(
                 "Backend serving {model_to_reload} ({source}) disappeared during the device \
                  switch; cannot finalize the reloaded model — leaving the daemon idle"
@@ -295,7 +275,6 @@ impl SuperSTTDaemon {
         error: anyhow::Error,
         device: &str,
         model_to_reload: &str,
-        provider: &super_stt_shared::models::provider::Provider,
         source: &str,
         previous_device: &str,
     ) -> DaemonResponse {
@@ -322,13 +301,11 @@ impl SuperSTTDaemon {
         warn!("Attempting to recover by reverting to previous device: {previous_device}");
 
         match self
-            .load_model_with_target_device(model_to_reload, provider, source, previous_device)
+            .load_model_with_target_device(model_to_reload, source, previous_device)
             .await
         {
             Ok(model_instance) => {
-                let Some(definition) = self
-                    .resolve_definition(model_to_reload, provider, source)
-                    .await
+                let Some(definition) = self.resolve_definition(model_to_reload, source).await
                 else {
                     error!(
                         "Backend serving {model_to_reload} ({source}) disappeared during \

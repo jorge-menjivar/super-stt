@@ -56,7 +56,6 @@ mod unmet_requirements_tests {
             allowed_hosts: Vec::new(),
             models: vec![BackendModel {
                 name: "whisper-1".to_string(),
-                provider: "openai".to_string(),
                 supported_devices: vec!["none".to_string()],
                 estimated_vram_bytes: 0,
                 multilingual: false,
@@ -284,7 +283,6 @@ mod model_status_tests {
             allowed_hosts: Vec::new(),
             models: vec![BackendModel {
                 name: "whisper-1".to_string(),
-                provider: "openai".to_string(),
                 supported_devices: vec!["none".to_string()],
                 estimated_vram_bytes: 0,
                 multilingual: false,

@@ -4,8 +4,8 @@
 use crate::daemon::client::internal::response::{require_message, require_success};
 use crate::daemon::client::internal::session::with_settings_token;
 use serde::Deserialize;
+use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
-use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
 
 // Only the `/active_model` fields the settings app consumes are modeled; serde ignores the rest.
 
@@ -24,7 +24,6 @@ pub struct ActiveModelPayload {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ActiveModelCurrent {
     pub model: Option<String>,
-    pub provider: Option<String>,
     pub source: Option<String>,
 }
 
@@ -54,30 +53,20 @@ async fn fetch_active_model(
     transport::get_json::<ActiveModelStatus>(socket, token, "/active_model").await
 }
 
-/// Get current loaded model from daemon as `(name, provider, source)`
+/// Get current loaded model from daemon as `(name source)`
 /// (HTTP `GET /active_model`).
-pub async fn get_current_model()
--> HttpResult<(String, super_stt_shared::models::provider::Provider, String)> {
+pub async fn get_current_model() -> HttpResult<(String, String)> {
     with_settings_token(|socket, token| async move {
         let status = fetch_active_model(socket, &token).await?;
         let current = status.active_model.current;
         // Idle daemon (no model loaded) is a valid state: report an empty
         // selection rather than erroring, so the UI shows nothing selected.
         let Some(model) = current.model else {
-            return Ok((
-                String::new(),
-                super_stt_shared::models::provider::Provider::default(),
-                String::new(),
-            ));
+            return Ok((String::new(), String::new()));
         };
-        let provider_str = current
-            .provider
-            .ok_or_else(|| HttpError::Other("missing active_model.current.provider".to_string()))?;
-        let provider: super_stt_shared::models::provider::Provider = provider_str
-            .parse()
-            .map_err(|e| HttpError::Other(format!("invalid provider {provider_str:?}: {e}")))?;
+
         let source = current.source.unwrap_or_default();
-        Ok((model, provider, source))
+        Ok((model, source))
     })
     .await
 }
@@ -121,19 +110,13 @@ pub async fn get_download_status()
 }
 
 /// Set/switch to a different model (HTTP `POST /active_model`).
-pub async fn set_model(
-    model: String,
-    provider: super_stt_shared::models::provider::Provider,
-    source: String,
-) -> HttpResult<String> {
-    let provider_str = provider.to_string();
+pub async fn set_model(model: String, source: String) -> HttpResult<String> {
     let source_str = source;
     with_settings_token(move |socket, token| {
         let model = model.clone();
-        let provider_str = provider_str.clone();
         let source_str = source_str.clone();
         async move {
-            let mut body = serde_json::json!({ "model": model, "provider": provider_str });
+            let mut body = serde_json::json!({ "model": model });
             body["source"] = serde_json::Value::String(source_str);
             // No header timeout: the daemon only responds once the switch
             // finishes (provisioning may stream multi-GB weights first), and
@@ -148,8 +131,7 @@ pub async fn set_model(
 }
 
 /// List all available models from daemon (HTTP `GET /models`).
-pub async fn list_available_models()
--> HttpResult<Vec<(String, super_stt_shared::models::provider::Provider, String)>> {
+pub async fn list_available_models() -> HttpResult<Vec<(String, String)>> {
     with_settings_token(|socket, token| async move {
         let resp = require_success(
             transport::settings_get(socket, &token, "/models").await?,

@@ -142,7 +142,6 @@ impl SubprocessBackend {
             .map_or_else(|| Duration::from_secs(2), Duration::from_millis);
         let info = ModelInfoData::new(
             model_name,
-            model.provider.clone(),
             manifest.backend.source.clone(),
             model.multilingual,
             model.is_online(),
@@ -157,9 +156,8 @@ impl SubprocessBackend {
             device: "unknown".to_string(),
         };
 
-        let provider_str = model.provider.to_string();
         backend.wait_for_ping(Duration::from_secs(30)).await?;
-        backend.load(model_name, &provider_str, device_pref).await?;
+        backend.load(model_name, device_pref).await?;
         Ok(backend)
     }
 
@@ -182,8 +180,8 @@ impl SubprocessBackend {
 
     /// `POST /v1/load` then poll `/v1/status` until `ready` (or `error`),
     /// capturing the device label the backend reports.
-    async fn load(&mut self, name: &str, provider: &str, device_pref: &str) -> Result<()> {
-        let mut load = serde_json::json!({ "name": name, "provider": provider });
+    async fn load(&mut self, name: &str, device_pref: &str) -> Result<()> {
+        let mut load = serde_json::json!({ "name": name });
         if !device_pref.is_empty() {
             load["device"] = serde_json::json!(device_pref);
         }

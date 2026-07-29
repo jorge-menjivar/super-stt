@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::models::provider::Provider;
 use crate::models::theme::AudioTheme;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -23,11 +22,9 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_provider: Option<Provider>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub current_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub available_models: Option<Vec<(String, Provider, String)>>,
+    pub available_models: Option<Vec<(String, String)>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_devices: Option<Vec<String>>,
 
@@ -237,12 +234,6 @@ impl DaemonResponse {
     }
 
     #[must_use]
-    pub fn with_current_provider(mut self, provider: Provider) -> Self {
-        self.current_provider = Some(provider);
-        self
-    }
-
-    #[must_use]
     pub fn with_current_source(mut self, source: String) -> Self {
         self.current_source = Some(source);
         self
@@ -297,7 +288,7 @@ impl DaemonResponse {
     }
 
     #[must_use]
-    pub fn with_available_models(mut self, models: Vec<(String, Provider, String)>) -> Self {
+    pub fn with_available_models(mut self, models: Vec<(String, String)>) -> Self {
         self.available_models = Some(models);
         self
     }

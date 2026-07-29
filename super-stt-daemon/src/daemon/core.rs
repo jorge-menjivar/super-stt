@@ -36,11 +36,7 @@ impl SuperSTTDaemon {
             Command::SetAudioTheme { theme } => self.handle_set_audio_theme(theme),
             Command::GetAudioTheme => self.handle_get_audio_theme(),
             Command::TestAudioTheme => self.handle_test_audio_theme().await,
-            Command::SetModel {
-                model,
-                provider,
-                source,
-            } => self.handle_set_model(model, provider, source).await,
+            Command::SetModel { model, source } => self.handle_set_model(model, source).await,
             Command::GetModel => self.handle_get_model().await,
             Command::ListModels => self.handle_list_models().await,
             Command::SetDevice { device } => self.handle_set_device(device).await,

@@ -16,12 +16,11 @@ use std::time::Duration;
 use log::{error, info, warn};
 
 use crate::stt_models::ModelDefinition;
-use super_stt_shared::models::provider::Provider;
 
 use manifest::{Device, Manifest, ModelEntry, Opt, Secret};
 
 /// A backend discovered on disk, with the models it serves resolved into
-/// [`ModelDefinition`]s keyed by `(name, provider, source)`.
+/// [`ModelDefinition`]s keyed by `(name, source)`.
 #[derive(Clone, Debug)]
 pub struct DiscoveredBackend {
     /// Directory holding `backend.toml` and the entrypoint.
@@ -129,7 +128,6 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
             .map_or_else(|| Duration::from_secs(2), Duration::from_millis);
         models.push(ModelDefinition {
             name: entry.name.clone(),
-            provider: entry.provider.clone(),
             source: source.clone(),
             is_multilingual: entry.multilingual,
             primary_language: entry.primary_language.clone(),
@@ -182,25 +180,20 @@ fn validate_supported_devices(entry: &ModelEntry) -> anyhow::Result<Vec<Device>>
     Ok(seen)
 }
 
-/// Locate the backend and model definition matching `(name, provider, source)`.
+/// Locate the backend and model definition matching `(name, source)`.
 ///
-/// An empty `source` matches the first backend that serves `(name, provider)`.
+/// An empty `source` matches the first backend that serves `name`.
 #[must_use]
 pub fn find_model<'a>(
     backends: &'a [DiscoveredBackend],
     name: &str,
-    provider: &Provider,
     source: &str,
 ) -> Option<(&'a DiscoveredBackend, &'a ModelDefinition)> {
     for backend in backends {
         if !source.is_empty() && backend.source != source {
             continue;
         }
-        if let Some(def) = backend
-            .models
-            .iter()
-            .find(|d| d.name == name && d.provider == *provider)
-        {
+        if let Some(def) = backend.models.iter().find(|d| d.name == name) {
             return Some((backend, def));
         }
     }
@@ -217,16 +210,12 @@ pub fn dir_name(backend: &DiscoveredBackend) -> Option<String> {
         .map(|n| n.to_string_lossy().into_owned())
 }
 
-/// Flatten all discovered models into `(name, provider, source)` triples.
+/// Flatten all discovered models into `(name,  source)` triples.
 #[must_use]
-pub fn list_models(backends: &[DiscoveredBackend]) -> Vec<(String, Provider, String)> {
+pub fn list_models(backends: &[DiscoveredBackend]) -> Vec<(String, String)> {
     backends
         .iter()
-        .flat_map(|b| {
-            b.models
-                .iter()
-                .map(|d| (d.name.clone(), d.provider.clone(), d.source.clone()))
-        })
+        .flat_map(|b| b.models.iter().map(|d| (d.name.clone(), d.source.clone())))
         .collect()
 }
 

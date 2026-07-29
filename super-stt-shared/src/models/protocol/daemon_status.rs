@@ -32,9 +32,6 @@ pub enum DaemonStatusEvent {
     /// A model finished loading and is now the active model.
     ModelSwitched {
         model_name: String,
-        /// The provider's `Display` form (e.g. `whisper`), parsed back on the
-        /// app side.
-        provider: String,
         source: String,
         actual_device: String,
     },
@@ -88,7 +85,6 @@ mod tests {
     fn model_switched_wire_shape() {
         let json = serde_json::to_value(DaemonStatusEvent::ModelSwitched {
             model_name: "whisper-tiny".into(),
-            provider: "whisper".into(),
             source: "github.com/super-stt/whisper".into(),
             actual_device: "cpu".into(),
         })

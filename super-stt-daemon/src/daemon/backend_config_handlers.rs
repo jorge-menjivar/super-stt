@@ -30,7 +30,6 @@ impl SuperSTTDaemon {
                     .iter()
                     .map(|m| BackendModel {
                         name: m.name.clone(),
-                        provider: m.provider.to_string(),
                         supported_devices: m
                             .supported_devices
                             .iter()

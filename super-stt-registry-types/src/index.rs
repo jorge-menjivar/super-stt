@@ -84,7 +84,7 @@ struct ModelSupport {
 /// Classify a manifest's models by their [`Device`]s — the `none` sentinel
 /// marks online/remote models, `cuda`/`metal` mark GPU, `cpu` marks CPU. Devices
 /// are typed and validated by `Manifest::parse`, so there is no string matching
-/// to get wrong; the provider string is irrelevant here.
+/// to get wrong.
 fn model_support(models: &[ModelEntry]) -> ModelSupport {
     let any_device =
         |pred: fn(&Device) -> bool| models.iter().any(|m| m.supported_devices.iter().any(pred));
@@ -143,7 +143,7 @@ impl IndexBackend {
                 .into_iter()
                 .map(|md| IndexModel {
                     name: md.name,
-                    provider: md.provider.to_string(),
+                    provider: String::new(),
                     supported_devices: md
                         .supported_devices
                         .iter()
@@ -189,6 +189,15 @@ impl IndexBackend {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexModel {
     pub name: String,
+    /// Wire-compatibility shim, always empty. Daemons through v0.2.0
+    /// deserialize the index with this key **required**, so publishing an
+    /// index without it makes every installed one of them fail to parse the
+    /// whole document. `min_client` cannot gate that: serde rejects the
+    /// missing field before the floor is ever read.
+    ///
+    /// Nothing reads the value. Delete the field once no supported daemon
+    /// requires the key.
+    #[serde(default, skip_deserializing)]
     pub provider: String,
     pub supported_devices: Vec<String>,
 }
@@ -261,14 +270,51 @@ pub struct IndexStale {
 mod tests {
     use super::*;
     use crate::manifest::ModelEntry;
-    use crate::provider::Provider;
 
-    /// Build a `ModelEntry` with the given provider and devices; the other
+    /// The published `index.json` must keep carrying `provider` on every model.
+    /// Daemons through v0.2.0 declare it as a required `String`, so an index
+    /// without it fails to deserialize *in full* on every installed one of
+    /// them — the registry stops resolving, and `min_client` cannot soften it
+    /// because the missing field is rejected before the floor is read.
+    ///
+    /// This is the test that fails if the compatibility shim is deleted before
+    /// those daemons have rolled over.
+    #[test]
+    fn the_published_index_still_carries_the_provider_key() {
+        let m = IndexModel {
+            name: "m1".into(),
+            provider: String::new(),
+            supported_devices: vec!["cpu".into()],
+        };
+        let v = serde_json::to_value(&m).expect("serializes");
+        assert!(
+            v.get("provider").is_some(),
+            "index.json dropped `provider`; daemons <= v0.2.0 cannot parse this: {v}"
+        );
+    }
+
+    /// The shim is write-only: an index carrying `provider` parses (it is
+    /// ignored), and so does one without it, so this crate can keep reading
+    /// indexes published either side of the change.
+    #[test]
+    fn an_index_model_parses_with_or_without_the_provider_key() {
+        let with: IndexModel = serde_json::from_str(
+            r#"{"name":"m1","provider":"local_whisper","supported_devices":["cpu"]}"#,
+        )
+        .expect("an index carrying `provider` must parse");
+        assert_eq!(with.name, "m1");
+
+        let without: IndexModel =
+            serde_json::from_str(r#"{"name":"m1","supported_devices":["cpu"]}"#)
+                .expect("an index without `provider` must parse");
+        assert_eq!(without.name, "m1");
+    }
+
+    /// Build a `ModelEntry` with the given devices; the other
     /// fields are irrelevant to `model_support` (which reads only devices).
-    fn model(provider: &str, devices: &[Device]) -> ModelEntry {
+    fn model(devices: &[Device]) -> ModelEntry {
         ModelEntry {
             name: "m".into(),
-            provider: Provider::from(provider),
             multilingual: true,
             primary_language: "en".into(),
             supported_languages: vec!["en".into()],
@@ -284,26 +330,26 @@ mod tests {
     fn classify_marks_online_from_none_device_not_provider() {
         // Online-ness is derived from the `none` device sentinel, not the
         // (free-form) provider string.
-        assert!(model_support(&[model("openai", &[Device::None])]).online);
-        assert!(model_support(&[model("mistral", &[Device::None])]).online);
-        assert!(model_support(&[model("totally_bogus", &[Device::None])]).online);
-        assert!(!model_support(&[model("openai", &[Device::Cpu])]).online);
-        assert!(!model_support(&[model("local_whisper", &[Device::Cpu])]).online);
-        assert!(!model_support(&[model("openai", &[])]).online);
+        assert!(model_support(&[model(&[Device::None])]).online);
+        assert!(model_support(&[model(&[Device::None])]).online);
+        assert!(model_support(&[model(&[Device::None])]).online);
+        assert!(!model_support(&[model(&[Device::Cpu])]).online);
+        assert!(!model_support(&[model(&[Device::Cpu])]).online);
+        assert!(!model_support(&[model(&[])]).online);
     }
 
     #[test]
     fn classify_marks_gpu_for_cuda_or_metal() {
-        assert!(model_support(&[model("local_whisper", &[Device::Cuda])]).supports_gpu);
-        assert!(model_support(&[model("local_whisper", &[Device::Metal])]).supports_gpu);
-        assert!(!model_support(&[model("local_whisper", &[Device::Cpu])]).supports_gpu);
+        assert!(model_support(&[model(&[Device::Cuda])]).supports_gpu);
+        assert!(model_support(&[model(&[Device::Metal])]).supports_gpu);
+        assert!(!model_support(&[model(&[Device::Cpu])]).supports_gpu);
     }
 
     #[test]
     fn classify_marks_cpu_only_for_cpu_device() {
-        assert!(model_support(&[model("local_whisper", &[Device::Cpu])]).supports_cpu);
-        assert!(!model_support(&[model("openai", &[Device::None])]).supports_cpu);
-        assert!(!model_support(&[model("local_whisper", &[Device::Cuda])]).supports_cpu);
+        assert!(model_support(&[model(&[Device::Cpu])]).supports_cpu);
+        assert!(!model_support(&[model(&[Device::None])]).supports_cpu);
+        assert!(!model_support(&[model(&[Device::Cuda])]).supports_cpu);
     }
 
     #[test]

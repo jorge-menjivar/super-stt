@@ -7,7 +7,6 @@ use crate::ui::messages::{Message, ModelMessage, RecordingMessage};
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
 use std::collections::HashMap;
-use super_stt_shared::models::provider::Provider;
 
 use super::{AppModel, DeviceState, ModelOperationState};
 
@@ -108,7 +107,6 @@ impl AppModel {
             // Initialize model state
             available_models: Vec::new(),
             current_model: String::new(),
-            current_provider: Provider::default(),
             current_source: String::new(),
             current_model_epoch: 0,
             model_operation_state: ModelOperationState::Loading {

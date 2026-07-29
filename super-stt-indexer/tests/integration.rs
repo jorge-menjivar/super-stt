@@ -33,7 +33,6 @@ default = "https://api.y.example"
 
 [[models]]
 name = "y-1"
-provider = "openai"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]

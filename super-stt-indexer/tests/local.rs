@@ -40,7 +40,6 @@ wasm = "{wasm_file}"
 
 [[models]]
 name = "m-1"
-provider = "openai"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]

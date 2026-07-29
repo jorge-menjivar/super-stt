@@ -9,7 +9,6 @@ use crate::state::ErrorScope;
 use crate::ui::messages::{BackendMessage, Message};
 use cosmic::prelude::*;
 use super_stt_shared::daemon::http_client::HttpError;
-use super_stt_shared::models::provider::Provider;
 
 /// Build a Configure-sheet-scoped banner message for a failed secret/option save.
 fn configure_backend_error(e: &HttpError) -> Message {
@@ -223,26 +222,5 @@ impl AppModel {
 
             _ => Task::none(),
         }
-    }
-
-    /// Look up the [`Provider`] for a `(source, model)` pair against the
-    /// installed-backend catalog. Returns `None` if the source isn't
-    /// installed, doesn't serve that model, or its `provider` string fails to
-    /// parse — the daemon will reject any of these cases anyway, so silently
-    /// dropping the request is correct.
-    pub(in crate::core::app) fn backend_model_provider(
-        &self,
-        source: &str,
-        model: &str,
-    ) -> Option<Provider> {
-        self.backends
-            .iter()
-            .find(|b| b.source == source)?
-            .models
-            .iter()
-            .find(|m| m.name == model)?
-            .provider
-            .parse::<Provider>()
-            .ok()
     }
 }

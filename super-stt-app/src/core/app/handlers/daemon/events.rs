@@ -5,7 +5,6 @@ use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message
 use cosmic::prelude::*;
 use log::{debug, info, warn};
 use super_stt_shared::models::protocol::{DaemonStatusEvent, NotificationEvent};
-use super_stt_shared::models::provider::Provider;
 
 impl AppModel {
     pub(in crate::core::app) fn handle_daemon_events(
@@ -75,11 +74,8 @@ impl AppModel {
                 Some(self.handle_daemon_device_error(&error))
             }
             DaemonStatusEvent::ModelSwitched {
-                model_name,
-                provider,
-                source,
-                ..
-            } => Some(self.handle_daemon_model_switched(&model_name, &provider, &source)),
+                model_name, source, ..
+            } => Some(self.handle_daemon_model_switched(&model_name, &source)),
             DaemonStatusEvent::SwitchingDevice { target_device, .. } => {
                 info!("Received switching_device event -> {target_device}");
                 // Keep device_state as Switching and wait for the `ready` event;
@@ -180,25 +176,18 @@ impl AppModel {
     pub(in crate::core::app) fn handle_daemon_model_switched(
         &mut self,
         model_name: &str,
-        provider: &str,
         source: &str,
     ) -> Task<cosmic::Action<Message>> {
         let model = model_name.to_string();
-        // The wire carries the provider's `Display` form; fall back to the current
-        // provider if it doesn't parse (forward-compat with an unknown provider).
-        let provider = provider
-            .parse::<Provider>()
-            .unwrap_or_else(|_| self.current_provider.clone());
         let source = source.to_string();
         info!(
-            "Received model_switched event: current_model={:?} -> {:?} via {provider} ({source})",
+            "Received model_switched event: current_model={:?} -> {:?} via ({source})",
             self.current_model, model
         );
         // A live identity change supersedes any in-flight reconnect snapshot: bump
         // the epoch so a stale get_current_model response can't revert this.
         self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
         self.current_model.clone_from(&model);
-        self.current_provider = provider;
         self.current_source.clone_from(&source);
         self.model_operation_state = ModelOperationState::Ready;
         info!("Model state updated to Ready after model_switched event");

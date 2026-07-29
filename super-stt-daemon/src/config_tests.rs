@@ -211,7 +211,6 @@ allow_online_models = true
 "#;
     let config: DaemonConfig =
         toml::from_str(toml_str).expect("legacy provider string should not fail the whole config");
-    assert_eq!(config.transcription.preferred_provider, Provider::default());
     // `preferred_source` is a free-form string now — any value is accepted.
     assert_eq!(config.transcription.preferred_source, "BadValue");
     // Other fields must survive the field-level fallback.
@@ -243,18 +242,8 @@ write_method = "auto"
 "#;
     let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
     assert_eq!(
-        config.transcription.preferred_provider,
-        Provider::from("local_voxtral")
-    );
-    assert_eq!(
         config.transcription.preferred_source,
         "github.com/super-stt/voxtral"
-    );
-
-    let serialized = toml::to_string_pretty(&config).expect("should serialize");
-    assert!(
-        serialized.contains("preferred_provider = \"local_voxtral\""),
-        "serialized form: {serialized}"
     );
 }
 
@@ -410,7 +399,6 @@ fn v0_1_3_full_daemon_config_loads_and_migrates() {
     assert_eq!(cfg.transcription.custom_models_dir, None);
 
     // New fields materialize at their defaults.
-    assert_eq!(cfg.transcription.preferred_provider, Provider::default());
     assert_eq!(cfg.transcription.preferred_source, "");
     assert_eq!(cfg.transcription.backends_dir, None);
     assert_eq!(cfg.transcription.active_backend, None);

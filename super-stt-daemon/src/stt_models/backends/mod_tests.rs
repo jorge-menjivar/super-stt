@@ -47,7 +47,6 @@ default = "https://api.openai.com"
 
 [[models]]
 name = "whisper-1"
-provider = "openai"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -72,7 +71,6 @@ description = "Test backend."
 
 [[models]]
 name = "voxtral-mini"
-provider = "local_voxtral"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -99,13 +97,8 @@ processing_interval_ms = 2000
     assert_eq!(oai.options.len(), 1);
 
     // find_model resolves the triple; provider parses to the newtype.
-    let (b, def) = find_model(
-        &backends,
-        "whisper-1",
-        &Provider::from("openai"),
-        "github.com/super-stt/openai",
-    )
-    .expect("resolve whisper-1");
+    let (b, def) = find_model(&backends, "whisper-1", "github.com/super-stt/openai")
+        .expect("resolve whisper-1");
     assert_eq!(b.kind, "wasm");
     assert_eq!(def.source, "github.com/super-stt/openai");
     assert_eq!(
@@ -115,13 +108,8 @@ processing_interval_ms = 2000
     );
 
     // Empty source matches the first backend serving (name, provider).
-    let (_, vox) = find_model(
-        &backends,
-        "voxtral-mini",
-        &Provider::from("local_voxtral"),
-        "",
-    )
-    .expect("resolve voxtral-mini with empty source");
+    let (_, vox) =
+        find_model(&backends, "voxtral-mini", "").expect("resolve voxtral-mini with empty source");
     assert_eq!(vox.source, "github.com/super-stt/voxtral");
     assert_eq!(vox.estimated_vram_bytes, 8_589_934_592);
     assert_eq!(vox.processing_interval, Duration::from_millis(2000));
@@ -140,7 +128,7 @@ processing_interval_ms = 2000
     assert!(
         listed
             .iter()
-            .any(|(n, _, s)| n == "whisper-1" && s == "github.com/super-stt/openai")
+            .any(|(n, s)| n == "whisper-1" && s == "github.com/super-stt/openai")
     );
 }
 
@@ -185,7 +173,6 @@ description = "Test backend."
 
 [[models]]
 name = "whisper-1"
-provider = "openai"
 multilingual = true
 # supported_devices intentionally absent
 "#,
@@ -220,7 +207,6 @@ description = "Test backend."
 
 [[models]]
 name = "whisper-1"
-provider = "openai"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -255,7 +241,6 @@ description = "Test backend."
 
 [[models]]
 name = "whisper-1"
-provider = "openai"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -288,7 +273,6 @@ description = "Test backend."
 
 [[models]]
 name = "whisper-1"
-provider = "openai"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -358,7 +342,6 @@ description = "Test backend."
 
 [[models]]
 name = "{dir}-base"
-provider = "openai"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -441,8 +424,7 @@ fn duplicate_sources_are_deduplicated() {
     assert_eq!(matches.len(), 1);
 }
 
-/// The qwen3-asr subprocess backend is discovered and both of its models
-/// resolve with the new `local_qwen3_asr` provider.
+/// The qwen3-asr subprocess backend is discovered.
 #[test]
 fn discovers_qwen3_asr_backend() {
     let root = scratch("qwen3");
@@ -462,7 +444,6 @@ description = "Test backend."
 
 [[models]]
 name = "qwen3-asr-0.6b"
-provider = "local_qwen3_asr"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -472,7 +453,6 @@ processing_interval_ms = 1000
 
 [[models]]
 name = "qwen3-asr-1.7b"
-provider = "local_qwen3_asr"
 multilingual = true
 primary_language = "en"
 supported_languages = ["en"]
@@ -489,7 +469,6 @@ processing_interval_ms = 1500
     let (b, def) = find_model(
         &backends,
         "qwen3-asr-0.6b",
-        &Provider::from("local_qwen3_asr"),
         "github.com/jorge-menjivar/super-stt/qwen3-asr",
     )
     .expect("resolve qwen3-asr-0.6b");
@@ -503,13 +482,8 @@ processing_interval_ms = 1500
         ]
     );
 
-    let (_, big) = find_model(
-        &backends,
-        "qwen3-asr-1.7b",
-        &Provider::from("local_qwen3_asr"),
-        "",
-    )
-    .expect("resolve qwen3-asr-1.7b with empty source");
+    let (_, big) = find_model(&backends, "qwen3-asr-1.7b", "")
+        .expect("resolve qwen3-asr-1.7b with empty source");
     assert_eq!(big.estimated_vram_bytes, 6_000_000_000);
     assert_eq!(big.processing_interval, Duration::from_millis(1500));
 }

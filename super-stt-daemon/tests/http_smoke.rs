@@ -77,10 +77,6 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
         .env("SUPER_STT_AUTO_APPROVE", "1") // bypass consent popup
-        .arg("--device")
-        .arg("cpu")
-        .arg("--audio-theme")
-        .arg("silent")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

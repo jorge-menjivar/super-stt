@@ -59,7 +59,7 @@ impl SuperSTTDaemon {
     }
 
     /// Handle list all available models command — every model served by an
-    /// installed backend, as `(name, provider, source)` triples.
+    /// installed backend, as `(name, source)` triples.
     pub async fn handle_list_models(&self) -> DaemonResponse {
         // Scoped to the active backend: only its models are switchable. The
         // full catalog of installed backends lives at `GET /backends`.
@@ -74,7 +74,7 @@ impl SuperSTTDaemon {
             .map(|b| {
                 b.models
                     .iter()
-                    .map(|d| (d.name.clone(), d.provider.clone(), d.source.clone()))
+                    .map(|d| (d.name.clone(), d.source.clone()))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();

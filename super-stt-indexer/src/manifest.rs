@@ -123,6 +123,31 @@ mod tests {
         validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap();
     }
 
+    /// The indexer fetches `backend.toml` from a backend's release, so it sees
+    /// whatever released backends declare — including `provider`, which this
+    /// workspace no longer reads. Accepting it is what keeps already-published
+    /// backends in the index; rejecting it would silently drop them.
+    ///
+    /// The parse-level guarantee is pinned in `super-stt-registry-types`; this
+    /// pins that the indexer's own `validate` gate passes it too.
+    #[test]
+    fn accepts_a_manifest_whose_model_declares_an_unread_provider() {
+        let t = format!(
+            "{VALID}
+            [[models]]
+            name = \"m1\"
+            provider = \"local_whisper\"
+            primary_language = \"en\"
+            supported_languages = [\"en\"]
+            supported_devices = [\"cpu\"]
+            "
+        );
+        let m = Manifest::parse(&t).expect("a manifest declaring `provider` must still parse");
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y")
+            .expect("`provider` must not fail indexer validation");
+        assert_eq!(m.models.len(), 1);
+    }
+
     #[test]
     fn rejects_version_mismatch() {
         let m = Manifest::parse(VALID).unwrap();

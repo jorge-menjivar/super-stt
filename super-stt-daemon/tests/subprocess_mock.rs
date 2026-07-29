@@ -33,7 +33,6 @@ description = "Test backend."
 
 [[models]]
 name = "mock"
-provider = "local_voxtral"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]

@@ -11,18 +11,15 @@
 //!
 //! ## Identity
 //!
-//! `(name, provider, source)` is the canonical wire-level identity:
+//! `(name, source)` is the canonical wire-level identity:
 //!
 //! - `name` — the model's wire name (e.g. `whisper-1`, `voxtral-mini`).
-//! - `provider` — the engine family / routing class ([`Provider`]).
 //! - `source` — the repo id of the backend that serves the model, e.g.
-//!   `github.com/super-stt/openai`. Two backends can serve a model with the same
-//!   `(name, provider)` and the `source` keeps them distinct.
+//!   `github.com/super-stt/openai`.
 
 use std::time::Duration;
 
 use super_stt_registry_types::manifest::Device;
-use super_stt_shared::models::provider::Provider;
 
 /// Fully resolved description of a single model served by a backend.
 ///
@@ -32,8 +29,6 @@ use super_stt_shared::models::provider::Provider;
 pub struct ModelDefinition {
     /// Wire-level model name.
     pub name: String,
-    /// Engine family + routing class.
-    pub provider: Provider,
     /// Repo id of the backend that serves this model (e.g.
     /// `github.com/super-stt/openai`).
     pub source: String,
@@ -61,7 +56,7 @@ impl ModelDefinition {
     /// Whether the model is served by a remote API with no local compute —
     /// encoded by the [`Device::None`] sentinel in `supported_devices` (the only
     /// entry when present). This is the single source of the online/local
-    /// distinction; `provider` is a free-form label and carries no such meaning.
+    /// distinction.
     #[must_use]
     pub fn is_online(&self) -> bool {
         self.supported_devices.contains(&Device::None)

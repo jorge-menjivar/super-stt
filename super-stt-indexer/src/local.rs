@@ -258,7 +258,6 @@ mod tests {
 
             [[models]]
             name = "m"
-            provider = "openai"
             primary_language = "en"
             supported_languages = ["en"]
             supported_devices = ["none"]

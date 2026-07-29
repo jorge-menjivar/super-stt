@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::command::Command;
 use super::request::DaemonRequest;
-use crate::models::provider::Provider;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::write_method::WriteMethod;
 use crate::validation::{self, Validate};
@@ -151,17 +150,8 @@ fn cmd_set_model(request: &DaemonRequest) -> Result<Command, String> {
         .and_then(|v| v.as_str())
         .ok_or("Model string is empty")?;
 
-    let provider_str = data
-        .and_then(|d| d.get("provider"))
-        .and_then(|v| v.as_str())
-        .ok_or("Provider string is required for set_model")?;
-    let provider: Provider = provider_str
-        .parse()
-        .map_err(|e| format!("Invalid provider {provider_str:?}: {e}"))?;
-
     // `source` is the serving backend's repo id. It is optional: when absent
-    // the daemon selects the first installed backend serving `(model,
-    // provider)`.
+    // the daemon selects the first installed backend serving `model`.
     let source = data
         .and_then(|d| d.get("source"))
         .and_then(|v| v.as_str())
@@ -170,7 +160,6 @@ fn cmd_set_model(request: &DaemonRequest) -> Result<Command, String> {
 
     Ok(Command::SetModel {
         model: model_str.to_string(),
-        provider,
         source,
     })
 }

@@ -2,7 +2,7 @@
 //! Unified traits for STT backends presented to the daemon.
 //!
 //! Three layered surfaces:
-//! - [`ModelInfo`] — static metadata (name, provider, source, capabilities).
+//! - [`ModelInfo`] — static metadata (name, source, capabilities).
 //! - [`ModelState`] — runtime state that can change after load (device).
 //! - [`Transcribe`] — actual inference.
 //!
@@ -16,24 +16,19 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::time::Duration;
 
-use super_stt_shared::models::provider::Provider;
-
 /// Static metadata about a loaded model, built from the discovered backend
 /// entry that serves it. Self-contained — there is no static registry.
 #[derive(Debug, Clone)]
 pub struct ModelInfoData {
     /// Wire-level model name.
     pub name: String,
-    /// Engine family + routing class.
-    pub provider: Provider,
     /// Repo id of the backend serving this model.
     pub source: String,
     /// Whether the model supports multiple languages.
     pub is_multilingual: bool,
     /// Whether the model is served by a remote API with no local compute.
     /// Derived from the model's `supported_devices` (`none` sentinel) at
-    /// construction — the `provider` string is free-form and carries no such
-    /// meaning.
+    /// construction.
     pub online: bool,
     /// Suggested minimum interval between real-time processing chunks.
     pub processing_interval: Duration,
@@ -44,7 +39,6 @@ impl ModelInfoData {
     #[must_use]
     pub fn new(
         name: impl Into<String>,
-        provider: Provider,
         source: impl Into<String>,
         is_multilingual: bool,
         online: bool,
@@ -52,7 +46,6 @@ impl ModelInfoData {
     ) -> Self {
         Self {
             name: name.into(),
-            provider,
             source: source.into(),
             is_multilingual,
             online,
@@ -65,12 +58,6 @@ impl ModelInfoData {
 pub trait ModelInfo: Send + Sync {
     /// The underlying metadata payload.
     fn info(&self) -> &ModelInfoData;
-
-    /// Engine family + routing class.
-    fn provider(&self) -> Provider {
-        self.info().provider.clone()
-    }
-
     /// Wire-level name.
     fn display_name(&self) -> &str {
         &self.info().name

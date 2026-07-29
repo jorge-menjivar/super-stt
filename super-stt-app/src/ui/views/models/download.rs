@@ -93,15 +93,12 @@ pub(super) fn download_toolbar<'a>(
     let spacing = cosmic::theme::spacing();
     let filters = &app.registry.filters;
 
-    let search = widget::search_input(
-        "Search backends, models, or providers\u{2026}",
-        &filters.search,
-    )
-    .on_input(|x| Message::ModelsPage(ModelsPageMessage::RegistrySearchChanged(x)))
-    .on_clear(Message::ModelsPage(
-        ModelsPageMessage::RegistrySearchChanged(String::new()),
-    ))
-    .width(Length::Fill);
+    let search = widget::search_input("Search backends or models\u{2026}", &filters.search)
+        .on_input(|x| Message::ModelsPage(ModelsPageMessage::RegistrySearchChanged(x)))
+        .on_clear(Message::ModelsPage(
+            ModelsPageMessage::RegistrySearchChanged(String::new()),
+        ))
+        .width(Length::Fill);
 
     let add_btn = button::suggested("+ Add backend").on_press(Message::Shell(
         ShellMessage::ToggleContextPage(ContextPage::AddBackend),
@@ -179,7 +176,7 @@ pub(super) fn download_toolbar<'a>(
 }
 
 /// Whether a registry entry matches the search needle. Searches the backend
-/// name, description, and repo id, plus the name + provider of every model it
+/// name, description, and repo id, plus the name of every model it
 /// serves — so "whisper", "voxtral", or "openai" find their backend even when
 /// the term isn't in the display name.
 pub(super) fn registry_entry_matches(
@@ -200,8 +197,6 @@ pub(super) fn registry_entry_matches(
     for m in &entry.models {
         hay.push(' ');
         hay.push_str(&m.name.to_lowercase());
-        hay.push(' ');
-        hay.push_str(&m.provider.to_lowercase());
     }
     hay.contains(&needle)
 }

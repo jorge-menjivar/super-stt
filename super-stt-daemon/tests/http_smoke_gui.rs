@@ -111,10 +111,6 @@ async fn start_daemon_no_auto_approve() -> (DaemonGuard, PathBuf) {
         .env("XDG_RUNTIME_DIR", &xdg)
         .env("XDG_CONFIG_HOME", &config_home)
         .env_remove("SUPER_STT_AUTO_APPROVE") // ensure the popup path runs
-        .arg("--device")
-        .arg("cpu")
-        .arg("--audio-theme")
-        .arg("silent")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

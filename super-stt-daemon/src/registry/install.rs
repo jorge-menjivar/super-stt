@@ -636,7 +636,6 @@ description = "Test backend."
 
 [[models]]
 name = "m"
-provider = "local_x"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["cpu"]

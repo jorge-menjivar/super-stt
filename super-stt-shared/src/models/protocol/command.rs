@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::models::provider::Provider;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::write_method::WriteMethod;
 
@@ -33,10 +32,9 @@ pub enum Command {
     TestAudioTheme,
     SetModel {
         model: String,
-        provider: Provider,
         /// Backend repo id that serves the model (e.g.
         /// `github.com/super-stt/openai`). Empty selects the first backend
-        /// serving `(model, provider)`.
+        /// serving `model`.
         source: String,
     },
     GetModel,
@@ -108,7 +106,7 @@ pub enum Command {
         name: String,
         value: String,
     },
-    /// Select the active backend (the provider in use). Does not load a model.
+    /// Select the active backend. Does not load a model.
     SetActiveBackend {
         source: String,
     },

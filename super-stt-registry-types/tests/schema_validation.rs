@@ -117,18 +117,9 @@ fn rejects_contract_violations() {
             ]);
             d
         }),
-        ("malformed provider (not snake_case)", {
-            // The provider is free-form, but must be snake_case — uppercase is
-            // rejected by the pattern.
-            let mut d = wasm_base();
-            d["models"] = json!([{ "name": "m", "provider": "Anthropic",
-                "primary_language": "en", "supported_languages": ["en"],
-                "supported_devices": ["none"] }]);
-            d
-        }),
         ("file missing url", {
             let mut d = wasm_base();
-            d["models"] = json!([{ "name": "m", "provider": "openai",
+            d["models"] = json!([{ "name": "m",
                 "primary_language": "en", "supported_languages": ["en"],
                 "supported_devices": ["none"],
                 "files": [{ "destination": "models/m/config.json" }] }]);
@@ -136,7 +127,7 @@ fn rejects_contract_violations() {
         }),
         ("file missing destination", {
             let mut d = wasm_base();
-            d["models"] = json!([{ "name": "m", "provider": "openai",
+            d["models"] = json!([{ "name": "m",
                 "primary_language": "en", "supported_languages": ["en"],
                 "supported_devices": ["none"],
                 "files": [{ "url": "https://example.com/config.json" }] }]);
@@ -149,7 +140,7 @@ fn rejects_contract_violations() {
         }),
         ("model with empty supported_devices", {
             let mut d = wasm_base();
-            d["models"] = json!([{ "name": "m", "provider": "openai",
+            d["models"] = json!([{ "name": "m",
                 "primary_language": "en", "supported_languages": ["en"],
                 "supported_devices": [] }]);
             d
@@ -301,7 +292,7 @@ fn allows_documented_optionals() {
     assert!(v.is_valid(&wildcard), "wildcard cuda_sm must validate");
     // Model files: each entry is url + destination, with an optional sha256.
     let mut with_files = sub_base();
-    with_files["models"] = json!([{ "name": "m", "provider": "local_whisper",
+    with_files["models"] = json!([{ "name": "m",
         "primary_language": "en", "supported_languages": ["en"],
         "supported_devices": ["cpu"],
         "files": [

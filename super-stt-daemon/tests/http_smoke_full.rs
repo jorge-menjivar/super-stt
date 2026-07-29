@@ -136,10 +136,6 @@ async fn start_daemon_with_auto_approve_timer() -> (DaemonGuard, PathBuf) {
             "RUST_LOG",
             "info,super_stt_daemon::daemon::http_server=debug",
         )
-        .arg("--device")
-        .arg("cpu")
-        .arg("--audio-theme")
-        .arg("silent")
         .stdout(Stdio::null())
         .stderr(stderr_target)
         .spawn()

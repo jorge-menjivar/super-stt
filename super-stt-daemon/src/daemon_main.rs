@@ -9,31 +9,9 @@
 
 use crate::cli;
 use crate::config::DaemonConfig;
-use crate::daemon::types::{DeviceOverride, SuperSTTDaemon};
+use crate::daemon::types::SuperSTTDaemon;
 use anyhow::Result;
 use log::{error, info, warn};
-use super_stt_shared::theme::AudioTheme;
-
-/// Resolve the per-session overrides set on the command line. An override
-/// is `Some` only when the user passed the flag explicitly — when not
-/// set, the daemon falls back to whatever is in the config file.
-fn resolve_cli_overrides(
-    matches: &clap::ArgMatches,
-    model: String,
-    audio_theme: AudioTheme,
-    force_cpu: bool,
-) -> (Option<String>, Option<DeviceOverride>, Option<AudioTheme>) {
-    let was_explicit =
-        |name: &str| matches.value_source(name) == Some(clap::parser::ValueSource::CommandLine);
-    let model_override = was_explicit("model").then_some(model);
-    let device_override = was_explicit("device").then_some(if force_cpu {
-        DeviceOverride::Cpu
-    } else {
-        DeviceOverride::Cuda
-    });
-    let audio_theme_override = was_explicit("audio-theme").then_some(audio_theme);
-    (model_override, device_override, audio_theme_override)
-}
 
 /// Spawn the HTTP listener that serves every external request the daemon
 /// answers. Failure to bind is fatal — there's no other transport.
@@ -83,33 +61,12 @@ pub async fn run() -> Result<()> {
     // Load saved configuration
     let config = DaemonConfig::load();
 
-    // CLI flag overrides the saved preferred model for this session;
-    // when it's not passed, fall back to whatever the config has.
-    let model: String = matches.get_one::<String>("model").map_or_else(
-        || config.transcription.preferred_model.clone(),
-        Clone::clone,
-    );
-
-    let device = matches.get_one::<String>("device").unwrap();
-    let force_cpu = device == "cpu";
-
-    let audio_theme =
-        if matches.value_source("audio-theme") == Some(clap::parser::ValueSource::CommandLine) {
-            let audio_theme_str = matches.get_one::<String>("audio-theme").unwrap();
-            audio_theme_str.parse::<AudioTheme>().unwrap_or_default()
-        } else {
-            config.audio.theme
-        };
-
     info!("Starting Super STT Daemon");
-    info!("Model: {model}");
-    info!("Device: {device}");
-    info!("Audio theme: {audio_theme}");
+    info!("Model: {}", config.transcription.preferred_model);
+    info!("Device: {}", config.device.preferred_device);
+    info!("Audio theme: {}", config.audio.theme);
 
-    let (model_override, device_override, audio_theme_override) =
-        resolve_cli_overrides(&matches, model, audio_theme, force_cpu);
-
-    let daemon = SuperSTTDaemon::new(model_override, device_override, audio_theme_override).await?;
+    let daemon = SuperSTTDaemon::new().await?;
 
     info!("Daemon initialized successfully");
 
