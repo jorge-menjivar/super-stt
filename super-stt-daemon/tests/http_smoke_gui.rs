@@ -119,17 +119,18 @@ async fn start_daemon_no_auto_approve() -> (DaemonGuard, PathBuf) {
     // Wait for the HTTP listener to come up. Without auto-approve we
     // can't issue a real auth_request to confirm readiness, so we just
     // poll for the socket file's existence + a brief settle.
+    // Hand the child to the guard before the readiness loop: the timeout
+    // panic below must still kill and reap the daemon, not leak it.
+    let guard = DaemonGuard {
+        child,
+        xdg_runtime_dir: xdg,
+    };
+
     let deadline = Instant::now() + Duration::from_secs(120);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists() {
             sleep(Duration::from_millis(200)).await;
-            return (
-                DaemonGuard {
-                    child,
-                    xdg_runtime_dir: xdg,
-                },
-                http_socket,
-            );
+            return (guard, http_socket);
         }
         sleep(Duration::from_millis(200)).await;
     }

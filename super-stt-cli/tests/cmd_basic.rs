@@ -93,18 +93,19 @@ fn spawn_daemon() -> (DaemonGuard, PathBuf) {
         .spawn()
         .expect("spawn daemon");
 
+    // Hand the child to the guard before the readiness loop: the timeout
+    // panic below must still kill and reap the daemon, not leak it.
+    let guard = DaemonGuard {
+        child,
+        cleanup: vec![http_socket.clone(), config_home, data_home],
+    };
+
     let deadline = Instant::now() + Duration::from_secs(120);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists() {
             // Give the listener a beat to finish binding before the CLI connects.
             std::thread::sleep(Duration::from_millis(500));
-            return (
-                DaemonGuard {
-                    child,
-                    cleanup: vec![http_socket.clone(), config_home, data_home],
-                },
-                http_socket,
-            );
+            return (guard, http_socket);
         }
         std::thread::sleep(Duration::from_millis(200));
     }

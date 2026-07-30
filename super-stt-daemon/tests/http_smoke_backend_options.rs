@@ -123,6 +123,13 @@ async fn start_daemon(scopes: &[&str]) -> (DaemonGuard, PathBuf, String) {
         .spawn()
         .expect("spawn super-stt-daemon");
 
+    // Hand the child to the guard before the readiness loop: the timeout
+    // panic below must still kill and reap the daemon, not leak it.
+    let guard = DaemonGuard {
+        child,
+        cleanup_paths: vec![http_socket.clone(), config_home, data_home],
+    };
+
     let deadline = Instant::now() + Duration::from_secs(120);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists()
@@ -135,14 +142,7 @@ async fn start_daemon(scopes: &[&str]) -> (DaemonGuard, PathBuf, String) {
                 .await
                 .expect("auth_request for test scopes");
             let token = auth.session_token;
-            return (
-                DaemonGuard {
-                    child,
-                    cleanup_paths: vec![http_socket.clone(), config_home, data_home],
-                },
-                http_socket,
-                token,
-            );
+            return (guard, http_socket, token);
         }
         sleep(Duration::from_millis(200)).await;
     }
