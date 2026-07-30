@@ -295,7 +295,7 @@ mod tests {
         // with a deliberately tiny `total_cap` so the check trips on a small
         // archive — no need to materialize gigabytes.
         let bytes = make_tarball(|tb| {
-            let body = vec![0u8; 200];
+            let body = [0u8; 200];
             let mut h = tar::Header::new_gnu();
             h.set_size(body.len() as u64);
             h.set_mode(0o755);
