@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-30T06:54:24Z",
+  "generated_at": "2026-07-30T09:28:32Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -23,7 +23,7 @@
       "models": [
         {
           "name": "nova-3",
-          "provider": "deepgram",
+          "provider": "",
           "supported_devices": [
             "none"
           ]
@@ -70,14 +70,14 @@
       "models": [
         {
           "name": "voxtral-mini-latest",
-          "provider": "mistral",
+          "provider": "",
           "supported_devices": [
             "none"
           ]
         },
         {
           "name": "voxtral-mini-transcribe-realtime-2602",
-          "provider": "mistral",
+          "provider": "",
           "supported_devices": [
             "none"
           ]
@@ -124,21 +124,21 @@
       "models": [
         {
           "name": "whisper-1",
-          "provider": "openai",
+          "provider": "",
           "supported_devices": [
             "none"
           ]
         },
         {
           "name": "gpt-4o-transcribe",
-          "provider": "openai",
+          "provider": "",
           "supported_devices": [
             "none"
           ]
         },
         {
           "name": "gpt-4o-mini-transcribe",
-          "provider": "openai",
+          "provider": "",
           "supported_devices": [
             "none"
           ]
@@ -183,7 +183,7 @@
       "models": [
         {
           "name": "qwen3-asr-0.6b",
-          "provider": "local_qwen3_asr",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -191,7 +191,7 @@
         },
         {
           "name": "qwen3-asr-1.7b",
-          "provider": "local_qwen3_asr",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -252,14 +252,14 @@
       "models": [
         {
           "name": "voxtral-mini",
-          "provider": "local_voxtral",
+          "provider": "",
           "supported_devices": [
             "cuda"
           ]
         },
         {
           "name": "voxtral-small",
-          "provider": "local_voxtral",
+          "provider": "",
           "supported_devices": [
             "cuda"
           ]
@@ -417,7 +417,7 @@
       "models": [
         {
           "name": "whisper-tiny",
-          "provider": "local_whisper",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -425,7 +425,7 @@
         },
         {
           "name": "whisper-tiny.en",
-          "provider": "local_whisper",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -433,7 +433,7 @@
         },
         {
           "name": "whisper-base",
-          "provider": "local_whisper",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -441,7 +441,7 @@
         },
         {
           "name": "whisper-base.en",
-          "provider": "local_whisper",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -449,7 +449,7 @@
         },
         {
           "name": "whisper-small",
-          "provider": "local_whisper",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -457,7 +457,7 @@
         },
         {
           "name": "whisper-small.en",
-          "provider": "local_whisper",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -465,7 +465,7 @@
         },
         {
           "name": "whisper-medium",
-          "provider": "local_whisper",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -473,7 +473,7 @@
         },
         {
           "name": "whisper-medium.en",
-          "provider": "local_whisper",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"
@@ -481,7 +481,7 @@
         },
         {
           "name": "whisper-large",
-          "provider": "local_whisper",
+          "provider": "",
           "supported_devices": [
             "cpu",
             "cuda"

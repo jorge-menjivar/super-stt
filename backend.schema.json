@@ -447,7 +447,7 @@
     },
     "ModelEntry": {
       "additionalProperties": false,
-      "description": "One `[[models]]` entry. Each model is identified on the wire by\n`(name, provider, source)`, where `source` is `[backend].source`.",
+      "description": "One `[[models]]` entry. Each model is identified on the wire by\n`(name, source)`, where `source` is `[backend].source`.",
       "properties": {
         "estimated_vram_bytes": {
           "default": 0,
@@ -487,12 +487,12 @@
           ]
         },
         "provider": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Provider"
-            }
-          ],
-          "description": "Engine that serves the model — a free-form `snake_case` identity label\n(any backend may define its own). Online vs local is determined by\n[`ModelEntry::is_online`] (the `none` device sentinel), not by this."
+          "default": null,
+          "description": "Compatibility shim; not part of model identity, which is\n`(name, source)`.\n\n`provider` used to be the third component of that key, and backends\nreleased against the earlier contract compare it against their own\nfixed value on `POST /v1/load` — answering `400 invalid_model` when it\ndoes not match. Dropping the field from the parser would make every\nsuch backend unloadable, so the value is kept solely to be echoed back\non load; the daemon reads no meaning from it (`is_online` comes from\n`supported_devices`).\n\nIt also has to stay in the generated schema: every published manifest\ndeclares the key, and a closed `ModelEntry` without it flags all of\nthem as invalid in an editor bound to the schema.\n\nDelete the field once no supported backend validates the key.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "realtime": {
           "default": false,
@@ -517,7 +517,6 @@
       },
       "required": [
         "name",
-        "provider",
         "primary_language",
         "supported_languages",
         "supported_devices"
@@ -617,11 +616,6 @@
         "integer",
         "bool"
       ],
-      "type": "string"
-    },
-    "Provider": {
-      "description": "Engine that serves the model — a free-form snake_case identifier (e.g. `local_whisper`, `openai`, `groq`). Any backend may define its own; online vs local is determined by the model's `supported_devices`, not by this value.",
-      "pattern": "^[a-z][a-z0-9_]*$",
       "type": "string"
     },
     "Secret": {
