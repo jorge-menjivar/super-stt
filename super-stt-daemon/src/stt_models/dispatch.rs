@@ -106,6 +106,9 @@ mod tests {
     struct FakeModel {
         info: ModelInfoData,
         outcome: Outcome,
+        // Outer `Option` records whether dispatch ran at all; inner is the
+        // `language` argument it forwarded, which is itself optional.
+        #[allow(clippy::option_option, reason = "outer = called, inner = the argument")]
         seen_language: Arc<Mutex<Option<Option<String>>>>,
         seen_audio_len: Arc<Mutex<Option<usize>>>,
     }

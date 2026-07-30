@@ -167,7 +167,7 @@ fn config_defaults_are_sane() {
         &["recording_state"],
     );
     // Idle timeout must be ≥ 2× the daemon's keepalive interval (30 s).
-    assert!(cfg.idle_timeout >= Duration::from_secs(60));
+    assert!(cfg.idle_timeout >= Duration::from_mins(1));
     // Backoff must grow.
     assert!(cfg.initial_backoff < cfg.max_backoff);
 }

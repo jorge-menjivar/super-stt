@@ -111,6 +111,9 @@ impl Simulator {
     ///
     /// # Errors
     /// Returns an error if the backend fails to simulate key input.
+    ///
+    /// # Panics
+    /// The test-only capture backend panics if its buffer mutex is poisoned.
     pub async fn type_text(&mut self, text: &str) -> Result<()> {
         match self {
             // The enigo/ydotool backends are synchronous and `!Send`; run them
@@ -132,6 +135,9 @@ impl Simulator {
     ///
     /// # Errors
     /// Returns an error if the backend fails to simulate key input.
+    ///
+    /// # Panics
+    /// The test-only capture backend panics if its buffer mutex is poisoned.
     pub async fn backspace_n(&mut self, n: usize) -> Result<()> {
         match self {
             Self::WaylandProtocol(b) => {

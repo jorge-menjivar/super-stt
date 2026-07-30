@@ -208,7 +208,7 @@ mod tests {
                 let (frequencies, _, _, _) = theme.start_sound();
                 for &freq in &frequencies {
                     assert!(
-                        freq >= 100.0 && freq <= 5000.0,
+                        (100.0..=5000.0).contains(&freq),
                         "Theme {theme:?} frequency {freq}Hz should be in audible range (100-5000Hz)"
                     );
                 }
@@ -216,7 +216,7 @@ mod tests {
                 let (end_frequencies, _, _, _) = theme.end_sound();
                 for &freq in &end_frequencies {
                     assert!(
-                        freq >= 100.0 && freq <= 5000.0,
+                        (100.0..=5000.0).contains(&freq),
                         "Theme {theme:?} end frequency {freq}Hz should be in audible range (100-5000Hz)"
                     );
                 }
@@ -262,8 +262,7 @@ mod tests {
         let last_freq = frequencies[frequencies.len() - 1];
         assert!(
             last_freq > 1000.0,
-            "Retro theme should end with high frequency, got {}Hz",
-            last_freq
+            "Retro theme should end with high frequency, got {last_freq}Hz"
         );
     }
 

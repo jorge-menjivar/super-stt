@@ -205,7 +205,7 @@ fn set_model_parses_online_models() {
             .unwrap_or_else(|e| panic!("set_model should parse {model_name}: {e}"));
         match command {
             Command::SetModel { model, source } => {
-                assert_eq!(model.to_string(), *model_name);
+                assert_eq!(model.clone(), *model_name);
                 // No source supplied → empty; the daemon resolves it against
                 // the active backend (see endpoints/v1/active_model.md).
                 assert_eq!(source, "");

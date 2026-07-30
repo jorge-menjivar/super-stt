@@ -100,7 +100,7 @@ fn spawn_daemon() -> (DaemonGuard, PathBuf) {
         cleanup: vec![http_socket.clone(), config_home, data_home],
     };
 
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_mins(2);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists() {
             // Give the listener a beat to finish binding before the CLI connects.

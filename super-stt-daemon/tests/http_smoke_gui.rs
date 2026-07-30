@@ -126,7 +126,7 @@ async fn start_daemon_no_auto_approve() -> (DaemonGuard, PathBuf) {
         xdg_runtime_dir: xdg,
     };
 
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_mins(2);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists() {
             sleep(Duration::from_millis(200)).await;
@@ -202,7 +202,10 @@ async fn auth_request_dismissed_returns_user_dismissed() {
         // Send SIGTERM — the libcosmic event loop unwinds and the
         // dismissed-on-close path writes "dismissed" to stdout.
         unsafe {
-            libc::kill(helper_pid as libc::pid_t, libc::SIGTERM);
+            libc::kill(
+                libc::pid_t::try_from(helper_pid).expect("pid fits in pid_t"),
+                libc::SIGTERM,
+            );
         }
     }
 

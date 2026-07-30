@@ -93,7 +93,7 @@ fn spawn_daemon() -> (DaemonGuard, PathBuf) {
         cleanup: vec![http_socket.clone()],
     };
 
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_mins(2);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists() {
             std::thread::sleep(Duration::from_millis(500));
@@ -136,6 +136,7 @@ fn run_cli(socket: &Path, args: &[&str]) -> (i32, String, String) {
 ///    silence; stdout has `(no speech detected)` or transcribed text.
 ///  - audio fails → daemon returns an error; CLI exits non-zero with
 ///    stderr message containing the failure.
+///
 /// Both outcomes are valid; what we check is that we never end up in
 /// the "transcribe stream ended unexpectedly" state, which was the
 /// symptom of the original toggle bug where a JSON 409 body was fed

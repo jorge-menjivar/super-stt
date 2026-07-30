@@ -433,7 +433,7 @@ mod tests {
     /// part of the key: it's client-controlled, so a misbehaving
     /// caller could otherwise bypass a deny by rotating its declared
     /// app name. Two requests from the same binary in the same scope
-    /// SHOULD collide regardless of app_name — that's the bug fix.
+    /// SHOULD collide regardless of `app_name` — that's the bug fix.
     #[test]
     fn deny_cache_distinguishes_keys_by_each_component() {
         let cache = DenyCache::default();
@@ -461,8 +461,8 @@ mod tests {
 
     /// `insert` is a set add, not a list append — calling it twice
     /// with the same key is a no-op. We're not strictly testing
-    /// HashSet semantics (that's stdlib's job); we're documenting
-    /// the contract DenyCache exposes so a future refactor can't
+    /// `HashSet` semantics (that's stdlib's job); we're documenting
+    /// the contract `DenyCache` exposes so a future refactor can't
     /// accidentally swap it for a duplicating store.
     #[test]
     fn deny_cache_insert_is_idempotent() {
@@ -478,7 +478,7 @@ mod tests {
     }
 
     /// The cache is purely in-memory and lives on the daemon's
-    /// AppState. Two independent `DenyCache::default()` instances
+    /// `AppState`. Two independent `DenyCache::default()` instances
     /// must not share state — that's what gives us the "daemon
     /// restart clears the deny cache" guarantee documented in
     /// auth.md.

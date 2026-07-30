@@ -11,6 +11,15 @@ pub const WARMUP_TONE_DURATION_MS: u64 = 20;
 pub const WARMUP_TONE_FREQUENCY: f32 = 44000.0;
 pub const WARMUP_DELAY_AFTER_TONE_MS: u64 = 50;
 
+// Guard-rails on the values above. These hold at compile time, so an edit that
+// puts one out of range fails the build rather than a test run.
+const _: () = assert!(WARMUP_TONE_DURATION_MS > 0);
+const _: () = assert!(WARMUP_DELAY_AFTER_TONE_MS < 1000);
+const _: () = assert!(WARMUP_TONE_FREQUENCY > 20.0);
+// The warmup tone is deliberately near-ultrasonic: it wakes the audio driver
+// without being audible to the user.
+const _: () = assert!(WARMUP_TONE_FREQUENCY < 50000.0);
+
 /// Timing parameters derived from the sample rate and ms inputs.
 struct BeepParams {
     sample_rate: f32,
@@ -363,30 +372,11 @@ mod tests {
         }
     }
 
+    // The fade-out multiplier is contracted to return exact sentinels (1.0
+    // outside the zone, 0.0 on the final sample), so these compare exactly on
+    // purpose — an epsilon would stop testing the contract.
     #[test]
-    fn test_warmup_tone_constants() {
-        // Verify warmup tone constants are reasonable
-        assert!(
-            WARMUP_TONE_DURATION_MS > 0,
-            "Warmup duration should be positive"
-        );
-        assert!(
-            WARMUP_TONE_FREQUENCY > 20.0,
-            "Warmup frequency should be positive"
-        );
-        // Note: Warmup tone uses very high frequency (44kHz) intentionally to warm up audio drivers
-        // without creating audible noise for users
-        assert!(
-            WARMUP_TONE_FREQUENCY < 50000.0,
-            "Warmup frequency should be reasonable"
-        );
-        assert!(
-            WARMUP_DELAY_AFTER_TONE_MS < 1000,
-            "Warmup delay should be reasonable"
-        );
-    }
-
-    #[test]
+    #[allow(clippy::float_cmp, reason = "exact sentinel values are the contract")]
     fn test_fade_out_calculation() {
         let fade_out_samples = 100;
         let total_samples = 1000;
@@ -416,6 +406,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp, reason = "exact sentinel values are the contract")]
     fn test_fade_out_reaches_zero() {
         let fade_out_samples = 50;
         let total_samples = 2000;
@@ -442,10 +433,7 @@ mod tests {
                 calculate_fade_out_multiplier(sample_clock, total_samples, fade_out_samples);
             assert!(
                 multiplier <= previous_multiplier,
-                "Fade-out should decrease monotonically: sample {} has multiplier {} > {}",
-                sample_clock,
-                multiplier,
-                previous_multiplier
+                "Fade-out should decrease monotonically: sample {sample_clock} has multiplier {multiplier} > {previous_multiplier}"
             );
             previous_multiplier = multiplier;
         }
@@ -464,13 +452,11 @@ mod tests {
             // Should be clamped between 100-200ms
             assert!(
                 buffer_flush_time >= 100,
-                "Buffer flush time should be at least 100ms for sample rate {}",
-                sample_rate
+                "Buffer flush time should be at least 100ms for sample rate {sample_rate}"
             );
             assert!(
                 buffer_flush_time <= 200,
-                "Buffer flush time should be at most 200ms for sample rate {}",
-                sample_rate
+                "Buffer flush time should be at most 200ms for sample rate {sample_rate}"
             );
         }
     }

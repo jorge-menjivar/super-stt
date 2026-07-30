@@ -134,6 +134,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(
+        clippy::many_single_char_names,
+        reason = "geometry: width/height/half-width/distance/offset"
+    )]
     fn near_rest_at_start() {
         // Full applet: half_width = w/2, origin (d=0) at the centre.
         let (w, h) = (240.0_f32, 60.0_f32);

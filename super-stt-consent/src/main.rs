@@ -329,28 +329,6 @@ fn permissions_for_scope(scope: &str) -> &'static [&'static str] {
     }
 }
 
-#[cfg(test)]
-mod scope_conformance {
-    use super::{constants, permissions_for_scope};
-
-    /// Every scope the daemon accepts must have a specific consent description.
-    /// A daemon scope that falls through to `UNKNOWN_SCOPE_PERMISSIONS` would
-    /// render the "unknown scope — deny is safe" warning on a legitimate prompt,
-    /// so this pins the two lists together (Tier 2 #8).
-    #[test]
-    fn every_known_scope_has_specific_permissions() {
-        for scope in super_stt_shared::daemon::scopes::KNOWN_SCOPES {
-            assert!(
-                !std::ptr::eq(
-                    permissions_for_scope(scope),
-                    constants::UNKNOWN_SCOPE_PERMISSIONS
-                ),
-                "scope `{scope}` has no specific consent description; add an arm to permissions_for_scope"
-            );
-        }
-    }
-}
-
 /// Union of the per-scope bullet lists for every scope the app asked
 /// for, de-duplicated and order-preserving. Falls back to the unknown
 /// bullet if the set is empty.
@@ -510,4 +488,26 @@ fn main() -> cosmic::iced::Result {
     }
 
     result
+}
+
+#[cfg(test)]
+mod scope_conformance {
+    use super::{constants, permissions_for_scope};
+
+    /// Every scope the daemon accepts must have a specific consent description.
+    /// A daemon scope that falls through to `UNKNOWN_SCOPE_PERMISSIONS` would
+    /// render the "unknown scope — deny is safe" warning on a legitimate prompt,
+    /// so this pins the two lists together (Tier 2 #8).
+    #[test]
+    fn every_known_scope_has_specific_permissions() {
+        for scope in super_stt_shared::daemon::scopes::KNOWN_SCOPES {
+            assert!(
+                !std::ptr::eq(
+                    permissions_for_scope(scope),
+                    constants::UNKNOWN_SCOPE_PERMISSIONS
+                ),
+                "scope `{scope}` has no specific consent description; add an arm to permissions_for_scope"
+            );
+        }
+    }
 }

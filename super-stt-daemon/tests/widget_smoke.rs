@@ -25,7 +25,7 @@ use tokio::time::sleep;
 
 const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 
-/// Stable AppId used across the test run. We don't need a per-run
+/// Stable `AppId` used across the test run. We don't need a per-run
 /// unique id here: the daemon-side persisted token survives restart by
 /// design, and that's exactly what we want to verify. We do
 /// `session::forget` in the test's drop guard so we don't leak entries
@@ -82,7 +82,7 @@ fn unique_socket_paths(label: &str) -> (PathBuf, PathBuf) {
     )
 }
 
-async fn spawn_daemon(_legacy_socket: &Path, http_socket: &Path) -> Child {
+fn spawn_daemon(_legacy_socket: &Path, http_socket: &Path) -> Child {
     // Isolate XDG_CONFIG_HOME so the test daemon doesn't overwrite
     // the developer's real config when applying `--audio-theme` /
     // `--device` CLI overrides.
@@ -105,7 +105,7 @@ async fn spawn_daemon(_legacy_socket: &Path, http_socket: &Path) -> Child {
 }
 
 async fn wait_for_daemon_ready(http_socket: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_mins(2);
     while Instant::now() < deadline {
         if http_socket.exists()
             && http_client::auth_request(http_socket.to_path_buf(), TEST_APP_NAME, TEST_SCOPES)
@@ -139,7 +139,7 @@ where
     let start = Instant::now();
     let mut seen = Vec::new();
     while start.elapsed() < deadline {
-        let remaining = deadline - start.elapsed();
+        let remaining = deadline.checked_sub(start.elapsed()).unwrap();
         match tokio::time::timeout(remaining, stream.next()).await {
             Ok(Some(update)) => {
                 let hit = matches(&update);
@@ -148,8 +148,8 @@ where
                     return Some(seen);
                 }
             }
-            Ok(None) => return None, // stream ended unexpectedly
-            Err(_) => return None,   // deadline hit
+            // Stream ended unexpectedly, or the deadline hit.
+            Ok(None) | Err(_) => return None,
         }
     }
     None
@@ -180,7 +180,7 @@ async fn subscription_recovers_from_daemon_restart() {
     //    SUPER_STT_AUTO_APPROVE so the subscription's session::obtain
     //    will succeed silently.
     let mut guard = DaemonGuard {
-        child: spawn_daemon(&legacy_socket, &http_socket).await,
+        child: spawn_daemon(&legacy_socket, &http_socket),
         cleanup_paths: vec![legacy_socket.clone(), http_socket.clone()],
     };
     wait_for_daemon_ready(&http_socket).await;
@@ -232,7 +232,7 @@ async fn subscription_recovers_from_daemon_restart() {
     //    a backoff window without external intervention.
     eprintln!("[smoke] restarting daemon");
     guard = DaemonGuard {
-        child: spawn_daemon(&legacy_socket, &http_socket).await,
+        child: spawn_daemon(&legacy_socket, &http_socket),
         cleanup_paths: vec![legacy_socket.clone(), http_socket.clone()],
     };
     wait_for_daemon_ready(&http_socket).await;
@@ -240,7 +240,7 @@ async fn subscription_recovers_from_daemon_restart() {
     // 6. Wait for the SECOND Connected — this is the actual "no stale
     //    widget" assertion. If `run_widget_subscription` had given up,
     //    we'd time out here.
-    let post = drain_until(&mut stream, Duration::from_secs(60), |u| {
+    let post = drain_until(&mut stream, Duration::from_mins(1), |u| {
         matches!(u, WidgetSubscriptionUpdate::Connected)
     })
     .await
@@ -266,7 +266,7 @@ async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
     let (legacy_socket, http_socket) = unique_socket_paths("widget-idle");
 
     let _guard = DaemonGuard {
-        child: spawn_daemon(&legacy_socket, &http_socket).await,
+        child: spawn_daemon(&legacy_socket, &http_socket),
         cleanup_paths: vec![legacy_socket.clone(), http_socket.clone()],
     };
     wait_for_daemon_ready(&http_socket).await;
@@ -320,7 +320,7 @@ async fn subscription_recovers_from_invalid_session() {
     let (legacy_socket, http_socket) = unique_socket_paths("widget-invalid");
 
     let _guard = DaemonGuard {
-        child: spawn_daemon(&legacy_socket, &http_socket).await,
+        child: spawn_daemon(&legacy_socket, &http_socket),
         cleanup_paths: vec![legacy_socket.clone(), http_socket.clone()],
     };
     wait_for_daemon_ready(&http_socket).await;

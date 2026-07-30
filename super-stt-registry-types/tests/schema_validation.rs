@@ -287,12 +287,12 @@ fn conditional_property_names_exist() {
         assert!(root_props.contains_key(key), "root missing `{key}`");
     }
     let defs = schema["definitions"].as_object().expect("definitions");
-    let asset_props = defs["SubprocessAsset"]["properties"]
+    let subprocess_asset_props = defs["SubprocessAsset"]["properties"]
         .as_object()
         .expect("SubprocessAsset properties");
     for key in ["accel", "cuda_major", "cuda_sm", "cudnn"] {
         assert!(
-            asset_props.contains_key(key),
+            subprocess_asset_props.contains_key(key),
             "SubprocessAsset missing `{key}`"
         );
     }

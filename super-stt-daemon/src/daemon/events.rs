@@ -469,13 +469,11 @@ mod tests {
         // non-blockingly (`try_recv`) — calling `recv().await` on an
         // empty channel with no senders dropped would block forever.
         let bus = EventBus::new();
-        let mut fast_rx = match bus.subscribe(Topic::RecordingState) {
-            AnyReceiver::RecordingState(rx) => rx,
-            _ => unreachable!("subscribe(RecordingState) returns the matching variant"),
+        let AnyReceiver::RecordingState(mut fast_rx) = bus.subscribe(Topic::RecordingState) else {
+            unreachable!("subscribe(RecordingState) returns the matching variant")
         };
-        let mut slow_rx = match bus.subscribe(Topic::RecordingState) {
-            AnyReceiver::RecordingState(rx) => rx,
-            _ => unreachable!(),
+        let AnyReceiver::RecordingState(mut slow_rx) = bus.subscribe(Topic::RecordingState) else {
+            unreachable!("subscribe(RecordingState) returns the matching variant")
         };
 
         // Push enough state changes to overflow the STATE_BUF_CAPACITY-sized ring.

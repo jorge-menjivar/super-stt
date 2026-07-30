@@ -33,9 +33,7 @@ fn execstart_args(text: &str) -> Vec<Vec<String>> {
     let mut out = Vec::new();
     for (offset, _) in text.match_indices("ExecStart=") {
         let rest = &text[offset + "ExecStart=".len()..];
-        let end = rest
-            .find(['|', '"', '\'', '\n'])
-            .unwrap_or_else(|| rest.len());
+        let end = rest.find(['|', '"', '\'', '\n']).unwrap_or(rest.len());
         let mut tokens = Vec::new();
         let mut chars = rest[..end].chars().peekable();
         let mut current = String::new();

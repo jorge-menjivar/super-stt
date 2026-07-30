@@ -83,7 +83,7 @@ mod tests {
         assert_eq!(e.to_string(), "oom");
         let e = parse_transcribe_response(500, br#"{"message":"just message"}"#).unwrap_err();
         assert_eq!(e.to_string(), "just message");
-        let e = parse_transcribe_response(500, br#"{}"#).unwrap_err();
+        let e = parse_transcribe_response(500, br"{}").unwrap_err();
         assert_eq!(e.to_string(), "transcription failed");
     }
 

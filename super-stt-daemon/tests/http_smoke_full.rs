@@ -150,7 +150,7 @@ async fn start_daemon_with_auto_approve_timer() -> (DaemonGuard, PathBuf) {
         cleanup_paths: vec![legacy_socket.clone(), http_socket.clone()],
     };
 
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_mins(2);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists() {
             sleep(Duration::from_millis(200)).await;

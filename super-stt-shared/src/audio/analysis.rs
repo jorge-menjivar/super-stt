@@ -395,6 +395,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "sample indices are small; exactness is irrelevant to a test tone"
+    )]
     fn test_audio_analyzer() {
         let analyzer = AudioAnalyzer::new(44_100, 1024);
 
@@ -427,13 +431,20 @@ mod tests {
         );
     }
 
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "sample indices are small; exactness is irrelevant to a test tone"
+    )]
     fn tone(freq: f32, n: usize, sample_rate: f32) -> Vec<f32> {
         (0..n)
             .map(|i| (2.0 * std::f32::consts::PI * freq * i as f32 / sample_rate).sin())
             .collect()
     }
 
+    // Empty input must produce the exact documented defaults, not values near
+    // them, so these compare exactly on purpose.
     #[test]
+    #[allow(clippy::float_cmp, reason = "asserting exact default values")]
     fn empty_input_yields_default_bands() {
         let analyzer = AudioAnalyzer::new(44_100, 1024);
         let data = analyzer.analyze(&[]);
@@ -457,7 +468,10 @@ mod tests {
         }
     }
 
+    // Determinism means bit-identical output for identical input — an epsilon
+    // comparison here would assert nothing.
     #[test]
+    #[allow(clippy::float_cmp, reason = "bit-identical output is the assertion")]
     fn analyze_is_deterministic() {
         let analyzer = AudioAnalyzer::new(44_100, 1024);
         let samples = tone(440.0, 1024, 44_100.0);

@@ -235,7 +235,10 @@ mod upgrade_compat_tests {
             for file in std::fs::read_dir(&version_dir).expect("readable version dir") {
                 let path = file.expect("readable file entry").path();
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if !(name.starts_with("applet-") && name.ends_with(".toml")) {
+                let is_toml = path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("toml"));
+                if !(name.starts_with("applet-") && is_toml) {
                     continue;
                 }
                 let content = std::fs::read_to_string(&path).expect("read applet fixture");

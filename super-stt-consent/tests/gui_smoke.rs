@@ -12,7 +12,7 @@
 //!
 //! What's covered:
 //!
-//! - **renders_and_decides**: the binary launches, opens its window,
+//! - **`renders_and_decides`**: the binary launches, opens its window,
 //!   and after a short wait either gets SIGTERM'd (simulating the user
 //!   closing the dialog → expect `dismissed`) or — if the human running
 //!   the test clicks Allow / Deny during the wait — writes `allow` /
@@ -28,7 +28,7 @@
 //!     - all three decision paths (Allow / Deny / dismissed) write a
 //!       recognizable line to stdout.
 //!
-//! - **surface_survives_compositor_handshake**: the helper is still alive
+//! - **`surface_survives_compositor_handshake`**: the helper is still alive
 //!   after the surface is up, and the compositor never raised a Wayland
 //!   protocol error against it. See that test for why a dialog that dies
 //!   during the handshake is invisible in production.
@@ -92,7 +92,10 @@ fn renders_and_decides() {
         // write "dismissed" before the helper exits.
         #[cfg(unix)]
         unsafe {
-            libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+            libc::kill(
+                libc::pid_t::try_from(child.id()).expect("pid fits in pid_t"),
+                libc::SIGTERM,
+            );
         }
         #[cfg(not(unix))]
         {
@@ -193,7 +196,10 @@ fn surface_survives_compositor_handshake() {
     if early_exit.is_none() {
         #[cfg(unix)]
         unsafe {
-            libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+            libc::kill(
+                libc::pid_t::try_from(child.id()).expect("pid fits in pid_t"),
+                libc::SIGTERM,
+            );
         }
         #[cfg(not(unix))]
         {

@@ -770,10 +770,11 @@ async fn get_gpu_info_returns_success_array() {
 /// Real-hardware check: the daemon reports a non-empty, well-formed GPU
 /// inventory. Ignored by default because CI runners have no GPU — run it on
 /// a machine that does:
-///   cargo test -p super-stt-daemon --all-features gpu_info_reports_real_hardware -- --ignored --nocapture
+///   cargo test -p super-stt-daemon --all-features `gpu_info_reports_real_hardware` -- --ignored --nocapture
 #[tokio::test]
 #[ignore = "requires a real GPU (NVML/sysfs); run with --ignored"]
 async fn gpu_info_reports_real_hardware() {
+    const VENDORS: [&str; 5] = ["nvidia", "amd", "intel", "apple", "unknown"];
     let resp = SuperSTTDaemon::handle_get_gpu_info().await;
     assert_eq!(resp.status, "success");
     let gpus = resp.gpu_info.expect("gpu_info present");
@@ -782,7 +783,6 @@ async fn gpu_info_reports_real_hardware() {
         serde_json::to_string_pretty(&gpus).unwrap()
     );
     assert!(!gpus.is_empty(), "expected at least one GPU on this host");
-    const VENDORS: [&str; 5] = ["nvidia", "amd", "intel", "apple", "unknown"];
     for gpu in &gpus {
         assert!(!gpu.name.is_empty(), "each GPU needs a non-empty name");
         assert!(gpu.total_bytes > 0, "each GPU needs total_bytes > 0");

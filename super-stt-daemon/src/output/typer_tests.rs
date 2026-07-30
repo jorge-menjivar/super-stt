@@ -15,8 +15,10 @@ fn build_display_text_returns_preview_when_no_stabilized_text() {
 
 #[test]
 fn build_display_text_combines_stabilized_with_tail_matched_suffix() {
-    let mut s = State::default();
-    s.stabilized_text = "Hello engi".to_string();
+    let s = State {
+        stabilized_text: "Hello engi".to_string(),
+        ..Default::default()
+    };
     // "engi"'s tail "ngi" overlaps "engineer…"; suffix "neer is good" is grafted on.
     assert_eq!(
         s.build_display_text("engineer is good"),
@@ -26,17 +28,21 @@ fn build_display_text_combines_stabilized_with_tail_matched_suffix() {
 
 #[test]
 fn build_display_text_prefers_session_when_no_tail_match_and_session_longer() {
-    let mut s = State::default();
-    s.stabilized_text = "abc".to_string();
-    s.full_session_text = "abcdefghij".to_string();
+    let s = State {
+        stabilized_text: "abc".to_string(),
+        full_session_text: "abcdefghij".to_string(),
+        ..Default::default()
+    };
     assert_eq!(s.build_display_text("wxyz"), "abcdefghij");
 }
 
 #[test]
 fn build_display_text_prefers_preview_when_no_tail_match_and_preview_longer() {
-    let mut s = State::default();
-    s.stabilized_text = "abc".to_string();
-    s.full_session_text = "ab".to_string();
+    let s = State {
+        stabilized_text: "abc".to_string(),
+        full_session_text: "ab".to_string(),
+        ..Default::default()
+    };
     assert_eq!(s.build_display_text("wxyz"), "wxyz");
 }
 
@@ -49,16 +55,20 @@ fn update_full_session_text_adopts_first_preview() {
 
 #[test]
 fn update_full_session_text_grows_on_perfect_extension() {
-    let mut s = State::default();
-    s.full_session_text = "Hello".to_string();
+    let mut s = State {
+        full_session_text: "Hello".to_string(),
+        ..Default::default()
+    };
     s.update_full_session_text("Hello world");
     assert_eq!(s.full_session_text, "Hello world");
 }
 
 #[test]
 fn update_full_session_text_extends_via_tail_match() {
-    let mut s = State::default();
-    s.full_session_text = "Hello engi".to_string();
+    let mut s = State {
+        full_session_text: "Hello engi".to_string(),
+        ..Default::default()
+    };
     s.update_full_session_text("engineer here");
     assert_eq!(s.full_session_text, "Hello engineer here");
 }

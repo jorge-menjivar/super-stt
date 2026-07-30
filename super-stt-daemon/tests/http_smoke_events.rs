@@ -86,7 +86,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
         cleanup_paths: vec![http_socket.clone(), config_home, data_home],
     };
 
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_mins(2);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists()
             && http_client::auth_request(http_socket.clone(), "events-smoke", &["status"])
@@ -101,8 +101,8 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
 }
 
 /// Mint a token with the given scopes via the (auto-approved) consent flow.
-async fn mint(sock: &PathBuf, scopes: &[&str]) -> String {
-    http_client::auth_request(sock.clone(), "events scope smoke", scopes)
+async fn mint(sock: &Path, scopes: &[&str]) -> String {
+    http_client::auth_request(sock.to_path_buf(), "events scope smoke", scopes)
         .await
         .expect("auth_request")
         .session_token

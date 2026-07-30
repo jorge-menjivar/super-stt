@@ -184,7 +184,7 @@ write_mode = false
 }
 
 /// A pre-existing TOML config carrying a stale provider/source string
-/// (e.g. PascalCase variant names from a prior build) must keep loading
+/// (e.g. `PascalCase` variant names from a prior build) must keep loading
 /// — falling back to the type's `Default` rather than failing the whole
 /// `[transcription]` section. The user's other settings have to survive.
 #[test]

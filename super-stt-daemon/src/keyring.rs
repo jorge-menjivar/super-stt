@@ -283,6 +283,21 @@ pub async fn has_backend_secret_async(source: String, name: String) -> Result<bo
         .map_err(|e| KeyringError::Task(e.to_string()))?
 }
 
+/// Write the daemon's HTTP session blob to the keyring. The value is
+/// the JSON-serialized full sessions map; passing an empty map clears
+/// previously-stored sessions.
+///
+/// # Errors
+///
+/// Returns an error if the keyring is unavailable or the write fails.
+pub fn set_sessions_blob(value: &str) -> Result<(), KeyringError> {
+    // Route through `kv_set` for the same reason as `get_sessions_blob`: one
+    // mock mechanism, one entry-construction path (audit Tier 3 #36).
+    kv_set(SESSIONS_KEY, value)?;
+    debug!("Persisted session blob to keyring");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,19 +327,4 @@ mod tests {
         set_sessions_blob(blob).unwrap();
         assert_eq!(get_sessions_blob().unwrap().as_deref(), Some(blob));
     }
-}
-
-/// Write the daemon's HTTP session blob to the keyring. The value is
-/// the JSON-serialized full sessions map; passing an empty map clears
-/// previously-stored sessions.
-///
-/// # Errors
-///
-/// Returns an error if the keyring is unavailable or the write fails.
-pub fn set_sessions_blob(value: &str) -> Result<(), KeyringError> {
-    // Route through `kv_set` for the same reason as `get_sessions_blob`: one
-    // mock mechanism, one entry-construction path (audit Tier 3 #36).
-    kv_set(SESSIONS_KEY, value)?;
-    debug!("Persisted session blob to keyring");
-    Ok(())
 }

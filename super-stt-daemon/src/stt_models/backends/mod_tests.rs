@@ -111,7 +111,7 @@ processing_interval_ms = 2000
         .expect("resolve voxtral-mini");
     assert_eq!(vox.source, "github.com/super-stt/voxtral");
     assert_eq!(vox.estimated_vram_bytes, 8_589_934_592);
-    assert_eq!(vox.processing_interval, Duration::from_millis(2000));
+    assert_eq!(vox.processing_interval, Duration::from_secs(2));
     assert_eq!(
         vox.supported_devices,
         vec![

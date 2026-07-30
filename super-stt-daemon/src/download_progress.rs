@@ -506,9 +506,9 @@ mod tests {
     }
 
     /// Companion of the tests above: when nothing meaningful changes
-    /// (percentage, status, total_bytes, file_index all stable), the
+    /// (percentage, status, `total_bytes`, `file_index` all stable), the
     /// throttle suppresses the publish. Without this guard,
-    /// broadcast_progress would spam events on every chunk.
+    /// `broadcast_progress` would spam events on every chunk.
     #[test]
     fn broadcast_progress_suppressed_when_neither_percentage_nor_status_changes() {
         let cancelled = Arc::new(AtomicBool::new(false));

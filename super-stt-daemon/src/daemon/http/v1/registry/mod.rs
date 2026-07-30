@@ -44,6 +44,24 @@ pub(crate) fn registry_error_msg(status: StatusCode, code: &str, message: &str) 
         .into_response()
 }
 
+/// Registry browse/refresh/install/update routes (settings-scope).
+pub(crate) fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/registry/backends", get(list::list_registry_backends))
+        .route(
+            "/registry/backends/refresh",
+            post(refresh::refresh_registry),
+        )
+        .route(
+            "/registry/backends/install",
+            post(install::install_registry_backend),
+        )
+        .route(
+            "/registry/backends/update",
+            post(update::update_registry_backend),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{registry_error, registry_error_msg};
@@ -85,22 +103,4 @@ mod tests {
             "provide exactly one of source, repo_url, local_path"
         );
     }
-}
-
-/// Registry browse/refresh/install/update routes (settings-scope).
-pub(crate) fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/registry/backends", get(list::list_registry_backends))
-        .route(
-            "/registry/backends/refresh",
-            post(refresh::refresh_registry),
-        )
-        .route(
-            "/registry/backends/install",
-            post(install::install_registry_backend),
-        )
-        .route(
-            "/registry/backends/update",
-            post(update::update_registry_backend),
-        )
 }

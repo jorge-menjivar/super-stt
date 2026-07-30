@@ -82,7 +82,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
         cleanup_paths: vec![http_socket.clone()],
     };
 
-    let deadline = Instant::now() + Duration::from_secs(120);
+    let deadline = Instant::now() + Duration::from_mins(2);
     while Instant::now() < deadline {
         if Path::new(&http_socket).exists()
             && http_client::auth_request(http_socket.clone(), "settings-smoke", &["status"])
@@ -97,7 +97,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
 }
 
 /// Tiny GET helper for endpoints `super_stt_shared::daemon::http_client`
-/// doesn't yet wrap. Returns (status_code, parsed JSON body).
+/// doesn't yet wrap. Returns (`status_code`, parsed JSON body).
 async fn raw_get_json(
     socket_path: &PathBuf,
     path: &str,
@@ -168,6 +168,10 @@ async fn raw_post_json(
 }
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one daemon spawn covers the whole settings surface; splitting would spawn one per case"
+)]
 async fn settings_scope_endpoints() {
     let (_guard, http_socket) = start_daemon().await;
 
