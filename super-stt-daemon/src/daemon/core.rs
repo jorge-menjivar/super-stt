@@ -164,12 +164,13 @@ impl SuperSTTDaemon {
             self.preview_typing_enabled
                 .store(original_preview, std::sync::atomic::Ordering::Relaxed);
         }
-        // Don't cache the simulator — Wayland compositors recycle idle
-        // connections, leaving a stale enego `Con` that silently fails on
-        // the next recording. Creating a fresh connection per-recording is
-        // cheap and avoids stale-pipe issues.
-        drop(typer.take_simulator());
-        *self.simulator.write().await = None;
+        // Return the simulator to the cache for reuse, unless this backend
+        // goes stale while idle (see `Simulator::is_cacheable`) — in which
+        // case it is dropped here and the next recording builds a fresh one.
+        let simulator = typer.take_simulator();
+        if simulator.is_cacheable() {
+            *self.simulator.write().await = Some(simulator);
+        }
         response
     }
 }

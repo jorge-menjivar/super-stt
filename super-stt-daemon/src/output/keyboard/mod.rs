@@ -80,6 +80,19 @@ impl Simulator {
         Ok(Self::WaylandProtocol(Box::new(EnigoBackend::new()?)))
     }
 
+    /// Whether this backend may be held across recordings.
+    ///
+    /// Everything except enigo is cached. Rebuilding the portal session costs
+    /// three D-Bus round-trips before capture can start and may prompt the
+    /// user for authorization each time, so paying it per recording is not an
+    /// option. enigo is the exception: Wayland compositors recycle idle
+    /// connections, leaving a stale `Con` that fails silently on the next
+    /// recording, and recreating it is cheap.
+    #[must_use]
+    pub fn is_cacheable(&self) -> bool {
+        !matches!(self, Self::WaylandProtocol(_))
+    }
+
     /// Human-readable name for logging.
     #[must_use]
     pub fn name(&self) -> &'static str {
@@ -170,5 +183,16 @@ mod tests {
         assert_eq!(*buf.lock().unwrap(), "hello w");
 
         assert_eq!(sim.name(), "capture (test)");
+    }
+
+    /// Caching is the default; only enigo opts out. A regression that inverts
+    /// this rebuilds the portal session before every recording, costing three
+    /// D-Bus round-trips and possibly an authorization prompt. enigo itself
+    /// needs a live compositor to construct, so this pins the side of the rule
+    /// that is reachable in a test.
+    #[test]
+    fn backends_are_cached_by_default() {
+        let (sim, _buf) = Simulator::capture();
+        assert!(sim.is_cacheable());
     }
 }

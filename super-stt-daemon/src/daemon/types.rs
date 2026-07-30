@@ -79,7 +79,8 @@ pub struct SuperSTTDaemon {
     pub preview_typing_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     // Sender used to signal a running recording to stop early (shortcut or external stop)
     pub manual_stop_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::broadcast::Sender<()>>>>,
-    // Cached keyboard simulator (session persists across recordings)
+    // Cached keyboard simulator (session persists across recordings, except
+    // for backends that go stale while idle — see `Simulator::is_cacheable`)
     pub simulator: Arc<tokio::sync::RwLock<Option<crate::output::keyboard::Simulator>>>,
     // Streams preview text to the one waiting `/transcribe` client. See
     // [`PreviewSlot`]: the id closes the busy-check TOCTOU that let a losing
