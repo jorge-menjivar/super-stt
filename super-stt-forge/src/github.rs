@@ -39,6 +39,9 @@ struct GhAsset {
 
 impl From<GhRelease> for Release {
     fn from(r: GhRelease) -> Self {
+        // GitHub's two flags are independent and a release may set both, so
+        // `draft` is checked first: an unpublished release is unusable no
+        // matter how it would be labelled once published.
         let kind = if r.draft {
             ReleaseKind::Draft
         } else if r.prerelease {
@@ -180,12 +183,46 @@ mod tests {
         assert_eq!(
             r.kind,
             ReleaseKind::Published,
-            "default release is published"
+            "draft/prerelease default to false when omitted, so the release is published"
         );
         assert_eq!(r.assets.len(), 1);
         assert_eq!(r.assets[0].name, "a.tar.gz");
         assert_eq!(r.assets[0].download_url, "https://dl/a");
         assert_eq!(r.assets[0].size, 7);
+    }
+
+    /// Fetch `/releases/latest` from a stubbed body and return the mapped kind.
+    async fn kind_of(body: &str) -> ReleaseKind {
+        crate::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        s.mock("GET", "/repos/x/y/releases/latest")
+            .with_status(200)
+            .with_body(body)
+            .create_async()
+            .await;
+        let gh = Github::new(s.url(), None);
+        let repo = RepoRef::parse("github.com/x/y").unwrap();
+        gh.latest_release(&repo).await.unwrap().kind
+    }
+
+    #[tokio::test]
+    async fn draft_flag_maps_to_draft() {
+        let kind = kind_of(r#"{"tag_name":"v1.0.0","draft":true}"#).await;
+        assert_eq!(kind, ReleaseKind::Draft);
+    }
+
+    #[tokio::test]
+    async fn prerelease_flag_maps_to_prerelease() {
+        let kind = kind_of(r#"{"tag_name":"v1.0.0","prerelease":true}"#).await;
+        assert_eq!(kind, ReleaseKind::Prerelease);
+    }
+
+    #[tokio::test]
+    async fn draft_wins_over_prerelease() {
+        // GitHub's two flags are independent, so a draft pre-release is a real
+        // state. Pin the precedence rather than leaving it to chance.
+        let kind = kind_of(r#"{"tag_name":"v1.0.0","draft":true,"prerelease":true}"#).await;
+        assert_eq!(kind, ReleaseKind::Draft);
     }
 
     #[tokio::test]

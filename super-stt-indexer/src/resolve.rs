@@ -4,7 +4,7 @@
 use semver::Version;
 use thiserror::Error;
 
-use super_stt_forge::{ForgeClient, Release, ReleaseKind, RepoRef};
+use super_stt_forge::{ForgeClient, Release, RepoRef};
 
 use crate::registry_toml::Entry;
 
@@ -50,7 +50,7 @@ fn select_release(releases: Vec<Release>, entry: &Entry) -> Result<Resolved, Rel
 
     let mut best: Option<(Version, Release)> = None;
     for r in releases {
-        if r.kind != ReleaseKind::Published {
+        if !r.is_published() {
             continue;
         }
         let stripped = match &entry.tag_prefix {
@@ -165,6 +165,14 @@ mod tests {
     fn skips_prerelease() {
         let mut releases = vec![rel("v1.0.0"), rel("v2.0.0")];
         releases[1].kind = ReleaseKind::Prerelease;
+        let r = select_release(releases, &entry(None, None)).unwrap();
+        assert_eq!(r.version, Version::new(1, 0, 0));
+    }
+
+    #[test]
+    fn skips_draft() {
+        let mut releases = vec![rel("v1.0.0"), rel("v2.0.0")];
+        releases[1].kind = ReleaseKind::Draft;
         let r = select_release(releases, &entry(None, None)).unwrap();
         assert_eq!(r.version, Version::new(1, 0, 0));
     }

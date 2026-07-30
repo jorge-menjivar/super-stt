@@ -61,15 +61,24 @@ impl RepoRef {
     }
 }
 
-/// Whether a forge release is a published release, an unpublished draft, or a
-/// pre-release. These three states are mutually exclusive on every forge.
+/// How a release should be treated when selecting an installable version.
+///
+/// A forge does not necessarily model this as a single field. GitHub exposes
+/// two independent booleans — `draft` (unpublished) and `prerelease` (not a
+/// full release) — and a release may set both. Adapters collapse whatever
+/// their host reports onto this enum, with `Draft` taking precedence, so a
+/// draft pre-release maps to [`ReleaseKind::Draft`].
+///
+/// Only [`ReleaseKind::Published`] is installable, so that collapse loses
+/// nothing that release selection depends on. A caller needing a host's exact
+/// flags must read them from that adapter's own response type instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReleaseKind {
-    /// A stable, published release.
+    /// A full, published release — the only kind eligible for selection.
     Published,
-    /// An unpublished draft.
+    /// An unpublished draft, whether or not it is also flagged a pre-release.
     Draft,
-    /// A pre-release (e.g. GitHub's `prerelease` flag).
+    /// A published pre-release.
     Prerelease,
 }
 
@@ -79,6 +88,14 @@ pub struct Release {
     pub tag: String,
     pub kind: ReleaseKind,
     pub assets: Vec<ReleaseAsset>,
+}
+
+impl Release {
+    /// Whether this release is eligible for selection and install.
+    #[must_use]
+    pub fn is_published(&self) -> bool {
+        matches!(self.kind, ReleaseKind::Published)
+    }
 }
 
 /// A forge-neutral release asset. `download_url` is a plain HTTPS URL.
