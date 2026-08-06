@@ -517,4 +517,16 @@ impl DaemonAudioRecorder {
     pub fn get_audio_buffer_ref(&self) -> Arc<Mutex<VecDeque<f32>>> {
         Arc::clone(&self.audio_buffer)
     }
+
+    /// Share the recorder's speech-detection state with the recording flow.
+    ///
+    /// The recorder is moved into its own task, so callers must clone this
+    /// handle out *before* the move (the same way `get_audio_buffer_ref` is
+    /// used) and read it after the task joins. `RecordingState::recording` is a
+    /// one-way per-take latch — false at the end means the take contained no
+    /// speech.
+    #[must_use]
+    pub fn recording_state_ref(&self) -> Arc<Mutex<RecordingState>> {
+        Arc::clone(&self.recording_state)
+    }
 }

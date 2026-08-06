@@ -27,6 +27,10 @@ struct RecordingSession {
     // Shared with the recorder's ring buffer (`get_audio_buffer_ref`), which is
     // a `parking_lot::Mutex` (Tier 3 #5).
     pub(super) preview_buffer: Arc<parking_lot::Mutex<VecDeque<f32>>>,
+    // Shared with the recorder's speech-detection state. `recording` is a
+    // one-way per-take latch: false after the take means no speech was ever
+    // detected, so there is nothing to transcribe.
+    pub(super) speech_state: Arc<parking_lot::Mutex<crate::audio::state::RecordingState>>,
     pub(super) device_sample_rate: u32,
     pub(super) start_time: Instant,
 }
@@ -144,6 +148,9 @@ impl SuperSTTDaemon {
         self.run_preview_loop(&session, typer, write_mode, request_language)
             .await;
 
+        // Cloned out before `collect_and_clear_preview` consumes the session.
+        let speech_state = Arc::clone(&session.speech_state);
+
         // Phase 3: await the recorder; the mic releases here.
         let full_audio_data = match self
             .collect_and_clear_preview(session, typer, write_mode)
@@ -167,6 +174,25 @@ impl SuperSTTDaemon {
                 return Ok(Err(format!("recording error: {e}")));
             }
         };
+
+        // Nothing was spoken. Stopping a recording without speaking is not a
+        // failure, so the backend is never asked to transcribe silence and
+        // nothing is typed — the cycle simply completes with no text.
+        if !speech_state.lock().recording {
+            info!("🎤 No speech detected during the take; skipping transcription");
+            if write_mode {
+                // Typed nothing, but the per-recording transcript state still
+                // has to be cleared or it feeds the next recording's preview
+                // tail-matching.
+                typer.reset_after_recording(String::new());
+            }
+            // `transcribing_started` is deliberately NOT emitted: decode never
+            // begins. `finalize_recording_session` still emits `final_stt` with
+            // empty text plus the closing `transcribing_stopped`, which is what
+            // the events contract requires (docs/protocol/endpoints/v1/events.md).
+            self.finalize_recording_session("", true, None).await;
+            return Ok(Ok(String::new()));
+        }
 
         // Phase 4: final transcription.
         self.emit_transcribing_started();

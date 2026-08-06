@@ -160,3 +160,78 @@ async fn type_notice_waits_for_shortcut_keys_to_be_released_before_typing() {
     );
     assert_eq!(*buf.lock().unwrap(), "[Super STT: no model loaded]");
 }
+
+// ---------------------------------------------------------------------------
+// Empty-transcript handling
+// ---------------------------------------------------------------------------
+
+/// An empty transcript must type nothing at all. The final text is built as
+/// `format!("{processed} ")`, so without a guard a silent recording deposits a
+/// bare space into whatever the user has focused.
+#[tokio::test]
+async fn process_final_text_types_nothing_for_an_empty_transcript() {
+    let (sim, buf) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    typer.process_final_text("").await;
+
+    assert_eq!(*buf.lock().unwrap(), "");
+}
+
+/// Whitespace-only is empty for this purpose — the backend returning " " must
+/// not type a space either.
+#[tokio::test]
+async fn process_final_text_types_nothing_for_a_whitespace_transcript() {
+    let (sim, buf) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    typer.process_final_text("   ").await;
+
+    assert_eq!(*buf.lock().unwrap(), "");
+}
+
+/// The guard must not change the normal path.
+#[tokio::test]
+async fn process_final_text_still_types_a_non_empty_transcript() {
+    let (sim, buf) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    typer.process_final_text("hello world").await;
+
+    assert!(
+        buf.lock().unwrap().contains("Hello world"),
+        "expected the transcript to be typed, got {:?}",
+        buf.lock().unwrap()
+    );
+}
+
+/// Skipping the typing must NOT skip the state reset: leftover session text
+/// would feed preview tail-matching on the next recording.
+#[tokio::test]
+async fn process_final_text_resets_state_even_when_it_types_nothing() {
+    let (sim, _buf) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+    typer.state.prev_text = "stale".to_string();
+    typer.state.full_session_text = "stale session".to_string();
+
+    typer.process_final_text("").await;
+
+    assert_eq!(typer.state.prev_text, "");
+    assert_eq!(typer.state.full_session_text, "");
+}
+
+/// The extracted reset is callable on its own — Task 2 uses it on the
+/// no-speech path, which does no typing at all.
+#[test]
+fn reset_after_recording_clears_transcript_state() {
+    let (sim, _buf) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+    typer.state.prev_text = "stale".to_string();
+    typer.state.full_session_text = "stale session".to_string();
+
+    typer.reset_after_recording(String::new());
+
+    assert_eq!(typer.state.prev_text, "");
+    assert_eq!(typer.state.full_session_text, "");
+    assert_eq!(typer.state.last_transcription, "");
+}
