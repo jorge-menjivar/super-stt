@@ -329,6 +329,49 @@ async fn set_audio_theme_rejects_unknown_theme() {
     assert_eq!(daemon.get_audio_theme(), before);
 }
 
+/// An unknown notification method is a client error:
+/// `docs/protocol/endpoints/v1/notification_method.md` documents `400
+/// invalid_notification_method`. The daemon must reject it (not silently
+/// apply the default and report success), and the config must not be
+/// mutated by a rejected wire set.
+#[tokio::test]
+async fn set_notification_method_rejects_unknown_method() {
+    let daemon = test_daemon().await;
+    let before = daemon.config.read().await.transcription.notification_method;
+
+    let resp = daemon
+        .handle_set_notification_method("definitely-not-a-method".to_string())
+        .await;
+
+    assert_eq!(resp.status, "error");
+    assert_eq!(resp.message.as_deref(), Some("invalid_notification_method"));
+    assert_eq!(resp.error_code, Some(ErrorCode::InvalidValue));
+    assert_eq!(resp.error_code.map(ErrorCode::http_status), Some(400));
+    // The rejected value must not have changed the persisted setting.
+    assert_eq!(
+        daemon.config.read().await.transcription.notification_method,
+        before
+    );
+}
+
+/// A valid value round-trips through `set_notification_method` and
+/// `get_notification_method` end to end (dispatch parse -> handler -> config).
+#[tokio::test]
+async fn set_notification_method_round_trips_through_set_and_get() {
+    let daemon = test_daemon().await;
+
+    let mut set_request = make_request("set_notification_method");
+    set_request.data = Some(serde_json::json!({ "method": "dbus" }));
+    let set_response = daemon.handle_command(set_request).await;
+    assert_eq!(set_response.status, "success");
+    assert_eq!(set_response.notification_method.as_deref(), Some("dbus"));
+
+    let get_response = daemon
+        .handle_command(make_request("get_notification_method"))
+        .await;
+    assert_eq!(get_response.notification_method.as_deref(), Some("dbus"));
+}
+
 #[tokio::test]
 async fn get_allow_online_models_returns_config_value() {
     let daemon = test_daemon().await;

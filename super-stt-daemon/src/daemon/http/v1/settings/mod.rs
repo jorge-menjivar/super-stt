@@ -76,6 +76,7 @@ pub(crate) mod audio_theme;
 pub(crate) mod backends;
 pub(crate) mod custom_models_dir;
 pub(crate) mod language;
+pub(crate) mod notification_method;
 pub(crate) mod preview_typing;
 pub(crate) mod recording_stop_mode;
 pub(crate) mod volume;
@@ -123,6 +124,11 @@ pub(crate) fn routes() -> Router<AppState> {
         .route(
             "/write_method",
             get(write_method::get_write_method).post(write_method::set_write_method),
+        )
+        .route(
+            "/notification_method",
+            get(notification_method::get_notification_method)
+                .post(notification_method::set_notification_method),
         )
         .route(
             "/preview_typing",

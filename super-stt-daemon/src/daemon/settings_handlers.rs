@@ -3,7 +3,8 @@
 use crate::config::DaemonConfig;
 use crate::daemon::types::SuperSTTDaemon;
 use log::{info, warn};
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::notification_method::NotificationMethod;
+use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 
@@ -115,6 +116,37 @@ impl SuperSTTDaemon {
         let config = self.config.read().await;
         let method = config.transcription.write_method;
         DaemonResponse::success().with_write_method(method.to_string())
+    }
+
+    /// Handle set notification method command. An unknown method name is
+    /// rejected with `invalid_notification_method` (HTTP 400) per
+    /// `docs/protocol/endpoints/v1/notification_method.md`, rather than
+    /// silently applying the default and reporting success.
+    pub async fn handle_set_notification_method(&self, method_str: String) -> DaemonResponse {
+        let Ok(method) = method_str.parse::<NotificationMethod>() else {
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidValue,
+                "invalid_notification_method",
+            );
+        };
+
+        let persist = self
+            .set_config_field(|c| c.transcription.notification_method = method)
+            .await;
+
+        info!("Notification method set to {method}");
+        Self::settings_saved(
+            DaemonResponse::success().with_notification_method(method.to_string()),
+            format!("Notification method set to {method}"),
+            persist,
+        )
+    }
+
+    /// Handle get notification method command
+    pub async fn handle_get_notification_method(&self) -> DaemonResponse {
+        let config = self.config.read().await;
+        let method = config.transcription.notification_method;
+        DaemonResponse::success().with_notification_method(method.to_string())
     }
 
     /// Handle set allow online models command

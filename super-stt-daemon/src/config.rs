@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
@@ -103,6 +104,13 @@ pub struct TranscriptionConfig {
         deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub write_method: WriteMethod,
+    /// How a recording failure is surfaced to the user. An unparseable stored
+    /// value degrades to the default rather than failing the whole config load.
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub notification_method: NotificationMethod,
     /// Vestigial: retained for config compatibility. Custom models are now
     /// provided as backends discovered under [`backends_dir`].
     #[serde(default)]
@@ -144,6 +152,7 @@ impl Default for DaemonConfig {
                 preview_typing_enabled: false, // Default to disabled (beta feature)
                 recording_stop_mode: RecordingStopMode::default(),
                 write_method: WriteMethod::default(),
+                notification_method: NotificationMethod::default(),
                 custom_models_dir: None,
                 backends_dir: None,
                 active_backend: None,

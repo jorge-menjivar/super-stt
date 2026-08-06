@@ -59,6 +59,13 @@ pub enum Command {
         method: WriteMethod,
     },
     GetWriteMethod,
+    /// The raw wire string, unparsed. `handle_set_notification_method` parses
+    /// it (mirrors `SetAudioTheme`) so an unrecognized value can be rejected
+    /// with a classified `error_code` (400), not just a bare error string.
+    SetNotificationMethod {
+        method: String,
+    },
+    GetNotificationMethod,
     SetVolume {
         volume: u8,
     },
