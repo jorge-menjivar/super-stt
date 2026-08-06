@@ -84,7 +84,7 @@ To stop an in-flight daemon-mic capture, see
 | `event:`   | `data:` payload                       | When                                                                  |
 |------------|---------------------------------------|-----------------------------------------------------------------------|
 | `preview`  | `{ "text": "hello wor…" }`            | Streaming preview while audio keeps arriving                          |
-| `done`     | `{ "transcription": "hello world" }`  | Final transcription; stream closes after this                         |
+| `done`     | `{ "transcription": "hello world" }`  | Final transcription; stream closes after this. Empty when the captured take had no speech — that capture still completes successfully. |
 | `error`    | `{ "message": "..." }`                | Fatal error before `done`; stream closes after this                   |
 
 The daemon also writes SSE comment frames (lines starting with `:`) —
@@ -125,14 +125,17 @@ when a capture is already in progress.
 | 429  | `rate_limited`                     | Per-client rate limit hit; back off and retry                           |
 | 503  | `connection_rejected`              | Server refused the connection                                           |
 
-When the request set `write_mode: true`, a failure also types a short fixed
-notice into the focused window — for example `[Super STT: no model loaded]` —
-because a write-mode client is looking at a text field rather than at this
-response. The notice is a fixed daemon-authored string; backend-supplied error
-detail is never typed. The failure is still reported normally — as the direct
-error response (e.g. `409 model_not_loaded`, checked and answered before the
-`202`/SSE envelope for a daemon-mic capture commits) or, once an SSE stream has
-started, via the `error` event — with an empty transcription.
+A failure is also surfaced to the user according to the
+[`/notification_method`](./notification_method.md) setting. With the default,
+`auto`, the daemon sends a desktop notification; typing a short fixed notice
+into the focused window — for example `[Super STT: no model loaded]` — happens
+only as a fallback when notification delivery fails, and only for a request
+that set `write_mode: true`. The notice is a fixed daemon-authored string;
+backend-supplied error detail is never typed. The failure is still reported
+normally — as the direct error response (e.g. `409 model_not_loaded`, checked
+and answered before the `202`/SSE envelope for a daemon-mic capture commits)
+or, once an SSE stream has started, via the `error` event — with an empty
+transcription.
 
 Once an SSE response has started (`200 text/event-stream`), late
 errors arrive as an in-stream `event: error` block followed by the

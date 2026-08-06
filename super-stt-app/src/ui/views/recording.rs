@@ -141,6 +141,7 @@ fn test_section<'a>(
 }
 
 /// Recording page: settings + test recording
+// reason: one parameter per piece of view state the page renders; grouping them would only add indirection.
 #[allow(clippy::too_many_arguments)]
 pub fn page<'a>(
     recording_stop_mode: RecordingStopMode,

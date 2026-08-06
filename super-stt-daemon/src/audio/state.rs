@@ -202,8 +202,7 @@ mod tests {
             process_audio_samples(&samples, &buffer, &state, &level_tx);
         }
 
-        let flipped = state.lock().recording;
-        flipped
+        state.lock().recording
     }
 
     /// The whole silence gate rests on this: a take with no speech must leave

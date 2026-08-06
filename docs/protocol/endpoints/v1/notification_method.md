@@ -4,7 +4,8 @@ Read and set how the daemon surfaces a recording failure to the user.
 
 A failure — no model loaded, the recorder could not start, capture died
 partway, or the model could not transcribe the audio — is reported to the
-caller in the response and on the `error` event regardless of this setting.
+caller regardless of this setting: as the direct error response (e.g. `409
+model_not_loaded`) or, once an SSE stream has started, via the `error` event.
 This setting controls the additional, human-facing notice.
 
 | Method  | Notes                                                                                          |
