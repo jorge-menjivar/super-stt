@@ -1438,6 +1438,10 @@ async fn handle_transcribe_errors_when_no_model_loaded() {
 // what the preflight does, not how long the notice waits.
 #[tokio::test(start_paused = true)]
 async fn record_with_no_model_types_a_notice_in_write_mode() {
+    // `test_daemon()` carries a notifier that always fails delivery (never
+    // the real session bus — see its doc comment), so the config-default
+    // `Auto` method falls through to typing here; that fallback is what this
+    // test checks.
     let daemon = test_daemon().await;
     let (sim, buf) = crate::output::keyboard::Simulator::capture();
     let mut typer = crate::output::typer::Typer::new(sim);
@@ -1460,6 +1464,8 @@ async fn record_with_no_model_types_a_notice_in_write_mode() {
 /// the error response and nothing is typed.
 #[tokio::test]
 async fn record_with_no_model_types_nothing_without_write_mode() {
+    // See the write-mode test above: `test_daemon()`'s notifier never reaches
+    // the real session bus.
     let daemon = test_daemon().await;
     let (sim, buf) = crate::output::keyboard::Simulator::capture();
     let mut typer = crate::output::typer::Typer::new(sim);

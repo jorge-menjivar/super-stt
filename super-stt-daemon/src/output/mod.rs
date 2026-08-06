@@ -2,5 +2,6 @@
 
 pub mod keyboard;
 pub(crate) mod notice;
+pub mod notification;
 pub mod preview;
 pub mod typer;

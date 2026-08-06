@@ -108,6 +108,9 @@ impl SuperSTTDaemon {
             preview_text: Arc::new(tokio::sync::RwLock::new(None)),
             backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             active_backend: Arc::new(tokio::sync::RwLock::new(active_backend)),
+            notifier: Arc::new(tokio::sync::Mutex::new(
+                crate::output::notification::Notifier::dbus(),
+            )),
         };
 
         daemon.post_init().await;
