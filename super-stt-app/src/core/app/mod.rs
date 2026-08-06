@@ -131,6 +131,9 @@ pub struct AppModel {
     // Write method
     pub write_method: super_stt_shared::models::write_method::WriteMethod,
 
+    // Notification method
+    pub notification_method: super_stt_shared::models::notification_method::NotificationMethod,
+
     // Master volume (0-100)
     pub volume: u8,
     /// Last value successfully committed to (or loaded from) the daemon. The

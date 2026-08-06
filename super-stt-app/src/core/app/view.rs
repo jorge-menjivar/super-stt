@@ -162,6 +162,7 @@ impl AppModel {
             Page::Recording => views::recording::page(
                 self.recording_stop_mode,
                 self.preview_typing_enabled,
+                self.notification_method,
                 &self.recording_status,
                 &self.transcription_text,
                 self.audio_level,

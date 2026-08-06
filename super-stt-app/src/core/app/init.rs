@@ -127,6 +127,8 @@ impl AppModel {
             recording_stop_mode:
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),
+            notification_method:
+                super_stt_shared::models::notification_method::NotificationMethod::default(),
             volume: 100,
             last_committed_volume: 100,
 

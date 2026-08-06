@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::AppModel;
-use crate::daemon::client::{set_preview_typing, set_recording_stop_mode, set_write_method};
+use crate::daemon::client::{
+    set_notification_method, set_preview_typing, set_recording_stop_mode, set_write_method,
+};
 use crate::ui::messages::{
-    Message, PreviewTypingMessage, RecordingStopModeMessage, WriteMethodMessage,
+    Message, NotificationMethodMessage, PreviewTypingMessage, RecordingStopModeMessage,
+    WriteMethodMessage,
 };
 use cosmic::prelude::*;
 
@@ -121,6 +124,46 @@ impl AppModel {
                 self.set_action_error(
                     crate::state::ErrorScope::InputSimulation,
                     format!("Couldn't save write method: {err}"),
+                );
+                Task::none()
+            }
+        }
+    }
+
+    /// Handle notification method messages
+    pub(in crate::core::app) fn handle_notification_method_messages(
+        &mut self,
+        message: NotificationMethodMessage,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
+            // Confirm-then-apply, as with the write method: apply only on the
+            // daemon ack so a failed save doesn't strand an optimistic value.
+            NotificationMethodMessage::Changed(method) => {
+                let method_str = method.to_string();
+                Task::perform(
+                    set_notification_method(method_str),
+                    move |result| match result {
+                        Ok(()) => cosmic::Action::App(Message::NotificationMethod(
+                            NotificationMethodMessage::Loaded(method),
+                        )),
+                        Err(e) => cosmic::Action::App(Message::NotificationMethod(
+                            NotificationMethodMessage::Error(e.to_string()),
+                        )),
+                    },
+                )
+            }
+
+            NotificationMethodMessage::Loaded(method) => {
+                self.notification_method = method;
+                self.clear_action_error(crate::state::ErrorScope::Recording);
+                Task::none()
+            }
+
+            NotificationMethodMessage::Error(err) => {
+                log::warn!("Notification method error: {err}");
+                self.set_action_error(
+                    crate::state::ErrorScope::Recording,
+                    format!("Couldn't save notification method: {err}"),
                 );
                 Task::none()
             }
