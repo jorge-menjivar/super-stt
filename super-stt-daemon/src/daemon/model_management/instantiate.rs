@@ -279,6 +279,16 @@ impl SuperSTTDaemon {
         if raw.trim().is_empty() {
             overrides.remove(name);
         } else if let Some(canonical) = backends::base_url::normalize(&raw) {
+            // The scheme the daemon chose for a value that named none decides
+            // whether the request is encrypted, so an operator asking later why
+            // a gateway was reached in the clear needs it on the record.
+            if !raw.contains("://") {
+                log::info!(
+                    "Backend {}: base_url `{}` names no scheme; reading it as `{canonical}`",
+                    backend.source,
+                    raw.trim()
+                );
+            }
             overrides.insert(name.to_string(), canonical);
         } else {
             // Shaped like the missing-secret error above: name the setting the

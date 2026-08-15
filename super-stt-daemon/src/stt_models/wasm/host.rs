@@ -197,7 +197,7 @@ fn guard_egress_host(
 /// Parse a host that is an IP literal, accepting the bracketed IPv6 form
 /// (`[::1]`) a URI authority carries. `None` for a hostname, which is resolved
 /// instead.
-fn ip_literal(host: &str) -> Option<IpAddr> {
+pub(crate) fn ip_literal(host: &str) -> Option<IpAddr> {
     host.strip_prefix('[')
         .and_then(|inner| inner.strip_suffix(']'))
         .unwrap_or(host)
@@ -308,7 +308,7 @@ fn is_never_routable_v4(v4: Ipv4Addr) -> bool {
 
 /// Loopback and private addresses: off-limits to a manifest-declared
 /// destination, reachable for the endpoint the user named.
-fn is_local_ip(ip: &IpAddr) -> bool {
+pub(crate) fn is_local_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => is_local_v4(*v4),
         IpAddr::V6(v6) => {
