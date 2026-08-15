@@ -52,12 +52,34 @@ identity-checks the manifest). The synchronous response carries
 ```
 
 The daemon reads `<local_path>/backend.toml`, validates the manifest, and
-copies the directory contents into the backends directory as if a registry
-install had completed. No network access. No checksum verification — the
-operator chose the bytes. Symlinks in the directory are rejected (so an import
-cannot copy a link target's bytes into the install dir). The synchronous
-response carries `warning: "unverified_source"`; the `selected_asset` reflects
-the local copy with `accel = "local"` and an empty `target`.
+copies the backend into the backends directory as if a registry install had
+completed. No network access. No checksum verification — the operator chose the
+bytes. Symlinks are rejected (so an import cannot copy a link target's bytes
+into the install dir). The synchronous response carries
+`warning: "unverified_source"`; the `selected_asset` reflects the local copy
+with `accel = "local"` and an empty `target`.
+
+What gets copied depends on `[backend].kind`, and mirrors what a registry
+install of that kind produces:
+
+| Kind         | Copied                                                                 |
+|--------------|------------------------------------------------------------------------|
+| `wasm`       | `backend.toml` and the file `[backend].entrypoint` names — nothing else. |
+| `subprocess` | The directory tree, minus VCS metadata (`.git`).                        |
+
+A `wasm` install is exactly those two files, so the import takes them and
+ignores everything beside them: pointing `local_path` at a source checkout
+copies neither the build tree nor the repository history.
+
+A `subprocess` executable may need siblings no manifest field declares — a
+bundled interpreter, shared libraries, resource files — and the registry
+equivalent is an opaque tarball, so the whole tree is taken. Stage a
+subprocess backend as the directory you would have tarred, not as a source
+checkout: everything beside the executable is copied verbatim.
+
+Model files are not part of either copy. The daemon downloads each
+[`[[models.files]]`](../../../backend/config.md#modelsfiles) entry into its
+`destination` at load time.
 
 The directory must already contain the file `[backend].entrypoint` names — the
 `.wasm` component or the executable. A registry release ships it built and
