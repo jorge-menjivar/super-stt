@@ -2,7 +2,7 @@
 //! Per-`Store` host state for running a WASM backend component, including the
 //! outbound-host allowlist that confines a component's network egress.
 
-use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
@@ -242,6 +242,50 @@ fn is_egress_permitted(ip: &IpAddr, allow_loopback: bool, scope: EgressScope) ->
     }
 }
 
+/// The IPv4 destination an IPv6 address stands for, when it embeds one.
+///
+/// Four encodings reach the same host as the bare v4 address and so must be
+/// judged by the v4 rules, not treated as opaque IPv6: the mapped form
+/// (`::ffff:a.b.c.d`), the deprecated compatible form (`::a.b.c.d`), the NAT64
+/// well-known prefix (`64:ff9b::a.b.c.d`, routed on IPv6-only networks), and
+/// 6to4 (`2002:a.b.c.d::`). Classifying only the mapped form left the other
+/// three looking like ordinary public IPv6, so `64:ff9b::c0a8:101` — a private
+/// LAN address reachable through any NAT64 gateway — passed the guard.
+///
+/// Judged by their embedded address rather than refused outright: a public v4
+/// behind NAT64 is how an IPv6-only network reaches the v4 internet at all, and
+/// a backend's own upstream may sit there.
+///
+/// `::1` and `::` embed nothing — `to_ipv4` would render them `0.0.0.1` and
+/// `0.0.0.0`, neither loopback nor unspecified — so they return `None` here and
+/// stay with the IPv6 checks that do recognize them.
+fn embedded_v4(v6: Ipv6Addr) -> Option<Ipv4Addr> {
+    if v6.is_loopback() || v6.is_unspecified() {
+        return None;
+    }
+    let seg = v6.segments();
+    let from_low_32 = || {
+        Ipv4Addr::new(
+            seg[6].to_be_bytes()[0],
+            seg[6].to_be_bytes()[1],
+            seg[7].to_be_bytes()[0],
+            seg[7].to_be_bytes()[1],
+        )
+    };
+    // NAT64 well-known prefix, RFC 6052: 64:ff9b::/96.
+    if seg[0] == 0x0064 && seg[1] == 0xff9b && seg[2..6].iter().all(|&s| s == 0) {
+        return Some(from_low_32());
+    }
+    // 6to4, RFC 3056: 2002:<v4>::/48.
+    if seg[0] == 0x2002 {
+        let [a, b] = seg[1].to_be_bytes();
+        let [c, d] = seg[2].to_be_bytes();
+        return Some(Ipv4Addr::new(a, b, c, d));
+    }
+    // Mapped (`::ffff:a.b.c.d`) and the deprecated compatible form (`::a.b.c.d`).
+    v6.to_ipv4()
+}
+
 /// Addresses no allowlist authorizes, whoever wrote it: the link-local range
 /// (the cloud metadata endpoint `169.254.169.254` among it), the unspecified
 /// address, and broadcast.
@@ -249,11 +293,8 @@ fn is_never_routable_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => is_never_routable_v4(*v4),
         IpAddr::V6(v6) => {
-            // An IPv4-mapped address (`::ffff:a.b.c.d`) reaches the same host
-            // as the bare v4 — e.g. `::ffff:169.254.169.254` is the metadata
-            // endpoint — so re-check it through the v4 rules.
-            if let Some(mapped) = v6.to_ipv4_mapped() {
-                return is_never_routable_v4(mapped);
+            if let Some(v4) = embedded_v4(*v6) {
+                return is_never_routable_v4(v4);
             }
             v6.is_unspecified() || v6.is_unicast_link_local()
         }
@@ -270,8 +311,8 @@ fn is_local_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => is_local_v4(*v4),
         IpAddr::V6(v6) => {
-            if let Some(mapped) = v6.to_ipv4_mapped() {
-                return is_local_v4(mapped);
+            if let Some(v4) = embedded_v4(*v6) {
+                return is_local_v4(v4);
             }
             v6.is_loopback() || v6.is_unique_local()
         }
@@ -306,6 +347,56 @@ mod tests {
         assert!(is_local_ip(&ip("fd12:3456::1")), "unique-local");
         assert!(is_local_ip(&ip("::1")), "loopback");
         assert!(is_local_ip(&ip("::ffff:127.0.0.1")), "mapped loopback");
+    }
+
+    /// Every IPv6 encoding that embeds a v4 destination is judged by the v4
+    /// rules. Classifying only the mapped form left the compatible, NAT64, and
+    /// 6to4 forms looking like ordinary public IPv6 — and `64:ff9b::/96` is
+    /// routed on IPv6-only networks, so a private LAN address behind a NAT64
+    /// gateway passed the guard.
+    #[test]
+    fn embedded_ipv4_forms_are_judged_as_ipv4() {
+        for addr in [
+            "::ffff:127.0.0.1",  // mapped
+            "::127.0.0.1",       // deprecated compatible form
+            "64:ff9b::7f00:1",   // NAT64
+            "2002:7f00:1::",     // 6to4
+            "64:ff9b::c0a8:101", // 192.168.1.1 through NAT64
+            "2002:c0a8:101::",   // 192.168.1.1 through 6to4
+        ] {
+            assert!(is_local_ip(&ip(addr)), "{addr} embeds a local v4");
+        }
+        for addr in [
+            "::ffff:169.254.169.254",
+            "::169.254.169.254",
+            "64:ff9b::a9fe:a9fe",
+            "2002:a9fe:a9fe::",
+        ] {
+            assert!(
+                is_never_routable_ip(&ip(addr)),
+                "{addr} embeds the metadata endpoint"
+            );
+        }
+    }
+
+    /// `::1` and `::` embed nothing: converting them to v4 would render
+    /// `0.0.0.1` and `0.0.0.0`, so a conversion applied first would stop
+    /// recognizing loopback as loopback.
+    #[test]
+    fn ipv6_loopback_and_unspecified_survive_the_v4_normalization() {
+        assert!(is_local_ip(&ip("::1")), "::1 is loopback, not 0.0.0.1");
+        assert!(!is_never_routable_ip(&ip("::1")));
+        assert!(is_never_routable_ip(&ip("::")));
+    }
+
+    /// A *public* v4 behind NAT64 must stay reachable — it is how an IPv6-only
+    /// network reaches the v4 internet, and a backend's own upstream may sit
+    /// there. The fix classifies these forms, it does not refuse them.
+    #[test]
+    fn a_public_v4_behind_nat64_stays_reachable() {
+        let addr = ip("64:ff9b::5db8:d822"); // 93.184.216.34
+        assert!(!is_never_routable_ip(&addr));
+        assert!(!is_local_ip(&addr));
     }
 
     #[test]
