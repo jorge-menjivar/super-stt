@@ -83,13 +83,13 @@ async fn egress_lists_reach_the_hooks_in_their_own_slots() {
 
     let hooks = backend.allowlist_hooks();
     assert_eq!(
-        hooks.allowed_hosts,
-        vec!["manifest.example".to_string()],
+        &*hooks.allowed_hosts,
+        ["manifest.example".to_string()],
         "the manifest list must stay in the SSRF-guarded slot"
     );
     assert_eq!(
-        hooks.user_allowed_hosts,
-        vec!["gw.example:8443".to_string(), "gw.example".to_string()],
+        &*hooks.user_allowed_hosts,
+        ["gw.example:8443".to_string(), "gw.example".to_string()],
         "the user's endpoint must stay in the relaxed slot"
     );
     assert!(
