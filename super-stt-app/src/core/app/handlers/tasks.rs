@@ -4,13 +4,13 @@
 //! result-to-`Message` mapping isn't re-rolled at each call site.
 
 use crate::daemon::client::{
-    get_current_audio_theme, get_custom_models_dir, get_preview_typing, get_recording_stop_mode,
-    get_volume, get_write_method, list_backends, ping_daemon,
+    get_current_audio_theme, get_custom_models_dir, get_notification_method, get_preview_typing,
+    get_recording_stop_mode, get_volume, get_write_method, list_backends, ping_daemon,
 };
 use crate::state::AudioTheme;
 use crate::ui::messages::{
-    BackendMessage, DaemonMessage, Message, ModelsPageMessage, PreviewTypingMessage,
-    RecordingStopModeMessage, WriteMethodMessage,
+    BackendMessage, DaemonMessage, Message, ModelsPageMessage, NotificationMethodMessage,
+    PreviewTypingMessage, RecordingStopModeMessage, WriteMethodMessage,
 };
 use cosmic::prelude::*;
 use log::warn;
@@ -133,6 +133,23 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
                     cosmic::Action::App(Message::WriteMethod(WriteMethodMessage::Loaded(
                         WriteMethod::default(),
                     )))
+                }
+            }
+        }),
+        Task::perform(get_notification_method(), |result| {
+            use super_stt_shared::models::notification_method::NotificationMethod;
+            match result {
+                Ok(method_str) => {
+                    let method = method_str.parse::<NotificationMethod>().unwrap_or_default();
+                    cosmic::Action::App(Message::NotificationMethod(
+                        NotificationMethodMessage::Loaded(method),
+                    ))
+                }
+                Err(e) => {
+                    warn!("Failed to load notification method: {e}");
+                    cosmic::Action::App(Message::NotificationMethod(
+                        NotificationMethodMessage::Loaded(NotificationMethod::default()),
+                    ))
                 }
             }
         }),

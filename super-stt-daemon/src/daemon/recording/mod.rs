@@ -27,11 +27,28 @@ struct RecordingSession {
     // Shared with the recorder's ring buffer (`get_audio_buffer_ref`), which is
     // a `parking_lot::Mutex` (Tier 3 #5).
     pub(super) preview_buffer: Arc<parking_lot::Mutex<VecDeque<f32>>>,
+    // Shared with the recorder's speech-detection state. `recording` is a
+    // one-way per-take latch: false after the take means no speech was ever
+    // detected, so there is nothing to transcribe.
+    pub(super) speech_state: Arc<parking_lot::Mutex<crate::audio::state::RecordingState>>,
     pub(super) device_sample_rate: u32,
     pub(super) start_time: Instant,
 }
 
 impl SuperSTTDaemon {
+    /// Surface a recording failure through the user's configured channel.
+    ///
+    /// The failure is always reported to the caller through the response and
+    /// the `error` event; this is the additional human-facing notice. It fires
+    /// for every recording, write mode or not — the trigger is the failure, not
+    /// the output mode.
+    async fn surface_failure(&self, typer: &mut Typer, notice: &'static str, write_mode: bool) {
+        let method = self.config.read().await.transcription.notification_method;
+        let mut notifier = self.notifier.lock().await;
+        crate::output::notification::deliver(method, &mut notifier, typer, notice, write_mode)
+            .await;
+    }
+
     /// Internal record handling implementation
     pub async fn handle_record_internal(
         &self,
@@ -58,9 +75,8 @@ impl SuperSTTDaemon {
         // reason lands in the field they are actually looking at.
         if self.model.read().await.is_none() {
             warn!("Recording request rejected - no model loaded");
-            if write_mode {
-                typer.type_notice(notice::NO_MODEL_LOADED).await;
-            }
+            self.surface_failure(typer, notice::NO_MODEL_LOADED, write_mode)
+                .await;
             return DaemonResponse::error_with_code(
                 ErrorCode::ModelNotLoaded,
                 "No model is loaded. Load a model and try again.",
@@ -102,9 +118,8 @@ impl SuperSTTDaemon {
                     let mut guard = self.busy.write().await;
                     *guard = false;
                 }
-                if write_mode {
-                    typer.type_notice(notice::COULD_NOT_START_RECORDING).await;
-                }
+                self.surface_failure(typer, notice::COULD_NOT_START_RECORDING, write_mode)
+                    .await;
                 DaemonResponse::error(&format!("Recording failed: {e}"))
             }
         }
@@ -144,6 +159,9 @@ impl SuperSTTDaemon {
         self.run_preview_loop(&session, typer, write_mode, request_language)
             .await;
 
+        // Cloned out before `collect_and_clear_preview` consumes the session.
+        let speech_state = Arc::clone(&session.speech_state);
+
         // Phase 3: await the recorder; the mic releases here.
         let full_audio_data = match self
             .collect_and_clear_preview(session, typer, write_mode)
@@ -161,12 +179,30 @@ impl SuperSTTDaemon {
                 warn!("Recording capture failed: {e}");
                 self.finalize_recording_session("", false, Some(e.to_string()))
                     .await;
-                if write_mode {
-                    typer.type_notice(notice::RECORDING_FAILED).await;
-                }
+                self.surface_failure(typer, notice::RECORDING_FAILED, write_mode)
+                    .await;
                 return Ok(Err(format!("recording error: {e}")));
             }
         };
+
+        // Nothing was spoken. Stopping a recording without speaking is not a
+        // failure, so the backend is never asked to transcribe silence and
+        // nothing is typed — the cycle simply completes with no text.
+        if !speech_state.lock().recording {
+            info!("🎤 No speech detected during the take; skipping transcription");
+            if write_mode {
+                // Typed nothing, but the per-recording transcript state still
+                // has to be cleared or it feeds the next recording's preview
+                // tail-matching.
+                typer.reset_after_recording(String::new());
+            }
+            // `transcribing_started` is deliberately NOT emitted: decode never
+            // begins. `finalize_recording_session` still emits `final_stt` with
+            // empty text plus the closing `transcribing_stopped`, which is what
+            // the events contract requires (docs/protocol/endpoints/v1/events.md).
+            self.finalize_recording_session("", true, None).await;
+            return Ok(Ok(String::new()));
+        }
 
         // Phase 4: final transcription.
         self.emit_transcribing_started();
@@ -183,9 +219,8 @@ impl SuperSTTDaemon {
                 warn!("Final transcription failed: {e}");
                 self.finalize_recording_session("", false, Some(e.to_string()))
                     .await;
-                if write_mode {
-                    typer.type_notice(notice::TRANSCRIPTION_FAILED).await;
-                }
+                self.surface_failure(typer, notice::TRANSCRIPTION_FAILED, write_mode)
+                    .await;
                 return Ok(Err(format!("STT error: {e}")));
             }
         };

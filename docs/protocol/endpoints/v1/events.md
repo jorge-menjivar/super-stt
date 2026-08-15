@@ -88,7 +88,9 @@ that follows.
 
 **Lifecycle terminal and optional events:**
 - `transcribing_started` is emitted only when model decode actually begins
-  (Phase 4). If the cycle fails during audio capture it is skipped entirely.
+  (Phase 4). It is skipped entirely when the cycle fails during audio capture,
+  and when the capture contained no speech — in the latter case the cycle still
+  completes successfully, with `final_stt` carrying empty text.
 - `final_stt` is emitted only on a successful transcription (including "no
   speech detected", where `text` is empty). A failed cycle reports its error
   via `transcribing_stopped.error`; no `final_stt` is emitted.

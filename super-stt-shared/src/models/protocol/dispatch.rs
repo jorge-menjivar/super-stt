@@ -38,6 +38,8 @@ impl TryFrom<DaemonRequest> for Command {
             "get_recording_stop_mode" => Ok(Command::GetRecordingStopMode),
             "set_write_method" => cmd_set_write_method(&request),
             "get_write_method" => Ok(Command::GetWriteMethod),
+            "set_notification_method" => cmd_set_notification_method(&request),
+            "get_notification_method" => Ok(Command::GetNotificationMethod),
             "set_volume" => cmd_set_volume(&request),
             "get_volume" => Ok(Command::GetVolume),
             "set_primary_language" => cmd_set_primary_language(&request),
@@ -218,6 +220,18 @@ fn cmd_set_write_method(request: &DaemonRequest) -> Result<Command, String> {
         .parse::<WriteMethod>()
         .map_err(|e| format!("Invalid input method: {e}"))?;
     Ok(Command::SetWriteMethod { method })
+}
+
+fn cmd_set_notification_method(request: &DaemonRequest) -> Result<Command, String> {
+    let method = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("method"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing method for set_notification_method command")?
+        .to_string();
+
+    Ok(Command::SetNotificationMethod { method })
 }
 
 fn cmd_set_allow_online_models(request: &DaemonRequest) -> Result<Command, String> {

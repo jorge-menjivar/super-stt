@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
@@ -103,6 +104,13 @@ pub struct TranscriptionConfig {
         deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub write_method: WriteMethod,
+    /// How a recording failure is surfaced to the user. An unparseable stored
+    /// value degrades to the default rather than failing the whole config load.
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub notification_method: NotificationMethod,
     /// Vestigial: retained for config compatibility. Custom models are now
     /// provided as backends discovered under [`backends_dir`].
     #[serde(default)]
@@ -144,6 +152,7 @@ impl Default for DaemonConfig {
                 preview_typing_enabled: false, // Default to disabled (beta feature)
                 recording_stop_mode: RecordingStopMode::default(),
                 write_method: WriteMethod::default(),
+                notification_method: NotificationMethod::default(),
                 custom_models_dir: None,
                 backends_dir: None,
                 active_backend: None,
@@ -155,10 +164,43 @@ impl Default for DaemonConfig {
     }
 }
 
+/// The `daemon.toml` path used by `DaemonConfig::get_config_path()` under
+/// `#[cfg(test)]`: a directory under the OS temp dir, unique per test
+/// *process* (keyed by pid) and cached for the life of that process so every
+/// test in the binary agrees on the same path. This is what keeps unit tests
+/// that call `load()`/`save()` off the developer's real config file.
+#[cfg(test)]
+fn test_config_path() -> PathBuf {
+    use std::sync::OnceLock;
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    PATH.get_or_init(|| {
+        let dir =
+            std::env::temp_dir().join(format!("super-stt-test-config-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        dir.join("daemon.toml")
+    })
+    .clone()
+}
+
 impl DaemonConfig {
-    /// Get the config file path
+    /// Get the config file path.
+    ///
+    /// Under `#[cfg(test)]` this resolves to a process-local temp file instead
+    /// of the real XDG config path, so `load()`/`save()` in this crate's unit
+    /// tests can never read or clobber the developer's real
+    /// `~/.config/super-stt/daemon.toml`. Known limitation: this only covers
+    /// unit tests compiled *into* this crate (`cfg(test)`). Integration tests
+    /// under `tests/` link against the crate without `cfg(test)`, so they
+    /// still resolve the real path — not addressed here.
     fn get_config_path() -> PathBuf {
-        super_stt_shared::paths::config_dir().join("daemon.toml")
+        #[cfg(test)]
+        {
+            test_config_path()
+        }
+        #[cfg(not(test))]
+        {
+            super_stt_shared::paths::config_dir().join("daemon.toml")
+        }
     }
 
     /// Parse config file `content` into a [`DaemonConfig`], falling back to

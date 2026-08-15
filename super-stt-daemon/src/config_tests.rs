@@ -590,6 +590,75 @@ fn a_model_switch_updates_preferred_provider() {
     assert_eq!(config.transcription.preferred_provider, "");
 }
 
+/// A stored method round-trips.
+#[test]
+fn daemon_config_reads_notification_method() {
+    let toml = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "classic"
+volume = 100
+
+[transcription]
+preferred_model = "whisper"
+notification_method = "dbus"
+"#;
+    let cfg: DaemonConfig = toml::from_str(toml).unwrap();
+    assert_eq!(
+        cfg.transcription.notification_method,
+        NotificationMethod::Dbus
+    );
+}
+
+/// Config-load resilience: an unknown stored value degrades to the default
+/// instead of failing the whole parse. (The wire setter, by contrast, rejects
+/// it — see the endpoint doc.)
+#[test]
+fn daemon_bad_notification_method_falls_back_preserving_rest() {
+    let toml = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "classic"
+volume = 100
+
+[transcription]
+preferred_model = "whisper"
+notification_method = "BogusMethod"
+write_method = "ydotool"
+"#;
+    let cfg: DaemonConfig = toml::from_str(toml).unwrap();
+    assert_eq!(
+        cfg.transcription.notification_method,
+        NotificationMethod::default()
+    );
+    assert_eq!(cfg.transcription.write_method, WriteMethod::Ydotool);
+}
+
+/// An absent field is the default.
+#[test]
+fn daemon_missing_notification_method_is_auto() {
+    let toml = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "classic"
+volume = 100
+
+[transcription]
+preferred_model = "whisper"
+"#;
+    let cfg: DaemonConfig = toml::from_str(toml).unwrap();
+    assert_eq!(
+        cfg.transcription.notification_method,
+        NotificationMethod::Auto
+    );
+}
+
 /// Every path that drops the model preference drops the provider with it —
 /// otherwise the persisted triple names a model that is no longer selected.
 #[test]

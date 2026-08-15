@@ -8,6 +8,7 @@
 //! `match`es its sub-enum exhaustively — so a newly added variant is a compile
 //! error at both ends instead of silently falling through to `Task::none()`.
 
+use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 
@@ -28,6 +29,7 @@ pub enum Message {
     PreviewTyping(PreviewTypingMessage),
     RecordingStopMode(RecordingStopModeMessage),
     WriteMethod(WriteMethodMessage),
+    NotificationMethod(NotificationMethodMessage),
     Backend(BackendMessage),
     Language(LanguageMessage),
     Recording(RecordingMessage),
@@ -267,6 +269,14 @@ pub enum WriteMethodMessage {
     Error(String),
 }
 
+/// Notification-method setting.
+#[derive(Debug, Clone)]
+pub enum NotificationMethodMessage {
+    Changed(NotificationMethod),
+    Loaded(NotificationMethod),
+    Error(String),
+}
+
 /// Backend catalog + per-backend secret/option configuration.
 /// Secrets are managed via the daemon's secrets endpoints; options go to the
 /// daemon config via the client.
@@ -414,6 +424,7 @@ message_from! {
     PreviewTyping => PreviewTypingMessage,
     RecordingStopMode => RecordingStopModeMessage,
     WriteMethod => WriteMethodMessage,
+    NotificationMethod => NotificationMethodMessage,
     Backend => BackendMessage,
     Language => LanguageMessage,
     Recording => RecordingMessage,

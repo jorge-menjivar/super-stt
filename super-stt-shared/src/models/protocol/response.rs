@@ -102,6 +102,10 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write_method: Option<String>,
 
+    // Notification method
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notification_method: Option<String>,
+
     // Streaming preview text (intermediate transcription during recording)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_text: Option<String>,
@@ -362,6 +366,12 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_write_method(mut self, method: String) -> Self {
         self.write_method = Some(method);
+        self
+    }
+
+    #[must_use]
+    pub fn with_notification_method(mut self, method: String) -> Self {
+        self.notification_method = Some(method);
         self
     }
 

@@ -161,7 +161,12 @@ impl RecordingState {
 
 #[cfg(test)]
 mod tests {
-    use super::RecordingState;
+    use super::*;
+    use crate::audio::processing::process_audio_samples;
+    use parking_lot::Mutex;
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use tokio::sync::broadcast;
 
     /// A non-finite RMS (an empty capture buffer computes `0.0/0.0 = NaN`, and a
     /// misbehaving device can deliver NaN samples) must not reach the percentile
@@ -182,6 +187,64 @@ mod tests {
         assert!(
             state.active_level.is_finite(),
             "active level poisoned by NaN"
+        );
+    }
+
+    /// Drive `process_audio_samples` over `chunks` chunks of constant
+    /// amplitude and report whether the speech latch ever flipped.
+    fn latch_after_chunks(amplitude: f32, chunks: usize) -> bool {
+        let buffer = Arc::new(Mutex::new(VecDeque::new()));
+        let state = Arc::new(Mutex::new(RecordingState::new()));
+        let (level_tx, _rx) = broadcast::channel(64);
+
+        let samples = vec![amplitude; 480];
+        for _ in 0..chunks {
+            process_audio_samples(&samples, &buffer, &state, &level_tx);
+        }
+
+        state.lock().recording
+    }
+
+    /// The whole silence gate rests on this: a take with no speech must leave
+    /// `recording` false, so the daemon can skip transcription.
+    #[test]
+    fn latch_stays_false_through_pure_silence() {
+        assert!(
+            !latch_after_chunks(0.0, 20),
+            "silence must never flip the speech latch"
+        );
+    }
+
+    /// And the converse — real audio must flip it, or the gate would swallow
+    /// genuine speech.
+    #[test]
+    fn latch_flips_on_speech_level_audio() {
+        assert!(
+            latch_after_chunks(0.5, 20),
+            "speech-level audio must flip the speech latch"
+        );
+    }
+
+    /// The latch is one-way within a take: speech followed by trailing silence
+    /// still reports that speech happened.
+    #[test]
+    fn latch_stays_true_after_speech_then_silence() {
+        let buffer = Arc::new(Mutex::new(VecDeque::new()));
+        let state = Arc::new(Mutex::new(RecordingState::new()));
+        let (level_tx, _rx) = broadcast::channel(64);
+
+        let loud = vec![0.5f32; 480];
+        for _ in 0..5 {
+            process_audio_samples(&loud, &buffer, &state, &level_tx);
+        }
+        let quiet = vec![0.0f32; 480];
+        for _ in 0..20 {
+            process_audio_samples(&quiet, &buffer, &state, &level_tx);
+        }
+
+        assert!(
+            state.lock().recording,
+            "trailing silence must not clear the latch"
         );
     }
 }

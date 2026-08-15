@@ -304,6 +304,16 @@ impl Typer {
     pub async fn process_final_text(&mut self, transcription_result: &str) {
         // No preview typing, type directly
         let processed_text = preprocess_text(transcription_result, false);
+
+        // An empty transcript has nothing to type. Without this guard the
+        // `format!("{processed_text} ")` below deposits a bare space into the
+        // user's focused window every time a recording produces no text.
+        if processed_text.trim().is_empty() {
+            info!("Final transcription is empty; typing nothing");
+            self.reset_after_recording(processed_text);
+            return;
+        }
+
         let final_text = format!("{processed_text} ");
         if let Err(e) = self.keyboard_simulator.type_text(&final_text).await {
             warn!("Failed to type final transcription: {e}");
@@ -311,9 +321,18 @@ impl Typer {
             info!("Step 6 complete: Final transcription typed directly");
         }
 
-        // Reset state for next sentence - but keep the full session text for user reference
+        self.reset_after_recording(processed_text);
+    }
+
+    /// Clear the per-recording transcript state so the next recording starts
+    /// clean. Preview tail-matching reads `full_session_text` and `prev_text`,
+    /// so anything left here would be treated as a prefix to extend.
+    ///
+    /// Split out of [`Self::process_final_text`] because the no-speech path
+    /// finishes a recording without typing anything and still has to reset.
+    pub fn reset_after_recording(&mut self, last_transcription: String) {
         self.state.prev_text.clear();
-        self.state.last_transcription = processed_text;
+        self.state.last_transcription = last_transcription;
         self.state.last_growth_time = std::time::Instant::now();
 
         info!(

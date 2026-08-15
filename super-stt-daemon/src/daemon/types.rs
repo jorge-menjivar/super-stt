@@ -85,6 +85,9 @@ pub struct SuperSTTDaemon {
     // of the selected backend, or None when idle. Runtime mirror of
     // `config.transcription.active_backend`.
     pub active_backend: Arc<tokio::sync::RwLock<Option<String>>>,
+    // Desktop-notification channel for recording failures. Behind a mutex
+    // because sending mutates the cached connection and the replaces-id.
+    pub notifier: Arc<tokio::sync::Mutex<crate::output::notification::Notifier>>,
 }
 
 /// A daemon wired up with inert defaults: no model, no backends, nothing
@@ -116,6 +119,17 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         preview_text: Arc::new(tokio::sync::RwLock::new(None)),
         backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         active_backend: Arc::new(tokio::sync::RwLock::new(None)),
+        // A fake notifier, not `Notifier::dbus()`: no daemon test may reach
+        // the real session bus, or it can pop a genuine desktop notification
+        // on whoever's machine runs the suite. `fail = true` mirrors a
+        // headless/no-notification-server environment, which is also what
+        // makes `NotificationMethod::Auto` (the config default) degrade to
+        // typing — the behavior the write-mode failure-notice tests assert.
+        // A test that genuinely needs delivery to succeed can override
+        // `daemon.notifier` after construction.
+        notifier: Arc::new(tokio::sync::Mutex::new(
+            crate::output::notification::Notifier::fake(true).0,
+        )),
     }
 }
 

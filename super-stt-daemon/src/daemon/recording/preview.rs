@@ -47,6 +47,9 @@ impl SuperSTTDaemon {
 
         // Get a reference to the recorder's internal audio buffer for direct preview access
         let preview_buffer = recorder.get_audio_buffer_ref();
+        // Same deal for the speech latch — must be cloned out before the
+        // recorder moves into its task below.
+        let speech_state = recorder.recording_state_ref();
 
         // Detect the actual device sample rate for correct buffer calculations.
         // This opens the cpal default input device, so run it on a blocking
@@ -82,6 +85,7 @@ impl SuperSTTDaemon {
             model_processing_interval,
             actually_typed,
             preview_buffer,
+            speech_state,
             device_sample_rate,
             start_time,
         })
