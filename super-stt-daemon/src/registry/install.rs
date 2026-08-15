@@ -266,7 +266,9 @@ where
 
     let src = src_dir.to_path_buf();
     let dst = staging.clone();
-    tokio::task::spawn_blocking(move || copy_dir_recursive(&src, &dst))
+    let kind = entry.kind.clone();
+    let entrypoint = entry.entrypoint.clone();
+    tokio::task::spawn_blocking(move || copy_staged_backend(&src, &dst, &kind, &entrypoint))
         .await
         .map_err(|e| {
             PipelineError::Io(std::io::Error::other(format!("copy join: {e}")))
@@ -284,11 +286,69 @@ where
     Ok(entry.version.clone())
 }
 
+/// Copy a locally-staged backend into `dst`, taking only what the install
+/// needs.
+///
+/// A `wasm` install *is* its manifest and its component — the two files [`run`]
+/// writes for a registry install of that kind — so an import takes those and
+/// ignores whatever sits beside them. That matters because the natural thing to
+/// point `local_path` at is a source checkout, where the build tree and the
+/// repository history dwarf the component by orders of magnitude and none of it
+/// is ever read again.
+///
+/// A `subprocess` executable is not self-contained in the same way: it may need
+/// siblings no manifest field declares — a bundled interpreter, shared
+/// libraries — and the registry equivalent is an opaque tarball, so its tree is
+/// copied whole. Only VCS metadata is dropped, being the one thing that cannot
+/// be a runtime dependency.
+fn copy_staged_backend(
+    src: &Path,
+    dst: &Path,
+    kind: &str,
+    entrypoint: &str,
+) -> std::io::Result<()> {
+    if kind == "subprocess" {
+        return copy_dir_recursive(src, dst);
+    }
+    // Joined onto a destination below, so it may not climb out of it. The
+    // manifest parser guards `[[models.files]].destination` this way; the
+    // entrypoint reaches the same join and gets the same guard.
+    if !super_stt_registry_types::is_safe_relative_path(entrypoint) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("refusing to import unsafe entrypoint path: {entrypoint}"),
+        ));
+    }
+    std::fs::create_dir_all(dst)?;
+    for name in ["backend.toml", entrypoint] {
+        let from = src.join(name);
+        let to = dst.join(name);
+        // Same policy as the tree copy: a link here would pull the target's
+        // bytes into the install dir.
+        if from.symlink_metadata()?.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("refusing to import symlink entry: {}", from.display()),
+            ));
+        }
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(&from, &to)?;
+    }
+    Ok(())
+}
+
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let from = entry.path();
+        // Repository history is never a runtime dependency, and it is the
+        // bulkiest thing a staged checkout carries after the build tree.
+        if entry.file_name() == ".git" {
+            continue;
+        }
         let to = dst.join(entry.file_name());
         // `read_dir`'s file_type does not follow links, so this detects the
         // link itself. Reject it: copying would follow the link and pull the
@@ -739,6 +799,100 @@ supported_devices = ["cpu"]
         std::os::unix::fs::symlink("/etc/hostname", src.path().join("link")).unwrap();
         let dst = tempfile::tempdir().unwrap();
         let err = copy_dir_recursive(src.path(), &dst.path().join("out")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    /// Lay out the shape an operator actually points `local_path` at: a source
+    /// checkout, where the component sits beside a build tree and a `.git`.
+    fn staged_checkout() -> tempfile::TempDir {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("backend.toml"), b"stub").unwrap();
+        std::fs::write(src.path().join("y.wasm"), b"component").unwrap();
+        std::fs::write(src.path().join("README.md"), b"docs").unwrap();
+        std::fs::create_dir_all(src.path().join("target/wasm32-wasip2/release")).unwrap();
+        std::fs::write(
+            src.path().join("target/wasm32-wasip2/release/y.wasm"),
+            b"build tree",
+        )
+        .unwrap();
+        std::fs::create_dir_all(src.path().join(".git/objects")).unwrap();
+        std::fs::write(src.path().join(".git/objects/pack"), b"history").unwrap();
+        src
+    }
+
+    /// A wasm install is its manifest and its component; an import copies those
+    /// and nothing else. The build tree and the history beside them are what
+    /// make a naive tree copy orders of magnitude larger than the install.
+    #[test]
+    fn wasm_import_copies_only_the_manifest_and_the_component() {
+        let src = staged_checkout();
+        let dst = tempfile::tempdir().unwrap();
+        let out = dst.path().join("out");
+        copy_staged_backend(src.path(), &out, "wasm", "y.wasm").unwrap();
+
+        assert_eq!(std::fs::read(out.join("y.wasm")).unwrap(), b"component");
+        assert!(out.join("backend.toml").is_file());
+        let mut copied: Vec<_> = std::fs::read_dir(&out)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        copied.sort();
+        assert_eq!(copied, ["backend.toml", "y.wasm"]);
+    }
+
+    /// A subprocess executable may need siblings no manifest field declares, so
+    /// its tree is taken whole — except the history, which cannot be one.
+    #[test]
+    fn subprocess_import_keeps_the_tree_but_drops_vcs_metadata() {
+        let src = staged_checkout();
+        let dst = tempfile::tempdir().unwrap();
+        let out = dst.path().join("out");
+        copy_staged_backend(src.path(), &out, "subprocess", "y.wasm").unwrap();
+
+        assert!(out.join("README.md").is_file());
+        assert!(out.join("target/wasm32-wasip2/release/y.wasm").is_file());
+        assert!(!out.join(".git").exists());
+    }
+
+    /// A nested entrypoint (`bin/qwen3-asr`) needs its parent created.
+    #[test]
+    fn wasm_import_creates_the_entrypoints_parent() {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("backend.toml"), b"stub").unwrap();
+        std::fs::create_dir(src.path().join("bin")).unwrap();
+        std::fs::write(src.path().join("bin/y.wasm"), b"component").unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let out = dst.path().join("out");
+        copy_staged_backend(src.path(), &out, "wasm", "bin/y.wasm").unwrap();
+        assert_eq!(std::fs::read(out.join("bin/y.wasm")).unwrap(), b"component");
+    }
+
+    /// The entrypoint is joined onto the destination, so a traversing value
+    /// would write outside the staging dir.
+    #[test]
+    fn wasm_import_rejects_an_escaping_entrypoint() {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("backend.toml"), b"stub").unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let err = copy_staged_backend(
+            src.path(),
+            &dst.path().join("out"),
+            "wasm",
+            "../escaped.wasm",
+        )
+        .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wasm_import_rejects_a_symlinked_entrypoint() {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("backend.toml"), b"stub").unwrap();
+        std::os::unix::fs::symlink("/etc/hostname", src.path().join("y.wasm")).unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let err =
+            copy_staged_backend(src.path(), &dst.path().join("out"), "wasm", "y.wasm").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
