@@ -164,6 +164,12 @@ egress set at model-load time, and the SSRF resolver guard is relaxed for it
 backend be pointed at an arbitrary gateway — public, local, or on a private
 network — without re-installing the backend.
 
+The name is load-bearing: the daemon recognizes `base_url` and nothing else. An
+option called `endpoint`, `api_base`, or `server_url` is a perfectly valid
+option, but its value authorizes no egress, so a backend that reads one instead
+will have every request refused with `outbound host not allowed` once the user
+points it somewhere the manifest's `allowed_hosts` does not cover.
+
 `base_url` is the one option a manifest may declare but not supply a value for.
 The reason is the paragraph below — the value authorizes egress the sandbox
 would otherwise refuse, and a value the backend author wrote is not user intent.
