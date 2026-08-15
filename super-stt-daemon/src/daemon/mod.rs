@@ -13,6 +13,8 @@ pub mod recording;
 pub mod settings_handlers;
 pub mod startup;
 pub mod status_handlers;
+#[cfg(test)]
+pub(crate) mod test_fixtures;
 pub mod theme_handlers;
 pub mod transcription;
 pub mod types;

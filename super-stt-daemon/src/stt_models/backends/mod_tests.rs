@@ -43,7 +43,6 @@ required = true
 name = "base_url"
 description = "Base URL."
 type = "string"
-default = "https://api.openai.com"
 
 [[models]]
 name = "whisper-1"
@@ -581,4 +580,65 @@ fn an_empty_source_resolves_nothing() {
 
     // A source that serves a different name is still a miss.
     assert!(find_model(&backends, "whisper-large", "github.com/other/zeta").is_none());
+}
+
+/// A manifest that declares a `default` for `base_url` is wrong — that value
+/// authorizes egress the sandbox would otherwise refuse, and only the user may
+/// ask for it. The backend still loads, with the option intact and the value
+/// dropped, so an author's mistake costs the user a setting rather than the
+/// whole backend. (The registry indexer refuses to publish such a release, so
+/// this is the sideloaded/local case.)
+#[test]
+fn discovery_drops_a_base_url_default_and_keeps_the_backend() {
+    let root = scratch("base-url-default");
+    let backend_dir = root.join("openai");
+    fs::create_dir_all(&backend_dir).unwrap();
+    fs::write(
+        backend_dir.join("backend.toml"),
+        r#"
+[backend]
+source = "github.com/super-stt/openai"
+name = "OpenAI"
+version = "0.1.0"
+kind = "wasm"
+entrypoint = "openai.wasm"
+contract = "v1"
+description = "Test backend."
+
+[[options]]
+name = "base_url"
+description = "Base URL."
+type = "string"
+default = "http://127.0.0.1:11434"
+
+[[options]]
+name = "region"
+description = "Region."
+type = "string"
+default = "us-east-1"
+
+[[models]]
+name = "whisper-1"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
+"#,
+    )
+    .unwrap();
+
+    let backends = discover(&root);
+    assert_eq!(
+        backends.len(),
+        1,
+        "the backend must still load: {backends:?}"
+    );
+    let opts = &backends[0].options;
+    assert_eq!(opts[0].name, "base_url");
+    assert!(
+        opts[0].default.is_none(),
+        "the manifest's base_url value must not survive discovery"
+    );
+    // Only that option is touched; every other default is the author's to set.
+    assert_eq!(opts[1].name, "region");
+    assert!(opts[1].default.is_some());
 }

@@ -4,8 +4,9 @@
 //! A realtime backend imports `super-stt:realtime/ws` to open a WebSocket to
 //! its upstream cloud API. The daemon implements that import here, against the
 //! same egress allowlist + SSRF guard the HTTP host uses (see
-//! [`host::check_host_allowed`]) so a realtime backend's only network reach is
-//! its declared `allowed_hosts`.
+//! [`check_host_allowed`]) so a realtime backend's only network reach is
+//! its declared `allowed_hosts` plus the endpoint the user authorized through
+//! its `base_url` option.
 //!
 //! Only the *outgoing* `ws` interface lives here. The *incoming* `ws-server`
 //! interface (which the backend exports and the daemon invokes per consumer
@@ -135,13 +136,12 @@ impl self::super_stt::realtime::ws::Host for Host {
         let Some(host) = uri.host() else {
             return Ok(Err(WsError::InvalidUrl("url has no host".to_string())));
         };
-        let port = uri.port_u16().unwrap_or(match uri.scheme_str() {
-            Some("ws") => 80,
-            _ => 443,
+        let port = uri.port_u16().unwrap_or_else(|| {
+            crate::stt_models::backends::base_url::default_port(uri.scheme_str())
         });
 
         // Same egress allowlist + SSRF guard the HTTP host enforces, including
-        // the user-authorized `base_url` exception.
+        // the relaxation for the user-authorized `base_url` endpoint.
         if let Err(msg) = check_host_allowed(
             &self.hooks.allowed_hosts,
             &self.hooks.user_allowed_hosts,

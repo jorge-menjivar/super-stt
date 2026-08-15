@@ -6,7 +6,8 @@
 //! over wasmtime's `wasi:http` host, and presents the result through the
 //! daemon's [`Transcribe`] trait. Secrets and options are injected as
 //! `x-stt-secret-*` / `x-stt-option-*` request headers; outbound egress is
-//! confined to the backend's `allowed_hosts` (see [`host::AllowlistHooks`]).
+//! confined to the backend's `allowed_hosts` plus the endpoint the user
+//! authorized through its `base_url` option (see [`host::AllowlistHooks`]).
 
 pub mod host;
 pub mod ws_host;
@@ -62,8 +63,9 @@ impl WasmBackend {
     /// already-formed `x-stt-secret-*` / `x-stt-option-*` pairs to inject.
     ///
     /// `allowed_hosts` are the backend's manifest-pinned `[network].allowed_hosts`
-    /// (SSRF-guarded); `user_allowed_hosts` are hosts the user authorized via
-    /// backend options (e.g. a `base_url`) and are exempt from the SSRF guard.
+    /// (SSRF-guarded); `user_allowed_hosts` is what the user authorized via a
+    /// `base_url` option, whose `host:port` has the guard relaxed (see
+    /// [`host::AllowlistHooks::user_allowed_hosts`]).
     ///
     /// # Errors
     /// Returns an error if the component cannot be loaded or linked.
@@ -115,6 +117,24 @@ impl WasmBackend {
             realtime,
             info,
         })
+    }
+
+    /// The egress policy every invocation of this backend enforces — the one
+    /// place the two lists are wired into the hooks, so the batch and realtime
+    /// paths cannot drift into disagreeing about which list is which.
+    ///
+    /// The distinction is load-bearing: `allowed_hosts` is the backend's own
+    /// manifest and stays fully SSRF-guarded, while `user_allowed_hosts` is what
+    /// the user authorized and has the guard relaxed for its `host:port`. Wiring
+    /// them the other way round would hand a backend the relaxation for hosts it
+    /// declared itself.
+    #[must_use]
+    pub fn allowlist_hooks(&self) -> AllowlistHooks {
+        AllowlistHooks {
+            allowed_hosts: self.allowed_hosts.clone(),
+            user_allowed_hosts: self.user_allowed_hosts.clone(),
+            allow_loopback: self.allow_loopback,
+        }
     }
 
     /// Permit this backend's egress to loopback addresses (`127.0.0.1`, `::1`).
@@ -240,11 +260,7 @@ impl WasmBackend {
             table: ResourceTable::new(),
             wasi: WasiCtx::builder().build(),
             http: WasiHttpCtx::new(),
-            hooks: AllowlistHooks {
-                allowed_hosts: self.allowed_hosts.clone(),
-                user_allowed_hosts: self.user_allowed_hosts.clone(),
-                allow_loopback: self.allow_loopback,
-            },
+            hooks: self.allowlist_hooks(),
         };
         let mut store = Store::new(&self.engine, host);
 
@@ -457,11 +473,7 @@ impl Transcribe for WasmBackend {
             table: ResourceTable::new(),
             wasi: WasiCtx::builder().build(),
             http: WasiHttpCtx::new(),
-            hooks: AllowlistHooks {
-                allowed_hosts: self.allowed_hosts.clone(),
-                user_allowed_hosts: self.user_allowed_hosts.clone(),
-                allow_loopback: self.allow_loopback,
-            },
+            hooks: self.allowlist_hooks(),
         };
         let mut store = Store::new(&self.engine, host);
         // Inject the same x-stt-* headers a batch call gets, plus the model id.

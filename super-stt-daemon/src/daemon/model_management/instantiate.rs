@@ -43,7 +43,12 @@ impl SuperSTTDaemon {
         def: &ModelDefinition,
     ) -> Result<Box<dyn Transcribe>> {
         use crate::stt_models::transcribe::ModelInfoData;
-        let headers = self.backend_headers(backend).await?;
+        // One snapshot of the user's options for both the headers the component
+        // is handed and the egress it is granted: read separately, a config
+        // write landing between them would authorize a different endpoint than
+        // the one the component is told to use.
+        let overrides = self.backend_option_overrides(&backend.source).await;
+        let headers = self.backend_headers(backend, &overrides).await?;
         let component = backend.dir.join(&backend.entrypoint);
         let info = ModelInfoData::new(
             def.name.clone(),
@@ -59,9 +64,10 @@ impl SuperSTTDaemon {
             crate::stt_models::backends::manifest::Manifest::load(&backend.dir)?
                 .capabilities
                 .websocket;
-        // Egress = the manifest-pinned `allowed_hosts` (SSRF-guarded) plus any
-        // host the user authorized via the `base_url` option (SSRF exception).
-        let user_allowed_hosts = self.base_url_egress_hosts(backend).await;
+        // Egress = the manifest-pinned `allowed_hosts` (fully SSRF-guarded) plus
+        // what the user authorized via the `base_url` option, whose `host:port`
+        // may be local or private.
+        let user_allowed_hosts = Self::base_url_egress_hosts(backend, &overrides);
         let inst = crate::stt_models::wasm::WasmBackend::with_info(
             &component,
             backend.allowed_hosts.clone(),
@@ -177,7 +183,11 @@ impl SuperSTTDaemon {
     /// specific backend. Options use the config override if set, else the
     /// manifest default. A required secret that resolves to nothing is an error.
     #[cfg(feature = "wasm-backends")]
-    async fn backend_headers(&self, backend: &DiscoveredBackend) -> Result<Vec<(String, String)>> {
+    async fn backend_headers(
+        &self,
+        backend: &DiscoveredBackend,
+        overrides: &std::collections::HashMap<String, String>,
+    ) -> Result<Vec<(String, String)>> {
         let mut headers = Vec::new();
         for secret in &backend.secrets {
             let value = crate::keyring::get_backend_secret_async(
@@ -204,148 +214,162 @@ impl SuperSTTDaemon {
             }
         }
         for opt in &backend.options {
-            if let Some(v) = self.resolved_backend_option(backend, opt).await {
+            if let Some(v) = resolved_backend_option(overrides, opt) {
                 headers.push((format!("x-stt-option-{}", opt.name), v));
             }
         }
         Ok(headers)
     }
 
-    /// The effective value of a backend option: the user's config override if
-    /// set, else the manifest default. The single source of truth for option
-    /// resolution — shared by header injection ([`Self::backend_headers`]) and
-    /// egress allowlist derivation ([`Self::base_url_egress_hosts`]).
+    /// Snapshot of the user's option overrides for one backend.
+    ///
+    /// Taken once per load and shared by header injection and egress
+    /// derivation. Resolving them separately let a config write land in
+    /// between, so the component could be handed one gateway while a different
+    /// one was authorized, and every request would then be refused until the
+    /// model was reloaded. Cloned rather than held as a guard: the header path
+    /// awaits a keyring round-trip, and a read guard spanning that would block
+    /// config writers for its duration.
+    ///
+    /// `base_url` is normalized on the way out. It is the one value the two
+    /// paths must read *identically* — one dials it, the other authorizes what
+    /// it names — so surrounding whitespace, from a paste into the settings
+    /// field or from a hand-edited config that never passed through the API,
+    /// would otherwise leave them working from different strings. A value that
+    /// is only whitespace is no value at all and is dropped, so it neither
+    /// reaches the component nor authorizes anything. Every other option is
+    /// passed through exactly as the user set it: whitespace may carry meaning
+    /// in a value the daemon does not interpret.
     #[cfg(feature = "wasm-backends")]
-    async fn resolved_backend_option(
+    async fn backend_option_overrides(
         &self,
-        backend: &DiscoveredBackend,
-        opt: &backends::manifest::Opt,
-    ) -> Option<String> {
-        self.config
+        source: &str,
+    ) -> std::collections::HashMap<String, String> {
+        let mut overrides: std::collections::HashMap<String, String> = self
+            .config
             .read()
             .await
-            .backend_option(&backend.source, &opt.name)
-            .map(str::to_string)
-            .or_else(|| opt.default.as_ref().map(ToString::to_string))
+            .backends
+            .options
+            .get(source)
+            .cloned()
+            .unwrap_or_default();
+        let name = backends::base_url::OPTION_NAME;
+        match overrides.get(name).map(|v| v.trim().to_string()) {
+            Some(trimmed) if trimmed.is_empty() => {
+                overrides.remove(name);
+            }
+            Some(trimmed) => {
+                overrides.insert(name.to_string(), trimmed);
+            }
+            None => {}
+        }
+        overrides
     }
 
-    /// Hosts the *user* authorized via a `base_url` option, derived from its
-    /// effective value (config override → manifest default).
+    /// What the *user* authorized via a `base_url` option: the `host:port` the
+    /// value points at, followed by the bare host.
     ///
     /// `base_url` is the documented convention for a backend's configurable
     /// endpoint (`docs/protocol/backend/config.md`); any backend declaring an
-    /// option with that name gets the SSRF exception for its host. A backend
-    /// cannot self-authorize these — options are set by the user only — so the
-    /// host is exempt from the egress SSRF guard (it may be loopback/private,
-    /// e.g. a local gateway). Unparseable or unset values contribute nothing.
+    /// option with that name has the SSRF guard relaxed for that one authority.
+    /// The value is read from the config override **only** — never from the
+    /// manifest default, which the backend author writes and which therefore
+    /// cannot be allowed to widen the sandbox. (A manifest declaring one is
+    /// refused at parse; this read stands on its own so the invariant does not
+    /// depend on that check.) Because the value is the user's, it may be
+    /// loopback or private, e.g. a local gateway.
+    ///
+    /// The bare host carries no such relaxation; it keeps the gateway's other
+    /// ports reachable while they stay public, so no extra port on a local or
+    /// private gateway opens up (see
+    /// [`check_host_allowed`](crate::stt_models::wasm::host::check_host_allowed)).
+    /// Unparseable or unset values contribute nothing.
+    ///
+    /// Both outcomes are logged. This is the one path that relaxes the sandbox,
+    /// so an operator asking later why a backend reached a private address needs
+    /// a record of which endpoint was authorized for which backend, and when.
     #[cfg(feature = "wasm-backends")]
-    async fn base_url_egress_hosts(&self, backend: &DiscoveredBackend) -> Vec<String> {
-        let Some(opt) = backend.options.iter().find(|o| o.name == "base_url") else {
+    fn base_url_egress_hosts(
+        backend: &DiscoveredBackend,
+        overrides: &std::collections::HashMap<String, String>,
+    ) -> Vec<String> {
+        if !backend
+            .options
+            .iter()
+            .any(|o| o.name == backends::base_url::OPTION_NAME)
+        {
+            return Vec::new();
+        }
+        let Some(value) = overrides.get(backends::base_url::OPTION_NAME) else {
             return Vec::new();
         };
-        let Some(value) = self.resolved_backend_option(backend, opt).await else {
-            return Vec::new();
-        };
-        base_url_host(&value).into_iter().collect()
+        let entries = backends::base_url::egress_entries(value);
+        // Log the derived authority, never the configured value: the parser
+        // discards userinfo, so a URL pasted with credentials in it cannot reach
+        // the journal through here.
+        match entries.first() {
+            Some(endpoint) => log::info!(
+                "Backend {}: user-set base_url authorizes egress to {endpoint}, with the SSRF guard relaxed for it",
+                backend.source
+            ),
+            None => log::warn!(
+                "Backend {}: base_url is set but names no host the daemon can read; it authorizes nothing and the backend keeps only its manifest egress",
+                backend.source
+            ),
+        }
+        entries
     }
 }
 
-/// Extract the bare host (or `host[:port]`) from a base URL, mirroring the
-/// origin-form assumption the OpenAI-style WASM backends make: `base_url` is a
-/// scheme + authority, not a full-path URL. A bare host (no scheme) is treated
-/// as a host. Returns `None` when nothing parseable remains.
+/// The effective value of a backend option — the user's override if set, else
+/// the manifest default — as injected into the backend's headers by
+/// [`SuperSTTDaemon::backend_headers`].
+///
+/// Not what authorizes egress: `base_url_egress_hosts` deliberately reads the
+/// override alone, because a manifest default is the backend author's value and
+/// must not widen the sandbox. The settings-facing read path
+/// (`http/v1/backends/options.rs::effective`) resolves the same two sources
+/// separately, for display.
 #[cfg(feature = "wasm-backends")]
-fn base_url_host(base_url: &str) -> Option<String> {
-    let rest = base_url
-        .strip_prefix("https://")
-        .or_else(|| base_url.strip_prefix("http://"))
-        .unwrap_or(base_url);
-    let rest = rest.trim_end_matches('/');
-    let host = match rest.find('/') {
-        Some(i) => &rest[..i],
-        None => rest,
-    };
-    if host.is_empty() {
-        return None;
-    }
-    Some(host.to_string())
+fn resolved_backend_option(
+    overrides: &std::collections::HashMap<String, String>,
+    opt: &backends::manifest::Opt,
+) -> Option<String> {
+    overrides
+        .get(&opt.name)
+        .cloned()
+        .or_else(|| opt.default.as_ref().map(ToString::to_string))
 }
 
 #[cfg(all(test, feature = "wasm-backends"))]
 mod tests {
-    use super::base_url_host;
+    use super::SuperSTTDaemon;
 
-    #[test]
-    fn base_url_host_extracts_authority() {
-        assert_eq!(
-            base_url_host("https://api.openai.com"),
-            Some("api.openai.com".to_string())
-        );
-        assert_eq!(
-            base_url_host("https://api.openai.com/"),
-            Some("api.openai.com".to_string())
-        );
-        assert_eq!(
-            base_url_host("http://gw.example.com:8080"),
-            Some("gw.example.com:8080".to_string())
-        );
-        // A bare host (no scheme) is treated as a host.
-        assert_eq!(
-            base_url_host("gw.example.com"),
-            Some("gw.example.com".to_string())
-        );
-        // Any path after the authority is dropped — the backends assume origin form.
-        assert_eq!(
-            base_url_host("https://gw.example.com/v1/audio"),
-            Some("gw.example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn base_url_host_rejects_unparseable() {
-        assert_eq!(base_url_host(""), None);
-        assert_eq!(base_url_host("https://"), None);
-        assert_eq!(base_url_host("/"), None);
-        assert_eq!(base_url_host("https:///path"), None);
-    }
-
-    /// The user-set `base_url` option's host feeds the egress allowlist:
-    /// manifest default when unset, the override (port included) when set, and
-    /// nothing for a backend that declares no such option.
+    /// Only a user-set `base_url` feeds the egress allowlist, as the endpoint it
+    /// names followed by its bare host. A backend declaring no such option, and
+    /// one the user has not configured, both contribute nothing — a manifest
+    /// value must never widen the sandbox.
     #[tokio::test]
     async fn base_url_egress_hosts_resolves_override_or_default() {
+        use crate::daemon::test_fixtures::openai_backend;
         use crate::daemon::types::test_daemon;
         use crate::stt_models::backends::DiscoveredBackend;
-        use crate::stt_models::backends::manifest::{Opt, OptionDefault, OptionType};
 
         let daemon = test_daemon().await;
         let source = "github.com/super-stt/openai";
-        let backend = DiscoveredBackend {
-            dir: std::path::PathBuf::from("/tmp/openai"),
-            source: source.to_string(),
-            name: "OpenAI".to_string(),
-            kind: "wasm".to_string(),
-            entrypoint: "openai.wasm".to_string(),
-            allowed_hosts: vec!["api.openai.com".to_string()],
-            secrets: vec![],
-            options: vec![Opt {
-                name: "base_url".to_string(),
-                label: Some("API base URL".to_string()),
-                description: "Base URL".to_string(),
-                r#type: Some(OptionType::String),
-                default: Some(OptionDefault::String("https://api.openai.com".to_string())),
-                required: false,
-            }],
-            models: vec![],
-        };
+        // The manifest default is one `Manifest::parse` would reject; it is here
+        // to prove this read does not depend on that rejection.
+        let backend = openai_backend(source, Vec::new(), Some("https://api.openai.com"));
 
-        // No override → the manifest default's host.
-        assert_eq!(
-            daemon.base_url_egress_hosts(&backend).await,
-            vec!["api.openai.com"]
-        );
+        // No override → nothing, even though the option carries a default: a
+        // value the backend author wrote must not authorize egress.
+        let overrides = daemon.backend_option_overrides(source).await;
+        assert!(SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides).is_empty());
 
-        // Config override pointing at a local gateway → that host, port kept.
+        // Config override pointing at a local gateway → that endpoint, port kept.
+        // Only the `host:port` entry carries the relaxation, so the bare host
+        // opens no other local port.
         daemon
             .config
             .write()
@@ -355,16 +379,126 @@ mod tests {
             .entry(source.to_string())
             .or_default()
             .insert("base_url".to_string(), "http://localhost:8080".to_string());
+        let overrides = daemon.backend_option_overrides(source).await;
         assert_eq!(
-            daemon.base_url_egress_hosts(&backend).await,
-            vec!["localhost:8080"]
+            SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides),
+            vec!["localhost:8080", "localhost"]
         );
 
-        // A backend declaring no `base_url` option contributes nothing.
+        // A backend declaring no `base_url` option contributes nothing, even
+        // with the override still in config.
         let no_base = DiscoveredBackend {
             options: vec![],
             ..backend
         };
-        assert!(daemon.base_url_egress_hosts(&no_base).await.is_empty());
+        assert!(SuperSTTDaemon::base_url_egress_hosts(&no_base, &overrides).is_empty());
+    }
+
+    /// A `base_url` pasted with surrounding whitespace must reach both paths as
+    /// the same string: the component dials the header it is given, and the
+    /// daemon authorizes what the value names. A value that is only whitespace
+    /// is no value — it must not be injected or authorize anything.
+    #[tokio::test]
+    async fn whitespace_in_base_url_cannot_split_the_two_paths() {
+        use crate::daemon::test_fixtures::openai_backend;
+        use crate::daemon::types::test_daemon;
+        use crate::stt_models::backends::DiscoveredBackend;
+
+        let daemon = test_daemon().await;
+        let source = "github.com/super-stt/openai";
+        // No secrets: the assertions run through the real header path, which
+        // would otherwise reach the keyring for the fixture's required key.
+        let backend = DiscoveredBackend {
+            secrets: Vec::new(),
+            ..openai_backend(source, Vec::new(), None)
+        };
+
+        for (stored, expected_header) in [
+            ("  http://10.0.0.5:8080  ", Some("http://10.0.0.5:8080")),
+            ("\thttp://10.0.0.5:8080\n", Some("http://10.0.0.5:8080")),
+            ("   ", None),
+        ] {
+            daemon
+                .config
+                .write()
+                .await
+                .backends
+                .options
+                .entry(source.to_string())
+                .or_default()
+                .insert("base_url".to_string(), stored.to_string());
+
+            let overrides = daemon.backend_option_overrides(source).await;
+            let headers = daemon
+                .backend_headers(&backend, &overrides)
+                .await
+                .expect("headers for a secret-free backend");
+            let injected = headers
+                .iter()
+                .find(|(k, _)| k == "x-stt-option-base_url")
+                .map(|(_, v)| v.as_str());
+            let egress = SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides);
+            assert_eq!(injected, expected_header, "header for {stored:?}");
+            match expected_header {
+                Some(_) => assert_eq!(egress, vec!["10.0.0.5:8080", "10.0.0.5"]),
+                None => assert!(egress.is_empty(), "egress for {stored:?}"),
+            }
+        }
+    }
+
+    /// Headers and egress must describe one config state. Resolving them
+    /// separately let a write land in between, handing the component one
+    /// endpoint while a different one was authorized; both now read the same
+    /// snapshot, so the pair either sees the write or does not.
+    #[tokio::test]
+    async fn headers_and_egress_read_the_same_snapshot() {
+        use crate::daemon::test_fixtures::openai_backend;
+        use crate::daemon::types::test_daemon;
+        use crate::stt_models::backends::DiscoveredBackend;
+
+        let daemon = test_daemon().await;
+        let source = "github.com/super-stt/openai";
+        // No secrets: this drives the real `backend_headers`, which would
+        // otherwise reach the keyring for the fixture's required key.
+        let backend = DiscoveredBackend {
+            secrets: Vec::new(),
+            ..openai_backend(source, Vec::new(), None)
+        };
+        daemon
+            .config
+            .write()
+            .await
+            .backends
+            .options
+            .entry(source.to_string())
+            .or_default()
+            .insert("base_url".to_string(), "http://10.0.0.5:8080".to_string());
+
+        let overrides = daemon.backend_option_overrides(source).await;
+        // A write landing here reaches neither side, which is the point.
+        daemon
+            .config
+            .write()
+            .await
+            .backends
+            .options
+            .entry(source.to_string())
+            .or_default()
+            .insert("base_url".to_string(), "http://10.0.0.9:8080".to_string());
+
+        // Drive the real header path, not the resolver it happens to call: the
+        // regression this pins is `backend_headers` reading config for itself.
+        let headers = daemon
+            .backend_headers(&backend, &overrides)
+            .await
+            .expect("headers for a secret-free backend");
+        let injected = headers
+            .iter()
+            .find(|(k, _)| k == "x-stt-option-base_url")
+            .map(|(_, v)| v.as_str())
+            .expect("base_url is injected from the snapshot");
+        let egress = SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides);
+        assert_eq!(injected, "http://10.0.0.5:8080");
+        assert_eq!(egress, vec!["10.0.0.5:8080", "10.0.0.5"]);
     }
 }

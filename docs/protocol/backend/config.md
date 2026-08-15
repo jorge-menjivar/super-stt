@@ -88,7 +88,7 @@ allowed_hosts = ["api.openai.com"]
 
 | Field           | Type             | Required | Notes                                                              |
 |-----------------|------------------|----------|--------------------------------------------------------------------|
-| `allowed_hosts` | array of string  | no       | Host or `host:port` egress allowlist. Empty or absent ⇒ no network. |
+| `allowed_hosts` | array of string  | no       | Host or `host:port` egress allowlist. Empty or absent ⇒ no network beyond a user-set [`base_url`](#base_url-and-egress). |
 
 `allowed_hosts` is honored for `wasm` backends, where the daemon enforces it
 on every outbound request (see [wasm.md](./wasm.md#network-egress)).
@@ -136,7 +136,6 @@ name        = "base_url"
 label       = "API base URL"
 description = "Override the API base URL, e.g. for a gateway."
 type        = "string"
-default     = "https://api.openai.com"
 
 [[options]]
 name        = "request_timeout_seconds"
@@ -152,27 +151,55 @@ default     = 30
 | `label`       | string         | no       | Human-readable label shown in the settings UI. Falls back to `name` when absent. |
 | `description` | string         | yes      | Help text shown beside the input in the settings UI.   |
 | `type`        | string         | no       | `string`, `integer`, or `bool`. Drives the input the UI renders. Default `string`. |
-| `default`     | matches `type` | no       | Value used when the user sets none.                    |
+| `default`     | matches `type` | no       | Value used when the user sets none. Forbidden on `base_url` — see below. |
 | `required`    | bool           | no       | Whether a value must be set before the backend can load. Default `false`. |
 
 #### `base_url` and egress
 
 An option named `base_url` is the convention for a backend's configurable
-endpoint. When the user sets one, the daemon treats its host as
+endpoint. When the user sets one, the daemon treats its authority as
 **user-authorized egress** for the backend: it is added to the WASM transport's
-`allowed_hosts` at model-load time *and* exempt from the SSRF resolver guard
+egress set at model-load time, and the SSRF resolver guard is relaxed for it
 (see [wasm.md — Network egress](./wasm.md#network-egress)). This lets a cloud
 backend be pointed at an arbitrary gateway — public, local, or on a private
-network — without re-installing the backend. The host is derived from the
-effective value (config override → manifest default) and must be in origin
-form (`host` or `host:port`, scheme optional); a value carrying a path is
-treated as its bare host.
+network — without re-installing the backend.
 
-The exemption is safe because options are **user-writable only**: the daemon
-reads them from config set through the settings-scoped API, never from the
-(untrusted) backend, so a component cannot self-authorize a metadata endpoint
-or localhost target. Manifest-declared `[network].allowed_hosts` entries remain
-SSRF-guarded.
+`base_url` is the one option a manifest may declare but not supply a value for.
+The reason is the paragraph below — the value authorizes egress the sandbox
+would otherwise refuse, and a value the backend author wrote is not user intent.
+Every other option keeps its default.
+
+A manifest that declares one is refused **at publication**: the registry indexer
+rejects the release, so it never reaches a user. A backend installed some other
+way still loads, with the option intact and the declared value dropped and
+logged — an author's mistake costs the user a setting, not the backend. Either
+way the value never takes effect, so a backend that needs a working endpoint out
+of the box carries it in the component and treats the option as an override.
+That is what the missing `x-stt-option-base_url` header means when the user has
+set nothing.
+
+The daemon derives exactly one `host:port` authority from the configured value.
+An explicit port is taken as written; otherwise the scheme's default applies —
+`http` and `ws` ⇒ 80, `https` and `wss` ⇒ 443 — and a value carrying no scheme
+is read as `https`. Any path, query, or userinfo is discarded, and a value that
+yields no host contributes nothing: the backend keeps whatever egress its
+manifest declares.
+
+The host is authorized on its own as well, so a gateway stays reachable on its
+other ports — but only the derived `host:port` carries the relaxation below.
+Another port on the same host is therefore reachable while it is public, and
+refused once it is local or private.
+
+Relaxing the guard is safe because the value is **the user's only**: the daemon
+reads it from config set through the settings-scoped API, never from the
+component and never from the manifest, so a backend cannot self-authorize a
+metadata endpoint or localhost target. The relaxation lifts the loopback and
+private-range blocks — reaching a gateway on `127.0.0.1` or `10.0.0.0/8` is the
+point of the option — and nothing further. Link-local addresses
+(`169.254.0.0/16`, `fe80::/10`), including the cloud metadata endpoint
+`169.254.169.254`, along with the unspecified and broadcast addresses, stay
+refused for every backend however they were authorized. Manifest-declared
+`[network].allowed_hosts` entries remain fully SSRF-guarded.
 
 Both secrets and options reach the backend the same way — injected request
 headers on every `/v1` request — and differ only in how the daemon stores

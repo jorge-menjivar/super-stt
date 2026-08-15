@@ -93,7 +93,20 @@ async fn set(
     axum::Json(body): axum::Json<OptionBody>,
 ) -> Response {
     let source = decode_source(&source);
-    if body.value.is_empty() {
+    // `base_url` is normalized at the boundary. The daemon acts on this value
+    // rather than only passing it through — it is injected as a header *and*
+    // parsed into the egress the backend is granted — so storing it padded
+    // would leave `GET`, the component, and the authorized endpoint holding
+    // three different strings, and a whitespace-only value would show in the UI
+    // as an active override that authorizes nothing. Other options keep the
+    // value verbatim: whitespace may carry meaning in one the daemon does not
+    // interpret.
+    let value = if name == crate::stt_models::backends::base_url::OPTION_NAME {
+        body.value.trim()
+    } else {
+        body.value.as_str()
+    };
+    if value.is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "invalid_request");
     }
     if let Some(r) = guard_missing(&s, &source, &name).await {
@@ -102,7 +115,7 @@ async fn set(
     let (code, _hdrs, body_str) = dispatch_command(
         &s.daemon,
         "set_backend_option",
-        Some(serde_json::json!({ "source": source, "name": name, "value": body.value })),
+        Some(serde_json::json!({ "source": source, "name": name, "value": value })),
     )
     .await;
     if code != StatusCode::OK {

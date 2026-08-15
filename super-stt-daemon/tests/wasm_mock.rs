@@ -9,8 +9,9 @@
 #![cfg(feature = "wasm-backends")]
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-use super_stt_daemon::stt_models::transcribe::Transcribe;
+use super_stt_daemon::stt_models::transcribe::{ModelInfoData, Transcribe};
 use super_stt_daemon::stt_models::wasm::WasmBackend;
 
 /// Path to the prebuilt mock component (`just build-mock-wasm-backend`).
@@ -47,4 +48,52 @@ async fn wasm_orchestration_against_mock() {
         .await
         .expect("transcription should succeed");
     assert_eq!(text, "mock transcription");
+}
+
+/// The two egress lists must reach the hooks in the right slots. Nothing else
+/// covers this: the guard's own tests build argument lists directly, and every
+/// other harness here passes an empty user list, so swapping the two adjacent
+/// `Vec<String>` parameters of `with_info` — which would hand a backend the SSRF
+/// relaxation for hosts it declared in its own manifest — would leave the suite
+/// green. Both invocation paths (batch and realtime) build their hooks through
+/// `allowlist_hooks`, so asserting on it covers both.
+#[tokio::test]
+async fn egress_lists_reach_the_hooks_in_their_own_slots() {
+    let Some(path) = mock_component() else {
+        eprintln!("skipping: mock component not built (run `just build-mock-wasm-backend`)");
+        return;
+    };
+
+    let backend = WasmBackend::with_info(
+        &path,
+        vec!["manifest.example".to_string()],
+        vec!["gw.example:8443".to_string(), "gw.example".to_string()],
+        ModelInfoData::new(
+            "mock",
+            "github.com/super-stt/mock",
+            false,
+            true,
+            Duration::from_secs(0),
+        ),
+        Vec::new(),
+        false,
+        false,
+    )
+    .expect("load mock backend");
+
+    let hooks = backend.allowlist_hooks();
+    assert_eq!(
+        hooks.allowed_hosts,
+        vec!["manifest.example".to_string()],
+        "the manifest list must stay in the SSRF-guarded slot"
+    );
+    assert_eq!(
+        hooks.user_allowed_hosts,
+        vec!["gw.example:8443".to_string(), "gw.example".to_string()],
+        "the user's endpoint must stay in the relaxed slot"
+    );
+    assert!(
+        !hooks.allow_loopback,
+        "loopback egress stays off unless explicitly opted into"
+    );
 }
