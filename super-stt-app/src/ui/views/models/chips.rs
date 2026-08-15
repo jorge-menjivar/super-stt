@@ -37,6 +37,23 @@ pub(super) fn backend_supports_cpu(backend: &crate::daemon::backends::BackendInf
         .any(|m| m.supported_devices.iter().any(|d| d == "cpu"))
 }
 
+/// Whether the user pointed this backend at an endpoint of their own — a
+/// `base_url` option carrying a value. That value is egress the backend's
+/// `allowed_hosts` does not describe, so the Cloud chip has to account for it;
+/// the address itself stays out of the card (see [`cloud_chip`]).
+///
+/// Keyed on the value being present, which is the daemon's own rule: it
+/// authorizes whatever the override holds, whether or not that happens to equal
+/// a `default` some older daemon still reports. Testing against `default` would
+/// hide the line for a user who set the endpoint to the same string, on a card
+/// whose whole job is disclosing where audio goes.
+pub(super) fn backend_has_user_url(backend: &crate::daemon::backends::BackendInfo) -> bool {
+    backend.options.iter().any(|o| {
+        o.name == super_stt_registry_types::manifest::BASE_URL_OPTION
+            && o.value.as_ref().is_some_and(|v| !v.trim().is_empty())
+    })
+}
+
 /// A small rounded "pill" advertising one backend capability — a tinted icon
 /// and a short label over a soft, same-hue fill. `fg` is the full-strength
 /// tone (icon, text, and border); the fill and border are derived from it at a
@@ -169,27 +186,48 @@ pub(super) fn models_inventory(names: &[String]) -> Option<Element<'static, Mess
     Some(inventory.into())
 }
 
+/// Where an online backend sends audio, as a card can describe it: the hosts
+/// its `backend.toml` declares, plus whether the user pointed it at an endpoint
+/// of their own.
+#[derive(Clone, Copy)]
+pub(super) struct CloudEgress<'a> {
+    /// The backend's declared `[network].allowed_hosts`.
+    pub hosts: &'a [String],
+    /// Whether a `base_url` the user set adds an endpoint beyond `hosts`.
+    pub user_url: bool,
+}
+
 /// The Cloud capability chip: a [`capability_chip`] with a hover tooltip
 /// listing the hosts the backend transmits audio to. Shares the GPU/CPU
 /// chips' neutral tone so "runs in the cloud" reads as a plain capability,
 /// not a golden/premium value judgment.
-pub(super) fn cloud_chip(fg: cosmic::iced::Color, hosts: &[String]) -> Element<'static, Message> {
+///
+/// A user-set `base_url` is named as a line, never as the address: it is the
+/// user's own value, and printing it would put a configured endpoint on a card
+/// they may be showing someone.
+pub(super) fn cloud_chip(
+    fg: cosmic::iced::Color,
+    egress: CloudEgress<'_>,
+) -> Element<'static, Message> {
     use super::surface::rounded_tooltip;
     let chip = capability_chip(icons::CLOUD, "Cloud", fg);
-    if hosts.is_empty() {
+    if egress.hosts.is_empty() && !egress.user_url {
         return chip;
     }
-    let mut popup = widget::column::with_capacity(hosts.len() + 1)
+    let mut popup = widget::column::with_capacity(egress.hosts.len() + 2)
         .push(text::body("Transmits audio to:"))
         .spacing(cosmic::theme::spacing().space_xxxs);
-    for host in hosts {
+    for host in egress.hosts {
         popup = popup.push(text::body(format!("• {host}")));
+    }
+    if egress.user_url {
+        popup = popup.push(text::body("• another URL you set"));
     }
     rounded_tooltip(chip, popup, widget::tooltip::Position::Top)
 }
 
 /// The capability-chip row for a backend: GPU / CPU advertise local compute,
-/// Cloud (when `online_hosts` is `Some`) flags an online backend. Returns
+/// Cloud (when `online` is `Some`) flags an online backend. Returns
 /// `None` when there's nothing to advertise, so callers skip the row rather
 /// than render an empty band.
 ///
@@ -205,7 +243,7 @@ pub(super) fn cloud_chip(fg: cosmic::iced::Color, hosts: &[String]) -> Element<'
 pub(super) fn capability_chips(
     supports_gpu: bool,
     supports_cpu: bool,
-    online_hosts: Option<&[String]>,
+    online: Option<CloudEgress<'_>>,
     tooltips: bool,
 ) -> Option<Element<'static, Message>> {
     use super::surface::rounded_tooltip;
@@ -237,9 +275,9 @@ pub(super) fn capability_chips(
             chip
         });
     }
-    if let Some(hosts) = online_hosts {
+    if let Some(egress) = online {
         chips.push(if tooltips {
-            cloud_chip(neutral, hosts)
+            cloud_chip(neutral, egress)
         } else {
             capability_chip(icons::CLOUD, "Cloud", neutral)
         });
@@ -404,5 +442,47 @@ mod capability_tests {
         let b = backend_with_devices(&[&["cpu"], &["cuda"]]);
         assert!(backend_supports_gpu(&b));
         assert!(backend_supports_cpu(&b));
+    }
+
+    /// Build a backend declaring a `base_url` option with the given effective
+    /// value — what `GET /backends` reports once the user has (or hasn't) set
+    /// one.
+    fn backend_with_base_url(value: Option<&str>) -> BackendInfo {
+        use crate::daemon::backends::BackendOption;
+        let mut b = backend_with_devices(&[&["none"]]);
+        b.options = vec![BackendOption {
+            name: "base_url".to_string(),
+            label: None,
+            description: String::new(),
+            r#type: Some("string".to_string()),
+            default: None,
+            required: false,
+            value: value.map(ToString::to_string),
+        }];
+        b
+    }
+
+    /// The Cloud chip has to account for egress the manifest does not describe.
+    /// A `base_url` the user set is exactly that; an unset or blank one is not,
+    /// and must not put a phantom line on the card.
+    #[test]
+    fn user_url_is_flagged_only_once_a_value_is_set() {
+        assert!(backend_has_user_url(&backend_with_base_url(Some(
+            "https://gw.example.com"
+        ))));
+        assert!(!backend_has_user_url(&backend_with_base_url(None)));
+        assert!(!backend_has_user_url(&backend_with_base_url(Some("  "))));
+        // A backend that declares no such option never flags one.
+        assert!(!backend_has_user_url(&backend_with_devices(&[&["none"]])));
+    }
+
+    /// The daemon authorizes whatever the override holds, so a value equal to a
+    /// `default` an older daemon still reports is still egress the manifest did
+    /// not declare. The card must say so rather than compare the two.
+    #[test]
+    fn user_url_is_flagged_even_when_it_equals_a_reported_default() {
+        let mut b = backend_with_base_url(Some("https://api.example.com"));
+        b.options[0].default = Some("https://api.example.com".to_string());
+        assert!(backend_has_user_url(&b));
     }
 }

@@ -14,8 +14,8 @@ use crate::ui::messages::{
 };
 
 use super::chips::{
-    backend_is_online, backend_supports_cpu, backend_supports_gpu, capability_chips, count_chip,
-    requirement_warning,
+    CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
+    backend_supports_gpu, capability_chips, count_chip, requirement_warning,
 };
 use super::fmt::vram_warning;
 use super::status::unmet_requirements;
@@ -191,12 +191,15 @@ pub(super) fn active_backend_card<'a>(
     // Capability chips advertise the backend's compute: GPU / CPU for local
     // models, Cloud for online ones (with the hosts it reaches on hover); a
     // trailing "N models" count chip rounds out the row.
-    let hosts = online.then_some(backend.allowed_hosts.as_slice());
+    let egress = online.then(|| CloudEgress {
+        hosts: backend.allowed_hosts.as_slice(),
+        user_url: backend_has_user_url(backend),
+    });
     let mut chip_row = row![].spacing(spacing.space_xxs).align_y(Alignment::Center);
     if let Some(chips) = capability_chips(
         backend_supports_gpu(backend),
         backend_supports_cpu(backend),
-        hosts,
+        egress,
         true,
     ) {
         chip_row = chip_row.push(chips);

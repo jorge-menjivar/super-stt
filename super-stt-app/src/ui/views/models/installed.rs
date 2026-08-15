@@ -11,8 +11,8 @@ use crate::ui::messages::{Message, ModelsPageMessage};
 
 use super::active::backend_glyph_tile;
 use super::chips::{
-    backend_is_online, backend_supports_cpu, backend_supports_gpu, capability_chips,
-    models_inventory,
+    CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
+    backend_supports_gpu, capability_chips, models_inventory,
 };
 use super::surface::{card_divider, card_surface, card_title_block, repo_button};
 
@@ -95,12 +95,15 @@ pub(super) fn installed_card<'a>(
     // Facts row: the served-models inventory takes the width; the GPU / CPU /
     // Cloud capability chips sit opposite it.
     let model_names: Vec<String> = backend.models.iter().map(|m| m.name.clone()).collect();
-    let hosts = online.then_some(backend.allowed_hosts.as_slice());
+    let egress = online.then(|| CloudEgress {
+        hosts: backend.allowed_hosts.as_slice(),
+        user_url: backend_has_user_url(backend),
+    });
     let inventory = models_inventory(&model_names);
     let caps = capability_chips(
         backend_supports_gpu(backend),
         backend_supports_cpu(backend),
-        hosts,
+        egress,
         // Suppress chip tooltips while this card's overflow menu is open, so the
         // menu paints cleanly on top instead of a tooltip showing half-behind it.
         !menu_open,
