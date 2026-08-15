@@ -86,7 +86,13 @@ name = "base_url"
 label = "Base URL"
 description = "Override the OpenAI API base URL."
 type = "string"
-default = "https://api.openai.com"
+
+[[options]]
+name = "region"
+label = "Region"
+description = "Upstream region."
+type = "string"
+default = "us-east-1"
 
 [[models]]
 name = "whisper-1"
@@ -215,13 +221,13 @@ async fn delete_req(p: &PathBuf, path: &str, token: &str) -> (StatusCode, serde_
 #[tokio::test]
 async fn option_set_get_and_reset_to_default() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
-    let opt_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/base_url");
+    let opt_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/region");
 
     // Default before any override.
     let (s, body) = get(&sock, &opt_path, &token).await;
     assert_eq!(s, StatusCode::OK, "GET option before set: {body}");
     assert_eq!(
-        body["value"], "https://api.openai.com",
+        body["value"], "us-east-1",
         "should start at manifest default: {body}"
     );
 
@@ -230,12 +236,12 @@ async fn option_set_get_and_reset_to_default() {
         &sock,
         &opt_path,
         &token,
-        serde_json::json!({ "value": "https://gw.example.com" }),
+        serde_json::json!({ "value": "eu-west-1" }),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "POST option: {body}");
     assert_eq!(
-        body["value"], "https://gw.example.com",
+        body["value"], "eu-west-1",
         "value should reflect override: {body}"
     );
 
@@ -243,8 +249,44 @@ async fn option_set_get_and_reset_to_default() {
     let (s, body) = delete_req(&sock, &opt_path, &token).await;
     assert_eq!(s, StatusCode::OK, "DELETE option: {body}");
     assert_eq!(
-        body["value"], "https://api.openai.com",
+        body["value"], "us-east-1",
         "value should revert to manifest default after DELETE: {body}"
+    );
+}
+
+/// `base_url` is the one option a manifest may not supply a value for — its
+/// host is authorized for egress, so only the user may name it. It therefore
+/// round-trips through the unset state rather than through a default.
+#[tokio::test]
+async fn base_url_round_trips_through_unset() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let opt_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/base_url");
+
+    let (s, body) = get(&sock, &opt_path, &token).await;
+    assert_eq!(s, StatusCode::OK, "GET base_url before set: {body}");
+    assert!(
+        body["value"].is_null() && body["default"].is_null(),
+        "base_url starts unset, with no manifest default: {body}"
+    );
+
+    let (s, body) = post_req(
+        &sock,
+        &opt_path,
+        &token,
+        serde_json::json!({ "value": "https://gw.example.com" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "POST base_url: {body}");
+    assert_eq!(
+        body["value"], "https://gw.example.com",
+        "value should reflect override: {body}"
+    );
+
+    let (s, body) = delete_req(&sock, &opt_path, &token).await;
+    assert_eq!(s, StatusCode::OK, "DELETE base_url: {body}");
+    assert!(
+        body["value"].is_null(),
+        "clearing the override leaves base_url unset, not defaulted: {body}"
     );
 }
 
@@ -258,13 +300,16 @@ async fn option_list_returns_declared_options() {
     assert_eq!(s, StatusCode::OK, "GET options/list: {body}");
     assert_eq!(body["status"], "success", "list status: {body}");
     let options = body["options"].as_array().expect("options array");
-    assert_eq!(options.len(), 1, "one declared option: {body}");
+    assert_eq!(options.len(), 2, "two declared options: {body}");
     let o0 = &options[0];
     assert_eq!(o0["name"], "base_url", "option name: {body}");
-    assert_eq!(
-        o0["value"], "https://api.openai.com",
-        "default value in list: {body}"
+    assert!(
+        o0["value"].is_null(),
+        "base_url carries no default, so no value until the user sets one: {body}"
     );
+    let o1 = &options[1];
+    assert_eq!(o1["name"], "region", "option name: {body}");
+    assert_eq!(o1["value"], "us-east-1", "default value in list: {body}");
 }
 
 /// GET on an undeclared option name returns 404 `unknown_option`.

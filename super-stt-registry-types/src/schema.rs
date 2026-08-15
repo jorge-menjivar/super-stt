@@ -51,6 +51,91 @@ fn push_all_of(schema_obj: &mut Value, cond: Value) {
         .push(cond);
 }
 
+/// The conditionals and constraints that live on individual definitions
+/// rather than the root: asset shape, the `base_url` value ban, non-empty
+/// lists, and the license enum.
+///
+/// # Panics
+/// Panics if a definition the builder targets is missing — see
+/// [`backend_schema`].
+fn inject_definition_rules(defs: &mut serde_json::Map<String, Value>) {
+    let asset = defs
+        .get_mut("SubprocessAsset")
+        .expect("SubprocessAsset def");
+    push_all_of(
+        asset,
+        json!({
+            "if": {
+                "required": ["accel"],
+                "properties": { "accel": { "const": "cuda" } }
+            },
+            "then": { "required": ["cuda_major"] },
+            "else": { "properties": {
+                "cuda_major": false,
+                "cuda_sm": false,
+                "cudnn": { "const": false }
+            } }
+        }),
+    );
+    // Exactly one of `file` (single archive) or `parts` (multi-part). `oneOf`
+    // passes only when one branch matches: file-only or parts-only is valid;
+    // both or neither fails — the schema mirror of the parser's xor guard.
+    push_all_of(
+        asset,
+        json!({
+            "oneOf": [
+                { "required": ["file"] },
+                { "required": ["parts"] }
+            ]
+        }),
+    );
+    // A multi-part `parts` list must be non-empty (serde can't express minItems).
+    asset["properties"]["parts"]
+        .as_object_mut()
+        .expect("parts property")
+        .insert("minItems".into(), json!(1));
+    // `FileSpec` is flat — `url` and `destination` are required by serde and
+    // `sha256` is optional, so no cross-field conditional is needed here.
+
+    // `base_url` is the option whose value relaxes the egress guard, so it must
+    // be the user's — the manifest may declare the option but never a value for
+    // it. Mirrors the parser's `BaseUrlDefault` guard.
+    let opt = defs.get_mut("Opt").expect("Opt def");
+    push_all_of(
+        opt,
+        json!({
+            "if": {
+                "required": ["name"],
+                "properties": { "name": { "const": crate::manifest::BASE_URL_OPTION } }
+            },
+            "then": { "properties": { "default": false } }
+        }),
+    );
+
+    // `supported_devices` must be non-empty (discovery rejects an empty
+    // list); serde can't express minItems, so inject it here.
+    let model = defs.get_mut("ModelEntry").expect("ModelEntry def");
+    model["properties"]["supported_devices"]
+        .as_object_mut()
+        .expect("supported_devices property")
+        .insert("minItems".into(), serde_json::json!(1));
+
+    // Embed the accepted license values (recognized FOSS SPDX ids + `other`) as
+    // an enum so editors offer them and reject anything else — a self-contained
+    // snapshot of the FOSS subset of the SPDX list, requiring no external fetch
+    // by the editor. Built from the same predicate the indexer validates with
+    // (`crate::license`), so the schema and the indexer never disagree.
+    let licenses: Vec<Value> = crate::license::accepted_schema_values()
+        .into_iter()
+        .map(|s| json!(s))
+        .collect();
+    let backend = defs.get_mut("BackendMeta").expect("BackendMeta def");
+    backend["properties"]["license"]
+        .as_object_mut()
+        .expect("license property")
+        .insert("enum".into(), json!(licenses));
+}
+
 /// The full `backend.toml` schema.
 ///
 /// # Panics
@@ -116,70 +201,11 @@ pub fn backend_schema() -> Value {
     );
 
     // Per-definition conditionals.
-    let defs = root
-        .get_mut("definitions")
-        .and_then(Value::as_object_mut)
-        .expect("definitions");
-    let asset = defs
-        .get_mut("SubprocessAsset")
-        .expect("SubprocessAsset def");
-    push_all_of(
-        asset,
-        json!({
-            "if": {
-                "required": ["accel"],
-                "properties": { "accel": { "const": "cuda" } }
-            },
-            "then": { "required": ["cuda_major"] },
-            "else": { "properties": {
-                "cuda_major": false,
-                "cuda_sm": false,
-                "cudnn": { "const": false }
-            } }
-        }),
+    inject_definition_rules(
+        root.get_mut("definitions")
+            .and_then(Value::as_object_mut)
+            .expect("definitions"),
     );
-    // Exactly one of `file` (single archive) or `parts` (multi-part). `oneOf`
-    // passes only when one branch matches: file-only or parts-only is valid;
-    // both or neither fails — the schema mirror of the parser's xor guard.
-    push_all_of(
-        asset,
-        json!({
-            "oneOf": [
-                { "required": ["file"] },
-                { "required": ["parts"] }
-            ]
-        }),
-    );
-    // A multi-part `parts` list must be non-empty (serde can't express minItems).
-    asset["properties"]["parts"]
-        .as_object_mut()
-        .expect("parts property")
-        .insert("minItems".into(), json!(1));
-    // `FileSpec` is flat — `url` and `destination` are required by serde and
-    // `sha256` is optional, so no cross-field conditional is needed here.
-
-    // `supported_devices` must be non-empty (discovery rejects an empty
-    // list); serde can't express minItems, so inject it here.
-    let model = defs.get_mut("ModelEntry").expect("ModelEntry def");
-    model["properties"]["supported_devices"]
-        .as_object_mut()
-        .expect("supported_devices property")
-        .insert("minItems".into(), serde_json::json!(1));
-
-    // Embed the accepted license values (recognized FOSS SPDX ids + `other`) as
-    // an enum so editors offer them and reject anything else — a self-contained
-    // snapshot of the FOSS subset of the SPDX list, requiring no external fetch
-    // by the editor. Built from the same predicate the indexer validates with
-    // (`crate::license`), so the schema and the indexer never disagree.
-    let licenses: Vec<Value> = crate::license::accepted_schema_values()
-        .into_iter()
-        .map(|s| json!(s))
-        .collect();
-    let backend = defs.get_mut("BackendMeta").expect("BackendMeta def");
-    backend["properties"]["license"]
-        .as_object_mut()
-        .expect("license property")
-        .insert("enum".into(), json!(licenses));
 
     close_objects(&mut root);
     root

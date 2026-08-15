@@ -12,7 +12,8 @@ use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
 
 use super::active::backend_glyph_tile;
 use super::chips::{
-    backend_is_online, backend_supports_cpu, backend_supports_gpu, capability_chips,
+    CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
+    backend_supports_gpu, capability_chips,
 };
 use super::surface::muted_text_color;
 
@@ -88,7 +89,10 @@ pub fn load_backend_sheet(app: &AppModel) -> Element<'_, Message> {
 fn load_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
     let online = backend_is_online(backend);
-    let hosts = online.then_some(backend.allowed_hosts.as_slice());
+    let egress = online.then(|| CloudEgress {
+        hosts: backend.allowed_hosts.as_slice(),
+        user_url: backend_has_user_url(backend),
+    });
 
     let mut meta = widget::column::with_capacity(2)
         .spacing(spacing.space_xxxs)
@@ -97,7 +101,7 @@ fn load_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, 
     if let Some(chips) = capability_chips(
         backend_supports_gpu(backend),
         backend_supports_cpu(backend),
-        hosts,
+        egress,
         true,
     ) {
         meta = meta.push(chips);

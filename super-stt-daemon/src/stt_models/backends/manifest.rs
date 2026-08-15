@@ -371,11 +371,11 @@ contract = "v1"
 description = "Test backend."
 
 [[options]]
-name = "base_url"
-label = "API base URL"
-description = "Override the base URL."
+name = "region"
+label = "Upstream region"
+description = "Override the upstream region."
 type = "string"
-default = "https://api.openai.com"
+default = "us-east-1"
 
 [[options]]
 name = "request_timeout_seconds"
@@ -386,13 +386,13 @@ default = 30
         let manifest = Manifest::parse(toml_src).expect("parse");
         assert_eq!(manifest.options.len(), 2);
 
-        let base = &manifest.options[0];
-        assert_eq!(base.name, "base_url");
-        assert_eq!(base.label.as_deref(), Some("API base URL"));
-        assert_eq!(base.r#type, Some(OptionType::String));
+        let region = &manifest.options[0];
+        assert_eq!(region.name, "region");
+        assert_eq!(region.label.as_deref(), Some("Upstream region"));
+        assert_eq!(region.r#type, Some(OptionType::String));
         assert_eq!(
-            base.default,
-            Some(OptionDefault::String("https://api.openai.com".into()))
+            region.default,
+            Some(OptionDefault::String("us-east-1".into()))
         );
 
         let timeout = &manifest.options[1];

@@ -10,7 +10,7 @@ use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
 
 use super::active::backend_header;
-use super::chips::{capability_chips, result_count};
+use super::chips::{CloudEgress, capability_chips, result_count};
 use super::surface::{card_divider, card_surface, models_line, muted_text_color};
 
 /// Browse tab split into its two regions: the fixed search + filter toolbar
@@ -247,10 +247,13 @@ pub(super) fn download_card<'a>(
             vec![],
         ));
 
-    let online_hosts = entry.online.then_some(entry.allowed_hosts.as_slice());
-    if let Some(chips) =
-        capability_chips(entry.supports_gpu, entry.supports_cpu, online_hosts, true)
-    {
+    // Browse describes a backend that is not installed, so nothing of the
+    // user's is configured for it yet.
+    let egress = entry.online.then_some(CloudEgress {
+        hosts: entry.allowed_hosts.as_slice(),
+        user_url: false,
+    });
+    if let Some(chips) = capability_chips(entry.supports_gpu, entry.supports_cpu, egress, true) {
         card = card.push(chips);
     }
 

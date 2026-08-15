@@ -225,10 +225,31 @@ fn rejects_contract_violations() {
             d["backend"]["license"] = json!("Definitely-Not-A-License");
             d
         }),
+        ("base_url option declaring a default", {
+            let mut d = wasm_base();
+            d["options"] = json!([{ "name": "base_url", "description": "Endpoint.",
+                "type": "string", "default": "https://api.y.example" }]);
+            d
+        }),
     ];
     for (label, doc) in cases {
         assert!(!v.is_valid(&doc), "{label}: should have failed validation");
     }
+}
+
+/// The `base_url` rule is narrow: the option may be declared, and every other
+/// option keeps its `default`. Without this the conditional could be widened to
+/// ban defaults outright and the rejection case above would still pass.
+#[test]
+fn base_url_may_be_declared_without_a_default() {
+    let v = backend_validator();
+    let mut d = wasm_base();
+    d["options"] = json!([
+        { "name": "base_url", "description": "Endpoint." },
+        { "name": "region", "description": "Region.", "default": "us" }
+    ]);
+    let errors: Vec<String> = v.iter_errors(&d).map(|e| format!("{e}")).collect();
+    assert!(errors.is_empty(), "schema errors: {errors:#?}");
 }
 
 /// `close_objects` only walks root + definitions; if a future type change
@@ -333,6 +354,12 @@ fn conditional_property_names_exist() {
         model_entry_props.contains_key("supported_devices"),
         "ModelEntry missing `supported_devices`"
     );
+    let opt_props = defs["Opt"]["properties"]
+        .as_object()
+        .expect("Opt properties");
+    for key in ["name", "default"] {
+        assert!(opt_props.contains_key(key), "Opt missing `{key}`");
+    }
 }
 
 #[test]

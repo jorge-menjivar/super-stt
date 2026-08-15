@@ -78,6 +78,11 @@ impl SuperSTTDaemon {
                     source: b.source.clone(),
                     name: b.name.clone(),
                     kind: b.kind.clone(),
+                    // The manifest's declared egress, and only that. A user-set
+                    // `base_url` authorizes an endpoint beyond it, but it is the
+                    // user's own value and does not belong in a field clients
+                    // read as "what this backend declared": the settings UI
+                    // reports it from the `base_url` option instead.
                     allowed_hosts: b.allowed_hosts.clone(),
                     models,
                     secrets,

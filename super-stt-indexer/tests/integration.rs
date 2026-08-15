@@ -27,9 +27,9 @@ name = "y_api_key"
 description = "Key."
 
 [[options]]
-name = "base_url"
+name = "region"
 description = "Override."
-default = "https://api.y.example"
+default = "us-east-1"
 
 [[models]]
 name = "y-1"
@@ -108,12 +108,9 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
     // Relaxation fallbacks: a secret without `label` falls back to `name`;
     // an option without `label`/`type` falls back to `name`/"string".
     assert_eq!(v["backends"][0]["secrets"][0]["label"], "y_api_key");
-    assert_eq!(v["backends"][0]["options"][0]["label"], "base_url");
+    assert_eq!(v["backends"][0]["options"][0]["label"], "region");
     assert_eq!(v["backends"][0]["options"][0]["type"], "string");
-    assert_eq!(
-        v["backends"][0]["options"][0]["default"],
-        "https://api.y.example"
-    );
+    assert_eq!(v["backends"][0]["options"][0]["default"], "us-east-1");
     // The fixture's only model declares the `none` device sentinel — pins the
     // `supported_devices = ["none"]` → `online: true` mapping.
     assert_eq!(v["backends"][0]["online"], true);

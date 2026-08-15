@@ -35,6 +35,13 @@ pub enum ManifestError {
          GPL-3.0-only) or \"other\""
     )]
     LicenseNotAllowed(String),
+    #[error(
+        "option `base_url` must not declare a `default`: its value authorizes \
+         egress the sandbox would otherwise refuse, so it has to come from the \
+         user. Carry the endpoint in the component and leave the option as an \
+         override."
+    )]
+    BaseUrlDefault,
 }
 
 pub fn validate(
@@ -93,6 +100,17 @@ pub fn validate(
                 return Err(ManifestError::CudnnRequiresCuda { file: a.label() });
             }
         }
+    }
+    // A `base_url` value is user intent: the daemon authorizes the host it names
+    // for egress with the SSRF guard relaxed. A manifest-supplied one is the
+    // backend author's, so a release carrying it does not go in the registry.
+    // The daemon is laxer on purpose — it drops the value and loads the backend
+    // — because refusing to load punishes the user for the author's mistake;
+    // refusing to publish stops it reaching users at all.
+    if m.options.iter().any(|o| {
+        o.name == super_stt_registry_types::manifest::BASE_URL_OPTION && o.default.is_some()
+    }) {
+        return Err(ManifestError::BaseUrlDefault);
     }
     crate::license::check(m.backend.license.as_deref())?;
     Ok(())
@@ -220,6 +238,47 @@ mod tests {
         let m = Manifest::parse(t).unwrap();
         let err = validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap_err();
         assert!(matches!(err, ManifestError::CudaMissingMajor { .. }));
+    }
+
+    /// A release may declare the `base_url` option, but not a value for it: the
+    /// host it names is authorized for egress with the SSRF guard relaxed, which
+    /// only the user may ask for. The registry is where that is refused — the
+    /// daemon loads such a backend with the value dropped.
+    #[test]
+    fn rejects_a_base_url_default_but_accepts_the_option() {
+        const BASE: &str = r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "wasm"
+            entrypoint = "y.wasm"
+            contract = "v1"
+            description = "Test backend."
+            license = "Apache-2.0"
+
+            [assets]
+            wasm = "y.wasm"
+
+            [[options]]
+            name = "base_url"
+            description = "Endpoint."
+            type = "string"
+        "#;
+        let m = Manifest::parse(BASE).unwrap();
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap();
+
+        let m = Manifest::parse(&format!("{BASE}\ndefault = \"https://api.y.com\"\n")).unwrap();
+        let err = validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap_err();
+        assert!(
+            matches!(err, ManifestError::BaseUrlDefault),
+            "expected BaseUrlDefault, got {err:?}"
+        );
+
+        // Every other option keeps its default.
+        let m =
+            Manifest::parse(&BASE.replace(r#"name = "base_url""#, r#"name = "region""#)).unwrap();
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap();
     }
 
     #[test]

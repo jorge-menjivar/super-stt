@@ -600,35 +600,15 @@ async fn set_model_local_works_without_online_toggle() {
 /// override is reflected in an option's effective `value`. Keyring-free.
 #[tokio::test]
 async fn list_backends_catalog_and_option_override() {
+    use crate::daemon::test_fixtures::openai_backend;
     use crate::stt_models::ModelDefinition;
-    use crate::stt_models::backends::DiscoveredBackend;
-    use crate::stt_models::backends::manifest::{Opt, OptionDefault, OptionType, Secret};
     use std::time::Duration;
 
     let daemon = test_daemon().await;
     let source = "github.com/super-stt/openai";
-    let backend = DiscoveredBackend {
-        dir: std::path::PathBuf::from("/tmp/openai"),
-        source: source.to_string(),
-        name: "OpenAI".to_string(),
-        kind: "wasm".to_string(),
-        entrypoint: "openai.wasm".to_string(),
-        allowed_hosts: vec!["api.openai.com".to_string()],
-        secrets: vec![Secret {
-            name: "openai_api_key".to_string(),
-            label: Some("OpenAI API key".to_string()),
-            description: "key".to_string(),
-            required: true,
-        }],
-        options: vec![Opt {
-            name: "base_url".to_string(),
-            label: Some("API base URL".to_string()),
-            description: "Base URL".to_string(),
-            r#type: Some(OptionType::String),
-            default: Some(OptionDefault::String("https://api.openai.com".to_string())),
-            required: false,
-        }],
-        models: vec![ModelDefinition {
+    let backend = openai_backend(
+        source,
+        vec![ModelDefinition {
             name: "whisper-1".to_string(),
             source: source.to_string(),
             is_multilingual: true,
@@ -640,7 +620,10 @@ async fn list_backends_catalog_and_option_override() {
             realtime: false,
             provider: None,
         }],
-    };
+        // A manifest may not declare a default for `base_url`, so the catalog's
+        // effective value starts unset and only the override fills it in.
+        None,
+    );
     *daemon.backends.write().await = vec![backend];
 
     let resp = daemon.handle_list_backends().await;
@@ -653,8 +636,8 @@ async fn list_backends_catalog_and_option_override() {
     assert_eq!(cat[0]["models"][0]["name"], "whisper-1");
     assert_eq!(cat[0]["secrets"][0]["name"], "openai_api_key");
     assert_eq!(cat[0]["secrets"][0]["label"], "OpenAI API key");
-    // No override yet → option value is the manifest default.
-    assert_eq!(cat[0]["options"][0]["value"], "https://api.openai.com");
+    // No override yet, and `base_url` may carry no manifest default → no value.
+    assert!(cat[0]["options"][0]["value"].is_null());
 
     // In-memory override (avoids a config disk write in tests).
     daemon
@@ -673,6 +656,15 @@ async fn list_backends_catalog_and_option_override() {
         .backends
         .expect("backends catalog");
     assert_eq!(cat[0]["options"][0]["value"], "https://gw.example");
+    // `allowed_hosts` stays the manifest's own declaration; the user's gateway
+    // is reported through the option's value, which is what the settings UI
+    // reads to say a user-set URL exists.
+    assert_eq!(
+        cat[0]["allowed_hosts"][0], "api.openai.com",
+        "a user-set base_url must not be folded into the manifest's list: {:?}",
+        cat[0]["allowed_hosts"]
+    );
+    assert!(cat[0]["allowed_hosts"][1].is_null());
 }
 
 /// Build a `DiscoveredBackend` whose `dir` ends in `dir_name` and that

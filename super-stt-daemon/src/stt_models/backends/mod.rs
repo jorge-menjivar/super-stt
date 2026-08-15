@@ -7,6 +7,7 @@
 //! native binary). This module scans that directory and turns each manifest
 //! into a [`DiscoveredBackend`] carrying fully-resolved [`ModelDefinition`]s.
 
+pub(crate) mod base_url;
 pub mod manifest;
 
 use std::collections::HashSet;
@@ -115,8 +116,24 @@ fn dedup_sources(backends: Vec<DiscoveredBackend>) -> Vec<DiscoveredBackend> {
 /// manifest; this function enforces the cross-field device rules via
 /// [`validate_supported_devices`].
 fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
-    let m = Manifest::load(dir)?;
+    let mut m = Manifest::load(dir)?;
     manifest::validate_runtime(&m)?;
+    // A `base_url` value authorizes egress the sandbox would otherwise refuse,
+    // so only the user may supply one. A manifest that declares a default is
+    // wrong, but refusing to load the whole backend would punish the user for
+    // the author's mistake — and leave them with a backend that silently
+    // vanished. Drop the value, keep the option, say so. The registry indexer
+    // refuses such a release outright, so this is the sideloaded/local case.
+    for opt in &mut m.options {
+        if opt.name == base_url::OPTION_NAME && opt.default.take().is_some() {
+            warn!(
+                "Backend {}: ignoring the `base_url` default declared in {}; \
+                 only a value the user sets authorizes egress",
+                m.backend.source,
+                dir.display()
+            );
+        }
+    }
     let source = m.backend.source.clone();
 
     let mut models = Vec::new();

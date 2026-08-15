@@ -407,7 +407,14 @@ reach:
   `wasi:http/outgoing-handler`, validated against the `allowed_hosts` in its
   configuration; raw sockets are not granted. A subprocess backend runs with no
   network at all. See [wasm.md](./wasm.md) and
-  [subprocess.md](./subprocess.md).
+  [subprocess.md](./subprocess.md). One deliberate exception: the `host:port`
+  the *user* sets in a backend's `base_url` option is added to that backend's
+  egress with the SSRF guard relaxed for it, so a user can point a cloud backend
+  at a local or private gateway. It covers that one authority, never the
+  link-local/metadata range, and the value must be the user's — a `default` a
+  manifest declares for `base_url` never takes effect — so a backend cannot
+  self-authorize it; see
+  [config.md — `base_url` and egress](./config.md#base_url-and-egress).
 - **Filesystem.** A subprocess backend is confined to its own directory; a
   WASM backend has no ambient filesystem access.
 - **Secrets and options.** A backend declares the API keys (secrets) and

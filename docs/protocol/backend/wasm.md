@@ -45,7 +45,27 @@ which the daemon implements. The daemon enforces the configuration's
   to loopback, link-local, or private ranges — including the metadata
   address `169.254.169.254` — to prevent server-side request forgery.
 
-A backend with an empty `allowed_hosts` has no network at all.
+A backend with an empty `allowed_hosts` has no network at all, unless the user
+authorizes one endpoint through `base_url`.
+
+**User-authorized egress (`base_url`).** A backend that declares an option
+named `base_url` (see [config.md — `base_url` and egress](./config.md#base_url-and-egress))
+lets the user point it at an arbitrary gateway. At model-load time the daemon
+derives one `host:port` authority from the configured value, adds it to the
+backend's egress set, and relaxes the SSRF guard for it — so a user-set gateway
+may be on localhost or a private network. Only what the *user* configured
+through the settings-scoped API gets this treatment: the option is never
+writable by the component, and a `default` a manifest declares for `base_url` is
+dropped at discovery (and refused outright by the registry), so a malicious
+backend cannot self-authorize a localhost service.
+
+The relaxation is bounded in both directions. It covers the derived authority
+only — the host is authorized on its own too, so a public gateway keeps its
+other ports, but reaching a local or private address needs the endpoint the user
+actually named. And it lifts only the loopback and private-range blocks, so
+link-local addresses — the metadata endpoint `169.254.169.254` among them — and
+the unspecified and broadcast addresses stay refused no matter who named them.
+Manifest `allowed_hosts` entries remain fully SSRF-guarded.
 
 ## Secrets and options
 
