@@ -59,6 +59,14 @@ cannot copy a link target's bytes into the install dir). The synchronous
 response carries `warning: "unverified_source"`; the `selected_asset` reflects
 the local copy with `accel = "local"` and an empty `target`.
 
+The directory must already contain the file `[backend].entrypoint` names — the
+`.wasm` component or the executable. A registry release ships it built and
+named; an import is staged by the operator, so nothing else establishes that it
+is there. Without this check the install would succeed and the backend would
+fail at model load with a read error naming a path, long after the operator
+could connect it to what they staged. A source checkout is the usual cause: a
+build tree names its artifact after the crate, not after the entrypoint.
+
 **Integrity & limits.** Operator base-URL overrides (`GITHUB_API_BASE`,
 `SUPER_STT_REGISTRY_URL`) must be `https://` (loopback `http://` is allowed for
 testing); insecure values are ignored and the secure default is used. Downloads
@@ -136,7 +144,7 @@ Typed `error` values:
 | Status | Cause |
 |---|---|
 | `400` | Body has zero or more than one of `source` / `repo_url` / `local_path`. Body: `{"error":"bad_request"}`. For Custom-repo, `repo_url` not a `<host>/<owner>/<repo>` reference: `{"error":"bad_repo_url"}`. Custom-repo `forge` missing: `{"error":"bad_request"}` (an unrecognized `forge` value is rejected earlier as a malformed body). For Import-from-dir, `local_path` not an absolute path: `{"error":"bad_local_path"}`. |
-| `404` | `source` not in the cached or refreshed index, or Custom-repo repo/release/`backend.toml` not found at the forge: `{"error":"not_found"}`. For Import-from-dir, `<local_path>` or its `backend.toml` does not exist: `{"error":"not_found"}`. |
+| `404` | `source` not in the cached or refreshed index, or Custom-repo repo/release/`backend.toml` not found at the forge: `{"error":"not_found"}`. For Import-from-dir, `<local_path>`, its `backend.toml`, or the file `[backend].entrypoint` names does not exist: `{"error":"not_found"}`. |
 | `409` | An install for this `source` is already in flight. Body: `{"error":"install_in_progress"}`. |
 | `422` | No compatible asset on this host: `{"error":"incompatible"}`. For Custom-repo, `backend.toml` invalid: `{"error":"manifest_invalid"}` or `{"error":"manifest_too_large"}`; a declared asset is missing from the release: `{"error":"asset_missing"}`; the manifest's `source` is not the repo it was fetched from or namespaced under it (identity spoofing): `{"error":"source_mismatch"}`. For Import-from-dir, `<local_path>/backend.toml` failed to parse or yields an unsafe install id: `{"error":"manifest_invalid"}`. |
 | `502` | Custom-repo: forge API unreachable. Body: `{"error":"forge_unavailable"}`. |
