@@ -93,6 +93,12 @@ headers — external clients cannot set them.
 - Secrets and options come from the backend's [configuration](./config.md),
   with values set by the user in the settings UI. The header for a secret or
   option the user has not set is omitted.
+- `x-stt-option-base_url` is the one option header the daemon normalizes. It
+  carries a canonical `scheme://host[:port][/path]`: lowercase scheme, no
+  userinfo, no trailing slash, no query or fragment, and a port only when the
+  user set one. A backend can split it at the first `/` after the scheme and
+  needs no further parsing. Every other option is passed through exactly as the
+  user set it. See [config.md — `base_url` and egress](./config.md#base_url-and-egress).
 - **Secret values are sensitive.** The daemon stores them encrypted and
   redacts the `x-stt-secret-*` headers from logs. A backend uses a secret only
   to authenticate its own outbound calls — it must never echo one in a
