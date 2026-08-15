@@ -13,6 +13,7 @@ pub mod host;
 pub mod ws_host;
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -44,10 +45,10 @@ enum BackendPre {
 pub struct WasmBackend {
     engine: Engine,
     pre: BackendPre,
-    allowed_hosts: Vec<String>,
+    allowed_hosts: Arc<[String]>,
     /// Hosts the *user* authorized via backend options (e.g. a `base_url` set in
     /// the settings UI). Exempt from the SSRF guard — see [`AllowlistHooks`].
-    user_allowed_hosts: Vec<String>,
+    user_allowed_hosts: Arc<[String]>,
     allow_loopback: bool,
     transcribe_headers: Vec<(String, String)>,
     model_id: String,
@@ -109,8 +110,8 @@ impl WasmBackend {
         Ok(Self {
             engine,
             pre,
-            allowed_hosts,
-            user_allowed_hosts,
+            allowed_hosts: allowed_hosts.into(),
+            user_allowed_hosts: user_allowed_hosts.into(),
             allow_loopback: false,
             transcribe_headers,
             model_id,
@@ -128,6 +129,10 @@ impl WasmBackend {
     /// the user authorized and has the guard relaxed for its `host:port`. Wiring
     /// them the other way round would hand a backend the relaxation for hosts it
     /// declared itself.
+    ///
+    /// Both lists are immutable for the backend's lifetime and the hooks only
+    /// read them, so they are shared rather than copied: this runs once per
+    /// transcription and once per realtime session.
     #[must_use]
     pub fn allowlist_hooks(&self) -> AllowlistHooks {
         AllowlistHooks {

@@ -3,6 +3,7 @@
 //! outbound-host allowlist that confines a component's network egress.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use std::sync::Arc;
 
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
@@ -50,7 +51,7 @@ pub struct AllowlistHooks {
     /// manifest. These are SSRF-guarded: a manifest entry does **not** authorize
     /// loopback/private/link-local/metadata destinations, because the backend
     /// author is not a trusted operator.
-    pub allowed_hosts: Vec<String>,
+    pub allowed_hosts: Arc<[String]>,
     /// What the *user* authorized through backend options (e.g. a `base_url` set
     /// in the settings UI): the `host:port` the value names, plus its bare host.
     /// The SSRF guard is relaxed for the authority alone — loopback and private
@@ -60,7 +61,7 @@ pub struct AllowlistHooks {
     /// there: link-local (metadata), unspecified, and broadcast addresses stay
     /// refused, and the bare host is judged like a manifest entry, so a gateway's
     /// other ports stay reachable only while they are public.
-    pub user_allowed_hosts: Vec<String>,
+    pub user_allowed_hosts: Arc<[String]>,
     /// Permit egress to loopback addresses (`127.0.0.0/8`, `::1`). Off in
     /// production — the SSRF guard blocks loopback so an untrusted backend
     /// can't reach a service bound to localhost. Tests and local development

@@ -101,6 +101,13 @@ async fn set(
     // as an active override that authorizes nothing. Other options keep the
     // value verbatim: whitespace may carry meaning in one the daemon does not
     // interpret.
+    //
+    // Normalized, not validated: this deliberately does not check that the value
+    // parses into a host. Doing so would reject garbage but not the mistake that
+    // actually misleads people — a well-formed URL naming the wrong port — while
+    // a value the daemon cannot read is already logged at model load and shows
+    // up as a failed transcription. Revisit alongside a settings UI that can
+    // surface the error where the user is looking.
     let value = if name == crate::stt_models::backends::base_url::OPTION_NAME {
         body.value.trim()
     } else {
