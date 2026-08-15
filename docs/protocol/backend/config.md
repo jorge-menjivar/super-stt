@@ -184,8 +184,8 @@ of the box carries it in the component and treats the option as an override.
 That is what the missing `x-stt-option-base_url` header means when the user has
 set nothing.
 
-The value the backend receives is **canonical**, not the string the user typed.
-The daemon parses it once at model-load time and re-serializes it as
+The value the backend receives is **canonical**. The daemon parses it and
+re-serializes it as
 `scheme://host[:port][/path]`: the scheme is lowercased, and supplied when
 absent; userinfo is stripped; a trailing slash is removed; any query or
 fragment is dropped. A port appears only when the user gave one — the daemon
@@ -193,9 +193,18 @@ does not add the scheme's default, which would otherwise travel to the upstream
 in the `Host` header. The path is preserved exactly as written: it plays no part
 in egress, and only the backend knows which path its own API serves.
 
-Normalizing here rather than in each backend keeps every backend working from
-the same value the daemon authorized, and spares each one its own URL parser.
-Config storage is untouched — the settings UI still shows what the user typed.
+Normalizing in the daemon rather than in each backend keeps every backend
+working from the same value the daemon authorized, and spares each one its own
+URL parser.
+
+The same rewrite is applied when the value is **set**, so what
+[`POST /backends/{source}/options/{name}`](../endpoints/v1/backends/options.md)
+stores is already canonical and the settings field reads back the endpoint that
+will be dialed. The scheme is why this is worth doing at the write boundary
+rather than only at load: whether a request is encrypted should not be
+invisible in the field the user is looking at. A value that yields no host is
+the exception — it is stored as typed, so the load-time refusal can name it,
+rather than being dropped.
 
 #### The scheme a value without one is read as
 

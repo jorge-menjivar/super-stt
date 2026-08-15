@@ -129,6 +129,16 @@ Content-Type: application/json
 { "status": "success", "value": "https://gateway.example.com" }
 ```
 
+`base_url` is the one option stored in a rewritten form: the value is
+canonicalized to `scheme://host[:port][/path]` — the same form the backend is
+handed at model load — so the `value` returned here, and the one a later `GET`
+reports, is the endpoint that will actually be dialed rather than the string
+that was posted. A value naming no scheme is given the one its host implies, so
+posting `192.168.0.179:8080/v1` stores and returns
+`http://192.168.0.179:8080/v1`. See
+[config.md](../../../backend/config.md#base_url-and-egress) for the full rule.
+Every other option is stored exactly as posted.
+
 ## `DELETE /backends/{source}/options/{name}`
 
 Remove the override, resetting the option to its manifest **default**.
