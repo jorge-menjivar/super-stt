@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-15T07:27:48Z",
+  "generated_at": "2026-08-15T11:34:48Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -107,8 +107,8 @@
     {
       "id": "openai",
       "source": "github.com/jorge-menjivar/super-stt-openai",
-      "version": "0.1.0",
-      "tag": "v0.1.0",
+      "version": "0.1.1",
+      "tag": "v0.1.1",
       "name": "OpenAI",
       "description": "Cloud speech-to-text via the OpenAI API.",
       "license": "GPL-3.0-only",
@@ -142,27 +142,45 @@
           "supported_devices": [
             "none"
           ]
+        },
+        {
+          "name": "other",
+          "provider": "",
+          "supported_devices": [
+            "none"
+          ]
         }
       ],
       "secrets": [
         {
           "name": "openai_api_key",
           "label": "OpenAI API key",
-          "required": true
+          "required": false
         }
       ],
-      "options": [],
+      "options": [
+        {
+          "name": "base_url",
+          "label": "API base URL",
+          "type": "string"
+        },
+        {
+          "name": "custom_model",
+          "label": "Custom model name",
+          "type": "string"
+        }
+      ],
       "assets": {
         "wasm": {
-          "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.0/openai.wasm",
-          "size": 211177,
-          "sha256": "ea4c54451bc2152a28e01c52a44c29769cee527c3f0fd66973a2bdc173081b8e"
+          "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.1/openai.wasm",
+          "size": 220917,
+          "sha256": "c6a85f1cdb437ea933cb6ebcc9a82eb6740519276103de3ae8cb999392d9bbb1"
         }
       },
       "manifest": {
-        "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.0/backend.toml",
-        "size": 2561,
-        "sha256": "77a4372785fcefd95ec20818e8a7953906c40f76313f66f7a81fb54a1520ca90"
+        "url": "https://github.com/jorge-menjivar/super-stt-openai/releases/download/v0.1.1/backend.toml",
+        "size": 6089,
+        "sha256": "d342df3cfd5646bc3b24b953bae48900342a72fb9cee97c7844c9415639e6030"
       }
     },
     {
