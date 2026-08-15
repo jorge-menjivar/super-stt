@@ -163,16 +163,29 @@ impl IndexBackend {
             options: m
                 .options
                 .into_iter()
-                .map(|o| IndexOption {
-                    label: o.label.unwrap_or_else(|| o.name.clone()),
-                    name: o.name,
-                    r#type: o
-                        .r#type
-                        .map_or_else(|| "string".to_string(), |t| t.to_string()),
-                    // Untagged serialize yields the plain JSON value
-                    // (string/number/bool). `.ok()` drops the theoretically
-                    // impossible failure rather than panicking in a library.
-                    default: o.default.and_then(|d| serde_json::to_value(d).ok()),
+                .map(|o| {
+                    // A `base_url` value authorizes egress, so only the user may
+                    // supply one (see [`BASE_URL_OPTION`]). Dropping it here is
+                    // what keeps every install path agreeing with the daemon:
+                    // this synthesis is shared by the registry indexer, the
+                    // custom-repo resolver, and the local-dir import, and the
+                    // daemon drops the same value at discovery. Advertising it
+                    // would show the user a default their install then loses.
+                    let default = (o.name != crate::manifest::BASE_URL_OPTION)
+                        .then_some(o.default)
+                        .flatten()
+                        // Untagged serialize yields the plain JSON value
+                        // (string/number/bool). `.ok()` drops the theoretically
+                        // impossible failure rather than panicking in a library.
+                        .and_then(|d| serde_json::to_value(d).ok());
+                    IndexOption {
+                        label: o.label.unwrap_or_else(|| o.name.clone()),
+                        name: o.name,
+                        r#type: o
+                            .r#type
+                            .map_or_else(|| "string".to_string(), |t| t.to_string()),
+                        default,
+                    }
                 })
                 .collect(),
             assets,
@@ -455,6 +468,62 @@ mod tests {
         assert_eq!(b.options.len(), 1, "option must not be dropped");
         assert_eq!(b.options[0].label, "base_url", "label falls back to name");
         assert_eq!(b.options[0].r#type, "string", "type defaults to string");
+    }
+
+    /// Every install path — registry, custom repo, local dir — synthesizes its
+    /// catalog entry here, and the daemon drops a manifest-declared `base_url`
+    /// value at discovery. Carrying one into the catalog would advertise a
+    /// default that disappears the moment the backend is installed, and would
+    /// leave the Configure sheet offering to "reset" to a value nothing holds.
+    /// Every other option keeps its default.
+    #[test]
+    fn from_manifest_drops_a_base_url_default_and_keeps_the_others() {
+        let m = crate::manifest::Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "wasm"
+            entrypoint = "y.wasm"
+            contract = "v1"
+            description = "Test backend."
+
+            [assets]
+            wasm = "y.wasm"
+
+            [[options]]
+            name = "base_url"
+            description = "Override."
+            default = "https://api.y.example"
+
+            [[options]]
+            name = "region"
+            description = "Region."
+            default = "us-east-1"
+            "#,
+        )
+        .unwrap();
+
+        let b = IndexBackend::from_manifest(
+            id_from_source("github.com/x/y"),
+            m,
+            "1.0.0".into(),
+            "v1.0.0".into(),
+            IndexAssets::default(),
+            None,
+        );
+
+        assert_eq!(b.options[0].name, "base_url");
+        assert!(
+            b.options[0].default.is_none(),
+            "a manifest-declared base_url value must not reach the catalog"
+        );
+        assert_eq!(b.options[1].name, "region");
+        assert_eq!(
+            b.options[1].default,
+            Some(serde_json::Value::String("us-east-1".into()))
+        );
     }
 
     /// A backend with no `license` field still deserializes (lenient read),

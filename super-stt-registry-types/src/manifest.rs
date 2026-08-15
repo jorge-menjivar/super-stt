@@ -13,6 +13,17 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// The option name that carries a backend's configurable endpoint.
+///
+/// It is the one option whose *value* changes what the daemon permits: the host
+/// it names is authorized for egress with the SSRF guard relaxed. That is sound
+/// only while the value is the user's, so consumers treat a manifest-supplied
+/// one as no value — the indexer refuses such a release, the catalog synthesis
+/// in [`IndexBackend::from_manifest`](crate::index::IndexBackend::from_manifest)
+/// drops it, and the daemon drops it at discovery. Named here so those checks
+/// cannot drift apart over a string literal.
+pub const BASE_URL_OPTION: &str = "base_url";
+
 /// A backend's `backend.toml`: identity, packaging, network policy,
 /// secrets/options, and the models it provides.
 #[derive(Debug, Clone, Deserialize)]
@@ -598,7 +609,7 @@ mod tests {
             description = "Key."
 
             [[options]]
-            name = "base_url"
+            name = "region"
             description = "Override."
             type = "string"
             default = "https://api.y.com"
@@ -622,6 +633,41 @@ mod tests {
         );
         assert_eq!(m.options[1].default, Some(OptionDefault::Integer(30)));
         assert_eq!(m.options[1].default.as_ref().unwrap().to_string(), "30");
+    }
+
+    /// `base_url` names the endpoint whose host is authorized for egress with
+    /// the SSRF guard relaxed, so a value for it must come from the user. The
+    /// format stays lenient about that — the parser keeps whatever the manifest
+    /// wrote, and the consumers enforce the rule: the indexer refuses to publish
+    /// such a release, and the daemon drops the value and loads the backend
+    /// anyway (`super-stt-indexer::manifest::validate`,
+    /// `super_stt_daemon::stt_models::backends`).
+    #[test]
+    fn parse_keeps_a_base_url_default_for_consumers_to_judge() {
+        let m = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "wasm"
+            entrypoint = "y.wasm"
+            contract = "v1"
+            description = "Test backend."
+
+            [[options]]
+            name = "base_url"
+            description = "Endpoint."
+            type = "string"
+            default = "https://api.y.com"
+            "#,
+        )
+        .expect("parse stays lenient; policy lives in each consumer");
+        assert_eq!(m.options[0].name, "base_url");
+        assert_eq!(
+            m.options[0].default,
+            Some(OptionDefault::String("https://api.y.com".into()))
+        );
     }
 
     #[test]
