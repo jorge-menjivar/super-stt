@@ -540,6 +540,25 @@
     },
     "Opt": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "const": "base_url"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "then": {
+            "properties": {
+              "default": false
+            }
+          }
+        }
+      ],
       "description": "One `[[options]]` declaration — non-secret configuration the backend reads\nas an `x-stt-option-<name>` request header.",
       "properties": {
         "default": {
