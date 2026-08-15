@@ -93,26 +93,25 @@ async fn set(
     axum::Json(body): axum::Json<OptionBody>,
 ) -> Response {
     let source = decode_source(&source);
-    // `base_url` is normalized at the boundary. The daemon acts on this value
-    // rather than only passing it through — it is injected as a header *and*
-    // parsed into the egress the backend is granted — so storing it padded
-    // would leave `GET`, the component, and the authorized endpoint holding
-    // three different strings, and a whitespace-only value would show in the UI
-    // as an active override that authorizes nothing. Other options keep the
-    // value verbatim: whitespace may carry meaning in one the daemon does not
-    // interpret.
+    // `base_url` is stored canonical — the same rewrite model load applies, run
+    // here so the settings field reads back the endpoint that will actually be
+    // dialed. The scheme is the reason it matters: a value naming none is read
+    // by its host, and whether the request is encrypted is not something to
+    // leave invisible in the field the user is looking at. Other options keep
+    // the value verbatim, whitespace included: it may carry meaning in one the
+    // daemon does not interpret.
     //
-    // Normalized, not validated: this deliberately does not check that the value
-    // parses into a host. Doing so would reject garbage but not the mistake that
-    // actually misleads people — a well-formed URL naming the wrong port — while
-    // a value the daemon cannot read is already logged at model load and shows
-    // up as a failed transcription. Revisit alongside a settings UI that can
-    // surface the error where the user is looking.
+    // Canonicalized, not validated: a value that yields no host is stored as
+    // typed rather than refused. Rejecting it here would catch garbage but not
+    // the mistake that actually misleads people — a well-formed URL naming the
+    // wrong port — and model load already refuses it with a message naming the
+    // option. What this must not do is quietly drop it.
     let value = if name == crate::stt_models::backends::base_url::OPTION_NAME {
-        body.value.trim()
+        canonical_base_url(&body.value)
     } else {
-        body.value.as_str()
+        body.value.clone()
     };
+    let value = value.as_str();
     if value.is_empty() {
         return json_error(StatusCode::BAD_REQUEST, "invalid_request");
     }
@@ -153,6 +152,27 @@ async fn delete_option(
         return (code, [("content-type", "application/json")], body_str).into_response();
     }
     get_one_inner(s, source, name).await
+}
+
+/// The `base_url` form to store: canonical when the value can be read as a
+/// URL, trimmed otherwise.
+///
+/// A value that yields no host is kept as the user typed it so model load can
+/// refuse it by name; dropping it here would leave the backend on its built-in
+/// endpoint, sending the user's audio and credentials to the vendor they had
+/// configured their way out of.
+#[cfg(feature = "wasm-backends")]
+fn canonical_base_url(value: &str) -> String {
+    crate::stt_models::backends::base_url::normalize(value)
+        .unwrap_or_else(|| value.trim().to_string())
+}
+
+/// Without the wasm transport nothing derives an endpoint from this value, so
+/// there is no canonical form to agree on — only the trim that keeps a padded
+/// value from reading back padded.
+#[cfg(not(feature = "wasm-backends"))]
+fn canonical_base_url(value: &str) -> String {
+    value.trim().to_string()
 }
 
 /// Returns an error `Response` when the backend or the named option is missing,

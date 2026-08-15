@@ -47,7 +47,7 @@ impl SuperSTTDaemon {
         // is handed and the egress it is granted: read separately, a config
         // write landing between them would authorize a different endpoint than
         // the one the component is told to use.
-        let overrides = self.backend_option_overrides(&backend.source).await;
+        let overrides = self.backend_option_overrides(backend).await?;
         let headers = self.backend_headers(backend, &overrides).await?;
         let component = backend.dir.join(&backend.entrypoint);
         let info = ModelInfoData::new(
@@ -231,40 +231,74 @@ impl SuperSTTDaemon {
     /// awaits a keyring round-trip, and a read guard spanning that would block
     /// config writers for its duration.
     ///
-    /// `base_url` is normalized on the way out. It is the one value the two
-    /// paths must read *identically* — one dials it, the other authorizes what
-    /// it names — so surrounding whitespace, from a paste into the settings
-    /// field or from a hand-edited config that never passed through the API,
-    /// would otherwise leave them working from different strings. A value that
-    /// is only whitespace is no value at all and is dropped, so it neither
-    /// reaches the component nor authorizes anything. Every other option is
-    /// passed through exactly as the user set it: whitespace may carry meaning
-    /// in a value the daemon does not interpret.
+    /// `base_url` is canonicalized on the way out (see
+    /// [`normalize`](backends::base_url::normalize)). It is the one value the
+    /// two paths must read *identically* — one dials it, the other authorizes
+    /// what it names — and the component is handed it verbatim, so the rewrite
+    /// that keeps the pair consistent is also what spares every backend its own
+    /// URL parser. Every other option is passed through exactly as the user set
+    /// it: whitespace may carry meaning in a value the daemon does not
+    /// interpret.
+    ///
+    /// The two ways a value can fail are not the same failure. One that is only
+    /// whitespace is no value at all: it is dropped, so it neither reaches the
+    /// component nor authorizes anything, and the backend falls back to its
+    /// built-in endpoint exactly as if nothing were set. One the daemon cannot
+    /// read as a URL is a setting the user meant, so it fails the load instead —
+    /// dropping it would fall back to that same built-in endpoint and send the
+    /// user's audio and credentials to the vendor they had configured their way
+    /// out of.
+    ///
+    /// A value stored for an option this backend does not declare is inert —
+    /// nothing injects or authorizes it — so it is left alone rather than
+    /// validated.
+    ///
+    /// # Errors
+    /// Returns an error when a declared, non-empty `base_url` yields no host.
     #[cfg(feature = "wasm-backends")]
     async fn backend_option_overrides(
         &self,
-        source: &str,
-    ) -> std::collections::HashMap<String, String> {
+        backend: &DiscoveredBackend,
+    ) -> Result<std::collections::HashMap<String, String>> {
         let mut overrides: std::collections::HashMap<String, String> = self
             .config
             .read()
             .await
             .backends
             .options
-            .get(source)
+            .get(&backend.source)
             .cloned()
             .unwrap_or_default();
         let name = backends::base_url::OPTION_NAME;
-        match overrides.get(name).map(|v| v.trim().to_string()) {
-            Some(trimmed) if trimmed.is_empty() => {
-                overrides.remove(name);
+        let Some(opt) = backend.options.iter().find(|o| o.name == name) else {
+            return Ok(overrides);
+        };
+        let Some(raw) = overrides.get(name).cloned() else {
+            return Ok(overrides);
+        };
+        if raw.trim().is_empty() {
+            overrides.remove(name);
+        } else if let Some(canonical) = backends::base_url::normalize(&raw) {
+            // The scheme the daemon chose for a value that named none decides
+            // whether the request is encrypted, so an operator asking later why
+            // a gateway was reached in the clear needs it on the record.
+            if !raw.contains("://") {
+                log::info!(
+                    "Backend {}: base_url `{}` names no scheme; reading it as `{canonical}`",
+                    backend.source,
+                    raw.trim()
+                );
             }
-            Some(trimmed) => {
-                overrides.insert(name.to_string(), trimmed);
-            }
-            None => {}
+            overrides.insert(name.to_string(), canonical);
+        } else {
+            // Shaped like the missing-secret error above: name the setting the
+            // user can act on, never the internals.
+            bail!(
+                "{} is not a valid URL.",
+                opt.label.as_deref().unwrap_or(&opt.name)
+            );
         }
-        overrides
+        Ok(overrides)
     }
 
     /// What the *user* authorized via a `base_url` option: the `host:port` the
@@ -365,7 +399,10 @@ mod tests {
 
         // No override → nothing, even though the option carries a default: a
         // value the backend author wrote must not authorize egress.
-        let overrides = daemon.backend_option_overrides(source).await;
+        let overrides = daemon
+            .backend_option_overrides(&backend)
+            .await
+            .expect("a valid base_url");
         assert!(SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides).is_empty());
 
         // Config override pointing at a local gateway → that endpoint, port kept.
@@ -380,7 +417,10 @@ mod tests {
             .entry(source.to_string())
             .or_default()
             .insert("base_url".to_string(), "http://localhost:8080".to_string());
-        let overrides = daemon.backend_option_overrides(source).await;
+        let overrides = daemon
+            .backend_option_overrides(&backend)
+            .await
+            .expect("a valid base_url");
         assert_eq!(
             SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides),
             vec!["localhost:8080", "localhost"]
@@ -429,7 +469,10 @@ mod tests {
                 .or_default()
                 .insert("base_url".to_string(), stored.to_string());
 
-            let overrides = daemon.backend_option_overrides(source).await;
+            let overrides = daemon
+                .backend_option_overrides(&backend)
+                .await
+                .expect("a valid base_url");
             let headers = daemon
                 .backend_headers(&backend, &overrides)
                 .await
@@ -445,6 +488,98 @@ mod tests {
                 None => assert!(egress.is_empty(), "egress for {stored:?}"),
             }
         }
+    }
+
+    /// The component is handed the canonical form, not the string the user
+    /// typed. A backend dials this value directly, so the rewrite and the
+    /// authorization have to describe one endpoint — and a backend reading it
+    /// can split at the first `/` rather than carry a URL parser of its own.
+    #[tokio::test]
+    async fn the_injected_base_url_is_canonical() {
+        use crate::daemon::test_fixtures::openai_backend;
+        use crate::daemon::types::test_daemon;
+        use crate::stt_models::backends::DiscoveredBackend;
+
+        let daemon = test_daemon().await;
+        let source = "github.com/super-stt/openai";
+        // No secrets: this drives the real header path, which would otherwise
+        // reach the keyring for the fixture's required key.
+        let backend = DiscoveredBackend {
+            secrets: Vec::new(),
+            ..openai_backend(source, Vec::new(), None)
+        };
+        daemon
+            .config
+            .write()
+            .await
+            .backends
+            .options
+            .entry(source.to_string())
+            .or_default()
+            .insert(
+                "base_url".to_string(),
+                "  HTTPS://user:pass@gw.example.com:8443/v1/?k=v  ".to_string(),
+            );
+
+        let overrides = daemon
+            .backend_option_overrides(&backend)
+            .await
+            .expect("a valid base_url");
+        let headers = daemon
+            .backend_headers(&backend, &overrides)
+            .await
+            .expect("headers for a secret-free backend");
+        let injected = headers
+            .iter()
+            .find(|(k, _)| k == "x-stt-option-base_url")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(injected, Some("https://gw.example.com:8443/v1"));
+        assert_eq!(
+            SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides),
+            vec!["gw.example.com:8443", "gw.example.com"]
+        );
+    }
+
+    /// A value the daemon cannot read fails the load rather than being dropped:
+    /// dropping it would fall back to the backend's built-in endpoint and send
+    /// the user's audio and credentials to the vendor they had configured their
+    /// way out of. The error names the setting, not the internals.
+    ///
+    /// The same stored value is inert for a backend declaring no such option —
+    /// nothing injects or authorizes it — so it must not block that load.
+    #[tokio::test]
+    async fn an_unreadable_base_url_fails_the_load() {
+        use crate::daemon::test_fixtures::openai_backend;
+        use crate::daemon::types::test_daemon;
+        use crate::stt_models::backends::DiscoveredBackend;
+
+        let daemon = test_daemon().await;
+        let source = "github.com/super-stt/openai";
+        let backend = openai_backend(source, Vec::new(), None);
+        daemon
+            .config
+            .write()
+            .await
+            .backends
+            .options
+            .entry(source.to_string())
+            .or_default()
+            .insert("base_url".to_string(), "http://".to_string());
+
+        let err = daemon
+            .backend_option_overrides(&backend)
+            .await
+            .expect_err("an unreadable base_url fails the load");
+        assert!(err.to_string().contains("API base URL"), "{err}");
+
+        let undeclared = DiscoveredBackend {
+            options: Vec::new(),
+            ..backend
+        };
+        assert!(
+            daemon.backend_option_overrides(&undeclared).await.is_ok(),
+            "a value for an undeclared option must not block a load"
+        );
     }
 
     /// Headers and egress must describe one config state. Resolving them
@@ -475,7 +610,10 @@ mod tests {
             .or_default()
             .insert("base_url".to_string(), "http://10.0.0.5:8080".to_string());
 
-        let overrides = daemon.backend_option_overrides(source).await;
+        let overrides = daemon
+            .backend_option_overrides(&backend)
+            .await
+            .expect("a valid base_url");
         // A write landing here reaches neither side, which is the point.
         daemon
             .config

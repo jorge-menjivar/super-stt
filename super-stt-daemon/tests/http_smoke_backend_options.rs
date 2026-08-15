@@ -290,6 +290,55 @@ async fn base_url_round_trips_through_unset() {
     );
 }
 
+/// `base_url` is stored canonical, so the settings field reads back the
+/// endpoint that will be dialed rather than the string that was posted. The
+/// scheme is why it matters: a value naming none is read by its host, and
+/// whether the request is encrypted must not be invisible in the field.
+#[tokio::test]
+async fn base_url_is_stored_canonical() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let opt_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/base_url");
+
+    for (posted, want) in [
+        // A private gateway named without a scheme is plaintext.
+        ("192.168.0.179:8080/v1", "http://192.168.0.179:8080/v1"),
+        ("localhost:4000/v1", "http://localhost:4000/v1"),
+        // A name the daemon cannot classify keeps https.
+        ("gw.example.com/v1", "https://gw.example.com/v1"),
+        // The rest of the canonical form travels with it.
+        (
+            "  HTTPS://user:pass@gw.example.com/v1/?k=v  ",
+            "https://gw.example.com/v1",
+        ),
+    ] {
+        let (s, body) = post_req(
+            &sock,
+            &opt_path,
+            &token,
+            serde_json::json!({ "value": posted }),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "POST {posted:?}: {body}");
+        assert_eq!(body["value"], want, "POST {posted:?} stored: {body}");
+
+        let (s, body) = get(&sock, &opt_path, &token).await;
+        assert_eq!(s, StatusCode::OK, "GET after {posted:?}: {body}");
+        assert_eq!(body["value"], want, "GET after {posted:?}: {body}");
+    }
+
+    // A value yielding no host is kept as typed rather than dropped, so the
+    // model load can refuse it by name.
+    let (s, body) = post_req(
+        &sock,
+        &opt_path,
+        &token,
+        serde_json::json!({ "value": "http://" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "POST unreadable: {body}");
+    assert_eq!(body["value"], "http://", "kept as typed: {body}");
+}
+
 /// Listing all options for the backend.
 #[tokio::test]
 async fn option_list_returns_declared_options() {
