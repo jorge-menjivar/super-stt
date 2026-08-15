@@ -484,12 +484,13 @@ name        = "openai_api_key"
 label       = "OpenAI API key"
 description = "Used to authenticate requests to api.openai.com."
 
+# No `default`: it is forbidden on `base_url`. The component carries the
+# stock endpoint and treats this option as an override.
 [[options]]
 name        = "base_url"
 label       = "API base URL"
 description = "Override the API base URL, e.g. for a gateway."
 type        = "string"
-default     = "https://api.openai.com"
 
 [[models]]
 name                = "whisper-1"

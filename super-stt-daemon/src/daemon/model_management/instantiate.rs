@@ -276,8 +276,9 @@ impl SuperSTTDaemon {
     /// The value is read from the config override **only** — never from the
     /// manifest default, which the backend author writes and which therefore
     /// cannot be allowed to widen the sandbox. (A manifest declaring one is
-    /// refused at parse; this read stands on its own so the invariant does not
-    /// depend on that check.) Because the value is the user's, it may be
+    /// refused at publication and scrubbed at load; this read stands on its own
+    /// so the invariant does not depend on either check.) Because the value is
+    /// the user's, it may be
     /// loopback or private, e.g. a local gateway.
     ///
     /// The bare host carries no such relaxation; it keeps the gateway's other
