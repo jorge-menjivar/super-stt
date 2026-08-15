@@ -58,9 +58,9 @@ fn local_dir_error_response(
     use crate::registry::local_dir::ResolveError;
     match e {
         ResolveError::NotAbsolute(_) => (StatusCode::BAD_REQUEST, "bad_local_path"),
-        ResolveError::NotFound(_) | ResolveError::NoManifest(_) => {
-            (StatusCode::NOT_FOUND, "not_found")
-        }
+        ResolveError::NotFound(_)
+        | ResolveError::NoManifest(_)
+        | ResolveError::NoEntrypoint(..) => (StatusCode::NOT_FOUND, "not_found"),
         ResolveError::NotADirectory(_) => (StatusCode::UNPROCESSABLE_ENTITY, "bad_local_path"),
         ResolveError::Manifest(_) | ResolveError::UnsafeId(_) => {
             (StatusCode::UNPROCESSABLE_ENTITY, "manifest_invalid")

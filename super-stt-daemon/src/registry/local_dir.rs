@@ -26,6 +26,10 @@ pub enum ResolveError {
     NotADirectory(String),
     #[error("local_path `{0}` has no backend.toml")]
     NoManifest(String),
+    #[error(
+        "local_path `{0}` has no `{1}`, the entrypoint backend.toml declares (a build tree names the artifact after the crate — stage it under the entrypoint name)"
+    )]
+    NoEntrypoint(String, String),
     #[error("backend.toml: {0:#}")]
     Manifest(#[from] anyhow::Error),
     #[error("backend.toml `source = {0:?}` yields an unsafe install id")]
@@ -38,7 +42,8 @@ pub enum ResolveError {
 ///
 /// # Errors
 /// Returns a [`ResolveError`] when the path is missing, not a directory,
-/// has no `backend.toml`, or the manifest fails to parse or validate.
+/// has no `backend.toml`, does not contain the file `[backend].entrypoint`
+/// names, or the manifest fails to parse or validate.
 pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
     if !local_path.is_absolute() {
         return Err(ResolveError::NotAbsolute(local_path.display().to_string()));
@@ -56,6 +61,18 @@ pub fn resolve(local_path: &Path) -> Result<IndexBackend, ResolveError> {
     }
     let m = Manifest::load(local_path).map_err(anyhow::Error::from)?;
     crate::stt_models::backends::manifest::validate_runtime(&m)?;
+
+    // A registry release ships the entrypoint built and named; an import is
+    // staged by hand, so nothing else establishes that it is there. Checked
+    // here rather than left to the loader: the install would otherwise succeed
+    // and the backend fail at model load with a read error naming a path,
+    // long after the operator could connect it to what they staged.
+    if !local_path.join(&m.backend.entrypoint).is_file() {
+        return Err(ResolveError::NoEntrypoint(
+            local_path.display().to_string(),
+            m.backend.entrypoint.clone(),
+        ));
+    }
 
     let id = id_from_source(&m.backend.source);
     if !super_stt_shared::registry::is_safe_component(&id) {
@@ -154,6 +171,38 @@ description = "Test backend."
         let dir = tempdir().unwrap();
         let err = resolve(dir.path()).unwrap_err();
         assert!(matches!(err, ResolveError::NoManifest(_)));
+    }
+
+    /// The shape that sent an operator here: a source checkout, where the build
+    /// tree holds the component under the crate's name rather than the
+    /// entrypoint's. Caught at install, while the operator still knows what they
+    /// staged, instead of at model load as a read error naming a path.
+    #[test]
+    fn rejects_dir_without_its_entrypoint() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("backend.toml"), MIN_MANIFEST).unwrap();
+        fs::create_dir_all(dir.path().join("target/wasm32-wasip2/release")).unwrap();
+        fs::write(
+            dir.path()
+                .join("target/wasm32-wasip2/release/crate_name.wasm"),
+            [0u8; 4],
+        )
+        .unwrap();
+        let err = resolve(dir.path()).unwrap_err();
+        assert!(matches!(err, ResolveError::NoEntrypoint(_, ref e) if e == "y.wasm"));
+        // The message names the file to stage, since that is the operator's fix.
+        assert!(err.to_string().contains("y.wasm"), "{err}");
+    }
+
+    /// A directory sharing the entrypoint's name is not an entrypoint. The
+    /// loader would fail to read it exactly as if nothing were staged.
+    #[test]
+    fn rejects_an_entrypoint_that_is_not_a_file() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("backend.toml"), MIN_MANIFEST).unwrap();
+        fs::create_dir(dir.path().join("y.wasm")).unwrap();
+        let err = resolve(dir.path()).unwrap_err();
+        assert!(matches!(err, ResolveError::NoEntrypoint(..)));
     }
 
     #[test]
