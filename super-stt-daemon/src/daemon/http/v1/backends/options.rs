@@ -93,14 +93,15 @@ async fn set(
     axum::Json(body): axum::Json<OptionBody>,
 ) -> Response {
     let source = decode_source(&source);
-    // `base_url` is normalized at the boundary. The daemon acts on this value
-    // rather than only passing it through — it is injected as a header *and*
-    // parsed into the egress the backend is granted — so storing it padded
-    // would leave `GET`, the component, and the authorized endpoint holding
-    // three different strings, and a whitespace-only value would show in the UI
-    // as an active override that authorizes nothing. Other options keep the
-    // value verbatim: whitespace may carry meaning in one the daemon does not
-    // interpret.
+    // `base_url` is trimmed at the boundary. Model load canonicalizes it again
+    // — the component and the authorized endpoint are derived there, from one
+    // value, so they agree however this was stored — but that rewrite never
+    // reaches config, which deliberately keeps what the user typed so the
+    // settings field reads back as they wrote it. Trimming here is what keeps
+    // that stored value honest: a padded one would read back padded, and a
+    // whitespace-only one would show as an active override that authorizes
+    // nothing. Other options keep the value verbatim: whitespace may carry
+    // meaning in one the daemon does not interpret.
     //
     // Normalized, not validated: this deliberately does not check that the value
     // parses into a host. Doing so would reject garbage but not the mistake that

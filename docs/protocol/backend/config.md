@@ -184,12 +184,30 @@ of the box carries it in the component and treats the option as an override.
 That is what the missing `x-stt-option-base_url` header means when the user has
 set nothing.
 
+The value the backend receives is **canonical**, not the string the user typed.
+The daemon parses it once at model-load time and re-serializes it as
+`scheme://host[:port][/path]`: the scheme is lowercased, and supplied as `https`
+when absent; userinfo is stripped; a trailing slash is removed; any query or
+fragment is dropped. A port appears only when the user gave one — the daemon
+does not add the scheme's default, which would otherwise travel to the upstream
+in the `Host` header. The path is preserved exactly as written: it plays no part
+in egress, and only the backend knows which path its own API serves.
+
+Normalizing here rather than in each backend keeps every backend working from
+the same value the daemon authorized, and spares each one its own URL parser.
+Config storage is untouched — the settings UI still shows what the user typed.
+
+A value the daemon cannot read as a URL fails the model load, with a message
+naming the option. It is not quietly dropped: falling back to the backend's
+built-in endpoint would send the user's audio and credentials to the very vendor
+they had configured their way out of.
+
 The daemon derives exactly one `host:port` authority from the configured value.
 An explicit port is taken as written; otherwise the scheme's default applies —
 `http` and `ws` ⇒ 80, `https` and `wss` ⇒ 443 — and a value carrying no scheme
-is read as `https`. Any path, query, or userinfo is discarded, and a value that
-yields no host contributes nothing: the backend keeps whatever egress its
-manifest declares.
+is read as `https`. Any path, query, or userinfo in the value plays no part in
+this derivation, and a value that yields no host contributes nothing: the
+backend keeps whatever egress its manifest declares.
 
 The host is authorized on its own as well, so a gateway stays reachable on its
 other ports — but only the derived `host:port` carries the relaxation below.
