@@ -213,6 +213,15 @@ pub(super) fn active_backend_card<'a>(
         };
         chip_row = chip_row.push(count_chip(label));
     }
+    // The update chip is the action as well as the sign, which is what lets it
+    // work here: this card has no overflow menu, so without it a waiting
+    // version would be invisible on the page the user actually sits on.
+    if let Some(v) = super::chips::update_offer(
+        app.registry.by_source().get(source.as_str()).copied(),
+        app.registry.installs.contains_key(source.as_str()),
+    ) {
+        chip_row = chip_row.push(super::chips::update_chip(&source, &v, true));
+    }
     card = card.push(chip_row);
 
     // Loaded vs idle. When a model is loaded for this backend, show a summary

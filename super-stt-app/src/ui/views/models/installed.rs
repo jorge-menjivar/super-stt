@@ -12,11 +12,9 @@ use crate::ui::messages::{Message, ModelsPageMessage};
 use super::active::backend_glyph_tile;
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chip, capability_chips, models_inventory,
+    backend_supports_gpu, capability_chips, models_inventory, update_chip, update_offer,
 };
-use super::surface::{
-    card_divider, card_surface, card_title_block, muted_text_color, repo_button, rounded_tooltip,
-};
+use super::surface::{card_divider, card_surface, card_title_block, muted_text_color, repo_button};
 
 /// The Library's Installed tab: every backend the daemon discovered on disk,
 /// one card each. The active backend is included too — activation lives on the
@@ -68,20 +66,13 @@ pub(super) fn installed_card<'a>(
     // Overflow ("⋯") menu: the optional Update, then Uninstall. Configure left
     // the menu to become a visible button beside it.
     let menu_open = app.models_page.installed_menu_open.as_deref() == Some(source.as_str());
-    // Built before the menu takes ownership of the version. The Update action
-    // lives behind the "⋯", which nothing on a settled card hints at; the badge
-    // is what says a version is waiting, while the menu stays where it is
-    // applied.
-    let badge = update_version
-        .as_deref()
-        .map(|v| update_badge(v, !menu_open));
     let trigger = button::icon(icons::phosphor_handle(icons::DOTS_THREE_VERTICAL)).on_press(
         Message::ModelsPage(ModelsPageMessage::ToggleInstalledMenu(source.clone())),
     );
     let mut overflow = widget::popover(trigger).position(widget::popover::Position::Bottom);
     if menu_open {
         overflow = overflow
-            .popup(installed_overflow_menu(&source, update_version))
+            .popup(installed_overflow_menu(&source))
             .on_close(Message::ModelsPage(ModelsPageMessage::CloseInstalledMenu));
     }
 
@@ -90,8 +81,8 @@ pub(super) fn installed_card<'a>(
         .align_y(Alignment::Center);
     if let Some(s) = in_flight {
         actions = actions.push(update_status(s));
-    } else if let Some(b) = badge {
-        actions = actions.push(b);
+    } else if let Some(v) = update_version.as_deref() {
+        actions = actions.push(update_chip(&source, v, !menu_open));
     }
     actions = actions
         .push(repo_button(&source))
@@ -157,54 +148,6 @@ pub(super) fn installed_card<'a>(
     }
 }
 
-/// The version an Update entry should offer, or `None` for no entry.
-///
-/// Compared as semver, so a stale or older index never prompts a downgrade.
-/// Withheld while an install is in flight for this backend: the entry would
-/// otherwise stay clickable during its own update and every further click would
-/// reach a daemon that has nothing left to do.
-///
-/// `installed_version` is annotated onto the registry catalog, not the backends
-/// list, so it goes stale unless that catalog is refetched when an install
-/// settles — which is what leaves an Update entry standing after the update it
-/// describes has already happened.
-fn update_offer(
-    entry: Option<&super_stt_shared::registry::RegistryBackend>,
-    in_flight: bool,
-) -> Option<String> {
-    if in_flight {
-        return None;
-    }
-    let e = entry?;
-    let installed = e.installed_version.as_deref()?;
-    super_stt_registry_types::version::update_available(installed, &e.version)
-        .then(|| e.version.clone())
-}
-
-/// Badge marking a backend with a newer version available, carrying the version
-/// in its tooltip.
-///
-/// Accent-colored rather than neutral: unlike the capability chips beside it,
-/// this reports something the user can act on. It is not itself a button — the
-/// action is the Update entry in the "⋯" menu, and two ways to start the same
-/// install is one more than the card needs.
-///
-/// `tooltips` is off while that menu is open, for the same reason the capability
-/// chips suppress theirs: a tooltip would paint half-behind the menu.
-fn update_badge(version: &str, tooltips: bool) -> Element<'static, Message> {
-    let accent: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
-    let chip = capability_chip(icons::ARROWS_CLOCKWISE, "Update", accent);
-    if tooltips {
-        rounded_tooltip(
-            chip,
-            text::body(format!("Version {version} is available")),
-            widget::tooltip::Position::Top,
-        )
-    } else {
-        chip
-    }
-}
-
 /// Progress for an update running on an installed backend, shown beside the
 /// card's actions.
 ///
@@ -233,30 +176,25 @@ fn update_status(s: &crate::state::registry::InstallStatus) -> Element<'static, 
         .into()
 }
 
-/// The popup body for an installed card's "⋯" overflow menu: an optional
-/// Update, then Uninstall — a small rounded panel of full-width rows the
-/// popover anchors below the trigger. (Configure is a visible button on the
-/// card, so it's not repeated here.)
-pub(super) fn installed_overflow_menu(
-    source: &str,
-    update_version: Option<String>,
-) -> Element<'static, Message> {
+/// The popup body for an installed card's "⋯" overflow menu: Uninstall, in a
+/// small rounded panel the popover anchors below the trigger.
+///
+/// Only the destructive action lives here. Configure is a visible button on the
+/// card and Update is the accent chip beside it, so neither is repeated — an
+/// update offered in two places is one more than the card needs, and the chip
+/// is the one a settled card gives a reason to look at.
+pub(super) fn installed_overflow_menu(source: &str) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
     let item = |label: String, msg: Message| -> Element<'static, Message> {
         button::text(label).width(Length::Fill).on_press(msg).into()
     };
 
-    let mut col = widget::column::with_capacity(2).spacing(spacing.space_xxxs);
-    if let Some(v) = update_version {
-        col = col.push(item(
-            format!("Update to {v}"),
-            Message::ModelsPage(ModelsPageMessage::UpdateBackend(source.to_string())),
+    let col = widget::column::with_capacity(1)
+        .spacing(spacing.space_xxxs)
+        .push(item(
+            "Uninstall".to_string(),
+            Message::ModelsPage(ModelsPageMessage::UninstallBackend(source.to_string())),
         ));
-    }
-    col = col.push(item(
-        "Uninstall".to_string(),
-        Message::ModelsPage(ModelsPageMessage::UninstallBackend(source.to_string())),
-    ));
 
     widget::container(col)
         .padding(spacing.space_xxs)
@@ -286,74 +224,4 @@ pub(super) fn installed_overflow_menu(
             }
         }))
         .into()
-}
-
-#[cfg(test)]
-mod update_offer_tests {
-    //! Pin when an Update entry is offered. The failure this guards against is
-    //! not a wrong version but a stale one: `installed_version` rides on the
-    //! registry catalog, so an entry can survive the update it describes and
-    //! then do nothing when clicked.
-    use super::update_offer;
-    use super_stt_shared::registry::RegistryBackend;
-
-    fn entry(installed: Option<&str>, latest: &str) -> RegistryBackend {
-        RegistryBackend {
-            id: "y".to_string(),
-            source: "github.com/x/y".to_string(),
-            version: latest.to_string(),
-            name: "Y".to_string(),
-            description: None,
-            license: "Apache-2.0".to_string(),
-            kind: "wasm".to_string(),
-            contract: "v1".to_string(),
-            allowed_hosts: Vec::new(),
-            online: true,
-            supports_gpu: false,
-            supports_cpu: false,
-            models: Vec::new(),
-            secrets: Vec::new(),
-            options: Vec::new(),
-            compatibility: super_stt_shared::registry::Compatibility {
-                compatible: true,
-                selected_asset: None,
-                reason: None,
-            },
-            installed_version: installed.map(String::from),
-            index_stale: None,
-        }
-    }
-
-    #[test]
-    fn offers_only_a_newer_version() {
-        assert_eq!(
-            update_offer(Some(&entry(Some("0.1.0"), "0.1.1")), false),
-            Some("0.1.1".to_string())
-        );
-        // Already current — this is the state that was being drawn from a stale
-        // catalog and clicked repeatedly.
-        assert_eq!(
-            update_offer(Some(&entry(Some("0.1.1"), "0.1.1")), false),
-            None
-        );
-        // An index older than what is installed must not prompt a downgrade.
-        assert_eq!(
-            update_offer(Some(&entry(Some("0.2.0"), "0.1.1")), false),
-            None
-        );
-    }
-
-    #[test]
-    fn withholds_while_an_install_is_in_flight() {
-        assert_eq!(
-            update_offer(Some(&entry(Some("0.1.0"), "0.1.1")), true),
-            None
-        );
-    }
-
-    #[test]
-    fn needs_a_catalog_entry_and_an_installed_version() {
-        assert_eq!(update_offer(None, false), None);
-        assert_eq!(update_offer(Some(&entry(None, "0.1.1")), false), None);
-    }
 }

@@ -9,6 +9,98 @@ use crate::ui::messages::Message;
 
 use super::surface::muted_text_color;
 
+/// The version an update should offer, or `None` for no update.
+///
+/// Compared as semver, so a stale or older index never prompts a downgrade.
+/// Withheld while an install is in flight for this backend: the badge would
+/// otherwise stay clickable during its own update, and every further click
+/// would reach a daemon that has nothing left to do.
+///
+/// `installed_version` is annotated onto the registry catalog, not the backends
+/// list, so it goes stale unless that catalog is refetched when an install
+/// settles — which is what leaves an update offered after the update it
+/// describes has already happened.
+pub(super) fn update_offer(
+    entry: Option<&super_stt_shared::registry::RegistryBackend>,
+    in_flight: bool,
+) -> Option<String> {
+    if in_flight {
+        return None;
+    }
+    let e = entry?;
+    let installed = e.installed_version.as_deref()?;
+    super_stt_registry_types::version::update_available(installed, &e.version)
+        .then(|| e.version.clone())
+}
+
+/// Accent chip marking a backend with a newer version — and the control that
+/// applies it.
+///
+/// Shaped like the capability chips beside it but accent-colored and clickable,
+/// because unlike them it reports something the user can act on. Being the
+/// action as well as the sign is what lets it work on the Models page, whose
+/// card carries no other route to an update.
+///
+/// `tooltips` is off while a card's overflow menu is open, for the same reason
+/// the capability chips suppress theirs: a tooltip would paint half-behind the
+/// menu.
+pub(super) fn update_chip(
+    source: &str,
+    version: &str,
+    tooltips: bool,
+) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    let radius = cosmic::theme::active().cosmic().corner_radii.radius_xl;
+    let fg: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
+    // Same translucent fill the capability chips use, so the row reads as one
+    // family; the accent hue is what sets this one apart.
+    let style = move |alpha: f32| {
+        let mut fill = fg;
+        fill.a = alpha;
+        let mut edge = fg;
+        edge.a = 0.32;
+        cosmic::widget::button::Style {
+            background: Some(cosmic::iced::Background::Color(fill)),
+            border_radius: radius.into(),
+            border_width: 1.0,
+            border_color: edge,
+            icon_color: Some(fg),
+            text_color: Some(fg),
+            ..cosmic::widget::button::Style::new()
+        }
+    };
+
+    let chip = widget::button::custom(
+        row![
+            icons::phosphor_tinted(icons::ARROWS_CLOCKWISE, 14.0, fg),
+            text::caption("Update").class(cosmic::theme::Text::Color(fg)),
+        ]
+        .spacing(spacing.space_xxxs)
+        .align_y(Alignment::Center),
+    )
+    .padding([spacing.space_xxxs, spacing.space_xs])
+    .class(cosmic::theme::Button::Custom {
+        active: Box::new(move |_, _| style(0.14)),
+        disabled: Box::new(move |_| style(0.14)),
+        hovered: Box::new(move |_, _| style(0.26)),
+        pressed: Box::new(move |_, _| style(0.34)),
+    })
+    .on_press(Message::ModelsPage(
+        crate::ui::messages::ModelsPageMessage::UpdateBackend(source.to_string()),
+    ))
+    .into();
+
+    if tooltips {
+        super::surface::rounded_tooltip(
+            chip,
+            text::body(format!("Update to {version}")),
+            widget::tooltip::Position::Top,
+        )
+    } else {
+        chip
+    }
+}
+
 /// Whether a backend's models are served by an online provider. Online
 /// backends transmit audio to a third-party service, flagged in the UI.
 pub(super) fn backend_is_online(backend: &crate::daemon::backends::BackendInfo) -> bool {
@@ -484,5 +576,75 @@ mod capability_tests {
         let mut b = backend_with_base_url(Some("https://api.example.com"));
         b.options[0].default = Some("https://api.example.com".to_string());
         assert!(backend_has_user_url(&b));
+    }
+}
+
+#[cfg(test)]
+mod update_offer_tests {
+    //! Pin when an update is offered. The failure this guards against is
+    //! not a wrong version but a stale one: `installed_version` rides on the
+    //! registry catalog, so a chip can survive the update it describes and
+    //! then do nothing when clicked.
+    use super::update_offer;
+    use super_stt_shared::registry::RegistryBackend;
+
+    fn entry(installed: Option<&str>, latest: &str) -> RegistryBackend {
+        RegistryBackend {
+            id: "y".to_string(),
+            source: "github.com/x/y".to_string(),
+            version: latest.to_string(),
+            name: "Y".to_string(),
+            description: None,
+            license: "Apache-2.0".to_string(),
+            kind: "wasm".to_string(),
+            contract: "v1".to_string(),
+            allowed_hosts: Vec::new(),
+            online: true,
+            supports_gpu: false,
+            supports_cpu: false,
+            models: Vec::new(),
+            secrets: Vec::new(),
+            options: Vec::new(),
+            compatibility: super_stt_shared::registry::Compatibility {
+                compatible: true,
+                selected_asset: None,
+                reason: None,
+            },
+            installed_version: installed.map(String::from),
+            index_stale: None,
+        }
+    }
+
+    #[test]
+    fn offers_only_a_newer_version() {
+        assert_eq!(
+            update_offer(Some(&entry(Some("0.1.0"), "0.1.1")), false),
+            Some("0.1.1".to_string())
+        );
+        // Already current — this is the state that was being drawn from a stale
+        // catalog and clicked repeatedly.
+        assert_eq!(
+            update_offer(Some(&entry(Some("0.1.1"), "0.1.1")), false),
+            None
+        );
+        // An index older than what is installed must not prompt a downgrade.
+        assert_eq!(
+            update_offer(Some(&entry(Some("0.2.0"), "0.1.1")), false),
+            None
+        );
+    }
+
+    #[test]
+    fn withholds_while_an_install_is_in_flight() {
+        assert_eq!(
+            update_offer(Some(&entry(Some("0.1.0"), "0.1.1")), true),
+            None
+        );
+    }
+
+    #[test]
+    fn needs_a_catalog_entry_and_an_installed_version() {
+        assert_eq!(update_offer(None, false), None);
+        assert_eq!(update_offer(Some(&entry(None, "0.1.1")), false), None);
     }
 }
