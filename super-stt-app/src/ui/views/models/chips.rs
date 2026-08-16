@@ -11,15 +11,18 @@ use super::surface::muted_text_color;
 
 /// The version an update should offer, or `None` for no update.
 ///
-/// Compared as semver, so a stale or older index never prompts a downgrade.
-/// Withheld while an install is in flight for this backend: the badge would
+/// Whether an update exists is the daemon's answer, read from
+/// `update_available`: it is the side that reads the installed manifest off
+/// disk and owns the index, so the comparison lives there and no client
+/// re-derives it. This only decides whether to *show* that answer.
+///
+/// Withheld while an install is in flight for this backend: the chip would
 /// otherwise stay clickable during its own update, and every further click
 /// would reach a daemon that has nothing left to do.
 ///
-/// `installed_version` is annotated onto the registry catalog, not the backends
-/// list, so it goes stale unless that catalog is refetched when an install
-/// settles — which is what leaves an update offered after the update it
-/// describes has already happened.
+/// The flag rides on the registry catalog, not the backends list, so it goes
+/// stale unless that catalog is refetched — which is what left an update
+/// offered after the update it describes had already happened.
 pub(super) fn update_offer(
     entry: Option<&super_stt_shared::registry::RegistryBackend>,
     in_flight: bool,
@@ -28,9 +31,7 @@ pub(super) fn update_offer(
         return None;
     }
     let e = entry?;
-    let installed = e.installed_version.as_deref()?;
-    super_stt_registry_types::version::update_available(installed, &e.version)
-        .then(|| e.version.clone())
+    e.update_available.then(|| e.version.clone())
 }
 
 /// Accent chip marking a backend with a newer version — and the control that
@@ -626,14 +627,18 @@ mod capability_tests {
 
 #[cfg(test)]
 mod update_offer_tests {
-    //! Pin when an update is offered. The failure this guards against is
-    //! not a wrong version but a stale one: `installed_version` rides on the
-    //! registry catalog, so a chip can survive the update it describes and
-    //! then do nothing when clicked.
+    //! Pin when the daemon's answer is shown. The comparison itself is the
+    //! daemon's — these fix what the card does with it, including the failure
+    //! this started from: the flag rides on the registry catalog, so a chip can
+    //! survive the update it describes and then do nothing when clicked.
     use super::update_offer;
     use super_stt_shared::registry::RegistryBackend;
 
     fn entry(installed: Option<&str>, latest: &str) -> RegistryBackend {
+        // Mirrors what the daemon computes, so the fixture cannot claim an
+        // update the daemon would not report.
+        let update_available = installed
+            .is_some_and(|i| super_stt_registry_types::version::update_available(i, latest));
         RegistryBackend {
             id: "y".to_string(),
             source: "github.com/x/y".to_string(),
@@ -656,6 +661,7 @@ mod update_offer_tests {
                 reason: None,
             },
             installed_version: installed.map(String::from),
+            update_available,
             index_stale: None,
         }
     }

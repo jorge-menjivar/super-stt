@@ -325,7 +325,18 @@ impl cosmic::Application for AppModel {
         self.core.window.show_context = false;
         self.models_page.installed_menu_open = None;
 
-        self.update_title()
+        // Opening a page that draws backend cards refetches both catalogs. The
+        // daemon reads `installed_version` off disk on every request, so it is
+        // never the stale one — the app was, holding a catalog fetched once at
+        // startup. Anything that changed a backend outside this app (an install
+        // from the CLI, an edited `backend.toml`) went unseen until a restart.
+        match self.nav.data::<crate::state::Page>(id) {
+            Some(crate::state::Page::Models | crate::state::Page::Library) => Task::batch([
+                handlers::tasks::reload_backend_catalogs(),
+                self.update_title(),
+            ]),
+            _ => self.update_title(),
+        }
     }
 }
 

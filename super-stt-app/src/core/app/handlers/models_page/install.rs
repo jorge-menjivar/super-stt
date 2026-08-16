@@ -186,10 +186,7 @@ impl AppModel {
                 // does nothing when clicked. No index refresh: the annotation
                 // is computed from local install state, so the cached index is
                 // enough and a network round-trip would only slow this down.
-                Task::batch([
-                    crate::core::app::handlers::tasks::reload_backends(),
-                    crate::core::app::handlers::tasks::fetch_registry_catalog(false),
-                ])
+                crate::core::app::handlers::tasks::reload_backend_catalogs()
             }
 
             ModelsPageMessage::InstallFailed {

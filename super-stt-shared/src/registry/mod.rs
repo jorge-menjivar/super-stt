@@ -12,6 +12,10 @@ pub struct RegistryListResponse {
     pub backends: Vec<RegistryBackend>,
 }
 
+// A flat mirror of the `/registry/backends` JSON. The lint wants related flags
+// grouped into a sub-struct, which here would reshape the wire payload to suit
+// an internal API guideline.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryBackend {
     pub id: String,
@@ -34,6 +38,19 @@ pub struct RegistryBackend {
     pub compatibility: Compatibility,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
+    /// Whether `version` is newer than `installed_version`, decided by the
+    /// daemon.
+    ///
+    /// The comparison is semver, and it belongs here rather than in each client
+    /// for the same reason `installed_version` does: the daemon is what reads
+    /// the installed manifest and owns the index, so it is the one place that
+    /// can answer without a client re-deriving it. A client that wants to
+    /// present the versions still has both.
+    ///
+    /// `false` when nothing is installed, when the installed version is at or
+    /// ahead of the index's, or when either version does not parse.
+    #[serde(default)]
+    pub update_available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_stale: Option<IndexStale>,
 }

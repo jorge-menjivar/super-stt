@@ -122,6 +122,9 @@ fn map_entry(
             })
             .collect(),
         compatibility: compat_field,
+        update_available: installed_version.as_deref().is_some_and(|installed| {
+            super_stt_registry_types::version::update_available(installed, &entry.version)
+        }),
         installed_version,
         index_stale: entry
             .index_stale

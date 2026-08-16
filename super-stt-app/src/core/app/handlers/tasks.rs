@@ -27,6 +27,21 @@ pub(in crate::core::app) fn ping_task() -> Task<cosmic::Action<Message>> {
     })
 }
 
+/// Reload both backend catalogs: the installed list and the annotated registry.
+///
+/// They carry different halves of one picture — `/backends` names what is
+/// installed (and its version), `/registry/backends` annotates each entry with
+/// the `installed_version` it reads off disk per request — and every question a
+/// card asks needs both. Refreshed apart, a card can report a version from one
+/// and an update from the other and have them disagree.
+///
+/// No index refresh: the annotation is computed from local state, so the cached
+/// index is enough and a network round-trip would only make this slower than
+/// the moment that needs it.
+pub(in crate::core::app) fn reload_backend_catalogs() -> Task<cosmic::Action<Message>> {
+    Task::batch([reload_backends(), fetch_registry_catalog(false)])
+}
+
 /// Reload the installed-backend catalog and map the result to `BackendsLoaded`
 /// / `BackendsError`.
 pub(in crate::core::app) fn reload_backends() -> Task<cosmic::Action<Message>> {
