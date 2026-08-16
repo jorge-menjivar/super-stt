@@ -61,15 +61,22 @@ fn entry_passes_filters(
 }
 
 /// Read the installed version for a backend from its `backend.toml`, if present.
+/// `None` marks a backend that is not installed here.
 fn installed_version(backends_dir: &std::path::Path, backend_id: &str) -> Option<String> {
-    let candidate = backends_dir.join(backend_id).join("backend.toml");
-    if candidate.exists() {
-        crate::stt_models::backends::manifest::Manifest::load(&backends_dir.join(backend_id))
-            .ok()
-            .map(|m| m.backend.version)
-    } else {
-        None
-    }
+    crate::stt_models::backends::installed_version(&backends_dir.join(backend_id))
+}
+
+/// Whether the index offers something newer than what is installed.
+///
+/// The daemon answers this rather than each client re-deriving it: it is the
+/// side that reads the installed manifest and owns the index. A backend that is
+/// not installed here has no update to offer — it has an *install* — so `None`
+/// is `false` rather than "everything is an update".
+///
+/// The comparison itself is the shared semver one, which already refuses a
+/// downgrade and refuses to guess at a version it cannot parse.
+fn update_available(installed: Option<&str>, index_version: &str) -> bool {
+    installed.is_some_and(|i| super_stt_registry_types::version::update_available(i, index_version))
 }
 
 /// Map a registry entry + compatibility result to the wire `RegistryBackend` shape.
@@ -122,6 +129,7 @@ fn map_entry(
             })
             .collect(),
         compatibility: compat_field,
+        update_available: update_available(installed_version.as_deref(), &entry.version),
         installed_version,
         index_stale: entry
             .index_stale
@@ -194,4 +202,28 @@ pub(crate) async fn list_registry_backends(
         serde_json::to_string(&resp).unwrap_or_default(),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_available;
+
+    /// The daemon's own part of the decision. The semver comparison is tested
+    /// in `super-stt-registry-types`; what is pinned here is what this adds to
+    /// it — that "not installed" is not an update, and that a downgrade or an
+    /// unreadable version never becomes one on the way to the wire.
+    #[test]
+    fn only_an_installed_older_version_has_an_update() {
+        assert!(update_available(Some("0.1.0"), "0.1.1"));
+        assert!(update_available(Some("v1.0.0"), "1.0.1"));
+
+        // Not installed: the client is offered an install, not an update.
+        assert!(!update_available(None, "0.1.1"));
+        // Already current, and a stale index that would prompt a downgrade.
+        assert!(!update_available(Some("0.1.1"), "0.1.1"));
+        assert!(!update_available(Some("0.2.0"), "0.1.1"));
+        // Neither side is guessed at when it cannot be parsed.
+        assert!(!update_available(Some("1.0.0"), "nightly"));
+        assert!(!update_available(Some(""), "1.0.0"));
+    }
 }

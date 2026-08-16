@@ -760,6 +760,7 @@ fn fixture_backend_devices(
         dir: std::path::PathBuf::from("/tmp").join(dir_name),
         source: source.to_string(),
         name: name.to_string(),
+        version: "1.0.0".to_string(),
         kind: "wasm".to_string(),
         entrypoint: format!("{dir_name}.wasm"),
         allowed_hosts: Vec::new(),

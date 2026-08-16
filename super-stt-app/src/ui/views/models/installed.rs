@@ -12,7 +12,8 @@ use crate::ui::messages::{Message, ModelsPageMessage};
 use super::active::backend_glyph_tile;
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips, models_inventory,
+    backend_supports_gpu, capability_chips, models_inventory, update_chip, update_offer,
+    update_progress_chip,
 };
 use super::surface::{card_divider, card_surface, card_title_block, repo_button};
 
@@ -53,11 +54,12 @@ pub(super) fn installed_card<'a>(
     // semver so a stale/older index never prompts a downgrade.
     let registry_map = app.registry.by_source();
     let registry_entry = registry_map.get(source.as_str());
-    let update_version: Option<String> = registry_entry.and_then(|e| {
-        let installed = e.installed_version.as_deref()?;
-        super_stt_registry_types::version::update_available(installed, &e.version)
-            .then(|| e.version.clone())
-    });
+    // An update this card started is the same install pipeline Browse drives,
+    // so it reports on the same channel. Without reading it the card showed
+    // nothing at all while an update ran, and "nothing happened" is exactly how
+    // that reads to the user.
+    let in_flight = app.registry.installs.get(source.as_str());
+    let update_version = update_offer(registry_entry.copied(), in_flight.is_some());
     let description = registry_entry
         .and_then(|e| e.description.clone())
         .filter(|d| !d.is_empty());
@@ -71,22 +73,27 @@ pub(super) fn installed_card<'a>(
     let mut overflow = widget::popover(trigger).position(widget::popover::Position::Bottom);
     if menu_open {
         overflow = overflow
-            .popup(installed_overflow_menu(&source, update_version))
+            .popup(installed_overflow_menu(&source))
             .on_close(Message::ModelsPage(ModelsPageMessage::CloseInstalledMenu));
     }
 
-    let actions = row![
-        repo_button(&source),
-        button::standard("Configure").on_press(Message::ModelsPage(
+    let mut actions = widget::row::with_capacity(5)
+        .spacing(spacing.space_xs)
+        .align_y(Alignment::Center);
+    if let Some(s) = in_flight {
+        actions = actions.push(update_progress_chip(s));
+    } else if let Some(v) = update_version.as_deref() {
+        actions = actions.push(update_chip(&source, v, !menu_open));
+    }
+    actions = actions
+        .push(repo_button(&source))
+        .push(button::standard("Configure").on_press(Message::ModelsPage(
             ModelsPageMessage::OpenBackendConfig(source.clone()),
-        )),
-        overflow,
-    ]
-    .spacing(spacing.space_xs)
-    .align_y(Alignment::Center);
+        )))
+        .push(overflow);
     let header = row![
         backend_glyph_tile(),
-        card_title_block(backend.name.clone(), description),
+        card_title_block(backend.name.clone(), &backend.version, description),
         actions,
     ]
     .spacing(spacing.space_s)
@@ -142,30 +149,25 @@ pub(super) fn installed_card<'a>(
     }
 }
 
-/// The popup body for an installed card's "⋯" overflow menu: an optional
-/// Update, then Uninstall — a small rounded panel of full-width rows the
-/// popover anchors below the trigger. (Configure is a visible button on the
-/// card, so it's not repeated here.)
-pub(super) fn installed_overflow_menu(
-    source: &str,
-    update_version: Option<String>,
-) -> Element<'static, Message> {
+/// The popup body for an installed card's "⋯" overflow menu: Uninstall, in a
+/// small rounded panel the popover anchors below the trigger.
+///
+/// Only the destructive action lives here. Configure is a visible button on the
+/// card and Update is the accent chip beside it, so neither is repeated — an
+/// update offered in two places is one more than the card needs, and the chip
+/// is the one a settled card gives a reason to look at.
+pub(super) fn installed_overflow_menu(source: &str) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
     let item = |label: String, msg: Message| -> Element<'static, Message> {
         button::text(label).width(Length::Fill).on_press(msg).into()
     };
 
-    let mut col = widget::column::with_capacity(2).spacing(spacing.space_xxxs);
-    if let Some(v) = update_version {
-        col = col.push(item(
-            format!("Update to {v}"),
-            Message::ModelsPage(ModelsPageMessage::UpdateBackend(source.to_string())),
+    let col = widget::column::with_capacity(1)
+        .spacing(spacing.space_xxxs)
+        .push(item(
+            "Uninstall".to_string(),
+            Message::ModelsPage(ModelsPageMessage::UninstallBackend(source.to_string())),
         ));
-    }
-    col = col.push(item(
-        "Uninstall".to_string(),
-        Message::ModelsPage(ModelsPageMessage::UninstallBackend(source.to_string())),
-    ));
 
     widget::container(col)
         .padding(spacing.space_xxs)

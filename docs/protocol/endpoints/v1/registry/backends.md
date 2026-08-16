@@ -67,7 +67,8 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
           "cudnn": false
         }
       },
-      "installed_version": "0.1.0"
+      "installed_version": "0.1.0",
+      "update_available": true
     }
   ]
 }
@@ -85,7 +86,18 @@ Per-entry fields beyond what `index.json` carries:
   internal.
 - `compatibility.reason` — present only when `compatible = false`. Human-readable.
 - `installed_version` — present if the backend is already installed on this
-  host, regardless of its registry status.
+  host, regardless of its registry status. Read from the installed
+  `backend.toml` on every request, so it reflects what is on disk now rather
+  than what the daemon saw at startup. It is the same read that fills
+  [`version` on `GET /backends`](../backends.md), so the two never disagree.
+- `update_available` — whether `version` is newer than `installed_version`,
+  compared as semver. The daemon decides this rather than leaving each client
+  to re-derive it: the daemon is the side that reads the installed manifest and
+  owns the index, so it is the only one that can answer without duplicating
+  both. `false` when nothing is installed, when the installed version is at or
+  ahead of the index's, or when either version does not parse — so a stale or
+  older index never advertises a downgrade. Clients that want to *show* the
+  versions still have both fields.
 
 ## Failure modes
 

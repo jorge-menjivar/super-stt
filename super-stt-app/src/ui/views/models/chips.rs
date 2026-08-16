@@ -9,6 +9,131 @@ use crate::ui::messages::Message;
 
 use super::surface::muted_text_color;
 
+/// The version an update should offer, or `None` for no update.
+///
+/// Whether an update exists is the daemon's answer, read from
+/// `update_available`: it is the side that reads the installed manifest off
+/// disk and owns the index, so the comparison lives there and no client
+/// re-derives it. This only decides whether to *show* that answer.
+///
+/// Withheld while an install is in flight for this backend: the chip would
+/// otherwise stay clickable during its own update, and every further click
+/// would reach a daemon that has nothing left to do.
+///
+/// The flag rides on the registry catalog, not the backends list, so it goes
+/// stale unless that catalog is refetched — which is what left an update
+/// offered after the update it describes had already happened.
+pub(super) fn update_offer(
+    entry: Option<&super_stt_shared::registry::RegistryBackend>,
+    in_flight: bool,
+) -> Option<String> {
+    if in_flight {
+        return None;
+    }
+    let e = entry?;
+    e.update_available.then(|| e.version.clone())
+}
+
+/// Accent chip marking a backend with a newer version — and the control that
+/// applies it.
+///
+/// Shaped like the capability chips beside it but accent-colored and clickable,
+/// because unlike them it reports something the user can act on. Being the
+/// action as well as the sign is what lets it work on the Models page, whose
+/// card carries no other route to an update.
+///
+/// `tooltips` is off while a card's overflow menu is open, for the same reason
+/// the capability chips suppress theirs: a tooltip would paint half-behind the
+/// menu.
+pub(super) fn update_chip(
+    source: &str,
+    version: &str,
+    tooltips: bool,
+) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    let radius = cosmic::theme::active().cosmic().corner_radii.radius_xl;
+    let fg: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
+    // Same translucent fill the capability chips use, so the row reads as one
+    // family; the accent hue is what sets this one apart.
+    let style = move |alpha: f32| {
+        let mut fill = fg;
+        fill.a = alpha;
+        let mut edge = fg;
+        edge.a = 0.32;
+        cosmic::widget::button::Style {
+            background: Some(cosmic::iced::Background::Color(fill)),
+            border_radius: radius.into(),
+            border_width: 1.0,
+            border_color: edge,
+            icon_color: Some(fg),
+            text_color: Some(fg),
+            ..cosmic::widget::button::Style::new()
+        }
+    };
+
+    let chip = widget::button::custom(
+        row![
+            icons::phosphor_tinted(icons::ARROWS_CLOCKWISE, 14.0, fg),
+            text::caption("Update").class(cosmic::theme::Text::Color(fg)),
+        ]
+        .spacing(spacing.space_xxxs)
+        .align_y(Alignment::Center),
+    )
+    .padding([spacing.space_xxxs, spacing.space_xs])
+    .class(cosmic::theme::Button::Custom {
+        active: Box::new(move |_, _| style(0.14)),
+        disabled: Box::new(move |_| style(0.14)),
+        hovered: Box::new(move |_, _| style(0.26)),
+        pressed: Box::new(move |_, _| style(0.34)),
+    })
+    .on_press(Message::ModelsPage(
+        crate::ui::messages::ModelsPageMessage::UpdateBackend(source.to_string()),
+    ))
+    .into();
+
+    if tooltips {
+        super::surface::rounded_tooltip(
+            chip,
+            text::body(format!("Update to {version}")),
+            widget::tooltip::Position::Top,
+        )
+    } else {
+        chip
+    }
+}
+
+/// The update chip's in-flight form: same shape, muted, and inert.
+///
+/// Reads the `InstallStatus` a Browse install reports on — an update *is* an
+/// install — so the phase and percentage mean what they mean there. It replaces
+/// the update chip in place on both cards, so the control the user pressed
+/// becomes the progress they are waiting on rather than disappearing.
+pub(super) fn update_progress_chip(
+    s: &crate::state::registry::InstallStatus,
+) -> Element<'static, Message> {
+    let label = match (&s.error, s.bytes_total) {
+        (Some(_), _) => "Update failed".to_string(),
+        (None, Some(total)) if total > 0 => {
+            format!("Updating\u{2026} {}%", (s.bytes_done * 100) / total)
+        }
+        _ => format!(
+            "Updating\u{2026} ({})",
+            super::download::phase_label(s.phase)
+        ),
+    };
+    let fg = muted_text_color();
+    let chip = inert_chip(icons::ARROWS_CLOCKWISE, label, fg);
+    match &s.error {
+        // The reason is too long for the chip and too important to drop.
+        Some(err) => super::surface::rounded_tooltip(
+            chip,
+            text::body(format!("{err}")),
+            widget::tooltip::Position::Top,
+        ),
+        None => chip,
+    }
+}
+
 /// Whether a backend's models are served by an online provider. Online
 /// backends transmit audio to a third-party service, flagged in the UI.
 pub(super) fn backend_is_online(backend: &crate::daemon::backends::BackendInfo) -> bool {
@@ -61,6 +186,18 @@ pub(super) fn backend_has_user_url(backend: &crate::daemon::backends::BackendInf
 pub(super) fn capability_chip(
     icon: &'static [u8],
     label: &'static str,
+    fg: cosmic::iced::Color,
+) -> Element<'static, Message> {
+    inert_chip(icon, label.to_string(), fg)
+}
+
+/// The chip shape itself, for a label only known at runtime. `capability_chip`
+/// is the fixed-label form; both render identically so a chip built from a
+/// progress percentage sits in a row of capability chips without looking
+/// foreign.
+pub(super) fn inert_chip(
+    icon: &'static [u8],
+    label: String,
     fg: cosmic::iced::Color,
 ) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
@@ -386,6 +523,7 @@ mod capability_tests {
         BackendInfo {
             source: "github.com/super-stt/test".to_string(),
             name: "Test".to_string(),
+            version: "1.0.0".to_string(),
             kind: "subprocess".to_string(),
             allowed_hosts: Vec::new(),
             models: per_model
@@ -484,5 +622,80 @@ mod capability_tests {
         let mut b = backend_with_base_url(Some("https://api.example.com"));
         b.options[0].default = Some("https://api.example.com".to_string());
         assert!(backend_has_user_url(&b));
+    }
+}
+
+#[cfg(test)]
+mod update_offer_tests {
+    //! Pin when the daemon's answer is shown. The comparison itself is the
+    //! daemon's — these fix what the card does with it, including the failure
+    //! this started from: the flag rides on the registry catalog, so a chip can
+    //! survive the update it describes and then do nothing when clicked.
+    use super::update_offer;
+    use super_stt_shared::registry::RegistryBackend;
+
+    fn entry(installed: Option<&str>, latest: &str) -> RegistryBackend {
+        // Mirrors what the daemon computes, so the fixture cannot claim an
+        // update the daemon would not report.
+        let update_available = installed
+            .is_some_and(|i| super_stt_registry_types::version::update_available(i, latest));
+        RegistryBackend {
+            id: "y".to_string(),
+            source: "github.com/x/y".to_string(),
+            version: latest.to_string(),
+            name: "Y".to_string(),
+            description: None,
+            license: "Apache-2.0".to_string(),
+            kind: "wasm".to_string(),
+            contract: "v1".to_string(),
+            allowed_hosts: Vec::new(),
+            online: true,
+            supports_gpu: false,
+            supports_cpu: false,
+            models: Vec::new(),
+            secrets: Vec::new(),
+            options: Vec::new(),
+            compatibility: super_stt_shared::registry::Compatibility {
+                compatible: true,
+                selected_asset: None,
+                reason: None,
+            },
+            installed_version: installed.map(String::from),
+            update_available,
+            index_stale: None,
+        }
+    }
+
+    #[test]
+    fn offers_only_a_newer_version() {
+        assert_eq!(
+            update_offer(Some(&entry(Some("0.1.0"), "0.1.1")), false),
+            Some("0.1.1".to_string())
+        );
+        // Already current — this is the state that was being drawn from a stale
+        // catalog and clicked repeatedly.
+        assert_eq!(
+            update_offer(Some(&entry(Some("0.1.1"), "0.1.1")), false),
+            None
+        );
+        // An index older than what is installed must not prompt a downgrade.
+        assert_eq!(
+            update_offer(Some(&entry(Some("0.2.0"), "0.1.1")), false),
+            None
+        );
+    }
+
+    #[test]
+    fn withholds_while_an_install_is_in_flight() {
+        assert_eq!(
+            update_offer(Some(&entry(Some("0.1.0"), "0.1.1")), true),
+            None
+        );
+    }
+
+    #[test]
+    fn needs_a_catalog_entry_and_an_installed_version() {
+        assert_eq!(update_offer(None, false), None);
+        assert_eq!(update_offer(Some(&entry(None, "0.1.1")), false), None);
     }
 }

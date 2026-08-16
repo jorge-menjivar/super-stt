@@ -24,6 +24,16 @@ pub struct BackendInfo {
     pub source: String,
     /// Human-readable backend name, e.g. `OpenAI`.
     pub name: String,
+    /// The installed backend's `[backend].version`, read from the `backend.toml`
+    /// on disk — what is installed, not what is published.
+    ///
+    /// For a backend the registry does not list (imported from a directory, or
+    /// installed from an arbitrary repo) this is the only version there is; for
+    /// the rest it is still the authoritative one, since the registry reports
+    /// what a release offers rather than what this machine has. `default` so a
+    /// payload written before the field existed still deserializes.
+    #[serde(default)]
+    pub version: String,
     /// `"wasm"` or `"subprocess"` — the backend's transport.
     #[serde(default)]
     pub kind: String,
@@ -209,5 +219,27 @@ mod tests {
         });
         let info: BackendInfo = serde_json::from_value(json).unwrap();
         assert!(info.allowed_hosts.is_empty());
+    }
+
+    /// A daemon that predates `version` still deserializes here, reporting an
+    /// empty one rather than failing the whole catalog. The field was added to
+    /// `GET /backends`; a client that hard-required it would black out the
+    /// settings UI against any daemon not yet upgraded.
+    #[test]
+    fn a_backends_payload_without_a_version_still_parses() {
+        let json = serde_json::json!({
+            "source": "github.com/super-stt/openai",
+            "name": "OpenAI",
+            "kind": "wasm",
+            "allowed_hosts": [],
+            "models": [],
+            "secrets": [],
+            "options": [],
+        });
+        let b: BackendInfo = serde_json::from_value(json).expect("older payload must parse");
+        assert_eq!(
+            b.version, "",
+            "a missing version reads as unknown, not an error"
+        );
     }
 }

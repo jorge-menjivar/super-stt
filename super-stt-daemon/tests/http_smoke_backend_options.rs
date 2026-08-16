@@ -34,6 +34,9 @@ const FIXTURE_SOURCE_ENC: &str = "github.com%2Fsuper-stt%2Fopenai";
 struct DaemonGuard {
     child: Child,
     cleanup_paths: Vec<PathBuf>,
+    /// Where the fixture backend was seeded, so a test can change it on disk
+    /// under the running daemon.
+    data_home: PathBuf,
 }
 
 impl Drop for DaemonGuard {
@@ -133,7 +136,8 @@ async fn start_daemon(scopes: &[&str]) -> (DaemonGuard, PathBuf, String) {
     // panic below must still kill and reap the daemon, not leak it.
     let guard = DaemonGuard {
         child,
-        cleanup_paths: vec![http_socket.clone(), config_home, data_home],
+        cleanup_paths: vec![http_socket.clone(), config_home, data_home.clone()],
+        data_home,
     };
 
     let deadline = Instant::now() + Duration::from_mins(2);
@@ -412,5 +416,66 @@ async fn unknown_backend_is_404() {
     assert_eq!(
         body["message"], "unknown_backend",
         "error code for unknown backend: {body}"
+    );
+}
+
+/// `GET /backends` reports the version on disk now, not the one the daemon
+/// scanned at startup.
+///
+/// A client shows this beside an update badge judged from `installed_version`
+/// on the registry listing, which is read per request — reported from the scan
+/// instead, this would name the version the daemon started with while the badge
+/// spoke for the one on disk.
+#[tokio::test]
+async fn backend_version_is_read_from_disk_per_request() {
+    let (guard, sock, token) = start_daemon(&["settings"]).await;
+    let manifest = guard
+        .data_home
+        .join("super-stt")
+        .join("backends")
+        .join("fixture-openai")
+        .join("backend.toml");
+
+    let (s, body) = get(&sock, "/backends", &token).await;
+    assert_eq!(s, StatusCode::OK, "GET /backends: {body}");
+    assert_eq!(body["backends"][0]["version"], "1.0.0", "seeded: {body}");
+
+    // Change it underneath the running daemon; nothing rescans.
+    let edited = std::fs::read_to_string(&manifest)
+        .expect("read fixture manifest")
+        .replace("version = \"1.0.0\"", "version = \"2.5.0\"");
+    std::fs::write(&manifest, edited).expect("write fixture manifest");
+
+    let (s, body) = get(&sock, "/backends", &token).await;
+    assert_eq!(s, StatusCode::OK, "GET /backends after edit: {body}");
+    assert_eq!(
+        body["backends"][0]["version"], "2.5.0",
+        "version follows the manifest without a rescan: {body}"
+    );
+}
+
+/// When the manifest cannot be read, the version falls back to what the last
+/// scan recorded rather than blanking.
+///
+/// A backend whose `backend.toml` has gone missing is broken either way; the
+/// last version the daemon actually loaded is more use to whoever is looking at
+/// it than an empty field, and it is what the running model came from.
+#[tokio::test]
+async fn backend_version_falls_back_to_the_scan_when_the_manifest_is_gone() {
+    let (guard, sock, token) = start_daemon(&["settings"]).await;
+    let manifest = guard
+        .data_home
+        .join("super-stt")
+        .join("backends")
+        .join("fixture-openai")
+        .join("backend.toml");
+
+    std::fs::remove_file(&manifest).expect("remove fixture manifest");
+
+    let (s, body) = get(&sock, "/backends", &token).await;
+    assert_eq!(s, StatusCode::OK, "GET /backends: {body}");
+    assert_eq!(
+        body["backends"][0]["version"], "1.0.0",
+        "the scanned version stands in when the manifest cannot be read: {body}"
     );
 }

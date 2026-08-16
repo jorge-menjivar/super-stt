@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use cosmic::iced::Length;
+use cosmic::iced::widget::row;
 use cosmic::widget::{self, text};
 use cosmic::{Apply, Element};
 
@@ -204,13 +205,29 @@ pub(super) fn repo_button(source: &str) -> Element<'static, Message> {
 /// flush at the card's right edge.
 pub(super) fn card_title_block<'a>(
     name: String,
+    version: &str,
     description: Option<String>,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
+    // The version rides beside the name, muted: it answers "what am I running"
+    // without competing with the name for the eye. Backends installed before
+    // the daemon reported it have none, so the row simply omits it rather than
+    // showing a placeholder.
+    let title: Element<'a, Message> = if version.is_empty() {
+        text::title4(name).line_height(1.0).into()
+    } else {
+        row![
+            text::title4(name).line_height(1.0),
+            text::body(format!("v{version}")).class(cosmic::theme::Text::Color(muted_text_color())),
+        ]
+        .spacing(spacing.space_xxs)
+        .align_y(cosmic::iced::Alignment::End)
+        .into()
+    };
     let mut col = widget::column::with_capacity(2)
         .spacing(spacing.space_xxxs)
         .width(Length::Fill)
-        .push(text::title4(name).line_height(1.0));
+        .push(title);
     if let Some(desc) = description {
         col = col.push(text::body(desc).class(cosmic::theme::Text::Color(muted_text_color())));
     }
