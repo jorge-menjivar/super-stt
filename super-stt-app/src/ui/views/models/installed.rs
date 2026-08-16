@@ -12,9 +12,11 @@ use crate::ui::messages::{Message, ModelsPageMessage};
 use super::active::backend_glyph_tile;
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips, models_inventory,
+    backend_supports_gpu, capability_chip, capability_chips, models_inventory,
 };
-use super::surface::{card_divider, card_surface, card_title_block, muted_text_color, repo_button};
+use super::surface::{
+    card_divider, card_surface, card_title_block, muted_text_color, repo_button, rounded_tooltip,
+};
 
 /// The Library's Installed tab: every backend the daemon discovered on disk,
 /// one card each. The active backend is included too — activation lives on the
@@ -66,6 +68,13 @@ pub(super) fn installed_card<'a>(
     // Overflow ("⋯") menu: the optional Update, then Uninstall. Configure left
     // the menu to become a visible button beside it.
     let menu_open = app.models_page.installed_menu_open.as_deref() == Some(source.as_str());
+    // Built before the menu takes ownership of the version. The Update action
+    // lives behind the "⋯", which nothing on a settled card hints at; the badge
+    // is what says a version is waiting, while the menu stays where it is
+    // applied.
+    let badge = update_version
+        .as_deref()
+        .map(|v| update_badge(v, !menu_open));
     let trigger = button::icon(icons::phosphor_handle(icons::DOTS_THREE_VERTICAL)).on_press(
         Message::ModelsPage(ModelsPageMessage::ToggleInstalledMenu(source.clone())),
     );
@@ -76,11 +85,13 @@ pub(super) fn installed_card<'a>(
             .on_close(Message::ModelsPage(ModelsPageMessage::CloseInstalledMenu));
     }
 
-    let mut actions = widget::row::with_capacity(4)
+    let mut actions = widget::row::with_capacity(5)
         .spacing(spacing.space_xs)
         .align_y(Alignment::Center);
     if let Some(s) = in_flight {
         actions = actions.push(update_status(s));
+    } else if let Some(b) = badge {
+        actions = actions.push(b);
     }
     actions = actions
         .push(repo_button(&source))
@@ -168,6 +179,30 @@ fn update_offer(
     let installed = e.installed_version.as_deref()?;
     super_stt_registry_types::version::update_available(installed, &e.version)
         .then(|| e.version.clone())
+}
+
+/// Badge marking a backend with a newer version available, carrying the version
+/// in its tooltip.
+///
+/// Accent-colored rather than neutral: unlike the capability chips beside it,
+/// this reports something the user can act on. It is not itself a button — the
+/// action is the Update entry in the "⋯" menu, and two ways to start the same
+/// install is one more than the card needs.
+///
+/// `tooltips` is off while that menu is open, for the same reason the capability
+/// chips suppress theirs: a tooltip would paint half-behind the menu.
+fn update_badge(version: &str, tooltips: bool) -> Element<'static, Message> {
+    let accent: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
+    let chip = capability_chip(icons::ARROWS_CLOCKWISE, "Update", accent);
+    if tooltips {
+        rounded_tooltip(
+            chip,
+            text::body(format!("Version {version} is available")),
+            widget::tooltip::Position::Top,
+        )
+    } else {
+        chip
+    }
 }
 
 /// Progress for an update running on an installed backend, shown beside the
