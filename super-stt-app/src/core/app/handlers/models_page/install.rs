@@ -89,8 +89,12 @@ impl AppModel {
                         cosmic::Action::App(match res {
                             Ok(r) if r.noop => {
                                 log::info!("update({source}) noop — already at {}", r.to_version);
-                                // Nothing to do; let the UI settle naturally.
-                                Message::Backend(BackendMessage::BackendsReload)
+                                // Nothing to install, but something to correct:
+                                // the only way to reach this is an Update entry
+                                // drawn from a stale `installed_version`. Reload
+                                // the catalog that decides it, or the entry
+                                // stays and every click no-ops again.
+                                Message::ModelsPage(ModelsPageMessage::InstallCompleted { source })
                             }
                             Ok(r) => Message::ModelsPage(ModelsPageMessage::InstallAccepted {
                                 source: source.clone(),
@@ -174,9 +178,18 @@ impl AppModel {
             ModelsPageMessage::InstallCompleted { source } => {
                 self.registry.installs.remove(&source);
                 self.registry.install_errors.remove(&source);
-                // Refresh the installed-backends list so the new install
-                // shows up in the Installed tab.
-                crate::core::app::handlers::tasks::reload_backends()
+                // Both catalogs, because they carry different halves of what
+                // just changed. The backends list is what the Installed tab
+                // draws; the registry catalog carries `installed_version`, and
+                // that is what decides whether an Update entry is offered. Left
+                // stale, the Update the user just ran stays on the menu and
+                // does nothing when clicked. No index refresh: the annotation
+                // is computed from local install state, so the cached index is
+                // enough and a network round-trip would only slow this down.
+                Task::batch([
+                    crate::core::app::handlers::tasks::reload_backends(),
+                    crate::core::app::handlers::tasks::fetch_registry_catalog(false),
+                ])
             }
 
             ModelsPageMessage::InstallFailed {
