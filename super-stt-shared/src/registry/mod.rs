@@ -131,3 +131,66 @@ pub struct UninstallResponse {
 }
 
 pub use super_stt_registry_types::{is_safe_component, is_safe_relative_path};
+
+#[cfg(test)]
+mod tests {
+    use super::RegistryBackend;
+
+    /// A daemon that predates `update_available` still deserializes here. The
+    /// field moved the update decision from the client to the daemon; a client
+    /// that hard-required it would fail to list anything at all against a
+    /// daemon that has not rolled over, which is worse than not knowing about
+    /// an update.
+    #[test]
+    fn a_registry_entry_without_update_available_still_parses() {
+        let json = serde_json::json!({
+            "id": "openai",
+            "source": "github.com/super-stt/openai",
+            "version": "0.1.1",
+            "name": "OpenAI",
+            "license": "Apache-2.0",
+            "kind": "wasm",
+            "contract": "v1",
+            "online": true,
+            "supports_gpu": false,
+            "supports_cpu": false,
+            "models": [],
+            "secrets": [],
+            "options": [],
+            "compatibility": { "compatible": true },
+            "installed_version": "0.1.0",
+        });
+        let b: RegistryBackend = serde_json::from_value(json).expect("older payload must parse");
+        assert!(
+            !b.update_available,
+            "an absent flag reads as no update, never as one"
+        );
+    }
+
+    /// Unknown keys are ignored, so a newer daemon adding a field does not
+    /// break a client built against this shape. The compatibility runs both
+    /// ways or it is not compatibility.
+    #[test]
+    fn a_registry_entry_with_an_unknown_field_still_parses() {
+        let json = serde_json::json!({
+            "id": "openai",
+            "source": "github.com/super-stt/openai",
+            "version": "0.1.1",
+            "name": "OpenAI",
+            "license": "Apache-2.0",
+            "kind": "wasm",
+            "contract": "v1",
+            "online": true,
+            "supports_gpu": false,
+            "supports_cpu": false,
+            "models": [],
+            "secrets": [],
+            "options": [],
+            "compatibility": { "compatible": true },
+            "update_available": true,
+            "a_field_from_a_later_daemon": 42,
+        });
+        let b: RegistryBackend = serde_json::from_value(json).expect("newer payload must parse");
+        assert!(b.update_available);
+    }
+}

@@ -220,4 +220,26 @@ mod tests {
         let info: BackendInfo = serde_json::from_value(json).unwrap();
         assert!(info.allowed_hosts.is_empty());
     }
+
+    /// A daemon that predates `version` still deserializes here, reporting an
+    /// empty one rather than failing the whole catalog. The field was added to
+    /// `GET /backends`; a client that hard-required it would black out the
+    /// settings UI against any daemon not yet upgraded.
+    #[test]
+    fn a_backends_payload_without_a_version_still_parses() {
+        let json = serde_json::json!({
+            "source": "github.com/super-stt/openai",
+            "name": "OpenAI",
+            "kind": "wasm",
+            "allowed_hosts": [],
+            "models": [],
+            "secrets": [],
+            "options": [],
+        });
+        let b: BackendInfo = serde_json::from_value(json).expect("older payload must parse");
+        assert_eq!(
+            b.version, "",
+            "a missing version reads as unknown, not an error"
+        );
+    }
 }

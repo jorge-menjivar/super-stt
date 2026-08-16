@@ -453,3 +453,29 @@ async fn backend_version_is_read_from_disk_per_request() {
         "version follows the manifest without a rescan: {body}"
     );
 }
+
+/// When the manifest cannot be read, the version falls back to what the last
+/// scan recorded rather than blanking.
+///
+/// A backend whose `backend.toml` has gone missing is broken either way; the
+/// last version the daemon actually loaded is more use to whoever is looking at
+/// it than an empty field, and it is what the running model came from.
+#[tokio::test]
+async fn backend_version_falls_back_to_the_scan_when_the_manifest_is_gone() {
+    let (guard, sock, token) = start_daemon(&["settings"]).await;
+    let manifest = guard
+        .data_home
+        .join("super-stt")
+        .join("backends")
+        .join("fixture-openai")
+        .join("backend.toml");
+
+    std::fs::remove_file(&manifest).expect("remove fixture manifest");
+
+    let (s, body) = get(&sock, "/backends", &token).await;
+    assert_eq!(s, StatusCode::OK, "GET /backends: {body}");
+    assert_eq!(
+        body["backends"][0]["version"], "1.0.0",
+        "the scanned version stands in when the manifest cannot be read: {body}"
+    );
+}
