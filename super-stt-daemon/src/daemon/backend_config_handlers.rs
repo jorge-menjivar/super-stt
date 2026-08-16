@@ -77,7 +77,14 @@ impl SuperSTTDaemon {
                 BackendInfo {
                     source: b.source.clone(),
                     name: b.name.clone(),
-                    version: b.version.clone(),
+                    // Re-read rather than reported from the scan: a client
+                    // showing this beside an update badge would otherwise name
+                    // the version the daemon started with while the badge was
+                    // judged against the one on disk. Falls back to the scan's
+                    // value if the manifest cannot be read now, since the last
+                    // known version beats none for a backend in that state.
+                    version: crate::stt_models::backends::installed_version(&b.dir)
+                        .unwrap_or_else(|| b.version.clone()),
                     kind: b.kind.clone(),
                     // The manifest's declared egress, and only that. A user-set
                     // `base_url` authorizes an endpoint beyond it, but it is the

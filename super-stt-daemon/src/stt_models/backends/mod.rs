@@ -30,10 +30,14 @@ pub struct DiscoveredBackend {
     pub source: String,
     /// Human-facing backend name (`[backend].name`).
     pub name: String,
-    /// The backend's own version (`[backend].version`), carried from the
-    /// manifest so the catalog can report what is installed without consulting
-    /// the registry — which knows only what a release offers, and nothing at
-    /// all about a locally imported backend.
+    /// The backend's own version (`[backend].version`) as of the last scan.
+    ///
+    /// Carried from the manifest so the catalog can report what is installed
+    /// without consulting the registry — which knows only what a release
+    /// offers, and nothing at all about a locally imported backend. Callers
+    /// reporting a version to a user should prefer [`installed_version`], which
+    /// re-reads the manifest; this is the value the running daemon loaded from,
+    /// and stands as the fallback when that read fails.
     pub version: String,
     /// `"wasm"` or `"subprocess"`.
     pub kind: String,
@@ -47,6 +51,26 @@ pub struct DiscoveredBackend {
     pub options: Vec<Opt>,
     /// Models this backend serves.
     pub models: Vec<ModelDefinition>,
+}
+
+/// Read a backend's version from the `backend.toml` in `dir`, or `None` when
+/// there is no readable manifest there.
+///
+/// Read per call rather than taken from discovery, because the two answer
+/// different questions: [`DiscoveredBackend::version`] is what the daemon
+/// loaded from and only moves when it rescans, while this is what is on disk
+/// now. Anything reporting a version to a user wants the latter — a backend
+/// changed outside the daemon (a hand-edited manifest, an install from another
+/// tool) would otherwise read as its pre-change self until the next rescan.
+///
+/// The same read backs `GET /backends` and the `installed_version` on
+/// `GET /registry/backends`, so the version a client sees and the one an update
+/// is judged against cannot disagree.
+#[must_use]
+pub fn installed_version(dir: &Path) -> Option<String> {
+    manifest::Manifest::load(dir)
+        .ok()
+        .map(|m| m.backend.version)
 }
 
 /// Scan `backends_dir` for installed backends. Subdirectories without a

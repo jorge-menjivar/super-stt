@@ -61,15 +61,9 @@ fn entry_passes_filters(
 }
 
 /// Read the installed version for a backend from its `backend.toml`, if present.
+/// `None` marks a backend that is not installed here.
 fn installed_version(backends_dir: &std::path::Path, backend_id: &str) -> Option<String> {
-    let candidate = backends_dir.join(backend_id).join("backend.toml");
-    if candidate.exists() {
-        crate::stt_models::backends::manifest::Manifest::load(&backends_dir.join(backend_id))
-            .ok()
-            .map(|m| m.backend.version)
-    } else {
-        None
-    }
+    crate::stt_models::backends::installed_version(&backends_dir.join(backend_id))
 }
 
 /// Map a registry entry + compatibility result to the wire `RegistryBackend` shape.

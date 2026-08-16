@@ -88,7 +88,8 @@ Per-entry fields beyond what `index.json` carries:
 - `installed_version` — present if the backend is already installed on this
   host, regardless of its registry status. Read from the installed
   `backend.toml` on every request, so it reflects what is on disk now rather
-  than what the daemon saw at startup.
+  than what the daemon saw at startup. It is the same read that fills
+  [`version` on `GET /backends`](../backends.md), so the two never disagree.
 - `update_available` — whether `version` is newer than `installed_version`,
   compared as semver. The daemon decides this rather than leaving each client
   to re-derive it: the daemon is the side that reads the installed manifest and
