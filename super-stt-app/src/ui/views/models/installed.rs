@@ -13,8 +13,9 @@ use super::active::backend_glyph_tile;
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
     backend_supports_gpu, capability_chips, models_inventory, update_chip, update_offer,
+    update_progress_chip,
 };
-use super::surface::{card_divider, card_surface, card_title_block, muted_text_color, repo_button};
+use super::surface::{card_divider, card_surface, card_title_block, repo_button};
 
 /// The Library's Installed tab: every backend the daemon discovered on disk,
 /// one card each. The active backend is included too — activation lives on the
@@ -80,7 +81,7 @@ pub(super) fn installed_card<'a>(
         .spacing(spacing.space_xs)
         .align_y(Alignment::Center);
     if let Some(s) = in_flight {
-        actions = actions.push(update_status(s));
+        actions = actions.push(update_progress_chip(s));
     } else if let Some(v) = update_version.as_deref() {
         actions = actions.push(update_chip(&source, v, !menu_open));
     }
@@ -92,7 +93,7 @@ pub(super) fn installed_card<'a>(
         .push(overflow);
     let header = row![
         backend_glyph_tile(),
-        card_title_block(backend.name.clone(), description),
+        card_title_block(backend.name.clone(), &backend.version, description),
         actions,
     ]
     .spacing(spacing.space_s)
@@ -146,34 +147,6 @@ pub(super) fn installed_card<'a>(
         .into(),
         None => surface,
     }
-}
-
-/// Progress for an update running on an installed backend, shown beside the
-/// card's actions.
-///
-/// Reads the same `InstallStatus` a Browse install reports on — an update *is*
-/// an install — so the phase and percentage mean what they mean there. It is a
-/// caption rather than a button: nothing here is actionable while the daemon is
-/// working, and the Update entry is withheld for the duration.
-fn update_status(s: &crate::state::registry::InstallStatus) -> Element<'static, Message> {
-    let muted = muted_text_color();
-    let label = match (&s.error, s.bytes_total) {
-        (Some(err), _) => format!("Update failed: {err}"),
-        (None, Some(total)) if total > 0 => {
-            format!(
-                "Updating\u{2026} ({}) {}%",
-                super::download::phase_label(s.phase),
-                (s.bytes_done * 100) / total
-            )
-        }
-        _ => format!(
-            "Updating\u{2026} ({})",
-            super::download::phase_label(s.phase)
-        ),
-    };
-    text::caption(label)
-        .class(cosmic::theme::Text::Color(muted))
-        .into()
 }
 
 /// The popup body for an installed card's "⋯" overflow menu: Uninstall, in a

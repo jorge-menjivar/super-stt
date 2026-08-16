@@ -178,7 +178,7 @@ pub(super) fn active_backend_card<'a>(
     .align_y(Alignment::Center);
     let header = row![
         backend_glyph_tile(),
-        super::surface::card_title_block(backend.name.clone(), description),
+        super::surface::card_title_block(backend.name.clone(), &backend.version, description),
         actions,
     ]
     .spacing(spacing.space_s)
@@ -215,11 +215,15 @@ pub(super) fn active_backend_card<'a>(
     }
     // The update chip is the action as well as the sign, which is what lets it
     // work here: this card has no overflow menu, so without it a waiting
-    // version would be invisible on the page the user actually sits on.
-    if let Some(v) = super::chips::update_offer(
-        app.registry.by_source().get(source.as_str()).copied(),
-        app.registry.installs.contains_key(source.as_str()),
-    ) {
+    // version would be invisible on the page the user actually sits on. Once
+    // pressed it becomes the progress chip in place — the Library card does the
+    // same, and an update started from either is watchable from both.
+    let registry_map = app.registry.by_source();
+    if let Some(s) = app.registry.installs.get(source.as_str()) {
+        chip_row = chip_row.push(super::chips::update_progress_chip(s));
+    } else if let Some(v) =
+        super::chips::update_offer(registry_map.get(source.as_str()).copied(), false)
+    {
         chip_row = chip_row.push(super::chips::update_chip(&source, &v, true));
     }
     card = card.push(chip_row);

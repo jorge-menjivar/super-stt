@@ -28,6 +28,7 @@ pub(crate) fn openai_backend(
         dir: std::path::PathBuf::from("/tmp/openai"),
         source: source.to_string(),
         name: "OpenAI".to_string(),
+        version: "1.0.0".to_string(),
         kind: "wasm".to_string(),
         entrypoint: "openai.wasm".to_string(),
         allowed_hosts: vec!["api.openai.com".to_string()],

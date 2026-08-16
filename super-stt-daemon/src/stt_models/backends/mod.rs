@@ -30,6 +30,11 @@ pub struct DiscoveredBackend {
     pub source: String,
     /// Human-facing backend name (`[backend].name`).
     pub name: String,
+    /// The backend's own version (`[backend].version`), carried from the
+    /// manifest so the catalog can report what is installed without consulting
+    /// the registry — which knows only what a release offers, and nothing at
+    /// all about a locally imported backend.
+    pub version: String,
     /// `"wasm"` or `"subprocess"`.
     pub kind: String,
     /// Entrypoint relative to `dir` (component file or binary).
@@ -161,6 +166,7 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
         dir: dir.to_path_buf(),
         source,
         name: m.backend.name,
+        version: m.backend.version,
         kind: m.backend.kind.to_string(),
         entrypoint: m.backend.entrypoint,
         allowed_hosts: m.network.allowed_hosts,

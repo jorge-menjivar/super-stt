@@ -94,6 +94,10 @@ processing_interval_ms = 2000
     assert_eq!(oai.secrets.len(), 1);
     assert!(oai.secrets[0].required);
     assert_eq!(oai.options.len(), 1);
+    // Carried from the manifest: for a backend the registry does not list, this
+    // is the only version there is, so dropping it here would leave the catalog
+    // unable to say what is installed.
+    assert_eq!(oai.version, "0.1.0");
 
     // find_model resolves the pair against the declaring backend.
     let (b, def) = find_model(&backends, "whisper-1", "github.com/super-stt/openai")
@@ -294,6 +298,7 @@ fn dir_name_returns_final_component() {
             dir,
             source: "github.com/super-stt/openai".to_string(),
             name: "OpenAI".to_string(),
+            version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
             entrypoint: "openai.wasm".to_string(),
             allowed_hosts: Vec::new(),
@@ -499,6 +504,7 @@ fn dedup_sources_keeps_first_occurrence() {
             dir: PathBuf::from(dir),
             source: source.to_string(),
             name: dir.to_string(),
+            version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
             entrypoint: "x.wasm".to_string(),
             allowed_hosts: Vec::new(),
@@ -535,6 +541,7 @@ fn an_empty_source_resolves_nothing() {
             dir: PathBuf::from(dir),
             source: source.to_string(),
             name: dir.to_string(),
+            version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
             entrypoint: "x.wasm".to_string(),
             allowed_hosts: Vec::new(),

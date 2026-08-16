@@ -77,6 +77,7 @@ impl SuperSTTDaemon {
                 BackendInfo {
                     source: b.source.clone(),
                     name: b.name.clone(),
+                    version: b.version.clone(),
                     kind: b.kind.clone(),
                     // The manifest's declared egress, and only that. A user-set
                     // `base_url` authorizes an endpoint beyond it, but it is the

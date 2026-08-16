@@ -101,6 +101,38 @@ pub(super) fn update_chip(
     }
 }
 
+/// The update chip's in-flight form: same shape, muted, and inert.
+///
+/// Reads the `InstallStatus` a Browse install reports on — an update *is* an
+/// install — so the phase and percentage mean what they mean there. It replaces
+/// the update chip in place on both cards, so the control the user pressed
+/// becomes the progress they are waiting on rather than disappearing.
+pub(super) fn update_progress_chip(
+    s: &crate::state::registry::InstallStatus,
+) -> Element<'static, Message> {
+    let label = match (&s.error, s.bytes_total) {
+        (Some(_), _) => "Update failed".to_string(),
+        (None, Some(total)) if total > 0 => {
+            format!("Updating\u{2026} {}%", (s.bytes_done * 100) / total)
+        }
+        _ => format!(
+            "Updating\u{2026} ({})",
+            super::download::phase_label(s.phase)
+        ),
+    };
+    let fg = muted_text_color();
+    let chip = inert_chip(icons::ARROWS_CLOCKWISE, label, fg);
+    match &s.error {
+        // The reason is too long for the chip and too important to drop.
+        Some(err) => super::surface::rounded_tooltip(
+            chip,
+            text::body(format!("{err}")),
+            widget::tooltip::Position::Top,
+        ),
+        None => chip,
+    }
+}
+
 /// Whether a backend's models are served by an online provider. Online
 /// backends transmit audio to a third-party service, flagged in the UI.
 pub(super) fn backend_is_online(backend: &crate::daemon::backends::BackendInfo) -> bool {
@@ -153,6 +185,18 @@ pub(super) fn backend_has_user_url(backend: &crate::daemon::backends::BackendInf
 pub(super) fn capability_chip(
     icon: &'static [u8],
     label: &'static str,
+    fg: cosmic::iced::Color,
+) -> Element<'static, Message> {
+    inert_chip(icon, label.to_string(), fg)
+}
+
+/// The chip shape itself, for a label only known at runtime. `capability_chip`
+/// is the fixed-label form; both render identically so a chip built from a
+/// progress percentage sits in a row of capability chips without looking
+/// foreign.
+pub(super) fn inert_chip(
+    icon: &'static [u8],
+    label: String,
     fg: cosmic::iced::Color,
 ) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
@@ -478,6 +522,7 @@ mod capability_tests {
         BackendInfo {
             source: "github.com/super-stt/test".to_string(),
             name: "Test".to_string(),
+            version: "1.0.0".to_string(),
             kind: "subprocess".to_string(),
             allowed_hosts: Vec::new(),
             models: per_model

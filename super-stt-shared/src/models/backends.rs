@@ -24,6 +24,16 @@ pub struct BackendInfo {
     pub source: String,
     /// Human-readable backend name, e.g. `OpenAI`.
     pub name: String,
+    /// The installed backend's `[backend].version`, read from the `backend.toml`
+    /// on disk — what is installed, not what is published.
+    ///
+    /// For a backend the registry does not list (imported from a directory, or
+    /// installed from an arbitrary repo) this is the only version there is; for
+    /// the rest it is still the authoritative one, since the registry reports
+    /// what a release offers rather than what this machine has. `default` so a
+    /// payload written before the field existed still deserializes.
+    #[serde(default)]
+    pub version: String,
     /// `"wasm"` or `"subprocess"` — the backend's transport.
     #[serde(default)]
     pub kind: String,
