@@ -7,11 +7,11 @@
 //! standalone servers used on bare compositors (mako, dunst, swaync). One code
 //! path covers all of them; nothing here is desktop-specific.
 //!
-//! Notification bodies carry only the fixed constants from [`crate::output::notice`],
-//! never backend error text. Backends are explicitly untrusted (audit 2 Tier 3
-//! #8) and notification servers may render limited markup in the body, so the
-//! same rule that governs typing governs this channel.
+//! What a bubble says is decided in [`crate::output::notice`], including how
+//! backend-authored text is made safe to put in a body; this module only carries
+//! it to the bus.
 
+use crate::output::notice::Failure;
 use crate::output::typer::Typer;
 use anyhow::{Context, Result};
 use log::{debug, info, warn};
@@ -24,10 +24,11 @@ const NOTIFY_BUS: &str = "org.freedesktop.Notifications";
 const NOTIFY_PATH: &str = "/org/freedesktop/Notifications";
 const NOTIFY_IFACE: &str = "org.freedesktop.Notifications";
 
+/// Sent as the notification's `app_name`, which is where the user learns who
+/// this bubble is from. The summary is free to name the failure instead.
 const APP_NAME: &str = "Super STT";
 /// Installed into `share/icons/hicolor/scalable/apps` by the justfile.
 const APP_ICON: &str = "super-stt-app";
-const SUMMARY: &str = "Super STT";
 /// 0 = low, 1 = normal, 2 = critical.
 const URGENCY_NORMAL: u8 = 1;
 /// Let the notification server pick the timeout.
@@ -45,14 +46,15 @@ pub struct Notifier {
     last_id: u32,
 }
 
+/// Every `(summary, body)` a [`Notifier::fake`] was asked to send.
+#[cfg(test)]
+type Sent = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
 enum Inner {
     /// Session-bus connection, established on first send and cached.
     Dbus(Option<Connection>),
     #[cfg(test)]
-    Fake {
-        fail: bool,
-        sent: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-    },
+    Fake { fail: bool, sent: Sent },
 }
 
 impl Notifier {
@@ -64,7 +66,7 @@ impl Notifier {
         }
     }
 
-    /// Deliver `body` as a desktop notification.
+    /// Deliver `summary` and `body` as a desktop notification.
     ///
     /// # Errors
     /// Returns an error when no session bus is reachable, or when no
@@ -74,7 +76,7 @@ impl Notifier {
     /// # Panics
     /// Never in practice: the `expect` below only unwraps the connection slot
     /// this same call just populated a few lines above.
-    pub async fn send(&mut self, body: &str) -> Result<()> {
+    pub async fn send(&mut self, summary: &str, body: &str) -> Result<()> {
         match &mut self.inner {
             Inner::Dbus(slot) => {
                 if slot.is_none() {
@@ -102,7 +104,7 @@ impl Notifier {
                             APP_NAME,
                             self.last_id,
                             APP_ICON,
-                            SUMMARY,
+                            summary,
                             body,
                             actions,
                             hints,
@@ -121,16 +123,18 @@ impl Notifier {
                 if *fail {
                     anyhow::bail!("fake notifier: delivery failed");
                 }
-                sent.lock().unwrap().push(body.to_string());
+                sent.lock()
+                    .unwrap()
+                    .push((summary.to_string(), body.to_string()));
                 Ok(())
             }
         }
     }
 
-    /// A notifier that records what it was asked to send, or fails every send
-    /// when `fail` is true.
+    /// A notifier that records the `(summary, body)` of what it was asked to
+    /// send, or fails every send when `fail` is true.
     #[cfg(test)]
-    pub(crate) fn fake(fail: bool) -> (Self, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    pub(crate) fn fake(fail: bool) -> (Self, Sent) {
         let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         (
             Self {
@@ -154,23 +158,29 @@ pub(crate) async fn deliver(
     method: NotificationMethod,
     notifier: &mut Notifier,
     typer: &mut Typer,
-    notice: &'static str,
+    failure: &Failure,
     write_mode: bool,
 ) {
     match method {
         NotificationMethod::Off => {
-            info!("Recording failure: {notice} (surfacing disabled)");
+            info!(
+                "Recording failure: {} — {} (surfacing disabled)",
+                failure.summary, failure.body
+            );
         }
-        NotificationMethod::Typed => type_or_log(typer, notice, write_mode).await,
+        NotificationMethod::Typed => type_or_log(typer, failure.typed, write_mode).await,
         NotificationMethod::Dbus => {
-            if let Err(e) = notifier.send(notice).await {
-                warn!("Could not deliver failure notification ({notice}): {e}");
+            if let Err(e) = notifier.send(failure.summary, &failure.body).await {
+                warn!(
+                    "Could not deliver failure notification ({}): {e}",
+                    failure.summary
+                );
             }
         }
         NotificationMethod::Auto => {
-            if let Err(e) = notifier.send(notice).await {
+            if let Err(e) = notifier.send(failure.summary, &failure.body).await {
                 warn!("Notification delivery failed ({e}); falling back to typing");
-                type_or_log(typer, notice, write_mode).await;
+                type_or_log(typer, failure.typed, write_mode).await;
             }
         }
     }
@@ -188,12 +198,18 @@ async fn type_or_log(typer: &mut Typer, notice: &'static str, write_mode: bool) 
 mod tests {
     use super::*;
     use crate::output::keyboard::Simulator;
-    use crate::output::notice;
+    use crate::output::notice::{self, Origin};
 
     /// Build a typer whose keystrokes land in a buffer we can assert on.
     fn typer() -> (Typer, std::sync::Arc<std::sync::Mutex<String>>) {
         let (sim, buf) = Simulator::capture();
         (Typer::new(sim), buf)
+    }
+
+    /// A transcription failure carrying a backend's reason — the shape the user
+    /// hits most often, and the one that has both a summary and a body to check.
+    fn backend_failure() -> Failure {
+        Failure::transcription_failed(Origin::Backend, "Could not reach the server (write_failed)")
     }
 
     #[tokio::test(start_paused = true)]
@@ -205,7 +221,7 @@ mod tests {
             NotificationMethod::Off,
             &mut n,
             &mut t,
-            notice::TRANSCRIPTION_FAILED,
+            &backend_failure(),
             true,
         )
         .await;
@@ -223,7 +239,7 @@ mod tests {
             NotificationMethod::Typed,
             &mut n,
             &mut t,
-            notice::TRANSCRIPTION_FAILED,
+            &backend_failure(),
             true,
         )
         .await;
@@ -232,8 +248,33 @@ mod tests {
         assert_eq!(*typed.lock().unwrap(), notice::TRANSCRIPTION_FAILED);
     }
 
+    /// The rule the notification channel relaxed and this one did not: what goes
+    /// into the user's focused window is the fixed marker, never the backend's
+    /// reason, however much of it the bubble would have shown.
     #[tokio::test(start_paused = true)]
-    async fn dbus_sends_the_notice_and_types_nothing() {
+    async fn typing_never_carries_the_reason() {
+        let (mut n, _sent) = Notifier::fake(true);
+        let (mut t, typed) = typer();
+
+        deliver(
+            NotificationMethod::Auto,
+            &mut n,
+            &mut t,
+            &backend_failure(),
+            true,
+        )
+        .await;
+
+        let typed = typed.lock().unwrap().clone();
+        assert_eq!(typed, notice::TRANSCRIPTION_FAILED);
+        assert!(
+            !typed.contains("write_failed"),
+            "backend text was typed into the focused window: {typed}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dbus_sends_the_summary_and_body_and_types_nothing() {
         let (mut n, sent) = Notifier::fake(false);
         let (mut t, typed) = typer();
 
@@ -241,13 +282,48 @@ mod tests {
             NotificationMethod::Dbus,
             &mut n,
             &mut t,
-            notice::RECORDING_FAILED,
+            &Failure::recording_failed("Audio device disappeared mid-take"),
             true,
         )
         .await;
 
-        assert_eq!(*sent.lock().unwrap(), vec![notice::RECORDING_FAILED]);
+        assert_eq!(
+            *sent.lock().unwrap(),
+            vec![(
+                "Recording failed".to_string(),
+                "Audio device disappeared mid-take".to_string()
+            )]
+        );
         assert_eq!(*typed.lock().unwrap(), "");
+    }
+
+    /// The bug this replaced: a bubble that named the app twice and the reason
+    /// not at all.
+    #[tokio::test(start_paused = true)]
+    async fn the_bubble_carries_the_reason_and_not_a_second_app_name() {
+        let (mut n, sent) = Notifier::fake(false);
+        let (mut t, _typed) = typer();
+
+        deliver(
+            NotificationMethod::Dbus,
+            &mut n,
+            &mut t,
+            &backend_failure(),
+            false,
+        )
+        .await;
+
+        let sent = sent.lock().unwrap().clone();
+        let (summary, body) = sent.first().expect("one notification");
+        assert_eq!(summary, "Transcription failed");
+        assert_eq!(
+            body,
+            "Backend error: Could not reach the server (write_failed)"
+        );
+        assert!(
+            !summary.contains(APP_NAME) && !body.contains(APP_NAME),
+            "the app name is the notification's own field, not text"
+        );
     }
 
     /// `dbus` is the deliberate "notification or nothing" choice — a failed
@@ -261,7 +337,7 @@ mod tests {
             NotificationMethod::Dbus,
             &mut n,
             &mut t,
-            notice::RECORDING_FAILED,
+            &Failure::recording_failed("d"),
             true,
         )
         .await;
@@ -278,12 +354,18 @@ mod tests {
             NotificationMethod::Auto,
             &mut n,
             &mut t,
-            notice::NO_MODEL_LOADED,
+            &Failure::no_model_loaded(),
             true,
         )
         .await;
 
-        assert_eq!(*sent.lock().unwrap(), vec![notice::NO_MODEL_LOADED]);
+        assert_eq!(
+            *sent.lock().unwrap(),
+            vec![(
+                "No model loaded".to_string(),
+                "Load a model and try again.".to_string()
+            )]
+        );
         assert_eq!(*typed.lock().unwrap(), "");
     }
 
@@ -298,7 +380,7 @@ mod tests {
             NotificationMethod::Auto,
             &mut n,
             &mut t,
-            notice::NO_MODEL_LOADED,
+            &Failure::no_model_loaded(),
             true,
         )
         .await;
@@ -316,7 +398,7 @@ mod tests {
             NotificationMethod::Typed,
             &mut n,
             &mut t,
-            notice::TRANSCRIPTION_FAILED,
+            &backend_failure(),
             false,
         )
         .await;
@@ -334,12 +416,12 @@ mod tests {
             NotificationMethod::Auto,
             &mut n,
             &mut t,
-            notice::TRANSCRIPTION_FAILED,
+            &backend_failure(),
             false,
         )
         .await;
 
-        assert_eq!(*sent.lock().unwrap(), vec![notice::TRANSCRIPTION_FAILED]);
+        assert_eq!(sent.lock().unwrap().len(), 1);
         assert_eq!(*typed.lock().unwrap(), "");
     }
 
@@ -353,7 +435,7 @@ mod tests {
             NotificationMethod::Auto,
             &mut n,
             &mut t,
-            notice::TRANSCRIPTION_FAILED,
+            &backend_failure(),
             false,
         )
         .await;

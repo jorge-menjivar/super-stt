@@ -130,8 +130,9 @@ A failure is also surfaced to the user according to the
 `auto`, the daemon sends a desktop notification; typing a short fixed notice
 into the focused window — for example `[Super STT: no model loaded]` — happens
 only as a fallback when notification delivery fails, and only for a request
-that set `write_mode: true`. The notice is a fixed daemon-authored string;
-backend-supplied error detail is never typed. The failure is still reported
+that set `write_mode: true`. A typed notice is a fixed daemon-authored string
+and never carries error detail; a notification names the failure in its summary
+and gives the reason in its body. The failure is still reported
 normally — as the direct error response (e.g. `409 model_not_loaded`, checked
 and answered before the `202`/SSE envelope for a daemon-mic capture commits)
 or, once an SSE stream has started, via the `error` event — with an empty
