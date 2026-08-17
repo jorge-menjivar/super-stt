@@ -26,18 +26,26 @@ impl FinalFailure {
         }
     }
 
-    /// The backend answered and said no.
-    fn backend(error: anyhow::Error) -> Self {
-        Self {
-            origin: Origin::Backend,
-            error,
-        }
-    }
-
     /// The reason, as one string. `{:#}` so an `anyhow` chain reports its causes
     /// and not just the outermost context.
     pub(super) fn detail(&self) -> String {
         format!("{:#}", self.error)
+    }
+}
+
+/// Who authored a dispatch failure's message.
+///
+/// `Failed` is the backend's own answer — it was asked and it refused. The other
+/// two are the daemon never getting as far as asking: an empty model slot, or an
+/// inference task that did not come back.
+///
+/// Separated from [`SuperSTTDaemon::transcribe_final`] because this is the
+/// decision the user-facing notice reads, and that function needs a whole daemon
+/// to call. A decision worth showing the user is worth being able to test.
+fn origin_of(error: &DispatchError) -> Origin {
+    match error {
+        DispatchError::Failed(_) => Origin::Backend,
+        DispatchError::NotLoaded | DispatchError::Join(_) => Origin::Daemon,
     }
 }
 
@@ -132,17 +140,73 @@ impl SuperSTTDaemon {
                 );
                 Ok(text)
             }
-            Err(DispatchError::Failed(e)) => {
-                warn!("Transcription failed: {e}");
-                Err(FinalFailure::backend(e))
+            // One place decides the origin, so the notice cannot disagree with
+            // the variant; the arms below only shape the message and log it.
+            Err(e) => {
+                let origin = origin_of(&e);
+                let error = match e {
+                    DispatchError::Failed(err) => {
+                        warn!("Transcription failed: {err}");
+                        err
+                    }
+                    DispatchError::NotLoaded => {
+                        error!("Model not loaded");
+                        anyhow::anyhow!("Model not loaded")
+                    }
+                    DispatchError::Join(err) => {
+                        anyhow::anyhow!("Transcription task failed: {err}")
+                    }
+                };
+                Err(FinalFailure { origin, error })
             }
-            Err(DispatchError::NotLoaded) => {
-                error!("Model not loaded");
-                Err(FinalFailure::daemon(anyhow::anyhow!("Model not loaded")))
-            }
-            Err(DispatchError::Join(e)) => Err(FinalFailure::daemon(anyhow::anyhow!(
-                "Transcription task failed: {e}"
-            ))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FinalFailure, origin_of};
+    use crate::output::notice::Origin;
+    use crate::stt_models::dispatch::DispatchError;
+
+    /// The backend was asked and refused, so its message is its own and the
+    /// notice says so.
+    #[test]
+    fn a_backend_refusal_is_the_backends_own() {
+        let e = DispatchError::Failed(anyhow::anyhow!("write_failed"));
+        assert_eq!(origin_of(&e), Origin::Backend);
+    }
+
+    /// Nothing was asked: there was no model to ask. Labelling this as the
+    /// backend's would blame a backend for the daemon's own state.
+    #[test]
+    fn an_empty_model_slot_is_the_daemons() {
+        assert_eq!(origin_of(&DispatchError::NotLoaded), Origin::Daemon);
+    }
+
+    /// The inference task died, so whatever the backend would have said never
+    /// arrived. The message here is the daemon's own description of the crash.
+    #[tokio::test]
+    async fn a_dead_inference_task_is_the_daemons() {
+        let handle = tokio::spawn(std::future::pending::<()>());
+        handle.abort();
+        let join_error = handle.await.expect_err("an aborted task fails to join");
+        assert_eq!(origin_of(&DispatchError::Join(join_error)), Origin::Daemon);
+    }
+
+    /// The reason shown to the user expands the whole `anyhow` chain. With the
+    /// plain `{}` form the user would get "Failed to process audio" and no clue
+    /// what about it failed.
+    #[test]
+    fn the_reason_expands_the_cause_chain() {
+        let e = FinalFailure::daemon(
+            anyhow::anyhow!("rate mismatch").context("Failed to process audio"),
+        );
+        assert_eq!(e.detail(), "Failed to process audio: rate mismatch");
+        assert_eq!(
+            e.to_string(),
+            "Failed to process audio",
+            "the plain form is what the existing error text keeps using"
+        );
     }
 }

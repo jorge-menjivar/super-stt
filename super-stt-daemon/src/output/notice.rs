@@ -160,7 +160,19 @@ fn sanitize(detail: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Failure, MAX_DETAIL, Origin, sanitize};
+    use super::{ALL, Failure, MAX_DETAIL, Origin, sanitize};
+
+    /// Every failure the daemon can raise, for the invariants that must hold
+    /// across all of them.
+    fn every_failure() -> Vec<Failure> {
+        vec![
+            Failure::no_model_loaded(),
+            Failure::could_not_start_recording("d"),
+            Failure::recording_failed("d"),
+            Failure::transcription_failed(Origin::Daemon, "d"),
+            Failure::transcription_failed(Origin::Backend, "d"),
+        ]
+    }
 
     /// The reason the user reported: a backend failure the log had in full
     /// showed up as a fixed marker. The body must carry the reason, and must say
@@ -203,13 +215,7 @@ mod tests {
     /// the summary is the line the user actually reads.
     #[test]
     fn no_summary_repeats_the_app_name() {
-        let all = [
-            Failure::no_model_loaded(),
-            Failure::could_not_start_recording("d"),
-            Failure::recording_failed("d"),
-            Failure::transcription_failed(Origin::Daemon, "d"),
-        ];
-        for f in all {
+        for f in every_failure() {
             assert!(
                 !f.summary.contains("Super STT"),
                 "summary repeats the app name: {:?}",
@@ -219,6 +225,42 @@ mod tests {
                 f.typed.starts_with("[Super STT: "),
                 "a typed notice must stay bracketed and attributed: {:?}",
                 f.typed
+            );
+        }
+    }
+
+    /// [`ALL`] is what the typer's sanitizer test checks every notice against, so
+    /// a failure whose typed string is not in it would be typed without anything
+    /// ever having verified it is safe to type. Fails when a new failure is added
+    /// with a string of its own.
+    #[test]
+    fn every_typed_notice_is_in_the_catalogue() {
+        for f in every_failure() {
+            assert!(
+                ALL.contains(&f.typed),
+                "a typed notice outside the catalogue is typed unchecked: {:?}",
+                f.typed
+            );
+        }
+    }
+
+    /// No failure reaches the user with an empty body. Every constructor either
+    /// carries a reason or substitutes a sentence, and a bubble whose body is
+    /// blank tells the user only that something is broken.
+    #[test]
+    fn no_failure_has_an_empty_body() {
+        for f in every_failure() {
+            assert!(!f.body.is_empty(), "empty body for {:?}", f.summary);
+        }
+        for f in [
+            Failure::could_not_start_recording(""),
+            Failure::recording_failed("\n\t "),
+            Failure::transcription_failed(Origin::Backend, "\u{1b}"),
+        ] {
+            assert!(
+                !f.body.is_empty(),
+                "a reason that sanitized away left an empty body: {:?}",
+                f.summary
             );
         }
     }
