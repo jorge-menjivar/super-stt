@@ -47,7 +47,7 @@
         dirs = "6.0.0"
         # Input simulation (for client)
         enigo = {
-            version = "0.6.1",
+            git = "https://github.com/jorge-menjivar/enigo",
             default-features = false,
             features = [
                 "wayland",
