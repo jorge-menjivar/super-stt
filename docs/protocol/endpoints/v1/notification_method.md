@@ -25,6 +25,41 @@ failed — logs the failure instead.
 
 The new method takes effect on the next recording.
 
+## What the user sees
+
+The two channels carry different amounts of detail, because they land in
+different places.
+
+A notification has a summary and a body of its own, and its app name and icon
+are supplied separately — so the summary names the failure and the body gives
+the reason:
+
+| Failure                       | Summary                     | Body                             |
+|-------------------------------|-----------------------------|----------------------------------|
+| No model is loaded            | `No model loaded`           | `Load a model and try again.`    |
+| The recorder could not start  | `Could not start recording` | The reason, from the daemon      |
+| Capture died partway          | `Recording failed`          | The reason, from the daemon      |
+| The audio was not transcribed | `Transcription failed`      | The reason, from the backend     |
+
+Reasons authored by a backend are prefixed `Backend error:`, so a failure the
+daemon is only relaying is never mistaken for one of its own. Backend text is
+untrusted: it is flattened to a single line, escaped so a notification server
+that renders markup in the body cannot be driven from it, and clamped to 300
+characters. A failure that arrives with no reason to report falls back to a
+fixed sentence rather than an empty body.
+
+Typing has nowhere to put a reason: the notice lands in whatever window the user
+has focused, in among their own text. It is one fixed, daemon-authored string
+per failure, bracketed so it cannot be read as transcript, and it never carries
+backend text:
+
+```
+[Super STT: no model loaded]
+[Super STT: could not start recording]
+[Super STT: recording failed]
+[Super STT: transcription failed]
+```
+
 ## Auth
 
 - **Required scope:** `settings`.

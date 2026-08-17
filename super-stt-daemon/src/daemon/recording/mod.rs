@@ -42,10 +42,15 @@ impl SuperSTTDaemon {
     /// the `error` event; this is the additional human-facing notice. It fires
     /// for every recording, write mode or not — the trigger is the failure, not
     /// the output mode.
-    async fn surface_failure(&self, typer: &mut Typer, notice: &'static str, write_mode: bool) {
+    async fn surface_failure(
+        &self,
+        typer: &mut Typer,
+        failure: &notice::Failure,
+        write_mode: bool,
+    ) {
         let method = self.config.read().await.transcription.notification_method;
         let mut notifier = self.notifier.lock().await;
-        crate::output::notification::deliver(method, &mut notifier, typer, notice, write_mode)
+        crate::output::notification::deliver(method, &mut notifier, typer, failure, write_mode)
             .await;
     }
 
@@ -75,7 +80,7 @@ impl SuperSTTDaemon {
         // reason lands in the field they are actually looking at.
         if self.model.read().await.is_none() {
             warn!("Recording request rejected - no model loaded");
-            self.surface_failure(typer, notice::NO_MODEL_LOADED, write_mode)
+            self.surface_failure(typer, &notice::Failure::no_model_loaded(), write_mode)
                 .await;
             return DaemonResponse::error_with_code(
                 ErrorCode::ModelNotLoaded,
@@ -118,8 +123,12 @@ impl SuperSTTDaemon {
                     let mut guard = self.busy.write().await;
                     *guard = false;
                 }
-                self.surface_failure(typer, notice::COULD_NOT_START_RECORDING, write_mode)
-                    .await;
+                self.surface_failure(
+                    typer,
+                    &notice::Failure::could_not_start_recording(&format!("{e:#}")),
+                    write_mode,
+                )
+                .await;
                 DaemonResponse::error(&format!("Recording failed: {e}"))
             }
         }
@@ -179,8 +188,12 @@ impl SuperSTTDaemon {
                 warn!("Recording capture failed: {e}");
                 self.finalize_recording_session("", false, Some(e.to_string()))
                     .await;
-                self.surface_failure(typer, notice::RECORDING_FAILED, write_mode)
-                    .await;
+                self.surface_failure(
+                    typer,
+                    &notice::Failure::recording_failed(&format!("{e:#}")),
+                    write_mode,
+                )
+                .await;
                 return Ok(Err(format!("recording error: {e}")));
             }
         };
@@ -219,8 +232,15 @@ impl SuperSTTDaemon {
                 warn!("Final transcription failed: {e}");
                 self.finalize_recording_session("", false, Some(e.to_string()))
                     .await;
-                self.surface_failure(typer, notice::TRANSCRIPTION_FAILED, write_mode)
-                    .await;
+                // `e.origin` is why the notice can say whether the daemon or the
+                // backend is the one refusing; the chain form is the reason it
+                // shows.
+                self.surface_failure(
+                    typer,
+                    &notice::Failure::transcription_failed(e.origin, &e.detail()),
+                    write_mode,
+                )
+                .await;
                 return Ok(Err(format!("STT error: {e}")));
             }
         };
