@@ -63,6 +63,7 @@ Authorization: Bearer stt_…64hex…
       "version": "0.1.1",               // installed version, re-read from disk per request
       "kind":   "wasm",                 // "wasm" | "subprocess"
       "allowed_hosts": ["api.openai.com"],  // hosts the manifest declares; [] for subprocess/local
+      "installed_accel": [],            // accel of the installed asset; [] for a wasm/cloud backend
       "models": [
         {
           "name":                 "whisper-1",
@@ -106,13 +107,33 @@ Authorization: Bearer stt_…64hex…
 | `…[].version`     | string           | The installed backend's `[backend].version`, read from the `backend.toml` on disk **on every request** — what is on the machine now, not what the daemon saw when it last scanned. This is what is installed, not what is published: it is the only version available for a backend the registry does not list — one imported from a directory or installed from an arbitrary repo — and it is authoritative for the rest, since the registry reports what a release offers rather than what this machine has. The same read backs [`installed_version`](./registry/backends.md) on the registry listing, so the version reported here and the one an update is judged against cannot disagree. Falls back to the version recorded at the last scan if the manifest cannot be read; empty only for a backend installed before the field existed. |
 | `…[].kind`        | string           | `wasm` or `subprocess`.                                              |
 | `…[].allowed_hosts` | array of strings | Hosts the backend **declared** in its `backend.toml` (`[network].allowed_hosts`). Empty for `subprocess` backends (which run with no network) and for backends that declare none. Surfaced in the settings UI's "Online model" badge so the user sees where a cloud backend's audio would go. It is the manifest's declaration alone: a user-set [`base_url`](../../backend/config.md#base_url-and-egress) authorizes a further endpoint, which clients read from that option's `value` rather than from this list. |
-| `…[].models`      | array            | Models served, as `{ name, multilingual, primary_language, supported_languages, supported_devices, estimated_vram_bytes }`. `multilingual` is `true` when the model accepts a language tag. `primary_language` is the model's default BCP-47 tag (the fallback when no override or global setting applies). `supported_languages` is the non-empty array of BCP-47 tags the model accepts; these feed the per-model language picker and the [`/backends/{source}/models/{model}/language`](./backends/model-language.md) resolution. `supported_devices` is a non-empty array drawn from `["cpu", "cuda", "metal", "none"]`; `"none"` marks a remote/online model with no local compute. `estimated_vram_bytes` is a conservative GPU memory estimate (weights + KV cache + overhead); `0` when unknown or not GPU-resident. See [`GET /gpu_info`](./gpu_info.md) for the detected GPU memory it's weighed against. |
+| `…[].installed_accel` | array of strings | The accel list of the asset variant actually installed on this host, e.g. `["cuda"]` or `["cpu"]` — see [`accel`](../../backend/config.md#assets). Empty for a `wasm` backend (no asset selection applies) and for a `subprocess` backend imported from a local directory, where the binary's accel is not knowable. See below for how a client derives the offered device list from it. |
+| `…[].models`      | array            | Models served, as `{ name, multilingual, primary_language, supported_languages, supported_devices, estimated_vram_bytes }`. `multilingual` is `true` when the model accepts a language tag. `primary_language` is the model's default BCP-47 tag (the fallback when no override or global setting applies). `supported_languages` is the non-empty array of BCP-47 tags the model accepts; these feed the per-model language picker and the [`/backends/{source}/models/{model}/language`](./backends/model-language.md) resolution. `supported_devices` is a non-empty array drawn from `["cpu", "gpu", "none"]`; `"none"` marks a remote/online model with no local compute. `estimated_vram_bytes` is a conservative GPU memory estimate (weights + KV cache + overhead); `0` when unknown or not GPU-resident. See [`GET /gpu_info`](./gpu_info.md) for the detected GPU memory it's weighed against. |
 | `…[].secrets`     | array            | Declared secrets: `{ name, label, description, required }`. `label` falls back to `name` when absent. Secret **values** are never returned. |
 | `…[].options`     | array            | Declared options: `{ name, label, description, type, default, required, value }`. `label` falls back to `name` when absent; `value` is the effective value (config override if set, else `default`). |
 
 `models[].provider` is always an empty string. It is emitted so clients that
 require the key can still parse the response, and carries no information —
 identify a model by `(name, source)` instead. It will be removed.
+
+### Deriving the offered device list
+
+A model's `supported_devices` says only whether the model can use an
+accelerator at all; whether this particular installation can is a property of
+`installed_accel`. A client presenting a device picker intersects the two:
+
+```
+offered devices = model.supported_devices ∩ devices_provided_by(installed_accel)
+
+  installed_accel == ["cpu"]           → devices_provided_by = { cpu }
+  installed_accel contains a GPU accel → devices_provided_by = { cpu, gpu }
+  installed_accel empty                → fall back to supported_devices alone
+```
+
+A GPU-capable asset still offers `cpu`, since a GPU build runs on the CPU as
+well. An empty `installed_accel` carries no information — a local import or a
+pre-upgrade install — so a client falls back to the model's declared
+`supported_devices` with no narrowing, as it does today.
 
 **Errors:**
 
