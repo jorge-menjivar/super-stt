@@ -86,6 +86,16 @@ impl SuperSTTDaemon {
                     version: crate::stt_models::backends::installed_version(&b.dir)
                         .unwrap_or_else(|| b.version.clone()),
                     kind: b.kind.clone(),
+                    // `"wasm"` is what `installed.json` records for a wasm-kind
+                    // backend's asset — correct for that record's own purpose,
+                    // but it names a transport, not an accelerator, so it is
+                    // filtered before publication (see `BackendInfo::installed_accel`).
+                    installed_accel: crate::registry::installed::read(&b.dir)
+                        .map(|r| r.selected.accel)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|a| a != "wasm")
+                        .collect(),
                     // The manifest's declared egress, and only that. A user-set
                     // `base_url` authorizes an endpoint beyond it, but it is the
                     // user's own value and does not belong in a field clients

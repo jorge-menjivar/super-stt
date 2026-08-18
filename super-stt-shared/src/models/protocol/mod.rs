@@ -13,4 +13,7 @@ pub use command::Command;
 pub use daemon_status::DaemonStatusEvent;
 pub use error_code::ErrorCode;
 pub use request::DaemonRequest;
-pub use response::{DaemonResponse, DownloadProgress, GpuInfo, NotificationEvent};
+pub use response::{
+    CudaHostInfo, DaemonResponse, DownloadProgress, GpuHostInfo, GpuInfo, NotificationEvent,
+    RocmHostInfo, VulkanHostInfo,
+};

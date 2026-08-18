@@ -55,6 +55,7 @@ mod unmet_requirements_tests {
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
             allowed_hosts: Vec::new(),
+            installed_accel: Vec::new(),
             models: vec![BackendModel {
                 name: "whisper-1".to_string(),
                 provider: String::new(),
@@ -284,6 +285,7 @@ mod model_status_tests {
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
             allowed_hosts: Vec::new(),
+            installed_accel: Vec::new(),
             models: vec![BackendModel {
                 name: "whisper-1".to_string(),
                 provider: String::new(),

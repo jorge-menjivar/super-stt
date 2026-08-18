@@ -485,3 +485,60 @@ fn record_command_carries_language_override() {
         _ => panic!("expected Command::Record"),
     }
 }
+
+/// `resolved_accel` is doubly `Option` so a response that never mentions
+/// devices at all omits the key, while `/active_device` can still emit a
+/// literal `null` for "gpu requested, nothing has resolved yet" rather than
+/// dropping the key like every other irrelevant field on this kitchen-sink
+/// response type.
+#[test]
+fn resolved_accel_is_omitted_unless_set_then_may_serialize_as_null() {
+    let untouched = serde_json::to_value(DaemonResponse::success()).expect("serialize");
+    assert!(
+        untouched.get("resolved_accel").is_none(),
+        "a response that never calls with_resolved_accel must not mention the key: {untouched}"
+    );
+
+    let unresolved =
+        serde_json::to_value(DaemonResponse::success().with_resolved_accel(None)).expect("ser");
+    assert_eq!(unresolved["resolved_accel"], Value::Null);
+
+    let resolved = serde_json::to_value(
+        DaemonResponse::success().with_resolved_accel(Some("cuda".to_string())),
+    )
+    .expect("ser");
+    assert_eq!(resolved["resolved_accel"], "cuda");
+}
+
+/// The `host.{cuda,rocm,vulkan}` field names are published in
+/// `docs/protocol/endpoints/v1/gpu_info.md` and other work builds against
+/// them; pin the exact wire shape here rather than trusting the derive.
+#[test]
+fn gpu_host_info_serializes_the_published_field_names() {
+    let host = GpuHostInfo {
+        cuda: Some(CudaHostInfo {
+            driver_version: "13.3".to_string(),
+        }),
+        rocm: None,
+        vulkan: Some(VulkanHostInfo {
+            api_version: "1.4.354".to_string(),
+        }),
+    };
+    let value = serde_json::to_value(
+        DaemonResponse::success()
+            .with_gpu_info(vec![GpuInfo {
+                name: "NVIDIA GeForce RTX 3090".to_string(),
+                vendor: "nvidia".to_string(),
+                total_bytes: 25_757_220_864,
+                free_bytes: None,
+                used_bytes: None,
+                arch_target: Some("sm_86".to_string()),
+            }])
+            .with_gpu_host_info(host),
+    )
+    .expect("serialize");
+    assert_eq!(value["host"]["cuda"]["driver_version"], "13.3");
+    assert_eq!(value["host"]["rocm"], Value::Null);
+    assert_eq!(value["host"]["vulkan"]["api_version"], "1.4.354");
+    assert_eq!(value["gpu_info"][0]["arch_target"], "sm_86");
+}

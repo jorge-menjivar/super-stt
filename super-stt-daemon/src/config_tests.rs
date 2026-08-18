@@ -361,6 +361,44 @@ fn corrupt_daemon_config_resets_to_default() {
     assert_eq!(cfg.device.preferred_device, "cpu");
 }
 
+/// A wire setter rejects an unparseable device outright; a persisted config
+/// value has no such option — a daemon that refused to start over a stale
+/// `preferred_device` would be worse than one that falls back to the default.
+/// The deprecated `cuda`/`metal` spellings normalize to `gpu` rather than
+/// falling back, so a config written before this vocabulary still loads onto
+/// the accelerator it always meant.
+#[test]
+fn a_persisted_device_preference_normalizes_and_a_bogus_one_falls_back_to_cpu() {
+    let toml_str = |device: &str| {
+        format!(
+            "[device]\npreferred_device = \"{device}\"\n\
+             [audio]\ntheme = \"classic\"\nvolume = 100\n\
+             [transcription]\npreferred_model = \"\"\nwrite_mode = false\n"
+        )
+    };
+
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&toml_str("cuda"));
+    assert!(!was_reset);
+    assert_eq!(cfg.device.preferred_device, "gpu");
+
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&toml_str("gpu"));
+    assert!(!was_reset);
+    assert_eq!(cfg.device.preferred_device, "gpu");
+
+    // A garbage value (or `none`, a model sentinel rather than a preference)
+    // degrades to the default instead of failing the whole config load.
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&toml_str("xpu"));
+    assert!(
+        !was_reset,
+        "a stale device field must not reset the whole config"
+    );
+    assert_eq!(cfg.device.preferred_device, "cpu");
+
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&toml_str("none"));
+    assert!(!was_reset);
+    assert_eq!(cfg.device.preferred_device, "cpu");
+}
+
 /// The committed v0.1.3 `daemon.toml` fixture (customized, not defaults). The
 /// canonical copy lives in the on-disk corpus so the release gate and these
 /// detailed assertions test the same bytes.
@@ -375,8 +413,10 @@ fn v0_1_3_full_daemon_config_loads_and_migrates() {
     let (cfg, was_reset) = DaemonConfig::parse_or_reset(&v0_1_3_daemon_fixture());
     assert!(!was_reset, "a valid v0.1.3 config must load, not reset");
 
-    // Preserved fields.
-    assert_eq!(cfg.device.preferred_device, "cuda");
+    // `preferred_device` normalizes rather than surviving verbatim: v0.1.3
+    // wrote the pre-vocabulary "cuda", which now loads as "gpu" (see
+    // `a_persisted_device_preference_normalizes_and_a_bogus_one_falls_back_to_cpu`).
+    assert_eq!(cfg.device.preferred_device, "gpu");
     assert_eq!(cfg.audio.volume, 80);
     assert!(cfg.transcription.write_mode);
     assert!(!cfg.transcription.preview_typing_enabled);

@@ -27,6 +27,20 @@ pub struct DaemonResponse {
     pub available_models: Option<Vec<(String, String)>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_devices: Option<Vec<String>>,
+    /// The accelerator `"gpu"` resolved to, on `GET`/`POST /active_device`.
+    /// `"cpu"` when the preference itself is `"cpu"` (nothing to resolve);
+    /// `"cuda"`/`"rocm"`/`"metal"`/`"vulkan"` once a local model has loaded
+    /// onto a `"gpu"` preference; JSON `null` when the preference is `"gpu"`
+    /// but nothing has loaded yet. See `docs/protocol/endpoints/v1/active_device.md`.
+    ///
+    /// Doubly `Option`, the same way `custom_models_dir` below is: the outer
+    /// layer is "irrelevant to this response" (omitted, as for every other
+    /// field here); the inner layer is the documented nullable value itself,
+    /// so an unresolved `"gpu"` preference serializes as an explicit `null`
+    /// rather than an absent key on `/active_device`, while every other
+    /// command's response omits the key entirely.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_accel: Option<Option<String>>,
 
     // Notification system fields
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,6 +92,11 @@ pub struct DaemonResponse {
     // See docs/protocol/endpoints/v1/gpu_info.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gpu_info: Option<Vec<GpuInfo>>,
+
+    // Host-wide GPU toolchain/driver versions (GET /gpu_info), independent of
+    // any one GPU. See docs/protocol/endpoints/v1/gpu_info.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host: Option<GpuHostInfo>,
 
     // Connection status fields
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -309,6 +328,16 @@ impl DaemonResponse {
         self
     }
 
+    /// Set `resolved_accel` to the documented value, which may itself be
+    /// `None` (unresolved). Wrapping in `Some` here marks the field present
+    /// on this response, so an unresolved `"gpu"` preference serializes as
+    /// `null` rather than being dropped like an irrelevant field.
+    #[must_use]
+    pub fn with_resolved_accel(mut self, accel: Option<String>) -> Self {
+        self.resolved_accel = Some(accel);
+        self
+    }
+
     #[must_use]
     pub fn with_daemon_config(mut self, config: Value) -> Self {
         self.daemon_config = Some(config);
@@ -336,6 +365,12 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_gpu_info(mut self, gpu_info: Vec<GpuInfo>) -> Self {
         self.gpu_info = Some(gpu_info);
+        self
+    }
+
+    #[must_use]
+    pub fn with_gpu_host_info(mut self, host: GpuHostInfo) -> Self {
+        self.host = Some(host);
         self
     }
 
@@ -408,4 +443,46 @@ pub struct GpuInfo {
     pub free_bytes: Option<u64>,
     #[serde(default)]
     pub used_bytes: Option<u64>,
+    /// The architecture a prebuilt asset must target to run on this GPU, in
+    /// the vendor's own spelling: `"sm_86"` on NVIDIA, `"gfx1030"` on AMD.
+    /// `null` when the driver reports none (an Apple or Intel GPU, or an AMD
+    /// card on a kernel without KFD).
+    #[serde(default)]
+    pub arch_target: Option<String>,
+}
+
+/// Host-wide GPU toolchain/driver versions reported on
+/// [`GET /gpu_info`](../../../docs/protocol/endpoints/v1/gpu_info.md), independent
+/// of any one GPU. Each field is `null` when that accelerator's runtime isn't
+/// detected on this host — see `docs/protocol/endpoints/v1/gpu_info.md` for
+/// what presence and absence do and don't imply for each one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct GpuHostInfo {
+    #[serde(default)]
+    pub cuda: Option<CudaHostInfo>,
+    #[serde(default)]
+    pub rocm: Option<RocmHostInfo>,
+    #[serde(default)]
+    pub vulkan: Option<VulkanHostInfo>,
+}
+
+/// The installed NVIDIA driver's CUDA version, e.g. `"13.3"`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CudaHostInfo {
+    pub driver_version: String,
+}
+
+/// The installed `ROCm` userspace release, e.g. `"6.2.4"`. Advisory only — see
+/// `docs/protocol/endpoints/v1/gpu_info.md`; `arch_target` is what a build must
+/// actually match.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RocmHostInfo {
+    pub version: String,
+}
+
+/// The highest Vulkan API version any installed driver advertises, e.g.
+/// `"1.3.280"`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VulkanHostInfo {
+    pub api_version: String,
 }

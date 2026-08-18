@@ -207,9 +207,27 @@ impl DaemonConfig {
     /// defaults on a parse error. Pure (no I/O) so the load/reset decision is
     /// unit-testable without touching the real config path. Returns the config
     /// and whether a reset occurred (so the caller knows to persist defaults).
+    ///
+    /// `preferred_device` is a bare `String`, not an enum, so no
+    /// `deserialize_or_default` catches a stale value at the serde layer —
+    /// it is normalized here instead. Unlike `POST /active_device`, which
+    /// rejects an unparseable value outright, a persisted value has no such
+    /// option: a daemon that refused to start over a stale config field would
+    /// be worse than one that falls back to the default, so this degrades to
+    /// `"cpu"` rather than triggering a full reset. The deprecated `cuda`/
+    /// `metal` spellings normalize to `gpu` rather than falling back, the same
+    /// as the wire setter, so a config written before this vocabulary still
+    /// loads onto the accelerator it always meant.
     fn parse_or_reset(content: &str) -> (Self, bool) {
         match toml::from_str::<DaemonConfig>(content) {
-            Ok(config) => (config, false),
+            Ok(mut config) => {
+                config.device.preferred_device =
+                    crate::daemon::device_management::parse_device_preference(
+                        &config.device.preferred_device,
+                    )
+                    .unwrap_or_else(|| "cpu".to_string());
+                (config, false)
+            }
             Err(e) => {
                 warn!("Failed to parse config: {e}. Resetting to defaults.");
                 (Self::default(), true)

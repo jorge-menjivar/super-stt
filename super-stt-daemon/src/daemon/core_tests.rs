@@ -710,6 +710,40 @@ async fn list_backends_catalog_and_option_override() {
     assert!(cat[0]["allowed_hosts"][1].is_null());
 }
 
+/// `installed.json` records `"wasm"` as the accel of a wasm-kind backend's
+/// installed asset, but `"wasm"` is a transport, not an accelerator. A client
+/// deriving an offered device list from a non-empty `installed_accel` would
+/// otherwise conclude a WebAssembly backend has real GPU compute and offer a
+/// device picker it has no business showing.
+#[tokio::test]
+async fn wasm_backend_reports_no_installed_accel() {
+    use crate::daemon::test_fixtures::openai_backend;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("installed.json"),
+        br#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":["wasm"]}}"#,
+    )
+    .expect("writes");
+
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/openai";
+    let mut backend = openai_backend(source, Vec::new(), None);
+    backend.dir = dir.path().to_path_buf();
+    *daemon.backends.write().await = vec![backend];
+
+    let cat = daemon
+        .handle_list_backends()
+        .await
+        .backends
+        .expect("backends catalog");
+    assert_eq!(
+        cat[0]["installed_accel"],
+        serde_json::json!([]),
+        "\"wasm\" is a transport, not an accelerator, and must not surface here"
+    );
+}
+
 /// Build a `DiscoveredBackend` whose `dir` ends in `dir_name` and that
 /// serves a single **online** model (the `none` device sentinel) — enough
 /// surface for the active-backend handlers and the online gate.
@@ -1157,19 +1191,20 @@ async fn set_device_when_idle_only_updates_preference() {
     assert!(daemon.model.read().await.is_none());
     assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
 
+    // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
     let response = daemon.handle_set_device("cuda".to_string()).await;
     assert_eq!(
         response.status, "success",
         "set_device must succeed when no model is loaded; got error: {:?}",
         response.message,
     );
-    // Both runtime locks updated, and the model lock is still empty.
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cuda");
-    assert_eq!(daemon.actual_device.read().await.as_str(), "cuda");
+    // Both runtime locks updated (normalized), and the model lock is still empty.
+    assert_eq!(daemon.preferred_device.read().await.as_str(), "gpu");
+    assert_eq!(daemon.actual_device.read().await.as_str(), "gpu");
     assert!(daemon.model.read().await.is_none());
     assert_eq!(
         daemon.config.read().await.device.preferred_device,
-        "cuda",
+        "gpu",
         "preference must be persisted to in-memory config so the next load uses it"
     );
 }
@@ -1197,7 +1232,8 @@ async fn set_device_with_online_model_keeps_model_and_updates_preference() {
     let response = daemon.handle_set_device("cuda".to_string()).await;
 
     assert_eq!(response.status, "success", "got: {:?}", response.message);
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cuda");
+    // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
+    assert_eq!(daemon.preferred_device.read().await.as_str(), "gpu");
     assert!(
         daemon.model.read().await.is_some(),
         "online model must not be unloaded by a device switch"

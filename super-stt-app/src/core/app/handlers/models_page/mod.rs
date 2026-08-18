@@ -411,6 +411,7 @@ mod tests {
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
             allowed_hosts: Vec::new(),
+            installed_accel: Vec::new(),
             models: vec![BackendModel {
                 name: model.to_string(),
                 provider: String::new(),
