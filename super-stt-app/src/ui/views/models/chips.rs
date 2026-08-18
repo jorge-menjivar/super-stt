@@ -205,6 +205,24 @@ pub(super) fn offered_devices(
         .collect()
 }
 
+/// Whether `model` is the online sentinel (`supported_devices == ["none"]`)
+/// — genuinely no local device to pick, ever.
+///
+/// Sibling to [`offered_devices`], which also reports an empty list for this
+/// case — but an empty list means two different things: this one (nothing to
+/// pick because there is nothing local to run), or a local model this
+/// specific install cannot run on *any* device (e.g. a GPU-only model with
+/// only a CPU asset installed). A caller deciding whether to enable a "Load"
+/// action must not conflate the two: only this one needs no device at all.
+/// Returns `false` for an unknown model, same as `offered_devices`.
+pub(super) fn model_is_online(backend: &crate::daemon::backends::BackendInfo, model: &str) -> bool {
+    backend
+        .models
+        .iter()
+        .find(|m| m.name == model)
+        .is_some_and(|m| m.supported_devices.iter().any(|d| d == "none"))
+}
+
 /// Whether any model this backend serves can run on the CPU. Drives the
 /// "CPU" capability chip on the backend card.
 pub(super) fn backend_supports_cpu(backend: &crate::daemon::backends::BackendInfo) -> bool {
@@ -710,6 +728,30 @@ mod capability_tests {
     fn an_unknown_model_offers_nothing() {
         let backend = backend_with_install(&["cpu", "gpu"], &["cuda"]);
         assert!(offered_devices(&backend, "absent").is_empty());
+    }
+
+    /// `offered_devices` returns empty for two different reasons, and a
+    /// caller deciding whether to enable a "Load" action must tell them
+    /// apart: the online sentinel needs no device at all, while a GPU-only
+    /// model on an install that resolved to CPU-only can be loaded nowhere.
+    /// Pinning both against the same empty-list outcome is what keeps them
+    /// from silently collapsing back into one case.
+    #[test]
+    fn online_and_unrunnable_both_offer_nothing_but_differ_on_is_online() {
+        let online = backend_with_install(&["none"], &[]);
+        assert!(offered_devices(&online, "m").is_empty());
+        assert!(model_is_online(&online, "m"));
+
+        let gpu_only_on_a_cpu_install = backend_with_install(&["gpu"], &["cpu"]);
+        assert!(offered_devices(&gpu_only_on_a_cpu_install, "m").is_empty());
+        assert!(!model_is_online(&gpu_only_on_a_cpu_install, "m"));
+    }
+
+    #[test]
+    fn model_is_online_is_false_for_a_local_model_and_an_unknown_one() {
+        let backend = backend_with_install(&["cpu", "gpu"], &["cuda"]);
+        assert!(!model_is_online(&backend, "m"));
+        assert!(!model_is_online(&backend, "absent"));
     }
 
     /// The install record is authoritative over the manifest: a CUDA-labeled

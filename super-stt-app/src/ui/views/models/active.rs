@@ -15,9 +15,10 @@ use crate::ui::messages::{
 
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips, count_chip, offered_devices, requirement_warning,
+    backend_supports_gpu, capability_chips, count_chip, model_is_online, offered_devices,
+    requirement_warning,
 };
-use super::fmt::vram_warning;
+use super::fmt::{no_viable_device_warning, vram_warning};
 use super::status::unmet_requirements;
 use super::surface::{card_divider, card_surface};
 
@@ -406,12 +407,18 @@ pub(super) fn staged_model_picker<'a>(
     }
 
     // Load button — enabled only when a model is staged AND (the staged
-    // device is set OR this install offers no device at all for it — an
-    // online model, signalled by the empty `offered_devices` list rather than
-    // by comparing against the `["none"]` sentinel directly).
+    // device is set OR the staged model is the online sentinel, which needs
+    // no device at all). `offered_devices` reports empty for that case too,
+    // but also for a local model this install cannot run on any device (e.g.
+    // a GPU-only model with only a CPU asset installed) — the same defect
+    // class as the reported bug, just with no accelerator to fall back to.
+    // `model_is_online` is what tells the two apart; conflating them would
+    // enable Load with nothing to stage it onto, and `set_model` would then
+    // be sent straight onto whatever device happens to already be current.
+    let staged_online = staged_model.is_some_and(|m| model_is_online(backend, m));
+    let no_viable_device = !staged_online && staged_devices.as_ref().is_some_and(Vec::is_empty);
     let staged_ok = app.models_page.staged_model.is_some()
-        && (app.models_page.staged_device.is_some()
-            || staged_devices.is_some_and(|d| d.is_empty()));
+        && (app.models_page.staged_device.is_some() || staged_online);
     let load_button = button::suggested("Load model")
         .leading_icon(icons::phosphor_handle(icons::PLAY))
         .on_press_maybe(
@@ -420,9 +427,20 @@ pub(super) fn staged_model_picker<'a>(
         );
     picker_row = picker_row.push(load_button);
 
-    // A staged CUDA load whose conservative VRAM estimate exceeds the GPU's
-    // available memory gets an advisory yellow warning below the picker.
-    if let Some((needed, available)) = staged_vram_shortfall(backend, app) {
+    // Below the picker: either the "can't be loaded here" advisory for a
+    // staged model with no viable device (blocking — Load is already
+    // disabled above), or a staged GPU load whose conservative VRAM estimate
+    // exceeds the GPU's available memory (non-blocking). The two can't both
+    // fire — the VRAM check requires a staged `gpu` device, which
+    // `no_viable_device` rules out.
+    if no_viable_device {
+        column![
+            picker_row,
+            no_viable_device_warning(staged_model.unwrap_or_default())
+        ]
+        .spacing(spacing.space_xs)
+        .into()
+    } else if let Some((needed, available)) = staged_vram_shortfall(backend, app) {
         column![picker_row, vram_warning(needed, available)]
             .spacing(spacing.space_xs)
             .into()
