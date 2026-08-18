@@ -714,33 +714,48 @@ async fn list_backends_catalog_and_option_override() {
 /// installed asset, but `"wasm"` is a transport, not an accelerator. A client
 /// deriving an offered device list from a non-empty `installed_accel` would
 /// otherwise conclude a WebAssembly backend has real GPU compute and offer a
-/// device picker it has no business showing.
+/// device picker it has no business showing. The companion `"cuda"` case pins
+/// the actual headline behaviour of `GET /backends`: a real accel written to
+/// `installed.json` must reach the wire catalog verbatim — stubbing the
+/// `installed_accel` expression in `backend_config_handlers.rs` to
+/// `Vec::new()` keeps the `"wasm"` case green but fails this one.
 #[tokio::test]
 async fn wasm_backend_reports_no_installed_accel() {
     use crate::daemon::test_fixtures::openai_backend;
 
-    let dir = tempfile::tempdir().expect("tempdir");
-    std::fs::write(
-        dir.path().join("installed.json"),
-        br#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":["wasm"]}}"#,
-    )
-    .expect("writes");
+    async fn catalog_installed_accel(accel_json: &str) -> serde_json::Value {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("installed.json"),
+            format!(
+                r#"{{"selected":{{"target":"x86_64-unknown-linux-gnu","accel":{accel_json}}}}}"#
+            ),
+        )
+        .expect("writes");
 
-    let daemon = test_daemon().await;
-    let source = "github.com/super-stt/openai";
-    let mut backend = openai_backend(source, Vec::new(), None);
-    backend.dir = dir.path().to_path_buf();
-    *daemon.backends.write().await = vec![backend];
+        let daemon = test_daemon().await;
+        let source = "github.com/super-stt/openai";
+        let mut backend = openai_backend(source, Vec::new(), None);
+        backend.dir = dir.path().to_path_buf();
+        *daemon.backends.write().await = vec![backend];
 
-    let cat = daemon
-        .handle_list_backends()
-        .await
-        .backends
-        .expect("backends catalog");
+        daemon
+            .handle_list_backends()
+            .await
+            .backends
+            .expect("backends catalog")[0]["installed_accel"]
+            .clone()
+    }
+
     assert_eq!(
-        cat[0]["installed_accel"],
+        catalog_installed_accel(r#"["wasm"]"#).await,
         serde_json::json!([]),
         "\"wasm\" is a transport, not an accelerator, and must not surface here"
+    );
+    assert_eq!(
+        catalog_installed_accel(r#"["cuda"]"#).await,
+        serde_json::json!(["cuda"]),
+        "a real accel must reach the wire catalog, not just installed::read"
     );
 }
 
@@ -1214,9 +1229,26 @@ async fn set_device_when_idle_only_updates_preference() {
 #[tokio::test]
 async fn set_device_when_idle_rejects_invalid_device() {
     let daemon = test_daemon().await;
+
     let response = daemon.handle_set_device("xpu".to_string()).await;
     assert_eq!(response.status, "error");
+    assert_eq!(
+        response.error_code,
+        Some(ErrorCode::InvalidDevice),
+        "the documented 400 invalid_device carries its code, or an uncoded \
+         error would map to 500 instead"
+    );
     assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
+    assert_eq!(daemon.actual_device.read().await.as_str(), "cpu");
+
+    // `none` parses via `Device::from_str` (it is a real device variant) but
+    // is a per-model sentinel, not a preference a client may set — the wire
+    // setter must still reject it rather than deferring to the parser.
+    let response = daemon.handle_set_device("none".to_string()).await;
+    assert_eq!(response.status, "error");
+    assert_eq!(response.error_code, Some(ErrorCode::InvalidDevice));
+    assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
+    assert_eq!(daemon.actual_device.read().await.as_str(), "cpu");
 }
 
 /// Switching devices while an online model is loaded only records the

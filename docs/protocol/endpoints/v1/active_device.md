@@ -51,7 +51,7 @@ Content-Type: application/json
 | Field               | Type     | Notes                                                                                   |
 |---------------------|----------|-----------------------------------------------------------------------------------------|
 | `device`            | string   | The new device preference, `"cpu"` or `"gpu"` (already normalized).                      |
-| `resolved_accel`    | string?  | The accelerator `"gpu"` resolved to once a local model has loaded onto it: `"cuda"`, `"rocm"`, `"metal"`, or `"vulkan"`. `"cpu"` when the preference itself is `"cpu"` — no resolution is needed. `null` when the preference is `"gpu"` but no local model has loaded yet, so nothing has resolved. |
+| `resolved_accel`    | string?  | The accelerator `"gpu"` resolved to once a local model has loaded onto it: `"cuda"`, `"rocm"`, `"metal"`, or `"vulkan"`. `"cpu"` when the preference itself is `"cpu"` — no resolution is needed. Also `"cpu"` with `device: "gpu"` when a GPU load fell back (see the fallback note below) — the field always reports what actually loaded, not the request. `null` when the preference is `"gpu"` but no local model has loaded yet, so nothing has resolved. |
 | `available_devices` | string[] | The devices reachable on this host — see [below](#get-active_device).                    |
 
 When a local model is loaded, the reload itself runs in the

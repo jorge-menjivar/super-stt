@@ -77,6 +77,14 @@ and a distro packaging `ROCm` into `/usr`, or a subprocess backend bundling
 its own runtime, both report `null` here while working normally. `arch_target`
 is what a build must match; `host.rocm` is advisory only.
 
+A non-null `host.vulkan` likewise does **not** mean this host has usable GPU
+compute: it reports whether a Vulkan *loader* is installed, and Mesa's
+lavapipe — a software rasterizer shipped by default on many distributions —
+is a loader like any other, so a machine with no GPU at all can still report
+a `host.vulkan` version here. `available_devices` on
+[`/active_device`](./active_device.md) is the authoritative capability
+answer; `host.vulkan` is advisory only, the same as `host.rocm` above.
+
 **Errors:**
 
 | HTTP | `message`         | Meaning                                  |
