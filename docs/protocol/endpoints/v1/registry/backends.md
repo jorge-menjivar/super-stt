@@ -53,7 +53,7 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
       "supports_cpu": true,
       "models": [
         { "name": "voxtral-mini", "provider": "",
-          "supported_devices": ["cpu", "cuda"] }
+          "supported_devices": ["cpu", "gpu"] }
       ],
       "secrets": [],
       "options": [],
@@ -61,7 +61,7 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
         "compatible": true,
         "selected_asset": {
           "target": "x86_64-unknown-linux-gnu",
-          "accel": ["cuda"],
+          "accel": "cuda",
           "cuda_major": 12,
           "cuda_sm": 86,
           "cudnn": false
@@ -78,12 +78,20 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
 require the key can still parse the response, and carries no information —
 identify a model by `(name, source)` instead. It will be removed.
 
+`models[].supported_devices` names the runtimes a model can use: `"cpu"`,
+`"gpu"`, or the `"none"` sentinel for a model that runs remotely. It is a
+property of the *model*, not of this host — see
+[`GET /backends`](../backends.md) for narrowing it to the devices the
+installed build actually provides.
+
 Per-entry fields beyond what `index.json` carries:
 
 - `compatibility.compatible` — `true` if a matching asset exists for this host.
 - `compatibility.selected_asset` — the asset the daemon would install. Only
   the selection axes (target/accel/cuda_*/cudnn) are reported; URL + hash are
-  internal. `accel` is an array, since one build may carry several runtimes.
+  internal. `accel` is a string for a build carrying one runtime, and an array
+  for one carrying several — the same two spellings
+  [`backend.toml`](../../../backend/config.md#assets) accepts.
 - `compatibility.reason` — present only when `compatible = false`. Human-readable.
 - `installed_version` — present if the backend is already installed on this
   host, regardless of its registry status. Read from the installed

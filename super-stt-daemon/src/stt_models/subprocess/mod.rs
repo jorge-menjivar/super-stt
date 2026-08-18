@@ -45,8 +45,10 @@ impl SubprocessBackend {
     /// Provision the selected model, spawn the sandboxed backend, and load it.
     ///
     /// `backend_dir` holds `backend.toml` and the `entrypoint` binary; model
-    /// files are downloaded into `<backend_dir>/<dest>`. `device_pref` is
-    /// `"cpu"`, `"cuda"`, or empty (auto).
+    /// files are downloaded into `<backend_dir>/<dest>`. `device_pref` is the
+    /// resolved accelerator (`"cpu"`, `"cuda"`, `"rocm"`, `"metal"`,
+    /// `"vulkan"`), or empty when none resolved, which leaves the backend to
+    /// select for itself.
     ///
     /// # Errors
     /// Returns an error if provisioning, spawning, or loading fails.
@@ -356,8 +358,8 @@ fn json_headers() -> Vec<(String, String)> {
 }
 
 /// Build the `POST /v1/load` body. `name` is always present; `device` only
-/// when a preference is set, and `provider` only when the model's manifest
-/// declares one.
+/// when the daemon resolved an accelerator to name, and `provider` only when
+/// the model's manifest declares one.
 ///
 /// `provider` is a compatibility echo (see [`ModelEntry::provider`]): backends
 /// released against the earlier `(name, provider)` identity answer

@@ -90,6 +90,29 @@ where
     })
 }
 
+/// Write a one-element list as a bare string, and a longer one as an array.
+///
+/// The counterpart to [`one_or_many_string`], and the reason the pair exists:
+/// `index.json` is a single shared artifact, rebuilt from `main` and served to
+/// every installed daemon at once. A client that declares this field as a
+/// plain `String` rejects the *whole* document when it turns into an array,
+/// which no version floor can soften — the parse fails before the floor is
+/// read. Emitting the scalar for the one-element case keeps the published
+/// bytes readable by those clients, and an array is written only where there
+/// is genuinely more than one value to carry.
+///
+/// # Errors
+/// Returns the serializer's error.
+pub fn one_or_many_string_ser<S>(v: &[String], s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match v {
+        [only] => s.serialize_str(only),
+        many => s.collect_seq(many),
+    }
+}
+
 /// `<host>/<owner>/<repo>` → `<repo>`. The install-dir name the daemon derives
 /// from a backend's `source` (custom-repo and local-dir installs). The registry
 /// indexer uses the maintainer-declared `id` instead, so this is only shared by
@@ -274,10 +297,14 @@ pub struct IndexAsset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexSubprocessAsset {
     pub target: String,
-    /// Acceleration backends the build carries. Serialized as an array; a bare
-    /// string is accepted on read, since indexes published before the list
-    /// form carry one and the daemon reads whatever the registry serves.
-    #[serde(deserialize_with = "one_or_many_string")]
+    /// Acceleration backends the build carries. A single entry is both read
+    /// and written as a bare string, a list of two or more as an array — see
+    /// [`one_or_many_string_ser`] for why the published bytes keep the scalar
+    /// shape.
+    #[serde(
+        deserialize_with = "one_or_many_string",
+        serialize_with = "one_or_many_string_ser"
+    )]
     pub accel: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cuda_major: Option<u32>,
@@ -618,5 +645,80 @@ mod tests {
             !json.contains("vulkan_api"),
             "absent floor must not be emitted: {json}"
         );
+    }
+
+    fn asset(accel: &[&str]) -> IndexSubprocessAsset {
+        IndexSubprocessAsset {
+            target: "x86_64-unknown-linux-gnu".into(),
+            accel: accel.iter().map(|a| (*a).to_string()).collect(),
+            cuda_major: None,
+            cuda_sm: None,
+            cudnn: false,
+            gfx: Vec::new(),
+            vulkan_api: None,
+            url: Some("u".into()),
+            size: Some(1),
+            sha256: Some("s".into()),
+            parts: Vec::new(),
+        }
+    }
+
+    /// `index.json` is one shared server-side artifact: the cron rebuild
+    /// replaces the document every installed daemon reads. Daemons through
+    /// v0.2.0 declare `accel` as a required `String` and reject the *whole*
+    /// document when it is an array, so a single-accel asset — which is every
+    /// asset a backend can publish — must still serialize as a bare string.
+    ///
+    /// This is the test that fails if the scalar form is dropped before those
+    /// daemons have rolled over.
+    #[test]
+    fn a_single_accel_asset_still_serializes_as_a_bare_string() {
+        let json = serde_json::to_string(&asset(&["cuda"])).expect("serializes");
+        assert!(
+            json.contains(r#""accel":"cuda""#),
+            "accel is no longer a bare string; daemons <= v0.2.0 cannot parse this index: {json}"
+        );
+    }
+
+    /// The scalar form is a compatibility shape, not a lossy one: a build
+    /// carrying two runtimes has no bare-string spelling, so it is written as
+    /// the array it is.
+    #[test]
+    fn a_multi_accel_asset_serializes_as_an_array() {
+        let json = serde_json::to_string(&asset(&["cuda", "rocm"])).expect("serializes");
+        assert!(
+            json.contains(r#""accel":["cuda","rocm"]"#),
+            "a multi-runtime build must keep its list: {json}"
+        );
+    }
+
+    /// The published bytes for the single case are parseable by the shape
+    /// deployed daemons declare — a plain required `String`, no leniency.
+    #[test]
+    fn a_single_accel_asset_parses_into_the_deployed_string_shape() {
+        #[derive(Deserialize)]
+        struct DeployedAsset {
+            #[allow(dead_code)]
+            target: String,
+            accel: String,
+        }
+        let json = serde_json::to_string(&asset(&["cuda"])).expect("serializes");
+        let deployed: DeployedAsset =
+            serde_json::from_str(&json).expect("a deployed daemon must still parse this");
+        assert_eq!(deployed.accel, "cuda");
+    }
+
+    /// Round-trip: whatever shape it was written in, this crate reads it back
+    /// as the same list.
+    #[test]
+    fn an_accel_list_round_trips_through_either_shape() {
+        for accel in [vec!["cuda"], vec!["cuda", "rocm"]] {
+            let json = serde_json::to_string(&asset(&accel)).expect("serializes");
+            let back: IndexSubprocessAsset = serde_json::from_str(&json).expect("round-trips");
+            assert_eq!(
+                back.accel,
+                accel.iter().map(|a| (*a).to_string()).collect::<Vec<_>>()
+            );
+        }
     }
 }

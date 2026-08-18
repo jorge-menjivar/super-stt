@@ -120,7 +120,8 @@ Authorization: Bearer stt_…64hex…
       "source":   "github.com/super-stt/voxtral",
       "provider": "",               // always empty; see below
       "loaded":   true,
-      "device":   "cuda"            // "cpu" / "cuda" / "metal" / "remote"
+      "device":   "cuda"            // "cpu" / "cuda" / "rocm" / "metal"
+                                    // / "vulkan" / "remote"
     },
 
     // Present only when a download is in flight. `null` otherwise.

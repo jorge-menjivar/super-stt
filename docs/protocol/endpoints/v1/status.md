@@ -39,7 +39,7 @@ Content-Type: application/json
 
 | Field           | Type    | Notes                                                                                  |
 |-----------------|---------|----------------------------------------------------------------------------------------|
-| `device`        | string  | `"cpu"`, `"cuda"`, `"metal"`, or `"unknown"` if nothing is loaded                       |
+| `device`        | string  | The accelerator the loaded model is actually running on: `"cpu"`, `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"`, or `"remote"` for an online model. `"unknown"` if nothing is loaded. |
 | `model_loaded`  | bool    | `false` while the daemon is still loading the initial model or after a failed switch   |
 | `current_model` | string? | The loaded model's name (e.g. `whisper-tiny`); absent when `model_loaded` is `false`   |
 | `busy`          | bool    | `true` while a daemon-mic cycle is active — covers audio capture **and** the post-capture transcription/typing. Clients implementing a toggle hotkey consult this and call [`POST /transcribe/stop`](./transcribe/stop.md) when `true`, [`POST /transcribe`](./transcribe.md) when `false`. |

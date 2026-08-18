@@ -74,9 +74,14 @@ pub struct Compatibility {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectedAsset {
     pub target: String,
-    /// Acceleration backends the selected build carries. A registry payload
-    /// written before the list form carries a bare string, which still reads.
-    #[serde(deserialize_with = "super_stt_registry_types::index::one_or_many_string")]
+    /// Acceleration backends the selected build carries. A single entry is
+    /// both read and written as a bare string, a list of two or more as an
+    /// array — a client that declares this field as a plain `String` still
+    /// parses the catalog for every asset that carries one runtime.
+    #[serde(
+        deserialize_with = "super_stt_registry_types::index::one_or_many_string",
+        serialize_with = "super_stt_registry_types::index::one_or_many_string_ser"
+    )]
     pub accel: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cuda_major: Option<u32>,
@@ -195,5 +200,61 @@ mod tests {
         });
         let b: RegistryBackend = serde_json::from_value(json).expect("newer payload must parse");
         assert!(b.update_available);
+    }
+
+    fn selected(accel: &[&str]) -> super::SelectedAsset {
+        super::SelectedAsset {
+            target: "x86_64-unknown-linux-gnu".into(),
+            accel: accel.iter().map(|a| (*a).to_string()).collect(),
+            cuda_major: Some(12),
+            cuda_sm: Some(86),
+            cudnn: false,
+        }
+    }
+
+    /// An app built before the list form declares `accel` as a required
+    /// `String` and fails to parse the *whole* `/registry/backends` response
+    /// when it turns into an array. Every asset carrying one runtime — which
+    /// is every asset a backend can publish — therefore keeps the bare-string
+    /// shape on the wire.
+    #[test]
+    fn a_single_accel_selection_still_serializes_as_a_bare_string() {
+        let json = serde_json::to_string(&selected(&["cuda"])).expect("serializes");
+        assert!(
+            json.contains(r#""accel":"cuda""#),
+            "accel is no longer a bare string; an older app cannot parse the catalog: {json}"
+        );
+
+        #[derive(serde::Deserialize)]
+        struct DeployedSelectedAsset {
+            accel: String,
+        }
+        let deployed: DeployedSelectedAsset =
+            serde_json::from_str(&json).expect("an older app must still parse this");
+        assert_eq!(deployed.accel, "cuda");
+    }
+
+    /// A build carrying two runtimes has no bare-string spelling, so it is
+    /// written as the array it is, and read back unchanged.
+    #[test]
+    fn a_multi_accel_selection_serializes_as_an_array_and_round_trips() {
+        let json = serde_json::to_string(&selected(&["cuda", "rocm"])).expect("serializes");
+        assert!(
+            json.contains(r#""accel":["cuda","rocm"]"#),
+            "a multi-runtime build must keep its list: {json}"
+        );
+        let back: super::SelectedAsset = serde_json::from_str(&json).expect("round-trips");
+        assert_eq!(back.accel, vec!["cuda".to_string(), "rocm".to_string()]);
+    }
+
+    /// Read leniency is unchanged: a payload written either way parses.
+    #[test]
+    fn a_selection_parses_from_either_shape() {
+        let scalar: super::SelectedAsset =
+            serde_json::from_str(r#"{"target":"t","accel":"cuda"}"#).expect("scalar parses");
+        assert_eq!(scalar.accel, vec!["cuda".to_string()]);
+        let list: super::SelectedAsset =
+            serde_json::from_str(r#"{"target":"t","accel":["cuda"]}"#).expect("list parses");
+        assert_eq!(list.accel, vec!["cuda".to_string()]);
     }
 }

@@ -399,8 +399,15 @@ async fn resolve_device_for_backend(device_pref: &str, backend_dir: &std::path::
 /// when detection itself failed, or when none of the declared entries match
 /// what it reports (should not happen for an asset `compat::select` already
 /// approved, but a stale or hand-edited `installed.json` should still degrade
-/// rather than panic) — both fall back to the prior list-order heuristic,
-/// since a `gpu` preference stays meaningful to a backend on its own.
+/// rather than panic) — both fall back to the list-order heuristic.
+///
+/// Returns the empty string when a `gpu` preference names no accelerator at
+/// all: an install with no record (a local-directory import, or one predating
+/// the record) or a CPU-only asset. `device` carries the resolved accelerator
+/// and nothing else, so with none to name the daemon omits the key rather
+/// than forwarding the preference — an absent `device` is the contract's
+/// auto-select, which is precisely "this daemon does not know which
+/// accelerator this build targets".
 pub(crate) fn resolve_accel(
     preference: &str,
     installed_accel: &[String],
@@ -418,7 +425,7 @@ pub(crate) fn resolve_accel(
         .iter()
         .find(|a| *a != "cpu")
         .cloned()
-        .unwrap_or_else(|| preference.to_string())
+        .unwrap_or_default()
 }
 
 /// Whether the host can run `accel`, mirroring the presence checks
@@ -542,12 +549,27 @@ mod resolve_accel_tests {
         );
     }
 
-    /// No record — a local-directory import, or an install predating the
-    /// record. `gpu` is still meaningful to a backend: everything that is not
-    /// `cpu` means "use the accelerator you have".
+    /// No record — a local-directory import, or every install predating the
+    /// record, which is the whole upgrade path. `gpu` is the user's
+    /// preference, and `docs/protocol/backend/contract.md` says `device`
+    /// carries the *resolved accelerator*, never the preference. When the
+    /// daemon cannot resolve one it says nothing rather than something false:
+    /// an omitted `device` is the documented "auto-select" signal, which is
+    /// exactly what "this daemon does not know which accelerator this build
+    /// targets" means.
     #[test]
-    fn a_gpu_preference_without_a_record_stays_gpu() {
-        assert_eq!(resolve_accel("gpu", &[], None), "gpu");
+    fn an_unresolvable_gpu_preference_sends_no_device_at_all() {
+        assert_eq!(resolve_accel("gpu", &[], None), "");
+        assert_eq!(
+            resolve_accel("gpu", &[], Some(&nvidia_host())),
+            "",
+            "a host with a GPU still says nothing about what the asset targets"
+        );
+        assert_eq!(
+            resolve_accel("gpu", &["cpu".into()], Some(&nvidia_host())),
+            "",
+            "a CPU-only asset provides no accelerator to name"
+        );
     }
 }
 

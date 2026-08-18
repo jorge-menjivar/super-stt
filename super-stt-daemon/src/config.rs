@@ -45,7 +45,7 @@ pub struct ModelSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceConfig {
-    pub preferred_device: String, // "cpu" or "cuda"
+    pub preferred_device: String, // "cpu" or "gpu"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -57,7 +57,7 @@ completed. No network access. No checksum verification — the operator chose th
 bytes. Symlinks are rejected (so an import cannot copy a link target's bytes
 into the install dir). The synchronous response carries
 `warning: "unverified_source"`; the `selected_asset` reflects the local copy
-with `accel = ["local"]` and an empty `target`.
+with `accel = "local"` and an empty `target`.
 
 What gets copied depends on `[backend].kind`, and mirrors what a registry
 install of that kind produces:
@@ -106,7 +106,7 @@ archive that decompresses beyond the budget, fails the install.
   "version": "0.2.0",
   "selected_asset": {
     "target": "x86_64-unknown-linux-gnu",
-    "accel": ["cuda"],
+    "accel": "cuda",
     "cuda_major": 12,
     "cuda_sm": 86,
     "cudnn": false

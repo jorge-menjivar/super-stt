@@ -175,7 +175,7 @@ pub(super) fn backend_supports_gpu(backend: &crate::daemon::backends::BackendInf
 /// local-directory import, or an install predating the record — and the
 /// manifest is then the only available answer. Online models
 /// (`supported_devices == ["none"]`) offer nothing: there is no local compute.
-pub(super) fn offered_devices(
+pub(crate) fn offered_devices(
     backend: &crate::daemon::backends::BackendInfo,
     model: &str,
 ) -> Vec<String> {
