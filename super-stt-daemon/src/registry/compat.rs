@@ -53,7 +53,7 @@ pub fn select(host: &Host, entry: &IndexBackend) -> Selection {
         let cuda_matches: Vec<&(usize, &IndexSubprocessAsset)> = by_target
             .iter()
             .filter(|(_, a)| {
-                a.accel == "cuda"
+                a.accel.iter().any(|s| s == "cuda")
                     && (a.cuda_sm.is_none() || a.cuda_sm == Some(cuda.compute_capability))
                     && a.cuda_major.is_some_and(|m| m <= cuda.runtime_major)
             })
@@ -72,7 +72,10 @@ pub fn select(host: &Host, entry: &IndexBackend) -> Selection {
         // Fall through to CPU.
     }
     // CPU fallback.
-    if let Some((idx, _)) = by_target.iter().find(|(_, a)| a.accel == "cpu") {
+    if let Some((idx, _)) = by_target
+        .iter()
+        .find(|(_, a)| a.accel.iter().any(|s| s == "cpu"))
+    {
         return Selection::Subprocess { index: *idx };
     }
     Selection::Incompatible {
@@ -99,7 +102,12 @@ pub fn to_selected_asset(entry: &IndexBackend, sel: &Selection) -> Option<Select
         Selection::Subprocess { index } => {
             entry.assets.subprocess.get(*index).map(|a| SelectedAsset {
                 target: a.target.clone(),
-                accel: a.accel.clone(),
+                // `SelectedAsset::accel` is still wire-singular; this
+                // selection logic only ever matches a single-accel asset
+                // (`cuda` or `cpu`), so the first entry is lossless today.
+                // Widening `accel` to a list, and the ROCm/Vulkan matching
+                // that needs it, is a later phase.
+                accel: a.accel.first().cloned().unwrap_or_default(),
                 cuda_major: a.cuda_major,
                 cuda_sm: a.cuda_sm,
                 cudnn: a.cudnn,
@@ -152,10 +160,12 @@ mod tests {
     ) -> IndexSubprocessAsset {
         IndexSubprocessAsset {
             target: target.into(),
-            accel: accel.into(),
+            accel: vec![accel.into()],
             cuda_major: cm,
             cuda_sm: sm,
             cudnn,
+            gfx: Vec::new(),
+            vulkan_api: None,
             url: Some("x".into()),
             size: Some(1),
             sha256: Some("x".into()),

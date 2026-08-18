@@ -65,6 +65,31 @@ pub struct IndexBackend {
     pub manifest: Option<IndexAsset>,
 }
 
+/// Accept a bare string where a list is expected.
+///
+/// The index's leaf types stay loose `String`s on purpose — they must tolerate
+/// a carried-forward `index.json` — and that tolerance extends to the shape of
+/// this field, not just its values.
+///
+/// # Errors
+/// Returns the deserializer's error if the value is neither a string nor an
+/// array of strings.
+pub fn one_or_many_string<'de, D>(d: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(s) => vec![s],
+        OneOrMany::Many(v) => v,
+    })
+}
+
 /// `<host>/<owner>/<repo>` → `<repo>`. The install-dir name the daemon derives
 /// from a backend's `source` (custom-repo and local-dir installs). The registry
 /// indexer uses the maintainer-declared `id` instead, so this is only shared by
@@ -249,13 +274,24 @@ pub struct IndexAsset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexSubprocessAsset {
     pub target: String,
-    pub accel: String,
+    /// Acceleration backends the build carries. Serialized as an array; a bare
+    /// string is accepted on read, since indexes published before the list
+    /// form carry one and the daemon reads whatever the registry serves.
+    #[serde(deserialize_with = "one_or_many_string")]
+    pub accel: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cuda_major: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cuda_sm: Option<u32>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cudnn: bool,
+    /// AMD architecture targets, in `--offload-arch` spelling. Non-empty when
+    /// `accel` contains `rocm`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gfx: Vec<String>,
+    /// Minimum Vulkan API version as `major.minor`, when the build declares one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vulkan_api: Option<String>,
     /// Single-file archive pin. Present for a single-file variant; omitted when
     /// the archive is delivered as `parts`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -537,5 +573,50 @@ mod tests {
         }"#;
         let b: IndexBackend = serde_json::from_str(json).expect("missing license is tolerated");
         assert_eq!(b.license, "");
+    }
+
+    /// Indexes published before the list form carry `accel` as a bare string.
+    /// The daemon reads whatever is on the registry today, so both must parse.
+    #[test]
+    fn an_index_asset_parses_a_scalar_or_list_accel() {
+        let scalar: IndexSubprocessAsset = serde_json::from_str(
+            r#"{"target":"x86_64-unknown-linux-gnu","accel":"cuda","cuda_major":12}"#,
+        )
+        .expect("a scalar accel must parse");
+        assert_eq!(scalar.accel, vec!["cuda".to_string()]);
+
+        let list: IndexSubprocessAsset = serde_json::from_str(
+            r#"{"target":"x86_64-unknown-linux-gnu","accel":["cuda","rocm"],
+                "cuda_major":12,"gfx":["gfx1030"]}"#,
+        )
+        .expect("a list accel must parse");
+        assert_eq!(list.accel, vec!["cuda".to_string(), "rocm".to_string()]);
+        assert_eq!(list.gfx, vec!["gfx1030".to_string()]);
+    }
+
+    #[test]
+    fn an_index_asset_omits_empty_new_fields() {
+        let asset = IndexSubprocessAsset {
+            target: "x86_64-unknown-linux-gnu".into(),
+            accel: vec!["cpu".into()],
+            cuda_major: None,
+            cuda_sm: None,
+            cudnn: false,
+            gfx: Vec::new(),
+            vulkan_api: None,
+            url: Some("u".into()),
+            size: Some(1),
+            sha256: Some("s".into()),
+            parts: Vec::new(),
+        };
+        let json = serde_json::to_string(&asset).expect("serializes");
+        assert!(
+            !json.contains("gfx"),
+            "empty gfx must not be emitted: {json}"
+        );
+        assert!(
+            !json.contains("vulkan_api"),
+            "absent floor must not be emitted: {json}"
+        );
     }
 }
