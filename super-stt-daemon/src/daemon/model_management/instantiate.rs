@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::types::SuperSTTDaemon;
+use crate::registry::host_detect::Host;
+use crate::registry::installed;
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use crate::stt_models::transcribe::Transcribe;
@@ -7,7 +9,11 @@ use anyhow::{Result, anyhow, bail};
 
 impl SuperSTTDaemon {
     /// Build a running backend instance for `(name, source)` plus its
-    /// resolved definition. Central routing point for all model loading.
+    /// resolved definition. Central routing point for all model loading —
+    /// startup, a model switch, a device switch, and a config reload all
+    /// funnel through here, so `device_pref` (the user's `cpu`/`gpu`
+    /// preference) is resolved into the concrete accelerator right here
+    /// rather than by each caller.
     ///
     /// # Errors
     /// Returns an error if no installed backend serves the model, the backend
@@ -28,7 +34,8 @@ impl SuperSTTDaemon {
         let instance: Box<dyn Transcribe> = match backend.kind.as_str() {
             "wasm" => self.instantiate_wasm(&backend, &def).await?,
             "subprocess" => {
-                self.instantiate_subprocess(&backend, name, device_pref)
+                let resolved = resolve_device_for_backend(device_pref, &backend.dir).await;
+                self.instantiate_subprocess(&backend, name, &resolved)
                     .await?
             }
             other => bail!("backend {} declares unknown kind '{other}'", backend.source),
@@ -354,6 +361,193 @@ impl SuperSTTDaemon {
             ),
         }
         entries
+    }
+}
+
+/// Resolve `device_pref` (`cpu`/`gpu`) into the concrete accelerator handed to
+/// a subprocess backend's `POST /v1/load`, per
+/// `docs/protocol/backend/contract.md`. Reads the backend directory's install
+/// record for the asset's declared accel list, and the host's detected
+/// capability — a dual-runtime asset resolves by which the *host* can run,
+/// not by which entry the asset lists first.
+async fn resolve_device_for_backend(device_pref: &str, backend_dir: &std::path::Path) -> String {
+    let installed_accel = installed::read(backend_dir)
+        .map(|r| r.selected.accel)
+        .unwrap_or_default();
+    // Best-effort: detection failure degrades `resolve_accel` to its
+    // list-order fallback rather than blocking the load.
+    let host = tokio::task::spawn_blocking(crate::registry::host_detect::detect)
+        .await
+        .ok();
+    resolve_accel(device_pref, &installed_accel, host.as_ref())
+}
+
+/// Turn the user's `cpu`/`gpu` preference into the accelerator the backend is
+/// told to load on.
+///
+/// The daemon knows which it is — it chose the asset — so it sends the
+/// concrete value rather than forwarding the preference. A binary carrying
+/// several runtimes needs this to pick; one carrying a single runtime ignores
+/// it, since the contract has always been "anything that is not `cpu` means
+/// use the accelerator".
+///
+/// A dual-runtime asset (`accel = ["cuda", "rocm"]`) cannot be resolved by
+/// list position: `compat::select` (`registry/compat.rs`) chose this asset
+/// because the *host* can run one of its declared families, not because of
+/// where that family sits in the list, so resolving here has to ask the same
+/// question rather than default to "first declared". `host` is `None` only
+/// when detection itself failed, or when none of the declared entries match
+/// what it reports (should not happen for an asset `compat::select` already
+/// approved, but a stale or hand-edited `installed.json` should still degrade
+/// rather than panic) — both fall back to the prior list-order heuristic,
+/// since a `gpu` preference stays meaningful to a backend on its own.
+pub(crate) fn resolve_accel(
+    preference: &str,
+    installed_accel: &[String],
+    host: Option<&Host>,
+) -> String {
+    if preference == "cpu" {
+        return "cpu".to_string();
+    }
+    if let Some(host) = host
+        && let Some(found) = installed_accel.iter().find(|a| host_can_run(host, a))
+    {
+        return found.clone();
+    }
+    installed_accel
+        .iter()
+        .find(|a| *a != "cpu")
+        .cloned()
+        .unwrap_or_else(|| preference.to_string())
+}
+
+/// Whether the host can run `accel`, mirroring the presence checks
+/// `compat::score` (`registry/compat.rs`) gates asset selection on. Full
+/// sm/gfx/floor compatibility was already proven when the asset was
+/// selected; this only has to tell apart two host-compatible accelerators
+/// declared by the same installed asset.
+fn host_can_run(host: &Host, accel: &str) -> bool {
+    match accel {
+        "cuda" => host.cuda.is_some(),
+        "rocm" => host.rocm.is_some(),
+        "vulkan" => host.vulkan.is_some(),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod resolve_accel_tests {
+    use super::{Host, resolve_accel};
+    use crate::registry::host_detect::{CudaHost, RocmHost, VulkanHost};
+
+    fn nvidia_host() -> Host {
+        Host {
+            target_triple: "x86_64-unknown-linux-gnu".into(),
+            cuda: Some(CudaHost {
+                compute_capability: 86,
+                runtime_major: 13,
+                cudnn_present: true,
+            }),
+            rocm: None,
+            vulkan: None,
+        }
+    }
+
+    fn amd_host() -> Host {
+        Host {
+            target_triple: "x86_64-unknown-linux-gnu".into(),
+            cuda: None,
+            rocm: Some(RocmHost {
+                gfx_targets: vec![gpu_probe::GfxTarget::new(11, 0, 0)],
+                version: None,
+            }),
+            vulkan: None,
+        }
+    }
+
+    fn vulkan_only_host() -> Host {
+        Host {
+            target_triple: "x86_64-unknown-linux-gnu".into(),
+            cuda: None,
+            rocm: None,
+            vulkan: Some(VulkanHost {
+                api_version: gpu_probe::VulkanVersion::new(1, 3, 0),
+            }),
+        }
+    }
+
+    /// The user picks `cpu` or `gpu`; the backend is told which accelerator,
+    /// because a build carrying several runtimes has to be able to choose.
+    #[test]
+    fn a_gpu_preference_resolves_to_the_accel_the_host_can_run() {
+        assert_eq!(
+            resolve_accel("gpu", &["cuda".into()], Some(&nvidia_host())),
+            "cuda"
+        );
+        assert_eq!(
+            resolve_accel("gpu", &["rocm".into()], Some(&amd_host())),
+            "rocm"
+        );
+        assert_eq!(
+            resolve_accel("gpu", &["vulkan".into()], Some(&vulkan_only_host())),
+            "vulkan"
+        );
+    }
+
+    #[test]
+    fn a_cpu_preference_always_resolves_to_cpu() {
+        assert_eq!(
+            resolve_accel("cpu", &["cuda".into()], Some(&nvidia_host())),
+            "cpu"
+        );
+        assert_eq!(resolve_accel("cpu", &[], None), "cpu");
+    }
+
+    /// The bug this pins: `compat::select` chose this asset because the host
+    /// can run one of its declared families, never because of list position.
+    /// An asset declaring `["cuda", "rocm"]` must resolve to whichever the
+    /// *host* actually has — not to `cuda` just because it was declared
+    /// first — or the daemon tells a ROCm-only host to load a runtime it
+    /// cannot run.
+    #[test]
+    fn a_dual_runtime_asset_resolves_by_host_capability_not_list_position() {
+        assert_eq!(
+            resolve_accel("gpu", &["rocm".into(), "cuda".into()], Some(&nvidia_host())),
+            "cuda"
+        );
+        assert_eq!(
+            resolve_accel("gpu", &["cuda".into(), "rocm".into()], Some(&amd_host())),
+            "rocm"
+        );
+    }
+
+    /// Detection failure (`host: None`) degrades to the list-order heuristic
+    /// rather than blocking the load — a `gpu` preference stays meaningful to
+    /// a backend on its own.
+    #[test]
+    fn an_unknown_host_falls_back_to_list_order() {
+        assert_eq!(
+            resolve_accel("gpu", &["cpu".into(), "rocm".into()], None),
+            "rocm"
+        );
+    }
+
+    /// A host that matches none of the asset's declared entries (a stale or
+    /// hand-edited record) also degrades to list order rather than erroring.
+    #[test]
+    fn a_host_matching_nothing_declared_falls_back_to_list_order() {
+        assert_eq!(
+            resolve_accel("gpu", &["rocm".into()], Some(&nvidia_host())),
+            "rocm"
+        );
+    }
+
+    /// No record — a local-directory import, or an install predating the
+    /// record. `gpu` is still meaningful to a backend: everything that is not
+    /// `cpu` means "use the accelerator you have".
+    #[test]
+    fn a_gpu_preference_without_a_record_stays_gpu() {
+        assert_eq!(resolve_accel("gpu", &[], None), "gpu");
     }
 }
 

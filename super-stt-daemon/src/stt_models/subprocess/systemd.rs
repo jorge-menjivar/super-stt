@@ -148,6 +148,13 @@ const FALLBACK_RENDER_NODE: &str = "/dev/dri/renderD128";
 /// `gpu_probe::GpuInfo` does not expose KFD's `drm_render_minor` — so every
 /// present node is granted rather than guessing one.
 fn gpu_device_nodes() -> Vec<String> {
+    gpu_device_nodes_in(Path::new("/dev/dri"))
+}
+
+/// [`gpu_device_nodes`], parameterized on the DRM directory so the
+/// enumeration/sort/fallback behavior is testable against a fixture
+/// directory instead of the real (and test-host-dependent) `/dev/dri`.
+fn gpu_device_nodes_in(dri_dir: &Path) -> Vec<String> {
     let mut nodes: Vec<String> = [
         "/dev/nvidia0",
         "/dev/nvidiactl",
@@ -159,7 +166,7 @@ fn gpu_device_nodes() -> Vec<String> {
     .map(|n| format!("DeviceAllow={n} rw"))
     .collect();
 
-    let mut render: Vec<String> = std::fs::read_dir("/dev/dri")
+    let mut render: Vec<String> = std::fs::read_dir(dri_dir)
         .into_iter()
         .flatten()
         .flatten()
@@ -223,7 +230,9 @@ fn hardening_params(backend_dir: &Path, socket_dir: &Path, gpu_access: bool) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{Device, gpu_device_nodes, hardening_params, needs_gpu_access};
+    use super::{
+        Device, FALLBACK_RENDER_NODE, gpu_device_nodes_in, hardening_params, needs_gpu_access,
+    };
     use std::path::{Path, PathBuf};
 
     /// A model that declares no GPU device must not be handed the GPU nodes.
@@ -278,19 +287,63 @@ mod tests {
     fn gpu_access_follows_the_gpu_device() {
         assert!(!needs_gpu_access(&[Device::Cpu]));
         assert!(!needs_gpu_access(&[Device::None]));
+        assert!(!needs_gpu_access(&[]));
         assert!(needs_gpu_access(&[Device::Gpu]));
         assert!(needs_gpu_access(&[Device::Cpu, Device::Gpu]));
     }
 
     /// The render minor is not knowable from the probe — `GpuInfo` does not
-    /// expose KFD's `drm_render_minor` — so the nodes are enumerated. A host
-    /// with no `/dev/dri` still yields the conventional first node so the
-    /// unit's policy is well-formed.
+    /// expose KFD's `drm_render_minor` — so the nodes are enumerated from a
+    /// real DRM directory rather than guessed. Driven through
+    /// `gpu_device_nodes_in` against a fixture directory: the real
+    /// `gpu_device_nodes()` reading the test host's actual `/dev/dri` would
+    /// let a hardcoded stub pass this test on any machine, and would make the
+    /// fallback/sort/multi-node cases untestable at all.
     #[test]
-    fn render_nodes_are_enumerated_with_a_fallback() {
-        let nodes = gpu_device_nodes();
+    fn render_nodes_are_enumerated_and_sorted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for name in ["renderD129", "renderD128", "card0", "by-path"] {
+            std::fs::write(dir.path().join(name), b"").expect("writes fixture entry");
+        }
+        let nodes = gpu_device_nodes_in(dir.path());
         assert!(nodes.iter().any(|n| n.contains("/dev/kfd")));
-        assert!(nodes.iter().any(|n| n.contains("/dev/dri/renderD")));
+        let render: Vec<&String> = nodes.iter().filter(|n| n.contains("renderD")).collect();
+        assert_eq!(
+            render,
+            vec![
+                &format!("DeviceAllow={} rw", dir.path().join("renderD128").display()),
+                &format!("DeviceAllow={} rw", dir.path().join("renderD129").display()),
+            ],
+            "non-render entries must be filtered out and render nodes sorted: {nodes:?}"
+        );
+    }
+
+    /// An empty or unreadable DRM directory still yields a well-formed
+    /// policy: the conventional first render node, not zero `DeviceAllow`
+    /// lines for the GPU a unit was granted access to.
+    #[test]
+    fn render_nodes_fall_back_when_the_drm_directory_has_no_render_node() {
+        let empty = tempfile::tempdir().expect("tempdir");
+        let nodes = gpu_device_nodes_in(empty.path());
+        assert_eq!(
+            nodes.iter().filter(|n| n.contains("renderD")).count(),
+            1,
+            "empty dir must fall back to exactly one render node: {nodes:?}"
+        );
+        assert!(
+            nodes
+                .iter()
+                .any(|n| n == &format!("DeviceAllow={FALLBACK_RENDER_NODE} rw"))
+        );
+
+        let missing = empty.path().join("does-not-exist");
+        let nodes = gpu_device_nodes_in(&missing);
+        assert!(
+            nodes
+                .iter()
+                .any(|n| n == &format!("DeviceAllow={FALLBACK_RENDER_NODE} rw")),
+            "an unreadable dir must fall back too: {nodes:?}"
+        );
     }
 
     /// Verify the systemd sandbox actually *enforces* its restrictions: a probe

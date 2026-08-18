@@ -1,39 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};
-use crate::registry::installed;
-use crate::stt_models::backends;
 use crate::stt_models::transcribe::Transcribe;
 use anyhow::Result;
 use log::{error, info, warn};
 use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
 
-/// Turn the user's `cpu`/`gpu` preference into the accelerator the backend is
-/// told to load on.
-///
-/// The daemon knows which it is — it chose the asset — so it sends the concrete
-/// value rather than forwarding the preference. A binary carrying several
-/// runtimes needs this to pick; one carrying a single runtime ignores it, since
-/// the contract has always been "anything that is not `cpu` means use the
-/// accelerator".
-pub(crate) fn resolve_accel(preference: &str, installed_accel: &[String]) -> String {
-    if preference == "cpu" {
-        return "cpu".to_string();
-    }
-    installed_accel
-        .iter()
-        .find(|a| *a != "cpu")
-        .cloned()
-        .unwrap_or_else(|| preference.to_string())
-}
-
 impl SuperSTTDaemon {
     /// Load a model on an explicit device (used during device switching).
     ///
-    /// `target_device` is the user's `cpu`/`gpu` preference; it is resolved
-    /// against the installed asset's recorded accelerator before being handed
-    /// to the backend, since `POST /v1/load` carries the concrete accelerator
-    /// (`cpu`/`cuda`/`rocm`/`metal`/`vulkan`), not the preference (see
-    /// `docs/protocol/backend/contract.md`).
+    /// `target_device` is the user's `cpu`/`gpu` preference; `instantiate_backend`
+    /// — the single funnel every load path (startup, model switch, device
+    /// switch, reload) goes through — resolves it into the concrete
+    /// accelerator (`cpu`/`cuda`/`rocm`/`metal`/`vulkan`) a subprocess backend
+    /// is actually handed on `POST /v1/load`, per
+    /// `docs/protocol/backend/contract.md`.
     ///
     /// # Errors
     /// Returns an error if no backend serves the model or instantiation fails.
@@ -45,15 +25,9 @@ impl SuperSTTDaemon {
     ) -> Result<Box<dyn Transcribe>> {
         info!("Loading model {name} with target device: {target_device}");
         self.broadcast_device_model_loading_status(name, target_device);
-        let installed_accel = {
-            let backends = self.backends.read().await;
-            backends::find_model(&backends, name, source)
-                .and_then(|(b, _)| installed::read(&b.dir))
-                .map(|r| r.selected.accel)
-                .unwrap_or_default()
-        };
-        let resolved = resolve_accel(target_device, &installed_accel);
-        let (instance, _def) = self.instantiate_backend(name, source, &resolved).await?;
+        let (instance, _def) = self
+            .instantiate_backend(name, source, target_device)
+            .await?;
         let actual = normalize_device(&instance.device());
         *self.actual_device.write().await = actual.clone();
         info!("Model {name} loaded on {actual}");
@@ -223,40 +197,5 @@ impl SuperSTTDaemon {
         let msg = dropped.map_or_else(|| "Model unloaded".to_string(), |n| format!("Unloaded {n}"));
         info!("{msg}");
         DaemonResponse::success().with_message(msg)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::resolve_accel;
-
-    /// The user picks `cpu` or `gpu`; the backend is told which accelerator,
-    /// because a build carrying several runtimes has to be able to choose.
-    #[test]
-    fn a_gpu_preference_resolves_to_the_installed_accel() {
-        assert_eq!(resolve_accel("gpu", &["cuda".into()]), "cuda");
-        assert_eq!(resolve_accel("gpu", &["rocm".into()]), "rocm");
-        assert_eq!(resolve_accel("gpu", &["vulkan".into()]), "vulkan");
-    }
-
-    #[test]
-    fn a_cpu_preference_always_resolves_to_cpu() {
-        assert_eq!(resolve_accel("cpu", &["cuda".into()]), "cpu");
-        assert_eq!(resolve_accel("cpu", &[]), "cpu");
-    }
-
-    /// A dual-runtime build declares both; the first non-CPU entry wins, since
-    /// `compat::select` only matched it against one of the host's families.
-    #[test]
-    fn a_dual_runtime_asset_resolves_to_its_first_accelerator() {
-        assert_eq!(resolve_accel("gpu", &["cpu".into(), "rocm".into()]), "rocm");
-    }
-
-    /// No record — a local-directory import, or an install predating the
-    /// record. `gpu` is still meaningful to a backend: everything that is not
-    /// `cpu` means "use the accelerator you have".
-    #[test]
-    fn a_gpu_preference_without_a_record_stays_gpu() {
-        assert_eq!(resolve_accel("gpu", &[]), "gpu");
     }
 }

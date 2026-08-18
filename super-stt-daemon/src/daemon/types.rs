@@ -20,7 +20,7 @@ pub(crate) fn normalize_device(label: &str) -> String {
     let l = label.to_ascii_lowercase();
     if l.contains("cuda") {
         "cuda".to_string()
-    } else if l.contains("rocm") || l.contains("hip") {
+    } else if l.contains("rocm") || contains_hip_token(&l) {
         "rocm".to_string()
     } else if l.contains("vulkan") {
         "vulkan".to_string()
@@ -31,6 +31,16 @@ pub(crate) fn normalize_device(label: &str) -> String {
     } else {
         "cpu".to_string()
     }
+}
+
+/// Whether `label` (already lowercased) names `hip` as a whole token rather
+/// than as a substring. A bare `contains("hip")` also fires inside `"chip"` /
+/// `"chipset"`, so e.g. a Vulkan label mentioning an llvmpipe "chip" would
+/// misroute to `rocm`.
+fn contains_hip_token(label: &str) -> bool {
+    label
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|token| token == "hip")
 }
 
 /// A live model: its full resolved [`ModelDefinition`] plus the running
@@ -265,16 +275,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_device_maps_labels() {
-        assert_eq!(normalize_device("cuda:0"), "cuda");
-        assert_eq!(normalize_device("Cuda(0)"), "cuda");
-        assert_eq!(normalize_device("Metal(0)"), "metal");
-        assert_eq!(normalize_device("remote"), "remote");
-        assert_eq!(normalize_device("cpu"), "cpu");
-        assert_eq!(normalize_device("anything else"), "cpu");
-    }
-
-    #[test]
     fn normalize_device_maps_every_accel_label() {
         assert_eq!(normalize_device("cuda:0"), "cuda");
         assert_eq!(normalize_device("Cuda(0)"), "cuda");
@@ -285,5 +285,15 @@ mod tests {
         assert_eq!(normalize_device("remote"), "remote");
         assert_eq!(normalize_device("cpu"), "cpu");
         assert_eq!(normalize_device("anything else"), "cpu");
+    }
+
+    /// `hip` must match as a token, not as a substring — a bare
+    /// `contains("hip")` also fires inside `"chip"` and would misroute a
+    /// Vulkan label naming an llvmpipe "chip" to `rocm`.
+    #[test]
+    fn normalize_device_does_not_treat_chip_as_hip() {
+        assert_eq!(normalize_device("chip"), "cpu");
+        assert_eq!(normalize_device("generic chip"), "cpu");
+        assert_eq!(normalize_device("Vulkan (llvmpipe chip)"), "vulkan");
     }
 }
