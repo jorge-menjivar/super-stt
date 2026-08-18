@@ -861,6 +861,29 @@ supported_devices = ["cpu"]
         assert_eq!(copied, ["backend.toml", "y.wasm"]);
     }
 
+    /// A source dir that is itself a copy of a previously installed backend
+    /// carries its `installed.json` forward instead of it being silently
+    /// dropped, the one entry in the allowlist that is optional rather than
+    /// required.
+    #[test]
+    fn local_import_carries_forward_an_existing_installed_json() {
+        let src = staged_checkout();
+        let record = br#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":["cuda"]}}"#;
+        std::fs::write(
+            src.path().join(crate::registry::installed::RECORD_FILE),
+            record,
+        )
+        .unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let out = dst.path().join("out");
+        copy_staged_backend(src.path(), &out, "wasm", "y.wasm").unwrap();
+
+        assert_eq!(
+            std::fs::read(out.join(crate::registry::installed::RECORD_FILE)).unwrap(),
+            record
+        );
+    }
+
     /// A subprocess executable may need siblings no manifest field declares, so
     /// its tree is taken whole — except the history, which cannot be one.
     #[test]
