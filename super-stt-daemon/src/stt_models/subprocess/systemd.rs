@@ -133,9 +133,7 @@ pub(super) async fn spawn_systemd_unit(
 /// GPU-capable model keeps the nodes whether or not the user currently prefers
 /// the CPU — switching device must not depend on how the unit was spawned.
 fn needs_gpu_access(devices: &[Device]) -> bool {
-    devices
-        .iter()
-        .any(|d| matches!(d, Device::Cuda | Device::Metal))
+    devices.iter().any(|d| matches!(d, Device::Gpu))
 }
 
 /// The systemd sandbox directives applied to every spawned backend. Shared by
@@ -243,9 +241,8 @@ mod tests {
         assert!(!needs_gpu_access(&[Device::Cpu]));
         assert!(!needs_gpu_access(&[Device::None]));
         assert!(!needs_gpu_access(&[]));
-        assert!(needs_gpu_access(&[Device::Cuda]));
-        assert!(needs_gpu_access(&[Device::Metal]));
-        assert!(needs_gpu_access(&[Device::Cpu, Device::Cuda]));
+        assert!(needs_gpu_access(&[Device::Gpu]));
+        assert!(needs_gpu_access(&[Device::Cpu, Device::Gpu]));
     }
 
     /// Verify the systemd sandbox actually *enforces* its restrictions: a probe

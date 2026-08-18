@@ -362,6 +362,137 @@ fn conditional_property_names_exist() {
     }
 }
 
+/// Build a minimal valid manifest around one asset body so a schema test
+/// carries only the lines under test.
+fn manifest_json(asset_body: &str) -> Value {
+    toml_to_json(&format!(
+        r#"
+        [backend]
+        source = "github.com/x/y"
+        name = "Y"
+        version = "1.0.0"
+        kind = "subprocess"
+        contract = "v1"
+        entrypoint = "y"
+        license = "Apache-2.0"
+        description = "Test backend."
+
+        [[assets.subprocess]]
+        {asset_body}
+
+        [[models]]
+        name = "m"
+        supported_devices = ["cpu"]
+        primary_language = "en"
+        supported_languages = ["en"]
+    "#
+    ))
+}
+
+/// A scalar `accel` is what every published manifest carries, and a list is
+/// what a dual-runtime build needs. The schema has to describe both.
+#[test]
+fn the_schema_accepts_both_accel_spellings() {
+    let v = backend_validator();
+    assert!(
+        v.is_valid(&manifest_json(
+            r#"file = "y.tar.gz"
+               target = "x86_64-unknown-linux-gnu"
+               accel = "cuda"
+               cuda_major = 12"#
+        )),
+        "a scalar accel must validate"
+    );
+    assert!(
+        v.is_valid(&manifest_json(
+            r#"file = "y.tar.gz"
+               target = "x86_64-unknown-linux-gnu"
+               accel = ["cuda", "rocm"]
+               cuda_major = 12
+               gfx = ["gfx1030"]"#
+        )),
+        "a list accel must validate"
+    );
+}
+
+#[test]
+fn the_schema_gates_gfx_on_rocm() {
+    let v = backend_validator();
+    assert!(
+        !v.is_valid(&manifest_json(
+            r#"file = "y.tar.gz"
+               target = "x86_64-unknown-linux-gnu"
+               accel = ["rocm"]"#
+        )),
+        "rocm without gfx must fail"
+    );
+    assert!(
+        !v.is_valid(&manifest_json(
+            r#"file = "y.tar.gz"
+               target = "x86_64-unknown-linux-gnu"
+               accel = ["cpu"]
+               gfx = ["gfx1030"]"#
+        )),
+        "gfx without rocm must fail"
+    );
+}
+
+#[test]
+fn the_schema_gates_vulkan_api_on_vulkan() {
+    let v = backend_validator();
+    assert!(
+        v.is_valid(&manifest_json(
+            r#"file = "y.tar.gz"
+               target = "x86_64-unknown-linux-gnu"
+               accel = ["vulkan"]
+               vulkan_api = "1.2""#
+        )),
+        "a vulkan asset may declare an api floor"
+    );
+    assert!(
+        !v.is_valid(&manifest_json(
+            r#"file = "y.tar.gz"
+               target = "x86_64-unknown-linux-gnu"
+               accel = ["cpu"]
+               vulkan_api = "1.2""#
+        )),
+        "vulkan_api without vulkan must fail"
+    );
+}
+
+/// `cuda` and `metal` are deprecated input spellings the daemon normalizes.
+/// The published schema describes what a manifest may legally contain, which
+/// is a wider set than what `Display` emits.
+#[test]
+fn the_schema_accepts_the_deprecated_device_spellings() {
+    let v = backend_validator();
+    for device in ["cpu", "gpu", "cuda", "metal", "none"] {
+        let m = toml_to_json(&format!(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "wasm"
+            contract = "v1"
+            entrypoint = "y.wasm"
+            license = "Apache-2.0"
+            description = "Test backend."
+
+            [assets]
+            wasm = "y.wasm"
+
+            [[models]]
+            name = "m"
+            supported_devices = ["{device}"]
+            primary_language = "en"
+            supported_languages = ["en"]
+        "#
+        ));
+        assert!(v.is_valid(&m), "supported_devices must accept {device}");
+    }
+}
+
 #[test]
 fn allows_documented_optionals() {
     let v = backend_validator();

@@ -119,7 +119,7 @@ processing_interval_ms = 2000
         vox.supported_devices,
         vec![
             super_stt_registry_types::manifest::Device::Cpu,
-            super_stt_registry_types::manifest::Device::Cuda
+            super_stt_registry_types::manifest::Device::Gpu
         ],
         "local model carries its declared supported_devices"
     );
@@ -481,7 +481,7 @@ processing_interval_ms = 1500
         def.supported_devices,
         vec![
             super_stt_registry_types::manifest::Device::Cpu,
-            super_stt_registry_types::manifest::Device::Cuda
+            super_stt_registry_types::manifest::Device::Gpu
         ]
     );
 

@@ -6,7 +6,7 @@ use semver::Version;
 use thiserror::Error;
 
 pub use super_stt_registry_types::manifest::{
-    Accel, Kind, Manifest, ManifestError as ParseError, SubprocessAsset,
+    Kind, Manifest, ManifestError as ParseError, SubprocessAsset,
 };
 
 #[derive(Debug, Error)]
@@ -21,12 +21,6 @@ pub enum ManifestError {
     MissingWasmAsset,
     #[error("`backend.kind = \"subprocess\"` requires `[[assets.subprocess]]` but list is empty")]
     MissingSubprocessAssets,
-    #[error("subprocess asset `{file}`: `cuda_major` is required when accel = \"cuda\"")]
-    CudaMissingMajor { file: String },
-    #[error("subprocess asset `{file}`: cuda_major/cuda_sm forbidden when accel != \"cuda\"")]
-    CudaForbiddenFields { file: String },
-    #[error("subprocess asset `{file}`: `cudnn = true` requires `accel = \"cuda\"`")]
-    CudnnRequiresCuda { file: String },
     #[error("missing license; declare `[backend].license` (a recognized SPDX id or \"other\")")]
     MissingLicense,
     #[error(
@@ -85,22 +79,10 @@ pub fn validate(
             }
         }
     }
-    for a in &m.assets.subprocess {
-        if a.accel == Accel::Cuda {
-            // `cuda_sm` stays optional: omitted means the build matches any
-            // compute capability (multi-architecture framework builds).
-            if a.cuda_major.is_none() {
-                return Err(ManifestError::CudaMissingMajor { file: a.label() });
-            }
-        } else {
-            if a.cuda_major.is_some() || a.cuda_sm.is_some() {
-                return Err(ManifestError::CudaForbiddenFields { file: a.label() });
-            }
-            if a.cudnn {
-                return Err(ManifestError::CudnnRequiresCuda { file: a.label() });
-            }
-        }
-    }
+    // Accel/cuda/rocm/vulkan cross-field validation (`cuda_major` required when
+    // `accel` contains `cuda`, and so on) is enforced by `Manifest::parse`
+    // itself, which every caller of `validate` has already run successfully —
+    // repeating it here would be dead code that can never trigger.
     // A `base_url` value is user intent: the daemon authorizes the host it names
     // for egress with the SSRF guard relaxed. A manifest-supplied one is the
     // backend author's, so a release carrying it does not go in the registry.
@@ -219,6 +201,9 @@ mod tests {
 
     #[test]
     fn rejects_cuda_without_required_fields() {
+        // Accel/cuda cross-field validation is enforced by `Manifest::parse`
+        // itself (canonical in `super-stt-registry-types`); this only pins that
+        // the guard surfaces as this crate's `ManifestError::Parse`.
         let t = r#"
             [backend]
             source = "github.com/x/y"
@@ -235,9 +220,11 @@ mod tests {
             target = "x86_64-unknown-linux-gnu"
             accel = "cuda"
         "#;
-        let m = Manifest::parse(t).unwrap();
-        let err = validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap_err();
-        assert!(matches!(err, ManifestError::CudaMissingMajor { .. }));
+        let err: ManifestError = Manifest::parse(t).unwrap_err().into();
+        assert!(matches!(
+            err,
+            ManifestError::Parse(ParseError::CudaMissingMajor { .. })
+        ));
     }
 
     /// A release may declare the `base_url` option, but not a value for it: the

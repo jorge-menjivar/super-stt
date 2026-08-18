@@ -62,19 +62,49 @@ fn inject_definition_rules(defs: &mut serde_json::Map<String, Value>) {
     let asset = defs
         .get_mut("SubprocessAsset")
         .expect("SubprocessAsset def");
+    // `accel` is one value or a list of them; the conditionals below test for
+    // membership so both spellings are governed by one rule.
+    asset["properties"]["accel"] = json!({
+        "oneOf": [
+            { "$ref": "#/definitions/Accel" },
+            { "type": "array", "items": { "$ref": "#/definitions/Accel" }, "minItems": 1 }
+        ]
+    });
+    let declares = |accel: &str| {
+        json!({
+            "required": ["accel"],
+            "properties": { "accel": { "anyOf": [
+                { "const": accel },
+                { "type": "array", "contains": { "const": accel } }
+            ] } }
+        })
+    };
     push_all_of(
         asset,
         json!({
-            "if": {
-                "required": ["accel"],
-                "properties": { "accel": { "const": "cuda" } }
-            },
+            "if": declares("cuda"),
             "then": { "required": ["cuda_major"] },
             "else": { "properties": {
                 "cuda_major": false,
                 "cuda_sm": false,
                 "cudnn": { "const": false }
             } }
+        }),
+    );
+    push_all_of(
+        asset,
+        json!({
+            "if": declares("rocm"),
+            "then": { "properties": { "gfx": { "minItems": 1 } }, "required": ["gfx"] },
+            "else": { "properties": { "gfx": false } }
+        }),
+    );
+    push_all_of(
+        asset,
+        json!({
+            "if": declares("vulkan"),
+            "then": true,
+            "else": { "properties": { "vulkan_api": false } }
         }),
     );
     // Exactly one of `file` (single archive) or `parts` (multi-part). `oneOf`
@@ -119,6 +149,24 @@ fn inject_definition_rules(defs: &mut serde_json::Map<String, Value>) {
         .as_object_mut()
         .expect("supported_devices property")
         .insert("minItems".into(), serde_json::json!(1));
+
+    // `Display` emits only cpu/gpu/none, but `FromStr` accepts the two
+    // deprecated spellings, and the published schema has to describe what a
+    // manifest may legally contain. The derived shape is a `oneOf` (one branch
+    // per variant, driven by the `None` variant's own doc comment), so a bare
+    // `enum` insertion alongside it would be ANDed against that `oneOf` and
+    // still reject the deprecated spellings; the definition is replaced
+    // outright instead.
+    let device = defs.get_mut("Device").expect("Device def");
+    let description = device.get("description").cloned();
+    let mut widened = json!({
+        "type": "string",
+        "enum": ["cpu", "gpu", "none", "cuda", "metal"],
+    });
+    if let Some(description) = description {
+        widened["description"] = description;
+    }
+    *device = widened;
 
     // Embed the accepted license values (recognized FOSS SPDX ids + `other`) as
     // an enum so editors offer them and reject anything else — a self-contained

@@ -198,7 +198,15 @@ fn synthesize_assets(
                 };
                 out.subprocess.push(IndexSubprocessAsset {
                     target: sa.target.clone(),
-                    accel: sa.accel.to_string(),
+                    // `IndexSubprocessAsset::accel` is still wire-singular;
+                    // `Manifest::parse` guarantees `sa.accel` non-empty. Widening
+                    // the wire form to a list is Phase 3 (index producers); every
+                    // accel published so far is a single value, so the first
+                    // entry is lossless today.
+                    accel: sa
+                        .accel
+                        .first()
+                        .map_or_else(String::new, ToString::to_string),
                     cuda_major: sa.cuda_major,
                     cuda_sm: sa.cuda_sm,
                     cudnn: sa.cudnn,

@@ -82,15 +82,15 @@ struct ModelSupport {
 }
 
 /// Classify a manifest's models by their [`Device`]s — the `none` sentinel
-/// marks online/remote models, `cuda`/`metal` mark GPU, `cpu` marks CPU. Devices
-/// are typed and validated by `Manifest::parse`, so there is no string matching
-/// to get wrong.
+/// marks online/remote models, `gpu` marks GPU, `cpu` marks CPU. Devices are
+/// typed and validated by `Manifest::parse`, so there is no string matching to
+/// get wrong.
 fn model_support(models: &[ModelEntry]) -> ModelSupport {
     let any_device =
         |pred: fn(&Device) -> bool| models.iter().any(|m| m.supported_devices.iter().any(pred));
     ModelSupport {
         online: models.iter().any(ModelEntry::is_online),
-        supports_gpu: any_device(|d| matches!(d, Device::Cuda | Device::Metal)),
+        supports_gpu: any_device(|d| matches!(d, Device::Gpu)),
         supports_cpu: any_device(|d| matches!(d, Device::Cpu)),
     }
 }
@@ -366,9 +366,8 @@ mod tests {
     }
 
     #[test]
-    fn classify_marks_gpu_for_cuda_or_metal() {
-        assert!(model_support(&[model(&[Device::Cuda])]).supports_gpu);
-        assert!(model_support(&[model(&[Device::Metal])]).supports_gpu);
+    fn classify_marks_gpu_for_gpu_device() {
+        assert!(model_support(&[model(&[Device::Gpu])]).supports_gpu);
         assert!(!model_support(&[model(&[Device::Cpu])]).supports_gpu);
     }
 
@@ -376,7 +375,7 @@ mod tests {
     fn classify_marks_cpu_only_for_cpu_device() {
         assert!(model_support(&[model(&[Device::Cpu])]).supports_cpu);
         assert!(!model_support(&[model(&[Device::None])]).supports_cpu);
-        assert!(!model_support(&[model(&[Device::Cuda])]).supports_cpu);
+        assert!(!model_support(&[model(&[Device::Gpu])]).supports_cpu);
     }
 
     #[test]

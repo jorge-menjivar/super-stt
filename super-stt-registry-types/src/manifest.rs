@@ -185,22 +185,63 @@ pub struct SubprocessAsset {
     /// Rust target triple, e.g. `x86_64-unknown-linux-gnu`. Tier-1/2 only;
     /// the indexer rejects unknown triples.
     pub target: String,
-    /// Acceleration backend the build targets.
-    pub accel: Accel,
-    /// CUDA major version this build targets. Required when
-    /// `accel = "cuda"`, forbidden otherwise.
+    /// Acceleration backends this build carries. A single string is accepted
+    /// and read as a one-element list, which is what every published manifest
+    /// uses; an array declares a binary carrying several runtimes, and the
+    /// daemon tells it at load time which one to use. Must be non-empty.
+    #[serde(deserialize_with = "one_or_many_accel")]
+    pub accel: Vec<Accel>,
+    /// CUDA major version this build targets. Required when `accel` contains
+    /// `cuda`, forbidden otherwise.
     #[serde(default)]
     pub cuda_major: Option<u32>,
     /// Compute capability (e.g. `75`, `86`, `90`, `120`). Omit to match any
     /// compute capability — use for multi-architecture framework builds
     /// (e.g. a `PyTorch` wheel). An exact-SM asset is preferred over a
-    /// wildcard when both match. Forbidden when `accel != "cuda"`.
+    /// wildcard when both match. Forbidden when `accel` lacks `cuda`.
     #[serde(default)]
     pub cuda_sm: Option<u32>,
-    /// Whether this build links cuDNN. Allowed only when `accel = "cuda"`.
-    /// Default `false`.
+    /// Whether this build links cuDNN. Allowed only when `accel` contains
+    /// `cuda`. Default `false`.
     #[serde(default)]
     pub cudnn: bool,
+    /// AMD architecture targets this build carries, in `--offload-arch`
+    /// spelling. Required when `accel` contains `rocm`, forbidden otherwise.
+    ///
+    /// There is no wildcard, deliberately breaking symmetry with `cuda_sm`:
+    /// PTX gives CUDA a JIT path that makes "any compute capability" a true
+    /// claim, while HIP code objects are architecture-specific AMDGCN ISA with
+    /// no equivalent. A wildcard would install a binary that fails at model
+    /// load instead of falling back to CPU. Fat builds list every target they
+    /// were compiled for.
+    #[serde(default)]
+    pub gfx: Vec<crate::arch::GfxSpec>,
+    /// Minimum Vulkan API version this build requires. Allowed only when
+    /// `accel` contains `vulkan`. There is no architecture field: SPIR-V is
+    /// portable and driver-compiled.
+    #[serde(default)]
+    pub vulkan_api: Option<crate::arch::VulkanApi>,
+}
+
+/// Accept `accel = "cuda"` as well as `accel = ["cuda", "rocm"]`.
+///
+/// Every manifest published so far uses the scalar form, and `backend.toml` is
+/// a pinned release asset the daemon re-reads on every scan, so the scalar has
+/// to keep parsing indefinitely.
+fn one_or_many_accel<'de, D>(d: D) -> Result<Vec<Accel>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(Accel),
+        Many(Vec<Accel>),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(a) => vec![a],
+        OneOrMany::Many(v) => v,
+    })
 }
 
 impl SubprocessAsset {
@@ -422,13 +463,18 @@ impl ModelEntry {
 }
 
 /// A device a model can be loaded onto.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Only two local answers exist, because `registry::compat` has already chosen
+/// exactly one asset by the time this matters and that asset names its own
+/// runtimes: run on the CPU, or run on the accelerator the installed build
+/// targets. Which accelerator that is — CUDA, `ROCm`, Metal, Vulkan — is a
+/// property of the asset, reported by `Accel`, not a choice made here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Device {
     Cpu,
-    Cuda,
-    Metal,
+    Gpu,
     /// Sentinel for remote/online models with no local compute; must be the
     /// only entry when present.
     None,
@@ -438,8 +484,7 @@ impl fmt::Display for Device {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Cpu => write!(f, "cpu"),
-            Self::Cuda => write!(f, "cuda"),
-            Self::Metal => write!(f, "metal"),
+            Self::Gpu => write!(f, "gpu"),
             Self::None => write!(f, "none"),
         }
     }
@@ -451,11 +496,27 @@ impl std::str::FromStr for Device {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "cpu" => Ok(Self::Cpu),
-            "cuda" => Ok(Self::Cuda),
-            "metal" => Ok(Self::Metal),
+            // `cuda` and `metal` are deprecated input spellings. They are
+            // accepted because `backend.toml` is a pinned release asset and
+            // published `index.json` files carry them, so a manifest written
+            // before this vocabulary must keep loading. `Display` never emits
+            // them, so nothing new can come to depend on them.
+            "gpu" | "cuda" | "metal" => Ok(Self::Gpu),
             "none" => Ok(Self::None),
             _ => Err(format!("Unknown device: {s}")),
         }
+    }
+}
+
+/// Routed through `FromStr` so the deprecated spellings are accepted wherever
+/// a device is deserialized — TOML manifests and JSON index entries alike.
+impl<'de> Deserialize<'de> for Device {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let text = String::deserialize(d)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -518,6 +579,52 @@ pub enum ManifestError {
          `file` or `parts`"
     )]
     AssetFileXorParts(String),
+    /// A `[[assets.subprocess]]` entry declared an empty `accel` list.
+    #[error("asset `{file}` declares an empty `accel` list")]
+    AccelEmpty {
+        /// The asset's label (its `file`, or its first `parts` entry).
+        file: String,
+    },
+    /// A `[[assets.subprocess]]` entry declared `accel = "rocm"` with no `gfx`.
+    #[error("asset `{file}` declares `accel = rocm` but no `gfx` targets")]
+    RocmMissingGfx {
+        /// The asset's label (its `file`, or its first `parts` entry).
+        file: String,
+    },
+    /// A `[[assets.subprocess]]` entry declared `gfx` without `rocm` in `accel`.
+    #[error("asset `{file}` declares `gfx` without `accel = rocm`")]
+    GfxRequiresRocm {
+        /// The asset's label (its `file`, or its first `parts` entry).
+        file: String,
+    },
+    /// A `[[assets.subprocess]]` entry declared `vulkan_api` without `vulkan`
+    /// in `accel`.
+    #[error("asset `{file}` declares `vulkan_api` without `accel = vulkan`")]
+    VulkanApiRequiresVulkan {
+        /// The asset's label (its `file`, or its first `parts` entry).
+        file: String,
+    },
+    /// A `[[assets.subprocess]]` entry declared `accel` containing `cuda` but
+    /// no `cuda_major`.
+    #[error("asset `{file}` declares `accel` containing `cuda` but no `cuda_major`")]
+    CudaMissingMajor {
+        /// The asset's label (its `file`, or its first `parts` entry).
+        file: String,
+    },
+    /// A `[[assets.subprocess]]` entry declared `cuda_major`/`cuda_sm` without
+    /// `cuda` in `accel`.
+    #[error("asset `{file}` declares `cuda_major`/`cuda_sm` without `accel` containing `cuda`")]
+    CudaForbiddenFields {
+        /// The asset's label (its `file`, or its first `parts` entry).
+        file: String,
+    },
+    /// A `[[assets.subprocess]]` entry declared `cudnn = true` without `cuda`
+    /// in `accel`.
+    #[error("asset `{file}` declares `cudnn = true` without `accel` containing `cuda`")]
+    CudnnRequiresCuda {
+        /// The asset's label (its `file`, or its first `parts` entry).
+        file: String,
+    },
 }
 
 impl Manifest {
@@ -561,6 +668,34 @@ impl Manifest {
             let has_parts = !a.parts.is_empty() && a.parts.iter().all(|p| !p.is_empty());
             if has_file == has_parts {
                 return Err(ManifestError::AssetFileXorParts(a.target.clone()));
+            }
+            if a.accel.is_empty() {
+                return Err(ManifestError::AccelEmpty { file: a.label() });
+            }
+            let has = |k: Accel| a.accel.contains(&k);
+            if has(Accel::Cuda) {
+                // `cuda_sm` stays optional: omitted means the build matches any
+                // compute capability (multi-architecture framework builds).
+                if a.cuda_major.is_none() {
+                    return Err(ManifestError::CudaMissingMajor { file: a.label() });
+                }
+            } else {
+                if a.cuda_major.is_some() || a.cuda_sm.is_some() {
+                    return Err(ManifestError::CudaForbiddenFields { file: a.label() });
+                }
+                if a.cudnn {
+                    return Err(ManifestError::CudnnRequiresCuda { file: a.label() });
+                }
+            }
+            if has(Accel::Rocm) {
+                if a.gfx.is_empty() {
+                    return Err(ManifestError::RocmMissingGfx { file: a.label() });
+                }
+            } else if !a.gfx.is_empty() {
+                return Err(ManifestError::GfxRequiresRocm { file: a.label() });
+            }
+            if !has(Accel::Vulkan) && a.vulkan_api.is_some() {
+                return Err(ManifestError::VulkanApiRequiresVulkan { file: a.label() });
             }
         }
         Ok(m)
@@ -966,7 +1101,7 @@ mod tests {
         )
         .unwrap();
         let a = &m.assets.subprocess[0];
-        assert_eq!(a.accel, Accel::Cuda);
+        assert_eq!(a.accel, vec![Accel::Cuda]);
         assert_eq!(a.cuda_major, Some(13));
         assert_eq!(a.cuda_sm, None);
         assert!(!a.cudnn);
@@ -1083,22 +1218,254 @@ mod tests {
 
     #[test]
     fn device_from_str_round_trips_canonical_forms() {
-        for device in [Device::Cpu, Device::Cuda, Device::Metal, Device::None] {
+        for device in [Device::Cpu, Device::Gpu, Device::None] {
             let s = device.to_string();
             let parsed: Device = s.parse().unwrap();
             assert_eq!(device, parsed, "round-trip failed for {s}");
         }
     }
 
+    /// `cuda` and `metal` are the spelling every shipped manifest and published
+    /// index uses. They are accepted as input and mapped onto the one device that
+    /// means "an accelerator"; nothing ever writes them back.
+    #[test]
+    fn deprecated_device_spellings_parse_as_gpu() {
+        assert_eq!("cuda".parse(), Ok(Device::Gpu));
+        assert_eq!("metal".parse(), Ok(Device::Gpu));
+        assert_eq!("gpu".parse(), Ok(Device::Gpu));
+        assert_eq!("cpu".parse(), Ok(Device::Cpu));
+        assert_eq!("none".parse(), Ok(Device::None));
+        assert!(
+            "rocm".parse::<Device>().is_err(),
+            "rocm is an accel, not a device"
+        );
+        assert!("nonsense".parse::<Device>().is_err());
+    }
+
+    #[test]
+    fn device_never_emits_a_deprecated_spelling() {
+        for device in [Device::Cpu, Device::Gpu, Device::None] {
+            let text = device.to_string();
+            assert!(
+                !matches!(text.as_str(), "cuda" | "metal"),
+                "Display emitted a deprecated spelling: {text}"
+            );
+            assert_eq!(text.parse(), Ok(device), "round trip for {text}");
+        }
+        assert_eq!(Device::Gpu.to_string(), "gpu");
+    }
+
+    #[test]
+    fn a_manifest_declaring_cuda_yields_gpu() {
+        let m = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "subprocess"
+            contract = "v1"
+            entrypoint = "y"
+            license = "Apache-2.0"
+            description = "Test backend."
+
+            [[assets.subprocess]]
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = "cuda"
+            cuda_major = 12
+
+            [[models]]
+            name = "m"
+            supported_devices = ["cpu", "cuda"]
+            primary_language = "en"
+            supported_languages = ["en"]
+        "#,
+        )
+        .expect("shipped manifests must keep parsing");
+        assert_eq!(
+            m.models[0].supported_devices,
+            vec![Device::Cpu, Device::Gpu]
+        );
+    }
+
     #[test]
     fn device_from_str_rejects_non_canonical_strings() {
         // `rocm` is an `Accel` build axis, never a model `Device`; non-snake_case
         // and unknown strings must error so callers don't accept stale forms.
-        for bad in ["rocm", "Cpu", "CUDA", "gpu", "metal_gpu", ""] {
+        for bad in ["rocm", "Cpu", "CUDA", "metal_gpu", ""] {
             assert!(
                 bad.parse::<Device>().is_err(),
                 "{bad:?} should fail to parse as a Device"
             );
         }
+    }
+
+    /// Build a minimal valid manifest around one `[[assets.subprocess]]` body, so
+    /// asset-level validation tests carry only the lines under test.
+    fn manifest_with_asset(asset_body: &str) -> Result<Manifest, ManifestError> {
+        Manifest::parse(&format!(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "subprocess"
+            contract = "v1"
+            entrypoint = "y"
+            license = "Apache-2.0"
+            description = "Test backend."
+
+            [[assets.subprocess]]
+            {asset_body}
+
+            [[models]]
+            name = "m"
+            supported_devices = ["cpu"]
+            primary_language = "en"
+            supported_languages = ["en"]
+        "#
+        ))
+    }
+
+    /// A scalar `accel` is the spelling every shipped manifest uses, and
+    /// `backend.toml` is a pinned release asset — rejecting it would break
+    /// already-installed backends on users' machines.
+    #[test]
+    fn a_scalar_accel_parses_as_a_one_element_list() {
+        let m = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "subprocess"
+            contract = "v1"
+            entrypoint = "y"
+            license = "Apache-2.0"
+            description = "Test backend."
+
+            [[assets.subprocess]]
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = "cuda"
+            cuda_major = 12
+
+            [[models]]
+            name = "m"
+            supported_devices = ["cpu"]
+            primary_language = "en"
+            supported_languages = ["en"]
+        "#,
+        )
+        .expect("a scalar accel must parse");
+        assert_eq!(m.assets.subprocess[0].accel, vec![Accel::Cuda]);
+    }
+
+    #[test]
+    fn a_list_accel_parses() {
+        let m = manifest_with_asset(
+            r#"
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = ["cuda", "rocm"]
+            cuda_major = 12
+            gfx = ["gfx1030"]
+        "#,
+        )
+        .expect("a dual-runtime asset must parse");
+        assert_eq!(m.assets.subprocess[0].accel, vec![Accel::Cuda, Accel::Rocm]);
+        assert_eq!(
+            m.assets.subprocess[0].gfx,
+            vec![crate::arch::GfxSpec::new(10, 3, 0)]
+        );
+    }
+
+    #[test]
+    fn an_empty_accel_list_is_rejected() {
+        let err = manifest_with_asset(
+            r#"
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = []
+        "#,
+        )
+        .expect_err("an asset must declare at least one accel");
+        assert!(format!("{err}").contains("accel"), "{err}");
+    }
+
+    #[test]
+    fn rocm_requires_gfx_and_forbids_it_elsewhere() {
+        let err = manifest_with_asset(
+            r#"
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = ["rocm"]
+        "#,
+        )
+        .expect_err("a rocm asset must list its gfx targets");
+        assert!(format!("{err}").contains("gfx"), "{err}");
+
+        let err = manifest_with_asset(
+            r#"
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = ["cpu"]
+            gfx = ["gfx1030"]
+        "#,
+        )
+        .expect_err("gfx is meaningless without rocm");
+        assert!(format!("{err}").contains("gfx"), "{err}");
+    }
+
+    #[test]
+    fn vulkan_api_is_allowed_only_with_vulkan() {
+        manifest_with_asset(
+            r#"
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = ["vulkan"]
+            vulkan_api = "1.2"
+        "#,
+        )
+        .expect("a vulkan asset may declare an api floor");
+
+        let err = manifest_with_asset(
+            r#"
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = ["cpu"]
+            vulkan_api = "1.2"
+        "#,
+        )
+        .expect_err("vulkan_api without vulkan is a contradiction");
+        assert!(format!("{err}").contains("vulkan"), "{err}");
+    }
+
+    #[test]
+    fn cuda_fields_are_gated_on_accel_containing_cuda() {
+        manifest_with_asset(
+            r#"
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = ["cuda", "rocm"]
+            cuda_major = 12
+            cuda_sm = 86
+            gfx = ["gfx1030"]
+        "#,
+        )
+        .expect("a dual asset may carry both vendors' discriminators");
+
+        let err = manifest_with_asset(
+            r#"
+            file = "y.tar.gz"
+            target = "x86_64-unknown-linux-gnu"
+            accel = ["rocm"]
+            gfx = ["gfx1030"]
+            cuda_sm = 86
+        "#,
+        )
+        .expect_err("cuda_sm without cuda is a contradiction");
+        assert!(format!("{err}").contains("cuda"), "{err}");
     }
 }
