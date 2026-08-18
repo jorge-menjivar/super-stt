@@ -12,13 +12,18 @@ use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 
 /// Normalize a backend-reported device label to the short wire-name
-/// (`"cpu"` / `"cuda"` / `"metal"` / `"remote"`) used in
-/// `daemon_status_changed` SSE payloads and on the `/active_device` endpoint.
+/// (`"cpu"` / `"cuda"` / `"rocm"` / `"metal"` / `"vulkan"` / `"remote"`) used
+/// in `daemon_status_changed` SSE payloads and on the `/active_device`
+/// endpoint.
 #[must_use]
 pub(crate) fn normalize_device(label: &str) -> String {
     let l = label.to_ascii_lowercase();
     if l.contains("cuda") {
         "cuda".to_string()
+    } else if l.contains("rocm") || l.contains("hip") {
+        "rocm".to_string()
+    } else if l.contains("vulkan") {
+        "vulkan".to_string()
     } else if l.contains("metal") {
         "metal".to_string()
     } else if l.contains("remote") {
@@ -264,6 +269,19 @@ mod tests {
         assert_eq!(normalize_device("cuda:0"), "cuda");
         assert_eq!(normalize_device("Cuda(0)"), "cuda");
         assert_eq!(normalize_device("Metal(0)"), "metal");
+        assert_eq!(normalize_device("remote"), "remote");
+        assert_eq!(normalize_device("cpu"), "cpu");
+        assert_eq!(normalize_device("anything else"), "cpu");
+    }
+
+    #[test]
+    fn normalize_device_maps_every_accel_label() {
+        assert_eq!(normalize_device("cuda:0"), "cuda");
+        assert_eq!(normalize_device("Cuda(0)"), "cuda");
+        assert_eq!(normalize_device("Metal(0)"), "metal");
+        assert_eq!(normalize_device("ROCm(0)"), "rocm");
+        assert_eq!(normalize_device("hip:0"), "rocm");
+        assert_eq!(normalize_device("Vulkan(0)"), "vulkan");
         assert_eq!(normalize_device("remote"), "remote");
         assert_eq!(normalize_device("cpu"), "cpu");
         assert_eq!(normalize_device("anything else"), "cpu");
