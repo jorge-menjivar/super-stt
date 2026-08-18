@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Detect the host's target triple, CUDA compute capability, runtime CUDA
-//! major version, and cuDNN presence. Used by `compat::select` to pick a
-//! compatible asset, and surfaced in the install failure error path.
+//! Detect the host's target triple and its accelerator capability — CUDA
+//! compute capability, runtime CUDA major version and cuDNN presence; the AMD
+//! architecture targets and `ROCm` userspace release; the Vulkan runtime's API
+//! version. Used by `compat::select` to pick a compatible asset, and surfaced
+//! in the install failure error path.
 
 #[derive(Debug, Clone)]
 pub struct Host {
     pub target_triple: String,
     pub cuda: Option<CudaHost>,
+    pub rocm: Option<RocmHost>,
+    pub vulkan: Option<VulkanHost>,
 }
 
 #[derive(Debug, Clone)]
@@ -18,12 +22,72 @@ pub struct CudaHost {
     pub cudnn_present: bool,
 }
 
+/// The host's AMD compute capability.
+#[derive(Debug, Clone)]
+pub struct RocmHost {
+    /// Every AMD GPU's architecture target, from KFD sysfs. Non-empty; the
+    /// whole struct is `None` when the host has no AMD compute node.
+    ///
+    /// A `Vec` because `gpu_probe::detect()` reports every GPU, unlike
+    /// `cuda_host()`, which documents itself as device 0 only.
+    pub gfx_targets: Vec<gpu_probe::GfxTarget>,
+    /// Installed `ROCm` userspace release, when one was found. Diagnostic
+    /// only — see [`rocm_capability`].
+    pub version: Option<gpu_probe::RocmVersion>,
+}
+
+/// The host's Vulkan runtime.
+#[derive(Debug, Clone)]
+pub struct VulkanHost {
+    pub api_version: gpu_probe::VulkanVersion,
+}
+
 #[must_use]
 pub fn detect() -> Host {
+    let gpus = gpu_probe::detect();
+    let gfx_targets: Vec<gpu_probe::GfxTarget> = gpus
+        .iter()
+        .filter_map(|g| g.arch_target.and_then(gpu_probe::ArchTarget::gfx))
+        .collect();
     Host {
         target_triple: target_triple().into(),
         cuda: detect_cuda(),
+        rocm: rocm_capability(&gfx_targets, gpu_probe::rocm_host().map(|h| h.version)),
+        vulkan: gpu_probe::vulkan_host().map(|h| VulkanHost {
+            api_version: h.api_version,
+        }),
     }
+}
+
+/// Assemble the AMD capability record from the two independent facts about it.
+///
+/// The architecture targets decide. `gpu_probe::rocm_host()` reads
+/// `$ROCM_PATH/.info/version` falling back to `/opt/rocm`, and its own
+/// documentation is explicit that `None` is a weak negative: a distro
+/// packaging `ROCm` into `/usr`, or a container carrying only the runtime
+/// libraries, reports `None` while working. Subprocess backends compound this
+/// — they typically bundle their runtime in the release tarball, so the host
+/// needs no `ROCm` install at all.
+///
+/// Gating on the version would therefore refuse a working asset on a working
+/// machine. The gfx target has no such problem: KFD publishes it from the
+/// `amdgpu` kernel driver, and it is exactly what a HIP code object must be
+/// built for. So the version rides along for logging and for the
+/// incompatibility reason, and never decides anything.
+///
+/// Its own function because that asymmetry is the whole point and a caller
+/// re-deriving it would get it wrong.
+fn rocm_capability(
+    gfx_targets: &[gpu_probe::GfxTarget],
+    version: Option<gpu_probe::RocmVersion>,
+) -> Option<RocmHost> {
+    if gfx_targets.is_empty() {
+        return None;
+    }
+    Some(RocmHost {
+        gfx_targets: gfx_targets.to_vec(),
+        version,
+    })
 }
 
 /// Compile-time host triple. The daemon binary is built for one target,
@@ -88,7 +152,7 @@ fn detect_cudnn() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::pack_sm;
+    use super::{detect, pack_sm, rocm_capability};
 
     /// `compat::select` compares this packed integer against an asset's
     /// `cuda_sm`, so the encoding is a contract with the registry metadata, not
@@ -103,5 +167,36 @@ mod tests {
         // minor must not lose its place: 9.0 is 90, never 9.
         assert_eq!(pack_sm(9, 0), 90);
         assert_eq!(pack_sm(12, 0), 120);
+    }
+
+    /// `rocm_host()` returning `None` is a weak negative — a distro shipping
+    /// ROCm into `/usr`, or a backend bundling its own runtime, both work
+    /// without `/opt/rocm`. The gfx target is the real signal: KFD publishes it
+    /// from the kernel driver with no ROCm userspace installed at all. So the
+    /// presence of gfx targets decides, and the version is carried only for
+    /// diagnostics.
+    #[test]
+    fn rocm_capability_is_keyed_on_gfx_targets_not_the_userspace_version() {
+        assert!(
+            rocm_capability(&[], Some(gpu_probe::RocmVersion::new(6, 2, 4))).is_none(),
+            "a ROCm install with no AMD compute node is not a usable host"
+        );
+        let host = rocm_capability(&[gpu_probe::GfxTarget::new(10, 3, 0)], None)
+            .expect("gfx targets alone make the host usable");
+        assert_eq!(host.gfx_targets, vec![gpu_probe::GfxTarget::new(10, 3, 0)]);
+        assert!(host.version.is_none());
+    }
+
+    #[test]
+    fn detect_never_panics_and_reports_this_host() {
+        // Environment-dependent: asserts invariants, not specific hardware.
+        let host = detect();
+        assert!(!host.target_triple.is_empty());
+        if let Some(rocm) = &host.rocm {
+            assert!(
+                !rocm.gfx_targets.is_empty(),
+                "a ROCm host must carry targets"
+            );
+        }
     }
 }

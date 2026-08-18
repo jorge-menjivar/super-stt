@@ -61,7 +61,7 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
         "compatible": true,
         "selected_asset": {
           "target": "x86_64-unknown-linux-gnu",
-          "accel": "cuda",
+          "accel": ["cuda"],
           "cuda_major": 12,
           "cuda_sm": 86,
           "cudnn": false
@@ -83,7 +83,7 @@ Per-entry fields beyond what `index.json` carries:
 - `compatibility.compatible` — `true` if a matching asset exists for this host.
 - `compatibility.selected_asset` — the asset the daemon would install. Only
   the selection axes (target/accel/cuda_*/cudnn) are reported; URL + hash are
-  internal.
+  internal. `accel` is an array, since one build may carry several runtimes.
 - `compatibility.reason` — present only when `compatible = false`. Human-readable.
 - `installed_version` — present if the backend is already installed on this
   host, regardless of its registry status. Read from the installed

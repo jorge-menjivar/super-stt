@@ -2824,10 +2824,9 @@ dependencies = [
 [[package]]
 name = "gpu-probe"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04f4ab092c87226808ad47c1e5559106c14d962243104f0fef3f29ad0e86e275"
 dependencies = [
  "nvml-wrapper",
+ "serde_json",
 ]
 
 [[package]]

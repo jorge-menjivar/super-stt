@@ -74,7 +74,10 @@ pub struct Compatibility {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SelectedAsset {
     pub target: String,
-    pub accel: String,
+    /// Acceleration backends the selected build carries. A registry payload
+    /// written before the list form carries a bare string, which still reads.
+    #[serde(deserialize_with = "super_stt_registry_types::index::one_or_many_string")]
+    pub accel: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cuda_major: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

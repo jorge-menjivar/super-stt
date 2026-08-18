@@ -16,6 +16,40 @@ pub enum Selection {
     Incompatible { reason: String },
 }
 
+/// Below this major version an AMD architecture's *stepping* is a whole
+/// generation rather than a variant, so the same-family fallback must not
+/// apply. `gfx900` (Vega 10), `gfx906` (Vega 20), `gfx908` (MI100) and
+/// `gfx90a` (MI200) all decode to major 9, minor 0 and are mutually
+/// incompatible; from `gfx10` on, steppings within a minor are ISA-compatible,
+/// which is what makes one `gfx1030` build serve the whole `gfx103x` line.
+pub const GFX_FAMILY_FLOOR: u32 = 10;
+
+/// Rank of an accel family. A native accel beats a portable one, which beats
+/// the CPU. CUDA and `ROCm` never compete: a host reports a compute capability
+/// or gfx targets, not both.
+const RANK_CPU: u8 = 0;
+const RANK_VULKAN: u8 = 1;
+const RANK_NATIVE: u8 = 2;
+
+/// Whether an asset's declared gfx target can run on a host's.
+///
+/// Exact always; same-family only from [`GFX_FAMILY_FLOOR`] up.
+fn gfx_runs_on(asset: super_stt_registry_types::arch::GfxSpec, host: gpu_probe::GfxTarget) -> bool {
+    if asset.major == host.major && asset.minor == host.minor && asset.step == host.step {
+        return true;
+    }
+    asset.major >= GFX_FAMILY_FLOOR && asset.major == host.major && asset.minor == host.minor
+}
+
+/// Whether an asset's declared gfx target is an exact hit, used to rank an
+/// exact match above one that relied on the family fallback.
+fn gfx_is_exact(
+    asset: super_stt_registry_types::arch::GfxSpec,
+    host: gpu_probe::GfxTarget,
+) -> bool {
+    asset.major == host.major && asset.minor == host.minor && asset.step == host.step
+}
+
 #[must_use]
 pub fn select(host: &Host, entry: &IndexBackend) -> Selection {
     if entry.kind == "wasm" {
@@ -46,47 +80,115 @@ pub fn select(host: &Host, entry: &IndexBackend) -> Selection {
         };
     }
 
-    // Capability-driven: if the host has a usable CUDA GPU, install the best
-    // matching CUDA asset. Independent of the runtime device preference — a
-    // CUDA build still runs on CPU when the user selects that device.
-    if let Some(cuda) = &host.cuda {
-        let cuda_matches: Vec<&(usize, &IndexSubprocessAsset)> = by_target
-            .iter()
-            .filter(|(_, a)| {
-                a.accel.iter().any(|s| s == "cuda")
-                    && (a.cuda_sm.is_none() || a.cuda_sm == Some(cuda.compute_capability))
-                    && a.cuda_major.is_some_and(|m| m <= cuda.runtime_major)
-            })
-            .collect();
-        // Preference: highest cuda_major; then exact-SM over wildcard; then cudnn.
-        let best = cuda_matches.iter().max_by_key(|(_, a)| {
-            (
-                a.cuda_major.unwrap_or(0),
-                u8::from(a.cuda_sm.is_some()),
-                u8::from(a.cudnn && cuda.cudnn_present),
-            )
-        });
-        if let Some(&&(idx, _)) = best {
-            return Selection::Subprocess { index: idx };
-        }
-        // Fall through to CPU.
-    }
-    // CPU fallback.
-    if let Some((idx, _)) = by_target
+    // Capability-driven: the most optimal asset the host can run. Independent
+    // of the runtime device preference — a GPU build still runs on CPU when
+    // the user selects that device.
+    // `reduce` keeping a strict improvement, not `max_by_key`: that returns the
+    // *last* maximum, and declaration order is the tiebreak this has always
+    // had — the CPU fallback was a `.find()`, so the first matching CPU asset
+    // won. Two equally-ranked assets must still resolve the same way.
+    let best = by_target
         .iter()
-        .find(|(_, a)| a.accel.iter().any(|s| s == "cpu"))
-    {
-        return Selection::Subprocess { index: *idx };
+        .filter_map(|(idx, a)| score(host, a).map(|s| (s, *idx)))
+        .reduce(|best, next| if next.0 > best.0 { next } else { best });
+    if let Some((_, idx)) = best {
+        return Selection::Subprocess { index: idx };
     }
     Selection::Incompatible {
-        reason: format!(
-            "no compatible asset for host `{}`, sm_{}",
-            host.target_triple,
-            host.cuda
-                .as_ref()
-                .map_or("?".into(), |c| c.compute_capability.to_string())
-        ),
+        reason: incompatible_reason(host),
     }
+}
+
+/// Rank an asset against the host, or `None` when it cannot run at all.
+///
+/// The tuple orders lexicographically, which is the whole preference policy:
+/// accel family first, then the family's own discriminators.
+fn score(host: &Host, a: &IndexSubprocessAsset) -> Option<(u8, u32, u8, u8)> {
+    let declares = |k: &str| a.accel.iter().any(|x| x == k);
+
+    if declares("cuda")
+        && let Some(cuda) = &host.cuda
+        && (a.cuda_sm.is_none() || a.cuda_sm == Some(cuda.compute_capability))
+        && a.cuda_major.is_some_and(|m| m <= cuda.runtime_major)
+    {
+        return Some((
+            RANK_NATIVE,
+            a.cuda_major.unwrap_or(0),
+            u8::from(a.cuda_sm.is_some()),
+            u8::from(a.cudnn && cuda.cudnn_present),
+        ));
+    }
+
+    if declares("rocm")
+        && let Some(rocm) = &host.rocm
+    {
+        let targets: Vec<_> = a
+            .gfx
+            .iter()
+            .filter_map(|g| g.parse::<super_stt_registry_types::arch::GfxSpec>().ok())
+            .collect();
+        let mut best: Option<u8> = None;
+        for host_target in &rocm.gfx_targets {
+            for asset_target in &targets {
+                if gfx_runs_on(*asset_target, *host_target) {
+                    let exact = u8::from(gfx_is_exact(*asset_target, *host_target));
+                    best = Some(best.map_or(exact, |b| b.max(exact)));
+                }
+            }
+        }
+        if let Some(exact) = best {
+            return Some((RANK_NATIVE, 0, exact, 0));
+        }
+    }
+
+    if declares("vulkan")
+        && let Some(vulkan) = &host.vulkan
+    {
+        let floor = a
+            .vulkan_api
+            .as_deref()
+            .and_then(|v| v.parse::<super_stt_registry_types::arch::VulkanApi>().ok());
+        let ok = floor.is_none_or(|f| {
+            (vulkan.api_version.major, vulkan.api_version.minor) >= (f.major, f.minor)
+        });
+        if ok {
+            return Some((RANK_VULKAN, 0, 0, 0));
+        }
+    }
+
+    if declares("cpu") {
+        return Some((RANK_CPU, 0, 0, 0));
+    }
+    None
+}
+
+/// The `Incompatible` reason, naming what the host offers so a user can see
+/// why nothing matched.
+fn incompatible_reason(host: &Host) -> String {
+    let mut caps = Vec::new();
+    if let Some(c) = &host.cuda {
+        caps.push(format!("sm_{}", c.compute_capability));
+    }
+    if let Some(r) = &host.rocm {
+        let targets: Vec<String> = r.gfx_targets.iter().map(ToString::to_string).collect();
+        // The userspace version is diagnostic only — it never gated selection,
+        // but it is the first thing to check when a ROCm asset was expected.
+        match r.version {
+            Some(v) => caps.push(format!("{} (ROCm {v})", targets.join(","))),
+            None => caps.push(format!("{} (no ROCm userspace found)", targets.join(","))),
+        }
+    }
+    if let Some(v) = &host.vulkan {
+        caps.push(format!("vulkan {}", v.api_version));
+    }
+    if caps.is_empty() {
+        caps.push("cpu only".into());
+    }
+    format!(
+        "no compatible asset for host `{}`: {}",
+        host.target_triple,
+        caps.join("; ")
+    )
 }
 
 #[must_use]
@@ -94,7 +196,7 @@ pub fn to_selected_asset(entry: &IndexBackend, sel: &Selection) -> Option<Select
     match sel {
         Selection::Wasm => entry.assets.wasm.as_ref().map(|_| SelectedAsset {
             target: String::new(),
-            accel: "wasm".into(),
+            accel: vec!["wasm".into()],
             cuda_major: None,
             cuda_sm: None,
             cudnn: false,
@@ -102,12 +204,7 @@ pub fn to_selected_asset(entry: &IndexBackend, sel: &Selection) -> Option<Select
         Selection::Subprocess { index } => {
             entry.assets.subprocess.get(*index).map(|a| SelectedAsset {
                 target: a.target.clone(),
-                // `SelectedAsset::accel` is still wire-singular; this
-                // selection logic only ever matches a single-accel asset
-                // (`cuda` or `cpu`), so the first entry is lossless today.
-                // Widening `accel` to a list, and the ROCm/Vulkan matching
-                // that needs it, is a later phase.
-                accel: a.accel.first().cloned().unwrap_or_default(),
+                accel: a.accel.clone(),
                 cuda_major: a.cuda_major,
                 cuda_sm: a.cuda_sm,
                 cudnn: a.cudnn,
@@ -173,6 +270,37 @@ mod tests {
         }
     }
 
+    fn sp_rocm(target: &str, gfx: &[&str]) -> IndexSubprocessAsset {
+        IndexSubprocessAsset {
+            target: target.into(),
+            accel: vec!["rocm".into()],
+            cuda_major: None,
+            cuda_sm: None,
+            cudnn: false,
+            gfx: gfx.iter().map(|g| (*g).to_string()).collect(),
+            vulkan_api: None,
+            url: Some("x".into()),
+            size: Some(1),
+            sha256: Some("x".into()),
+            parts: Vec::new(),
+        }
+    }
+
+    fn host_rocm(gfx: &[(u32, u32, u32)]) -> Host {
+        Host {
+            target_triple: "x86_64-unknown-linux-gnu".into(),
+            cuda: None,
+            rocm: Some(crate::registry::host_detect::RocmHost {
+                gfx_targets: gfx
+                    .iter()
+                    .map(|(a, b, c)| gpu_probe::GfxTarget::new(*a, *b, *c))
+                    .collect(),
+                version: None,
+            }),
+            vulkan: None,
+        }
+    }
+
     fn host_cuda(sm: u32, cm: u32, cudnn: bool) -> Host {
         Host {
             target_triple: "x86_64-unknown-linux-gnu".into(),
@@ -181,6 +309,8 @@ mod tests {
                 runtime_major: cm,
                 cudnn_present: cudnn,
             }),
+            rocm: None,
+            vulkan: None,
         }
     }
 
@@ -188,6 +318,8 @@ mod tests {
         Host {
             target_triple: "x86_64-unknown-linux-gnu".into(),
             cuda: None,
+            rocm: None,
+            vulkan: None,
         }
     }
 
@@ -400,6 +532,198 @@ mod tests {
             sel,
             Selection::Subprocess { index: 0 },
             "a cuda asset with no cuda_major must be ignored, not match every host"
+        );
+    }
+
+    #[test]
+    fn an_exact_gfx_target_matches() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                sp_rocm("x86_64-unknown-linux-gnu", &["gfx1030"]),
+            ],
+        );
+        assert_eq!(
+            select(&host_rocm(&[(10, 3, 0)]), &e),
+            Selection::Subprocess { index: 1 }
+        );
+    }
+
+    /// Steppings within a minor are ISA-compatible on RDNA — this is the
+    /// `HSA_OVERRIDE_GFX_VERSION=10.3.0` practice that makes one gfx1030 build
+    /// serve the whole gfx103x line.
+    #[test]
+    fn a_same_family_gfx_target_matches_on_rdna() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                sp_rocm("x86_64-unknown-linux-gnu", &["gfx1030"]),
+            ],
+        );
+        assert_eq!(
+            select(&host_rocm(&[(10, 3, 1)]), &e),
+            Selection::Subprocess { index: 1 },
+            "gfx1031 must take the gfx1030 build"
+        );
+        let e11 = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                sp_rocm("x86_64-unknown-linux-gnu", &["gfx1100"]),
+            ],
+        );
+        assert_eq!(
+            select(&host_rocm(&[(11, 0, 1)]), &e11),
+            Selection::Subprocess { index: 1 },
+            "gfx1101 must take the gfx1100 build"
+        );
+    }
+
+    /// On CDNA and Vega the *step* is a whole generation: gfx900 (Vega 10),
+    /// gfx906 (Vega 20), gfx908 (MI100) and gfx90a (MI200) all decode to
+    /// major 9, minor 0 while being mutually incompatible. An unguarded
+    /// family rule would hand an MI100 an MI200 build.
+    #[test]
+    fn the_family_fallback_does_not_apply_to_gfx9() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                sp_rocm("x86_64-unknown-linux-gnu", &["gfx90a"]),
+            ],
+        );
+        assert_eq!(
+            select(&host_rocm(&[(9, 0, 8)]), &e),
+            Selection::Subprocess { index: 0 },
+            "an MI100 must fall back to CPU, never take an MI200 build"
+        );
+        assert_eq!(
+            select(&host_rocm(&[(9, 0, 10)]), &e),
+            Selection::Subprocess { index: 1 },
+            "an exact gfx90a match is still fine"
+        );
+    }
+
+    #[test]
+    fn an_exact_gfx_match_outranks_a_family_match() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp_rocm("x86_64-unknown-linux-gnu", &["gfx1030"]),
+                sp_rocm("x86_64-unknown-linux-gnu", &["gfx1031"]),
+            ],
+        );
+        assert_eq!(
+            select(&host_rocm(&[(10, 3, 1)]), &e),
+            Selection::Subprocess { index: 1 }
+        );
+    }
+
+    #[test]
+    fn a_rocm_host_with_no_matching_gfx_falls_back_to_cpu() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                sp_rocm("x86_64-unknown-linux-gnu", &["gfx1100"]),
+            ],
+        );
+        assert_eq!(
+            select(&host_rocm(&[(10, 3, 0)]), &e),
+            Selection::Subprocess { index: 0 }
+        );
+    }
+
+    /// Declaration order breaks a tie. The CPU fallback used to be a `.find()`,
+    /// so the first matching asset won; scoring must not quietly move that to
+    /// the last one.
+    #[test]
+    fn equally_ranked_assets_resolve_to_the_first_declared() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+            ],
+        );
+        assert_eq!(select(&host_cpu(), &e), Selection::Subprocess { index: 0 });
+    }
+
+    #[test]
+    fn a_dual_runtime_asset_matches_on_either_host() {
+        let mut dual = sp_rocm("x86_64-unknown-linux-gnu", &["gfx1030"]);
+        dual.accel = vec!["cuda".into(), "rocm".into()];
+        dual.cuda_major = Some(12);
+        dual.cuda_sm = Some(86);
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                dual,
+            ],
+        );
+        assert_eq!(
+            select(&host_cuda(86, 12, false), &e),
+            Selection::Subprocess { index: 1 }
+        );
+        assert_eq!(
+            select(&host_rocm(&[(10, 3, 0)]), &e),
+            Selection::Subprocess { index: 1 }
+        );
+    }
+
+    #[test]
+    fn a_native_accel_outranks_vulkan_which_outranks_cpu() {
+        let mut vk = sp("x86_64-unknown-linux-gnu", "cpu", None, None, false);
+        vk.accel = vec!["vulkan".into()];
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+                vk.clone(),
+                sp_rocm("x86_64-unknown-linux-gnu", &["gfx1030"]),
+            ],
+        );
+        let mut host = host_rocm(&[(10, 3, 0)]);
+        host.vulkan = Some(crate::registry::host_detect::VulkanHost {
+            api_version: gpu_probe::VulkanVersion::new(1, 3, 0),
+        });
+        assert_eq!(
+            select(&host, &e),
+            Selection::Subprocess { index: 2 },
+            "rocm must win over vulkan"
+        );
+
+        let e_no_rocm = entry(
+            "subprocess",
+            vec![sp("x86_64-unknown-linux-gnu", "cpu", None, None, false), vk],
+        );
+        assert_eq!(
+            select(&host, &e_no_rocm),
+            Selection::Subprocess { index: 1 },
+            "vulkan must win over cpu"
+        );
+    }
+
+    #[test]
+    fn a_vulkan_asset_respects_its_api_floor() {
+        let mut vk = sp("x86_64-unknown-linux-gnu", "cpu", None, None, false);
+        vk.accel = vec!["vulkan".into()];
+        vk.vulkan_api = Some("1.3".into());
+        let e = entry(
+            "subprocess",
+            vec![sp("x86_64-unknown-linux-gnu", "cpu", None, None, false), vk],
+        );
+        let mut host = host_cpu();
+        host.vulkan = Some(crate::registry::host_detect::VulkanHost {
+            api_version: gpu_probe::VulkanVersion::new(1, 2, 0),
+        });
+        assert_eq!(
+            select(&host, &e),
+            Selection::Subprocess { index: 0 },
+            "a 1.2 host must not take a 1.3 build"
         );
     }
 
