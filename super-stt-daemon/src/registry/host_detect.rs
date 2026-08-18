@@ -53,9 +53,7 @@ pub fn detect() -> Host {
         target_triple: target_triple().into(),
         cuda: detect_cuda(),
         rocm: rocm_capability(&gfx_targets, gpu_probe::rocm_host().map(|h| h.version)),
-        vulkan: gpu_probe::vulkan_host().map(|h| VulkanHost {
-            api_version: h.api_version,
-        }),
+        vulkan: vulkan_capability(gpus.len(), gpu_probe::vulkan_host().map(|h| h.api_version)),
     }
 }
 
@@ -87,6 +85,38 @@ fn rocm_capability(
     Some(RocmHost {
         gfx_targets: gfx_targets.to_vec(),
         version,
+    })
+}
+
+/// Assemble the Vulkan capability record, gated on a GPU actually being here.
+///
+/// `gpu_probe::vulkan_host()` reads the loader and the installed ICD
+/// manifests, so it answers "is a Vulkan runtime installed", not "is there
+/// something worth running it on". Mesa's lavapipe is an ICD like any other
+/// and ships by default on many distributions, so a machine with no GPU at all
+/// reports a Vulkan runtime. Since a Vulkan asset outranks the CPU one, taking
+/// that at face value would download a GPU build and run inference through an
+/// LLVM software rasterizer — slower than the CPU build the host should have
+/// had, and possibly broken.
+///
+/// This is [`rocm_capability`]'s problem inverted. There a userspace fact
+/// produced false negatives, and the fix was to key on a hardware fact from
+/// the kernel; here a userspace fact produces false positives, and the fix is
+/// to require a hardware fact alongside it. So a detected GPU decides whether
+/// the reported API version means anything.
+///
+/// The trade is deliberate: a GPU-less host with a genuinely useful Vulkan
+/// compute setup is denied a Vulkan asset and gets the CPU build instead. That
+/// is the safe direction to be wrong in, and nothing ships Vulkan assets yet.
+fn vulkan_capability(
+    gpu_count: usize,
+    api_version: Option<gpu_probe::VulkanVersion>,
+) -> Option<VulkanHost> {
+    if gpu_count == 0 {
+        return None;
+    }
+    Some(VulkanHost {
+        api_version: api_version?,
     })
 }
 
@@ -152,7 +182,7 @@ fn detect_cudnn() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect, pack_sm, rocm_capability};
+    use super::{detect, pack_sm, rocm_capability, vulkan_capability};
 
     /// `compat::select` compares this packed integer against an asset's
     /// `cuda_sm`, so the encoding is a contract with the registry metadata, not
@@ -185,6 +215,26 @@ mod tests {
             .expect("gfx targets alone make the host usable");
         assert_eq!(host.gfx_targets, vec![gpu_probe::GfxTarget::new(10, 3, 0)]);
         assert!(host.version.is_none());
+    }
+
+    /// `vulkan_host()` answers "is a runtime installed", not "is there
+    /// something worth running it on" — Mesa's lavapipe is an ICD like any
+    /// other and ships by default on many distributions. A Vulkan asset
+    /// outranks the CPU one, so a GPU-less host reporting Vulkan would fetch a
+    /// GPU build and run it on a software rasterizer.
+    #[test]
+    fn vulkan_capability_requires_a_gpu_not_just_a_loader() {
+        assert!(
+            vulkan_capability(0, Some(gpu_probe::VulkanVersion::new(1, 3, 280))).is_none(),
+            "a loader with no GPU behind it is lavapipe, not a Vulkan host"
+        );
+        assert!(
+            vulkan_capability(1, None).is_none(),
+            "a GPU with no loader is not one either"
+        );
+        let host = vulkan_capability(1, Some(gpu_probe::VulkanVersion::new(1, 3, 280)))
+            .expect("a GPU plus a loader is a usable Vulkan host");
+        assert_eq!(host.api_version, gpu_probe::VulkanVersion::new(1, 3, 280));
     }
 
     #[test]
