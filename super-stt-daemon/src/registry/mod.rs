@@ -7,6 +7,7 @@ pub mod custom_repo;
 pub mod host_detect;
 pub mod index_schema;
 pub mod install;
+pub mod installed;
 pub mod local_dir;
 
 /// Re-export the shared operator-base-URL gate from `super-stt-forge` so the
