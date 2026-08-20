@@ -148,8 +148,3 @@
     lto = true
     panic = "abort"
     codegen-units = 1
-
-# Local override while the Vulkan probe is unreleased. Replaced by a pinned
-# `rev` on the git dependency once gpu-probe is pushed.
-[patch."https://github.com/jorge-menjivar/gpu-probe"]
-    gpu-probe = { path = "../gpu-probe" }
