@@ -37,6 +37,7 @@ and read only the fields for that variant; unknown variants should be ignored.
 | `device_switch_error`      | `error` (string), `failed_device` (string), `model` (string)                                |
 | `active_backend_changed`   | `source` (string, or `null` when the active backend was cleared)                            |
 | `settings_changed`         | `setting` (string — the name of what changed, e.g. `"language"`)                            |
+| `update_available`         | `latest_version` (string — the candidate release's tag, verbatim). Emitted when a check newly finds an available update or the candidate version changes; clients should refetch [`GET /update`](../endpoints/v1/update.md). |
 
 The destination device is named `target_device` on both `loading_model_for_device`
 and `switching_device` (previously `switching_device` used `to_device`). The
