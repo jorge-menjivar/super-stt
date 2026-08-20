@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-20T06:10:10Z",
+  "generated_at": "2026-08-20T07:33:25Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -204,7 +204,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         },
         {
@@ -212,7 +212,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         }
       ],
@@ -272,14 +272,14 @@
           "name": "voxtral-mini",
           "provider": "",
           "supported_devices": [
-            "cuda"
+            "gpu"
           ]
         },
         {
           "name": "voxtral-small",
           "provider": "",
           "supported_devices": [
-            "cuda"
+            "gpu"
           ]
         }
       ],
@@ -438,7 +438,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         },
         {
@@ -446,7 +446,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         },
         {
@@ -454,7 +454,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         },
         {
@@ -462,7 +462,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         },
         {
@@ -470,7 +470,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         },
         {
@@ -478,7 +478,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         },
         {
@@ -486,7 +486,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         },
         {
@@ -494,7 +494,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         },
         {
@@ -502,7 +502,7 @@
           "provider": "",
           "supported_devices": [
             "cpu",
-            "cuda"
+            "gpu"
           ]
         }
       ],

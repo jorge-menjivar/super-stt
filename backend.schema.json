@@ -386,22 +386,15 @@
       ]
     },
     "Device": {
-      "description": "A device a model can be loaded onto.",
-      "oneOf": [
-        {
-          "enum": [
-            "cpu",
-            "cuda",
-            "metal"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "none",
-          "description": "Sentinel for remote/online models with no local compute; must be the\nonly entry when present.",
-          "type": "string"
-        }
-      ]
+      "description": "A device a model can be loaded onto.\n\nOnly two local answers exist, because `registry::compat` has already chosen\nexactly one asset by the time this matters and that asset names its own\nruntimes: run on the CPU, or run on the accelerator the installed build\ntargets. Which accelerator that is — CUDA, `ROCm`, Metal, Vulkan — is a\nproperty of the asset, reported by `Accel`, not a choice made here.",
+      "enum": [
+        "cpu",
+        "gpu",
+        "none",
+        "cuda",
+        "metal"
+      ],
+      "type": "string"
     },
     "FileSpec": {
       "additionalProperties": false,
@@ -429,6 +422,10 @@
         "destination"
       ],
       "type": "object"
+    },
+    "GfxSpec": {
+      "description": "The AMD architecture a `ROCm`/HIP code object is built for, e.g. `gfx1030`.\n\nSpelled as `--offload-arch` spells it: a decimal major, then a single hex\ndigit each for minor and stepping. `gfx90a` is therefore\n`{ major: 9, minor: 0, step: 10 }`.\n\nOrdered `major` first, so targets within a vendor can be compared.",
+      "type": "string"
     },
     "Kind": {
       "description": "Transport a backend uses: a wasm32 component or a native executable.",
@@ -685,7 +682,17 @@
           "if": {
             "properties": {
               "accel": {
-                "const": "cuda"
+                "anyOf": [
+                  {
+                    "const": "cuda"
+                  },
+                  {
+                    "contains": {
+                      "const": "cuda"
+                    },
+                    "type": "array"
+                  }
+                ]
               }
             },
             "required": [
@@ -697,6 +704,71 @@
               "cuda_major"
             ]
           }
+        },
+        {
+          "else": {
+            "properties": {
+              "gfx": false
+            }
+          },
+          "if": {
+            "properties": {
+              "accel": {
+                "anyOf": [
+                  {
+                    "const": "rocm"
+                  },
+                  {
+                    "contains": {
+                      "const": "rocm"
+                    },
+                    "type": "array"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "accel"
+            ]
+          },
+          "then": {
+            "properties": {
+              "gfx": {
+                "minItems": 1
+              }
+            },
+            "required": [
+              "gfx"
+            ]
+          }
+        },
+        {
+          "else": {
+            "properties": {
+              "vulkan_api": false
+            }
+          },
+          "if": {
+            "properties": {
+              "accel": {
+                "anyOf": [
+                  {
+                    "const": "vulkan"
+                  },
+                  {
+                    "contains": {
+                      "const": "vulkan"
+                    },
+                    "type": "array"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "accel"
+            ]
+          },
+          "then": true
         },
         {
           "oneOf": [
@@ -716,16 +788,22 @@
       "description": "One `[[assets.subprocess]]` build variant.\n\nThe variant's `.tar.gz` is named by `file`, or — when it would exceed the\n2 GiB GitHub release-asset limit — by `parts`, whose byte-for-byte\nconcatenation in order is the archive. Exactly one of the two is set\n(enforced by [`Manifest::parse`]).",
       "properties": {
         "accel": {
-          "allOf": [
+          "oneOf": [
             {
               "$ref": "#/definitions/Accel"
+            },
+            {
+              "items": {
+                "$ref": "#/definitions/Accel"
+              },
+              "minItems": 1,
+              "type": "array"
             }
-          ],
-          "description": "Acceleration backend the build targets."
+          ]
         },
         "cuda_major": {
           "default": null,
-          "description": "CUDA major version this build targets. Required when\n`accel = \"cuda\"`, forbidden otherwise.",
+          "description": "CUDA major version this build targets. Required when `accel` contains\n`cuda`, forbidden otherwise.",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -735,7 +813,7 @@
         },
         "cuda_sm": {
           "default": null,
-          "description": "Compute capability (e.g. `75`, `86`, `90`, `120`). Omit to match any\ncompute capability — use for multi-architecture framework builds\n(e.g. a `PyTorch` wheel). An exact-SM asset is preferred over a\nwildcard when both match. Forbidden when `accel != \"cuda\"`.",
+          "description": "Compute capability (e.g. `75`, `86`, `90`, `120`). Omit to match any\ncompute capability — use for multi-architecture framework builds\n(e.g. a `PyTorch` wheel). An exact-SM asset is preferred over a\nwildcard when both match. Forbidden when `accel` lacks `cuda`.",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -745,7 +823,7 @@
         },
         "cudnn": {
           "default": false,
-          "description": "Whether this build links cuDNN. Allowed only when `accel = \"cuda\"`.\nDefault `false`.",
+          "description": "Whether this build links cuDNN. Allowed only when `accel` contains\n`cuda`. Default `false`.",
           "type": "boolean"
         },
         "file": {
@@ -755,6 +833,14 @@
             "string",
             "null"
           ]
+        },
+        "gfx": {
+          "default": [],
+          "description": "AMD architecture targets this build carries, in `--offload-arch`\nspelling. Required when `accel` contains `rocm`, forbidden otherwise.\n\nThere is no wildcard, deliberately breaking symmetry with `cuda_sm`:\nPTX gives CUDA a JIT path that makes \"any compute capability\" a true\nclaim, while HIP code objects are architecture-specific AMDGCN ISA with\nno equivalent. A wildcard would install a binary that fails at model\nload instead of falling back to CPU. Fat builds list every target they\nwere compiled for.",
+          "items": {
+            "$ref": "#/definitions/GfxSpec"
+          },
+          "type": "array"
         },
         "parts": {
           "default": [],
@@ -768,6 +854,18 @@
         "target": {
           "description": "Rust target triple, e.g. `x86_64-unknown-linux-gnu`. Tier-1/2 only;\nthe indexer rejects unknown triples.",
           "type": "string"
+        },
+        "vulkan_api": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VulkanApi"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum Vulkan API version this build requires. Allowed only when\n`accel` contains `vulkan`. There is no architecture field: SPIR-V is\nportable and driver-compiled."
         }
       },
       "required": [
@@ -775,6 +873,10 @@
         "accel"
       ],
       "type": "object"
+    },
+    "VulkanApi": {
+      "description": "A minimum Vulkan API version an asset requires, e.g. `1.3`.\n\nOrdered `major` first. Patch is deliberately absent: drivers advertise\nfeature levels at `major.minor`, and a patch floor would express a\nrequirement no build actually has.",
+      "type": "string"
     }
   },
   "description": "A backend's `backend.toml`: identity, packaging, network policy,\nsecrets/options, and the models it provides.",
