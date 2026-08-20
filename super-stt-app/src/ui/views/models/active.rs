@@ -15,9 +15,10 @@ use crate::ui::messages::{
 
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips, count_chip, requirement_warning,
+    backend_supports_gpu, capability_chips, count_chip, model_is_online, offered_devices,
+    requirement_warning,
 };
-use super::fmt::vram_warning;
+use super::fmt::{no_viable_device_warning, vram_warning};
 use super::status::unmet_requirements;
 use super::surface::{card_divider, card_surface};
 
@@ -307,8 +308,8 @@ pub(super) fn loaded_model_summary<'a>(
 
 /// Pure VRAM-fit check for a staged load: given the staged `device`, the
 /// model's conservative `estimated_vram_bytes`, and the primary GPU's
-/// available bytes, returns `(needed, available)` when a **CUDA** load looks
-/// too big to fit. `None` when the device isn't CUDA, the model declares no
+/// available bytes, returns `(needed, available)` when a **GPU** load looks
+/// too big to fit. `None` when the device isn't `gpu`, the model declares no
 /// estimate (online / unknown), no GPU memory is known, or it should fit.
 /// Kept free of [`AppModel`] so the rule is directly unit-testable.
 pub(super) fn vram_shortfall(
@@ -316,7 +317,7 @@ pub(super) fn vram_shortfall(
     estimated_vram_bytes: u64,
     gpu_available_bytes: Option<u64>,
 ) -> Option<(u64, u64)> {
-    if device != Some("cuda") || estimated_vram_bytes == 0 {
+    if device != Some("gpu") || estimated_vram_bytes == 0 {
         return None;
     }
     let available = gpu_available_bytes?;
@@ -343,9 +344,10 @@ pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Op
 /// Model + device pickers and the Load button, shown in the active-backend
 /// card when no model is loaded for this backend. Picking a model stages it
 /// (no daemon call); picking a device stages it too; the Load button
-/// commits both via `set_device` then `set_model`. For online models
-/// (`supported_devices == ["none"]`) the device dropdown is omitted — there
-/// is no local compute to pick.
+/// commits both via `set_device` then `set_model`. The device dropdown lists
+/// [`offered_devices`] — the model's declared devices narrowed by what the
+/// installed build can actually do — and is omitted whenever that list is
+/// empty: an online model, or a model with no viable device on this install.
 pub(super) fn staged_model_picker<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
@@ -371,16 +373,15 @@ pub(super) fn staged_model_picker<'a>(
         .align_y(Alignment::Center)
         .width(Length::Fill);
 
-    // Device dropdown — only when (a) a model is staged and (b) that model is
-    // not the online sentinel. A single-device model still shows the dropdown
-    // (read-only-ish, only one option) for visual consistency with the layout.
-    let staged_model_supports: Option<&[String]> = staged_model
-        .and_then(|m| backend.models.iter().find(|b| b.name == m))
-        .map(|m| m.supported_devices.as_slice());
-    let show_device_picker =
-        staged_model_supports.is_some_and(|devs| !(devs.len() == 1 && devs[0] == "none"));
+    // Device dropdown — only when a model is staged and this install can
+    // offer at least one device for it. `offered_devices` is already the
+    // model's `supported_devices` intersected with what the installed build
+    // can do, so an online model (offering nothing) and a GPU the install
+    // cannot use both fall out of the same check.
+    let staged_devices: Option<Vec<String>> = staged_model.map(|m| offered_devices(backend, m));
+    let show_device_picker = staged_devices.as_ref().is_some_and(|d| !d.is_empty());
     if show_device_picker {
-        let devices: Vec<String> = staged_model_supports.unwrap_or(&[]).to_vec();
+        let devices: Vec<String> = staged_devices.clone().unwrap_or_default();
         let device_index = app
             .models_page
             .staged_device
@@ -406,11 +407,18 @@ pub(super) fn staged_model_picker<'a>(
     }
 
     // Load button — enabled only when a model is staged AND (the staged
-    // device is set OR the model is the online-only `"none"` one, where
-    // there is no device to pick).
+    // device is set OR the staged model is the online sentinel, which needs
+    // no device at all). `offered_devices` reports empty for that case too,
+    // but also for a local model this install cannot run on any device (e.g.
+    // a GPU-only model with only a CPU asset installed) — the same defect
+    // class as the reported bug, just with no accelerator to fall back to.
+    // `model_is_online` is what tells the two apart; conflating them would
+    // enable Load with nothing to stage it onto, and `set_model` would then
+    // be sent straight onto whatever device happens to already be current.
+    let staged_online = staged_model.is_some_and(|m| model_is_online(backend, m));
+    let no_viable_device = !staged_online && staged_devices.as_ref().is_some_and(Vec::is_empty);
     let staged_ok = app.models_page.staged_model.is_some()
-        && (app.models_page.staged_device.is_some()
-            || staged_model_supports.is_some_and(|d| d == ["none".to_string()]));
+        && (app.models_page.staged_device.is_some() || staged_online);
     let load_button = button::suggested("Load model")
         .leading_icon(icons::phosphor_handle(icons::PLAY))
         .on_press_maybe(
@@ -419,9 +427,20 @@ pub(super) fn staged_model_picker<'a>(
         );
     picker_row = picker_row.push(load_button);
 
-    // A staged CUDA load whose conservative VRAM estimate exceeds the GPU's
-    // available memory gets an advisory yellow warning below the picker.
-    if let Some((needed, available)) = staged_vram_shortfall(backend, app) {
+    // Below the picker: either the "can't be loaded here" advisory for a
+    // staged model with no viable device (blocking — Load is already
+    // disabled above), or a staged GPU load whose conservative VRAM estimate
+    // exceeds the GPU's available memory (non-blocking). The two can't both
+    // fire — the VRAM check requires a staged `gpu` device, which
+    // `no_viable_device` rules out.
+    if no_viable_device {
+        column![
+            picker_row,
+            no_viable_device_warning(staged_model.unwrap_or_default())
+        ]
+        .spacing(spacing.space_xs)
+        .into()
+    } else if let Some((needed, available)) = staged_vram_shortfall(backend, app) {
         column![picker_row, vram_warning(needed, available)]
             .spacing(spacing.space_xs)
             .into()
@@ -488,19 +507,19 @@ pub(super) fn card_error(message: &str) -> Element<'_, Message> {
 
 #[cfg(test)]
 mod vram_shortfall_tests {
-    //! Pin the staged-load VRAM warning: it fires only for a CUDA target whose
-    //! conservative estimate exceeds the GPU's available memory. Anything else
-    //! — CPU/Metal, a fitting model, an online/unknown estimate of `0`, or no
-    //! GPU info — stays silent.
+    //! Pin the staged-load VRAM warning: it fires only for a `gpu` target
+    //! whose conservative estimate exceeds the GPU's available memory.
+    //! Anything else — CPU, a fitting model, an online/unknown estimate of
+    //! `0`, or no GPU info — stays silent.
     use super::*;
 
     const GIB: u64 = 1024 * 1024 * 1024;
 
-    /// A CUDA load bigger than available memory warns, echoing both amounts.
+    /// A GPU load bigger than available memory warns, echoing both amounts.
     #[test]
-    fn cuda_over_budget_warns_with_amounts() {
+    fn gpu_over_budget_warns_with_amounts() {
         assert_eq!(
-            vram_shortfall(Some("cuda"), 48 * GIB, Some(24 * GIB)),
+            vram_shortfall(Some("gpu"), 48 * GIB, Some(24 * GIB)),
             Some((48 * GIB, 24 * GIB)),
         );
     }
@@ -508,32 +527,28 @@ mod vram_shortfall_tests {
     /// A model that fits — including exactly filling memory — is silent; the
     /// check is strictly-greater.
     #[test]
-    fn cuda_within_budget_is_silent() {
-        assert_eq!(vram_shortfall(Some("cuda"), 8 * GIB, Some(24 * GIB)), None);
-        assert_eq!(vram_shortfall(Some("cuda"), 24 * GIB, Some(24 * GIB)), None);
+    fn gpu_within_budget_is_silent() {
+        assert_eq!(vram_shortfall(Some("gpu"), 8 * GIB, Some(24 * GIB)), None);
+        assert_eq!(vram_shortfall(Some("gpu"), 24 * GIB, Some(24 * GIB)), None);
     }
 
     /// Online / unknown models declare a `0` estimate and never warn.
     #[test]
     fn zero_estimate_is_silent() {
-        assert_eq!(vram_shortfall(Some("cuda"), 0, Some(GIB)), None);
+        assert_eq!(vram_shortfall(Some("gpu"), 0, Some(GIB)), None);
     }
 
-    /// The warning is CUDA-specific — CPU, Metal, and an unset device stay
-    /// silent even when the estimate exceeds memory.
+    /// The warning is GPU-specific — CPU and an unset device stay silent
+    /// even when the estimate exceeds memory.
     #[test]
-    fn non_cuda_devices_are_silent() {
+    fn non_gpu_devices_are_silent() {
         assert_eq!(vram_shortfall(Some("cpu"), 48 * GIB, Some(24 * GIB)), None);
-        assert_eq!(
-            vram_shortfall(Some("metal"), 48 * GIB, Some(24 * GIB)),
-            None
-        );
         assert_eq!(vram_shortfall(None, 48 * GIB, Some(24 * GIB)), None);
     }
 
     /// Without known GPU memory there's nothing to judge fit against.
     #[test]
     fn no_gpu_info_is_silent() {
-        assert_eq!(vram_shortfall(Some("cuda"), 48 * GIB, None), None);
+        assert_eq!(vram_shortfall(Some("gpu"), 48 * GIB, None), None);
     }
 }

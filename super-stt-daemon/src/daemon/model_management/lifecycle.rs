@@ -8,6 +8,13 @@ use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
 impl SuperSTTDaemon {
     /// Load a model on an explicit device (used during device switching).
     ///
+    /// `target_device` is the user's `cpu`/`gpu` preference; `instantiate_backend`
+    /// — the single funnel every load path (startup, model switch, device
+    /// switch, reload) goes through — resolves it into the concrete
+    /// accelerator (`cpu`/`cuda`/`rocm`/`metal`/`vulkan`) a subprocess backend
+    /// is actually handed on `POST /v1/load`, per
+    /// `docs/protocol/backend/contract.md`.
+    ///
     /// # Errors
     /// Returns an error if no backend serves the model or instantiation fails.
     pub async fn load_model_with_target_device(

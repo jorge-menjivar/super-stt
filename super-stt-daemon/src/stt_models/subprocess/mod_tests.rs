@@ -52,6 +52,32 @@ fn load_omits_provider_and_device_when_unset() {
     );
 }
 
+/// `device` carries the resolved accelerator, so the daemon sends it only
+/// when it has resolved one. A `cpu` preference always resolves — it is its
+/// own accelerator — and must keep reaching the backend, since that is what
+/// pins a load onto the CPU on a machine that has a GPU.
+#[test]
+fn load_sends_the_resolved_accelerator_and_never_the_bare_preference() {
+    for accel in ["cpu", "cuda", "rocm", "vulkan", "metal"] {
+        let body = load_body("whisper-tiny", None, accel);
+        assert_eq!(
+            body.get("device").and_then(serde_json::Value::as_str),
+            Some(accel),
+            "the resolved accelerator must reach the backend: {body}"
+        );
+    }
+    // What `resolve_accel` produces when it cannot name an accelerator — an
+    // install with no record, which is every backend installed before the
+    // record existed. `gpu` is the user's preference, and the contract says
+    // this field is not that; an absent `device` means "auto-select", which is
+    // the honest signal.
+    let unresolved = load_body("whisper-tiny", None, "");
+    assert!(
+        unresolved.get("device").is_none(),
+        "an unresolved accel must omit `device`, not send a preference: {unresolved}"
+    );
+}
+
 /// End-to-end over the real parser: the value reaching the wire is the one
 /// written in `backend.toml`. Guards the whole path, not just `load_body` —
 /// a `ModelEntry::provider` that stopped deserializing would leave the unit

@@ -94,22 +94,9 @@ impl AppModel {
 
             ModelsPageMessage::StageActiveModel(model) => {
                 // Stage the pick. The Load button reads `staged_model` /
-                // `staged_device` and only then calls the daemon. Default the
-                // device to the model's first supported entry (so a single-
-                // device model needs no extra click; multi-device models
-                // surface the dropdown).
+                // `staged_device` and only then calls the daemon.
                 let source = self.models_page.active_backend.clone();
-                let device = source.as_ref().and_then(|src| {
-                    self.backends
-                        .iter()
-                        .find(|b| &b.source == src)?
-                        .models
-                        .iter()
-                        .find(|m| m.name == model)?
-                        .supported_devices
-                        .first()
-                        .cloned()
-                });
+                let device = staged_default_device(&self.backends, source.as_deref(), &model);
                 self.models_page.staged_model = Some(model.clone());
                 self.models_page.staged_device = device;
                 // Fetch the per-model language block at selection time so the
@@ -351,6 +338,28 @@ impl AppModel {
     }
 }
 
+/// The device a freshly staged model starts on: the first device this install
+/// can actually offer for it, or `None` when it can offer none.
+///
+/// The narrowing is what makes `None` reachable, and `None` is what the Load
+/// button reads: a model declaring `gpu` on a backend whose installed asset is
+/// CPU-only can run on no device here, and staging one from the manifest would
+/// leave Load enabled next to the advisory saying so — sending a `set_device`
+/// that persists a GPU preference the user was just told is unusable. Seeding
+/// from the offered list also keeps the staged device inside the set the
+/// dropdown renders, so the picker never shows an unselected value.
+fn staged_default_device(
+    backends: &[crate::daemon::backends::BackendInfo],
+    source: Option<&str>,
+    model: &str,
+) -> Option<String> {
+    let source = source?;
+    let backend = backends.iter().find(|b| b.source == source)?;
+    crate::ui::views::models::offered_devices(backend, model)
+        .first()
+        .cloned()
+}
+
 /// What a Load click resolves to.
 #[derive(Debug, PartialEq, Eq)]
 enum StagedLoad {
@@ -373,7 +382,8 @@ enum StagedLoad {
 ///
 /// For online models (the `none` sentinel in `supported_devices`) there is no
 /// device to set; otherwise the staged device is sent only when it actually
-/// differs from the current one.
+/// differs from the current one, compared on the preference axis (see
+/// [`preference_axis`]).
 fn staged_load_device(
     backends: &[crate::daemon::backends::BackendInfo],
     source: &str,
@@ -393,15 +403,32 @@ fn staged_load_device(
         None
     } else {
         staged_device
-            .filter(|d| *d != "none" && *d != current_device)
+            .filter(|d| *d != "none" && preference_axis(d) != preference_axis(current_device))
             .map(ToString::to_string)
     };
     StagedLoad::Switch { device_to_set }
 }
 
+/// Collapse a device label onto the `cpu`/`gpu` axis the preference is
+/// expressed in.
+///
+/// A staged device is a preference (`set_device` takes `cpu` or `gpu`), while
+/// `current_device` is the accelerator that preference resolved to — `cuda` on
+/// an NVIDIA host. The two are only comparable here: raw, a staged `gpu` never
+/// equals a current `cuda`, so every GPU model switch resends the preference
+/// and the daemon unloads and reloads the running model on the same GPU before
+/// the model switch begins. A `gpu` preference that fell back to `cpu` still
+/// differs on this axis, so retrying the accelerator keeps working.
+fn preference_axis(device: &str) -> &str {
+    match device {
+        "cuda" | "rocm" | "metal" | "vulkan" => "gpu",
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{StagedLoad, staged_load_device};
+    use super::{StagedLoad, staged_default_device, staged_load_device};
     use crate::daemon::backends::{BackendInfo, BackendModel};
 
     fn backend(source: &str, model: &str, devices: &[&str]) -> BackendInfo {
@@ -411,6 +438,7 @@ mod tests {
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
             allowed_hosts: Vec::new(),
+            installed_accel: Vec::new(),
             models: vec![BackendModel {
                 name: model.to_string(),
                 provider: String::new(),
@@ -573,6 +601,160 @@ mod tests {
             StagedLoad::Switch {
                 device_to_set: None
             },
+        );
+    }
+
+    /// A staged `gpu` against a daemon already on CUDA is the *same* choice
+    /// spelled two ways: `set_device` takes the `cpu`/`gpu` preference, while
+    /// the current device is the accelerator that preference resolved to.
+    /// Comparing them raw makes every GPU model switch resend the preference,
+    /// which unloads the running model and reloads it on the same GPU before
+    /// the model switch even starts.
+    #[test]
+    fn a_staged_gpu_is_not_resent_to_a_daemon_already_on_an_accelerator() {
+        let installed = vec![backend(
+            "github.com/super-stt/whisper",
+            "whisper-tiny",
+            &["cpu", "gpu"],
+        )];
+        for current in ["cuda", "rocm", "metal", "vulkan", "gpu"] {
+            assert_eq!(
+                staged_load_device(
+                    &installed,
+                    "github.com/super-stt/whisper",
+                    "whisper-tiny",
+                    Some("gpu"),
+                    current
+                ),
+                StagedLoad::Switch {
+                    device_to_set: None
+                },
+                "current={current} is already the gpu preference"
+            );
+        }
+    }
+
+    /// The deliberate exception: a `gpu` preference that fell back to the CPU
+    /// still differs on the preference axis, so Load retries the accelerator.
+    #[test]
+    fn a_staged_gpu_is_resent_when_the_daemon_actually_fell_back_to_the_cpu() {
+        let installed = vec![backend(
+            "github.com/super-stt/whisper",
+            "whisper-tiny",
+            &["cpu", "gpu"],
+        )];
+        assert_eq!(
+            staged_load_device(
+                &installed,
+                "github.com/super-stt/whisper",
+                "whisper-tiny",
+                Some("gpu"),
+                "cpu"
+            ),
+            StagedLoad::Switch {
+                device_to_set: Some("gpu".to_string())
+            },
+        );
+        assert_eq!(
+            staged_load_device(
+                &installed,
+                "github.com/super-stt/whisper",
+                "whisper-tiny",
+                Some("cpu"),
+                "cuda"
+            ),
+            StagedLoad::Switch {
+                device_to_set: Some("cpu".to_string())
+            },
+        );
+    }
+
+    fn backend_with_accel(devices: &[&str], installed_accel: &[&str]) -> Vec<BackendInfo> {
+        let mut b = backend("github.com/super-stt/voxtral", "voxtral-mini", devices);
+        b.installed_accel = installed_accel.iter().map(|a| (*a).to_string()).collect();
+        vec![b]
+    }
+
+    /// The reported bug, on the staging path: a GPU-only model on an install
+    /// that resolved to a CPU asset can run on nothing here. Staging must
+    /// leave the device unset, because that is the only thing standing
+    /// between the "needs a device this install doesn't have" advisory and a
+    /// Load button that would happily persist an unusable GPU preference.
+    #[test]
+    fn a_gpu_only_model_on_a_cpu_install_stages_no_device() {
+        let installed = backend_with_accel(&["gpu"], &["cpu"]);
+        assert_eq!(
+            staged_default_device(
+                &installed,
+                Some("github.com/super-stt/voxtral"),
+                "voxtral-mini"
+            ),
+            None,
+        );
+    }
+
+    /// Same root cause, quieter symptom: a model declaring `["gpu", "cpu"]`
+    /// on a CPU-only install can run — on the CPU. Seeding from the manifest
+    /// stages `gpu`, which is not in the offered list, so the dropdown renders
+    /// with nothing selected while Load sends a device the install cannot use.
+    /// The staged device must always be one the picker actually offers.
+    #[test]
+    fn a_gpu_first_model_on_a_cpu_install_stages_the_cpu() {
+        let installed = backend_with_accel(&["gpu", "cpu"], &["cpu"]);
+        let staged = staged_default_device(
+            &installed,
+            Some("github.com/super-stt/voxtral"),
+            "voxtral-mini",
+        );
+        assert_eq!(staged, Some("cpu".to_string()));
+        assert!(
+            crate::ui::views::models::offered_devices(&installed[0], "voxtral-mini")
+                .contains(&staged.expect("staged")),
+            "the staged device must be one the picker offers"
+        );
+    }
+
+    /// With an accelerated asset installed, the model's first device is staged
+    /// as before — the narrowing only removes what this install cannot do.
+    #[test]
+    fn an_accelerated_install_stages_the_models_first_device() {
+        let installed = backend_with_accel(&["gpu", "cpu"], &["cuda"]);
+        assert_eq!(
+            staged_default_device(
+                &installed,
+                Some("github.com/super-stt/voxtral"),
+                "voxtral-mini"
+            ),
+            Some("gpu".to_string()),
+        );
+    }
+
+    /// An online model has no local device, and an unknown backend/model has
+    /// no answer at all — both stage nothing rather than guessing.
+    #[test]
+    fn an_online_or_unknown_model_stages_no_device() {
+        let online = backend_with_accel(&["none"], &[]);
+        assert_eq!(
+            staged_default_device(
+                &online,
+                Some("github.com/super-stt/voxtral"),
+                "voxtral-mini"
+            ),
+            None,
+        );
+        let installed = backend_with_accel(&["cpu"], &["cpu"]);
+        assert_eq!(
+            staged_default_device(&installed, None, "voxtral-mini"),
+            None,
+            "no active backend stages nothing"
+        );
+        assert_eq!(
+            staged_default_device(
+                &installed,
+                Some("github.com/super-stt/gone"),
+                "voxtral-mini"
+            ),
+            None,
         );
     }
 }

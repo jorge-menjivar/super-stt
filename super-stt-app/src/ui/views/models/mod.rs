@@ -33,6 +33,11 @@ pub use add_sheet::add_backend_sheet;
 pub use configure::configure_sheet;
 pub use load_sheet::load_backend_sheet;
 
+/// The device list the card's picker offers. Re-exported because staging a
+/// model has to seed the same list the dropdown will render — seeding from the
+/// raw manifest instead stages a device this install cannot use.
+pub(crate) use chips::offered_devices;
+
 /// Wrap a header readout (GPU meter / status) in a neutral "pill": a soft
 /// surface fill, hairline border, and fully-rounded corners, so the readouts
 /// read as discrete indicators rather than text floating in the title bar.

@@ -65,6 +65,54 @@ pub struct IndexBackend {
     pub manifest: Option<IndexAsset>,
 }
 
+/// Accept a bare string where a list is expected.
+///
+/// The index's leaf types stay loose `String`s on purpose — they must tolerate
+/// a carried-forward `index.json` — and that tolerance extends to the shape of
+/// this field, not just its values.
+///
+/// # Errors
+/// Returns the deserializer's error if the value is neither a string nor an
+/// array of strings.
+pub fn one_or_many_string<'de, D>(d: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(s) => vec![s],
+        OneOrMany::Many(v) => v,
+    })
+}
+
+/// Write a one-element list as a bare string, and a longer one as an array.
+///
+/// The counterpart to [`one_or_many_string`], and the reason the pair exists:
+/// `index.json` is a single shared artifact, rebuilt from `main` and served to
+/// every installed daemon at once. A client that declares this field as a
+/// plain `String` rejects the *whole* document when it turns into an array,
+/// which no version floor can soften — the parse fails before the floor is
+/// read. Emitting the scalar for the one-element case keeps the published
+/// bytes readable by those clients, and an array is written only where there
+/// is genuinely more than one value to carry.
+///
+/// # Errors
+/// Returns the serializer's error.
+pub fn one_or_many_string_ser<S>(v: &[String], s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match v {
+        [only] => s.serialize_str(only),
+        many => s.collect_seq(many),
+    }
+}
+
 /// `<host>/<owner>/<repo>` → `<repo>`. The install-dir name the daemon derives
 /// from a backend's `source` (custom-repo and local-dir installs). The registry
 /// indexer uses the maintainer-declared `id` instead, so this is only shared by
@@ -82,15 +130,15 @@ struct ModelSupport {
 }
 
 /// Classify a manifest's models by their [`Device`]s — the `none` sentinel
-/// marks online/remote models, `cuda`/`metal` mark GPU, `cpu` marks CPU. Devices
-/// are typed and validated by `Manifest::parse`, so there is no string matching
-/// to get wrong.
+/// marks online/remote models, `gpu` marks GPU, `cpu` marks CPU. Devices are
+/// typed and validated by `Manifest::parse`, so there is no string matching to
+/// get wrong.
 fn model_support(models: &[ModelEntry]) -> ModelSupport {
     let any_device =
         |pred: fn(&Device) -> bool| models.iter().any(|m| m.supported_devices.iter().any(pred));
     ModelSupport {
         online: models.iter().any(ModelEntry::is_online),
-        supports_gpu: any_device(|d| matches!(d, Device::Cuda | Device::Metal)),
+        supports_gpu: any_device(|d| matches!(d, Device::Gpu)),
         supports_cpu: any_device(|d| matches!(d, Device::Cpu)),
     }
 }
@@ -249,13 +297,28 @@ pub struct IndexAsset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexSubprocessAsset {
     pub target: String,
-    pub accel: String,
+    /// Acceleration backends the build carries. A single entry is both read
+    /// and written as a bare string, a list of two or more as an array — see
+    /// [`one_or_many_string_ser`] for why the published bytes keep the scalar
+    /// shape.
+    #[serde(
+        deserialize_with = "one_or_many_string",
+        serialize_with = "one_or_many_string_ser"
+    )]
+    pub accel: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cuda_major: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cuda_sm: Option<u32>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cudnn: bool,
+    /// AMD architecture targets, in `--offload-arch` spelling. Non-empty when
+    /// `accel` contains `rocm`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gfx: Vec<String>,
+    /// Minimum Vulkan API version as `major.minor`, when the build declares one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vulkan_api: Option<String>,
     /// Single-file archive pin. Present for a single-file variant; omitted when
     /// the archive is delivered as `parts`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -366,9 +429,8 @@ mod tests {
     }
 
     #[test]
-    fn classify_marks_gpu_for_cuda_or_metal() {
-        assert!(model_support(&[model(&[Device::Cuda])]).supports_gpu);
-        assert!(model_support(&[model(&[Device::Metal])]).supports_gpu);
+    fn classify_marks_gpu_for_gpu_device() {
+        assert!(model_support(&[model(&[Device::Gpu])]).supports_gpu);
         assert!(!model_support(&[model(&[Device::Cpu])]).supports_gpu);
     }
 
@@ -376,7 +438,7 @@ mod tests {
     fn classify_marks_cpu_only_for_cpu_device() {
         assert!(model_support(&[model(&[Device::Cpu])]).supports_cpu);
         assert!(!model_support(&[model(&[Device::None])]).supports_cpu);
-        assert!(!model_support(&[model(&[Device::Cuda])]).supports_cpu);
+        assert!(!model_support(&[model(&[Device::Gpu])]).supports_cpu);
     }
 
     #[test]
@@ -538,5 +600,125 @@ mod tests {
         }"#;
         let b: IndexBackend = serde_json::from_str(json).expect("missing license is tolerated");
         assert_eq!(b.license, "");
+    }
+
+    /// Indexes published before the list form carry `accel` as a bare string.
+    /// The daemon reads whatever is on the registry today, so both must parse.
+    #[test]
+    fn an_index_asset_parses_a_scalar_or_list_accel() {
+        let scalar: IndexSubprocessAsset = serde_json::from_str(
+            r#"{"target":"x86_64-unknown-linux-gnu","accel":"cuda","cuda_major":12}"#,
+        )
+        .expect("a scalar accel must parse");
+        assert_eq!(scalar.accel, vec!["cuda".to_string()]);
+
+        let list: IndexSubprocessAsset = serde_json::from_str(
+            r#"{"target":"x86_64-unknown-linux-gnu","accel":["cuda","rocm"],
+                "cuda_major":12,"gfx":["gfx1030"]}"#,
+        )
+        .expect("a list accel must parse");
+        assert_eq!(list.accel, vec!["cuda".to_string(), "rocm".to_string()]);
+        assert_eq!(list.gfx, vec!["gfx1030".to_string()]);
+    }
+
+    #[test]
+    fn an_index_asset_omits_empty_new_fields() {
+        let asset = IndexSubprocessAsset {
+            target: "x86_64-unknown-linux-gnu".into(),
+            accel: vec!["cpu".into()],
+            cuda_major: None,
+            cuda_sm: None,
+            cudnn: false,
+            gfx: Vec::new(),
+            vulkan_api: None,
+            url: Some("u".into()),
+            size: Some(1),
+            sha256: Some("s".into()),
+            parts: Vec::new(),
+        };
+        let json = serde_json::to_string(&asset).expect("serializes");
+        assert!(
+            !json.contains("gfx"),
+            "empty gfx must not be emitted: {json}"
+        );
+        assert!(
+            !json.contains("vulkan_api"),
+            "absent floor must not be emitted: {json}"
+        );
+    }
+
+    fn asset(accel: &[&str]) -> IndexSubprocessAsset {
+        IndexSubprocessAsset {
+            target: "x86_64-unknown-linux-gnu".into(),
+            accel: accel.iter().map(|a| (*a).to_string()).collect(),
+            cuda_major: None,
+            cuda_sm: None,
+            cudnn: false,
+            gfx: Vec::new(),
+            vulkan_api: None,
+            url: Some("u".into()),
+            size: Some(1),
+            sha256: Some("s".into()),
+            parts: Vec::new(),
+        }
+    }
+
+    /// `index.json` is one shared server-side artifact: the cron rebuild
+    /// replaces the document every installed daemon reads. Daemons through
+    /// v0.2.0 declare `accel` as a required `String` and reject the *whole*
+    /// document when it is an array, so a single-accel asset — which is every
+    /// asset a backend can publish — must still serialize as a bare string.
+    ///
+    /// This is the test that fails if the scalar form is dropped before those
+    /// daemons have rolled over.
+    #[test]
+    fn a_single_accel_asset_still_serializes_as_a_bare_string() {
+        let json = serde_json::to_string(&asset(&["cuda"])).expect("serializes");
+        assert!(
+            json.contains(r#""accel":"cuda""#),
+            "accel is no longer a bare string; daemons <= v0.2.0 cannot parse this index: {json}"
+        );
+    }
+
+    /// The scalar form is a compatibility shape, not a lossy one: a build
+    /// carrying two runtimes has no bare-string spelling, so it is written as
+    /// the array it is.
+    #[test]
+    fn a_multi_accel_asset_serializes_as_an_array() {
+        let json = serde_json::to_string(&asset(&["cuda", "rocm"])).expect("serializes");
+        assert!(
+            json.contains(r#""accel":["cuda","rocm"]"#),
+            "a multi-runtime build must keep its list: {json}"
+        );
+    }
+
+    /// The published bytes for the single case are parseable by the shape
+    /// deployed daemons declare — a plain required `String`, no leniency.
+    #[test]
+    fn a_single_accel_asset_parses_into_the_deployed_string_shape() {
+        #[derive(Deserialize)]
+        struct DeployedAsset {
+            #[allow(dead_code)]
+            target: String,
+            accel: String,
+        }
+        let json = serde_json::to_string(&asset(&["cuda"])).expect("serializes");
+        let deployed: DeployedAsset =
+            serde_json::from_str(&json).expect("a deployed daemon must still parse this");
+        assert_eq!(deployed.accel, "cuda");
+    }
+
+    /// Round-trip: whatever shape it was written in, this crate reads it back
+    /// as the same list.
+    #[test]
+    fn an_accel_list_round_trips_through_either_shape() {
+        for accel in [vec!["cuda"], vec!["cuda", "rocm"]] {
+            let json = serde_json::to_string(&asset(&accel)).expect("serializes");
+            let back: IndexSubprocessAsset = serde_json::from_str(&json).expect("round-trips");
+            assert_eq!(
+                back.accel,
+                accel.iter().map(|a| (*a).to_string()).collect::<Vec<_>>()
+            );
+        }
     }
 }

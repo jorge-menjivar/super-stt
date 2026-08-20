@@ -6,7 +6,7 @@ use log::{error, info, warn};
 use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
 
 impl SuperSTTDaemon {
-    /// Handle set device command - switch between CPU and CUDA
+    /// Handle set device command - switch between CPU and GPU
     pub async fn handle_set_device(&self, device: String) -> DaemonResponse {
         self.handle_set_device_impl(device).await
     }
@@ -22,10 +22,13 @@ impl SuperSTTDaemon {
             return DaemonResponse::error("Device switch rejected due to shutdown in progress");
         }
 
-        // Perform all validation checks
-        if let Some(early_return) = self.validate_device_switch_request(&device).await {
-            return early_return;
-        }
+        // Validate and normalize (`cuda`/`metal` → `gpu`) in one step, so
+        // everything downstream stores/threads `cpu`/`gpu` rather than the raw
+        // input the client sent.
+        let device = match self.validate_device_switch_request(&device).await {
+            Ok(device) => device,
+            Err(early_return) => return early_return,
+        };
 
         // No model is loaded → nothing to reload. Record the preference so the
         // next model load picks it up, and return. This makes the GPU toggle
@@ -115,40 +118,49 @@ impl SuperSTTDaemon {
             warn!("Failed to persist config after device preference update: {e}");
         }
         info!("Device preference updated to {device} (no model loaded — nothing to reload)");
+        let resolved_accel = self.resolved_accel(device).await;
+        let available_devices = self.probe_available_devices().await;
         DaemonResponse::success()
             .with_device(device.to_string())
+            .with_resolved_accel(resolved_accel)
+            .with_available_devices(available_devices)
             .with_message(format!(
                 "Device preference set to {device}. The next model load will use it."
             ))
     }
 
-    /// Validate device switch request and return early response if validation fails
-    async fn validate_device_switch_request(&self, device: &str) -> Option<DaemonResponse> {
-        // Validate device parameter. Emit the documented `400 invalid_device`
-        // code so clients can distinguish a bad request from a server failure
-        // (an uncoded error maps to 500) — audit 2 Tier 2 #7.
-        if device != "cpu" && device != "cuda" {
+    /// Validate and normalize a device switch request. `Ok` carries the
+    /// normalized `cpu`/`gpu` preference to thread through the rest of the
+    /// switch; `Err` is an early response the caller returns as-is, whether
+    /// that is a rejection or an already-satisfied no-op.
+    async fn validate_device_switch_request(&self, device: &str) -> Result<String, DaemonResponse> {
+        // Validate and normalize (`cuda`/`metal` → `gpu`). Emit the documented
+        // `400 invalid_device` code so clients can distinguish a bad request
+        // from a server failure (an uncoded error maps to 500) — audit 2 Tier 2 #7.
+        let Some(device) = parse_device_preference(device) else {
             warn!("Invalid device specified: {device}");
-            return Some(DaemonResponse::error_with_code(
+            return Err(DaemonResponse::error_with_code(
                 ErrorCode::InvalidDevice,
-                &format!("Invalid device '{device}'. Must be 'cpu' or 'cuda'"),
+                &format!("Invalid device '{device}'. Must be 'cpu' or 'gpu'"),
             ));
-        }
+        };
 
         // Check current preferred and actual devices
         let current_preferred = self.preferred_device.read().await.clone();
         let current_actual = self.actual_device.read().await.clone();
 
-        if current_preferred == device && current_actual == device {
+        if switch_is_satisfied(&current_preferred, &current_actual, &device) {
             info!(
                 "Device switch skipped - already using device: {device} (preferred: {current_preferred}, actual: {current_actual})"
             );
-            return Some(
-                DaemonResponse::success()
-                    .with_device(current_actual.clone())
-                    .with_message(format!("Already using device: {device}")),
-            );
-        } else if current_preferred == device && current_actual != device {
+            let resolved_accel = self.resolved_accel(&device).await;
+            let available_devices = self.probe_available_devices().await;
+            return Err(DaemonResponse::success()
+                .with_device(device.clone())
+                .with_resolved_accel(resolved_accel)
+                .with_available_devices(available_devices)
+                .with_message(format!("Already using device: {device}")));
+        } else if current_preferred == device {
             info!(
                 "Device preference is set to {device} but actual device is {current_actual} - forcing model reload"
             );
@@ -157,10 +169,10 @@ impl SuperSTTDaemon {
         // Prevent device switching during active recording.
         if let Some(resp) = self.guard_model_mutation("switch devices").await {
             warn!("Device switch rejected - recording in progress");
-            return Some(resp);
+            return Err(resp);
         }
 
-        None
+        Ok(device)
     }
 
     /// Get context needed for device switch
@@ -247,12 +259,7 @@ impl SuperSTTDaemon {
             warn!("Failed to persist config after device switch: {e}");
         }
 
-        let success_message = if actual_device != device && device == "cuda" {
-            "Device switch requested to CUDA, but fell back to CPU due to CUDA unavailability"
-                .to_string()
-        } else {
-            format!("Successfully switched to {actual_device} device")
-        };
+        let success_message = device_switch_message(device, &actual_device);
 
         info!("Device switch completed: {previous_device} -> {device} (actual: {actual_device})");
 
@@ -264,8 +271,12 @@ impl SuperSTTDaemon {
             preferred_device: Some(device.to_string()),
         });
 
+        let resolved_accel = self.resolved_accel(device).await;
+        let available_devices = self.probe_available_devices().await;
         DaemonResponse::success()
-            .with_device(actual_device)
+            .with_device(device.to_string())
+            .with_resolved_accel(resolved_accel)
+            .with_available_devices(available_devices)
             .with_message(success_message)
     }
 
@@ -360,6 +371,43 @@ impl SuperSTTDaemon {
         }
     }
 
+    /// Probe the host's device availability fresh, off the async runtime.
+    /// Shared by every `/active_device` response path so `available_devices`
+    /// never depends on which one produced the response.
+    async fn probe_available_devices(&self) -> Vec<String> {
+        let host = tokio::task::spawn_blocking(crate::registry::host_detect::detect)
+            .await
+            .unwrap_or_else(|_| crate::registry::host_detect::Host {
+                target_triple: String::new(),
+                cuda: None,
+                rocm: None,
+                vulkan: None,
+            });
+        host_available_devices(&host)
+    }
+
+    /// The documented `resolved_accel` rule: `"cpu"` needs no resolution — it
+    /// is always resolved. A `"gpu"` preference resolves only once a *local*
+    /// model has actually loaded onto it (an online model has nothing to
+    /// resolve locally either), reported via `self.actual_device`; until then
+    /// it is `None`, so a client is never told a device resolved before an
+    /// actual load event confirmed it.
+    async fn resolved_accel(&self, preferred_device: &str) -> Option<String> {
+        if preferred_device == "cpu" {
+            return Some("cpu".to_string());
+        }
+        let local_model_loaded = self
+            .model
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|loaded| !loaded.definition.is_online());
+        if !local_model_loaded {
+            return None;
+        }
+        Some(self.actual_device.read().await.clone())
+    }
+
     /// Handle get device command - return current device information
     pub async fn handle_get_device(&self) -> DaemonResponse {
         let preferred_device = self.preferred_device.read().await.clone();
@@ -367,21 +415,16 @@ impl SuperSTTDaemon {
 
         info!("Device status requested - preferred: {preferred_device}, actual: {actual_device}");
 
-        // The daemon offers both device preferences; whether CUDA is actually
-        // usable is decided by the GPU-resident backend at load time (it falls
-        // back to CPU if not).
-        let available_devices = vec!["cpu".to_string(), "cuda".to_string()];
+        // Answers for the host, not for any one model — probed fresh rather
+        // than assumed, so an AMD host is never offered a GPU it cannot use.
+        let available_devices = self.probe_available_devices().await;
+        let resolved_accel = self.resolved_accel(&preferred_device).await;
 
-        let message = if preferred_device != actual_device && preferred_device == "cuda" {
-            format!(
-                "Preferred device: CUDA, Actual device: {actual_device} (CUDA unavailable or failed)"
-            )
-        } else {
-            format!("Device: {actual_device} (preferred and actual match)")
-        };
+        let message = device_status_message(&preferred_device, &actual_device);
 
         DaemonResponse::success()
-            .with_device(actual_device)
+            .with_device(preferred_device)
+            .with_resolved_accel(resolved_accel)
             .with_available_devices(available_devices)
             .with_message(message)
     }
@@ -390,15 +433,97 @@ impl SuperSTTDaemon {
     /// blocking thread (NVML / sysfs / `system_profiler`) so it never stalls the
     /// async runtime. Best-effort: an empty list when no GPU is found.
     pub async fn handle_get_gpu_info() -> DaemonResponse {
-        let gpus = tokio::task::spawn_blocking(|| {
-            gpu_probe::detect()
+        let (gpus, host) = tokio::task::spawn_blocking(|| {
+            let gpus = gpu_probe::detect()
                 .into_iter()
                 .map(gpu_to_wire)
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (gpus, gpu_host_to_wire())
         })
         .await
         .unwrap_or_default();
-        DaemonResponse::success().with_gpu_info(gpus)
+        DaemonResponse::success()
+            .with_gpu_info(gpus)
+            .with_gpu_host_info(host)
+    }
+}
+
+/// The devices this host can offer.
+///
+/// Answers for the host, not for any one model: a client narrowing to a
+/// specific model intersects this with that model's `supported_devices` and
+/// the backend's `installed_accel` from `GET /backends`.
+pub(crate) fn host_available_devices(host: &crate::registry::host_detect::Host) -> Vec<String> {
+    let mut devices = vec!["cpu".to_string()];
+    if host.cuda.is_some() || host.rocm.is_some() || host.vulkan.is_some() {
+        devices.push("gpu".to_string());
+    }
+    devices
+}
+
+/// Collapse a device label onto the `cpu`/`gpu` axis the preference is
+/// expressed in.
+///
+/// Everything a client sets is a preference; everything the daemon records as
+/// *actual* is the accelerator that preference resolved to. The two are only
+/// comparable here — `remote` and anything unrecognized stay themselves, since
+/// neither is a local accelerator that a `gpu` preference could have produced.
+fn preference_axis(device: &str) -> &str {
+    match device {
+        "cuda" | "rocm" | "metal" | "vulkan" => "gpu",
+        other => other,
+    }
+}
+
+/// Whether a requested device switch is already in effect, and so has nothing
+/// to do.
+///
+/// The actual device is compared on the preference axis, because it is the
+/// accelerator the preference resolved to: a `gpu` request against a daemon
+/// already running on `cuda` is asking for what it already has, and reloading
+/// the model to grant it costs tens of seconds and a full VRAM churn for no
+/// change. A `gpu` preference that fell back to `cpu` still differs, so it is
+/// retried — which is the point of tracking preferred and actual separately.
+fn switch_is_satisfied(current_preferred: &str, current_actual: &str, requested: &str) -> bool {
+    current_preferred == requested && preference_axis(current_actual) == requested
+}
+
+/// The message a completed device switch reports.
+///
+/// Only a GPU request that genuinely landed on the CPU is a fallback; one that
+/// landed on an accelerator did exactly what was asked, whatever that
+/// accelerator is called.
+fn device_switch_message(requested: &str, actual_device: &str) -> String {
+    if requested == "gpu" && preference_axis(actual_device) == "cpu" {
+        "Device switch requested to GPU, but fell back to CPU: no usable accelerator".to_string()
+    } else {
+        format!("Successfully switched to {actual_device} device")
+    }
+}
+
+/// The message `GET /active_device` reports, drawing the same distinction as
+/// [`device_switch_message`].
+fn device_status_message(preferred_device: &str, actual_device: &str) -> String {
+    if preferred_device == "gpu" && preference_axis(actual_device) == "cpu" {
+        format!(
+            "Preferred device: GPU, Actual device: {actual_device} (no usable accelerator or load failed)"
+        )
+    } else {
+        format!("Device: {actual_device} (preference: {preferred_device})")
+    }
+}
+
+/// Normalize a requested device preference, or `None` when it is not one.
+///
+/// `cuda` and `metal` are accepted as deprecated spellings of `gpu` so clients
+/// shipped before this vocabulary keep working; `none` is a model property, not
+/// a preference a client may set, so it is rejected here even though
+/// `Device::from_str` parses it.
+pub(crate) fn parse_device_preference(device: &str) -> Option<String> {
+    match device.parse::<super_stt_registry_types::manifest::Device>() {
+        Ok(super_stt_registry_types::manifest::Device::Cpu) => Some("cpu".to_string()),
+        Ok(super_stt_registry_types::manifest::Device::Gpu) => Some("gpu".to_string()),
+        _ => None,
     }
 }
 
@@ -413,11 +538,231 @@ fn gpu_to_wire(gpu: gpu_probe::GpuInfo) -> super_stt_shared::models::protocol::G
         _ => "unknown",
     }
     .to_string();
+    let arch_target = arch_label(gpu.arch_target);
     super_stt_shared::models::protocol::GpuInfo {
         name: gpu.name,
         vendor,
         total_bytes: gpu.total_bytes,
         free_bytes: gpu.free_bytes,
         used_bytes: gpu.used_bytes,
+        arch_target,
+    }
+}
+
+/// Render a probed architecture target for the wire.
+///
+/// `ArchTarget`'s `Display` already emits each vendor's own spelling —
+/// `sm_86` for CUDA, `gfx1030` for `--offload-arch` — so this exists only to
+/// carry `None` through as `null` and to give that behavior a test, since
+/// `gpu_probe::GpuInfo` is `#[non_exhaustive]` and cannot be built here.
+fn arch_label(target: Option<gpu_probe::ArchTarget>) -> Option<String> {
+    target.map(|t| t.to_string())
+}
+
+/// Build the `/gpu_info` host block from `gpu-probe`'s raw toolchain probes.
+///
+/// Deliberately the *unfiltered* facts, unlike [`host_available_devices`] and
+/// the `Host` it reads: that path gates `vulkan` on a GPU actually being
+/// present, because a false positive there would make a lavapipe-only host
+/// download a GPU asset it should never run. `/gpu_info` is a read-only
+/// diagnostics endpoint that mutates nothing and drives no selection, so the
+/// safety concern that motivates that gate does not apply here — this reports
+/// whichever loader/toolchain is installed, full stop, the same way
+/// `host.rocm` already reports a `ROCm` userspace install with no claim about
+/// whether a GPU is behind it. A caller wanting "is there a real GPU here"
+/// already has that from `gpu_info[].vendor`.
+///
+/// [`host_available_devices`]: host_available_devices
+fn gpu_host_to_wire() -> super_stt_shared::models::protocol::GpuHostInfo {
+    use super_stt_shared::models::protocol::{
+        CudaHostInfo, GpuHostInfo, RocmHostInfo, VulkanHostInfo,
+    };
+    GpuHostInfo {
+        cuda: gpu_probe::cuda_host().map(|h| CudaHostInfo {
+            driver_version: h.driver_version.to_string(),
+        }),
+        rocm: gpu_probe::rocm_host().map(|h| RocmHostInfo {
+            version: h.version.to_string(),
+        }),
+        vulkan: gpu_probe::vulkan_host().map(|h| VulkanHostInfo {
+            api_version: h.api_version.to_string(),
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::host_detect::{Host, VulkanHost};
+
+    fn bare_host() -> Host {
+        Host {
+            target_triple: "x86_64-unknown-linux-gnu".into(),
+            cuda: None,
+            rocm: None,
+            vulkan: None,
+        }
+    }
+
+    /// The list used to be a constant `["cpu", "cuda"]`, which offered an AMD
+    /// host a device it could never resolve. It answers from the probe now.
+    #[test]
+    fn a_host_without_an_accelerator_offers_only_the_cpu() {
+        assert_eq!(
+            host_available_devices(&bare_host()),
+            vec!["cpu".to_string()]
+        );
+    }
+
+    #[test]
+    fn any_accelerator_adds_the_gpu() {
+        let mut cuda = bare_host();
+        cuda.cuda = Some(crate::registry::host_detect::CudaHost {
+            compute_capability: 86,
+            runtime_major: 13,
+            cudnn_present: false,
+        });
+        assert_eq!(
+            host_available_devices(&cuda),
+            vec!["cpu".to_string(), "gpu".to_string()]
+        );
+
+        let mut vulkan = bare_host();
+        vulkan.vulkan = Some(VulkanHost {
+            api_version: gpu_probe::VulkanVersion::new(1, 3, 0),
+        });
+        assert_eq!(
+            host_available_devices(&vulkan),
+            vec!["cpu".to_string(), "gpu".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_wire_setter_accepts_the_deprecated_spellings_and_rejects_junk() {
+        assert_eq!(parse_device_preference("gpu"), Some("gpu".to_string()));
+        assert_eq!(parse_device_preference("cuda"), Some("gpu".to_string()));
+        assert_eq!(parse_device_preference("metal"), Some("gpu".to_string()));
+        assert_eq!(parse_device_preference("cpu"), Some("cpu".to_string()));
+        assert_eq!(
+            parse_device_preference("rocm"),
+            None,
+            "an accel is not a device"
+        );
+        assert_eq!(parse_device_preference("none"), None, "not a preference");
+        assert_eq!(parse_device_preference("nonsense"), None);
+    }
+
+    #[test]
+    fn an_architecture_target_renders_in_the_vendors_own_spelling() {
+        assert_eq!(
+            arch_label(Some(gpu_probe::ArchTarget::Sm(
+                gpu_probe::ComputeCapability::new(8, 6)
+            ))),
+            Some("sm_86".to_string())
+        );
+        assert_eq!(
+            arch_label(Some(gpu_probe::ArchTarget::Gfx(gpu_probe::GfxTarget::new(
+                10, 3, 0
+            )))),
+            Some("gfx1030".to_string())
+        );
+    }
+
+    /// A GPU whose driver reports no target — an Apple or Intel part, or an
+    /// AMD card on a kernel without KFD — is `null`, never a placeholder
+    /// string a client would have to know to ignore.
+    #[test]
+    fn an_unreported_architecture_is_null() {
+        assert_eq!(arch_label(None), None);
+    }
+
+    /// A `gpu` preference and the accelerator it resolved to are the same
+    /// choice spelled on two axes. Comparing them raw makes the early return
+    /// unreachable on every GPU host, so a model switch that stages `gpu`
+    /// against a daemon already on CUDA unloads the running model and reloads
+    /// it on the same GPU — tens of seconds and a full VRAM churn — before the
+    /// model switch it was asked for even begins.
+    #[test]
+    fn a_switch_to_the_accelerator_already_in_use_has_nothing_to_do() {
+        for actual in ["cuda", "rocm", "metal", "vulkan", "gpu"] {
+            assert!(
+                switch_is_satisfied("gpu", actual, "gpu"),
+                "gpu preference already resolved to {actual}"
+            );
+        }
+        assert!(switch_is_satisfied("cpu", "cpu", "cpu"));
+    }
+
+    /// The deliberate exception the mapping must preserve: a `gpu` preference
+    /// that fell back to the CPU is *not* satisfied, so asking for it again
+    /// forces the retry.
+    #[test]
+    fn a_gpu_preference_that_fell_back_to_the_cpu_is_retried() {
+        assert!(!switch_is_satisfied("gpu", "cpu", "gpu"));
+        assert!(!switch_is_satisfied("cpu", "cpu", "gpu"));
+        assert!(!switch_is_satisfied("gpu", "cuda", "cpu"));
+    }
+
+    /// A GPU switch that landed on an accelerator succeeded; reporting a
+    /// fallback to CPU on every working GPU host tells the user their machine
+    /// failed when it did exactly what they asked.
+    #[test]
+    fn a_successful_gpu_switch_does_not_report_a_fallback() {
+        for actual in ["cuda", "rocm", "metal", "vulkan"] {
+            assert_eq!(
+                device_switch_message("gpu", actual),
+                format!("Successfully switched to {actual} device"),
+                "resolved to {actual}"
+            );
+        }
+        assert_eq!(
+            device_switch_message("cpu", "cpu"),
+            "Successfully switched to cpu device"
+        );
+    }
+
+    /// A GPU switch that really did land on the CPU still says so.
+    #[test]
+    fn a_gpu_switch_that_fell_back_says_so() {
+        assert_eq!(
+            device_switch_message("gpu", "cpu"),
+            "Device switch requested to GPU, but fell back to CPU: no usable accelerator"
+        );
+    }
+
+    /// `GET /active_device` reports the same distinction: a working GPU host
+    /// is not a failed one, and a remote model is on no local accelerator at
+    /// all — neither is "no usable accelerator".
+    #[test]
+    fn the_device_status_message_only_reports_a_real_fallback() {
+        assert_eq!(
+            device_status_message("gpu", "cuda"),
+            "Device: cuda (preference: gpu)"
+        );
+        assert_eq!(
+            device_status_message("cpu", "cpu"),
+            "Device: cpu (preference: cpu)"
+        );
+        assert_eq!(
+            device_status_message("gpu", "remote"),
+            "Device: remote (preference: gpu)"
+        );
+        assert_eq!(
+            device_status_message("gpu", "cpu"),
+            "Preferred device: GPU, Actual device: cpu (no usable accelerator or load failed)"
+        );
+    }
+
+    /// The mapping itself: every resolved accelerator collapses onto `gpu`,
+    /// and nothing else moves.
+    #[test]
+    fn every_accelerator_collapses_onto_the_gpu_preference() {
+        for accel in ["cuda", "rocm", "metal", "vulkan"] {
+            assert_eq!(preference_axis(accel), "gpu", "{accel}");
+        }
+        assert_eq!(preference_axis("gpu"), "gpu");
+        assert_eq!(preference_axis("cpu"), "cpu");
+        assert_eq!(preference_axis("remote"), "remote");
+        assert_eq!(preference_axis("unknown"), "unknown");
     }
 }

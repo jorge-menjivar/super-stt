@@ -63,8 +63,9 @@ unit. The backend cannot relax these restrictions; design against them:
 |-----------------------------------|----------------------------------------------------------------|
 | `PrivateNetwork=yes`              | No IP network of any kind. The Unix socket still works.        |
 | `ProtectSystem=strict`            | The entire filesystem is read-only …                           |
-| `ReadWritePaths=<backend dir>`    | … except the backend's own directory.                          |
-| `ProtectHome=yes`, `PrivateTmp=yes` | `$HOME` is inaccessible; `/tmp` is private.                  |
+| `ReadOnlyPaths=<backend dir>`     | … including the backend's own directory: the daemon provisions model files before the unit spawns, and the backend never writes there. |
+| `ReadWritePaths=<socket dir>`     | The socket directory is the only writable path granted.        |
+| `ProtectHome=read-only`, `PrivateTmp=yes` | `$HOME` is readable but not writable; `/tmp` is private and writable — put caches there. |
 | `NoNewPrivileges=yes`             | The process cannot acquire new privileges.                     |
 | `SystemCallFilter=@system-service` | A seccomp allowlist; privileged syscall groups are denied.    |
 | `PrivateDevices=yes`              | A private `/dev` with no GPU nodes, unless the model declares a GPU. |
@@ -75,18 +76,22 @@ Two consequences worth stating plainly:
   file a model needs is downloaded by the daemon (which has network) into
   the backend directory before `load`. This is why `allowed_hosts` must be
   empty for subprocess backends.
-- **GPU access is a deliberate hole.** Using CUDA or Metal requires exposing
-  the GPU device nodes, and the GPU driver is privileged kernel attack
-  surface. This is inherent to GPU compute and is not closed by the sandbox;
-  it is the reason untrusted, network-facing backends belong on the WASM
-  transport instead. The hole is opened only where it is needed, and the
-  manifest decides: a model whose `supported_devices` names `cuda` or `metal`
-  is spawned with the host `/dev`. A model that names neither — CPU-only, or
-  the `none` sentinel of a remote model — runs with a private `/dev` holding
-  only the pseudo-devices, so the GPU nodes are not there to open. The
-  sandbox is fixed when the unit spawns, which is before `load`, so the
-  `device` a load request asks for cannot widen it; declare every device the
-  model can use.
+- **GPU access is a deliberate hole.** Computing on an accelerator requires
+  exposing the GPU device nodes, and the GPU driver is privileged kernel
+  attack surface. This is inherent to GPU compute and is not closed by the
+  sandbox; it is the reason untrusted, network-facing backends belong on the
+  WASM transport instead. The hole is opened only where it is needed, and the
+  manifest decides: a model whose [`supported_devices`](./config.md#models)
+  names `gpu` is spawned with the GPU nodes bound in — NVIDIA's
+  `/dev/nvidia0`, `/dev/nvidiactl`, `/dev/nvidia-uvm` and
+  `/dev/nvidia-uvm-tools`, AMD's `/dev/kfd`, and every DRM render node
+  (`/dev/dri/renderD*`) present on the host, since the render minor a given
+  card answers on is not knowable in advance. A model that does not name
+  `gpu` — CPU-only, or the `none` sentinel of a remote model — runs with a
+  private `/dev` holding only the pseudo-devices, so the GPU nodes are not
+  there to open. The sandbox is fixed when the unit spawns, which is before
+  `load`, so the `device` a load request asks for cannot widen it; declare
+  every device the model can use.
 
 A subprocess backend whose CUDA kernels are multi-architecture (for example a
 bundled PyTorch wheel) may publish a single CUDA asset that omits `cuda_sm`;

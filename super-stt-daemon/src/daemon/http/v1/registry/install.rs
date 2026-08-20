@@ -222,7 +222,7 @@ fn select_install_compat(
         // Local-import path: placeholder selection; run_local ignores it.
         let asset = super_stt_shared::registry::SelectedAsset {
             target: String::new(),
-            accel: "local".into(),
+            accel: vec!["local".into()],
             cuda_major: None,
             cuda_sm: None,
             cudnn: false,

@@ -12,7 +12,7 @@ use thiserror::Error;
 use tokio::fs;
 
 use crate::download_stream::{StreamError, stream_body_to_writer};
-use crate::registry::compat::Selection;
+use crate::registry::compat::{self, Selection};
 use crate::registry::index_schema::{IndexAsset, IndexBackend};
 use super_stt_registry_types::verify::{
     MAX_MANIFEST_BYTES, sha256_matches, tar_budget_step, tar_entry_unsafe_reason, unpack_cap,
@@ -145,6 +145,13 @@ where
     fs::write(staging.join("backend.toml"), toml_text)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
+
+    // Record which variant this is. `backend.toml` lists them all, so without
+    // this the daemon cannot tell a CUDA install from a CPU one after the fact.
+    if let Some(selected) = compat::to_selected_asset(entry, selection) {
+        crate::registry::installed::write(&staging, &selected)
+            .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
+    }
 
     (p.on_progress)(P::Installing, None);
     let final_path = p.backends_dir.join(&entry.id);
@@ -320,12 +327,26 @@ fn copy_staged_backend(
         ));
     }
     std::fs::create_dir_all(dst)?;
-    for name in ["backend.toml", entrypoint] {
+    // `installed.json` is optional here: a plain local import never had an
+    // asset selection to record, so most source dirs won't carry one. When
+    // one is present — e.g. the source dir is itself a copy of a previously
+    // installed backend — carry it forward rather than dropping it.
+    let record_file = crate::registry::installed::RECORD_FILE;
+    for (name, required) in [
+        ("backend.toml", true),
+        (entrypoint, true),
+        (record_file, false),
+    ] {
         let from = src.join(name);
         let to = dst.join(name);
+        let meta = match from.symlink_metadata() {
+            Ok(meta) => meta,
+            Err(e) if !required && e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        };
         // Same policy as the tree copy: a link here would pull the target's
         // bytes into the install dir.
-        if from.symlink_metadata()?.file_type().is_symlink() {
+        if meta.file_type().is_symlink() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("refusing to import symlink entry: {}", from.display()),
@@ -838,6 +859,29 @@ supported_devices = ["cpu"]
             .collect();
         copied.sort();
         assert_eq!(copied, ["backend.toml", "y.wasm"]);
+    }
+
+    /// A source dir that is itself a copy of a previously installed backend
+    /// carries its `installed.json` forward instead of it being silently
+    /// dropped, the one entry in the allowlist that is optional rather than
+    /// required.
+    #[test]
+    fn local_import_carries_forward_an_existing_installed_json() {
+        let src = staged_checkout();
+        let record = br#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":["cuda"]}}"#;
+        std::fs::write(
+            src.path().join(crate::registry::installed::RECORD_FILE),
+            record,
+        )
+        .unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let out = dst.path().join("out");
+        copy_staged_backend(src.path(), &out, "wasm", "y.wasm").unwrap();
+
+        assert_eq!(
+            std::fs::read(out.join(crate::registry::installed::RECORD_FILE)).unwrap(),
+            record
+        );
     }
 
     /// A subprocess executable may need siblings no manifest field declares, so

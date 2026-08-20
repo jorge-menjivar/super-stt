@@ -119,7 +119,7 @@ processing_interval_ms = 2000
         vox.supported_devices,
         vec![
             super_stt_registry_types::manifest::Device::Cpu,
-            super_stt_registry_types::manifest::Device::Cuda
+            super_stt_registry_types::manifest::Device::Gpu
         ],
         "local model carries its declared supported_devices"
     );
@@ -481,7 +481,7 @@ processing_interval_ms = 1500
         def.supported_devices,
         vec![
             super_stt_registry_types::manifest::Device::Cpu,
-            super_stt_registry_types::manifest::Device::Cuda
+            super_stt_registry_types::manifest::Device::Gpu
         ]
     );
 
@@ -648,4 +648,21 @@ supported_devices = ["none"]
     // Only that option is touched; every other default is the author's to set.
     assert_eq!(opts[1].name, "region");
     assert!(opts[1].default.is_some());
+}
+
+/// The catalog has to carry what is installed, not what the manifest offers,
+/// or a client cannot tell a CUDA-capable backend that fell back to its CPU
+/// asset from one that did not.
+#[test]
+fn the_catalog_reports_the_installed_accel() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("installed.json"),
+        br#"{"selected":{"target":"x86_64-unknown-linux-gnu","accel":["cpu"]}}"#,
+    )
+    .expect("writes");
+    let accel = crate::registry::installed::read(dir.path())
+        .map(|r| r.selected.accel)
+        .unwrap_or_default();
+    assert_eq!(accel, vec!["cpu".to_string()]);
 }

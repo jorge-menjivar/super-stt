@@ -119,3 +119,26 @@ pub(super) fn vram_warning<'a>(needed: u64, available: u64) -> Element<'a, Messa
     .align_y(Alignment::Center)
     .into()
 }
+
+/// The advisory shown under the staged picker in place of a viable device: a
+/// local model whose `offered_devices` came back empty because this specific
+/// install cannot run it on any device (e.g. a GPU-only model with only a
+/// CPU asset installed), not because it needs none. Unlike [`vram_warning`]
+/// this one is blocking — the Load button is disabled while it shows, so a
+/// silently inert button doesn't ship with no explanation.
+pub(super) fn no_viable_device_warning<'a>(model: &str) -> Element<'a, Message> {
+    use crate::ui::icons;
+    use cosmic::iced::Alignment;
+    use cosmic::iced::widget::row;
+    use cosmic::widget::text;
+
+    row![
+        icons::phosphor_warning(icons::WARNING, 16.0),
+        text::body(format!(
+            "{model} needs a device this install doesn't have, so it can't be loaded here."
+        )),
+    ]
+    .spacing(cosmic::theme::spacing().space_xs)
+    .align_y(Alignment::Center)
+    .into()
+}

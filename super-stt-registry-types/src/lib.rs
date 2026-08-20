@@ -3,6 +3,7 @@
 //! `backend.toml` manifest and the maintainer-facing `registry.toml`.
 //! See `docs/protocol/backend/config.md`.
 
+pub mod arch;
 pub mod entry;
 pub mod forge;
 pub mod fs;

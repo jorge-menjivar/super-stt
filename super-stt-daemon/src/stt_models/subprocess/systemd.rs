@@ -120,9 +120,10 @@ pub(super) async fn spawn_systemd_unit(
 
 /// Whether a model that declares `devices` is granted the GPU device nodes.
 ///
-/// Exposing `/dev/nvidia*` hands the backend privileged kernel attack surface,
-/// so it is withheld from the models that provably cannot use it: those whose
-/// `supported_devices` name no GPU.
+/// Exposing the GPU device nodes (NVIDIA's `/dev/nvidia*`, AMD's `/dev/kfd`,
+/// and the DRM render nodes both share) hands the backend privileged kernel
+/// attack surface, so they are withheld from the models that provably cannot
+/// use them: those whose `supported_devices` name no GPU.
 ///
 /// The *runtime* device preference deliberately does not decide this. The
 /// sandbox is fixed when the unit spawns, which happens before `load` — at
@@ -133,9 +134,56 @@ pub(super) async fn spawn_systemd_unit(
 /// GPU-capable model keeps the nodes whether or not the user currently prefers
 /// the CPU — switching device must not depend on how the unit was spawned.
 fn needs_gpu_access(devices: &[Device]) -> bool {
-    devices
-        .iter()
-        .any(|d| matches!(d, Device::Cuda | Device::Metal))
+    devices.iter().any(|d| matches!(d, Device::Gpu))
+}
+
+/// Conventional first DRM render node, used when `/dev/dri` cannot be read.
+const FALLBACK_RENDER_NODE: &str = "/dev/dri/renderD128";
+
+/// The device nodes a GPU-capable backend is granted.
+///
+/// NVIDIA's nodes are fixed names. AMD reaches the driver through `/dev/kfd`
+/// (`ROCm`'s compute interface) plus a DRM render node, and Vulkan through the
+/// render node alone. The render minor is not derivable from the probe —
+/// `gpu_probe::GpuInfo` does not expose KFD's `drm_render_minor` — so every
+/// present node is granted rather than guessing one.
+fn gpu_device_nodes() -> Vec<String> {
+    gpu_device_nodes_in(Path::new("/dev/dri"))
+}
+
+/// [`gpu_device_nodes`], parameterized on the DRM directory so the
+/// enumeration/sort/fallback behavior is testable against a fixture
+/// directory instead of the real (and test-host-dependent) `/dev/dri`.
+fn gpu_device_nodes_in(dri_dir: &Path) -> Vec<String> {
+    let mut nodes: Vec<String> = [
+        "/dev/nvidia0",
+        "/dev/nvidiactl",
+        "/dev/nvidia-uvm",
+        "/dev/nvidia-uvm-tools",
+        "/dev/kfd",
+    ]
+    .iter()
+    .map(|n| format!("DeviceAllow={n} rw"))
+    .collect();
+
+    let mut render: Vec<String> = std::fs::read_dir(dri_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("renderD"))
+        })
+        .map(|p| format!("DeviceAllow={} rw", p.display()))
+        .collect();
+    render.sort();
+    if render.is_empty() {
+        render.push(format!("DeviceAllow={FALLBACK_RENDER_NODE} rw"));
+    }
+    nodes.extend(render);
+    nodes
 }
 
 /// The systemd sandbox directives applied to every spawned backend. Shared by
@@ -148,7 +196,10 @@ fn needs_gpu_access(devices: &[Device]) -> bool {
 /// - `PrivateTmp`, `NoNewPrivileges`, `SystemCallFilter=@system-service`.
 /// - `PrivateDevices` (models declaring no GPU): a private `/dev` holding just
 ///   the pseudo-devices, so the GPU nodes are not there to open.
-/// - `DevicePolicy=closed` + `DeviceAllow`: the intended device allowlist.
+/// - `DevicePolicy=closed` + `DeviceAllow`: the intended device allowlist —
+///   the NVIDIA nodes, `/dev/kfd` for `ROCm`, and every enumerated DRM render
+///   node (see [`gpu_device_nodes`]) — granted only when the spawned model
+///   declares GPU support.
 ///
 /// The device *cgroup* controller (`DevicePolicy`/`DeviceAllow`) is only
 /// enforced for system units — a per-user manager records the properties and
@@ -169,16 +220,7 @@ fn hardening_params(backend_dir: &Path, socket_dir: &Path, gpu_access: bool) -> 
         "DevicePolicy=closed".to_string(),
     ];
     if gpu_access {
-        params.extend(
-            [
-                "DeviceAllow=/dev/nvidia0 rw",
-                "DeviceAllow=/dev/nvidiactl rw",
-                "DeviceAllow=/dev/nvidia-uvm rw",
-                "DeviceAllow=/dev/nvidia-uvm-tools rw",
-                "DeviceAllow=/dev/dri/renderD128 rw",
-            ]
-            .map(String::from),
-        );
+        params.extend(gpu_device_nodes());
     } else {
         params.push("PrivateDevices=yes".to_string());
     }
@@ -188,7 +230,9 @@ fn hardening_params(backend_dir: &Path, socket_dir: &Path, gpu_access: bool) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{Device, hardening_params, needs_gpu_access};
+    use super::{
+        Device, FALLBACK_RENDER_NODE, gpu_device_nodes_in, hardening_params, needs_gpu_access,
+    };
     use std::path::{Path, PathBuf};
 
     /// A model that declares no GPU device must not be handed the GPU nodes.
@@ -212,40 +256,94 @@ mod tests {
         );
     }
 
-    /// The GPU path still gets every node CUDA needs, and must NOT get the
-    /// private `/dev` — that would hide the GPU from the one backend that
-    /// needs it, failing at model-load time as an opaque driver error rather
-    /// than as a permission problem.
+    /// The GPU path gets every node any supported runtime needs, and must NOT
+    /// get the private `/dev` — that would hide the GPU from the one backend
+    /// that needs it, failing at model-load time as an opaque driver error
+    /// rather than as a permission problem.
     #[test]
-    fn a_gpu_backend_gets_the_cuda_device_nodes() {
+    fn a_gpu_backend_gets_the_nodes_every_runtime_needs() {
         let params = hardening_params(Path::new("/backend"), Path::new("/sock"), true);
+        assert!(!params.iter().any(|p| p == "PrivateDevices=yes"));
         for node in [
             "DeviceAllow=/dev/nvidia0 rw",
             "DeviceAllow=/dev/nvidiactl rw",
             "DeviceAllow=/dev/nvidia-uvm rw",
             "DeviceAllow=/dev/nvidia-uvm-tools rw",
-            "DeviceAllow=/dev/dri/renderD128 rw",
+            // ROCm and Vulkan reach the AMD driver through KFD; without this a
+            // ROCm backend is sandboxed out of its own GPU.
+            "DeviceAllow=/dev/kfd rw",
         ] {
             assert!(params.iter().any(|p| p == node), "missing {node}");
         }
         assert!(
-            !params.iter().any(|p| p == "PrivateDevices=yes"),
-            "gpu backend was given a private /dev, hiding the GPU: {params:?}"
+            params
+                .iter()
+                .any(|p| p.starts_with("DeviceAllow=/dev/dri/renderD")),
+            "no DRM render node granted: {params:?}"
         );
     }
 
-    /// Pin the `supported_devices` → GPU-access mapping. A model keeps the
-    /// nodes if *any* declared device is a GPU, because the user may switch to
-    /// it after load; only a model that names no GPU at all — CPU-only, or the
-    /// `none` sentinel of a remote model — is spawned without them.
     #[test]
-    fn only_a_model_declaring_a_gpu_gets_gpu_access() {
+    fn gpu_access_follows_the_gpu_device() {
         assert!(!needs_gpu_access(&[Device::Cpu]));
         assert!(!needs_gpu_access(&[Device::None]));
         assert!(!needs_gpu_access(&[]));
-        assert!(needs_gpu_access(&[Device::Cuda]));
-        assert!(needs_gpu_access(&[Device::Metal]));
-        assert!(needs_gpu_access(&[Device::Cpu, Device::Cuda]));
+        assert!(needs_gpu_access(&[Device::Gpu]));
+        assert!(needs_gpu_access(&[Device::Cpu, Device::Gpu]));
+    }
+
+    /// The render minor is not knowable from the probe — `GpuInfo` does not
+    /// expose KFD's `drm_render_minor` — so the nodes are enumerated from a
+    /// real DRM directory rather than guessed. Driven through
+    /// `gpu_device_nodes_in` against a fixture directory: the real
+    /// `gpu_device_nodes()` reading the test host's actual `/dev/dri` would
+    /// let a hardcoded stub pass this test on any machine, and would make the
+    /// fallback/sort/multi-node cases untestable at all.
+    #[test]
+    fn render_nodes_are_enumerated_and_sorted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for name in ["renderD129", "renderD128", "card0", "by-path"] {
+            std::fs::write(dir.path().join(name), b"").expect("writes fixture entry");
+        }
+        let nodes = gpu_device_nodes_in(dir.path());
+        assert!(nodes.iter().any(|n| n.contains("/dev/kfd")));
+        let render: Vec<&String> = nodes.iter().filter(|n| n.contains("renderD")).collect();
+        assert_eq!(
+            render,
+            vec![
+                &format!("DeviceAllow={} rw", dir.path().join("renderD128").display()),
+                &format!("DeviceAllow={} rw", dir.path().join("renderD129").display()),
+            ],
+            "non-render entries must be filtered out and render nodes sorted: {nodes:?}"
+        );
+    }
+
+    /// An empty or unreadable DRM directory still yields a well-formed
+    /// policy: the conventional first render node, not zero `DeviceAllow`
+    /// lines for the GPU a unit was granted access to.
+    #[test]
+    fn render_nodes_fall_back_when_the_drm_directory_has_no_render_node() {
+        let empty = tempfile::tempdir().expect("tempdir");
+        let nodes = gpu_device_nodes_in(empty.path());
+        assert_eq!(
+            nodes.iter().filter(|n| n.contains("renderD")).count(),
+            1,
+            "empty dir must fall back to exactly one render node: {nodes:?}"
+        );
+        assert!(
+            nodes
+                .iter()
+                .any(|n| n == &format!("DeviceAllow={FALLBACK_RENDER_NODE} rw"))
+        );
+
+        let missing = empty.path().join("does-not-exist");
+        let nodes = gpu_device_nodes_in(&missing);
+        assert!(
+            nodes
+                .iter()
+                .any(|n| n == &format!("DeviceAllow={FALLBACK_RENDER_NODE} rw")),
+            "an unreadable dir must fall back too: {nodes:?}"
+        );
     }
 
     /// Verify the systemd sandbox actually *enforces* its restrictions: a probe

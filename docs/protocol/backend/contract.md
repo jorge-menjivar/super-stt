@@ -140,7 +140,7 @@ Content-Type: application/json
 | Field      | Type   | Required | Notes                                                          |
 |------------|--------|----------|----------------------------------------------------------------|
 | `name`     | string | yes      | A model `name` the backend declares in its configuration.           |
-| `device`   | string | no       | Preferred device: `cpu`, `cuda`, or `metal`. The backend may fall back; the actual device is reported by `GET /v1/status`. |
+| `device`   | string | no       | The resolved accelerator for this load: `cpu`, `cuda`, `rocm`, `metal`, or `vulkan`. This is the accelerator the installed asset actually targets, not the user's `cpu`/`gpu` preference — the daemon resolves that preference against the asset it selected, so a build carrying more than one runtime is told which one to use. The same resolution is what external clients see as `resolved_accel` on [`GET`/`POST /active_device`](../endpoints/v1/active_device.md). **Absent** when the daemon has no record of which accelerator the installed build targets — an install performed from a local directory, for instance — in which case the backend selects for itself. The backend may still fall back; the actual device is reported by `GET /v1/status`. |
 | `provider` | string | no       | Present only when the model declares [`provider`](./config.md#models) in its configuration, echoed back verbatim. Carries no meaning to the daemon. |
 
 > **Compatibility.** `provider` was part of model identity before it became
@@ -191,7 +191,7 @@ Host: backend.local
   "model": {               // present once a load has been requested
     "name": "whisper-tiny"
   },
-  "device":   "cuda",      // actual device in use: "cpu" | "cuda" | "metal"
+  "device":   "cuda",      // actual device in use: "cpu" | "cuda" | "rocm" | "metal" | "vulkan"
   "reason":   null         // machine-readable cause; set when state == "error"
 }
 ```
@@ -201,7 +201,7 @@ Host: backend.local
 | `state`    | string  | `starting` (spawned, no load yet), `loading`, `ready`, or `error`.          |
 | `progress` | number? | Load progress `0.0`–`1.0`; present only while `state` is `loading`.         |
 | `model`    | object? | The model being loaded or loaded; absent in `starting`.                     |
-| `device`   | string? | Device actually in use; present once `ready`.                               |
+| `device`   | string? | Device actually in use, one of `cpu`, `cuda`, `rocm`, `metal`, `vulkan`; present once `ready`. |
 | `reason`   | string? | Machine-readable failure cause; present only when `state` is `error`.       |
 
 `state` transitions:

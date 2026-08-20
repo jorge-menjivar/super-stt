@@ -278,9 +278,10 @@ wasm = "openai.wasm"   # filename on the release; must be a `wasm32` component
 ```
 
 Subprocess backends declare one entry per built variant. Selection axes are
-`target`, `accel`, and (when `accel = "cuda"`) `cuda_major`, `cuda_sm`, `cudnn`.
-Each variant names its archive with `file`, or with `parts` when the `.tar.gz`
-exceeds the 2 GiB release-asset limit (see [Multi-part assets](#multi-part-assets)).
+`target`, `accel`, and — gated on which accelerator(s) `accel` names —
+`cuda_major`/`cuda_sm`/`cudnn` (`cuda`), `gfx` (`rocm`), and `vulkan_api`
+(`vulkan`). Each variant names its archive with `file`, or with `parts` when
+the `.tar.gz` exceeds the 2 GiB release-asset limit (see [Multi-part assets](#multi-part-assets)).
 
 ```toml
 [[assets.subprocess]]
@@ -302,6 +303,28 @@ accel      = "cuda"
 cuda_major = 12
 cuda_sm    = 75
 cudnn      = true
+
+[[assets.subprocess]]
+file   = "voxtral-x86_64-unknown-linux-gnu-rocm.tar.gz"
+target = "x86_64-unknown-linux-gnu"
+accel  = "rocm"
+gfx    = ["gfx1030", "gfx1100", "gfx1101"]
+
+[[assets.subprocess]]
+file       = "voxtral-x86_64-unknown-linux-gnu-vulkan.tar.gz"
+target     = "x86_64-unknown-linux-gnu"
+accel      = "vulkan"
+vulkan_api = "1.3"
+
+# A build carrying more than one runtime — `accel` as an array — matches
+# either. Host matching then considers every accelerator listed.
+[[assets.subprocess]]
+file       = "voxtral-x86_64-unknown-linux-gnu-cuda-rocm.tar.gz"
+target     = "x86_64-unknown-linux-gnu"
+accel      = ["cuda", "rocm"]
+cuda_major = 12
+cuda_sm    = 75
+gfx        = ["gfx1030", "gfx1100"]
 ```
 
 | Field | Type | Required | Notes |
@@ -309,10 +332,12 @@ cudnn      = true
 | `file` | string | one of `file`/`parts` | Filename on the GitHub release. Subprocess: `.tar.gz`; wasm: `.wasm`. |
 | `parts` | array of strings | one of `file`/`parts` | **Subprocess only.** Ordered release filenames whose byte-for-byte concatenation is the variant's `.tar.gz`. Use instead of `file` when the archive would exceed the 2 GiB release-asset limit. See [Multi-part assets](#multi-part-assets). |
 | `target` | string | yes | Rust target triple. Tier-1/2 only; indexer rejects unknown. |
-| `accel` | string | yes | One of `"cpu"`, `"cuda"`, `"metal"`, `"rocm"`, `"vulkan"`. |
-| `cuda_major` | integer | for `accel = "cuda"` | CUDA major version this build targets. |
-| `cuda_sm` | integer | no | Compute capability (e.g. `75`, `86`, `90`). Omit to match **any** compute capability — use this for framework builds (e.g. a PyTorch wheel) whose kernels are multi-architecture. When both an exact-SM and a wildcard asset match a host, the exact-SM asset is preferred. |
-| `cudnn` | bool | no | Defaults `false`. Allowed only when `accel = "cuda"`. |
+| `accel` | string or array of strings | yes | A single value, or a non-empty array, drawn from `"cpu"`, `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"`. An array declares one build carrying more than one runtime (e.g. a llama.cpp binary built with both CUDA and HIP support); the build then matches a host that satisfies any of the accelerators listed. |
+| `gfx` | array of strings | for `accel` containing `rocm`; forbidden otherwise | AMD architecture targets in `--offload-arch` spelling (`"gfx1030"`, `"gfx90a"`). There is deliberately no wildcard: HIP code objects are architecture-specific AMDGCN ISA with no JIT path, so a build that does not list the host's target cannot run on it. A fat build lists every target it carries. |
+| `vulkan_api` | string | no; allowed only when `accel` contains `vulkan` | Minimum Vulkan API version this build requires, as `"major.minor"` (e.g. `"1.3"`). |
+| `cuda_major` | integer | for `accel` containing `cuda` | CUDA major version this build targets. |
+| `cuda_sm` | integer | no | Compute capability (e.g. `75`, `86`, `90`). Omit to match **any** compute capability — use this for framework builds (e.g. a PyTorch wheel) whose kernels are multi-architecture. When both an exact-SM and a wildcard asset match a host, the exact-SM asset is preferred. Allowed only when `accel` contains `cuda`. |
+| `cudnn` | bool | no | Defaults `false`. Allowed only when `accel` contains `cuda`. |
 
 A variant gives `file` **or** `parts`, never both (and `wasm` always uses a
 single `file`).
@@ -378,7 +403,7 @@ name                   = "whisper-tiny"
 multilingual           = true
 primary_language       = "en"
 supported_languages    = ["en", "es", "fr", "de", "zh"]  # abbreviated
-supported_devices      = ["cpu", "cuda"]
+supported_devices      = ["cpu", "gpu"]
 estimated_vram_bytes   = 262144000
 processing_interval_ms = 1000
 ```
@@ -389,7 +414,7 @@ processing_interval_ms = 1000
 | `multilingual`           | bool            | no       | Whether the model accepts more than one language. Default `true`. When `true`, `POST /v1/transcribe` accepts a `language` from `supported_languages`. |
 | `primary_language`       | string          | yes      | Default language code (e.g. `en`); used when `language` is omitted. |
 | `supported_languages`    | array of string | yes      | Language codes the model accepts; must include `primary_language`. When `multilingual` is `false`, it is exactly `[primary_language]`. |
-| `supported_devices`      | array of string | yes      | Devices the model can be loaded onto. Snake_case values from `["cpu", "cuda", "metal", "none"]`. `"none"` is the sentinel for remote/online models and must be the only entry when present. Non-empty. |
+| `supported_devices`      | array of string | yes      | Whether the model can use an accelerator at all — which accelerator an installed build actually targets is a property of the [asset](#assets), not the model. Non-empty, drawn from `["cpu", "gpu", "none"]`. `"cuda"` and `"metal"` are accepted input spellings for `"gpu"`; the daemon normalizes them and never emits them. `"none"` is the sentinel for remote/online models and must be the only entry when present. |
 | `estimated_vram_bytes`   | integer         | no       | Conservative GPU memory estimate. Default `0`; use `0` for cloud models. |
 | `processing_interval_ms` | integer         | no       | Suggested minimum interval between streaming passes, in ms.      |
 | `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. |
@@ -408,11 +433,16 @@ describe language capability. When `multilingual` is `true`,
 `supported_languages`; when omitted, `primary_language` is used. When
 `multilingual` is `false`, the model transcribes only `primary_language`.
 
-`supported_devices` declares which physical/virtual devices the model can be
-loaded onto. The settings app uses it to present the device choice at load
+`supported_devices` declares whether the model can use an accelerator at all.
+It says nothing about *which* accelerator — CUDA, ROCm, Vulkan — since one
+asset can serve several models and one of them may have no GPU path; that
+detail lives on the asset that ends up installed (see
+[`[[assets.subprocess]]`](#assets)) and is reported per-backend as
+`installed_accel` (see [`GET /backends`](../endpoints/v1/backends.md)). The
+settings app uses `supported_devices` to present the device choice at load
 time. `"none"` marks a remote/online model with no local compute; mixing
-`"none"` with any local device (`"cpu"` / `"cuda"` / `"metal"`) is a
-contradiction and the manifest is rejected.
+`"none"` with any local device (`"cpu"` / `"gpu"`) is a contradiction and the
+manifest is rejected.
 
 ### `[[models.files]]`
 
@@ -475,7 +505,7 @@ name                   = "whisper-tiny"
 multilingual           = true
 primary_language       = "en"
 supported_languages    = ["en", "es", "fr", "de", "zh"]  # abbreviated
-supported_devices      = ["cpu", "cuda"]
+supported_devices      = ["cpu", "gpu"]
 estimated_vram_bytes   = 262144000
 processing_interval_ms = 1000
 files = [
@@ -492,7 +522,7 @@ name                   = "voxtral-mini"
 multilingual           = true
 primary_language       = "en"
 supported_languages    = ["en", "es", "fr", "de", "zh"]  # abbreviated
-supported_devices      = ["cuda"]
+supported_devices      = ["gpu"]
 estimated_vram_bytes   = 8589934592
 processing_interval_ms = 2000
 
@@ -590,8 +620,9 @@ supported_devices   = ["none"]
   `multilingual` is `false`, `supported_languages` must be exactly
   `[primary_language]`.
 - `supported_devices` is required and non-empty for every model. Each entry
-  must be one of `cpu`, `cuda`, `metal`, `none`; the sentinel `none` (remote
-  / online model) must be the only entry when present. A backend whose
+  must be one of `cpu`, `gpu`, `none` — `cuda` and `metal` are accepted input
+  spellings normalized to `gpu` — and the sentinel `none` (remote / online
+  model) must be the only entry when present. A backend whose
   manifest violates any of these is skipped during discovery.
 - A `subprocess` backend that declares `[capabilities] websocket = true` is
   rejected at discovery — realtime WebSocket support is wasm-only.

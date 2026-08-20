@@ -250,10 +250,12 @@ fn subprocess_index_entry(
     };
     index_json::IndexSubprocessAsset {
         target: sa.target.clone(),
-        accel: sa.accel.to_string(),
+        accel: sa.accel.iter().map(ToString::to_string).collect(),
         cuda_major: sa.cuda_major,
         cuda_sm: sa.cuda_sm,
         cudnn: sa.cudnn,
+        gfx: sa.gfx.iter().map(ToString::to_string).collect(),
+        vulkan_api: sa.vulkan_api.map(|v| v.to_string()),
         url,
         size,
         sha256,
