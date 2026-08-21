@@ -25,6 +25,15 @@ fn tag_is_prerelease(tag: &str) -> bool {
     tag.contains('-')
 }
 
+/// The candidate tag to show/build messages around, falling back to a
+/// generic label when `status` is absent (a `Failed`/idle run can render
+/// while a fresh status hasn't loaded, e.g. right after `DismissRun`).
+fn tag_of(status: Option<&SelfUpdateStatus>) -> &str {
+    status
+        .and_then(|s| s.latest_version.as_deref())
+        .unwrap_or("the latest version")
+}
+
 /// The curl-bootstrap fallback shown when the daemon reports an update but
 /// published no installer asset for this host (unsupported arch, or the
 /// release simply lacks one).
@@ -124,21 +133,34 @@ fn settings_section(state: &UpdateState) -> Element<'_, Message> {
         .into()
 }
 
-/// The dynamic content of the Update section's single row: the idle CTA, the
-/// in-progress phase + byte progress + Cancel, the Done banner, or the
-/// Failed error — all keyed off `state.run`.
+/// The dynamic content of the Update section's single row: the idle CTA
+/// (gated on `update_available` and an installer asset), the in-progress
+/// phase and byte progress with Cancel, the Done banner, or the Failed
+/// error — keyed off `state.run` first, `status` only for the idle
+/// CTA/fallback text.
+///
+/// `run` always wins over the idle CTA, regardless of what `status` says
+/// right now: a `Done`/`Failed` run's own panel (Restart/Dismiss, or the
+/// error + Dismiss) must stay visible even after a post-update refetch
+/// reports `update_available: false` — see `update_section`'s gate and
+/// `handlers/update.rs::clear_run_on_status_refresh`.
 // reason: byte-count → progress-bar fraction is intentionally lossy/cosmetic.
 #[allow(clippy::cast_precision_loss)]
-fn update_body<'a>(state: &'a UpdateState, status: &'a SelfUpdateStatus) -> Element<'a, Message> {
-    let tag = status
-        .latest_version
-        .as_deref()
-        .unwrap_or("the latest version");
+fn update_body<'a>(
+    state: &'a UpdateState,
+    status: Option<&'a SelfUpdateStatus>,
+) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing().space_xs;
+    let tag = tag_of(status);
 
     let Some(run) = state.run.as_ref() else {
         // Idle: the CTA, or (no published asset for this host) the curl
-        // fallback caption in place of a live button.
+        // fallback caption in place of a live button. `update_section` only
+        // reaches this branch (no run) when `update_available` was true, so
+        // `status` is always populated here.
+        let Some(status) = status else {
+            return text::body("").into();
+        };
         return if status.installer_asset.is_some() {
             widget::button::suggested(format!("Update to {tag}"))
                 .on_press(Message::Update(UpdateMessage::StartUpdate))
@@ -166,12 +188,19 @@ fn update_body<'a>(state: &'a UpdateState, status: &'a SelfUpdateStatus) -> Elem
                     .align_y(Alignment::Center)
                     .spacing(spacing),
                 );
+                // A failed relaunch attempt (RestartApp's spawn erred) is
+                // surfaced here rather than silently exiting the app with
+                // nothing left running — see handlers/update.rs::RestartApp.
+                if let Some(err) = run.error.as_deref() {
+                    col = col.push(error_banner(err));
+                }
             }
-            col.into()
+            col.push(dismiss_button()).into()
         }
         RunPhase::Failed => column![
             error_banner(run.error.as_deref().unwrap_or("Update failed")),
             text::caption(curl_fallback_caption(tag)),
+            dismiss_button(),
         ]
         .spacing(spacing)
         .into(),
@@ -192,17 +221,33 @@ fn update_body<'a>(state: &'a UpdateState, status: &'a SelfUpdateStatus) -> Elem
     }
 }
 
-/// Update section: only rendered while `status.update_available`.
+/// The "Dismiss" button shown on a terminal (`Done`/`Failed`) run's panel —
+/// clears it without restarting, so the page returns to the idle CTA and a
+/// future `StartUpdate` isn't permanently blocked.
+fn dismiss_button<'a>() -> Element<'a, Message> {
+    widget::button::standard("Dismiss")
+        .on_press(Message::Update(UpdateMessage::DismissRun))
+        .into()
+}
+
+/// Update section: rendered whenever there's an in-flight/terminal run to
+/// show (independent of the current `update_available` flag — a `Done` run's
+/// Restart CTA must survive the post-update refetch that flips it to
+/// `false`), or the daemon currently reports an update available.
 fn update_section<'a>(
     state: &'a UpdateState,
-    status: &'a SelfUpdateStatus,
+    status: Option<&'a SelfUpdateStatus>,
 ) -> Option<Element<'a, Message>> {
-    status.update_available.then(|| {
+    let update_offered = status.is_some_and(|s| s.update_available);
+    if state.run.is_none() && !update_offered {
+        return None;
+    }
+    Some(
         settings::section()
             .title("Update")
             .add(update_body(state, status))
-            .into()
-    })
+            .into(),
+    )
 }
 
 /// Updates page: version info, automatic-check/beta togglers, and (when the
@@ -220,9 +265,7 @@ pub fn page(state: &UpdateState) -> Element<'_, Message> {
         blocks.push(text::caption("The connected daemon predates update support.").into());
     } else {
         blocks.push(settings_section(state));
-        if let Some(status) = state.status.as_ref()
-            && let Some(update) = update_section(state, status)
-        {
+        if let Some(update) = update_section(state, state.status.as_ref()) {
             blocks.push(update);
         }
     }

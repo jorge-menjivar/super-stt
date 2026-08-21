@@ -101,7 +101,7 @@ async fn drive(asset: &InstallerAsset, target_tag: &str, tx: &mut Tx) -> Result<
     cmd.arg("--non-interactive")
         .arg("--json-progress")
         .arg(format!("--version={target_tag}"));
-    if target_tag.contains("-beta") || target_tag.contains('-') {
+    if target_tag.contains('-') {
         cmd.arg("--beta"); // prerelease target: resolution must see prereleases
     }
     cmd.stdin(std::process::Stdio::null())

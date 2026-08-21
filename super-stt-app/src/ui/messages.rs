@@ -414,11 +414,20 @@ pub enum UpdateMessage {
     AutoCheckLoaded(bool),
     AutoCheckToggled(bool),
     BetaOptinToggled(bool),
+    /// A settings-toggle write (`AutoCheckToggled`/`BetaOptinToggled`)
+    /// failed. Distinct from `StatusError` (a fetch/check failure) so the
+    /// banner names the right verb ("update a setting" vs. "fetch status").
+    SettingError(String),
     StartUpdate,
     CancelUpdate,
     RunEvent(crate::core::app::updater::UpdateRunEvent),
     RestartApp,
     AvailableEventReceived,
+    /// User dismissed a finished (`Done`/`Failed`) run's panel without
+    /// restarting — clears it so the page returns to the idle CTA (or a
+    /// future `StartUpdate` is no longer blocked). No-op on an in-flight run;
+    /// that goes through `CancelUpdate` instead.
+    DismissRun,
 }
 
 macro_rules! message_from {
