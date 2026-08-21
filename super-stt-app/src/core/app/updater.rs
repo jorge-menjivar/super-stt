@@ -4,7 +4,7 @@
 //! back as [`UpdateRunEvent`]s.
 
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use futures_util::SinkExt;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -82,13 +82,25 @@ type Tx = cosmic::iced::futures::channel::mpsc::Sender<UpdateRunEvent>;
 /// not an `Err` here — the caller still sends `Finished` for them via the
 /// normal exit path.
 async fn drive(asset: &InstallerAsset, target_tag: &str, tx: &mut Tx) -> Result<(), String> {
-    let dir = super_stt_shared::paths::cache_dir().join("self-update");
-    tokio::fs::create_dir_all(&dir)
+    let base = super_stt_shared::paths::cache_dir().join("self-update");
+    tokio::fs::create_dir_all(&base)
         .await
-        .map_err(|e| format!("create {}: {e}", dir.display()))?;
-    let bin = dir.join(&asset.name);
+        .map_err(|e| format!("create {}: {e}", base.display()))?;
+
+    // A fresh, unpredictably-named directory per run (not `base` itself,
+    // which every run shares) — see `installer_run_paths`'s doc comment for
+    // why a predictable path here is a privilege-escalation TOCTOU, not just
+    // a tidiness concern.
+    let (run_dir, bin) = installer_run_paths(&base, &asset.name);
+    create_run_dir(&run_dir).await?;
 
     download_installer(&asset.url, &bin, tx).await?;
+
+    // The outermost root-bound link: this binary self-escalates once
+    // spawned, so it must be at least as verified as the inner ones it
+    // itself checks (its own tarball against the release's SHA256SUMS).
+    // Verify before chmod/spawn — a mismatch must never execute.
+    verify_installer_checksum(&bin, &asset.sha256).await?;
 
     {
         use std::os::unix::fs::PermissionsExt;
@@ -169,7 +181,79 @@ async fn drive(asset: &InstallerAsset, target_tag: &str, tx: &mut Tx) -> Result<
             stderr_tail,
         })
         .await;
+    // Best-effort cleanup, only now that `child.wait()` above has actually
+    // returned — the installer self-escalates by pkexec-re-execing its own
+    // `current_exe()` (this same `run_dir`/`bin`), so removing it any
+    // earlier would race that re-exec. A leftover directory in the cache is
+    // harmless (e.g. the app may restart itself right after a successful
+    // run), so a failure here is not propagated — leaking beats racing.
+    let _ = tokio::fs::remove_dir_all(&run_dir).await;
     Ok(())
+}
+
+/// Build the (per-run directory, installer-binary path) for one apply-flow
+/// run under `base` (`cache_dir()/self-update`, shared across runs). The
+/// directory name embeds this process's pid plus 8 random bytes (via
+/// `super_stt_registry_types::verify::random_hex_suffix`, the same
+/// unpredictable-name pattern `super-stt-install`'s own `StagingGuard` uses
+/// for its staging directory) so a same-UID process can neither predict nor
+/// pre-create/race it.
+///
+/// This matters because the installer this app spawns self-escalates by
+/// pkexec-re-execing its own `current_exe()` — which resolves to this same
+/// path. A predictable path (e.g. `base` joined with the bare asset name)
+/// would let another same-UID process swap the binary out between this
+/// module's checksum verify and the installer's own re-exec open, turning
+/// user-level code execution into root. Two calls always return different
+/// paths.
+fn installer_run_paths(base: &Path, asset_name: &str) -> (PathBuf, PathBuf) {
+    let name = format!(
+        "{}-{}",
+        std::process::id(),
+        super_stt_registry_types::verify::random_hex_suffix(8)
+    );
+    let dir = base.join(name);
+    let bin = dir.join(asset_name);
+    (dir, bin)
+}
+
+/// Create `dir` with mode `0700` (matching `super-stt-install`'s own staging
+/// directory) off the async runtime, since `DirBuilder::create` is a
+/// blocking syscall.
+async fn create_run_dir(dir: &Path) -> Result<(), String> {
+    use std::os::unix::fs::DirBuilderExt;
+    let path = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || std::fs::DirBuilder::new().mode(0o700).create(&path))
+        .await
+        .map_err(|e| format!("run dir task panicked: {e}"))?
+        .map_err(|e| format!("create {}: {e}", dir.display()))
+}
+
+/// Hash `bin` (off the async runtime, since hashing is sync `std::io`) and
+/// compare it against `expected_hex` (case-insensitive; see
+/// `super_stt_registry_types::verify::sha256_matches`). On mismatch, deletes
+/// `bin` — a corrupted or tampered-with installer binary must never be
+/// chmod'd executable or spawned — and returns an error describing why.
+async fn verify_installer_checksum(bin: &Path, expected_hex: &str) -> Result<(), String> {
+    let path = bin.to_path_buf();
+    let actual = tokio::task::spawn_blocking(move || {
+        super_stt_registry_types::verify::file_sha256_hex(&path)
+    })
+    .await
+    .map_err(|e| format!("checksum task panicked: {e}"))?
+    .map_err(|e| format!("hash {}: {e}", bin.display()))?;
+
+    if super_stt_registry_types::verify::sha256_matches(&actual, expected_hex) {
+        return Ok(());
+    }
+
+    if let Err(e) = tokio::fs::remove_file(bin).await {
+        log::warn!(
+            "failed to remove checksum-mismatched installer {}: {e}",
+            bin.display()
+        );
+    }
+    Err("installer checksum mismatch".to_string())
 }
 
 /// Stream `url` to `dest`, reporting throttled `FetchProgress` events.
@@ -220,7 +304,76 @@ async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), S
 
 #[cfg(test)]
 mod tests {
-    use super::InstallerEvent;
+    use super::{InstallerEvent, create_run_dir, installer_run_paths, verify_installer_checksum};
+    use std::path::Path;
+
+    /// The TOCTOU this closes: a predictable `base/<asset.name>` path would
+    /// let a same-UID process swap the installer binary between this
+    /// module's checksum verify and the installer's own pkexec re-exec of
+    /// `current_exe()`. Two calls must never reuse a path, and the binary
+    /// must never sit directly under `base`.
+    #[test]
+    fn installer_run_paths_are_unpredictable_and_not_a_bare_base_join() {
+        let base = Path::new("/tmp/fake-self-update-base");
+        let (dir1, bin1) = installer_run_paths(base, "installer-bin");
+        let (dir2, bin2) = installer_run_paths(base, "installer-bin");
+
+        assert_ne!(
+            dir1, dir2,
+            "two calls must not reuse the same run directory"
+        );
+        assert_ne!(bin1, bin2);
+        assert_eq!(bin1.file_name().unwrap(), "installer-bin");
+        assert_eq!(bin2.file_name().unwrap(), "installer-bin");
+        // The predictable path this closes: `base` joined directly with the
+        // asset name.
+        assert_ne!(bin1, base.join("installer-bin"));
+        assert_ne!(bin1.parent().unwrap(), base);
+        assert!(dir1.starts_with(base));
+        assert!(dir2.starts_with(base));
+    }
+
+    #[tokio::test]
+    async fn create_run_dir_makes_a_private_0700_directory() {
+        let base = std::env::temp_dir().join(format!(
+            "sstt-app-updater-rundir-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let (dir, _bin) = installer_run_paths(&base, "installer-bin");
+
+        create_run_dir(&dir).await.unwrap();
+
+        assert!(dir.is_dir());
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "run dir must be private to this user");
+    }
+
+    #[tokio::test]
+    async fn verify_installer_checksum_matches_and_rejects_corruption() {
+        let dir = std::env::temp_dir().join(format!(
+            "sstt-app-updater-checksum-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("installer-bin");
+        std::fs::write(&bin, b"hello world").unwrap();
+        let good = super_stt_registry_types::verify::file_sha256_hex(&bin).unwrap();
+
+        assert!(verify_installer_checksum(&bin, &good).await.is_ok());
+        assert!(bin.exists(), "a matching checksum must not delete the file");
+
+        // A wrong pin: the mismatch must be reported and the file removed so
+        // it can never be chmod'd/spawned.
+        let bad = "0".repeat(64);
+        let err = verify_installer_checksum(&bin, &bad).await.unwrap_err();
+        assert_eq!(err, "installer checksum mismatch");
+        assert!(
+            !bin.exists(),
+            "a checksum mismatch must delete the downloaded file"
+        );
+    }
 
     #[test]
     fn parses_installer_golden_lines() {

@@ -2,12 +2,17 @@
 //! Self-update checking. Contract: docs/protocol/endpoints/v1/update.md
 
 use std::path::PathBuf;
-use super_stt_forge::{ForgeClient, Release, ReleaseKind, RepoRef};
+use super_stt_forge::{ForgeClient, Release, ReleaseAsset, ReleaseKind, RepoRef};
 use super_stt_shared::models::self_update::{InstallerAsset, SelfUpdateStatus};
 use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
 
 pub(crate) const REPO: &str = "github.com/jorge-menjivar/super-stt";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Ceiling on the `SHA256SUMS` listing download — mirrors
+/// `super-stt-install`'s `download_string` cap for the same asset; the
+/// listing is plain text naming a handful of release assets, never close to
+/// this size.
+const MAX_SUMS_BYTES: u64 = 64 * 1024;
 
 pub(crate) fn target_triple() -> Option<&'static str> {
     match std::env::consts::ARCH {
@@ -46,17 +51,80 @@ pub(crate) fn select_candidate(
         .map(|(_, r)| r)
 }
 
-fn installer_asset(release: &Release, triple: &str) -> Option<InstallerAsset> {
+/// Find `release`'s installer asset for `triple` by exact name match. Pure
+/// name-matching only — the release's `SHA256SUMS` asset isn't consulted
+/// here (see [`resolve_installer_asset`]).
+fn find_installer_asset<'a>(release: &'a Release, triple: &str) -> Option<&'a ReleaseAsset> {
     let want = format!("super-stt-install-{triple}");
-    release
-        .assets
-        .iter()
-        .find(|a| a.name == want)
-        .map(|a| InstallerAsset {
-            name: a.name.clone(),
-            url: a.download_url.clone(),
-            size: a.size,
-        })
+    release.assets.iter().find(|a| a.name == want)
+}
+
+/// Build the candidate's [`InstallerAsset`], populating `sha256` from the
+/// release's `SHA256SUMS` asset — downloaded via `client` (the same
+/// `ForgeClient` `run_check` already used for `list_releases`), so this only
+/// ever adds a second network call on the update-available path.
+///
+/// The outermost root-bound link (the app spawning this installer, which
+/// self-escalates) must be at least as verified as the inner ones the
+/// installer itself checks against its own tarball — so a caller here is
+/// never handed an `InstallerAsset` without a real digest to verify against.
+/// Returns `None` (logging why) rather than a digest-less asset when the
+/// release has no `SHA256SUMS` asset, downloading it fails, or it doesn't
+/// list the installer's exact filename; the app already renders a
+/// curl-fallback caption when `installer_asset` is `None`, so this is a
+/// graceful degradation, not a hard failure of the check itself.
+async fn resolve_installer_asset(
+    client: &dyn ForgeClient,
+    release: &Release,
+    triple: &str,
+) -> Option<InstallerAsset> {
+    let asset = find_installer_asset(release, triple)?;
+    let Some(sums_asset) = release.assets.iter().find(|a| a.name == "SHA256SUMS") else {
+        log::warn!(
+            "release {} has installer asset {} but no SHA256SUMS asset; omitting installer_asset",
+            release.tag,
+            asset.name
+        );
+        return None;
+    };
+    let bytes = match client
+        .download(&sums_asset.download_url, MAX_SUMS_BYTES)
+        .await
+    {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!(
+                "failed to download SHA256SUMS for release {}: {e}; omitting installer_asset",
+                release.tag
+            );
+            return None;
+        }
+    };
+    let text = match String::from_utf8(bytes) {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!(
+                "SHA256SUMS for release {} was not valid UTF-8: {e}; omitting installer_asset",
+                release.tag
+            );
+            return None;
+        }
+    };
+    let sums = super_stt_registry_types::verify::parse_sha256sums(&text);
+    let Some((sha256, _)) = sums.into_iter().find(|(_, name)| *name == asset.name) else {
+        log::warn!(
+            "SHA256SUMS for release {} does not list {}; omitting installer_asset",
+            release.tag,
+            asset.name
+        );
+        return None;
+    };
+    Some(InstallerAsset {
+        name: asset.name.clone(),
+        url: asset.download_url.clone(),
+        size: asset.size,
+        sha256,
+    })
 }
 
 /// On-disk shape of the notify-once state: the last release tag a desktop
@@ -137,6 +205,11 @@ impl SelfUpdateChecker {
     /// `installer_asset` and records the error in `last_check_error`
     /// instead.
     ///
+    /// When an update is found, a *second* request fetches the release's
+    /// `SHA256SUMS` asset via the same `client` so `installer_asset.sha256`
+    /// is populated ([`resolve_installer_asset`]) — only on this
+    /// update-available path, never on every check.
+    ///
     /// Concurrent callers coalesce onto a single in-flight check: a caller
     /// that arrives while another is already running waits for it on
     /// `check_lock`, then — since `generation` will have moved — returns
@@ -181,10 +254,9 @@ impl SelfUpdateChecker {
                 let update_available = candidate.is_some_and(|c| {
                     super_stt_registry_types::version::update_available(CURRENT_VERSION, &c.tag)
                 });
-                let installer = if update_available {
-                    candidate.and_then(|c| target_triple().and_then(|t| installer_asset(c, t)))
-                } else {
-                    None
+                let installer = match (update_available, candidate, target_triple()) {
+                    (true, Some(c), Some(t)) => resolve_installer_asset(client, c, t).await,
+                    _ => None,
                 };
                 SelfUpdateStatus {
                     current_version: CURRENT_VERSION.to_string(),
@@ -320,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn installer_asset_picked_by_exact_name() {
+    fn find_installer_asset_picked_by_exact_name() {
         let mut r = rel("v0.3.0", ReleaseKind::Published);
         r.assets = vec![
             ReleaseAsset {
@@ -334,9 +406,125 @@ mod tests {
                 size: 2,
             },
         ];
-        let asset = installer_asset(&r, "x86_64-unknown-linux-gnu").unwrap();
+        let asset = find_installer_asset(&r, "x86_64-unknown-linux-gnu").unwrap();
+        assert_eq!(asset.download_url, "https://dl/i");
+        assert!(find_installer_asset(&r, "aarch64-unknown-linux-gnu").is_none());
+    }
+
+    /// A release with no `SHA256SUMS` asset at all: `installer_asset` must
+    /// degrade to `None` rather than publish a digest-less asset — no
+    /// network call happens since `find_installer_asset` never gets that
+    /// far, so a deliberately-unreachable base URL proves no request occurs.
+    #[tokio::test]
+    async fn resolve_installer_asset_none_without_sums_asset() {
+        crate::install_crypto_provider();
+        let mut r = rel("v0.3.0", ReleaseKind::Published);
+        r.assets = vec![ReleaseAsset {
+            name: "super-stt-install-x86_64-unknown-linux-gnu".into(),
+            download_url: "https://dl/i".into(),
+            size: 2,
+        }];
+        let gh = super_stt_forge::Github::new("http://127.0.0.1:1", None);
+        assert!(
+            resolve_installer_asset(&gh, &r, "x86_64-unknown-linux-gnu")
+                .await
+                .is_none()
+        );
+    }
+
+    /// The `SHA256SUMS` asset exists but its download fails (a 404 here,
+    /// standing in for any transport/HTTP failure): degrade to `None`.
+    #[tokio::test]
+    async fn resolve_installer_asset_none_when_sums_download_fails() {
+        crate::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        s.mock("GET", "/sums").with_status(404).create_async().await;
+        let mut r = rel("v0.3.0", ReleaseKind::Published);
+        r.assets = vec![
+            ReleaseAsset {
+                name: "super-stt-install-x86_64-unknown-linux-gnu".into(),
+                download_url: "https://dl/i".into(),
+                size: 2,
+            },
+            ReleaseAsset {
+                name: "SHA256SUMS".into(),
+                download_url: format!("{}/sums", s.url()),
+                size: 10,
+            },
+        ];
+        let gh = super_stt_forge::Github::new(s.url(), None);
+        assert!(
+            resolve_installer_asset(&gh, &r, "x86_64-unknown-linux-gnu")
+                .await
+                .is_none()
+        );
+    }
+
+    /// The `SHA256SUMS` listing downloads fine but doesn't list the
+    /// installer's exact filename: degrade to `None`.
+    #[tokio::test]
+    async fn resolve_installer_asset_none_when_entry_missing() {
+        crate::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        s.mock("GET", "/sums")
+            .with_status(200)
+            .with_body("deadbeef  some-other-file.tar.gz\n")
+            .create_async()
+            .await;
+        let mut r = rel("v0.3.0", ReleaseKind::Published);
+        r.assets = vec![
+            ReleaseAsset {
+                name: "super-stt-install-x86_64-unknown-linux-gnu".into(),
+                download_url: "https://dl/i".into(),
+                size: 2,
+            },
+            ReleaseAsset {
+                name: "SHA256SUMS".into(),
+                download_url: format!("{}/sums", s.url()),
+                size: 10,
+            },
+        ];
+        let gh = super_stt_forge::Github::new(s.url(), None);
+        assert!(
+            resolve_installer_asset(&gh, &r, "x86_64-unknown-linux-gnu")
+                .await
+                .is_none()
+        );
+    }
+
+    /// The happy path: the `SHA256SUMS` listing is fetched and the entry
+    /// matching the installer's filename populates `sha256`.
+    #[tokio::test]
+    async fn resolve_installer_asset_populates_sha256_from_sums_listing() {
+        crate::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        s.mock("GET", "/sums")
+            .with_status(200)
+            .with_body(
+                "deadbeef00  super-stt-install-x86_64-unknown-linux-gnu\n\
+                 111111  some-other-file.tar.gz\n",
+            )
+            .create_async()
+            .await;
+        let mut r = rel("v0.3.0", ReleaseKind::Published);
+        r.assets = vec![
+            ReleaseAsset {
+                name: "super-stt-install-x86_64-unknown-linux-gnu".into(),
+                download_url: "https://dl/i".into(),
+                size: 2,
+            },
+            ReleaseAsset {
+                name: "SHA256SUMS".into(),
+                download_url: format!("{}/sums", s.url()),
+                size: 10,
+            },
+        ];
+        let gh = super_stt_forge::Github::new(s.url(), None);
+        let asset = resolve_installer_asset(&gh, &r, "x86_64-unknown-linux-gnu")
+            .await
+            .unwrap();
         assert_eq!(asset.url, "https://dl/i");
-        assert!(installer_asset(&r, "aarch64-unknown-linux-gnu").is_none());
+        assert_eq!(asset.sha256, "deadbeef00");
     }
 
     #[tokio::test]

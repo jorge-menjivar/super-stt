@@ -20,6 +20,12 @@ pub struct InstallerAsset {
     pub name: String,
     pub url: String,
     pub size: u64,
+    /// Hex SHA-256 of the binary at `url`, from the release's `SHA256SUMS`
+    /// asset. Always present when `installer_asset` is non-null — clients
+    /// MUST verify the downloaded bytes against this before executing it
+    /// (the daemon omits `installer_asset` entirely rather than publish one
+    /// without a verifiable digest).
+    pub sha256: String,
 }
 
 #[cfg(test)]
@@ -39,11 +45,17 @@ mod tests {
             "installer_asset": {
                 "name": "super-stt-install-x86_64-unknown-linux-gnu",
                 "url": "https://github.com/jorge-menjivar/super-stt/releases/download/v0.2.3-beta.1/super-stt-install-x86_64-unknown-linux-gnu",
-                "size": 8388608
+                "size": 8388608,
+                "sha256": "a3f2c8b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1"
             }
         }"#;
         let s: SelfUpdateStatus = serde_json::from_str(json).unwrap();
         assert!(s.update_available);
-        assert_eq!(s.installer_asset.unwrap().size, 8_388_608);
+        let asset = s.installer_asset.unwrap();
+        assert_eq!(asset.size, 8_388_608);
+        assert_eq!(
+            asset.sha256,
+            "a3f2c8b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1"
+        );
     }
 }

@@ -43,28 +43,30 @@ Content-Type: application/json
   "installer_asset": {
     "name": "super-stt-install-x86_64-unknown-linux-gnu",
     "url": "https://github.com/jorge-menjivar/super-stt/releases/download/v0.2.3-beta.1/super-stt-install-x86_64-unknown-linux-gnu",
-    "size": 8388608
+    "size": 8388608,
+    "sha256": "a3f2c8b1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1"
   }
 }
 ```
 
-| Field                   | Type   | Notes                                                                                                                                                                              |
-|--------------------------|--------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `current_version`        | string | The daemon's own workspace version (no `v` prefix).                                                                                                                               |
-| `latest_version`         | string | The candidate release's tag, verbatim (with `v` prefix); `null` before the first completed check.                                                                                 |
-| `update_available`       | bool   | Strict semver "candidate > current"; prerelease-aware; never `true` for downgrades or unparsable tags.                                                                            |
-| `checked_at`              | string | RFC 3339 UTC of the last completed check attempt; `null` before the first.                                                                                                         |
-| `last_check_error`       | string | Human-readable failure of the last attempt, `null` on success. A failed check keeps the previous successful result's `latest_version`.                                            |
-| `beta_optin_effective`   | bool   | Resolved from the [`update_beta_optin`](./update_beta_optin.md) setting (`auto` → `true` iff `current_version` is a prerelease).                                                  |
-| `installer_asset`        | object | The `super-stt-install-<target-triple>` asset of the candidate release for this host's architecture; `null` when there is no update, the release lacks the asset, or the arch is unsupported. Clients download this URL to apply the update. |
+| Field                   | Type    | Notes                                                                                                                                                                              |
+|--------------------------|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `current_version`        | string  | The daemon's own workspace version (no `v` prefix).                                                                                                                               |
+| `latest_version`         | string? | The candidate release's tag, verbatim (with `v` prefix); `null` before the first completed check.                                                                                 |
+| `update_available`       | bool    | Strict semver "candidate > current"; prerelease-aware; never `true` for downgrades or unparsable tags.                                                                            |
+| `checked_at`              | string? | RFC 3339 UTC of the last completed check attempt; `null` before the first.                                                                                                         |
+| `last_check_error`       | string? | Human-readable failure of the last attempt, `null` on success. A failed check keeps the previous successful result's `latest_version`.                                            |
+| `beta_optin_effective`   | bool    | Resolved from the [`update_beta_optin`](./update_beta_optin.md) setting (`auto` → `true` iff `current_version` is a prerelease).                                                  |
+| `installer_asset`        | object? | The `super-stt-install-<target-triple>` asset of the candidate release for this host's architecture; `null` when there is no update, the release lacks the asset, the arch is unsupported, or the release's `SHA256SUMS` asset is unavailable or doesn't list the binary. Clients download this URL to apply the update. |
 
 `installer_asset` fields:
 
-| Field  | Type   | Notes                       |
-|--------|--------|------------------------------|
-| `name` | string | Asset file name.             |
-| `url`  | string | Download URL for the asset.  |
-| `size` | u64    | Asset size in bytes.         |
+| Field    | Type   | Notes                                                                                     |
+|----------|--------|--------------------------------------------------------------------------------------------|
+| `name`   | string | Asset file name.                                                                            |
+| `url`    | string | Download URL for the asset.                                                                 |
+| `size`   | u64    | Asset size in bytes.                                                                         |
+| `sha256` | string | Hex SHA-256 of the binary at `url`, from the release's `SHA256SUMS` asset. Always present when `installer_asset` is non-null. Clients MUST verify the downloaded bytes against this before executing the binary. |
 
 **Errors:**
 

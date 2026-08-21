@@ -174,10 +174,12 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
     ])
 }
 
-/// Re-fetch the self-update status. Used both by connection-time settings
-/// loads (`build_load_settings_tasks`) and by `on_nav_select` when the
-/// Updates page is opened, so its data isn't stale from whenever the app
-/// last connected.
+/// Re-fetch the self-update status. Used by connection-time settings loads
+/// (`build_load_settings_tasks`), by `on_nav_select` when the Updates page is
+/// opened, and by the `SettingsChanged { setting }` SSE handler for
+/// `update_check_enabled`/`update_beta_optin` (the latter because
+/// `beta_optin_effective` rides this status, not a separate field), so its
+/// data isn't stale from whenever the app last connected or last re-fetched.
 pub(in crate::core::app) fn refresh_update_status() -> Task<cosmic::Action<Message>> {
     Task::perform(get_update_status(), |result| match result {
         Ok(status) => cosmic::Action::App(Message::Update(UpdateMessage::StatusLoaded(status))),
@@ -187,8 +189,10 @@ pub(in crate::core::app) fn refresh_update_status() -> Task<cosmic::Action<Messa
 
 /// Load the automatic-check-enabled setting, defaulting to `true` (its
 /// documented daemon-side default) on a fetch failure rather than leaving
-/// the Updates page's toggler in a misleading off state.
-fn load_update_check_enabled() -> Task<cosmic::Action<Message>> {
+/// the Updates page's toggler in a misleading off state. Also re-used by the
+/// `SettingsChanged { setting: "update_check_enabled" }` SSE handler so a
+/// change from another client is reflected here too.
+pub(in crate::core::app) fn load_update_check_enabled() -> Task<cosmic::Action<Message>> {
     Task::perform(get_update_check_enabled(), |result| match result {
         Ok(enabled) => {
             cosmic::Action::App(Message::Update(UpdateMessage::AutoCheckLoaded(enabled)))

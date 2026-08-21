@@ -37,10 +37,16 @@ impl Components {
     }
 }
 
-/// An explicit `--component` CLI selection (`all|daemon|app|applet`).
+/// An explicit component selection: either the four `--components` CLI
+/// values (`all|daemon|app|applet`, see `From<&str>` below), or
+/// `AllButApplet` — reachable only from the interactive menu's "All" option
+/// when no COSMIC panel is present, never from `--components` (the CLI's
+/// `all` keeps meaning literally-all, so the hermetic e2e test stays
+/// deterministic regardless of the CI host's COSMIC availability).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComponentSelection {
     All,
+    AllButApplet,
     Daemon,
     App,
     Applet,
@@ -80,6 +86,11 @@ pub fn plan_components(
                 daemon: true,
                 app: true,
                 applet: true,
+            },
+            ComponentSelection::AllButApplet => Components {
+                daemon: true,
+                app: true,
+                applet: false,
             },
             ComponentSelection::Daemon => Components {
                 daemon: true,
@@ -462,6 +473,21 @@ mod tests {
         let prefix = mktree(&["bin/super-stt-app"]);
         let c = plan_components(Some(ComponentSelection::Daemon), &prefix, true);
         assert!(c.daemon && !c.app && !c.applet);
+    }
+
+    #[test]
+    fn all_but_applet_always_skips_applet_while_all_stays_all_inclusive() {
+        let prefix = mktree(&[]);
+        // `AllButApplet` (the interactive menu's "All (skip COSMIC applet)"
+        // path) skips the applet even when a COSMIC panel is present.
+        let c = plan_components(Some(ComponentSelection::AllButApplet), &prefix, true);
+        assert!(c.daemon && c.app && !c.applet);
+        // Explicit `All` (the `--components=all` CLI path) stays literally
+        // all-inclusive regardless of `cosmic_available` — this must never
+        // change, since the hermetic e2e test relies on it being
+        // deterministic on a CI host with no cosmic-panel.
+        let c = plan_components(Some(ComponentSelection::All), &prefix, false);
+        assert!(c.daemon && c.app && c.applet);
     }
 
     #[test]

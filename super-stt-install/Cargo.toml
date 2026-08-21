@@ -13,10 +13,8 @@ clap.workspace = true
 dirs.workspace = true
 env_logger.workspace = true
 flate2 = "1"
-hex = "0.4.3"
 log.workspace = true
 reqwest.workspace = true
-ring = "0.17.14"
 serde.workspace = true
 serde_json.workspace = true
 super-stt-forge = { version = "0.2.2-beta.2", path = "../super-stt-forge" }
@@ -29,4 +27,6 @@ tokio.workspace = true
     workspace = true
 
 [dev-dependencies]
+hex = "0.4.3"
 mockito = "1"
+ring = "0.17.14"

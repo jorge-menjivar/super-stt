@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Shared download-verification policy: predicates the daemon (install) and the
 //! indexer (publish) must apply identically so a backend that passes publishing
-//! also installs. Pure logic, no I/O or hashing backend — callers compute the
-//! digest with whatever library they already use and pass the hex string here.
+//! also installs. Mostly pure logic — most of this module has no I/O or
+//! hashing backend, and callers compute a digest with whatever library they
+//! already use and pass the hex string in. [`file_sha256_hex`] and
+//! [`parse_sha256sums`] are the exception: streaming file hashing and
+//! `SHA256SUMS`-listing parsing used identically by the installer (its own
+//! tarball) and the daemon (the self-update installer binary), promoted here
+//! so both stay in lock-step. [`random_hex_suffix`] is a second, smaller
+//! exception: the unpredictable-name pattern the installer's own staging
+//! directory and the app's self-update download directory both need.
+
+use std::io::Read;
+use std::path::Path;
 
 /// Per-file ceiling when unpacking a subprocess tarball. A single bundled
 /// library (e.g. a CUDA `.so`) can be large, so this is generous.
@@ -85,11 +95,74 @@ pub fn sha256_matches(actual: &str, expected: &str) -> bool {
     !expected.is_empty() && actual.eq_ignore_ascii_case(expected)
 }
 
+/// Read a `SHA256SUMS`-format listing into `(hex_digest, filename)` pairs.
+///
+/// Tolerates both the coreutils `sha256sum` text-mode (`<hex>  <filename>`,
+/// two spaces) and binary-mode (`<hex> *<filename>`) line shapes, and a
+/// `./`-prefixed filename (`<hex>  ./<filename>`).
+#[must_use]
+pub fn parse_sha256sums(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let mut parts = line.splitn(2, char::is_whitespace);
+            let hex = parts.next()?.to_string();
+            let rest = parts.next()?.trim_start();
+            let filename = rest.strip_prefix('*').unwrap_or(rest);
+            let filename = filename.strip_prefix("./").unwrap_or(filename);
+            Some((hex, filename.to_string()))
+        })
+        .collect()
+}
+
+/// `n_bytes` random bytes from the system RNG, hex-encoded — for building an
+/// unpredictable directory/file name (e.g. a staging directory a same-UID
+/// process must not be able to guess or pre-create/race). Shared by
+/// `super-stt-install`'s own staging directory (`StagingGuard`) and
+/// `super-stt-app`'s self-update download directory, so both draw from the
+/// same RNG/encoding in lock-step.
+///
+/// # Panics
+/// If the system RNG is unavailable — a fatal host condition with no sane
+/// "unpredictable" fallback.
+#[must_use]
+pub fn random_hex_suffix(n_bytes: usize) -> String {
+    use ring::rand::{SecureRandom, SystemRandom};
+    let mut buf = vec![0u8; n_bytes];
+    SystemRandom::new()
+        .fill(&mut buf)
+        .expect("system RNG unavailable");
+    hex::encode(buf)
+}
+
+/// Compute the SHA-256 digest of the file at `path`, streaming it in 1 MiB
+/// reads so a multi-hundred-MB tarball (or installer binary) is never fully
+/// buffered in memory.
+///
+/// # Errors
+/// Any I/O error opening or reading `path`.
+pub fn file_sha256_hex(path: &Path) -> std::io::Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        ctx.update(&buf[..n]);
+    }
+    Ok(hex::encode(ctx.finish().as_ref()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_TARBALL_ENTRY_BYTES, MAX_TARBALL_TOTAL_FLOOR, sha256_matches, tar_budget_step,
-        tar_entry_unsafe_reason, unpack_cap,
+        MAX_TARBALL_ENTRY_BYTES, MAX_TARBALL_TOTAL_FLOOR, file_sha256_hex, parse_sha256sums,
+        random_hex_suffix, sha256_matches, tar_budget_step, tar_entry_unsafe_reason, unpack_cap,
     };
 
     #[test]
@@ -139,5 +212,42 @@ mod tests {
         // "skip verification" *before* calling this.
         assert!(!sha256_matches("abc123", ""));
         assert!(!sha256_matches("", ""));
+    }
+
+    #[test]
+    fn parses_sha256sums_variants() {
+        let text =
+            "abc123  super-stt-x.tar.gz\ndef456 *binary-mode-file\n789aaa  ./dotslash-file\n";
+        let sums = parse_sha256sums(text);
+        assert_eq!(sums.len(), 3);
+        assert_eq!(sums[0], ("abc123".into(), "super-stt-x.tar.gz".into()));
+        assert_eq!(sums[1].1, "binary-mode-file");
+        assert_eq!(sums[2].1, "dotslash-file");
+    }
+
+    #[test]
+    fn file_sha256_hex_matches_known_vector() {
+        // sha256("hello world\n") — a standard test vector.
+        let dir =
+            std::env::temp_dir().join(format!("sstt-registry-verify-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("hello.txt");
+        std::fs::write(&f, "hello world\n").unwrap();
+        assert_eq!(
+            file_sha256_hex(&f).unwrap(),
+            "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447"
+        );
+        assert!(file_sha256_hex(&dir.join("missing.txt")).is_err());
+    }
+
+    #[test]
+    fn random_hex_suffix_is_hex_of_the_requested_length_and_unpredictable() {
+        let a = random_hex_suffix(8);
+        let b = random_hex_suffix(8);
+        assert_eq!(a.len(), 16, "8 bytes hex-encode to 16 hex chars");
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        // Astronomically unlikely to collide if the RNG is actually being
+        // used — a regression to a fixed/zeroed buffer would make this fail.
+        assert_ne!(a, b);
     }
 }

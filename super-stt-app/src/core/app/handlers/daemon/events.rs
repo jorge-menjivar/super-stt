@@ -100,18 +100,47 @@ impl AppModel {
                 None
             }
             DaemonStatusEvent::SettingsChanged { setting } => {
-                // A setting changed — possibly from another client, or the global
-                // Primary Language this very client just set. Re-fetch the language
-                // state so a per-model button that follows the global value, and
-                // the global card, reflect the new value.
-                if setting != "language" {
-                    return None;
+                // A setting changed — possibly from another client, or this
+                // very client's own change coming back over SSE.
+                match setting.as_str() {
+                    "language" => {
+                        // Re-fetch the language state so a per-model button that
+                        // follows the global value, and the global card, reflect
+                        // the new value.
+                        let mut tasks = vec![self.load_primary_language()];
+                        if let Some((source, model)) = self.language.model_language_for.clone() {
+                            tasks.push(self.load_model_language(source, model));
+                        }
+                        Some(Task::batch(tasks))
+                    }
+                    "update_check_enabled" => {
+                        // Both the toggler state and the status (which a
+                        // disabled/re-enabled periodic check can also affect)
+                        // need to reflect the new value.
+                        Some(Task::batch(vec![
+                            crate::core::app::handlers::tasks::load_update_check_enabled(),
+                            crate::core::app::handlers::tasks::refresh_update_status(),
+                        ]))
+                    }
+                    "update_beta_optin" => {
+                        // `beta_optin_effective` is computed server-side at
+                        // check time, not stored — it isn't part of the
+                        // cached status a plain re-fetch would return, so a
+                        // `refresh_update_status()` here would show the STALE
+                        // value (and clear `checking` before the toggler
+                        // actually reflects the new channel) until whatever
+                        // triggered this event's own check lands. Route
+                        // through the same `CheckNow` path the toggler itself
+                        // uses so this always recomputes fresh.
+                        // `CheckNow`'s `if self.update.checking { return }`
+                        // guard makes this a no-op for the app's own
+                        // self-triggered change (its `BetaOptinToggled` already
+                        // chains `CheckNow`), while a genuine cross-app change
+                        // still gets a correct fresh recompute.
+                        Some(self.handle_update_messages(UpdateMessage::CheckNow))
+                    }
+                    _ => None,
                 }
-                let mut tasks = vec![self.load_primary_language()];
-                if let Some((source, model)) = self.language.model_language_for.clone() {
-                    tasks.push(self.load_model_language(source, model));
-                }
-                Some(Task::batch(tasks))
             }
             // No app-side effect today: the load-start and active-backend-changed
             // notifications don't drive UI state here.

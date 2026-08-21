@@ -6938,7 +6938,9 @@ dependencies = [
 name = "super-stt-registry-types"
 version = "0.2.2-beta.2"
 dependencies = [
+ "hex",
  "jsonschema",
+ "ring",
  "schemars",
  "semver",
  "serde",

@@ -31,9 +31,9 @@ fn target_triple() -> &'static str {
     }
 }
 
-/// sha256 hex digest of `bytes`, via `ring` (already a real dependency of
-/// this crate, so available to integration tests without a new
-/// dev-dependency).
+/// sha256 hex digest of `bytes`, via `ring` (a dev-dependency of this crate
+/// — the crate's own production code hashes files, not in-memory bytes, via
+/// `super_stt_registry_types::verify::file_sha256_hex`).
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
     hex::encode(digest.as_ref())

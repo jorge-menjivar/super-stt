@@ -70,15 +70,10 @@ impl Drop for StagingGuard {
 
 /// 8 random bytes, hex-encoded — the unpredictable half of the staging
 /// directory's name (obligation (b): pid alone is guessable/reused).
+/// Delegates to the shared helper so this crate and `super-stt-app`'s
+/// self-update download directory draw from the same RNG/encoding.
 fn random_suffix() -> String {
-    use ring::rand::{SecureRandom, SystemRandom};
-    let mut buf = [0u8; 8];
-    // A failing system RNG means something is deeply wrong with the host;
-    // there's no sane "unpredictable" fallback, so this is fatal.
-    SystemRandom::new()
-        .fill(&mut buf)
-        .expect("system RNG unavailable");
-    hex::encode(buf)
+    super_stt_registry_types::verify::random_hex_suffix(8)
 }
 
 /// The interactive component-selection menu (`scripts/install-beta.sh:397-460`),
@@ -137,7 +132,13 @@ fn run_interactive_menu(
             return Ok(None);
         }
         match line.trim() {
-            "" | "1" => return Ok(Some(stage::ComponentSelection::All)),
+            "" | "1" => {
+                return Ok(Some(if cosmic_available {
+                    stage::ComponentSelection::All
+                } else {
+                    stage::ComponentSelection::AllButApplet
+                }));
+            }
             "2" => return Ok(Some(stage::ComponentSelection::Daemon)),
             "3" => return Ok(Some(stage::ComponentSelection::App)),
             "4" if cosmic_available => return Ok(Some(stage::ComponentSelection::Applet)),

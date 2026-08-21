@@ -12,6 +12,8 @@
     required-features = ["schema"]
 
 [dependencies]
+    hex = "0.4.3"
+    ring = "0.17.14"
     schemars = { version = "1", optional = true }
     semver = "1"
     serde.workspace = true
