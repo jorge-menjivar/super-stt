@@ -20,15 +20,23 @@ pub async fn get_update_status() -> HttpResult<Option<SelfUpdateStatus>> {
     .await
 }
 
-pub async fn check_update_now() -> HttpResult<SelfUpdateStatus> {
+/// `Ok(None)` when the daemon predates `/v1/update` (404) — same fallback
+/// as `get_update_status`, since a daemon old enough to lack the `GET` route
+/// lacks this `POST` one too.
+pub async fn check_update_now() -> HttpResult<Option<SelfUpdateStatus>> {
     with_settings_token(|socket, token| async move {
-        transport::post_json::<SelfUpdateStatus>(
+        match transport::post_json::<SelfUpdateStatus>(
             socket,
             &token,
             "/update/check",
             &serde_json::json!({}),
         )
         .await
+        {
+            Ok(s) => Ok(Some(s)),
+            Err(e) if is_not_found(&e) => Ok(None),
+            Err(e) => Err(e),
+        }
     })
     .await
 }

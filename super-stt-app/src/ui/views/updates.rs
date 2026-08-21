@@ -82,9 +82,8 @@ fn version_section(state: &UpdateState) -> Element<'_, Message> {
         checked_item = checked_item.description(err.to_string());
     }
 
-    let busy = state.checking || state.run.is_some();
     let mut check_button = widget::button::standard("Check now");
-    if !busy {
+    if state.can_check_now() {
         check_button = check_button.on_press(Message::Update(UpdateMessage::CheckNow));
     }
 
@@ -143,7 +142,7 @@ fn settings_section(state: &UpdateState) -> Element<'_, Message> {
 /// right now: a `Done`/`Failed` run's own panel (Restart/Dismiss, or the
 /// error + Dismiss) must stay visible even after a post-update refetch
 /// reports `update_available: false` — see `update_section`'s gate and
-/// `handlers/update.rs::clear_run_on_status_refresh`.
+/// `UpdateState::clear_run_on_status_refresh`.
 // reason: byte-count → progress-bar fraction is intentionally lossy/cosmetic.
 #[allow(clippy::cast_precision_loss)]
 fn update_body<'a>(
@@ -238,8 +237,7 @@ fn update_section<'a>(
     state: &'a UpdateState,
     status: Option<&'a SelfUpdateStatus>,
 ) -> Option<Element<'a, Message>> {
-    let update_offered = status.is_some_and(|s| s.update_available);
-    if state.run.is_none() && !update_offered {
+    if !state.update_section_visible() {
         return None;
     }
     Some(
@@ -278,15 +276,7 @@ pub fn page(state: &UpdateState) -> Element<'_, Message> {
 /// the source of truth — the badge would otherwise duplicate/contradict it).
 /// Mirrors the GPU/status pills' construction (`ui/views/models/mod.rs`).
 pub(crate) fn header_badge(app: &AppModel) -> Option<Element<'_, Message>> {
-    if app.update.run.is_some() {
-        return None;
-    }
-    if !app
-        .update
-        .status
-        .as_ref()
-        .is_some_and(|s| s.update_available)
-    {
+    if !app.update.header_badge_visible() {
         return None;
     }
 

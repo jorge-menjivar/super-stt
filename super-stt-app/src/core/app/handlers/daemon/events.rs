@@ -6,6 +6,38 @@ use cosmic::prelude::*;
 use log::{debug, info, warn};
 use super_stt_shared::models::protocol::{DaemonStatusEvent, NotificationEvent};
 
+/// How a `SettingsChanged { setting }` SSE event should refresh the Updates
+/// page's state, for the two self-update settings (`language` needs
+/// `AppModel` state — `model_language_for` — to build its follow-up task, so
+/// it's matched separately in the caller and never reaches this function).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core::app) enum SelfUpdateSettingRoute {
+    /// Reload the toggler value and re-fetch the cached status. Cheap, and
+    /// correct here because `update_check_enabled` doesn't change what the
+    /// next check would compute.
+    RefreshCachedStatus,
+    /// Force a real re-check rather than trust the cached status.
+    ForceRecheck,
+}
+
+/// `update_beta_optin` MUST route through a real re-check (`ForceRecheck`,
+/// which the caller sends via `CheckNow`) rather than a cached status
+/// refetch: `beta_optin_effective` is computed server-side at check time,
+/// not stored, so a plain refetch would show the STALE value until whatever
+/// triggered this event's own check lands — a regression a previous review
+/// round fixed. `update_check_enabled` has no such effective-at-check-time
+/// field, so the cheaper cached refresh is correct for it. Any other
+/// setting name (including `language`) isn't a self-update setting at all.
+pub(in crate::core::app) fn self_update_setting_route(
+    setting: &str,
+) -> Option<SelfUpdateSettingRoute> {
+    match setting {
+        "update_check_enabled" => Some(SelfUpdateSettingRoute::RefreshCachedStatus),
+        "update_beta_optin" => Some(SelfUpdateSettingRoute::ForceRecheck),
+        _ => None,
+    }
+}
+
 impl AppModel {
     pub(in crate::core::app) fn handle_daemon_events(
         &mut self,
@@ -113,33 +145,29 @@ impl AppModel {
                         }
                         Some(Task::batch(tasks))
                     }
-                    "update_check_enabled" => {
-                        // Both the toggler state and the status (which a
-                        // disabled/re-enabled periodic check can also affect)
-                        // need to reflect the new value.
-                        Some(Task::batch(vec![
-                            crate::core::app::handlers::tasks::load_update_check_enabled(),
-                            crate::core::app::handlers::tasks::refresh_update_status(),
-                        ]))
-                    }
-                    "update_beta_optin" => {
-                        // `beta_optin_effective` is computed server-side at
-                        // check time, not stored — it isn't part of the
-                        // cached status a plain re-fetch would return, so a
-                        // `refresh_update_status()` here would show the STALE
-                        // value (and clear `checking` before the toggler
-                        // actually reflects the new channel) until whatever
-                        // triggered this event's own check lands. Route
-                        // through the same `CheckNow` path the toggler itself
-                        // uses so this always recomputes fresh.
-                        // `CheckNow`'s `if self.update.checking { return }`
-                        // guard makes this a no-op for the app's own
-                        // self-triggered change (its `BetaOptinToggled` already
-                        // chains `CheckNow`), while a genuine cross-app change
-                        // still gets a correct fresh recompute.
-                        Some(self.handle_update_messages(UpdateMessage::CheckNow))
-                    }
-                    _ => None,
+                    // Both self-update settings need something beyond a plain
+                    // `SettingsChanged` no-op, but *what* they need differs —
+                    // see `self_update_setting_route`'s doc comment for why
+                    // `update_beta_optin` can't just reuse the cached-refresh
+                    // path `update_check_enabled` uses.
+                    other => match self_update_setting_route(other) {
+                        Some(SelfUpdateSettingRoute::RefreshCachedStatus) => {
+                            Some(Task::batch(vec![
+                                crate::core::app::handlers::tasks::load_update_check_enabled(),
+                                crate::core::app::handlers::tasks::refresh_update_status(),
+                            ]))
+                        }
+                        Some(SelfUpdateSettingRoute::ForceRecheck) => {
+                            // `CheckNow`'s `if self.update.checking { return }`
+                            // guard makes this a no-op for the app's own
+                            // self-triggered change (its `BetaOptinToggled`
+                            // already chains `CheckNow`), while a genuine
+                            // cross-app change still gets a correct fresh
+                            // recompute.
+                            Some(self.handle_update_messages(UpdateMessage::CheckNow))
+                        }
+                        None => None,
+                    },
                 }
             }
             // No app-side effect today: the load-start and active-backend-changed
@@ -270,5 +298,36 @@ impl AppModel {
             }));
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SelfUpdateSettingRoute, self_update_setting_route};
+
+    /// The regression this pins: `update_beta_optin` must force a real
+    /// re-check, never the cheaper cached-status path — `beta_optin_effective`
+    /// is computed server-side at check time and isn't part of the cached
+    /// status a plain refetch would return.
+    #[test]
+    fn update_beta_optin_forces_a_recheck() {
+        assert_eq!(
+            self_update_setting_route("update_beta_optin"),
+            Some(SelfUpdateSettingRoute::ForceRecheck)
+        );
+    }
+
+    #[test]
+    fn update_check_enabled_uses_the_cached_refresh() {
+        assert_eq!(
+            self_update_setting_route("update_check_enabled"),
+            Some(SelfUpdateSettingRoute::RefreshCachedStatus)
+        );
+    }
+
+    #[test]
+    fn other_settings_including_language_are_not_self_update_settings() {
+        assert_eq!(self_update_setting_route("language"), None);
+        assert_eq!(self_update_setting_route("something_else"), None);
     }
 }

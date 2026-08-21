@@ -5,6 +5,7 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use futures_util::SinkExt;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -59,6 +60,10 @@ const PROGRESS_THROTTLE_BYTES: u64 = 256 * 1024;
 /// `UpdateRunEvent::Finished { exit_ok: false, .. }`.
 const STDERR_TAIL_LINES: usize = 30;
 
+/// A sibling run directory older than this is swept before a new run
+/// starts — see `sweep_stale_run_dirs`.
+const STALE_RUN_AGE: Duration = Duration::from_hours(24);
+
 /// Download `asset`, spawn it against `target_tag`, and stream its progress.
 /// Consumed via `cosmic::task::stream(...).abortable()` — dropping the
 /// returned stream (on cancel) drops the spawned `Child`, which
@@ -92,6 +97,7 @@ async fn drive(asset: &InstallerAsset, target_tag: &str, tx: &mut Tx) -> Result<
     // why a predictable path here is a privilege-escalation TOCTOU, not just
     // a tidiness concern.
     let (run_dir, bin) = installer_run_paths(&base, &asset.name);
+    sweep_stale_run_dirs(&base, &run_dir).await;
     create_run_dir(&run_dir).await?;
 
     download_installer(&asset.url, &bin, tx).await?;
@@ -110,12 +116,7 @@ async fn drive(asset: &InstallerAsset, target_tag: &str, tx: &mut Tx) -> Result<
     }
 
     let mut cmd = tokio::process::Command::new(&bin);
-    cmd.arg("--non-interactive")
-        .arg("--json-progress")
-        .arg(format!("--version={target_tag}"));
-    if target_tag.contains('-') {
-        cmd.arg("--beta"); // prerelease target: resolution must see prereleases
-    }
+    cmd.args(installer_args(target_tag));
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -138,37 +139,9 @@ async fn drive(asset: &InstallerAsset, target_tag: &str, tx: &mut Tx) -> Result<
 
     // Capped tail of stderr, collected on its own task so a chatty installer
     // can't block reading stdout (or vice versa).
-    let stderr_task = tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        let mut tail: VecDeque<String> = VecDeque::with_capacity(STDERR_TAIL_LINES);
-        while let Ok(Some(line)) = lines.next_line().await {
-            if tail.len() == STDERR_TAIL_LINES {
-                tail.pop_front();
-            }
-            tail.push_back(line);
-        }
-        Vec::from(tail)
-    });
+    let stderr_task = tokio::spawn(collect_tail_lines(stderr, STDERR_TAIL_LINES));
 
-    let mut lines = BufReader::new(stdout).lines();
-    loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => match serde_json::from_str::<InstallerEvent>(&line) {
-                Ok(ev) => {
-                    let _ = tx.send(UpdateRunEvent::Installer(ev)).await;
-                }
-                // Forward-compatible: an installer newer than this app may
-                // emit a shape this parser doesn't know yet. Skip, don't fail
-                // the run over it.
-                Err(e) => log::warn!("installer emitted an unparsable progress line: {e}: {line}"),
-            },
-            Ok(None) => break,
-            Err(e) => {
-                log::warn!("installer stdout read error: {e}");
-                break;
-            }
-        }
-    }
+    stream_installer_events(stdout, tx).await;
 
     let status = child
         .wait()
@@ -189,6 +162,67 @@ async fn drive(asset: &InstallerAsset, target_tag: &str, tx: &mut Tx) -> Result<
     // run), so a failure here is not propagated — leaking beats racing.
     let _ = tokio::fs::remove_dir_all(&run_dir).await;
     Ok(())
+}
+
+/// The installer CLI's argument list for `target_tag`: always
+/// `--non-interactive --json-progress --version=<tag>`, plus `--beta` iff
+/// `target_tag` is a prerelease (a semver `-<identifier>` suffix, e.g.
+/// `v0.2.3-beta.1`) — the installer's own resolution must consider
+/// prereleases too, or a beta target could resolve back down to the latest
+/// stable release instead. Mirrors `ui/views/updates.rs::tag_is_prerelease`,
+/// which uses the same rule to decide the curl-fallback caption's flag.
+fn installer_args(target_tag: &str) -> Vec<String> {
+    let mut args = vec![
+        "--non-interactive".to_string(),
+        "--json-progress".to_string(),
+        format!("--version={target_tag}"),
+    ];
+    if target_tag.contains('-') {
+        args.push("--beta".to_string());
+    }
+    args
+}
+
+/// Collect the trailing `cap` lines from `reader` (the installer's stderr),
+/// dropping older ones as new ones arrive. Extracted from `drive` so the
+/// capping behavior is exercisable against an in-memory reader in a test,
+/// without spawning a real child process.
+async fn collect_tail_lines<R: tokio::io::AsyncRead + Unpin>(reader: R, cap: usize) -> Vec<String> {
+    let mut lines = BufReader::new(reader).lines();
+    let mut tail: VecDeque<String> = VecDeque::with_capacity(cap);
+    while let Ok(Some(line)) = lines.next_line().await {
+        if tail.len() == cap {
+            tail.pop_front();
+        }
+        tail.push_back(line);
+    }
+    Vec::from(tail)
+}
+
+/// Read newline-delimited JSON lines from `reader` (the installer's
+/// stdout), parsing each as an [`InstallerEvent`] and forwarding it over
+/// `tx`. Extracted from `drive` so this behavior is exercisable against an
+/// in-memory reader in a test.
+async fn stream_installer_events<R: tokio::io::AsyncRead + Unpin>(reader: R, tx: &mut Tx) {
+    let mut lines = BufReader::new(reader).lines();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => match serde_json::from_str::<InstallerEvent>(&line) {
+                Ok(ev) => {
+                    let _ = tx.send(UpdateRunEvent::Installer(ev)).await;
+                }
+                // Forward-compatible: an installer newer than this app may
+                // emit a shape this parser doesn't know yet. Skip, don't fail
+                // the run over it — subsequent, parsable lines still land.
+                Err(e) => log::warn!("installer emitted an unparsable progress line: {e}: {line}"),
+            },
+            Ok(None) => break,
+            Err(e) => {
+                log::warn!("installer stdout read error: {e}");
+                break;
+            }
+        }
+    }
 }
 
 /// Build the (per-run directory, installer-binary path) for one apply-flow
@@ -215,6 +249,53 @@ fn installer_run_paths(base: &Path, asset_name: &str) -> (PathBuf, PathBuf) {
     let dir = base.join(name);
     let bin = dir.join(asset_name);
     (dir, bin)
+}
+
+/// Best-effort cleanup of abandoned run directories under `base`, before
+/// this run's own directory (`keep`, not yet created) is created.
+///
+/// Every error path in `drive` before the spawned installer exits
+/// deliberately leaks its `run_dir` (see this function's caller, and the
+/// tail of `drive`) rather than race the child that self-escalates by
+/// re-execing that same path — correct, but it means abandoned directories
+/// accumulate under `self-update/` across failed runs. This sweeps them,
+/// but only ones old enough that no plausible run — this app's own
+/// concurrent instance, or another install-in-progress entirely — could
+/// still be using them: age-gating, not liveness-checking, is what keeps a
+/// directory belonging to a live run from ever being force-removed out from
+/// under it. `keep` is skipped unconditionally so this run's own
+/// about-to-be-created directory is never swept, live or not.
+///
+/// Every error (permission, a directory vanishing mid-sweep, `read_dir`
+/// itself failing) is ignored: this is tidiness, not correctness — a
+/// leftover directory is harmless clutter, so failing to remove one must
+/// never fail the run that triggered the sweep.
+async fn sweep_stale_run_dirs(base: &Path, keep: &Path) {
+    let Ok(mut entries) = tokio::fs::read_dir(base).await else {
+        return;
+    };
+    let cutoff = SystemTime::now() - STALE_RUN_AGE;
+    loop {
+        let Ok(Some(entry)) = entries.next_entry().await else {
+            break;
+        };
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata().await else {
+            continue;
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        if modified < cutoff {
+            let _ = tokio::fs::remove_dir_all(&path).await;
+        }
+    }
 }
 
 /// Create `dir` with mode `0700` (matching `super-stt-install`'s own staging
@@ -304,8 +385,14 @@ async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), S
 
 #[cfg(test)]
 mod tests {
-    use super::{InstallerEvent, create_run_dir, installer_run_paths, verify_installer_checksum};
+    use super::{
+        InstallerEvent, UpdateRunEvent, collect_tail_lines, create_run_dir, installer_args,
+        installer_run_paths, stream_installer_events, sweep_stale_run_dirs,
+        verify_installer_checksum,
+    };
+    use futures_util::StreamExt;
     use std::path::Path;
+    use std::time::{Duration, SystemTime};
 
     /// The TOCTOU this closes: a predictable `base/<asset.name>` path would
     /// let a same-UID process swap the installer binary between this
@@ -331,6 +418,83 @@ mod tests {
         assert_ne!(bin1.parent().unwrap(), base);
         assert!(dir1.starts_with(base));
         assert!(dir2.starts_with(base));
+    }
+
+    /// Back-date `dir`'s mtime by `age` (Unix: opening a directory read-only
+    /// is legal, and `set_modified` on that handle is a plain `utimes`
+    /// call).
+    fn backdate(dir: &Path, age: Duration) {
+        let f = std::fs::OpenOptions::new().read(true).open(dir).unwrap();
+        f.set_modified(SystemTime::now() - age).unwrap();
+    }
+
+    /// F2: a sibling run dir older than the 24h threshold is swept, a fresh
+    /// one is left alone (it could belong to another instance's live run —
+    /// age, not liveness, is the only safe signal here), and the caller's
+    /// own about-to-be-created directory (`keep`) is never touched even if
+    /// it happens to already exist with an old mtime.
+    #[tokio::test]
+    async fn sweep_stale_run_dirs_removes_only_old_siblings_and_never_touches_keep() {
+        let base = std::env::temp_dir().join(format!(
+            "sstt-app-updater-sweep-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+
+        let old_dir = base.join("12345-deadbeef");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        backdate(&old_dir, Duration::from_secs(25 * 60 * 60));
+
+        let fresh_dir = base.join("12345-cafef00d");
+        std::fs::create_dir_all(&fresh_dir).unwrap();
+
+        let keep_dir = base.join("12345-keepme00");
+        std::fs::create_dir_all(&keep_dir).unwrap();
+        backdate(&keep_dir, Duration::from_secs(25 * 60 * 60));
+
+        sweep_stale_run_dirs(&base, &keep_dir).await;
+
+        assert!(!old_dir.exists(), "an old sibling run dir must be swept");
+        assert!(fresh_dir.exists(), "a fresh sibling run dir must survive");
+        assert!(
+            keep_dir.exists(),
+            "the caller's own about-to-be-created run dir must never be swept"
+        );
+    }
+
+    /// A run dir younger than the threshold must never be removed, no
+    /// matter how young — it may belong to another same-UID process's
+    /// still-running installer.
+    #[tokio::test]
+    async fn sweep_stale_run_dirs_leaves_a_just_created_sibling_alone() {
+        let base = std::env::temp_dir().join(format!(
+            "sstt-app-updater-sweep-fresh-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let live_dir = base.join("99999-livehex01");
+        std::fs::create_dir_all(&live_dir).unwrap();
+
+        sweep_stale_run_dirs(&base, Path::new("/does/not/matter")).await;
+
+        assert!(
+            live_dir.exists(),
+            "a fresh/live sibling must never be removed"
+        );
+    }
+
+    /// A `base` that doesn't exist yet (first run ever) must not panic —
+    /// this sweep is best-effort tidiness, called every run.
+    #[tokio::test]
+    async fn sweep_stale_run_dirs_tolerates_a_missing_base_dir() {
+        let base = std::env::temp_dir().join(format!(
+            "sstt-app-updater-sweep-missing-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        sweep_stale_run_dirs(&base, &base.join("keep")).await;
     }
 
     #[tokio::test]
@@ -406,5 +570,94 @@ mod tests {
             serde_json::from_str(r#"{"event":"phase","phase":"defragment","message":"x"}"#)
                 .unwrap();
         assert!(matches!(future, InstallerEvent::Phase { .. }));
+    }
+
+    /// F3: the documented cap — only the last `STDERR_TAIL_LINES` survive,
+    /// oldest dropped first — actually holds when fed more lines than that.
+    #[tokio::test]
+    async fn collect_tail_lines_keeps_only_the_last_n_lines() {
+        let cap = 5;
+        let mut data = String::new();
+        for i in 0..(cap + 3) {
+            data.push_str(&format!("line-{i}\n"));
+        }
+        let reader = std::io::Cursor::new(data.into_bytes());
+
+        let tail = collect_tail_lines(reader, cap).await;
+
+        assert_eq!(tail.len(), cap, "must be capped to exactly `cap` lines");
+        assert_eq!(tail, vec!["line-3", "line-4", "line-5", "line-6", "line-7"]);
+    }
+
+    #[tokio::test]
+    async fn collect_tail_lines_returns_everything_when_under_the_cap() {
+        let reader = std::io::Cursor::new(b"only\ntwo\n".to_vec());
+        let tail = collect_tail_lines(reader, 30).await;
+        assert_eq!(tail, vec!["only", "two"]);
+    }
+
+    /// F3: an unparsable stdout line is logged and skipped, not treated as a
+    /// stream-ending error — lines before AND after it must still parse.
+    #[tokio::test]
+    async fn stream_installer_events_skips_an_unparsable_line_without_aborting() {
+        let data = concat!(
+            r#"{"event":"phase","phase":"resolve","message":"a"}"#,
+            "\n",
+            "not json at all, just installer chatter\n",
+            r#"{"event":"phase","phase":"stage","message":"b"}"#,
+            "\n",
+        );
+        let reader = std::io::Cursor::new(data.as_bytes().to_vec());
+        let (mut tx, mut rx) = cosmic::iced::futures::channel::mpsc::channel::<UpdateRunEvent>(8);
+
+        stream_installer_events(reader, &mut tx).await;
+        drop(tx);
+
+        let mut received = Vec::new();
+        while let Some(ev) = rx.next().await {
+            received.push(ev);
+        }
+
+        assert_eq!(
+            received.len(),
+            2,
+            "the unparsable middle line must be skipped, not abort the stream"
+        );
+        assert!(
+            matches!(&received[0], UpdateRunEvent::Installer(InstallerEvent::Phase { phase, .. }) if phase == "resolve")
+        );
+        assert!(
+            matches!(&received[1], UpdateRunEvent::Installer(InstallerEvent::Phase { phase, .. }) if phase == "stage")
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_installer_events_emits_nothing_for_an_empty_stream() {
+        let reader = std::io::Cursor::new(Vec::new());
+        let (mut tx, mut rx) = cosmic::iced::futures::channel::mpsc::channel::<UpdateRunEvent>(8);
+        stream_installer_events(reader, &mut tx).await;
+        drop(tx);
+        assert!(rx.next().await.is_none());
+    }
+
+    // ---- F3: --beta argument -----------------------------------------------
+
+    #[test]
+    fn installer_args_passes_beta_only_for_a_prerelease_tag() {
+        assert!(installer_args("v0.2.3-beta.1").contains(&"--beta".to_string()));
+        assert!(!installer_args("v0.2.3").contains(&"--beta".to_string()));
+    }
+
+    #[test]
+    fn installer_args_always_carries_the_fixed_flags() {
+        let args = installer_args("v0.2.3");
+        assert_eq!(
+            args,
+            vec![
+                "--non-interactive".to_string(),
+                "--json-progress".to_string(),
+                "--version=v0.2.3".to_string(),
+            ]
+        );
     }
 }
