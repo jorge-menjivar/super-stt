@@ -120,7 +120,8 @@ jobs:
             --bin super-stt-cli \
             --bin super-stt-consent \
             --bin super-stt-app \
-            --bin super-stt-cosmic-applet
+            --bin super-stt-cosmic-applet \
+            --bin super-stt-install
 
       - name: Create tarball
         run: |
@@ -152,11 +153,16 @@ jobs:
           # Create tarball with architecture suffix
           tar -czf super-stt-${{ matrix.target }}.tar.gz -C dist .
 
+      - name: Stage installer binary
+        run: cp target/${{ matrix.target }}/release/super-stt-install super-stt-install-${{ matrix.target }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: super-stt-${{ matrix.target }}
-          path: super-stt-${{ matrix.target }}.tar.gz
+          path: |
+            super-stt-${{ matrix.target }}.tar.gz
+            super-stt-install-${{ matrix.target }}
 
   create-release:
     name: Create Release
@@ -172,10 +178,23 @@ jobs:
         with:
           path: artifacts
 
+      - name: Generate SHA256SUMS
+        run: |
+          shopt -s globstar nullglob
+          : > SHA256SUMS
+          for f in artifacts/**/*; do
+            [ -f "$f" ] || continue
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") >> SHA256SUMS
+          done
+          cat SHA256SUMS
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          files: artifacts/**/*.tar.gz
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/super-stt-install-*
+            SHA256SUMS
           draft: false
           prerelease: false
           generate_release_notes: true
