@@ -516,13 +516,13 @@ mod tests {
 
     /// A release with no `SHA256SUMS` asset at all: `installer_asset` must
     /// degrade to `None` rather than publish a digest-less asset — no
-    /// network call happens since `find_installer_asset` never gets that
-    /// far. A real mock server with `.expect(0)` (asserted below) actually
-    /// discriminates this: an unreachable base URL alone would make
-    /// `is_none()` pass even if a request WERE fired and merely failed to
-    /// connect, so it can't tell "no request occurred" apart from "a
-    /// request occurred and failed" — only a reachable server that would
-    /// answer, paired with an assertion that it was never hit, can.
+    /// network call happens since the missing-`SHA256SUMS` branch returns
+    /// before any `download` call. The installer asset's `download_url`
+    /// points at this mock server (rather than an unreachable placeholder),
+    /// so `.expect(0)` is a genuine check: a request to that URL — from
+    /// this function or a future regression — would land on `mock` and be
+    /// counted, so `mock.assert_async()` passing proves no such request was
+    /// made, not merely that one was fired and failed to connect.
     #[tokio::test]
     async fn resolve_installer_asset_none_without_sums_asset() {
         crate::install_crypto_provider();
@@ -535,7 +535,7 @@ mod tests {
         let mut r = rel("v0.3.0", ReleaseKind::Published);
         r.assets = vec![ReleaseAsset {
             name: "super-stt-install-x86_64-unknown-linux-gnu".into(),
-            download_url: "https://dl/i".into(),
+            download_url: format!("{}/i", s.url()),
             size: 2,
         }];
         let gh = super_stt_forge::Github::new(s.url(), None);

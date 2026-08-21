@@ -82,18 +82,24 @@ pub fn pick_method(
 /// failed" can never collide on the same exit code.)
 /// - `pkexec` exit 126 (dialog dismissed) or 127 (not authorized) →
 ///   [`InstallError::EscalationDenied`].
-/// - `sudo` exit 1 → [`InstallError::EscalationDenied`]. `sudo` never runs
-///   the command at all when it exits 1 (a bad/missing password), so this
-///   is unambiguously a denial — unlike the root phase's own failures,
-///   which exit `3`, never `1`. Matched when `stderr` names a denial
-///   (`"incorrect password"`/`"Sorry"`) or is empty — the inherited-stdio
-///   case (F3): `stderr` is always `""` here for a real invocation, since
-///   `Method::Sudo` inherits stderr rather than capturing it.
+/// - `sudo` exit 1, when `stderr` is empty or names a denial
+///   (`"incorrect password"`/`"Sorry"`) → [`InstallError::EscalationDenied`].
+///   Exit 1 is sudo's own refusal-or-cannot-run status — a bad/missing
+///   password, but also a sudoers/config problem or a failure to exec the
+///   command at all — rather than the invoked command's exit status, so we
+///   treat it as a denial; the root phase's own failures are distinguishable
+///   because they exit `3`, never `1`. The empty-`stderr` case is the
+///   inherited-stdio case (F3): `stderr` is always `""` here for a real
+///   invocation, since `Method::Sudo` inherits stderr rather than capturing
+///   it.
 /// - either escalator, exit `3` → [`InstallError::InstallFailed`]: the root
 ///   phase itself ran and failed. Carries the captured stderr when there is
-///   any (pkexec always captures it); when it was inherited instead (sudo
-///   always does — F3), the message says the real error was already
-///   printed to the terminal, since there is no text here to carry.
+///   any (pkexec always captures it); when `stderr` is empty instead, the
+///   message is escalator-aware: for `sudo` (which inherits stderr rather
+///   than capturing it — F3) it points at the terminal output above; for
+///   `pkexec` (no terminal to point at) it says only that no reason was
+///   reported — practically unreachable, since the root phase always prints
+///   before exiting `3` and pkexec always captures that output.
 /// - anything else → [`InstallError::InstallFailed`] naming the exit code and
 ///   trimmed stderr.
 #[must_use]
@@ -109,9 +115,14 @@ pub fn classify_failure(escalator: &str, code: Option<i32>, stderr: &str) -> Ins
         }
         // C1: `root_phase::run`'s own failure code, for either escalator —
         // never a denial, regardless of which escalator propagated it.
-        (_, Some(3)) if stderr.is_empty() => InstallError::InstallFailed(
-            "the root phase failed; see the terminal output above for the reason".to_string(),
-        ),
+        (_, Some(3)) if stderr.is_empty() => {
+            let msg = if escalator == "sudo" {
+                "the root phase failed; see the terminal output above for the reason"
+            } else {
+                "the root phase failed without reporting a reason"
+            };
+            InstallError::InstallFailed(msg.to_string())
+        }
         (_, Some(3)) => {
             InstallError::InstallFailed(format!("root phase failed: {}", stderr.trim()))
         }

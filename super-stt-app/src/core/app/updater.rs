@@ -686,8 +686,17 @@ mod tests {
             .with_chunked_body(|w| w.write_all(&[3u8; 1000]))
             .create_async()
             .await;
-        let dir =
-            std::env::temp_dir().join(format!("sstt-app-updater-dl-nolen-{}", std::process::id()));
+        // pid + an atomic counter (super-stt-install/src/escalate.rs's test
+        // temp-dir convention) so parallel tests can't collide; clear a
+        // pre-existing directory first since the pid+counter name is only
+        // unique within one process run.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "sstt-app-updater-dl-nolen-{}-{n}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let dest = dir.join("blob");
 

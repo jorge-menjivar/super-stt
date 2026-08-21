@@ -433,7 +433,9 @@ mod tests {
     /// structurally instead: it re-reads this file's own source and counts
     /// `?` inside the per-step match, so a future edit that adds a second
     /// `?` arm (silently promoting a best-effort step to a hard error)
-    /// fails this test rather than passing unnoticed.
+    /// fails this test rather than passing unnoticed. Also scans for
+    /// `return Err` — the other obvious spelling of a hard error, one a
+    /// future arm could use without ever touching the `?` count above.
     #[test]
     fn only_restart_or_start_step_is_a_hard_error() {
         let src = include_str!("post_install.rs");
@@ -462,6 +464,16 @@ mod tests {
         assert!(
             code_only.contains("Step::RestartOrStart => step_restart_or_start().await?"),
             "the one `?` must be on the RestartOrStart arm specifically:\n{code_only}"
+        );
+        // `?` isn't the only way an arm could turn hard-error: an arm could
+        // instead be a block that does `return Err(..)` directly, which
+        // wouldn't move the `?` count above and would slip past the assert
+        // just made. Catch that spelling too.
+        assert_eq!(
+            code_only.matches("return Err").count(),
+            0,
+            "found a `return Err` in run's executor match outside the `?` \
+             this test already pins — every other step must stay best-effort:\n{code_only}"
         );
     }
 
