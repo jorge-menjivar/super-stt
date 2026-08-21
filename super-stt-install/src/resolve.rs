@@ -39,6 +39,7 @@ pub fn tarball_name(triple: &str, tag: &str) -> String {
 
 /// A release resolved to a concrete, installable tarball + checksums asset
 /// pair for the running host.
+#[derive(Debug)]
 pub struct ResolvedTarget {
     pub release: Release,
     pub tarball_url: String,
@@ -197,5 +198,253 @@ mod tests {
             required_asset(&r, "SHA256SUMS"),
             Err(crate::errors::InstallError::DownloadFailed(_))
         ));
+    }
+
+    fn rel_with_assets(tag: &str, kind: ReleaseKind, assets: &[&str]) -> Release {
+        Release {
+            tag: tag.to_string(),
+            kind,
+            assets: assets
+                .iter()
+                .map(|name| super_stt_forge::ReleaseAsset {
+                    name: (*name).to_string(),
+                    download_url: format!("https://example.invalid/{name}"),
+                    size: 0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn pin_absent_errors_no_release_found() {
+        let rels = vec![rel("v0.2.2", ReleaseKind::Published)];
+        assert!(matches!(
+            pick_release(&rels, Some("v9.9.9"), false),
+            Err(crate::errors::InstallError::NoReleaseFound(_))
+        ));
+    }
+
+    #[test]
+    fn unpinned_stable_never_selects_a_prerelease_or_draft() {
+        let rels = vec![
+            rel("v9.9.9-beta.1", ReleaseKind::Prerelease),
+            rel("v9.9.8", ReleaseKind::Draft), // higher than any published tag
+            rel("v0.2.2", ReleaseKind::Published),
+            rel("v0.2.1", ReleaseKind::Published),
+        ];
+        // Highest PUBLISHED release wins — not the higher-versioned
+        // prerelease or draft.
+        assert_eq!(pick_release(&rels, None, false).unwrap().tag, "v0.2.2");
+    }
+
+    #[test]
+    fn unpinned_beta_includes_prereleases_but_never_drafts() {
+        let rels = vec![
+            rel("v9.9.9", ReleaseKind::Draft), // must never win, even in beta mode
+            rel("v0.2.3-beta.2", ReleaseKind::Prerelease),
+            rel("v0.2.2", ReleaseKind::Published),
+        ];
+        assert_eq!(
+            pick_release(&rels, None, true).unwrap().tag,
+            "v0.2.3-beta.2"
+        );
+    }
+
+    #[test]
+    fn unparsable_tags_are_ignored() {
+        let rels = vec![
+            rel("not-a-version", ReleaseKind::Published),
+            rel("v0.2.2", ReleaseKind::Published),
+        ];
+        assert_eq!(pick_release(&rels, None, false).unwrap().tag, "v0.2.2");
+        // All-unparsable list: no release satisfies the channel filter.
+        let all_bad = vec![rel("garbage", ReleaseKind::Published)];
+        assert!(matches!(
+            pick_release(&all_bad, None, false),
+            Err(crate::errors::InstallError::NoReleaseFound(_))
+        ));
+    }
+
+    #[test]
+    fn empty_release_list_errors() {
+        let rels: Vec<Release> = Vec::new();
+        assert!(matches!(
+            pick_release(&rels, None, false),
+            Err(crate::errors::InstallError::NoReleaseFound(_))
+        ));
+        assert!(matches!(
+            pick_release(&rels, Some("v1.0.0"), false),
+            Err(crate::errors::InstallError::NoReleaseFound(_))
+        ));
+    }
+
+    #[test]
+    fn beta_only_list_with_beta_false_errors() {
+        let rels = vec![rel("v0.2.3-beta.1", ReleaseKind::Prerelease)];
+        assert!(matches!(
+            pick_release(&rels, None, false),
+            Err(crate::errors::InstallError::NoReleaseFound(_))
+        ));
+        // The same list, with beta requested, does resolve.
+        assert_eq!(
+            pick_release(&rels, None, true).unwrap().tag,
+            "v0.2.3-beta.1"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_target_happy_path_returns_both_urls() {
+        super_stt_forge::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        let base = s.url();
+        let releases_json = serde_json::json!([{
+            "tag_name": "v0.2.3-beta.1",
+            "draft": false,
+            "prerelease": true,
+            "assets": [
+                {
+                    "name": "super-stt-x86_64-unknown-linux-gnu-beta.tar.gz",
+                    "browser_download_url": format!("{base}/tarball"),
+                    "size": 10,
+                },
+                {
+                    "name": "SHA256SUMS",
+                    "browser_download_url": format!("{base}/sums"),
+                    "size": 10,
+                },
+            ],
+        }])
+        .to_string();
+        let _m = s
+            .mock(
+                "GET",
+                "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+            )
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&releases_json)
+            .create_async()
+            .await;
+
+        let repo = super_stt_forge::RepoRef::parse(REPO).unwrap();
+        let client = super_stt_forge::Github::new(base.clone(), None);
+        let target = resolve_target(&client, &repo, None, true, "x86_64-unknown-linux-gnu")
+            .await
+            .unwrap();
+        assert_eq!(target.release.tag, "v0.2.3-beta.1");
+        assert_eq!(target.tarball_url, format!("{base}/tarball"));
+        assert_eq!(target.sums_url, format!("{base}/sums"));
+        assert_eq!(
+            target.tarball_name,
+            "super-stt-x86_64-unknown-linux-gnu-beta.tar.gz"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_target_errors_when_release_is_missing_sha256sums() {
+        super_stt_forge::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        let base = s.url();
+        let releases_json = serde_json::json!([{
+            "tag_name": "v0.2.2",
+            "draft": false,
+            "prerelease": false,
+            "assets": [
+                {
+                    "name": "super-stt-x86_64-unknown-linux-gnu.tar.gz",
+                    "browser_download_url": format!("{base}/tarball"),
+                    "size": 10,
+                },
+            ],
+        }])
+        .to_string();
+        let _m = s
+            .mock(
+                "GET",
+                "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+            )
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&releases_json)
+            .create_async()
+            .await;
+
+        let repo = super_stt_forge::RepoRef::parse(REPO).unwrap();
+        let client = super_stt_forge::Github::new(base.clone(), None);
+        let err = resolve_target(&client, &repo, None, false, "x86_64-unknown-linux-gnu")
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::errors::InstallError::DownloadFailed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn resolve_target_errors_when_release_is_missing_the_arch_tarball() {
+        super_stt_forge::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        let base = s.url();
+        let releases_json = serde_json::json!([{
+            "tag_name": "v0.2.2",
+            "draft": false,
+            "prerelease": false,
+            "assets": [
+                {
+                    "name": "SHA256SUMS",
+                    "browser_download_url": format!("{base}/sums"),
+                    "size": 10,
+                },
+            ],
+        }])
+        .to_string();
+        let _m = s
+            .mock(
+                "GET",
+                "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+            )
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&releases_json)
+            .create_async()
+            .await;
+
+        let repo = super_stt_forge::RepoRef::parse(REPO).unwrap();
+        let client = super_stt_forge::Github::new(base.clone(), None);
+        let err = resolve_target(&client, &repo, None, false, "x86_64-unknown-linux-gnu")
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            crate::errors::InstallError::DownloadFailed(_)
+        ));
+    }
+
+    #[test]
+    fn required_asset_missing_names_the_asset() {
+        let r = rel_with_assets("v0.2.2", ReleaseKind::Published, &["SHA256SUMS"]);
+        let err = required_asset(&r, "super-stt-x86_64-unknown-linux-gnu.tar.gz").unwrap_err();
+        match err {
+            crate::errors::InstallError::DownloadFailed(msg) => {
+                assert!(
+                    msg.contains("super-stt-x86_64-unknown-linux-gnu.tar.gz"),
+                    "{msg}"
+                );
+            }
+            other => panic!("expected DownloadFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn target_triple_resolves_the_real_hosts_arch() {
+        // `target_triple` switches on `std::env::consts::ARCH`, fixed at
+        // compile time for this test binary — the unsupported-arch branch
+        // (anything but x86_64/aarch64) isn't reachable here without cfg
+        // tricks (building a whole separate test binary for e.g. `mips`),
+        // so it's not exercised as a unit test; `errors.rs`'s
+        // `error_codes_are_the_documented_closed_set` test already covers
+        // `UnsupportedArch`'s `code()` mapping directly. This just confirms
+        // the happy path: the real host's arch resolves to a triple.
+        assert!(target_triple().is_ok());
     }
 }

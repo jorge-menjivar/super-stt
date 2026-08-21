@@ -352,6 +352,11 @@ mod tests {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
             std::env::temp_dir().join(format!("sstt-install-root-{}-{n}", std::process::id()));
+        // F6: clear a pre-existing directory first — the pid+counter name
+        // is only unique within one process run, so PID reuse across
+        // separate test-binary invocations could otherwise leak files from
+        // a previous run into this one.
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -592,5 +597,95 @@ mod tests {
         let json = format!(r#"{{"entries":[]}}{padding}"#);
         std::fs::write(&manifest_path, json).unwrap();
         assert_eq!(run(&manifest_path), 1);
+    }
+
+    // NOTE: `run()`'s success (`0`) path is intentionally NOT exercised via a
+    // real call here. Past `apply_manifest` succeeding, `run` unconditionally
+    // shells out to the real, hardcoded `/usr/bin/gtk-update-icon-cache`
+    // against the real `/usr/local/share/icons/hicolor` (best-effort, no
+    // injectable path — by design, since `pkexec` strips the environment).
+    // On a host that has that binary installed, a genuinely-successful `run`
+    // call really does invoke it against that real system path (it fails
+    // harmlessly without root and mutates nothing, but it's still a real
+    // path this test suite shouldn't reach for). The two failure paths below
+    // exercise `run`'s exit-code contract instead — the more safety-relevant
+    // half of it, and reachable without ever getting past `apply_manifest`.
+
+    #[test]
+    fn run_returns_nonzero_when_apply_manifest_validation_fails() {
+        // A well-formed, well-under-cap manifest whose one entry fails
+        // `validate_dest` (outside every allowed root) — `run`'s nonzero
+        // path must also be reachable via a *parsed* manifest failing
+        // `apply_manifest`, not only via `read_manifest`'s own checks (the
+        // oversized-manifest case above).
+        let tmp = test_dir();
+        let manifest_path = tmp.join("manifest.json");
+        let src = tmp.join("payload");
+        std::fs::write(&src, b"evil").unwrap();
+        let json = serde_json::json!({
+            "entries": [{
+                "source": src.to_string_lossy(),
+                "dest": "/etc/passwd",
+                "mode": 0o644,
+            }]
+        });
+        std::fs::write(&manifest_path, json.to_string()).unwrap();
+        assert_eq!(run(&manifest_path), 1);
+    }
+
+    // --- validate_mode: direct unit tests (also exercised indirectly via
+    // apply_manifest above, but the matrix is clearer tested directly). ---
+
+    #[test]
+    fn validate_mode_rejects_setuid_setgid_and_sticky_bits() {
+        assert!(validate_mode(0o4755).is_err()); // setuid
+        assert!(validate_mode(0o2755).is_err()); // setgid
+        assert!(validate_mode(0o1755).is_err()); // sticky
+    }
+
+    #[test]
+    fn validate_mode_accepts_ordinary_permission_bits() {
+        assert!(validate_mode(0o644).is_ok());
+        assert!(validate_mode(0o755).is_ok());
+    }
+
+    // --- validate_source: direct unit tests. ---
+
+    #[test]
+    fn validate_source_accepts_a_path_inside_staging_root() {
+        let tmp = test_dir();
+        let staging = tmp.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        let src = staging.join("payload");
+        std::fs::write(&src, b"x").unwrap();
+        assert!(validate_source(&src, &staging).is_ok());
+    }
+
+    #[test]
+    fn validate_source_rejects_a_path_outside_staging_root() {
+        let tmp = test_dir();
+        let staging = tmp.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        let src = tmp.join("sibling-not-in-staging");
+        std::fs::write(&src, b"x").unwrap();
+        assert!(validate_source(&src, &staging).is_err());
+    }
+
+    #[test]
+    fn validate_source_rejects_a_parent_dir_component() {
+        let tmp = test_dir();
+        let staging = tmp.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        let src = staging.join("../escape");
+        assert!(validate_source(&src, &staging).is_err());
+    }
+
+    #[test]
+    fn validate_source_accepts_the_self_exe_exception_outside_staging_root() {
+        let tmp = test_dir();
+        let staging = tmp.join("staging"); // deliberately does NOT contain current_exe()
+        std::fs::create_dir_all(&staging).unwrap();
+        let self_exe = std::env::current_exe().unwrap();
+        assert!(validate_source(&self_exe, &staging).is_ok());
     }
 }

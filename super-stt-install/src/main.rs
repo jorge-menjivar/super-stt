@@ -76,6 +76,43 @@ fn random_suffix() -> String {
     super_stt_registry_types::verify::random_hex_suffix(8)
 }
 
+/// The outcome of mapping one trimmed line of `/dev/tty` input from the
+/// interactive menu: either a selection to install, an explicit quit
+/// (`q`/`Q`), or a retry with the message to show before looping back to the
+/// prompt (an unavailable option picked, or plain garbage input).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuChoice {
+    Select(stage::ComponentSelection),
+    Quit,
+    Retry(&'static str),
+}
+
+/// Pure mapping from one trimmed line of interactive-menu input to a
+/// [`MenuChoice`], extracted out of `run_interactive_menu`'s I/O loop so the
+/// whole choice matrix is testable without a `/dev/tty`.
+///
+/// `cosmic_available` decides two things: what `""`/`"1"` ("All") actually
+/// selects — [`stage::ComponentSelection::All`] when a COSMIC panel is
+/// present, [`stage::ComponentSelection::AllButApplet`] when it isn't, so the
+/// menu's own "(skip COSMIC applet)" label is never a lie — and whether
+/// `"4"` (COSMIC Applet only) is selectable at all.
+#[must_use]
+fn menu_choice(input: &str, cosmic_available: bool) -> MenuChoice {
+    match input {
+        "" | "1" => MenuChoice::Select(if cosmic_available {
+            stage::ComponentSelection::All
+        } else {
+            stage::ComponentSelection::AllButApplet
+        }),
+        "2" => MenuChoice::Select(stage::ComponentSelection::Daemon),
+        "3" => MenuChoice::Select(stage::ComponentSelection::App),
+        "4" if cosmic_available => MenuChoice::Select(stage::ComponentSelection::Applet),
+        "4" => MenuChoice::Retry("COSMIC panel not found - applet not available"),
+        "q" | "Q" => MenuChoice::Quit,
+        _ => MenuChoice::Retry("Invalid option. Please try again."),
+    }
+}
+
 /// The interactive component-selection menu (`scripts/install-beta.sh:397-460`),
 /// printed to stderr and read from `/dev/tty` (independent of stdin, which
 /// `--json-progress` callers may be piping/redirecting). Returns `None` on
@@ -131,20 +168,10 @@ fn run_interactive_menu(
             // EOF on /dev/tty — treat like an explicit quit.
             return Ok(None);
         }
-        match line.trim() {
-            "" | "1" => {
-                return Ok(Some(if cosmic_available {
-                    stage::ComponentSelection::All
-                } else {
-                    stage::ComponentSelection::AllButApplet
-                }));
-            }
-            "2" => return Ok(Some(stage::ComponentSelection::Daemon)),
-            "3" => return Ok(Some(stage::ComponentSelection::App)),
-            "4" if cosmic_available => return Ok(Some(stage::ComponentSelection::Applet)),
-            "4" => eprintln!("COSMIC panel not found - applet not available"),
-            "q" | "Q" => return Ok(None),
-            _ => eprintln!("Invalid option. Please try again."),
+        match menu_choice(line.trim(), cosmic_available) {
+            MenuChoice::Select(selection) => return Ok(Some(selection)),
+            MenuChoice::Quit => return Ok(None),
+            MenuChoice::Retry(message) => eprintln!("{message}"),
         }
     }
 }
@@ -194,7 +221,11 @@ async fn run(cli: &cli::Cli, reporter: Reporter) -> Result<(), InstallError> {
         },
     )
     .await?;
-    let sums = download::download_string(&target.sums_url, 64 * 1024).await?;
+    let sums = download::download_string(
+        &target.sums_url,
+        super_stt_registry_types::verify::MAX_SHA256SUMS_BYTES,
+    )
+    .await?;
 
     reporter.emit(&Event::Phase {
         phase: Phase::Verify,
@@ -288,6 +319,76 @@ fn main() -> std::process::ExitCode {
                 message: &e.to_string(),
             });
             std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_choice_default_and_1_pick_all_or_all_but_applet_on_cosmic_availability() {
+        // The fix that makes the menu's own "(skip COSMIC applet)" label
+        // true: option 1 (and the default, empty input) must yield
+        // `AllButApplet` — not `All` — exactly when no COSMIC panel is
+        // present, and `All` when one is.
+        assert_eq!(
+            menu_choice("1", true),
+            MenuChoice::Select(stage::ComponentSelection::All)
+        );
+        assert_eq!(
+            menu_choice("", true),
+            MenuChoice::Select(stage::ComponentSelection::All)
+        );
+        assert_eq!(
+            menu_choice("1", false),
+            MenuChoice::Select(stage::ComponentSelection::AllButApplet)
+        );
+        assert_eq!(
+            menu_choice("", false),
+            MenuChoice::Select(stage::ComponentSelection::AllButApplet)
+        );
+    }
+
+    #[test]
+    fn menu_choice_2_and_3_pick_daemon_and_app_regardless_of_cosmic() {
+        for cosmic in [true, false] {
+            assert_eq!(
+                menu_choice("2", cosmic),
+                MenuChoice::Select(stage::ComponentSelection::Daemon)
+            );
+            assert_eq!(
+                menu_choice("3", cosmic),
+                MenuChoice::Select(stage::ComponentSelection::App)
+            );
+        }
+    }
+
+    #[test]
+    fn menu_choice_4_selects_applet_only_when_cosmic_is_available() {
+        assert_eq!(
+            menu_choice("4", true),
+            MenuChoice::Select(stage::ComponentSelection::Applet)
+        );
+        assert!(matches!(menu_choice("4", false), MenuChoice::Retry(_)));
+    }
+
+    #[test]
+    fn menu_choice_q_quits_regardless_of_case_or_cosmic() {
+        for cosmic in [true, false] {
+            assert_eq!(menu_choice("q", cosmic), MenuChoice::Quit);
+            assert_eq!(menu_choice("Q", cosmic), MenuChoice::Quit);
+        }
+    }
+
+    #[test]
+    fn menu_choice_anything_else_retries() {
+        for bad in ["5", "abc", "-1", " ", "1 "] {
+            assert!(
+                matches!(menu_choice(bad, true), MenuChoice::Retry(_)),
+                "{bad:?} should retry"
+            );
         }
     }
 }

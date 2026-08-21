@@ -236,7 +236,14 @@ pub struct Manifest {
 
 /// Every `resources/super-stt-cosmic-applet-*.desktop` file in `staging`,
 /// sorted for deterministic manifest ordering.
-fn applet_desktop_files(staging: &Path) -> Vec<PathBuf> {
+///
+/// # Errors
+/// [`InstallError::InstallFailed`] when the glob yields zero entries (F5): a
+/// missing or renamed `resources/` directory would otherwise silently install
+/// the applet binary with no launcher entry at all, since a `for` loop over
+/// an empty `Vec` just does nothing — the same "required, not merely
+/// best-effort" treatment [`required_entry`] already gives the applet icon.
+fn applet_desktop_files(staging: &Path) -> Result<Vec<PathBuf>, InstallError> {
     let resources = staging.join("resources");
     let mut files: Vec<PathBuf> = std::fs::read_dir(&resources)
         .into_iter()
@@ -250,7 +257,13 @@ fn applet_desktop_files(staging: &Path) -> Vec<PathBuf> {
         })
         .collect();
     files.sort();
-    files
+    if files.is_empty() {
+        return Err(InstallError::InstallFailed(format!(
+            "staging missing any super-stt-cosmic-applet-*.desktop file under {}",
+            resources.display()
+        )));
+    }
+    Ok(files)
 }
 
 /// A required source is missing from `staging` — the tarball is malformed or
@@ -365,7 +378,7 @@ pub fn build_manifest(
             bin.join("super-stt-cosmic-applet"),
             0o755,
         )?);
-        for path in applet_desktop_files(staging) {
+        for path in applet_desktop_files(staging)? {
             let name = path
                 .file_name()
                 .expect("filtered on file_name above")
@@ -401,14 +414,26 @@ mod tests {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
             std::env::temp_dir().join(format!("sstt-install-stage-{}-{n}", std::process::id()));
+        // F6: clear a pre-existing directory first — the pid+counter name
+        // is only unique within one process run, so PID reuse across
+        // separate test-binary invocations could otherwise leak files from
+        // a previous run into this one.
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
-    /// A temp dir with each of `paths` touched as an empty file (parent dirs
-    /// created as needed). Used as a fake `prefix` for detection tests.
+    /// A temp dir with an (always-created, possibly empty) `bin/` and each of
+    /// `paths` touched as an empty file under it (parent dirs created as
+    /// needed). Used as a fake `prefix` for detection tests: `mktree(&[])`
+    /// exercises `plan_components`'s `Ok(ReadDir)`-but-empty path (a `bin/`
+    /// that exists with nothing in it); see
+    /// `detection_fresh_install_with_no_bin_directory_at_all` below for the
+    /// sibling case where `bin/` doesn't exist at all (the `read_dir` `Err`
+    /// path `.into_iter().flatten()` also has to handle).
     fn mktree(paths: &[&str]) -> PathBuf {
         let dir = test_dir();
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
         for p in paths {
             let full = dir.join(p);
             std::fs::create_dir_all(full.parent().unwrap()).unwrap();
@@ -420,11 +445,12 @@ mod tests {
     /// The full tarball layout (binaries at root, `systemd/`, `resources/**`)
     /// in a temp dir, as a fake `staging` tree.
     fn fake_staging() -> PathBuf {
-        fake_staging_without("")
+        fake_staging_without(&[])
     }
 
-    /// Like [`fake_staging`], but omits the entry whose basename is `missing`.
-    fn fake_staging_without(missing: &str) -> PathBuf {
+    /// Like [`fake_staging`], but omits every entry whose basename is in
+    /// `missing`.
+    fn fake_staging_without(missing: &[&str]) -> PathBuf {
         let dir = test_dir();
         let files = [
             "super-stt-daemon",
@@ -442,7 +468,10 @@ mod tests {
             "resources/icons/hicolor/scalable/apps/super-stt-cosmic-applet.svg",
         ];
         for f in files {
-            if !missing.is_empty() && std::path::Path::new(f).file_name().unwrap() == missing {
+            if missing
+                .iter()
+                .any(|m| std::path::Path::new(f).file_name().unwrap() == *m)
+            {
                 continue;
             }
             let full = dir.join(f);
@@ -461,7 +490,7 @@ mod tests {
 
     #[test]
     fn detection_fresh_install_takes_all_gated_on_cosmic() {
-        let prefix = mktree(&[]); // empty bin/
+        let prefix = mktree(&[]); // empty bin/ (F6: `mktree` always creates it)
         let c = plan_components(None, &prefix, false);
         assert!(c.daemon && c.app && !c.applet);
         let c = plan_components(None, &prefix, true);
@@ -469,10 +498,69 @@ mod tests {
     }
 
     #[test]
-    fn explicit_selection_wins() {
+    fn detection_fresh_install_with_no_bin_directory_at_all() {
+        // F6: the sibling of the empty-`bin/`-directory case above — here
+        // `bin/` doesn't exist at all, exercising `read_dir`'s `Err` path
+        // rather than an empty `Ok(ReadDir)`. `plan_components` must treat
+        // both identically: `.into_iter().flatten()` empties out either way,
+        // so this is still a fresh install.
+        let prefix = test_dir(); // no `bin/` subdirectory created
+        assert!(!prefix.join("bin").exists());
+        let c = plan_components(None, &prefix, false);
+        assert!(c.daemon && c.app && !c.applet);
+        let c = plan_components(None, &prefix, true);
+        assert!(c.daemon && c.app && c.applet);
+    }
+
+    #[test]
+    fn detection_update_mode_only_applet_present() {
+        // The daemon is always refreshed on an update (the core piece every
+        // install has) even when only the applet binary is present.
+        let prefix = mktree(&["bin/super-stt-cosmic-applet"]);
+        let c = plan_components(None, &prefix, true);
+        assert!(c.daemon && !c.app && c.applet);
+    }
+
+    #[test]
+    fn detection_update_mode_all_three_present() {
+        let prefix = mktree(&[
+            "bin/super-stt-daemon",
+            "bin/super-stt-app",
+            "bin/super-stt-cosmic-applet",
+        ]);
+        let c = plan_components(None, &prefix, false); // cosmic gone, but applet was already installed
+        assert!(c.daemon && c.app && c.applet);
+    }
+
+    #[test]
+    fn explicit_daemon_selects_only_daemon() {
         let prefix = mktree(&["bin/super-stt-app"]);
         let c = plan_components(Some(ComponentSelection::Daemon), &prefix, true);
         assert!(c.daemon && !c.app && !c.applet);
+    }
+
+    #[test]
+    fn explicit_app_selects_only_app() {
+        let prefix = mktree(&[]);
+        let c = plan_components(Some(ComponentSelection::App), &prefix, true);
+        assert!(!c.daemon && c.app && !c.applet);
+    }
+
+    #[test]
+    fn explicit_applet_selects_only_applet() {
+        let prefix = mktree(&[]);
+        // Explicit `--components=applet` bypasses the `cosmic_available`
+        // gate entirely — unlike the interactive menu's option 4, the CLI
+        // flag is trusted outright.
+        let c = plan_components(Some(ComponentSelection::Applet), &prefix, false);
+        assert!(!c.daemon && !c.app && c.applet);
+    }
+
+    #[test]
+    fn explicit_all_selects_everything_regardless_of_existing_state() {
+        let prefix = mktree(&["bin/super-stt-daemon"]);
+        let c = plan_components(Some(ComponentSelection::All), &prefix, true);
+        assert!(c.daemon && c.app && c.applet);
     }
 
     #[test]
@@ -536,7 +624,7 @@ mod tests {
 
     #[test]
     fn manifest_missing_required_source_errors_before_escalation() {
-        let staging = fake_staging_without("super-stt-app");
+        let staging = fake_staging_without(&["super-stt-app"]);
         let err = build_manifest(
             &staging,
             std::path::Path::new("/usr/local"),
@@ -550,6 +638,77 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, crate::errors::InstallError::InstallFailed(_)));
+    }
+
+    #[test]
+    fn manifest_errors_when_applet_desktop_glob_is_empty() {
+        // F5: if `resources/` is missing or renamed so the
+        // `super-stt-cosmic-applet-*.desktop` glob yields zero entries, the
+        // applet binary would otherwise get installed with no launcher
+        // entry at all — silently, since a `for` loop over an empty `Vec`
+        // just does nothing. That must be a hard error for a selected
+        // applet component, exactly like the sibling `required_entry` icon
+        // check just below it.
+        let staging = fake_staging_without(&[
+            "super-stt-cosmic-applet-full.desktop",
+            "super-stt-cosmic-applet-left.desktop",
+            "super-stt-cosmic-applet-right.desktop",
+        ]);
+        let err = build_manifest(
+            &staging,
+            std::path::Path::new("/usr/local"),
+            std::path::Path::new("/usr/lib/systemd/user"),
+            &Components {
+                daemon: false,
+                app: false,
+                applet: true,
+            },
+            std::path::Path::new("/proc/self/exe"),
+        )
+        .unwrap_err();
+        assert!(matches!(err, crate::errors::InstallError::InstallFailed(_)));
+    }
+
+    #[test]
+    fn manifest_skips_optional_metainfo_when_absent() {
+        let staging = fake_staging_without(&["super-stt-app.metainfo.xml"]);
+        let m = build_manifest(
+            &staging,
+            std::path::Path::new("/usr/local"),
+            std::path::Path::new("/usr/lib/systemd/user"),
+            &Components {
+                daemon: false,
+                app: true,
+                applet: false,
+            },
+            std::path::Path::new("/proc/self/exe"),
+        )
+        .unwrap();
+        assert!(
+            !m.entries
+                .iter()
+                .any(|e| e.dest.to_string_lossy().contains("metainfo"))
+        );
+    }
+
+    #[test]
+    fn manifest_self_exe_entry_is_present_with_0755() {
+        let staging = fake_staging();
+        let m = build_manifest(
+            &staging,
+            std::path::Path::new("/usr/local"),
+            std::path::Path::new("/usr/lib/systemd/user"),
+            &Components::default(),
+            std::path::Path::new("/some/self/exe"),
+        )
+        .unwrap();
+        let self_entry = m
+            .entries
+            .iter()
+            .find(|e| e.dest.ends_with("bin/super-stt-install"))
+            .expect("self-exe entry must always be present, regardless of components selected");
+        assert_eq!(self_entry.mode, 0o755);
+        assert_eq!(self_entry.source, std::path::Path::new("/some/self/exe"));
     }
 
     #[test]
@@ -598,5 +757,94 @@ mod tests {
         let out = tmp.join("out");
         assert!(extract_tarball(&tgz, &out).is_err());
         assert!(!out.join("evil-link").exists());
+    }
+
+    #[test]
+    fn extract_tarball_rejects_an_absolute_path_entry() {
+        // `Header::set_path` itself refuses an absolute path unless told
+        // otherwise, so this uses `set_path_absolute` — the same escape
+        // hatch a maliciously-crafted (not tar-rs-authored) archive can use
+        // — to actually get one into the archive and prove
+        // `extract_tarball`'s own `tar_entry_unsafe_reason` check (not
+        // tar-rs's) is what's rejecting it.
+        let tmp = test_dir();
+        let tgz = tmp.join("evil-abs.tar.gz");
+        {
+            let f = std::fs::File::create(&tgz).unwrap();
+            let enc = flate2::write::GzEncoder::new(f, flate2::Compression::fast());
+            let mut tar = tar::Builder::new(enc);
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_mode(0o644);
+            header.set_size(0);
+            header.set_path_absolute("/etc/evil-absolute").unwrap();
+            header.set_cksum();
+            tar.append(&header, std::io::empty()).unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let out = tmp.join("out");
+        let err = extract_tarball(&tgz, &out).unwrap_err();
+        assert!(matches!(err, crate::errors::InstallError::InstallFailed(_)));
+        assert!(!std::path::Path::new("/etc/evil-absolute").exists());
+    }
+
+    #[test]
+    fn extract_tarball_rejects_a_parent_dir_entry() {
+        // `Header::set_path`/`set_path_absolute` both unconditionally refuse
+        // a `..` component (tar-rs's own defense), so a legitimately built
+        // archive can never carry one through the high-level API. To prove
+        // `extract_tarball`'s *own* `tar_entry_unsafe_reason` check (not
+        // tar-rs) is what would catch one, this writes the raw name bytes
+        // directly into the header, bypassing `set_path` entirely — modeling
+        // a maliciously hand-crafted (not tar-rs-authored) archive.
+        let tmp = test_dir();
+        let tgz = tmp.join("evil-dotdot.tar.gz");
+        {
+            let f = std::fs::File::create(&tgz).unwrap();
+            let enc = flate2::write::GzEncoder::new(f, flate2::Compression::fast());
+            let mut tar = tar::Builder::new(enc);
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_mode(0o644);
+            header.set_size(0);
+            let name = b"../evil-dotdot";
+            header.as_old_mut().name[..name.len()].copy_from_slice(name);
+            header.set_cksum();
+            tar.append(&header, std::io::empty()).unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let out = tmp.join("out");
+        let err = extract_tarball(&tgz, &out).unwrap_err();
+        assert!(matches!(err, crate::errors::InstallError::InstallFailed(_)));
+        assert!(!tmp.join("evil-dotdot").exists());
+    }
+
+    #[test]
+    fn extract_tarball_enforces_the_decompression_bomb_cap() {
+        // The per-entry cap (`tar_budget_step` against
+        // `MAX_TARBALL_ENTRY_BYTES`) is checked against the tar header's
+        // DECLARED size before `unpack_in` ever reads/writes a single byte
+        // of body — so this proves the cap fires without needing gigabytes
+        // of real data on disk: the header lies about its size, and no
+        // matching body is ever written.
+        let tmp = test_dir();
+        let tgz = tmp.join("bomb.tar.gz");
+        {
+            let f = std::fs::File::create(&tgz).unwrap();
+            let enc = flate2::write::GzEncoder::new(f, flate2::Compression::fast());
+            let mut tar = tar::Builder::new(enc);
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_mode(0o644);
+            header.set_path("huge-file").unwrap();
+            header.set_size(super_stt_registry_types::verify::MAX_TARBALL_ENTRY_BYTES + 1);
+            header.set_cksum();
+            tar.append(&header, std::io::empty()).unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let out = tmp.join("out");
+        let err = extract_tarball(&tgz, &out).unwrap_err();
+        assert!(matches!(err, crate::errors::InstallError::InstallFailed(_)));
+        assert!(!out.join("huge-file").exists());
     }
 }

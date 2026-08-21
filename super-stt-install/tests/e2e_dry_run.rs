@@ -42,8 +42,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// A minimal, valid gzip'd tar covering every file `--components=all`
 /// requires (`super-stt-install/src/stage.rs::build_manifest`): the three
 /// daemon binaries, the systemd unit, the app binary + desktop + icon, and
-/// the applet binary + icon. Desktop-file globs (`super-stt-cosmic-applet-*.desktop`)
-/// and the app metainfo are optional in `build_manifest` and omitted here.
+/// the applet binary + desktop file + icon. At least one
+/// `super-stt-cosmic-applet-*.desktop` file is required whenever the applet
+/// component is selected (F5 — an empty glob is a hard error, not a silent
+/// no-launcher-entry install), so exactly one is included here; the app
+/// metainfo is still optional in `build_manifest` and omitted.
 fn build_fixture_tarball(dir: &std::path::Path) -> Vec<u8> {
     let tree = dir.join("tree");
     std::fs::create_dir_all(tree.join("systemd")).unwrap();
@@ -71,6 +74,11 @@ fn build_fixture_tarball(dir: &std::path::Path) -> Vec<u8> {
     std::fs::write(
         tree.join("resources/icons/hicolor/scalable/apps/super-stt-app.svg"),
         b"<svg/>",
+    )
+    .unwrap();
+    std::fs::write(
+        tree.join("resources/super-stt-cosmic-applet-full.desktop"),
+        b"[Desktop Entry]\nName=Super STT Applet\n",
     )
     .unwrap();
     std::fs::write(

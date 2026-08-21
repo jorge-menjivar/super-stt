@@ -59,4 +59,44 @@ mod tests {
             Err(crate::errors::InstallError::ChecksumMismatch(_))
         ));
     }
+
+    #[test]
+    fn verify_file_accepts_an_uppercase_digest_in_the_sums_listing() {
+        // The daemon's and app's own checksum lookups rely on this
+        // case-insensitivity too (`sha256_matches`) — an `index.json`/manifest
+        // pin may be upper- or mixed-case.
+        let dir =
+            std::env::temp_dir().join(format!("sstt-install-test-upper-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("hello.txt");
+        std::fs::write(&f, "hello world\n").unwrap();
+        let sums = "A948904F2F0F479B8F8197694B30184B0D2ED1C1CD2A1EC0FB85D299A192A447  hello.txt\n";
+        assert!(verify_file(&f, "hello.txt", sums).is_ok());
+    }
+
+    #[test]
+    fn verify_file_treats_a_malformed_digest_entry_as_not_listed() {
+        // Wave 1's `parse_sha256sums` guard skips any entry whose digest
+        // isn't exactly 64 ASCII hex chars, rather than yielding a truncated
+        // or corrupted digest as if it were real. From `verify_file`'s side
+        // that must surface as "not listed", not a checksum-mismatch bug
+        // report about a digest nobody actually published.
+        let dir = std::env::temp_dir().join(format!(
+            "sstt-install-test-malformed-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("hello.txt");
+        std::fs::write(&f, "hello world\n").unwrap();
+        // Truncated digest (63 hex chars) — not shape-valid, so it's skipped
+        // by `parse_sha256sums`, leaving `hello.txt` unlisted.
+        let sums = "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a44  hello.txt\n";
+        let err = verify_file(&f, "hello.txt", sums).unwrap_err();
+        match err {
+            crate::errors::InstallError::ChecksumMismatch(msg) => {
+                assert!(msg.contains("not listed"), "{msg}");
+            }
+            other => panic!("expected ChecksumMismatch(\"not listed\"), got {other:?}"),
+        }
+    }
 }

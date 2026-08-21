@@ -64,6 +64,42 @@ pub fn pick_method(
     Err(InstallError::EscalationUnavailable(reason.to_string()))
 }
 
+/// Classify a non-zero exit from the escalated `<escalator> <exe> --root-phase
+/// <manifest>` command into the wire-contract error the app branches on
+/// (extracted from `run_root_phase` per F2 so the whole denial matrix is
+/// testable without ever invoking a real `sudo`/`pkexec`).
+///
+/// `stderr` is whatever text was actually captured for the failing process —
+/// pass `""` when it was inherited instead (the `Method::Sudo` case; see
+/// `run_root_phase`'s F3 doc comment). Callers must have already forced
+/// `LANG=C`/`LC_ALL=C` on the escalated command (F1) so any captured `stderr`
+/// text this matches against is guaranteed English, not gettext-localized.
+///
+/// # Mapping (preserved exactly from before the F2 extraction)
+/// - `pkexec` exit 126 (dialog dismissed) or 127 (not authorized) →
+///   [`InstallError::EscalationDenied`].
+/// - `sudo` exit 1 → [`InstallError::EscalationDenied`] when `stderr` names a
+///   denial (`"incorrect password"`/`"Sorry"`), **or** when `stderr` is empty
+///   — the inherited-stdio case, where a `sudo -v` primer having already
+///   succeeded makes an immediate exit 1 from the real invocation sudo
+///   refusing, not some unrelated failure (F3).
+/// - anything else → [`InstallError::InstallFailed`] naming the exit code and
+///   trimmed stderr.
+#[must_use]
+pub fn classify_failure(escalator: &str, code: Option<i32>, stderr: &str) -> InstallError {
+    match (escalator, code) {
+        ("pkexec", Some(126 | 127)) => InstallError::EscalationDenied,
+        ("sudo", Some(1))
+            if stderr.is_empty()
+                || stderr.contains("incorrect password")
+                || stderr.contains("Sorry") =>
+        {
+            InstallError::EscalationDenied
+        }
+        _ => InstallError::InstallFailed(format!("root phase exited {code:?}: {}", stderr.trim())),
+    }
+}
+
 /// Re-exec this same running binary (`std::env::current_exe()`) under
 /// `method`, invoking `<exe> --root-phase <manifest_path>`. Blocks until the
 /// escalated process exits.
@@ -82,6 +118,9 @@ pub async fn run_root_phase(method: Method, manifest_path: &Path) -> Result<(), 
         // Prime the sudo timestamp so the actual run doesn't re-prompt oddly.
         let ok = tokio::process::Command::new("sudo")
             .arg("-v")
+            .env("LANG", "C")
+            .env("LC_ALL", "C")
+            .env_remove("LANGUAGE")
             .status()
             .await
             .map_err(|e| InstallError::EscalationUnavailable(e.to_string()))?;
@@ -93,30 +132,52 @@ pub async fn run_root_phase(method: Method, manifest_path: &Path) -> Result<(), 
         Method::Sudo => "sudo",
         Method::Pkexec => "pkexec",
     };
-    let out = tokio::process::Command::new(escalator)
-        .arg(&me)
+    let mut cmd = tokio::process::Command::new(escalator);
+    cmd.arg(&me)
         .arg("--root-phase")
         .arg(manifest_path)
         .stdin(std::process::Stdio::inherit())
-        .output()
-        .await
-        .map_err(|e| InstallError::EscalationUnavailable(e.to_string()))?;
-    if out.status.success() {
+        // F1: sudo/pkexec localize their diagnostics via gettext — force
+        // English so `classify_failure`'s denial-phrase match below isn't
+        // locale-dependent (a French/German/Spanish `LANG` would otherwise
+        // misreport a wrong-password rejection as `InstallFailed`).
+        .env("LANG", "C")
+        .env("LC_ALL", "C")
+        .env_remove("LANGUAGE");
+
+    let (status, stderr) = match method {
+        Method::Sudo => {
+            // F3: `pick_method` only ever returns `Sudo` when stderr is a
+            // TTY, so inherit it here instead of capturing via `.output()`:
+            // if the `sudo -v` primer's timestamp expires in the window
+            // between it and this call, sudo re-prompts, and an inherited
+            // prompt is visible — a captured one is an invisible prompt into
+            // a pipe nobody answers, hanging the process forever.
+            cmd.stderr(std::process::Stdio::inherit());
+            let status = cmd
+                .status()
+                .await
+                .map_err(|e| InstallError::EscalationUnavailable(e.to_string()))?;
+            (status, String::new())
+        }
+        Method::Pkexec => {
+            // No TTY here by construction (`pick_method` only picks Pkexec
+            // when sudo can't prompt), so there's no re-prompt-into-a-pipe
+            // risk — capture stderr as before for classification.
+            let out = cmd
+                .output()
+                .await
+                .map_err(|e| InstallError::EscalationUnavailable(e.to_string()))?;
+            (
+                out.status,
+                String::from_utf8_lossy(&out.stderr).into_owned(),
+            )
+        }
+    };
+    if status.success() {
         return Ok(());
     }
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    match (escalator, out.status.code()) {
-        // pkexec: 126 = dialog dismissed, 127 = not authorized.
-        ("pkexec", Some(126 | 127)) => Err(InstallError::EscalationDenied),
-        ("sudo", Some(1)) if stderr.contains("incorrect password") || stderr.contains("Sorry") => {
-            Err(InstallError::EscalationDenied)
-        }
-        _ => Err(InstallError::InstallFailed(format!(
-            "root phase exited {:?}: {}",
-            out.status.code(),
-            stderr.trim()
-        ))),
-    }
+    Err(classify_failure(escalator, status.code(), &stderr))
 }
 
 #[cfg(test)]
@@ -132,6 +193,11 @@ mod tests {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
             std::env::temp_dir().join(format!("sstt-install-escalate-{}-{n}", std::process::id()));
+        // F6: clear a pre-existing directory first — the pid+counter name
+        // is only unique within one process run, so PID reuse across
+        // separate test-binary invocations could otherwise leak files from
+        // a previous run into this one.
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -158,5 +224,90 @@ mod tests {
             pick_method(false, true, false),
             Err(InstallError::EscalationUnavailable(_))
         ));
+    }
+
+    #[test]
+    fn which_ignores_a_non_executable_file() {
+        let dir = test_dir();
+        let f = dir.join("not-executable");
+        std::fs::write(&f, b"nope").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let path_env = dir.display().to_string();
+        assert_eq!(which("not-executable", &path_env), None);
+    }
+
+    // --- classify_failure (F2): pure, so the whole denial matrix is
+    // testable without ever invoking a real sudo/pkexec. ---
+
+    #[test]
+    fn classify_pkexec_dialog_dismissed_or_unauthorized_as_denied() {
+        assert!(matches!(
+            classify_failure("pkexec", Some(126), ""),
+            InstallError::EscalationDenied
+        ));
+        assert!(matches!(
+            classify_failure("pkexec", Some(127), ""),
+            InstallError::EscalationDenied
+        ));
+    }
+
+    #[test]
+    fn classify_sudo_denial_with_english_stderr() {
+        // F1: LANG=C/LC_ALL=C on the escalated command guarantees sudo's
+        // diagnostics are English before we ever get here to match them.
+        assert!(matches!(
+            classify_failure("sudo", Some(1), "Sorry, try again.\n"),
+            InstallError::EscalationDenied
+        ));
+        assert!(matches!(
+            classify_failure("sudo", Some(1), "sudo: 1 incorrect password attempt\n"),
+            InstallError::EscalationDenied
+        ));
+    }
+
+    #[test]
+    fn classify_sudo_denial_with_inherited_empty_stderr() {
+        // F3: for `Method::Sudo` stderr is inherited (visible to the user),
+        // not captured — `run_root_phase` passes `""` in that case. A sudo
+        // exit code of 1 after a successful `sudo -v` primer is still a
+        // denial for our purposes, string match or not.
+        assert!(matches!(
+            classify_failure("sudo", Some(1), ""),
+            InstallError::EscalationDenied
+        ));
+    }
+
+    #[test]
+    fn classify_pkexec_other_code_is_install_failed_with_details() {
+        let e = classify_failure("pkexec", Some(1), "some polkit error\n");
+        match e {
+            InstallError::InstallFailed(msg) => {
+                assert!(msg.contains('1'), "{msg}");
+                assert!(msg.contains("some polkit error"), "{msg}");
+            }
+            other => panic!("expected InstallFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_sudo_other_code_is_install_failed_with_details() {
+        let e = classify_failure("sudo", Some(2), "unexpected failure\n");
+        match e {
+            InstallError::InstallFailed(msg) => {
+                assert!(msg.contains('2'), "{msg}");
+                assert!(msg.contains("unexpected failure"), "{msg}");
+                assert!(!msg.ends_with('\n'), "stderr must be trimmed: {msg:?}");
+            }
+            other => panic!("expected InstallFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_sudo_denial_stderr_must_actually_say_so_when_captured() {
+        // A captured (non-empty, non-denial) stderr for sudo exit 1 must NOT
+        // be misclassified as a denial — e.g. the invoked root-phase binary
+        // itself exiting 1 for an unrelated validation failure.
+        let e = classify_failure("sudo", Some(1), "error: staging missing foo\n");
+        assert!(matches!(e, InstallError::InstallFailed(_)));
     }
 }
