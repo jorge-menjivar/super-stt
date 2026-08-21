@@ -338,7 +338,9 @@ async fn verify_installer_checksum(bin: &Path, expected_hex: &str) -> Result<(),
 }
 
 /// Stream `url` to `dest`, reporting throttled `FetchProgress` events.
-/// Mirrors `super-stt-install`'s `download_to_file` chunk loop.
+/// Mirrors `super-stt-install`'s `download_to_file` chunk loop, including its
+/// guaranteed final emission (see the `any_progress`/`last_reported` check
+/// below) — keep the two in step per that function's own doc comment.
 async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), String> {
     let client = super_stt_forge::http::download_client();
     let mut resp = client
@@ -354,6 +356,7 @@ async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), S
         .map_err(|e| format!("create {}: {e}", dest.display()))?;
     let mut done: u64 = 0;
     let mut last_reported: u64 = 0;
+    let mut any_progress = false;
     while let Some(chunk) = resp
         .chunk()
         .await
@@ -365,6 +368,7 @@ async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), S
         done += chunk.len() as u64;
         if done.saturating_sub(last_reported) >= PROGRESS_THROTTLE_BYTES || done == total {
             last_reported = done;
+            any_progress = true;
             let _ = tx
                 .send(UpdateRunEvent::FetchProgress {
                     bytes_done: done,
@@ -372,6 +376,23 @@ async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), S
                 })
                 .await;
         }
+    }
+    // C6: guarantee at least one emission even when nothing above ever
+    // fired — the case for a response under the throttle threshold when the
+    // server sends no `Content-Length` (`total` stays 0 for the whole
+    // transfer, so `done == total` is only ever true for a zero-byte body).
+    // When the true total was never known, report the actual bytes
+    // downloaded as the total too, so a consumer computing a percentage
+    // sees a clean "done" rather than a `bytes_done > 0` over an
+    // unknown/zero total.
+    if !any_progress || last_reported != done {
+        let final_total = if total == 0 { done } else { total };
+        let _ = tx
+            .send(UpdateRunEvent::FetchProgress {
+                bytes_done: done,
+                bytes_total: final_total,
+            })
+            .await;
     }
     // Drive tokio::fs::File's pending buffered write to completion before the
     // file is dropped and the (freshly chmod'd) binary is spawned — the same
@@ -386,8 +407,8 @@ async fn download_installer(url: &str, dest: &Path, tx: &mut Tx) -> Result<(), S
 #[cfg(test)]
 mod tests {
     use super::{
-        InstallerEvent, UpdateRunEvent, collect_tail_lines, create_run_dir, installer_args,
-        installer_run_paths, stream_installer_events, sweep_stale_run_dirs,
+        InstallerEvent, UpdateRunEvent, collect_tail_lines, create_run_dir, download_installer,
+        installer_args, installer_run_paths, stream_installer_events, sweep_stale_run_dirs,
         verify_installer_checksum,
     };
     use futures_util::StreamExt;
@@ -646,6 +667,57 @@ mod tests {
     fn installer_args_passes_beta_only_for_a_prerelease_tag() {
         assert!(installer_args("v0.2.3-beta.1").contains(&"--beta".to_string()));
         assert!(!installer_args("v0.2.3").contains(&"--beta".to_string()));
+    }
+
+    // ---- C6: `download_installer` must guarantee a final `FetchProgress`
+    // emission, mirroring `super-stt-install::download::download_to_file`'s
+    // own guarantee (its doc comment says to keep the two in step). ----
+
+    #[tokio::test]
+    async fn download_installer_reports_final_progress_with_no_content_length() {
+        // A chunked body (no `Content-Length`) under the throttle threshold:
+        // `total` stays 0 for the whole transfer, so the old `done == total`
+        // check could never fire, and nothing else in the loop would either
+        // — the fetch would silently report zero progress.
+        super_stt_forge::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        s.mock("GET", "/blob")
+            .with_status(200)
+            .with_chunked_body(|w| w.write_all(&[3u8; 1000]))
+            .create_async()
+            .await;
+        let dir =
+            std::env::temp_dir().join(format!("sstt-app-updater-dl-nolen-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("blob");
+
+        let (mut tx, mut rx) = cosmic::iced::futures::channel::mpsc::channel::<UpdateRunEvent>(8);
+        download_installer(&format!("{}/blob", s.url()), &dest, &mut tx)
+            .await
+            .unwrap();
+        drop(tx);
+
+        let mut events = Vec::new();
+        while let Some(ev) = rx.next().await {
+            events.push(ev);
+        }
+        assert!(
+            !events.is_empty(),
+            "a no-Content-Length response must still emit at least one FetchProgress event"
+        );
+        match events.last().unwrap() {
+            UpdateRunEvent::FetchProgress {
+                bytes_done,
+                bytes_total,
+            } => {
+                assert_eq!(*bytes_done, 1000);
+                assert_eq!(
+                    *bytes_total, 1000,
+                    "unknown total reports bytes actually downloaded"
+                );
+            }
+            other => panic!("expected FetchProgress, got {other:?}"),
+        }
     }
 
     #[test]

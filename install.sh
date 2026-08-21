@@ -59,16 +59,25 @@ validate_channel() {
 
 # $1: JSON body of `GET /repos/<repo>/releases/latest` (a single release
 # object). Echoes its `tag_name`, or empty if the field is missing/blank.
-# Prefers `jq`; falls back to a `grep`+`sed` scrape of that one field when
-# `jq` isn't installed (a single object has no ordering hazard, unlike the
-# beta list below, but `jq` is still preferred for consistency).
+# The `grep`+`sed` scrape a single object has no ordering hazard (unlike the
+# beta list below), so this is a plain string scrape either way — split out
+# only so `scripts/test-install.sh` can exercise the exact fallback path
+# directly, independent of whether `jq` happens to be installed on the test
+# host.
+_resolve_stable_tag_grep() {
+    local json="$1"
+    printf '%s' "$json" | grep '"tag_name"' | head -1 \
+        | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/'
+}
+
+# Prefers `jq`; falls back to [`_resolve_stable_tag_grep`] when `jq` isn't
+# installed.
 resolve_stable_tag() {
     local json="$1"
     if command -v jq >/dev/null 2>&1; then
         printf '%s' "$json" | jq -r '.tag_name // empty'
     else
-        printf '%s' "$json" | grep '"tag_name"' | head -1 \
-            | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/'
+        _resolve_stable_tag_grep "$json"
     fi
 }
 
@@ -76,26 +85,38 @@ resolve_stable_tag() {
 # Echoes the `tag_name` of the newest release with `"prerelease": true`, or
 # empty if there isn't one.
 #
-# The `jq` path is exact: it reasons over parsed release objects, so field
-# order within an object and any text in a release's markdown `body` are
-# irrelevant. The fallback (no `jq` installed) instead greps every
+# This fallback (used when `jq` isn't installed) greps every
 # `"tag_name"`/`"prerelease"` line out of the whole document and pairs them
 # up positionally — it silently assumes `tag_name` always immediately
 # precedes `prerelease` in each object (true for GitHub's current field
 # order, but not a contract) AND that neither literal string ever appears
 # inside a release's `body` text (a changelog that quotes either desyncs
-# every later pair). Both hazards are real; `jq` is what actually fixes
-# them, so use it whenever it's available.
+# every later pair). Both hazards are real and NOT closed here — `jq` is
+# what actually fixes them (see [`resolve_beta_tag`]'s exact reasoning-over-
+# parsed-objects path below); `scripts/test-install.sh` pins the
+# field-order-swapped case as a documented known limitation of this
+# fallback specifically, run unconditionally (not gated on `jq`'s absence)
+# so that weak path always has real coverage.
+_resolve_beta_tag_grep() {
+    local json="$1"
+    printf '%s' "$json" \
+        | grep -E '"tag_name"|"prerelease"' \
+        | paste - - \
+        | awk -F'[:,]' '{ gsub(/[ "]/,"",$2); gsub(/[ "]/,"",$4); if ($4=="true") { print $2; exit } }'
+}
+
+# The `jq` path is exact: it reasons over parsed release objects, so field
+# order within an object and any text in a release's markdown `body` are
+# irrelevant. Falls back to [`_resolve_beta_tag_grep`] when `jq` isn't
+# installed — see that function's doc comment for the hazards it doesn't
+# close.
 resolve_beta_tag() {
     local json="$1"
     if command -v jq >/dev/null 2>&1; then
         printf '%s' "$json" \
             | jq -r '[.[] | select(.prerelease==true)][0].tag_name // empty'
     else
-        printf '%s' "$json" \
-            | grep -E '"tag_name"|"prerelease"' \
-            | paste - - \
-            | awk -F'[:,]' '{ gsub(/[ "]/,"",$2); gsub(/[ "]/,"",$4); if ($4=="true") { print $2; exit } }'
+        _resolve_beta_tag_grep "$json"
     fi
 }
 
@@ -177,7 +198,7 @@ main() {
         # ---- Legacy fallback: release has no installer binary ----
         print_info "Release $VERSION has no installer binary; using the legacy $CHANNEL script."
     else
-        CURL_ERR="$(cat "$CURL_ERR_FILE" 2>/dev/null)"
+        CURL_ERR="$(cat "$CURL_ERR_FILE" 2>/dev/null)" || true
         print_error "Installer download failed (HTTP ${HTTP_CODE:-unknown}): ${CURL_ERR:-curl reported no output}"
         print_info "Falling back to the legacy $CHANNEL script."
     fi

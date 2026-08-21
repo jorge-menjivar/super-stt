@@ -23,6 +23,36 @@ fn github_env_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+/// RAII guard for `GITHUB_API_BASE`: sets it on construction, restores
+/// (removes) it on drop — including on an unwind, e.g. an assertion panic
+/// partway through a test body. Without this, a plain `set_var` paired with
+/// a `remove_var` at the end of the test function leaks the var into every
+/// later test whenever a panic lands between the two (this file's own
+/// `github_env_lock` only serializes the tests against each other; it can't
+/// undo a set that never got cleaned up).
+struct GithubApiBaseGuard;
+
+impl GithubApiBaseGuard {
+    fn set(url: &str) -> Self {
+        // SAFETY: serialized against every other `GITHUB_API_BASE` mutation
+        // in this file by `github_env_lock`, held across the whole test
+        // body (including this guard's lifetime).
+        unsafe {
+            std::env::set_var("GITHUB_API_BASE", url);
+        }
+        Self
+    }
+}
+
+impl Drop for GithubApiBaseGuard {
+    fn drop(&mut self) {
+        // SAFETY: see `set` above.
+        unsafe {
+            std::env::remove_var("GITHUB_API_BASE");
+        }
+    }
+}
+
 /// Two overlapping calls race a mocked GitHub response reporting one new
 /// version. `before` is read by both calls before either check completes, so
 /// without gating the event/notify block on `run_check`'s "did I actually
@@ -50,10 +80,9 @@ async fn overlapping_checks_notify_at_most_once() {
     // `unsafe { set_var(XDG_RUNTIME_DIR, ..) }` idiom in
     // `super-stt-shared/src/validation/paths.rs`). Serialized against the
     // other `GITHUB_API_BASE`-touching tests in this file by
-    // `github_env_lock()` above.
-    unsafe {
-        std::env::set_var("GITHUB_API_BASE", s.url());
-    }
+    // `github_env_lock()` above; restored on drop (even on panic) by
+    // `GithubApiBaseGuard`.
+    let _api_base = GithubApiBaseGuard::set(&s.url());
 
     let mut daemon = test_daemon().await;
     // `test_daemon()`'s default notifier is set to fail delivery (so it
@@ -69,10 +98,6 @@ async fn overlapping_checks_notify_at_most_once() {
         a.run_self_update_check_and_notify(),
         b.run_self_update_check_and_notify(),
     );
-
-    unsafe {
-        std::env::remove_var("GITHUB_API_BASE");
-    }
 
     mock.assert_async().await;
     assert_eq!(
@@ -102,9 +127,7 @@ async fn update_available_event_published_only_when_the_candidate_is_new() {
         .expect(2)
         .create_async()
         .await;
-    unsafe {
-        std::env::set_var("GITHUB_API_BASE", s.url());
-    }
+    let _api_base = GithubApiBaseGuard::set(&s.url());
 
     let mut daemon = test_daemon().await;
     let (notifier, _sent) = Notifier::fake(false);
@@ -131,9 +154,6 @@ async fn update_available_event_published_only_when_the_candidate_is_new() {
         "an unchanged candidate must not publish a second event"
     );
 
-    unsafe {
-        std::env::remove_var("GITHUB_API_BASE");
-    }
     mock.assert_async().await;
 }
 
@@ -154,9 +174,7 @@ async fn failed_check_publishes_no_event_and_notifies_nobody() {
     .with_body(r#"[{"tag_name":"v81.0.0","prerelease":false,"assets":[]}]"#)
     .create_async()
     .await;
-    unsafe {
-        std::env::set_var("GITHUB_API_BASE", s.url());
-    }
+    let _api_base = GithubApiBaseGuard::set(&s.url());
 
     let mut daemon = test_daemon().await;
     let (notifier, sent) = Notifier::fake(false);
@@ -189,10 +207,6 @@ async fn failed_check_publishes_no_event_and_notifies_nobody() {
         1,
         "a failed check must not send a second notification"
     );
-
-    unsafe {
-        std::env::remove_var("GITHUB_API_BASE");
-    }
 }
 
 /// `Dbus` and `Auto` both deliver a desktop notification for a newly found
@@ -211,9 +225,7 @@ async fn assert_method_notifies(method: NotificationMethod, tag: &str) {
     ))
     .create_async()
     .await;
-    unsafe {
-        std::env::set_var("GITHUB_API_BASE", s.url());
-    }
+    let _api_base = GithubApiBaseGuard::set(&s.url());
 
     let mut daemon = test_daemon().await;
     daemon
@@ -237,10 +249,6 @@ async fn assert_method_notifies(method: NotificationMethod, tag: &str) {
         !daemon.self_update.should_notify(tag).await,
         "{method:?} must record the version as notified once delivery succeeds"
     );
-
-    unsafe {
-        std::env::remove_var("GITHUB_API_BASE");
-    }
 }
 
 #[tokio::test]
@@ -271,9 +279,7 @@ async fn assert_method_does_not_notify_or_record(method: NotificationMethod, tag
     ))
     .create_async()
     .await;
-    unsafe {
-        std::env::set_var("GITHUB_API_BASE", s.url());
-    }
+    let _api_base = GithubApiBaseGuard::set(&s.url());
 
     let mut daemon = test_daemon().await;
     daemon
@@ -299,10 +305,6 @@ async fn assert_method_does_not_notify_or_record(method: NotificationMethod, tag
         "{method:?} must NOT record the version as notified, so switching \
          the method later still notifies once"
     );
-
-    unsafe {
-        std::env::remove_var("GITHUB_API_BASE");
-    }
 }
 
 #[tokio::test]

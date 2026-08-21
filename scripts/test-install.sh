@@ -153,28 +153,24 @@ else
         "exit $MAIN_NO_PRERELEASE_STATUS, output: $MAIN_NO_PRERELEASE_OUT"
 fi
 
-echo "== beta resolution robustness (S1) =="
-if [ "$HAVE_JQ" -eq 1 ]; then
-    # A release object with `prerelease` written before `tag_name`. The old
-    # grep/paste/awk pipeline assumes tag_name always comes first within an
-    # object and mis-pairs this one, resolving empty instead of the tag.
-    FIXTURE_BETA_SWAPPED='[
+# A release object with `prerelease` written before `tag_name`. The
+# grep/paste/awk fallback assumes tag_name always comes first within an
+# object and mis-pairs this one.
+FIXTURE_BETA_SWAPPED='[
   {
     "prerelease": true,
     "tag_name": "v0.4.0-beta.1",
     "body": "Field order swapped."
   }
 ]'
-    assert_eq "field-order-swapped JSON still resolves the tag" \
-        "v0.4.0-beta.1" "$(resolve_beta_tag "$FIXTURE_BETA_SWAPPED")"
 
-    # A release whose body value is exactly the word `prerelease` (e.g. a
-    # templated changelog placeholder). Its JSON string delimiters make the
-    # rendered line read `"body": "prerelease"` — a literal match for the
-    # old pipeline's grep pattern despite `body` not being the `prerelease`
-    # key. That extra match shifts every later `paste - -` pairing by one,
-    # so the pipeline never finds the real prerelease that follows.
-    FIXTURE_BETA_BODY_LITERAL='[
+# A release whose body value is exactly the word `prerelease` (e.g. a
+# templated changelog placeholder). Its JSON string delimiters make the
+# rendered line read `"body": "prerelease"` — a literal match for the
+# fallback's grep pattern despite `body` not being the `prerelease` key.
+# That extra match shifts every later `paste - -` pairing by one, so the
+# pipeline never finds the real prerelease that follows.
+FIXTURE_BETA_BODY_LITERAL='[
   {
     "tag_name": "v0.5.0",
     "prerelease": false,
@@ -186,6 +182,36 @@ if [ "$HAVE_JQ" -eq 1 ]; then
     "body": "Latest beta before the stable cut."
   }
 ]'
+
+echo "== grep/awk fallback, exercised directly regardless of jq availability =="
+# `_resolve_stable_tag_grep`/`_resolve_beta_tag_grep` are what
+# `resolve_stable_tag`/`resolve_beta_tag` fall back to when `jq` isn't
+# installed. On a host that HAS jq (the normal case, e.g. this CI runner),
+# the public resolvers never take this path at all — so without asserting
+# against the private fallback functions directly, this whole path would
+# ship with zero real coverage on any ordinary dev/CI machine. Honest tests
+# of a known-weak path beat tests that silently skip.
+assert_eq "grep fallback extracts tag_name from a /releases/latest-shaped object" \
+    "v0.2.3" "$(_resolve_stable_tag_grep "$FIXTURE_STABLE_LATEST")"
+assert_eq "grep/awk fallback picks the newest prerelease from a well-formed, conventionally-ordered array" \
+    "v0.3.0-beta.2" "$(_resolve_beta_tag_grep "$FIXTURE_BETA_LIST")"
+assert_eq "grep/awk fallback resolves empty when no release is a prerelease" \
+    "" "$(_resolve_beta_tag_grep "$FIXTURE_BETA_NONE")"
+
+# Known limitation of the grep/awk fallback, documented on
+# `_resolve_beta_tag_grep` in install.sh: a field-order swap desyncs the
+# positional pairing and the fallback resolves EMPTY rather than the real
+# tag — it silently misses the beta release instead of picking a wrong one.
+# `jq` (asserted below, when available) is what actually closes this; pinning
+# the fallback's real behavior here is more honest than skipping the case
+# whenever this host happens to have jq installed.
+assert_eq "grep/awk fallback mis-pairs field-order-swapped JSON (known limitation, closed only by jq)" \
+    "" "$(_resolve_beta_tag_grep "$FIXTURE_BETA_SWAPPED")"
+
+echo "== beta resolution robustness (S1) =="
+if [ "$HAVE_JQ" -eq 1 ]; then
+    assert_eq "field-order-swapped JSON still resolves the tag" \
+        "v0.4.0-beta.1" "$(resolve_beta_tag "$FIXTURE_BETA_SWAPPED")"
     assert_eq "a release body containing the literal word desyncs nothing" \
         "v0.4.9-beta.3" "$(resolve_beta_tag "$FIXTURE_BETA_BODY_LITERAL")"
 else

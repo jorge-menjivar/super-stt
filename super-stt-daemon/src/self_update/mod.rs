@@ -239,12 +239,28 @@ impl SelfUpdateChecker {
     /// that arrives while another is already running waits for it on
     /// `check_lock`, then — since `generation` will have moved — returns
     /// that check's fresh result rather than making its own network call
-    /// (contract: `docs/protocol/endpoints/v1/update/check.md`). Callers
-    /// with side effects gated on "a new result showed up" (event publish,
-    /// notify-once) must key that on the returned `bool`, not merely on the
-    /// status — two overlapping calls both see a stale "before" snapshot
-    /// and would otherwise both fire those side effects for the coalesced
-    /// call too (task review round 1, Important finding).
+    /// (contract: `docs/protocol/endpoints/v1/update/check.md`, which
+    /// blesses this: a coalesced caller "receives that same fresh result").
+    /// Callers with side effects gated on "a new result showed up" (event
+    /// publish, notify-once) must key that on the returned `bool`, not
+    /// merely on the status — two overlapping calls both see a stale
+    /// "before" snapshot and would otherwise both fire those side effects
+    /// for the coalesced call too (task review round 1, Important finding).
+    ///
+    /// This is also the scope boundary of F1's channel-mismatch guarantee
+    /// above: F1 only closes the gap on the *failed-check* path — a failed
+    /// check that finds `resolved_include_pre` doesn't match its own
+    /// `include_pre` clears the stale candidate rather than reporting it
+    /// under the wrong `beta_optin_effective`. It does NOT make every
+    /// caller's `beta_optin_effective` reflect *its own* requested opt-in.
+    /// A `CheckNow` issued immediately after a beta toggle can still
+    /// coalesce onto an in-flight check that started running under the
+    /// *previous* opt-in, and get back that check's `beta_optin_effective`
+    /// (and candidate) instead of one resolved under the new toggle state —
+    /// deliberately left as-is, not restructured, since the coalescing
+    /// contract above is exactly what blesses it: two overlapping calls
+    /// share the one check that actually ran, whichever opt-in it ran
+    /// under.
     ///
     /// # Panics
     /// Never in practice: `REPO` is a hardcoded, valid
@@ -501,22 +517,34 @@ mod tests {
     /// A release with no `SHA256SUMS` asset at all: `installer_asset` must
     /// degrade to `None` rather than publish a digest-less asset — no
     /// network call happens since `find_installer_asset` never gets that
-    /// far, so a deliberately-unreachable base URL proves no request occurs.
+    /// far. A real mock server with `.expect(0)` (asserted below) actually
+    /// discriminates this: an unreachable base URL alone would make
+    /// `is_none()` pass even if a request WERE fired and merely failed to
+    /// connect, so it can't tell "no request occurred" apart from "a
+    /// request occurred and failed" — only a reachable server that would
+    /// answer, paired with an assertion that it was never hit, can.
     #[tokio::test]
     async fn resolve_installer_asset_none_without_sums_asset() {
         crate::install_crypto_provider();
+        let mut s = mockito::Server::new_async().await;
+        let mock = s
+            .mock("GET", mockito::Matcher::Any)
+            .expect(0)
+            .create_async()
+            .await;
         let mut r = rel("v0.3.0", ReleaseKind::Published);
         r.assets = vec![ReleaseAsset {
             name: "super-stt-install-x86_64-unknown-linux-gnu".into(),
             download_url: "https://dl/i".into(),
             size: 2,
         }];
-        let gh = super_stt_forge::Github::new("http://127.0.0.1:1", None);
+        let gh = super_stt_forge::Github::new(s.url(), None);
         assert!(
             resolve_installer_asset(&gh, &r, "x86_64-unknown-linux-gnu")
                 .await
                 .is_none()
         );
+        mock.assert_async().await;
     }
 
     /// The `SHA256SUMS` asset exists but its download fails (a 404 here,

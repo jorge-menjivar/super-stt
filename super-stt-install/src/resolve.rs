@@ -11,17 +11,29 @@ use crate::errors::InstallError;
 /// self-update release lookups.
 pub const REPO: &str = "github.com/jorge-menjivar/super-stt";
 
+/// Map a `std::env::consts::ARCH`-shaped string to a Rust target triple.
+/// Only the architectures Super STT ships prebuilt Linux binaries for are
+/// supported. Pure — split out from [`target_triple`] so the whole mapping,
+/// unsupported branch included, is testable across architectures without
+/// depending on the arch of the host actually running the test.
+///
+/// # Errors
+/// [`InstallError::UnsupportedArch`] on anything else (e.g. `mips`).
+fn target_triple_for(arch: &str) -> Result<&'static str, InstallError> {
+    match arch {
+        "x86_64" => Ok("x86_64-unknown-linux-gnu"),
+        "aarch64" => Ok("aarch64-unknown-linux-gnu"),
+        other => Err(InstallError::UnsupportedArch(other.to_string())),
+    }
+}
+
 /// Map the running host's CPU architecture to a Rust target triple. Only the
 /// architectures Super STT ships prebuilt Linux binaries for are supported.
 ///
 /// # Errors
 /// [`InstallError::UnsupportedArch`] on anything else (e.g. `mips`).
 pub fn target_triple() -> Result<&'static str, InstallError> {
-    match std::env::consts::ARCH {
-        "x86_64" => Ok("x86_64-unknown-linux-gnu"),
-        "aarch64" => Ok("aarch64-unknown-linux-gnu"),
-        other => Err(InstallError::UnsupportedArch(other.to_string())),
-    }
+    target_triple_for(std::env::consts::ARCH)
 }
 
 /// The release tarball's asset name for `triple` at `tag`: the `-beta` suffix
@@ -436,15 +448,29 @@ mod tests {
     }
 
     #[test]
-    fn target_triple_resolves_the_real_hosts_arch() {
-        // `target_triple` switches on `std::env::consts::ARCH`, fixed at
-        // compile time for this test binary — the unsupported-arch branch
-        // (anything but x86_64/aarch64) isn't reachable here without cfg
-        // tricks (building a whole separate test binary for e.g. `mips`),
-        // so it's not exercised as a unit test; `errors.rs`'s
-        // `error_codes_are_the_documented_closed_set` test already covers
-        // `UnsupportedArch`'s `code()` mapping directly. This just confirms
-        // the happy path: the real host's arch resolves to a triple.
-        assert!(target_triple().is_ok());
+    fn target_triple_for_maps_every_supported_arch_and_rejects_the_rest() {
+        // C11: exercised against the pure `target_triple_for` helper, not
+        // `target_triple()` itself (which is pinned to whatever arch this
+        // test binary happens to be compiled for) — so every branch,
+        // including the unsupported one, is actually reachable in one test.
+        assert_eq!(
+            target_triple_for("x86_64").unwrap(),
+            "x86_64-unknown-linux-gnu"
+        );
+        assert_eq!(
+            target_triple_for("aarch64").unwrap(),
+            "aarch64-unknown-linux-gnu"
+        );
+        // "arm64" is uname's/Apple's spelling, not Rust's — worth pinning
+        // that this mapping does NOT alias it to aarch64 the way
+        // `install.sh`'s shell-side `detect_triple` deliberately does.
+        assert!(matches!(
+            target_triple_for("arm64"),
+            Err(crate::errors::InstallError::UnsupportedArch(a)) if a == "arm64"
+        ));
+        assert!(matches!(
+            target_triple_for("mips"),
+            Err(crate::errors::InstallError::UnsupportedArch(a)) if a == "mips"
+        ));
     }
 }

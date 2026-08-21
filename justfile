@@ -176,8 +176,9 @@ coverage-lcov:
 coverage-html *args:
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --html {{ args }}
 
-# Full local CI gate: format, lint, feature-combo compile, tests, doctests, schemas
-ci: fmt-check check check-features test doctest schema-check
+# Full local CI gate: format, lint, feature-combo compile, tests, install.sh
+# tests, doctests, schemas
+ci: fmt-check check check-features test test-install doctest schema-check
 
 # Run the app for testing purposes
 run-app *args:

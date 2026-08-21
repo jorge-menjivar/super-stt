@@ -6752,6 +6752,7 @@ dependencies = [
  "libc",
  "libcosmic",
  "log",
+ "mockito",
  "open",
  "rfd 0.17.2",
  "rust-embed",

@@ -311,8 +311,20 @@ fn staging_root_of(manifest_path: &Path) -> Result<PathBuf, InstallError> {
 /// respectively, via [`staging_root_of`] and [`is_self_exe`]), never read
 /// back out of the manifest's own JSON.
 ///
-/// Returns a process exit code: `0` on success, `1` on any [`InstallError`]
-/// (logged to stderr).
+/// Returns a process exit code with its own dedicated failure value, chosen
+/// so the escalation layer (`crate::escalate::classify_failure`, which sees
+/// this exact code after `sudo`/`pkexec` propagate it verbatim) can always
+/// tell "the root phase itself ran and failed" apart from the escalator's
+/// OWN failure codes:
+/// - `0`: every manifest entry applied (the best-effort icon-cache refresh
+///   was also attempted, regardless of its own outcome).
+/// - `3`: reading, parsing, or applying the manifest failed — logged to
+///   stderr first. Deliberately **not** `1`: `sudo` uses exit `1` for its
+///   own refusal to run the command at all (bad/no password), and `pkexec`
+///   uses `126`/`127` when its polkit dialog is dismissed or authorization
+///   is refused — sharing `1` with those would make a genuine root-phase
+///   failure indistinguishable from a denied escalation once the exit code
+///   crosses that boundary.
 #[must_use]
 pub fn run(manifest_path: &Path) -> u8 {
     let outcome = read_manifest(manifest_path).and_then(|manifest| {
@@ -322,7 +334,7 @@ pub fn run(manifest_path: &Path) -> u8 {
 
     if let Err(e) = outcome {
         eprintln!("error: {e}");
-        return 1;
+        return 3;
     }
 
     // Best-effort: a missing gtk-update-icon-cache or a failing refresh is
@@ -596,7 +608,10 @@ mod tests {
             " ".repeat((super_stt_registry_types::verify::MAX_MANIFEST_BYTES + 1) as usize);
         let json = format!(r#"{{"entries":[]}}{padding}"#);
         std::fs::write(&manifest_path, json).unwrap();
-        assert_eq!(run(&manifest_path), 1);
+        // C1: `run`'s failure code is `3`, not `1` — `1` is reserved so a
+        // future exit-code consumer can never confuse "the root phase ran
+        // and failed" with an escalator's own denial code.
+        assert_eq!(run(&manifest_path), 3);
     }
 
     // NOTE: `run()`'s success (`0`) path is intentionally NOT exercised via a
@@ -630,7 +645,10 @@ mod tests {
             }]
         });
         std::fs::write(&manifest_path, json.to_string()).unwrap();
-        assert_eq!(run(&manifest_path), 1);
+        // C1: tightened from a bare "nonzero" check to the actual documented
+        // failure code (`3`) — the code the escalation layer now depends on
+        // to distinguish a real install failure from a denied escalation.
+        assert_eq!(run(&manifest_path), 3);
     }
 
     // --- validate_mode: direct unit tests (also exercised indirectly via

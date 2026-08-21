@@ -75,14 +75,25 @@ pub fn pick_method(
 /// `LANG=C`/`LC_ALL=C` on the escalated command (F1) so any captured `stderr`
 /// text this matches against is guaranteed English, not gettext-localized.
 ///
-/// # Mapping (preserved exactly from before the F2 extraction)
+/// # Mapping (C1: exit code `3` is `crate::root_phase::run`'s OWN failure
+/// code, distinct from either escalator's denial codes — see that
+/// function's doc comment for why. That's what makes the rest of this
+/// mapping sound: an escalator's denial code and "the root phase ran and
+/// failed" can never collide on the same exit code.)
 /// - `pkexec` exit 126 (dialog dismissed) or 127 (not authorized) →
 ///   [`InstallError::EscalationDenied`].
-/// - `sudo` exit 1 → [`InstallError::EscalationDenied`] when `stderr` names a
-///   denial (`"incorrect password"`/`"Sorry"`), **or** when `stderr` is empty
-///   — the inherited-stdio case, where a `sudo -v` primer having already
-///   succeeded makes an immediate exit 1 from the real invocation sudo
-///   refusing, not some unrelated failure (F3).
+/// - `sudo` exit 1 → [`InstallError::EscalationDenied`]. `sudo` never runs
+///   the command at all when it exits 1 (a bad/missing password), so this
+///   is unambiguously a denial — unlike the root phase's own failures,
+///   which exit `3`, never `1`. Matched when `stderr` names a denial
+///   (`"incorrect password"`/`"Sorry"`) or is empty — the inherited-stdio
+///   case (F3): `stderr` is always `""` here for a real invocation, since
+///   `Method::Sudo` inherits stderr rather than capturing it.
+/// - either escalator, exit `3` → [`InstallError::InstallFailed`]: the root
+///   phase itself ran and failed. Carries the captured stderr when there is
+///   any (pkexec always captures it); when it was inherited instead (sudo
+///   always does — F3), the message says the real error was already
+///   printed to the terminal, since there is no text here to carry.
 /// - anything else → [`InstallError::InstallFailed`] naming the exit code and
 ///   trimmed stderr.
 #[must_use]
@@ -95,6 +106,14 @@ pub fn classify_failure(escalator: &str, code: Option<i32>, stderr: &str) -> Ins
                 || stderr.contains("Sorry") =>
         {
             InstallError::EscalationDenied
+        }
+        // C1: `root_phase::run`'s own failure code, for either escalator —
+        // never a denial, regardless of which escalator propagated it.
+        (_, Some(3)) if stderr.is_empty() => InstallError::InstallFailed(
+            "the root phase failed; see the terminal output above for the reason".to_string(),
+        ),
+        (_, Some(3)) => {
+            InstallError::InstallFailed(format!("root phase failed: {}", stderr.trim()))
         }
         _ => InstallError::InstallFailed(format!("root phase exited {code:?}: {}", stderr.trim())),
     }
@@ -268,9 +287,11 @@ mod tests {
     #[test]
     fn classify_sudo_denial_with_inherited_empty_stderr() {
         // F3: for `Method::Sudo` stderr is inherited (visible to the user),
-        // not captured — `run_root_phase` passes `""` in that case. A sudo
-        // exit code of 1 after a successful `sudo -v` primer is still a
-        // denial for our purposes, string match or not.
+        // not captured — `run_root_phase` passes `""` in that case. C1: a
+        // sudo exit code of 1 is unambiguously a denial regardless of
+        // stderr content — `root_phase::run` never exits 1 (it exits `3` on
+        // failure), so 1 can only mean sudo itself refused to run the
+        // command at all.
         assert!(matches!(
             classify_failure("sudo", Some(1), ""),
             InstallError::EscalationDenied
@@ -302,12 +323,54 @@ mod tests {
         }
     }
 
+    // --- C1: `root_phase::run`'s own failure code (3), distinct from
+    // sudo's/pkexec's own escalator-denial codes, so a root-phase failure
+    // (containment rejection, disk full, missing staged source, ...) is
+    // never misclassified as the user having declined authorization. ---
+
     #[test]
-    fn classify_sudo_denial_stderr_must_actually_say_so_when_captured() {
-        // A captured (non-empty, non-denial) stderr for sudo exit 1 must NOT
-        // be misclassified as a denial — e.g. the invoked root-phase binary
-        // itself exiting 1 for an unrelated validation failure.
-        let e = classify_failure("sudo", Some(1), "error: staging missing foo\n");
-        assert!(matches!(e, InstallError::InstallFailed(_)));
+    fn classify_root_phase_failure_exit_code_is_install_failed_not_denied() {
+        // Exit 3 is `root_phase::run`'s OWN failure code, propagated
+        // verbatim by both escalators — it must always mean "the root phase
+        // ran and failed", never "authorization was denied".
+        for escalator in ["sudo", "pkexec"] {
+            let e = classify_failure(escalator, Some(3), "");
+            assert!(
+                matches!(e, InstallError::InstallFailed(_)),
+                "{escalator}: expected InstallFailed, got {e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_root_phase_failure_carries_captured_stderr() {
+        // pkexec's stderr is captured (not inherited) — the real error the
+        // root phase printed must survive into the reported message.
+        let e = classify_failure("pkexec", Some(3), "error: staging missing foo\n");
+        match e {
+            InstallError::InstallFailed(msg) => {
+                assert!(msg.contains("staging missing foo"), "{msg}");
+            }
+            other => panic!("expected InstallFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_root_phase_failure_with_inherited_stderr_points_at_the_terminal() {
+        // sudo's stderr is always inherited (never captured — see
+        // `run_root_phase`'s F3 doc comment), so `classify_failure` sees an
+        // empty string here for a real invocation. The message must still
+        // tell the user something useful: that the real error was already
+        // printed to their terminal, not just "root phase exited Some(3): ".
+        let e = classify_failure("sudo", Some(3), "");
+        match e {
+            InstallError::InstallFailed(msg) => {
+                assert!(
+                    msg.to_lowercase().contains("terminal"),
+                    "expected a message pointing at the inherited terminal output: {msg}"
+                );
+            }
+            other => panic!("expected InstallFailed, got {other:?}"),
+        }
     }
 }

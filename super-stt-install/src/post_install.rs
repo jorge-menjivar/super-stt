@@ -374,6 +374,9 @@ pub async fn run(
     prefix: &Path,
 ) -> Result<(), InstallError> {
     let systemctl_available = on_path("systemctl");
+    if components.daemon && !systemctl_available {
+        log::warn!("systemctl not found on PATH; skipping daemon service setup");
+    }
     let cosmic_available = on_path("cosmic-panel");
     // Only worth the `pgrep` shell-out when it could actually matter —
     // `plan` re-checks the same `components.applet && applet_was_installed`
@@ -393,6 +396,15 @@ pub async fn run(
             Step::DaemonReload => step_daemon_reload().await,
             Step::RemoveLegacyUnit => step_remove_legacy_unit(),
             Step::Enable => step_enable().await,
+            // C8 INVARIANT: this is the ONLY `?` in this match. Every other
+            // step function returns `()`, not `Result` — best-effort by
+            // construction, not merely by convention here — so adding a `?`
+            // to another arm first requires changing that step's own
+            // function signature. If you're doing that deliberately,
+            // update `only_restart_or_start_step_is_a_hard_error` below (it
+            // pins this match having exactly one `?`, on this arm) and this
+            // module's doc comment, which documents `RestartOrStart` as the
+            // sole hard error.
             Step::RestartOrStart => step_restart_or_start().await?,
             Step::RestartPanel => step_restart_panel().await,
             Step::NudgeLaunchers => step_nudge_launchers().await,
@@ -410,6 +422,48 @@ mod tests {
     use super::*;
 
     const STT_CMD: &str = "/usr/local/bin/stt record --write";
+
+    /// C8: pins that `Step::RestartOrStart` is the ONLY hard-error arm in
+    /// `run`'s per-step executor match. `run` itself can't be driven
+    /// directly without shelling out to real systemd/COSMIC commands — and
+    /// several steps (`cleanup_legacy`, `migrate_shortcut`, ...) touch the
+    /// real `$HOME`, so calling them for real from a test would risk
+    /// mutating the test-runner's actual machine, not a real seam to test
+    /// through. Absent an executable seam, this pins the invariant
+    /// structurally instead: it re-reads this file's own source and counts
+    /// `?` inside the per-step match, so a future edit that adds a second
+    /// `?` arm (silently promoting a best-effort step to a hard error)
+    /// fails this test rather than passing unnoticed.
+    #[test]
+    fn only_restart_or_start_step_is_a_hard_error() {
+        let src = include_str!("post_install.rs");
+        let match_start = src
+            .find("match step {")
+            .expect("run's per-step executor match must exist");
+        let match_end = src[match_start..]
+            .find("\n    }\n")
+            .expect("the per-step match must close");
+        let match_block = &src[match_start..match_start + match_end];
+        // Strip `//`-comment lines before counting: this very match block
+        // carries a doc comment that itself mentions the character being
+        // counted, which would otherwise inflate the count.
+        let code_only: String = match_block
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(
+            code_only.matches('?').count(),
+            1,
+            "expected exactly one `?` in run's executor match (Step::RestartOrStart); \
+             found a different count — every other step must stay best-effort:\n{code_only}"
+        );
+        assert!(
+            code_only.contains("Step::RestartOrStart => step_restart_or_start().await?"),
+            "the one `?` must be on the RestartOrStart arm specifically:\n{code_only}"
+        );
+    }
 
     #[test]
     fn migrate_rewrites_legacy_path_only_when_present() {
