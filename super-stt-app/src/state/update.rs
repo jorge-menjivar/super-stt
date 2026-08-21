@@ -737,6 +737,21 @@ mod tests {
         assert!(update.can_start_update());
     }
 
+    /// An asset with no resolved tag can't be started — the view must gate
+    /// its idle CTA on `can_start_update()` rather than re-deriving a
+    /// weaker `installer_asset.is_some()` condition that misses this case.
+    #[test]
+    fn can_start_update_false_with_asset_but_no_tag() {
+        let update = UpdateState {
+            status: Some(SelfUpdateStatus {
+                latest_version: None,
+                ..status(true)
+            }),
+            ..Default::default()
+        };
+        assert!(!update.can_start_update());
+    }
+
     #[test]
     fn can_check_now_truth_table() {
         assert!(UpdateState::default().can_check_now());

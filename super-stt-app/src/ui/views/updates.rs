@@ -157,10 +157,10 @@ fn update_body<'a>(
         // fallback caption in place of a live button. `update_section` only
         // reaches this branch (no run) when `update_available` was true, so
         // `status` is always populated here.
-        let Some(status) = status else {
+        if status.is_none() {
             return text::body("").into();
-        };
-        return if status.installer_asset.is_some() {
+        }
+        return if state.can_start_update() {
             widget::button::suggested(format!("Update to {tag}"))
                 .on_press(Message::Update(UpdateMessage::StartUpdate))
                 .into()

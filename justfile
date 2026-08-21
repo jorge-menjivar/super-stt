@@ -137,6 +137,13 @@ test *args:
 test-gui *args:
     cargo test -p super-stt-consent --test gui_smoke -- --ignored --nocapture {{ args }}
 
+# Unit-test install.sh's pure logic (arch detection, channel validation, tag
+# resolution from a JSON string) against fixture JSON. It's a bash script,
+# not a Cargo target, so it isn't covered by `just test` — see
+# scripts/test-install.sh for what it checks and why.
+test-install:
+    bash scripts/test-install.sh
+
 # Load every committed old-config fixture against the current config types.
 config-compat *args:
     cargo test -p super-stt-daemon --lib config {{ args }}
