@@ -506,14 +506,19 @@ async fn settings_scope_endpoints() {
     )
     .await;
 
-    // --- GET /update: a read-only snapshot; no check has run yet at this
-    // point in the test, so it's the checker's initial state.
+    // --- GET /update: a read-only snapshot. `latest_version` must still be
+    // null: `GITHUB_API_BASE` points at a refused loopback port (see
+    // `start_daemon`), so no candidate can ever resolve, whether this is the
+    // checker's untouched initial state or the background check's initial
+    // delay has already elapsed and a failed check has already run. Don't
+    // assert `checked_at` is null here — that only holds within the
+    // background check's initial delay (currently 60s), which this test's
+    // runtime isn't guaranteed to stay under.
     let (s, body) = raw_get_json(&http_socket, "/update", &settings_token).await;
     assert_eq!(s, StatusCode::OK, "GET /update: {body}");
     assert!(body["current_version"].is_string(), "{body}");
     assert!(body["latest_version"].is_null(), "{body}");
     assert_eq!(body["update_available"], false);
-    assert!(body["checked_at"].is_null(), "{body}");
 
     // --- POST /update/check: forces a check. `GITHUB_API_BASE` points the
     // daemon at a refused loopback port (see `start_daemon`), so the network

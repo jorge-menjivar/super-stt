@@ -4,7 +4,7 @@ use crate::config::DaemonConfig;
 use crate::daemon::types::SuperSTTDaemon;
 use log::{info, warn};
 use super_stt_shared::models::notification_method::NotificationMethod;
-use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
+use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
 use super_stt_shared::models::write_method::WriteMethod;
@@ -155,10 +155,7 @@ impl SuperSTTDaemon {
         let persist = self
             .set_config_field(|c| c.update.check_enabled = enabled)
             .await;
-        self.events
-            .publish_daemon_status(DaemonStatusEvent::SettingsChanged {
-                setting: "update_check_enabled".to_string(),
-            });
+        self.publish_settings_changed("update_check_enabled");
         info!(
             "Update checks {}",
             if enabled { "enabled" } else { "disabled" }
@@ -191,10 +188,7 @@ impl SuperSTTDaemon {
             );
         };
         let persist = self.set_config_field(|c| c.update.beta_optin = optin).await;
-        self.events
-            .publish_daemon_status(DaemonStatusEvent::SettingsChanged {
-                setting: "update_beta_optin".to_string(),
-            });
+        self.publish_settings_changed("update_beta_optin");
         info!("Update beta opt-in set to {optin}");
         Self::settings_saved(
             DaemonResponse::success().with_update_beta_optin(optin.to_string()),

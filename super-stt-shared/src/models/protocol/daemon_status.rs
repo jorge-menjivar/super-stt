@@ -98,6 +98,19 @@ mod tests {
         assert_eq!(json["actual_device"], "cpu");
     }
 
+    /// The wire discriminant is `status`, and the field name is
+    /// `latest_version` verbatim — pins the shape against a future stray
+    /// `#[serde(rename)]`.
+    #[test]
+    fn update_available_wire_shape() {
+        let json = serde_json::to_value(DaemonStatusEvent::UpdateAvailable {
+            latest_version: "v0.2.3-beta.1".into(),
+        })
+        .unwrap();
+        assert_eq!(json["status"], "update_available");
+        assert_eq!(json["latest_version"], "v0.2.3-beta.1");
+    }
+
     /// An extra `timestamp` key (injected by the publish path) is ignored on
     /// deserialize, and `switching_device` reads back with the normalized
     /// `target_device` key.

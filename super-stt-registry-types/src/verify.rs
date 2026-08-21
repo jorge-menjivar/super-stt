@@ -32,6 +32,12 @@ pub const MAX_DECOMP_RATIO: u64 = 5;
 /// passes publishing also installs (mirrors the tarball budgets above).
 pub const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 
+/// Ceiling on a downloaded `SHA256SUMS` listing. The listing is plain text
+/// naming a handful of release assets, never close to this size. Shared by
+/// the installer's own tarball verification and the daemon's self-update
+/// installer-checksum lookup, so both apply the same budget.
+pub const MAX_SHA256SUMS_BYTES: u64 = 64 * 1024;
+
 /// The uncompressed-output ceiling for an archive of `archive_size` compressed
 /// bytes: scales with the input but never drops below the floor.
 #[must_use]
@@ -100,6 +106,15 @@ pub fn sha256_matches(actual: &str, expected: &str) -> bool {
 /// Tolerates both the coreutils `sha256sum` text-mode (`<hex>  <filename>`,
 /// two spaces) and binary-mode (`<hex> *<filename>`) line shapes, and a
 /// `./`-prefixed filename (`<hex>  ./<filename>`).
+///
+/// A line is only yielded when its first token is shaped like a real
+/// SHA-256 digest — exactly 64 ASCII hex characters. This is a fail-closed
+/// shape guard: a malformed line (truncated, corrupted, or otherwise not a
+/// real digest) is silently skipped rather than published as a usable
+/// checksum, so it surfaces as "not listed" at the consumer (the daemon
+/// degrades `installer_asset` to `None`; the installer's `verify_file`
+/// reports "not listed in SHA256SUMS") instead of as a checksum mismatch at
+/// apply time.
 #[must_use]
 pub fn parse_sha256sums(text: &str) -> Vec<(String, String)> {
     text.lines()
@@ -110,6 +125,9 @@ pub fn parse_sha256sums(text: &str) -> Vec<(String, String)> {
             }
             let mut parts = line.splitn(2, char::is_whitespace);
             let hex = parts.next()?.to_string();
+            if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return None;
+            }
             let rest = parts.next()?.trim_start();
             let filename = rest.strip_prefix('*').unwrap_or(rest);
             let filename = filename.strip_prefix("./").unwrap_or(filename);
@@ -216,13 +234,33 @@ mod tests {
 
     #[test]
     fn parses_sha256sums_variants() {
+        let d1 = "1".repeat(64);
+        let d2 = "2".repeat(64);
+        let d3 = "3".repeat(64);
         let text =
-            "abc123  super-stt-x.tar.gz\ndef456 *binary-mode-file\n789aaa  ./dotslash-file\n";
-        let sums = parse_sha256sums(text);
+            format!("{d1}  super-stt-x.tar.gz\n{d2} *binary-mode-file\n{d3}  ./dotslash-file\n");
+        let sums = parse_sha256sums(&text);
         assert_eq!(sums.len(), 3);
-        assert_eq!(sums[0], ("abc123".into(), "super-stt-x.tar.gz".into()));
+        assert_eq!(sums[0], (d1, "super-stt-x.tar.gz".into()));
         assert_eq!(sums[1].1, "binary-mode-file");
         assert_eq!(sums[2].1, "dotslash-file");
+    }
+
+    /// A line whose first token isn't shaped like a real SHA-256 hex digest
+    /// (too short, too long, or right-length but non-hex) is skipped rather
+    /// than yielded — fail-closed: a malformed `SHA256SUMS` line must never
+    /// surface as a usable digest. Only the well-formed line is kept.
+    #[test]
+    fn parse_sha256sums_skips_malformed_digest_shapes() {
+        let valid = "a".repeat(64);
+        let too_short = "deadbeef"; // 8 hex chars, not 64
+        let too_long = format!("{valid}aa"); // 66 chars
+        let non_hex_64 = "z".repeat(64); // right length, not hex
+        let text = format!(
+            "{too_short}  short.bin\n{too_long}  long.bin\n{non_hex_64}  nonhex.bin\n{valid}  good.bin\n"
+        );
+        let sums = parse_sha256sums(&text);
+        assert_eq!(sums, vec![(valid, "good.bin".to_string())]);
     }
 
     #[test]
@@ -238,6 +276,43 @@ mod tests {
             "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447"
         );
         assert!(file_sha256_hex(&dir.join("missing.txt")).is_err());
+    }
+
+    #[test]
+    fn file_sha256_hex_of_empty_file() {
+        let dir =
+            std::env::temp_dir().join(format!("sstt-registry-verify-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("empty.txt");
+        std::fs::write(&f, []).unwrap();
+        assert_eq!(
+            file_sha256_hex(&f).unwrap(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    /// A file bigger than the 1 MiB read buffer, with a size that is NOT an
+    /// exact multiple of it, so the final `read` returns fewer bytes than
+    /// the buffer holds. Hashing the full reused `buf` instead of `&buf[..n]`
+    /// on that last read would fold in stale bytes left over from the
+    /// previous iteration and produce the wrong digest — this test's
+    /// expected digest was computed independently (Python `hashlib`), not
+    /// with this crate's own hasher, so it actually catches that slip.
+    #[test]
+    fn file_sha256_hex_multi_read_loop_over_1mib_buffer() {
+        let dir =
+            std::env::temp_dir().join(format!("sstt-registry-verify-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("big.bin");
+        let size: usize = 1024 * 1024 + 777; // > 1 MiB buffer, not a multiple of it
+        let data: Vec<u8> = (0..size)
+            .map(|i| u8::try_from(i % 251).expect("i % 251 is always < 256"))
+            .collect();
+        std::fs::write(&f, &data).unwrap();
+        assert_eq!(
+            file_sha256_hex(&f).unwrap(),
+            "14886280c82cb1c0c7d041d65fa2804396a4b426e7265f50d70e6a67244b4f3c"
+        );
     }
 
     #[test]

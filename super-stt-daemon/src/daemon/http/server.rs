@@ -9,17 +9,17 @@
 //!
 //! v1 endpoint set (wire paths):
 //!
-//! - `POST /v1/auth/request`     — interactive consent → mints a session token
-//! - `GET  /v1/auth/status`      — probe token validity (no consent UI)
-//! - `GET  /v1/ping`             — liveness (any authenticated token)
-//! - `GET  /v1/status`           — current model + device (`status` scope)
-//! - `POST /v1/transcribe`       — start a daemon-mic recording
-//! - `POST /v1/transcribe/stop`  — stop an in-flight daemon-mic recording
-//! - `GET  /v1/events?topics=…`  — Server-Sent Events stream (per-topic scope)
-//! - `GET  /v1/update`                  — last self-update check result (`settings` scope)
-//! - `POST /v1/update/check`            — force an immediate self-update check (`settings` scope)
-//! - `GET/POST /v1/update_check_enabled` — periodic self-update check on/off (`settings` scope)
-//! - `GET/POST /v1/update_beta_optin`    — self-update prerelease opt-in (`settings` scope)
+//! - `POST /v1/auth/request`              — interactive consent → mints a session token
+//! - `GET  /v1/auth/status`               — probe token validity (no consent UI)
+//! - `GET  /v1/ping`                      — liveness (any authenticated token)
+//! - `GET  /v1/status`                    — current model + device (`status` scope)
+//! - `POST /v1/transcribe`                — start a daemon-mic recording
+//! - `POST /v1/transcribe/stop`           — stop an in-flight daemon-mic recording
+//! - `GET  /v1/events?topics=…`           — Server-Sent Events stream (per-topic scope)
+//! - `GET  /v1/update`                    — last self-update check result (`settings` scope)
+//! - `POST /v1/update/check`              — force an immediate self-update check (`settings` scope)
+//! - `GET/POST /v1/update_check_enabled`  — periodic self-update check on/off (`settings` scope)
+//! - `GET/POST /v1/update_beta_optin`     — self-update prerelease opt-in (`settings` scope)
 //! - … plus the settings configuration surface (see [`build_router`])
 //!
 //! Authentication:
