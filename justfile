@@ -328,6 +328,10 @@ build-daemon *args:
 build-cli *args:
     cargo build --release --bin {{ cli_name }} {{ args }}
 
+# Build only the installer/self-updater
+build-install:
+    cargo build --release --bin super-stt-install
+
 # Build only the consent helper (co-located with the daemon binary)
 build-consent:
     cargo build --release --bin {{ consent_name }}

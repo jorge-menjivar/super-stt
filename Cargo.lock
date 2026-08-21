@@ -6911,6 +6911,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "super-stt-install"
+version = "0.2.2-beta.2"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "flate2",
+ "hex",
+ "log",
+ "mockito",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "super-stt-forge",
+ "super-stt-registry-types",
+ "tar",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "super-stt-registry-types"
 version = "0.2.2-beta.2"
 dependencies = [

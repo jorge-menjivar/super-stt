@@ -8,6 +8,7 @@
         "super-stt-daemon",
         "super-stt-forge",
         "super-stt-indexer",
+        "super-stt-install",
         "super-stt-registry-types",
         "super-stt-shared",
     ]
@@ -29,6 +30,7 @@
         "super-stt-cosmic-applet",
         "super-stt-daemon",
         "super-stt-forge",
+        "super-stt-install",
         "super-stt-registry-types",
         "super-stt-shared",
     ]
