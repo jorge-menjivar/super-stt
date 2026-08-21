@@ -6,6 +6,7 @@ mod init;
 mod small_state;
 mod subscription;
 mod update;
+pub(crate) mod updater;
 mod view;
 use subscription::{UdpSubscriptionId, audio_events_subscription};
 
@@ -165,6 +166,9 @@ pub struct AppModel {
 
     // Registry state (catalog + install progress for the Download tab).
     pub registry: crate::state::registry::RegistryState,
+
+    // Self-update state (Updates page + header badge + apply flow).
+    pub update: crate::state::update::UpdateState,
 
     /// Scope-tagged banner for a failed settings/backend save. Rendered inline
     /// on the owning page instead of hijacking the UI (Tier 1 #13) or being
@@ -333,6 +337,13 @@ impl cosmic::Application for AppModel {
         match self.nav.data::<crate::state::Page>(id) {
             Some(crate::state::Page::Models | crate::state::Page::Library) => Task::batch([
                 handlers::tasks::reload_backend_catalogs(),
+                self.update_title(),
+            ]),
+            // Re-fetch rather than trust whatever was loaded at connect-time —
+            // a periodic background check may have completed since, or another
+            // client may have changed the beta-opt-in setting.
+            Some(crate::state::Page::Updates) => Task::batch([
+                handlers::tasks::refresh_update_status(),
                 self.update_title(),
             ]),
             _ => self.update_title(),

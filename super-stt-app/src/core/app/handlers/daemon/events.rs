@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, DeviceState, ModelOperationState};
-use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message};
+use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message, UpdateMessage};
 use cosmic::prelude::*;
 use log::{debug, info, warn};
 use super_stt_shared::models::protocol::{DaemonStatusEvent, NotificationEvent};
@@ -113,13 +113,18 @@ impl AppModel {
                 }
                 Some(Task::batch(tasks))
             }
-            // No app-side effect today (matches the prior `_` fall-through): the
-            // load-start and active-backend-changed notifications don't drive UI
-            // state here. `UpdateAvailable` is handled by the self-update UI
-            // (a later phase); it's a no-op until that lands.
+            // No app-side effect today: the load-start and active-backend-changed
+            // notifications don't drive UI state here.
             DaemonStatusEvent::LoadingModel { .. }
-            | DaemonStatusEvent::ActiveBackendChanged { .. }
-            | DaemonStatusEvent::UpdateAvailable { .. } => None,
+            | DaemonStatusEvent::ActiveBackendChanged { .. } => None,
+            // The daemon completed a periodic self-update check and found a
+            // newer release. Re-fetch the status so the header badge and the
+            // Updates page pick it up without waiting for the user to open
+            // that page.
+            DaemonStatusEvent::UpdateAvailable { latest_version } => {
+                log::info!("Daemon reports update available: {latest_version}");
+                Some(self.handle_update_messages(UpdateMessage::AvailableEventReceived))
+            }
         }
     }
 

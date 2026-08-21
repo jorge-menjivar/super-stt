@@ -44,6 +44,9 @@ pub enum Page {
     /// page's Installed / Browse tabs). No activation here — that lives on the
     /// Models page.
     Library,
+    /// Self-update: current/latest version, automatic-check and beta-opt-in
+    /// settings, and the apply flow.
+    Updates,
 }
 
 /// The context page to display in the context drawer

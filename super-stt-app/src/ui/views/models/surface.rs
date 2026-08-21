@@ -250,7 +250,7 @@ pub(super) fn backend_description(app: &AppModel, source: &str) -> Option<String
 /// default `Container::Tooltip` uses `radius_l` (32 px), which is almost
 /// semicircular on a short row and reads as a pill. The padding/gap match
 /// cosmic's default `tooltip()` helper.
-pub(super) fn rounded_tooltip<'a>(
+pub(in crate::ui::views) fn rounded_tooltip<'a>(
     content: impl Into<Element<'a, Message>>,
     popup: impl Into<Element<'a, Message>>,
     position: cosmic::widget::tooltip::Position,

@@ -25,13 +25,16 @@ impl AppModel {
             return Vec::new();
         }
 
-        let mut row = widget::row::with_capacity(2)
+        let mut row = widget::row::with_capacity(3)
             .spacing(8.0)
             .align_y(cosmic::iced::Alignment::Center);
         if let Some(gpu) = views::models::gpu_summary(self) {
             row = row.push(gpu);
         }
         row = row.push(views::models::status_pill(self));
+        if let Some(badge) = views::updates::header_badge(self) {
+            row = row.push(badge);
+        }
 
         // Fixed trailing gap so the readouts aren't flush with the window edge.
         vec![widget::container(row).padding([0, 12, 0, 0]).into()]
@@ -175,6 +178,7 @@ impl AppModel {
             ),
             Page::Models => views::models::page(self),
             Page::Library => views::models::library_page(self),
+            Page::Updates => views::updates::page(&self.update),
             Page::Connection => views::connection::page(
                 &self.daemon_status,
                 self.socket_path.to_string_lossy().to_string(),

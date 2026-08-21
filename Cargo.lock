@@ -6761,6 +6761,7 @@ dependencies = [
  "slotmap",
  "strum",
  "strum_macros",
+ "super-stt-forge",
  "super-stt-registry-types",
  "super-stt-shared",
  "tokio",

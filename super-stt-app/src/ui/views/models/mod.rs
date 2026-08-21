@@ -38,6 +38,11 @@ pub use load_sheet::load_backend_sheet;
 /// raw manifest instead stages a device this install cannot use.
 pub(crate) use chips::offered_devices;
 
+/// Re-exported so the Updates page's header badge (`ui/views/updates.rs`) can
+/// give its tooltip the same small corner radius as the GPU/status pills'
+/// instead of cosmic's default near-semicircular one.
+pub(in crate::ui::views) use surface::rounded_tooltip;
+
 /// Wrap a header readout (GPU meter / status) in a neutral "pill": a soft
 /// surface fill, hairline border, and fully-rounded corners, so the readouts
 /// read as discrete indicators rather than text floating in the title bar.

@@ -47,6 +47,11 @@ fn build_nav() -> nav_bar::Model {
         .data::<crate::state::Page>(crate::state::Page::Connection)
         .icon(icons::phosphor(icons::PLUG));
 
+    nav.insert()
+        .text("Updates")
+        .data::<crate::state::Page>(crate::state::Page::Updates)
+        .icon(icons::phosphor(icons::ARROWS_CLOCKWISE));
+
     nav
 }
 
@@ -150,6 +155,9 @@ impl AppModel {
 
             // Registry state
             registry: crate::state::registry::RegistryState::default(),
+
+            // Self-update state
+            update: crate::state::update::UpdateState::default(),
 
             // No pending scoped action error at startup.
             action_error: None,

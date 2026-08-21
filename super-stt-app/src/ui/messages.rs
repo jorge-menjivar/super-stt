@@ -33,6 +33,7 @@ pub enum Message {
     Backend(BackendMessage),
     Language(LanguageMessage),
     Recording(RecordingMessage),
+    Update(UpdateMessage),
 
     /// A scoped settings/backend save failed. Stored in `AppModel::action_error`
     /// and rendered as an inline banner on the page named by `scope`, instead of
@@ -402,6 +403,24 @@ pub enum RecordingMessage {
     WidgetRecordingState(bool),
 }
 
+/// Self-update: status load/check, the two settings toggles, the apply-flow
+/// run (installer download + spawn + JSON progress stream), and the
+/// `UpdateAvailable` SSE-driven refetch.
+#[derive(Debug, Clone)]
+pub enum UpdateMessage {
+    StatusLoaded(Option<super_stt_shared::models::self_update::SelfUpdateStatus>),
+    StatusError(String),
+    CheckNow,
+    AutoCheckLoaded(bool),
+    AutoCheckToggled(bool),
+    BetaOptinToggled(bool),
+    StartUpdate,
+    CancelUpdate,
+    RunEvent(crate::core::app::updater::UpdateRunEvent),
+    RestartApp,
+    AvailableEventReceived,
+}
+
 macro_rules! message_from {
     ($($variant:ident => $ty:ident),+ $(,)?) => {
         $(
@@ -428,4 +447,5 @@ message_from! {
     Backend => BackendMessage,
     Language => LanguageMessage,
     Recording => RecordingMessage,
+    Update => UpdateMessage,
 }

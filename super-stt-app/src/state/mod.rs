@@ -6,6 +6,7 @@ pub mod language;
 pub mod models;
 pub mod models_page;
 pub mod registry;
+pub mod update;
 
 // Re-export commonly used types
 pub use models::{
