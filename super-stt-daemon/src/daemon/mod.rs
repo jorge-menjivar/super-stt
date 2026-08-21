@@ -10,6 +10,7 @@ pub(crate) mod language;
 pub mod language_handlers;
 pub mod model_management;
 pub mod recording;
+pub mod self_update_handlers;
 pub mod settings_handlers;
 pub mod startup;
 pub mod status_handlers;

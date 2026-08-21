@@ -103,6 +103,9 @@ pub struct SuperSTTDaemon {
     // Desktop-notification channel for recording failures. Behind a mutex
     // because sending mutates the cached connection and the replaces-id.
     pub notifier: Arc<tokio::sync::Mutex<crate::output::notification::Notifier>>,
+    // Self-update check state: last completed check + notify-once
+    // persistence. See `crate::self_update`.
+    pub self_update: Arc<crate::self_update::SelfUpdateChecker>,
 }
 
 /// A daemon wired up with inert defaults: no model, no backends, nothing
@@ -144,6 +147,10 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         // `daemon.notifier` after construction.
         notifier: Arc::new(tokio::sync::Mutex::new(
             crate::output::notification::Notifier::fake(true).0,
+        )),
+        // Per-pid temp path: no test may touch the real update-check cache.
+        self_update: Arc::new(crate::self_update::SelfUpdateChecker::new(
+            std::env::temp_dir().join(format!("super-stt-test-update-{}.json", std::process::id())),
         )),
     }
 }

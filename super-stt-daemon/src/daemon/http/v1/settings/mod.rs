@@ -79,6 +79,7 @@ pub(crate) mod language;
 pub(crate) mod notification_method;
 pub(crate) mod preview_typing;
 pub(crate) mod recording_stop_mode;
+pub(crate) mod self_update;
 pub(crate) mod update_beta_optin;
 pub(crate) mod update_check_enabled;
 pub(crate) mod volume;
@@ -156,6 +157,8 @@ pub(crate) fn routes() -> Router<AppState> {
             get(update_beta_optin::get_update_beta_optin)
                 .post(update_beta_optin::set_update_beta_optin),
         )
+        .route("/update", get(self_update::get_update))
+        .route("/update/check", post(self_update::post_check))
         .route("/backends", get(backends::list_backends))
         .route("/backends/{source}", delete(backends::uninstall_backend))
         .route(

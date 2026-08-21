@@ -111,6 +111,9 @@ impl SuperSTTDaemon {
             notifier: Arc::new(tokio::sync::Mutex::new(
                 crate::output::notification::Notifier::dbus(),
             )),
+            self_update: Arc::new(crate::self_update::SelfUpdateChecker::new(
+                super_stt_shared::paths::cache_dir().join("update-check.json"),
+            )),
         };
 
         daemon.post_init().await;
@@ -152,6 +155,33 @@ impl SuperSTTDaemon {
             });
         } else {
             info!("No startup model configured; daemon is idle until one is selected");
+        }
+
+        // Periodic self-update check: first ~60s after start (don't compete
+        // with model load), then daily. POST /v1/update/check bypasses the
+        // check_enabled gate; this loop honors it.
+        {
+            let bg = self.clone();
+            let mut shutdown = self.shutdown_tx.subscribe();
+            tokio::spawn(async move {
+                tokio::select! {
+                    () = tokio::time::sleep(std::time::Duration::from_mins(1)) => {}
+                    _ = shutdown.recv() => return,
+                }
+                let mut interval = tokio::time::interval(std::time::Duration::from_hours(24));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    // interval fires immediately on the first tick, which is
+                    // exactly the "check on startup" behavior we want.
+                    tokio::select! {
+                        _ = interval.tick() => {}
+                        _ = shutdown.recv() => return,
+                    }
+                    if bg.config.read().await.update.check_enabled {
+                        let _ = bg.run_self_update_check_and_notify().await;
+                    }
+                }
+            });
         }
     }
 
