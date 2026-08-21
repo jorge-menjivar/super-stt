@@ -10,6 +10,7 @@
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+dirs.workspace = true
 env_logger.workspace = true
 flate2 = "1"
 hex = "0.4.3"

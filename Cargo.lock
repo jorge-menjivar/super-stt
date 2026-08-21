@@ -6916,6 +6916,7 @@ version = "0.2.2-beta.2"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs",
  "env_logger",
  "flate2",
  "hex",

@@ -46,6 +46,20 @@ pub enum ComponentSelection {
     Applet,
 }
 
+impl From<&str> for ComponentSelection {
+    /// Maps the four `--components` values clap's `PossibleValuesParser`
+    /// restricts input to; anything else (only reachable if that validation
+    /// is ever loosened) defaults to `All`.
+    fn from(s: &str) -> Self {
+        match s {
+            "daemon" => ComponentSelection::Daemon,
+            "app" => ComponentSelection::App,
+            "applet" => ComponentSelection::Applet,
+            _ => ComponentSelection::All,
+        }
+    }
+}
+
 /// Decide which components to install.
 ///
 /// `explicit`, if given, wins outright — no detection runs. Otherwise: if
