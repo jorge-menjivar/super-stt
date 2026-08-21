@@ -1,99 +1,108 @@
 #!/bin/bash
 
-# Super STT Installation Dispatcher
+# Super STT Installation Bootstrap
 #
-# This script is the documented entry point:
+# Documented entry point:
 #
 #   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh | bash
 #   curl -sSL https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh | bash -s -- --beta
 #
-# It is intentionally tiny — all real work lives in
-# scripts/install-stable.sh (legacy single-`super-stt` releases) and
-# scripts/install-beta.sh (post-protocol-rewrite workspace with
-# separate daemon / CLI / consent-helper binaries).
+# This script is deliberately tiny: it detects the architecture, resolves
+# the requested release, downloads the `super-stt-install` binary attached
+# to that release, and execs it. All installer logic lives in that binary
+# (rustup-style), so the bootstrap can never disagree with the release
+# layout it installs.
 #
-# Why a thin dispatcher: the stable channel still serves users who
-# installed before the workspace split, and we don't want a tarball-
-# layout change to break their `install.sh` URL. The new layout
-# (consent helper, no `sg stt -c`, etc.) ships under `--beta` until
-# it's promoted.
+# Releases that predate the installer binary fall back to the legacy
+# channel scripts (scripts/install-stable.sh / scripts/install-beta.sh).
 #
 # Flags consumed here:
-#   --beta            Use the beta installer (pre-release artifacts)
-#   --channel=<name>  Force `stable` or `beta` (overrides --beta)
-#
-# Everything else is passed through to the chosen sub-installer.
+#   --beta / --stable / --channel=<name>   Pick the release channel
+#   --version=<tag>                        Pin a release tag
+# Everything else is passed through to the installer.
 
 set -e
 
 GITHUB_REPO="jorge-menjivar/super-stt"
 DEFAULT_BRANCH="main"
 CHANNEL="stable"
+VERSION=""
 PASSTHROUGH=()
 
-# Color helpers (mirror the sub-scripts so the dispatcher's lines
-# don't look out-of-place when piped through).
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 print_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-print_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 for arg in "$@"; do
     case "$arg" in
-        --beta)
-            CHANNEL="beta"
-            ;;
-        --stable)
-            CHANNEL="stable"
-            ;;
-        --channel=*)
-            CHANNEL="${arg#--channel=}"
-            ;;
-        *)
-            PASSTHROUGH+=("$arg")
-            ;;
+        --beta) CHANNEL="beta" ;;
+        --stable) CHANNEL="stable" ;;
+        --channel=*) CHANNEL="${arg#--channel=}" ;;
+        --version=*) VERSION="${arg#--version=}" ;;
+        *) PASSTHROUGH+=("$arg") ;;
     esac
 done
 
 case "$CHANNEL" in
     stable|beta) ;;
-    *)
-        print_error "Unknown channel '$CHANNEL' — expected 'stable' or 'beta'."
-        exit 1
-        ;;
+    *) print_error "Unknown channel '$CHANNEL' — expected 'stable' or 'beta'."; exit 1 ;;
 esac
 
-# When invoked from a clone (e.g. `bash install.sh --beta`) we have
-# the sub-scripts on disk and should use them directly. When invoked
-# via curl-to-bash the path doesn't exist, so we re-fetch over HTTP.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
-LOCAL_SCRIPT=""
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/scripts/install-${CHANNEL}.sh" ]; then
-    LOCAL_SCRIPT="$SCRIPT_DIR/scripts/install-${CHANNEL}.sh"
+case "$(uname -m)" in
+    x86_64) TRIPLE="x86_64-unknown-linux-gnu" ;;
+    aarch64|arm64) TRIPLE="aarch64-unknown-linux-gnu" ;;
+    *) print_error "Unsupported architecture: $(uname -m)"; exit 1 ;;
+esac
+
+# Resolve the target release tag for the channel (unless pinned).
+if [ -z "$VERSION" ]; then
+    if [ "$CHANNEL" = "stable" ]; then
+        VERSION=$(curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases/latest" \
+            | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+    else
+        # Newest prerelease: walk tag_name/prerelease pairs, first true wins.
+        VERSION=$(curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases" \
+            | grep -E '"tag_name"|"prerelease"' \
+            | paste - - \
+            | awk -F'[:,]' '{ gsub(/[ "]/,"",$2); gsub(/[ "]/,"",$4); if ($4=="true") { print $2; exit } }')
+    fi
+fi
+if [ -z "$VERSION" ]; then
+    print_error "Could not resolve a $CHANNEL release for $GITHUB_REPO"
+    exit 1
 fi
 
-if [ -n "$LOCAL_SCRIPT" ]; then
-    print_info "Dispatching to local installer: $LOCAL_SCRIPT"
-    exec bash "$LOCAL_SCRIPT" "${PASSTHROUGH[@]}"
+INSTALLER_ASSET="super-stt-install-$TRIPLE"
+INSTALLER_URL="https://github.com/$GITHUB_REPO/releases/download/$VERSION/$INSTALLER_ASSET"
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
+
+if curl -fsSL -o "$TEMP_DIR/$INSTALLER_ASSET" "$INSTALLER_URL" 2>/dev/null; then
+    chmod +x "$TEMP_DIR/$INSTALLER_ASSET"
+    print_info "Launching installer for $VERSION ($TRIPLE)"
+    EXTRA_ARGS=(--version="$VERSION")
+    [ "$CHANNEL" = "beta" ] && EXTRA_ARGS+=(--beta)
+    exec "$TEMP_DIR/$INSTALLER_ASSET" "${EXTRA_ARGS[@]}" "${PASSTHROUGH[@]}"
+fi
+
+[ -n "$VERSION" ] && PASSTHROUGH+=("--version=$VERSION")
+
+# ---- Legacy fallback: release has no installer binary ----
+print_info "Release $VERSION has no installer binary; using the legacy $CHANNEL script."
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/scripts/install-${CHANNEL}.sh" ]; then
+    exec bash "$SCRIPT_DIR/scripts/install-${CHANNEL}.sh" "${PASSTHROUGH[@]}"
 fi
 
 REMOTE_SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPO}/${DEFAULT_BRANCH}/scripts/install-${CHANNEL}.sh"
-print_info "Dispatching to remote ${CHANNEL} installer: $REMOTE_SCRIPT"
-
-# We need a controlling tty for the interactive menu in the
-# sub-script. Pulling the script body into a variable first lets us
-# bypass the `bash -c` stdin issue when this dispatcher was itself
-# piped from curl.
 SCRIPT_BODY=$(curl -fsSL "$REMOTE_SCRIPT")
 if [ -z "$SCRIPT_BODY" ]; then
     print_error "Failed to fetch installer from $REMOTE_SCRIPT"
     exit 1
 fi
-
-# Hand off to the channel-specific installer with the residual args.
-# Using a process substitution preserves stdin so the sub-script's
-# interactive prompts still see /dev/tty correctly.
+# Process substitution keeps /dev/tty available for the legacy script's menu.
 exec bash <(echo "$SCRIPT_BODY") "${PASSTHROUGH[@]}"
