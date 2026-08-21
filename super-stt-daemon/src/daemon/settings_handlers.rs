@@ -4,8 +4,9 @@ use crate::config::DaemonConfig;
 use crate::daemon::types::SuperSTTDaemon;
 use log::{info, warn};
 use super_stt_shared::models::notification_method::NotificationMethod;
-use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
 use super_stt_shared::models::write_method::WriteMethod;
 
 impl SuperSTTDaemon {
@@ -147,6 +148,65 @@ impl SuperSTTDaemon {
         let config = self.config.read().await;
         let method = config.transcription.notification_method;
         DaemonResponse::success().with_notification_method(method.to_string())
+    }
+
+    /// Handle set update-check-enabled command
+    pub async fn handle_set_update_check_enabled(&self, enabled: bool) -> DaemonResponse {
+        let persist = self
+            .set_config_field(|c| c.update.check_enabled = enabled)
+            .await;
+        self.events
+            .publish_daemon_status(DaemonStatusEvent::SettingsChanged {
+                setting: "update_check_enabled".to_string(),
+            });
+        info!(
+            "Update checks {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        Self::settings_saved(
+            DaemonResponse::success().with_update_check_enabled(enabled),
+            format!(
+                "Update checks {}",
+                if enabled { "enabled" } else { "disabled" }
+            ),
+            persist,
+        )
+    }
+
+    /// Handle get update-check-enabled command
+    pub async fn handle_get_update_check_enabled(&self) -> DaemonResponse {
+        let enabled = self.config.read().await.update.check_enabled;
+        DaemonResponse::success().with_update_check_enabled(enabled)
+    }
+
+    /// Handle set update-beta-optin command. An unknown value is rejected
+    /// with `invalid_update_beta_optin` (HTTP 400) per
+    /// `docs/protocol/endpoints/v1/update_beta_optin.md`, rather than
+    /// silently applying the default and reporting success.
+    pub async fn handle_set_update_beta_optin(&self, value: String) -> DaemonResponse {
+        let Ok(optin) = value.parse::<UpdateBetaOptIn>() else {
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidValue,
+                "invalid_update_beta_optin",
+            );
+        };
+        let persist = self.set_config_field(|c| c.update.beta_optin = optin).await;
+        self.events
+            .publish_daemon_status(DaemonStatusEvent::SettingsChanged {
+                setting: "update_beta_optin".to_string(),
+            });
+        info!("Update beta opt-in set to {optin}");
+        Self::settings_saved(
+            DaemonResponse::success().with_update_beta_optin(optin.to_string()),
+            format!("Update beta opt-in set to {optin}"),
+            persist,
+        )
+    }
+
+    /// Handle get update-beta-optin command
+    pub async fn handle_get_update_beta_optin(&self) -> DaemonResponse {
+        let optin = self.config.read().await.update.beta_optin;
+        DaemonResponse::success().with_update_beta_optin(optin.to_string())
     }
 
     /// Handle set allow online models command

@@ -441,6 +441,66 @@ async fn settings_scope_endpoints() {
     )
     .await;
 
+    // --- GET /update_check_enabled ---
+    let (s, body) = raw_get_json(&http_socket, "/update_check_enabled", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /update_check_enabled: {body}");
+    assert_eq!(body["status"], "success");
+    let initial_update_check_enabled = body["update_check_enabled"].as_bool().unwrap_or(true);
+
+    // --- POST /update_check_enabled: round-trip the inverse ---
+    let (s, _) = raw_post_json(
+        &http_socket,
+        "/update_check_enabled",
+        &settings_token,
+        serde_json::json!({ "enabled": !initial_update_check_enabled }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "POST /update_check_enabled");
+    let (_, body) = raw_get_json(&http_socket, "/update_check_enabled", &settings_token).await;
+    assert_eq!(body["update_check_enabled"], !initial_update_check_enabled);
+    // Restore.
+    let _ = raw_post_json(
+        &http_socket,
+        "/update_check_enabled",
+        &settings_token,
+        serde_json::json!({ "enabled": initial_update_check_enabled }),
+    )
+    .await;
+
+    // --- GET /update_beta_optin ---
+    let (s, body) = raw_get_json(&http_socket, "/update_beta_optin", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /update_beta_optin: {body}");
+    assert_eq!(body["status"], "success");
+    let initial_beta_optin = body["update_beta_optin"]
+        .as_str()
+        .unwrap_or("auto")
+        .to_string();
+
+    // --- POST /update_beta_optin: round-trip ---
+    let target_beta_optin = if initial_beta_optin == "enabled" {
+        "disabled"
+    } else {
+        "enabled"
+    };
+    let (s, _) = raw_post_json(
+        &http_socket,
+        "/update_beta_optin",
+        &settings_token,
+        serde_json::json!({ "value": target_beta_optin }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "POST /update_beta_optin");
+    let (_, body) = raw_get_json(&http_socket, "/update_beta_optin", &settings_token).await;
+    assert_eq!(body["update_beta_optin"], target_beta_optin);
+    // Restore.
+    let _ = raw_post_json(
+        &http_socket,
+        "/update_beta_optin",
+        &settings_token,
+        serde_json::json!({ "value": initial_beta_optin }),
+    )
+    .await;
+
     // --- POST /audio_theme/test: just verifies the endpoint accepts the
     // request and returns success. Audio playback is best-effort under
     // CI (no PulseAudio) but the handler always returns 200 with status:"success".

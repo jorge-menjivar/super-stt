@@ -66,6 +66,16 @@ pub enum Command {
         method: String,
     },
     GetNotificationMethod,
+    SetUpdateCheckEnabled {
+        enabled: bool,
+    },
+    GetUpdateCheckEnabled,
+    /// The raw wire string, unparsed; `handle_set_update_beta_optin` parses it
+    /// (mirrors `SetNotificationMethod`).
+    SetUpdateBetaOptin {
+        value: String,
+    },
+    GetUpdateBetaOptin,
     SetVolume {
         volume: u8,
     },

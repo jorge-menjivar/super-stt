@@ -47,11 +47,15 @@ Content-Type: application/json
 
 **Errors:**
 
-| HTTP | `message`                     | Meaning                                    |
-|------|--------------------------------|-----------------------------------------------|
-| 400  | `invalid_update_check_enabled` | `enabled` missing or not a bool               |
-| 401  | `invalid_session`              | Token unknown / expired / `exe_changed`       |
-| 403  | `scope_denied`                 | Token lacks the `settings` scope              |
+| HTTP | `message`         | Meaning                                  |
+|------|-------------------|--------------------------------------------|
+| 401  | `invalid_session` | Token unknown / expired / `exe_changed`  |
+| 403  | `scope_denied`    | Token lacks the `settings` scope         |
+
+`enabled` is required and must be a bool. A malformed body (missing or wrong
+type) fails JSON parsing before the request reaches the handler and gets a
+generic `400` rejection, not a classified `error_code` — the same behavior as
+[`/allow_online_models`](./allow_online_models.md), the other boolean toggle.
 
 ## `GET /update_check_enabled`
 

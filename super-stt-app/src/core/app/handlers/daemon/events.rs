@@ -115,9 +115,11 @@ impl AppModel {
             }
             // No app-side effect today (matches the prior `_` fall-through): the
             // load-start and active-backend-changed notifications don't drive UI
-            // state here.
+            // state here. `UpdateAvailable` is handled by the self-update UI
+            // (a later phase); it's a no-op until that lands.
             DaemonStatusEvent::LoadingModel { .. }
-            | DaemonStatusEvent::ActiveBackendChanged { .. } => None,
+            | DaemonStatusEvent::ActiveBackendChanged { .. }
+            | DaemonStatusEvent::UpdateAvailable { .. } => None,
         }
     }
 

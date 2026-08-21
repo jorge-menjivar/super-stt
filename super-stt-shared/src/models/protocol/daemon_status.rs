@@ -73,6 +73,10 @@ pub enum DaemonStatusEvent {
 
     /// A settings value changed (the app refetches the affected block).
     SettingsChanged { setting: String },
+
+    /// A self-update check found a newer release. Clients refetch
+    /// `GET /v1/update` for the full status including the installer asset.
+    UpdateAvailable { latest_version: String },
 }
 
 #[cfg(test)]
