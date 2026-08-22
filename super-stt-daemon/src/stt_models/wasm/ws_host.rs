@@ -195,6 +195,11 @@ impl self::super_stt::realtime::ws::Host for Host {
     }
 }
 
+// Signatures here are dictated by wasmtime's generated trait, so the
+// `async` cannot be dropped from the members that never await (the
+// unimplemented ones, and `drop`). `unknown_lints` keeps the attribute
+// harmless on toolchains predating the lint.
+#[allow(unknown_lints, clippy::unused_async_trait_impl)]
 impl self::super_stt::realtime::ws::HostWsStream for Host {
     async fn send_text(
         &mut self,
@@ -298,6 +303,8 @@ impl self::super_stt::realtime::ws::HostWsStream for Host {
     }
 }
 
+// Same as above: the trait is generated, so these signatures are fixed.
+#[allow(unknown_lints, clippy::unused_async_trait_impl)]
 impl self::super_stt::realtime::ws::HostConsumerStream for Host {
     async fn send_text(
         &mut self,

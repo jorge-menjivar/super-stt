@@ -133,6 +133,10 @@ impl SuperSTTDaemon {
     /// normalized `cpu`/`gpu` preference to thread through the rest of the
     /// switch; `Err` is an early response the caller returns as-is, whether
     /// that is a rejection or an already-satisfied no-op.
+    // `DaemonResponse` is the protocol's response type and is returned by value
+    // throughout the daemon; boxing it in this one helper's `Err` would buy
+    // nothing and read inconsistently against every sibling handler.
+    #[allow(clippy::result_large_err)]
     async fn validate_device_switch_request(&self, device: &str) -> Result<String, DaemonResponse> {
         // Validate and normalize (`cuda`/`metal` → `gpu`). Emit the documented
         // `400 invalid_device` code so clients can distinguish a bad request
