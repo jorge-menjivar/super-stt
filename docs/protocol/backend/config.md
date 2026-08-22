@@ -60,6 +60,7 @@ description = "Local Whisper speech-to-text."
 
 | Field        | Type   | Required        | Notes                                                                 |
 |--------------|--------|-----------------|-----------------------------------------------------------------------|
+| `id`         | string | for publication | Globally unique reverse-DNS identifier for the backend, e.g. `app.super-stt.voxtral`. Names the directory the backend is installed into. Required for a backend to be listed in the registry. |
 | `source`     | string | yes             | Canonical repository id for this backend. Becomes the `source` of every model it provides (see [identity](./contract.md#model-identity)). Must be unique across installed backends. |
 | `name`       | string | yes             | Human-readable display name.                                          |
 | `version`    | string | yes             | Backend version (semver).                                            |
@@ -76,6 +77,21 @@ literal `other`. License *expressions* (`MIT OR Apache-2.0`) are not accepted;
 declare a single identifier or `other`. A backend declaring `other` is still
 published — the app surfaces its license as "Other" — so the value is a
 conscious declaration, not an omission.
+
+#### `id` format
+
+- Lowercase ASCII letters, digits, `-`, and `.` only.
+- At least three `.`-separated segments.
+- Each segment is non-empty, begins with a letter, and does not end with `-`.
+- No leading, trailing, or consecutive dots.
+- At most 255 bytes.
+
+The reverse-DNS form namespaces a backend under a domain its author
+controls, so two unrelated authors may both publish a backend named
+`voxtral`: `app.super-stt.voxtral` and `com.example.voxtral` coexist.
+
+`id` names the install directory. It is not part of model identity, which is
+the `(name, source)` pair described in [contract.md](./contract.md).
 
 ## `[network]`
 
