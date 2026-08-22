@@ -83,10 +83,8 @@ fn b64_to_f32_vec(s: Option<&str>) -> Vec<f32> {
     let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s) else {
         return Vec::new();
     };
-    bytes
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect()
+    let (samples, _trailing) = bytes.as_chunks::<4>();
+    samples.iter().copied().map(f32::from_le_bytes).collect()
 }
 
 /// Translate one [`WidgetEvent`] into the applet's typed [`Message`]
