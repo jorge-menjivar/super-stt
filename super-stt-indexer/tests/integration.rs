@@ -76,6 +76,7 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
         &registry_path,
         r#"
         [x-y]
+        id = "com.example.x-y"
         repo = "github.com/x/y"
         forge = "github"
     "#,
