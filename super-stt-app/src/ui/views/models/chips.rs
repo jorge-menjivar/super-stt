@@ -831,6 +831,7 @@ mod update_offer_tests {
             .is_some_and(|i| super_stt_registry_types::version::update_available(i, latest));
         RegistryBackend {
             id: "y".to_string(),
+            backend_id: None,
             source: "github.com/x/y".to_string(),
             version: latest.to_string(),
             name: "Y".to_string(),

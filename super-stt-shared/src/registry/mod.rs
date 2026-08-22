@@ -19,6 +19,10 @@ pub struct RegistryListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryBackend {
     pub id: String,
+    /// The backend's reverse-DNS identifier, or `None` when the registry entry
+    /// predates it. Names the install directory.
+    #[serde(default)]
+    pub backend_id: Option<String>,
     pub source: String,
     pub version: String,
     pub name: String,
@@ -144,14 +148,12 @@ pub use super_stt_registry_types::{is_safe_component, is_safe_relative_path};
 mod tests {
     use super::RegistryBackend;
 
-    /// A daemon that predates `update_available` still deserializes here. The
-    /// field moved the update decision from the client to the daemon; a client
-    /// that hard-required it would fail to list anything at all against a
-    /// daemon that has not rolled over, which is worse than not knowing about
-    /// an update.
-    #[test]
-    fn a_registry_entry_without_update_available_still_parses() {
-        let json = serde_json::json!({
+    /// The minimal `/registry/backends` entry every test below starts from,
+    /// extending it with `serde_json::Value` indexing for the field each test
+    /// cares about. One fixture rather than three keeps them from drifting
+    /// apart on the fields that are merely required to parse at all.
+    fn minimal_backend_json() -> serde_json::Value {
+        serde_json::json!({
             "id": "openai",
             "source": "github.com/super-stt/openai",
             "version": "0.1.1",
@@ -166,9 +168,19 @@ mod tests {
             "secrets": [],
             "options": [],
             "compatibility": { "compatible": true },
-            "installed_version": "0.1.0",
-        });
-        let b: RegistryBackend = serde_json::from_value(json).expect("older payload must parse");
+        })
+    }
+
+    /// A daemon that predates `update_available` still deserializes here. The
+    /// field moved the update decision from the client to the daemon; a client
+    /// that hard-required it would fail to list anything at all against a
+    /// daemon that has not rolled over, which is worse than not knowing about
+    /// an update.
+    #[test]
+    fn a_registry_entry_without_update_available_still_parses() {
+        let mut v = minimal_backend_json();
+        v["installed_version"] = serde_json::json!("0.1.0");
+        let b: RegistryBackend = serde_json::from_value(v).expect("older payload must parse");
         assert!(
             !b.update_available,
             "an absent flag reads as no update, never as one"
@@ -180,26 +192,25 @@ mod tests {
     /// ways or it is not compatibility.
     #[test]
     fn a_registry_entry_with_an_unknown_field_still_parses() {
-        let json = serde_json::json!({
-            "id": "openai",
-            "source": "github.com/super-stt/openai",
-            "version": "0.1.1",
-            "name": "OpenAI",
-            "license": "Apache-2.0",
-            "kind": "wasm",
-            "contract": "v1",
-            "online": true,
-            "supports_gpu": false,
-            "supports_cpu": false,
-            "models": [],
-            "secrets": [],
-            "options": [],
-            "compatibility": { "compatible": true },
-            "update_available": true,
-            "a_field_from_a_later_daemon": 42,
-        });
-        let b: RegistryBackend = serde_json::from_value(json).expect("newer payload must parse");
+        let mut v = minimal_backend_json();
+        v["update_available"] = serde_json::json!(true);
+        v["a_field_from_a_later_daemon"] = serde_json::json!(42);
+        let b: RegistryBackend = serde_json::from_value(v).expect("newer payload must parse");
         assert!(b.update_available);
+    }
+
+    /// A daemon that predates `backend_id` still deserializes here, and a
+    /// response carrying one round-trips.
+    #[test]
+    fn backend_id_is_optional_on_the_wire() {
+        let without: RegistryBackend =
+            serde_json::from_value(minimal_backend_json()).expect("parses without backend_id");
+        assert!(without.backend_id.is_none());
+
+        let mut v = minimal_backend_json();
+        v["backend_id"] = serde_json::json!("app.super-stt.voxtral");
+        let with: RegistryBackend = serde_json::from_value(v).expect("parses with backend_id");
+        assert_eq!(with.backend_id.as_deref(), Some("app.super-stt.voxtral"));
     }
 
     fn selected(accel: &[&str]) -> super::SelectedAsset {

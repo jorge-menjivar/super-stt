@@ -40,6 +40,7 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
   "backends": [
     {
       "id": "voxtral",
+      "backend_id": "app.super-stt.voxtral",
       "source": "github.com/jorge-menjivar/super-stt",
       "version": "0.2.0",
       "name": "Voxtral",
@@ -73,6 +74,12 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
   ]
 }
 ```
+
+`id` is the registry key from `registry.toml`; it names the directory an
+installed backend lives in. `backend_id` is the backend's reverse-DNS
+identifier, declared by `[backend].id` in its release manifest — `null` for
+an entry that predates the field. The two are maintained independently:
+neither is derived from the other.
 
 `models[].provider` is always an empty string. It is emitted so clients that
 require the key can still parse the response, and carries no information —

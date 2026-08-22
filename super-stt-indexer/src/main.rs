@@ -350,6 +350,7 @@ mod tests {
     fn backend(id: &str, source: &str) -> index_json::IndexBackend {
         index_json::IndexBackend {
             id: id.into(),
+            backend_id: None,
             source: source.into(),
             version: "1.0.0".into(),
             tag: "v1.0.0".into(),

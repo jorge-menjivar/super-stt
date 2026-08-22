@@ -765,6 +765,7 @@ supported_devices = ["cpu"]
     fn minimal_entry() -> IndexBackend {
         IndexBackend {
             id: "x".into(),
+            backend_id: None,
             source: "github.com/x/y".into(),
             version: "1.0.0".into(),
             tag: "v1.0.0".into(),

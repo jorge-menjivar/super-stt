@@ -96,6 +96,7 @@ fn map_entry(
 ) -> RegistryBackend {
     RegistryBackend {
         id: entry.id.clone(),
+        backend_id: entry.backend_id.clone(),
         source: entry.source.clone(),
         version: entry.version.clone(),
         name: entry.name.clone(),
