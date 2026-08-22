@@ -116,6 +116,49 @@ impl Drop for InflightMarker {
     }
 }
 
+/// After a successful install/update, retire the directory that used to
+/// serve `source` (if the install just migrated to a new directory name) and
+/// move `active_backend` — both the persisted config and the runtime mirror —
+/// to follow it.
+///
+/// A no-op unless [`crate::registry::install::retire_previous_dir`] actually
+/// removed a predecessor, and even then repoints `active_backend` only when
+/// it named exactly the directory just retired: installing/updating a
+/// backend that is not the one currently selected must never touch the
+/// pointer. `rename_active_backend` (not `update_active_backend`) is
+/// deliberate — this is the same backend, same models, only the directory
+/// name changed, so the user's model selection must survive.
+async fn retire_and_repoint(
+    daemon: &crate::daemon::types::SuperSTTDaemon,
+    backends_dir: &std::path::Path,
+    source: &str,
+    dir_name: &str,
+) {
+    let installed_at = backends_dir.join(dir_name);
+    let Some(old) =
+        crate::registry::install::retire_previous_dir(backends_dir, source, &installed_at).await
+    else {
+        return;
+    };
+    let old_name = old
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+
+    let mut cfg = daemon.config.write().await;
+    if cfg.transcription.active_backend.as_deref() != Some(old_name.as_str()) {
+        return;
+    }
+    cfg.rename_active_backend(dir_name.to_string());
+    drop(cfg);
+    *daemon.active_backend.write().await = Some(dir_name.to_string());
+    if let Err(e) = daemon.persist_config().await {
+        log::warn!("Failed to persist config after backend migration rename: {e}");
+    }
+    log::info!("Repointed active_backend from {old_name} to {dir_name}");
+}
+
 /// Shared background pipeline spawner used by both the install and update
 /// handlers. The caller has already inserted `source_bg` into the inflight
 /// set; this function takes ownership of that responsibility via
@@ -195,39 +238,7 @@ pub(super) fn spawn_install_pipeline(
                 // move the active-backend pointer with it before the catalog
                 // is rescanned.
                 let dir_name = crate::registry::install_dir_name(&entry);
-                let installed_at = pipeline.backends_dir.join(dir_name);
-                if let Some(old) = crate::registry::install::retire_previous_dir(
-                    &pipeline.backends_dir,
-                    &entry.source,
-                    &installed_at,
-                )
-                .await
-                {
-                    // `transcription.active_backend` stores the install
-                    // directory name, so a migration that renames the
-                    // directory has to move the pointer with it or the
-                    // backend reads as deselected. `rename_active_backend`
-                    // (not `update_active_backend`) is deliberate: this is
-                    // the same backend, same models, only the directory name
-                    // changed — the user's model selection must survive.
-                    let old_name = old
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    let mut cfg = daemon.config.write().await;
-                    if cfg.transcription.active_backend.as_deref() == Some(old_name.as_str()) {
-                        cfg.rename_active_backend(dir_name.to_string());
-                        drop(cfg);
-                        *daemon.active_backend.write().await = Some(dir_name.to_string());
-                        if let Err(e) = daemon.persist_config().await {
-                            log::warn!(
-                                "Failed to persist config after backend migration rename: {e}"
-                            );
-                        }
-                        log::info!("Repointed active_backend from {old_name} to {dir_name}");
-                    }
-                }
+                retire_and_repoint(&daemon, &pipeline.backends_dir, &entry.source, dir_name).await;
 
                 // Refresh the daemon's in-memory backend catalog.
                 daemon.refresh_backends().await;
@@ -252,4 +263,116 @@ pub(super) fn spawn_install_pipeline(
 
         guard.disarm();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retire_and_repoint;
+    use crate::daemon::types::test_daemon;
+
+    /// Lay out an old directory serving `source` and a new one already
+    /// installed at `new_dir_name`, matching what `run`/`run_local` leave on
+    /// disk right before this function runs in production.
+    fn migrated_layout(root: &std::path::Path, old_dir_name: &str, new_dir_name: &str) {
+        let old = root.join(old_dir_name);
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(
+            old.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/x/voxtral"
+name = "Voxtral"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "voxtral"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(new_dir_name)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_migration_repoints_active_backend_when_it_named_the_retired_directory() {
+        let root = tempfile::tempdir().unwrap();
+        migrated_layout(root.path(), "super-stt-voxtral", "app.super-stt.voxtral");
+
+        let daemon = test_daemon().await;
+        daemon.config.write().await.transcription.active_backend =
+            Some("super-stt-voxtral".to_string());
+        daemon.config.write().await.update_preferred_model(
+            "voxtral-mini".to_string(),
+            "github.com/x/voxtral".to_string(),
+            Some("local_voxtral".to_string()),
+        );
+
+        retire_and_repoint(
+            &daemon,
+            root.path(),
+            "github.com/x/voxtral",
+            "app.super-stt.voxtral",
+        )
+        .await;
+
+        assert!(!root.path().join("super-stt-voxtral").exists());
+        let cfg = daemon.config.read().await;
+        assert_eq!(
+            cfg.transcription.active_backend.as_deref(),
+            Some("app.super-stt.voxtral"),
+            "the pointer must follow the migration"
+        );
+        assert_eq!(
+            cfg.transcription.preferred_model, "voxtral-mini",
+            "the model preference must survive the rename"
+        );
+        assert_eq!(cfg.transcription.preferred_provider, "local_voxtral");
+        drop(cfg);
+        assert_eq!(
+            daemon.active_backend.read().await.as_deref(),
+            Some("app.super-stt.voxtral"),
+            "the runtime mirror must agree with the persisted config"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_migration_leaves_a_different_active_backend_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        migrated_layout(root.path(), "super-stt-voxtral", "app.super-stt.voxtral");
+
+        let daemon = test_daemon().await;
+        daemon.config.write().await.transcription.active_backend =
+            Some("some-other-backend".to_string());
+        daemon.config.write().await.update_preferred_model(
+            "other-model".to_string(),
+            "github.com/x/other".to_string(),
+            Some("local_other".to_string()),
+        );
+
+        retire_and_repoint(
+            &daemon,
+            root.path(),
+            "github.com/x/voxtral",
+            "app.super-stt.voxtral",
+        )
+        .await;
+
+        // The stale directory is still retired — that part is unconditional —
+        // but the pointer, which names a different backend entirely, must not
+        // move.
+        assert!(
+            !root.path().join("super-stt-voxtral").exists(),
+            "the predecessor is retired regardless of what's active"
+        );
+        let cfg = daemon.config.read().await;
+        assert_eq!(
+            cfg.transcription.active_backend.as_deref(),
+            Some("some-other-backend"),
+            "an unrelated active backend must not be repointed"
+        );
+        assert_eq!(cfg.transcription.preferred_model, "other-model");
+        assert_eq!(cfg.transcription.preferred_provider, "local_other");
+        drop(cfg);
+        assert_eq!(daemon.active_backend.read().await.as_deref(), None);
+    }
 }

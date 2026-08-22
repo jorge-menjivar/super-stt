@@ -23,6 +23,14 @@ use super_stt_registry_types::verify::{
 const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// Slack allowed over a declared asset size before a download is rejected.
 const DOWNLOAD_SIZE_MARGIN: u64 = 1024 * 1024;
+/// The name of the shared staging root every install/update stages into
+/// before the atomic swap: `<backends_dir>/.staging/<id>-<version>`. It is
+/// a direct child of `backends_dir`, exactly like a backend's own install
+/// directory, but it is never one itself — a directory scan over
+/// `backends_dir` must always skip it explicitly rather than rely on its
+/// manifest lookup happening to fail one level too shallow.
+const STAGING_DIR_NAME: &str = ".staging";
+
 /// The byte ceiling for a download given the index-declared `expected_size`
 /// (0 when unknown).
 fn download_cap(expected_size: u64) -> u64 {
@@ -114,7 +122,7 @@ where
     download_and_verify(p, entry, selection, &partial_path).await?;
 
     (p.on_progress)(P::Extracting, None);
-    let staging = p.backends_dir.join(".staging").join(format!(
+    let staging = p.backends_dir.join(STAGING_DIR_NAME).join(format!(
         "{}-{}",
         crate::registry::install_dir_name(entry),
         entry.version
@@ -269,7 +277,7 @@ where
 
     (p.on_progress)(P::Resolving, None);
 
-    let staging = p.backends_dir.join(".staging").join(format!(
+    let staging = p.backends_dir.join(STAGING_DIR_NAME).join(format!(
         "{}-{}",
         crate::registry::install_dir_name(entry),
         entry.version
@@ -409,17 +417,35 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The directory currently serving `source`, if any — the one whose model
-/// files a migrating install should inherit. Equals `final_path` for an
-/// ordinary in-place update, where `final_path` is itself the directory
-/// already serving `source`.
-async fn previous_dir_for(backends_dir: &Path, source: &str) -> Option<PathBuf> {
+/// Scan the immediate children of `backends_dir` for the one whose manifest
+/// declares `source`, skipping `exclude` (when given) and always skipping
+/// [`STAGING_DIR_NAME`].
+///
+/// The `.staging` skip is an explicit rule, not an accident of directory
+/// depth: a real staged install's manifest lives one level *deeper*
+/// (`.staging/<id>-<version>/backend.toml`), so a naive scan happens to be
+/// safe today only because `Manifest::load(backends_dir/.staging)` fails.
+/// Callers that only read (like this one) would silently no-op if that
+/// stopped being true; [`retire_previous_dir`], which calls `remove_dir_all`
+/// on what this returns, would destroy the shared staging root instead. One
+/// scan with one skip rule means there is nowhere for the two to drift apart.
+///
+/// A directory whose manifest will not parse is never a match: without a
+/// readable `source` there is no evidence it is the same backend.
+async fn find_serving(
+    backends_dir: &Path,
+    source: &str,
+    exclude: Option<&Path>,
+) -> Option<PathBuf> {
     use super_stt_registry_types::manifest::Manifest;
 
     let mut entries = tokio::fs::read_dir(backends_dir).await.ok()?;
     while let Ok(Some(entry)) = entries.next_entry().await {
         let dir = entry.path();
-        if !dir.is_dir() {
+        if dir.file_name().is_some_and(|n| n == STAGING_DIR_NAME) {
+            continue;
+        }
+        if exclude.is_some_and(|e| dir == e) || !dir.is_dir() {
             continue;
         }
         if Manifest::load(&dir).is_ok_and(|m| m.backend.source == source) {
@@ -429,47 +455,40 @@ async fn previous_dir_for(backends_dir: &Path, source: &str) -> Option<PathBuf> 
     None
 }
 
+/// The directory currently serving `source`, if any — the one whose model
+/// files a migrating install should inherit. Equals `final_path` for an
+/// ordinary in-place update, where `final_path` is itself the directory
+/// already serving `source`.
+async fn previous_dir_for(backends_dir: &Path, source: &str) -> Option<PathBuf> {
+    find_serving(backends_dir, source, None).await
+}
+
 /// Remove the directory that used to serve `source`, when the install just
 /// landed somewhere else (a migration).
 ///
 /// Called only after a successful swap, so the backend is already being
 /// served from `keep` and removing the predecessor cannot take the last copy.
 /// Returns the path removed, or `None` when there was nothing to retire.
-///
-/// A directory whose manifest will not parse is never a candidate: without a
-/// readable `source` there is no evidence it is the same backend.
 pub async fn retire_previous_dir(
     backends_dir: &Path,
     source: &str,
     keep: &Path,
 ) -> Option<PathBuf> {
-    use super_stt_registry_types::manifest::Manifest;
-
-    let mut entries = tokio::fs::read_dir(backends_dir).await.ok()?;
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let dir = entry.path();
-        if dir == keep || !dir.is_dir() {
-            continue;
+    let dir = find_serving(backends_dir, source, Some(keep)).await?;
+    match tokio::fs::remove_dir_all(&dir).await {
+        Ok(()) => {
+            log::info!(
+                "Retired {} after installing {source} into {}",
+                dir.display(),
+                keep.display()
+            );
+            Some(dir)
         }
-        let Ok(installed) = Manifest::load(&dir) else {
-            continue;
-        };
-        if installed.backend.source != source {
-            continue;
-        }
-        match tokio::fs::remove_dir_all(&dir).await {
-            Ok(()) => {
-                log::info!(
-                    "Retired {} after installing {source} into {}",
-                    dir.display(),
-                    keep.display()
-                );
-                return Some(dir);
-            }
-            Err(e) => log::error!("Failed to retire {}: {e}", dir.display()),
+        Err(e) => {
+            log::error!("Failed to retire {}: {e}", dir.display());
+            None
         }
     }
-    None
 }
 
 /// Move model files that survive the replacement from the installed directory
@@ -1362,6 +1381,53 @@ description = "Test backend."
         assert!(found.is_none());
     }
 
+    /// `.staging` (the shared root every install/update stages into) sits one
+    /// level inside `backends_dir`, exactly where a real backend directory
+    /// would. Both scans are safe today only because a real staged install's
+    /// manifest lives one level *deeper* (`.staging/<id>-<version>/backend.toml`),
+    /// so a plain `Manifest::load(backends_dir/.staging)` fails. Nothing
+    /// enforces that shape, so this proves `.staging` is skipped by an
+    /// explicit rule rather than by accident — a manifest ever placed one
+    /// level shallower (a bug, a manual recovery) must never turn into
+    /// `retire_previous_dir` calling `remove_dir_all` on the shared staging
+    /// root out from under every in-flight install.
+    #[tokio::test]
+    async fn the_staging_root_is_never_matched_as_a_backend_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let staging_root = root.path().join(super::STAGING_DIR_NAME);
+        std::fs::create_dir_all(&staging_root).unwrap();
+        std::fs::write(
+            staging_root.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/x/super-stt-voxtral"
+name = "Voxtral"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "voxtral"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+        let keep = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(&keep).unwrap();
+
+        let found = super::previous_dir_for(root.path(), "github.com/x/super-stt-voxtral").await;
+        assert!(
+            found.is_none(),
+            ".staging must never be matched as a backend directory"
+        );
+
+        let removed =
+            super::retire_previous_dir(root.path(), "github.com/x/super-stt-voxtral", &keep).await;
+        assert!(removed.is_none());
+        assert!(
+            staging_root.exists(),
+            "the shared staging root must never be removed"
+        );
+    }
+
     /// The 8.8 GB case: a migration where `final_path` does not exist yet must
     /// still carry the old directory's unchanged model files into staging, by
     /// resolving the inherit-from directory through `previous_dir_for` rather
@@ -1422,6 +1488,11 @@ description = "Test backend."
         assert!(
             staging.join("models/m/a.bin").exists(),
             "the model file must survive the migration"
+        );
+        assert_eq!(
+            std::fs::read(staging.join("models/m/a.bin")).unwrap(),
+            b"weights",
+            "the carried file's bytes, not just its existence, must survive"
         );
     }
 
