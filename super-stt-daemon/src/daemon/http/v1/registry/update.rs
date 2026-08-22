@@ -75,14 +75,10 @@ async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, Er
     };
 
     // Matched by `source`, the same key `GET /registry/backends` uses to
-    // decide `update_available`. Keying on the install directory name instead
-    // made this 404 for anything installed from a custom repo or local path.
+    // decide `update_available` — and the same helper, so the two never drift.
     let installed_version: Option<String> = {
         let backends = s.daemon.backends.read().await;
-        backends.iter().find(|b| b.source == entry.source).map(|b| {
-            crate::stt_models::backends::installed_version(&b.dir)
-                .unwrap_or_else(|| b.version.clone())
-        })
+        super::list::installed_version_for_source(&backends, &entry.source)
     };
 
     let Some(from_version) = installed_version else {

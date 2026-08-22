@@ -62,7 +62,10 @@ fn entry_passes_filters(
 /// Re-reads the manifest off disk rather than trusting the cached
 /// `DiscoveredBackend::version`, so a version bumped since the last scan is
 /// reported; the cached value stands in when that read fails.
-fn installed_version_for_source(
+///
+/// `pub(super)` so `update.rs` shares this instead of re-implementing the same
+/// match-by-`source` + fresh-read-with-fallback rule.
+pub(super) fn installed_version_for_source(
     backends: &[crate::stt_models::backends::DiscoveredBackend],
     source: &str,
 ) -> Option<String> {
