@@ -616,8 +616,27 @@ supported_devices   = ["none"]
   `label` is the human-readable text shown beside the input in the settings
   UI. Secret values are stored encrypted; option values are stored as
   plaintext.
-- `[backend].source` must be unique across installed backends; a collision
-  is a discovery error for the later backend.
+- `[backend].id`, when present, must match the [`id` format](#id-format)
+  above; a manifest declaring a malformed `id` fails to parse, and the
+  backend is skipped during discovery. It must also be unique across
+  installed backends, since it names the install directory: the registry
+  indexer refuses to publish an index in which two entries declare the same
+  `id`, and an install whose target directory already holds a backend
+  declaring a different `[backend].source` is refused rather than allowed to
+  replace it.
+- `[backend].source` must be unique across installed backends. When two
+  installed directories declare the same `source`, the daemon serves exactly
+  one of them and removes the other. The survivor is chosen in this order:
+  highest `[backend].version`; then the directory named after the backend's
+  own `[backend].id`, its canonical location; then the lexicographically
+  first directory name, so the outcome is stable across scans. Version leads
+  because a backend updated in place is the newer install whatever its
+  directory happens to be called. Before the other directory is removed,
+  every model file it holds that the survivor's manifest still declares at
+  the same `destination` *and* the same `url` is moved across, so resolving a
+  duplicate never costs a re-download. A directory whose `backend.toml` does
+  not parse is never a candidate — neither to survive nor to be removed:
+  without a readable `source` there is no evidence it is the same backend.
 - `[backend].description` is required: a one-line, human-readable summary
   shown in the registry/Browse listing. A manifest that omits it fails to
   parse, and the backend is skipped during discovery.

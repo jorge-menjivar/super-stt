@@ -75,11 +75,15 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
 }
 ```
 
-`id` is the registry key from `registry.toml`; it names the directory an
-installed backend lives in. `backend_id` is the backend's reverse-DNS
-identifier, declared by `[backend].id` in its release manifest — `null` for
-an entry that predates the field. The two are maintained independently:
-neither is derived from the other.
+`id` is the registry key from `registry.toml`. `backend_id` is the backend's
+reverse-DNS identifier, declared by `[backend].id` in its release manifest —
+`null` for an entry that predates the field. The two are maintained
+independently: neither is derived from the other.
+
+The install directory is named by `backend_id`, falling back to `id` when
+`backend_id` is `null` — see
+[`POST /registry/install`](./install.md#request) for the full rule. A client
+computing the path must apply that fallback rather than assume either field.
 
 `models[].provider` is always an empty string. It is emitted so clients that
 require the key can still parse the response, and carries no information —

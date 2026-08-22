@@ -95,6 +95,15 @@ repository, or a local directory. A backend whose manifest declares no `id`
 is installed under the registry key instead, so installs that predate the
 identifier keep their directory.
 
+That directory must be free for this backend to take. An install whose target
+directory already holds a backend declaring a different `[backend].source`
+fails with `install_dir_conflict`; both directories are left exactly as they
+were, and no model files are moved. Completing such an install would replace
+the backend already there and delete the model files downloaded under it.
+`source` is the identity this is judged on, so re-installing or updating the
+same backend is unaffected, as is replacing an install whose `backend.toml`
+no longer parses.
+
 **Integrity & limits.** Operator base-URL overrides (`GITHUB_API_BASE`,
 `SUPER_STT_REGISTRY_URL`) must be `https://` (loopback `http://` is allowed for
 testing); insecure values are ignored and the secure default is used. Downloads
@@ -166,6 +175,8 @@ Typed `error` values:
 - `manifest_invalid` — the `backend.toml` asset was absent or failed
   verification: no `manifest` pin, unparseable, failed runtime validation, over
   the size cap, or a `source`/`entrypoint` inconsistent with the index entry
+- `install_dir_conflict` — the install directory already holds a backend
+  declaring a different `[backend].source`; nothing on disk was changed
 
 ## Failure modes (synchronous)
 
