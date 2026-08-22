@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Daemon-side registry client, compatibility evaluation, and install pipeline.
 
+pub mod carry_over;
 pub mod client;
 pub mod compat;
 pub mod custom_repo;
