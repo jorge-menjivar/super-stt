@@ -102,10 +102,12 @@ Per-entry fields beyond what `index.json` carries:
   compared as semver. The daemon decides this rather than leaving each client
   to re-derive it: the daemon is the side that reads the installed manifest and
   owns the index, so it is the only one that can answer without duplicating
-  both. `false` when nothing is installed, when the installed version is at or
-  ahead of the index's, or when either version does not parse — so a stale or
-  older index never advertises a downgrade. Clients that want to *show* the
-  versions still have both fields.
+  both. The daemon matches an installed backend to this entry by `source`, so
+  a backend installed from a custom repository or a local directory is matched
+  the same way one installed from the registry is. `false` when nothing is
+  installed, when the installed version is at or ahead of the index's, or when
+  either version does not parse — so a stale or older index never advertises a
+  downgrade. Clients that want to *show* the versions still have both fields.
 
 ## Failure modes
 

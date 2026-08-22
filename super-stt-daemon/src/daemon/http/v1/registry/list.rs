@@ -4,7 +4,6 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
-use std::path::PathBuf;
 use super_stt_shared::registry::{
     Compatibility, RegistryBackend, RegistryListResponse, RegistryModel, RegistryOption,
     RegistrySecret,
@@ -18,15 +17,6 @@ pub(crate) struct RegistryBackendsQuery {
     pub(crate) kind: Option<String>,
     pub(crate) online: Option<bool>,
     pub(crate) q: Option<String>,
-}
-
-/// Resolve the backends directory from app state.
-async fn backends_dir(s: &AppState) -> PathBuf {
-    let c = s.daemon.config.read().await;
-    c.transcription.backends_dir.clone().map_or_else(
-        crate::stt_models::backends::default_backends_dir,
-        PathBuf::from,
-    )
 }
 
 /// Return `true` if `entry` should be included given the query filters.
@@ -60,10 +50,26 @@ fn entry_passes_filters(
     true
 }
 
-/// Read the installed version for a backend from its `backend.toml`, if present.
-/// `None` marks a backend that is not installed here.
-fn installed_version(backends_dir: &std::path::Path, backend_id: &str) -> Option<String> {
-    crate::stt_models::backends::installed_version(&backends_dir.join(backend_id))
+/// The installed version of the backend serving `source`, or `None` when no
+/// installed backend claims it.
+///
+/// The catalog is keyed by `source` because that is the only identifier both
+/// sides always carry: the index always has one, and every `backend.toml` must
+/// declare one. A directory name does not qualify — it is derived differently
+/// depending on which install path produced it, so keying on it silently
+/// failed to match anything installed from a custom repo or a local path.
+///
+/// Re-reads the manifest off disk rather than trusting the cached
+/// `DiscoveredBackend::version`, so a version bumped since the last scan is
+/// reported; the cached value stands in when that read fails.
+fn installed_version_for_source(
+    backends: &[crate::stt_models::backends::DiscoveredBackend],
+    source: &str,
+) -> Option<String> {
+    let b = backends.iter().find(|b| b.source == source)?;
+    Some(
+        crate::stt_models::backends::installed_version(&b.dir).unwrap_or_else(|| b.version.clone()),
+    )
 }
 
 /// Whether the index offers something newer than what is installed.
@@ -155,7 +161,7 @@ pub(crate) async fn list_registry_backends(
     };
 
     let host = host_detect::detect();
-    let bdir = backends_dir(&s).await;
+    let backends = s.daemon.backends.read().await;
 
     let mut result = Vec::new();
     for entry in &index.backends {
@@ -186,7 +192,7 @@ pub(crate) async fn list_registry_backends(
         result.push(map_entry(
             entry,
             compat_field,
-            installed_version(&bdir, &entry.id),
+            installed_version_for_source(&backends, &entry.source),
         ));
     }
 
@@ -225,5 +231,56 @@ mod tests {
         // Neither side is guessed at when it cannot be parsed.
         assert!(!update_available(Some("1.0.0"), "nightly"));
         assert!(!update_available(Some(""), "1.0.0"));
+    }
+
+    use crate::stt_models::backends::DiscoveredBackend;
+    use std::path::PathBuf;
+
+    fn discovered(dir: &str, source: &str, version: &str) -> DiscoveredBackend {
+        DiscoveredBackend {
+            dir: PathBuf::from("/backends").join(dir),
+            source: source.to_string(),
+            name: "Voxtral".to_string(),
+            version: version.to_string(),
+            kind: "subprocess".to_string(),
+            entrypoint: "super-stt-backend-voxtral".to_string(),
+            allowed_hosts: Vec::new(),
+            secrets: Vec::new(),
+            options: Vec::new(),
+            models: Vec::new(),
+        }
+    }
+
+    /// The regression this task exists for: the install directory is named
+    /// after the repo, the index id is `voxtral`, and the two never matched.
+    /// Matching on `source` is what makes a custom-path install updatable.
+    #[test]
+    fn a_directory_not_named_after_the_index_id_still_reports_its_version() {
+        let catalog = vec![discovered(
+            "super-stt-voxtral",
+            "github.com/jorge-menjivar/super-stt-voxtral",
+            "0.1.0",
+        )];
+        assert_eq!(
+            super::installed_version_for_source(
+                &catalog,
+                "github.com/jorge-menjivar/super-stt-voxtral"
+            ),
+            Some("0.1.0".to_string())
+        );
+        assert!(update_available(Some("0.1.0"), "0.1.1"));
+    }
+
+    #[test]
+    fn a_source_absent_from_the_catalog_has_no_installed_version() {
+        let catalog = vec![discovered(
+            "whisper",
+            "github.com/x/super-stt-whisper",
+            "0.1.0",
+        )];
+        assert_eq!(
+            super::installed_version_for_source(&catalog, "github.com/x/super-stt-voxtral"),
+            None
+        );
     }
 }
