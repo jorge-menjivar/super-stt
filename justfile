@@ -137,6 +137,13 @@ test *args:
 test-gui *args:
     cargo test -p super-stt-consent --test gui_smoke -- --ignored --nocapture {{ args }}
 
+# Unit-test install.sh's pure logic (arch detection, channel validation, tag
+# resolution from a JSON string) against fixture JSON. It's a bash script,
+# not a Cargo target, so it isn't covered by `just test` — see
+# scripts/test-install.sh for what it checks and why.
+test-install:
+    bash scripts/test-install.sh
+
 # Load every committed old-config fixture against the current config types.
 config-compat *args:
     cargo test -p super-stt-daemon --lib config {{ args }}
@@ -169,8 +176,9 @@ coverage-lcov:
 coverage-html *args:
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --html {{ args }}
 
-# Full local CI gate: format, lint, feature-combo compile, tests, doctests, schemas
-ci: fmt-check check check-features test doctest schema-check
+# Full local CI gate: format, lint, feature-combo compile, tests, install.sh
+# tests, doctests, schemas
+ci: fmt-check check check-features test test-install doctest schema-check
 
 # Run the app for testing purposes
 run-app *args:
@@ -327,6 +335,10 @@ build-daemon *args:
 # Build only the CLI
 build-cli *args:
     cargo build --release --bin {{ cli_name }} {{ args }}
+
+# Build only the installer/self-updater
+build-install:
+    cargo build --release --bin super-stt-install
 
 # Build only the consent helper (co-located with the daemon binary)
 build-consent:

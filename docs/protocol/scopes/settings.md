@@ -31,6 +31,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | Mutation                                                                                                                          | Mirrored as an SSE event?                                                                            |
 |-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
 | `/active_model`, `/active_backend`, `/active_device`, `/allow_online_models` (when it triggers a fallback)                       | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled)                 |
+| `/update_check_enabled`, `/update_beta_optin`                                                                                    | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
 | `/audio_theme`, `/volume`, `/write_method`, `/notification_method`, `/recording_stop_mode`, `/preview_typing`, `/allow_online_models` (no fallback), `/custom_models_dir` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
 
 ## Endpoint reference
@@ -61,6 +62,10 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/registry/backends/refresh`](../endpoints/v1/registry/refresh.md) | POST | Refresh the registry index                                                                            |
 | [`/registry/backends/install`](../endpoints/v1/registry/install.md) | POST | Install a backend from the registry                                                                   |
 | [`/registry/backends/update`](../endpoints/v1/registry/update.md) | POST | Update an installed registry backend                                                                  |
+| [`/update`](../endpoints/v1/update.md) | GET | Self-update availability (daemon version vs latest release) |
+| [`/update/check`](../endpoints/v1/update/check.md) | POST | Force an immediate self-update check |
+| [`/update_check_enabled`](../endpoints/v1/update_check_enabled.md) | POST, GET | Toggle / read the daemon's periodic self-update check |
+| [`/update_beta_optin`](../endpoints/v1/update_beta_optin.md) | POST, GET | Whether prerelease versions are considered for updates (auto / enabled / disabled) |
 
 ## A typical settings session
 

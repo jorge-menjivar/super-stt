@@ -448,6 +448,10 @@ fn v0_1_3_full_daemon_config_loads_and_migrates() {
     assert_eq!(cfg.transcription.primary_language, None);
     assert!(cfg.backends.options.is_empty());
     assert!(cfg.backends.models.is_empty());
+    assert!(
+        cfg.update.check_enabled,
+        "new [update] section defaults on old configs"
+    );
 }
 
 #[test]
@@ -697,6 +701,78 @@ preferred_model = "whisper"
         cfg.transcription.notification_method,
         NotificationMethod::Auto
     );
+}
+
+#[test]
+fn default_update_config() {
+    let config = DaemonConfig::default();
+    assert!(config.update.check_enabled);
+    assert_eq!(
+        config.update.beta_optin,
+        super_stt_shared::models::update_beta_optin::UpdateBetaOptIn::Auto
+    );
+}
+
+#[test]
+fn config_without_update_section_gets_defaults() {
+    // Mirror the literal-TOML shape of `config_without_online_section_deserializes`
+    // above: a full config WITHOUT an [update] section.
+    let toml_str = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "classic"
+volume = 100
+
+[transcription]
+preferred_model = "whisper-tiny"
+write_mode = false
+preview_typing_enabled = false
+recording_stop_mode = "silence_and_manual"
+write_method = "auto"
+"#;
+    let cfg: DaemonConfig = toml::from_str(toml_str).expect("must parse");
+    assert!(cfg.update.check_enabled);
+}
+
+#[test]
+fn bad_beta_optin_falls_back_preserving_rest() {
+    // Mirror the shape of `daemon_bad_theme_falls_back_preserving_rest`: one
+    // bad enum value must reset only that field, not wipe the config.
+    let toml_str = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "classic"
+volume = 80
+
+[transcription]
+preferred_model = "whisper-tiny"
+
+[update]
+check_enabled = false
+beta_optin = "yes-please"
+"#;
+    let cfg: DaemonConfig = toml::from_str(toml_str).expect("must parse, not error");
+    assert_eq!(
+        cfg.update.beta_optin,
+        super_stt_shared::models::update_beta_optin::UpdateBetaOptIn::Auto
+    );
+    assert!(!cfg.update.check_enabled); // sibling field preserved
+    assert_eq!(cfg.audio.volume, 80); // other sections preserved
+}
+
+#[test]
+fn update_config_round_trips() {
+    let mut cfg = DaemonConfig::default();
+    cfg.update.check_enabled = false;
+    cfg.update.beta_optin = super_stt_shared::models::update_beta_optin::UpdateBetaOptIn::Enabled;
+    let serialized = toml::to_string(&cfg).unwrap();
+    assert!(serialized.contains("beta_optin = \"enabled\""));
+    let back: DaemonConfig = toml::from_str(&serialized).unwrap();
+    assert_eq!(back.update, cfg.update);
 }
 
 /// Every path that drops the model preference drops the provider with it —

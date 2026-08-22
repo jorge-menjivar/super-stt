@@ -1,0 +1,32 @@
+[package]
+    name = "super-stt-install"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
+    description = "Installer and self-updater for Super STT"
+    repository = "https://github.com/jorge-menjivar/super-stt"
+    license = "GPL-3.0-only"
+
+[dependencies]
+    anyhow.workspace = true
+    clap.workspace = true
+    dirs.workspace = true
+    env_logger.workspace = true
+    flate2 = "1.1.9"
+    log.workspace = true
+    reqwest.workspace = true
+    serde.workspace = true
+    serde_json.workspace = true
+    super-stt-forge = { version = "0.2.2-beta.2", path = "../super-stt-forge" }
+    super-stt-registry-types = { version = "0.2.2-beta.2", path = "../super-stt-registry-types" }
+    tar = "0.4.46"
+    thiserror.workspace = true
+    tokio.workspace = true
+
+[dev-dependencies]
+    hex = "0.4.3"
+    mockito = "1"
+    ring = "0.17.14"
+
+[lints]
+    workspace = true

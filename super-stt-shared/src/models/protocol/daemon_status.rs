@@ -73,6 +73,10 @@ pub enum DaemonStatusEvent {
 
     /// A settings value changed (the app refetches the affected block).
     SettingsChanged { setting: String },
+
+    /// A self-update check found a newer release. Clients refetch
+    /// `GET /v1/update` for the full status including the installer asset.
+    UpdateAvailable { latest_version: String },
 }
 
 #[cfg(test)]
@@ -92,6 +96,19 @@ mod tests {
         assert_eq!(json["status"], "model_switched");
         assert_eq!(json["model_name"], "whisper-tiny");
         assert_eq!(json["actual_device"], "cpu");
+    }
+
+    /// The wire discriminant is `status`, and the field name is
+    /// `latest_version` verbatim — pins the shape against a future stray
+    /// `#[serde(rename)]`.
+    #[test]
+    fn update_available_wire_shape() {
+        let json = serde_json::to_value(DaemonStatusEvent::UpdateAvailable {
+            latest_version: "v0.2.3-beta.1".into(),
+        })
+        .unwrap();
+        assert_eq!(json["status"], "update_available");
+        assert_eq!(json["latest_version"], "v0.2.3-beta.1");
     }
 
     /// An extra `timestamp` key (injected by the publish path) is ignored on

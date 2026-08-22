@@ -57,6 +57,12 @@ impl SuperSTTDaemon {
                 self.handle_set_notification_method(method).await
             }
             Command::GetNotificationMethod => self.handle_get_notification_method().await,
+            Command::SetUpdateCheckEnabled { enabled } => {
+                self.handle_set_update_check_enabled(enabled).await
+            }
+            Command::GetUpdateCheckEnabled => self.handle_get_update_check_enabled().await,
+            Command::SetUpdateBetaOptin { value } => self.handle_set_update_beta_optin(value).await,
+            Command::GetUpdateBetaOptin => self.handle_get_update_beta_optin().await,
             Command::SetVolume { volume } => self.handle_set_volume(volume),
             Command::GetVolume => self.handle_get_volume(),
             Command::SetPrimaryLanguage { language } => {

@@ -40,6 +40,10 @@ impl TryFrom<DaemonRequest> for Command {
             "get_write_method" => Ok(Command::GetWriteMethod),
             "set_notification_method" => cmd_set_notification_method(&request),
             "get_notification_method" => Ok(Command::GetNotificationMethod),
+            "set_update_check_enabled" => cmd_set_update_check_enabled(&request),
+            "get_update_check_enabled" => Ok(Command::GetUpdateCheckEnabled),
+            "set_update_beta_optin" => cmd_set_update_beta_optin(&request),
+            "get_update_beta_optin" => Ok(Command::GetUpdateBetaOptin),
             "set_volume" => cmd_set_volume(&request),
             "get_volume" => Ok(Command::GetVolume),
             "set_primary_language" => cmd_set_primary_language(&request),
@@ -239,6 +243,25 @@ fn cmd_set_allow_online_models(request: &DaemonRequest) -> Result<Command, Strin
         .enabled
         .ok_or("Missing enabled field for set_allow_online_models command")?;
     Ok(Command::SetAllowOnlineModels { enabled })
+}
+
+fn cmd_set_update_check_enabled(request: &DaemonRequest) -> Result<Command, String> {
+    let enabled = request
+        .enabled
+        .ok_or("Missing enabled field for set_update_check_enabled command")?;
+    Ok(Command::SetUpdateCheckEnabled { enabled })
+}
+
+fn cmd_set_update_beta_optin(request: &DaemonRequest) -> Result<Command, String> {
+    let value = request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("value"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing value for set_update_beta_optin command")?
+        .to_string();
+
+    Ok(Command::SetUpdateBetaOptin { value })
 }
 
 fn cmd_set_volume(request: &DaemonRequest) -> Result<Command, String> {

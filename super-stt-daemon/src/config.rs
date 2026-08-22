@@ -6,6 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
 use super_stt_shared::models::write_method::WriteMethod;
 use super_stt_shared::theme::AudioTheme;
 
@@ -18,6 +19,37 @@ pub struct DaemonConfig {
     pub online: OnlineConfig,
     #[serde(default)]
     pub backends: BackendsConfig,
+    #[serde(default)]
+    pub update: UpdateConfig,
+}
+
+/// Self-update checking. Contract: docs/protocol/endpoints/v1/update.md
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateConfig {
+    /// Periodic background checks + desktop notification. `POST
+    /// /v1/update/check` works regardless of this flag.
+    #[serde(default = "default_check_enabled")]
+    pub check_enabled: bool,
+    /// An unparseable stored value degrades to the default rather than
+    /// failing the whole config load.
+    #[serde(
+        default,
+        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
+    )]
+    pub beta_optin: UpdateBetaOptIn,
+}
+
+fn default_check_enabled() -> bool {
+    true
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            check_enabled: true,
+            beta_optin: UpdateBetaOptIn::default(),
+        }
+    }
 }
 
 /// User-set configuration for installed backends. Secrets live in the keyring;
@@ -160,6 +192,7 @@ impl Default for DaemonConfig {
             },
             online: OnlineConfig::default(),
             backends: BackendsConfig::default(),
+            update: UpdateConfig::default(),
         }
     }
 }

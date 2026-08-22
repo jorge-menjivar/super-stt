@@ -3,3 +3,4 @@ pub(crate) mod health;
 pub(crate) mod registry;
 pub(crate) mod settings;
 pub(crate) mod transcribe;
+pub(crate) mod update;

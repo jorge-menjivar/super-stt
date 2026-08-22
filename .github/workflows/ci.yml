@@ -71,6 +71,14 @@ jobs:
       - name: Run tests
         run: just test --verbose
 
+      - name: Run install.sh tests
+        # install.sh is a bash script, not a Cargo target, so `just test`
+        # above never touches it — see scripts/test-install.sh. `jq` ships
+        # preinstalled on `ubuntu-latest`, so the field-order-swapped/
+        # body-literal robustness cases run for real here, not just the
+        # grep/awk fallback's own direct coverage.
+        run: just test-install
+
       - name: Run doctests
         run: just doctest --verbose
 

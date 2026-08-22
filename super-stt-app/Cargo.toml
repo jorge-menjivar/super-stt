@@ -41,6 +41,7 @@
     slotmap = "1.1"
     strum.workspace = true
     strum_macros.workspace = true
+    super-stt-forge = { path = "../super-stt-forge" }
     super-stt-registry-types = { path = "../super-stt-registry-types" }
     # Workspace dependencies
     super-stt-shared = { path = "../super-stt-shared" }
@@ -55,6 +56,9 @@
 
 [features]
     default = []
+
+[dev-dependencies]
+    mockito = "1.7.2"
 
 [lints]
     workspace = true

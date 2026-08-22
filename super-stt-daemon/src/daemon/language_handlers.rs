@@ -9,20 +9,9 @@
 use crate::daemon::language::resolve_language;
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::ModelDefinition;
-use super_stt_shared::models::protocol::{Command, DaemonResponse, DaemonStatusEvent, ErrorCode};
+use super_stt_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
 
 impl SuperSTTDaemon {
-    /// Broadcast that a setting changed so subscribed clients re-resolve any
-    /// derived state — e.g. a per-model language that follows the global value
-    /// must re-fetch its resolution block. Reuses the `daemon_status_changed`
-    /// topic clients already subscribe to; `setting` names what changed.
-    fn publish_settings_changed(&self, setting: &str) {
-        self.events
-            .publish_daemon_status(DaemonStatusEvent::SettingsChanged {
-                setting: setting.to_string(),
-            });
-    }
-
     pub async fn handle_get_primary_language(&self) -> DaemonResponse {
         let config = self.config.read().await;
         let value = config

@@ -372,6 +372,85 @@ async fn set_notification_method_round_trips_through_set_and_get() {
     assert_eq!(get_response.notification_method.as_deref(), Some("dbus"));
 }
 
+/// `get_update_check_enabled` reflects the config default before any write.
+#[tokio::test]
+async fn get_update_check_enabled_returns_default() {
+    let daemon = test_daemon().await;
+    let resp = daemon
+        .handle_command(make_request("get_update_check_enabled"))
+        .await;
+    assert_eq!(resp.update_check_enabled, Some(true));
+}
+
+/// A valid value round-trips through `set_update_check_enabled` and
+/// `get_update_check_enabled`, and lands in the persisted config.
+#[tokio::test]
+async fn set_update_check_enabled_round_trips_through_set_and_get() {
+    let daemon = test_daemon().await;
+
+    let mut set_request = make_request("set_update_check_enabled");
+    set_request.enabled = Some(false);
+    let set_response = daemon.handle_command(set_request).await;
+    assert_eq!(set_response.status, "success");
+    assert_eq!(set_response.update_check_enabled, Some(false));
+
+    let get_response = daemon
+        .handle_command(make_request("get_update_check_enabled"))
+        .await;
+    assert_eq!(get_response.update_check_enabled, Some(false));
+    assert!(!daemon.config.read().await.update.check_enabled);
+}
+
+/// `get_update_beta_optin` reflects the config default (`auto`) before any
+/// write.
+#[tokio::test]
+async fn get_update_beta_optin_returns_default() {
+    let daemon = test_daemon().await;
+    let resp = daemon
+        .handle_command(make_request("get_update_beta_optin"))
+        .await;
+    assert_eq!(resp.update_beta_optin.as_deref(), Some("auto"));
+}
+
+/// A valid value round-trips through `set_update_beta_optin` and
+/// `get_update_beta_optin` end to end (dispatch parse -> handler -> config).
+#[tokio::test]
+async fn set_update_beta_optin_round_trips_through_set_and_get() {
+    let daemon = test_daemon().await;
+
+    let mut set_request = make_request("set_update_beta_optin");
+    set_request.data = Some(serde_json::json!({ "value": "enabled" }));
+    let set_response = daemon.handle_command(set_request).await;
+    assert_eq!(set_response.status, "success");
+    assert_eq!(set_response.update_beta_optin.as_deref(), Some("enabled"));
+
+    let get_response = daemon
+        .handle_command(make_request("get_update_beta_optin"))
+        .await;
+    assert_eq!(get_response.update_beta_optin.as_deref(), Some("enabled"));
+}
+
+/// An unknown `update_beta_optin` value is a client error:
+/// `docs/protocol/endpoints/v1/update_beta_optin.md` documents `400
+/// invalid_update_beta_optin`. The daemon must reject it (not silently
+/// apply the default and report success), and the config must not be
+/// mutated by the rejected wire set.
+#[tokio::test]
+async fn set_update_beta_optin_rejects_unknown_value() {
+    let daemon = test_daemon().await;
+    let before = daemon.config.read().await.update.beta_optin;
+
+    let resp = daemon
+        .handle_set_update_beta_optin("not-a-real-value".to_string())
+        .await;
+
+    assert_eq!(resp.status, "error");
+    assert_eq!(resp.message.as_deref(), Some("invalid_update_beta_optin"));
+    assert_eq!(resp.error_code, Some(ErrorCode::InvalidValue));
+    assert_eq!(resp.error_code.map(ErrorCode::http_status), Some(400));
+    assert_eq!(daemon.config.read().await.update.beta_optin, before);
+}
+
 #[tokio::test]
 async fn get_allow_online_models_returns_config_value() {
     let daemon = test_daemon().await;

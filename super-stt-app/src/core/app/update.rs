@@ -28,6 +28,7 @@ impl AppModel {
             Message::Backend(m) => self.handle_backend_messages(m),
             Message::Language(m) => self.handle_language_messages(m),
             Message::Recording(m) => self.handle_recording_messages(m),
+            Message::Update(m) => self.handle_update_messages(m),
 
             // Scoped action failure: park it in the per-page banner slot.
             Message::SettingActionFailed { scope, message } => {

@@ -69,6 +69,11 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
+        // Point the daemon's self-update forge client at a guaranteed-refused
+        // loopback port (`accept_base_url` allows loopback `http://`), so
+        // `POST /update/check` below fails deterministically and offline
+        // instead of making a real call to api.github.com under CI.
+        .env("GITHUB_API_BASE", "http://127.0.0.1:9")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -440,6 +445,105 @@ async fn settings_scope_endpoints() {
         serde_json::json!({ "enabled": initial_allow }),
     )
     .await;
+
+    // --- GET /update_check_enabled ---
+    let (s, body) = raw_get_json(&http_socket, "/update_check_enabled", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /update_check_enabled: {body}");
+    assert_eq!(body["status"], "success");
+    let initial_update_check_enabled = body["update_check_enabled"].as_bool().unwrap_or(true);
+
+    // --- POST /update_check_enabled: round-trip the inverse ---
+    let (s, _) = raw_post_json(
+        &http_socket,
+        "/update_check_enabled",
+        &settings_token,
+        serde_json::json!({ "enabled": !initial_update_check_enabled }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "POST /update_check_enabled");
+    let (_, body) = raw_get_json(&http_socket, "/update_check_enabled", &settings_token).await;
+    assert_eq!(body["update_check_enabled"], !initial_update_check_enabled);
+    // Restore.
+    let _ = raw_post_json(
+        &http_socket,
+        "/update_check_enabled",
+        &settings_token,
+        serde_json::json!({ "enabled": initial_update_check_enabled }),
+    )
+    .await;
+
+    // --- GET /update_beta_optin ---
+    let (s, body) = raw_get_json(&http_socket, "/update_beta_optin", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /update_beta_optin: {body}");
+    assert_eq!(body["status"], "success");
+    let initial_beta_optin = body["update_beta_optin"]
+        .as_str()
+        .unwrap_or("auto")
+        .to_string();
+
+    // --- POST /update_beta_optin: round-trip ---
+    let target_beta_optin = if initial_beta_optin == "enabled" {
+        "disabled"
+    } else {
+        "enabled"
+    };
+    let (s, _) = raw_post_json(
+        &http_socket,
+        "/update_beta_optin",
+        &settings_token,
+        serde_json::json!({ "value": target_beta_optin }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "POST /update_beta_optin");
+    let (_, body) = raw_get_json(&http_socket, "/update_beta_optin", &settings_token).await;
+    assert_eq!(body["update_beta_optin"], target_beta_optin);
+    // Restore.
+    let _ = raw_post_json(
+        &http_socket,
+        "/update_beta_optin",
+        &settings_token,
+        serde_json::json!({ "value": initial_beta_optin }),
+    )
+    .await;
+
+    // --- GET /update: a read-only snapshot. `latest_version` must still be
+    // null: `GITHUB_API_BASE` points at a refused loopback port (see
+    // `start_daemon`), so no candidate can ever resolve, whether this is the
+    // checker's untouched initial state or the background check's initial
+    // delay has already elapsed and a failed check has already run. Don't
+    // assert `checked_at` is null here — that only holds within the
+    // background check's initial delay (currently 60s), which this test's
+    // runtime isn't guaranteed to stay under.
+    let (s, body) = raw_get_json(&http_socket, "/update", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /update: {body}");
+    assert!(body["current_version"].is_string(), "{body}");
+    assert!(body["latest_version"].is_null(), "{body}");
+    assert_eq!(body["update_available"], false);
+
+    // --- POST /update/check: forces a check. `GITHUB_API_BASE` points the
+    // daemon at a refused loopback port (see `start_daemon`), so the network
+    // call fails deterministically — the response is still 200 (never a
+    // 5xx), with the failure recorded in `last_check_error` and the (empty)
+    // previous state preserved rather than clobbered.
+    let (s, body) = raw_post_json(
+        &http_socket,
+        "/update/check",
+        &settings_token,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "POST /update/check: {body}");
+    assert!(body["checked_at"].is_string(), "{body}");
+    assert!(
+        body["last_check_error"].is_string(),
+        "the refused loopback call must fail: {body}"
+    );
+    assert!(
+        body["latest_version"].is_null(),
+        "no prior successful check to preserve: {body}"
+    );
+    assert_eq!(body["update_available"], false);
+    assert!(body["installer_asset"].is_null(), "{body}");
 
     // --- POST /audio_theme/test: just verifies the endpoint accepts the
     // request and returns success. Audio playback is best-effort under

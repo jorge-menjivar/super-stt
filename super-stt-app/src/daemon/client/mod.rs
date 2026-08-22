@@ -32,5 +32,9 @@ pub use v1::settings::custom_models_dir::get_custom_models_dir;
 pub use v1::settings::notification_method::{get_notification_method, set_notification_method};
 pub use v1::settings::preview_typing::{get_preview_typing, set_preview_typing};
 pub use v1::settings::recording_stop_mode::{get_recording_stop_mode, set_recording_stop_mode};
+pub use v1::settings::update_beta_optin::set_update_beta_optin;
+pub use v1::settings::update_check_enabled::{get_update_check_enabled, set_update_check_enabled};
 pub use v1::settings::volume::{get_volume, set_volume};
 pub use v1::settings::write_method::{get_write_method, set_write_method};
+
+pub use v1::update::{check_update_now, get_update_status};

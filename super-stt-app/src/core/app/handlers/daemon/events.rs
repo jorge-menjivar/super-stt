@@ -1,10 +1,42 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, DeviceState, ModelOperationState};
-use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message};
+use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message, UpdateMessage};
 use cosmic::prelude::*;
 use log::{debug, info, warn};
 use super_stt_shared::models::protocol::{DaemonStatusEvent, NotificationEvent};
+
+/// How a `SettingsChanged { setting }` SSE event should refresh the Updates
+/// page's state, for the two self-update settings (`language` needs
+/// `AppModel` state — `model_language_for` — to build its follow-up task, so
+/// it's matched separately in the caller and never reaches this function).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core::app) enum SelfUpdateSettingRoute {
+    /// Reload the toggler value and re-fetch the cached status. Cheap, and
+    /// correct here because `update_check_enabled` doesn't change what the
+    /// next check would compute.
+    RefreshCachedStatus,
+    /// Force a real re-check rather than trust the cached status.
+    ForceRecheck,
+}
+
+/// `update_beta_optin` MUST route through a real re-check (`ForceRecheck`,
+/// which the caller sends via `CheckNow`) rather than a cached status
+/// refetch: `beta_optin_effective` is computed server-side at check time,
+/// not stored, so a plain refetch would show the STALE value until whatever
+/// triggered this event's own check lands — a regression a previous review
+/// round fixed. `update_check_enabled` has no such effective-at-check-time
+/// field, so the cheaper cached refresh is correct for it. Any other
+/// setting name (including `language`) isn't a self-update setting at all.
+pub(in crate::core::app) fn self_update_setting_route(
+    setting: &str,
+) -> Option<SelfUpdateSettingRoute> {
+    match setting {
+        "update_check_enabled" => Some(SelfUpdateSettingRoute::RefreshCachedStatus),
+        "update_beta_optin" => Some(SelfUpdateSettingRoute::ForceRecheck),
+        _ => None,
+    }
+}
 
 impl AppModel {
     pub(in crate::core::app) fn handle_daemon_events(
@@ -100,24 +132,56 @@ impl AppModel {
                 None
             }
             DaemonStatusEvent::SettingsChanged { setting } => {
-                // A setting changed — possibly from another client, or the global
-                // Primary Language this very client just set. Re-fetch the language
-                // state so a per-model button that follows the global value, and
-                // the global card, reflect the new value.
-                if setting != "language" {
-                    return None;
+                // A setting changed — possibly from another client, or this
+                // very client's own change coming back over SSE.
+                match setting.as_str() {
+                    "language" => {
+                        // Re-fetch the language state so a per-model button that
+                        // follows the global value, and the global card, reflect
+                        // the new value.
+                        let mut tasks = vec![self.load_primary_language()];
+                        if let Some((source, model)) = self.language.model_language_for.clone() {
+                            tasks.push(self.load_model_language(source, model));
+                        }
+                        Some(Task::batch(tasks))
+                    }
+                    // Both self-update settings need something beyond a plain
+                    // `SettingsChanged` no-op, but *what* they need differs —
+                    // see `self_update_setting_route`'s doc comment for why
+                    // `update_beta_optin` can't just reuse the cached-refresh
+                    // path `update_check_enabled` uses.
+                    other => match self_update_setting_route(other) {
+                        Some(SelfUpdateSettingRoute::RefreshCachedStatus) => {
+                            Some(Task::batch(vec![
+                                crate::core::app::handlers::tasks::load_update_check_enabled(),
+                                crate::core::app::handlers::tasks::refresh_update_status(),
+                            ]))
+                        }
+                        Some(SelfUpdateSettingRoute::ForceRecheck) => {
+                            // `CheckNow`'s `if self.update.checking { return }`
+                            // guard makes this a no-op for the app's own
+                            // self-triggered change (its `BetaOptinToggled`
+                            // already chains `CheckNow`), while a genuine
+                            // cross-app change still gets a correct fresh
+                            // recompute.
+                            Some(self.handle_update_messages(UpdateMessage::CheckNow))
+                        }
+                        None => None,
+                    },
                 }
-                let mut tasks = vec![self.load_primary_language()];
-                if let Some((source, model)) = self.language.model_language_for.clone() {
-                    tasks.push(self.load_model_language(source, model));
-                }
-                Some(Task::batch(tasks))
             }
-            // No app-side effect today (matches the prior `_` fall-through): the
-            // load-start and active-backend-changed notifications don't drive UI
-            // state here.
+            // No app-side effect today: the load-start and active-backend-changed
+            // notifications don't drive UI state here.
             DaemonStatusEvent::LoadingModel { .. }
             | DaemonStatusEvent::ActiveBackendChanged { .. } => None,
+            // The daemon completed a periodic self-update check and found a
+            // newer release. Re-fetch the status so the header badge and the
+            // Updates page pick it up without waiting for the user to open
+            // that page.
+            DaemonStatusEvent::UpdateAvailable { latest_version } => {
+                log::info!("Daemon reports update available: {latest_version}");
+                Some(self.handle_update_messages(UpdateMessage::AvailableEventReceived))
+            }
         }
     }
 
@@ -234,5 +298,36 @@ impl AppModel {
             }));
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SelfUpdateSettingRoute, self_update_setting_route};
+
+    /// The regression this pins: `update_beta_optin` must force a real
+    /// re-check, never the cheaper cached-status path — `beta_optin_effective`
+    /// is computed server-side at check time and isn't part of the cached
+    /// status a plain refetch would return.
+    #[test]
+    fn update_beta_optin_forces_a_recheck() {
+        assert_eq!(
+            self_update_setting_route("update_beta_optin"),
+            Some(SelfUpdateSettingRoute::ForceRecheck)
+        );
+    }
+
+    #[test]
+    fn update_check_enabled_uses_the_cached_refresh() {
+        assert_eq!(
+            self_update_setting_route("update_check_enabled"),
+            Some(SelfUpdateSettingRoute::RefreshCachedStatus)
+        );
+    }
+
+    #[test]
+    fn other_settings_including_language_are_not_self_update_settings() {
+        assert_eq!(self_update_setting_route("language"), None);
+        assert_eq!(self_update_setting_route("something_else"), None);
     }
 }

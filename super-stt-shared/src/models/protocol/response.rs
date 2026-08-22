@@ -125,6 +125,12 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notification_method: Option<String>,
 
+    // Self-update settings
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_check_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_beta_optin: Option<String>,
+
     // Streaming preview text (intermediate transcription during recording)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_text: Option<String>,
@@ -407,6 +413,18 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_notification_method(mut self, method: String) -> Self {
         self.notification_method = Some(method);
+        self
+    }
+
+    #[must_use]
+    pub fn with_update_check_enabled(mut self, enabled: bool) -> Self {
+        self.update_check_enabled = Some(enabled);
+        self
+    }
+
+    #[must_use]
+    pub fn with_update_beta_optin(mut self, value: String) -> Self {
+        self.update_beta_optin = Some(value);
         self
     }
 

@@ -8,6 +8,7 @@ use crate::services::dbus::DBusManager;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use anyhow::Result;
 use std::sync::{Arc, RwLock};
+use super_stt_shared::models::protocol::DaemonStatusEvent;
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 
@@ -103,6 +104,9 @@ pub struct SuperSTTDaemon {
     // Desktop-notification channel for recording failures. Behind a mutex
     // because sending mutates the cached connection and the replaces-id.
     pub notifier: Arc<tokio::sync::Mutex<crate::output::notification::Notifier>>,
+    // Self-update check state: last completed check + notify-once
+    // persistence. See `crate::self_update`.
+    pub self_update: Arc<crate::self_update::SelfUpdateChecker>,
 }
 
 /// A daemon wired up with inert defaults: no model, no backends, nothing
@@ -114,6 +118,11 @@ pub struct SuperSTTDaemon {
 #[cfg(test)]
 pub(crate) async fn test_daemon() -> SuperSTTDaemon {
     let (shutdown_tx, _) = broadcast::channel(1);
+    // Unique per test AND per pid: parallel tests in this binary that touch
+    // `should_notify`/`record_notified` must not share the notify-state file
+    // (mirrors `self_update::SelfUpdateChecker`'s own `test_notify_path`).
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     SuperSTTDaemon {
         model: Arc::new(tokio::sync::RwLock::new(None)),
         audio_processor: Arc::new(AudioProcessor::new()),
@@ -144,6 +153,15 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         // `daemon.notifier` after construction.
         notifier: Arc::new(tokio::sync::Mutex::new(
             crate::output::notification::Notifier::fake(true).0,
+        )),
+        // Per-pid, per-test temp path: no test may touch the real
+        // update-check cache, and two tests in this binary must not share
+        // on-disk notify state.
+        self_update: Arc::new(crate::self_update::SelfUpdateChecker::new(
+            std::env::temp_dir().join(format!(
+                "super-stt-test-daemon-update-{}-{n}.json",
+                std::process::id()
+            )),
         )),
     }
 }
@@ -224,6 +242,21 @@ impl SuperSTTDaemon {
     #[must_use]
     pub fn get_volume_f32(&self) -> f32 {
         f32::from(self.get_volume()) / 100.0
+    }
+
+    /// Broadcast that a setting changed so subscribed clients re-resolve any
+    /// derived state — e.g. a per-model language that follows the global
+    /// value must re-fetch its resolution block. Reuses the
+    /// `daemon_status_changed` topic clients already subscribe to;
+    /// `setting` names what changed (currently `"language"`,
+    /// `"update_check_enabled"`, or `"update_beta_optin"` — see
+    /// `docs/protocol/endpoints/v1/events.md`). Shared by the language and
+    /// settings handlers so the event shape can't drift between call sites.
+    pub fn publish_settings_changed(&self, setting: &str) {
+        self.events
+            .publish_daemon_status(DaemonStatusEvent::SettingsChanged {
+                setting: setting.to_string(),
+            });
     }
 
     /// Publish a recording-state transition on the SSE event bus so any
