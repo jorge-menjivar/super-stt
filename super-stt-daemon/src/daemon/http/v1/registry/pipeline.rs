@@ -189,6 +189,46 @@ pub(super) fn spawn_install_pipeline(
         };
         match outcome {
             Ok(version) => {
+                // An update that installs a version declaring an `id` may
+                // land at a new directory name while the backend is still
+                // installed under its old one — retire the predecessor and
+                // move the active-backend pointer with it before the catalog
+                // is rescanned.
+                let dir_name = crate::registry::install_dir_name(&entry);
+                let installed_at = pipeline.backends_dir.join(dir_name);
+                if let Some(old) = crate::registry::install::retire_previous_dir(
+                    &pipeline.backends_dir,
+                    &entry.source,
+                    &installed_at,
+                )
+                .await
+                {
+                    // `transcription.active_backend` stores the install
+                    // directory name, so a migration that renames the
+                    // directory has to move the pointer with it or the
+                    // backend reads as deselected. `rename_active_backend`
+                    // (not `update_active_backend`) is deliberate: this is
+                    // the same backend, same models, only the directory name
+                    // changed — the user's model selection must survive.
+                    let old_name = old
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let mut cfg = daemon.config.write().await;
+                    if cfg.transcription.active_backend.as_deref() == Some(old_name.as_str()) {
+                        cfg.rename_active_backend(dir_name.to_string());
+                        drop(cfg);
+                        *daemon.active_backend.write().await = Some(dir_name.to_string());
+                        if let Err(e) = daemon.persist_config().await {
+                            log::warn!(
+                                "Failed to persist config after backend migration rename: {e}"
+                            );
+                        }
+                        log::info!("Repointed active_backend from {old_name} to {dir_name}");
+                    }
+                }
+
                 // Refresh the daemon's in-memory backend catalog.
                 daemon.refresh_backends().await;
 

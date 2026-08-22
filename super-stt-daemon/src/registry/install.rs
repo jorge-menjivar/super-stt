@@ -158,7 +158,10 @@ where
     let final_path = p
         .backends_dir
         .join(crate::registry::install_dir_name(entry));
-    preserve_models(&staging, &final_path)
+    let inherit_from = previous_dir_for(&p.backends_dir, &entry.source)
+        .await
+        .unwrap_or_else(|| final_path.clone());
+    preserve_models(&staging, &inherit_from)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
     swap_into_place(&staging, &final_path)
@@ -294,7 +297,10 @@ where
     let final_path = p
         .backends_dir
         .join(crate::registry::install_dir_name(entry));
-    preserve_models(&staging, &final_path)
+    let inherit_from = previous_dir_for(&p.backends_dir, &entry.source)
+        .await
+        .unwrap_or_else(|| final_path.clone());
+    preserve_models(&staging, &inherit_from)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
     swap_into_place(&staging, &final_path)
@@ -401,6 +407,69 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The directory currently serving `source`, if any — the one whose model
+/// files a migrating install should inherit. Equals `final_path` for an
+/// ordinary in-place update, where `final_path` is itself the directory
+/// already serving `source`.
+async fn previous_dir_for(backends_dir: &Path, source: &str) -> Option<PathBuf> {
+    use super_stt_registry_types::manifest::Manifest;
+
+    let mut entries = tokio::fs::read_dir(backends_dir).await.ok()?;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        if Manifest::load(&dir).is_ok_and(|m| m.backend.source == source) {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+/// Remove the directory that used to serve `source`, when the install just
+/// landed somewhere else (a migration).
+///
+/// Called only after a successful swap, so the backend is already being
+/// served from `keep` and removing the predecessor cannot take the last copy.
+/// Returns the path removed, or `None` when there was nothing to retire.
+///
+/// A directory whose manifest will not parse is never a candidate: without a
+/// readable `source` there is no evidence it is the same backend.
+pub async fn retire_previous_dir(
+    backends_dir: &Path,
+    source: &str,
+    keep: &Path,
+) -> Option<PathBuf> {
+    use super_stt_registry_types::manifest::Manifest;
+
+    let mut entries = tokio::fs::read_dir(backends_dir).await.ok()?;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let dir = entry.path();
+        if dir == keep || !dir.is_dir() {
+            continue;
+        }
+        let Ok(installed) = Manifest::load(&dir) else {
+            continue;
+        };
+        if installed.backend.source != source {
+            continue;
+        }
+        match tokio::fs::remove_dir_all(&dir).await {
+            Ok(()) => {
+                log::info!(
+                    "Retired {} after installing {source} into {}",
+                    dir.display(),
+                    keep.display()
+                );
+                return Some(dir);
+            }
+            Err(e) => log::error!("Failed to retire {}: {e}", dir.display()),
+        }
+    }
+    None
 }
 
 /// Move model files that survive the replacement from the installed directory
@@ -1176,6 +1245,184 @@ supported_devices = ["cpu"]
             "the old file must stay put so the daemon re-downloads the new URL"
         );
         assert!(!staging.join("models/m/a.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn retire_previous_dir_removes_the_superseded_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("super-stt-voxtral");
+        let new = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(
+            old.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/x/super-stt-voxtral"
+name = "Voxtral"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "voxtral"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+
+        let removed =
+            super::retire_previous_dir(root.path(), "github.com/x/super-stt-voxtral", &new).await;
+
+        assert_eq!(removed.as_deref(), Some(old.as_path()));
+        assert!(!old.exists(), "the superseded directory is gone");
+        assert!(new.exists(), "the new directory survives");
+    }
+
+    #[tokio::test]
+    async fn retire_previous_dir_never_removes_the_directory_it_was_told_to_keep() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/x/super-stt-voxtral"
+name = "Voxtral"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "voxtral"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+
+        let removed =
+            super::retire_previous_dir(root.path(), "github.com/x/super-stt-voxtral", &dir).await;
+
+        assert!(removed.is_none());
+        assert!(dir.exists());
+    }
+
+    /// A directory whose manifest fails to parse carries no evidence it is the
+    /// same backend, so it must never be treated as a retirement candidate —
+    /// even if it happens to sit alongside `keep` and nothing else claims the
+    /// source.
+    #[tokio::test]
+    async fn retire_previous_dir_skips_a_directory_whose_manifest_does_not_parse() {
+        let root = tempfile::tempdir().unwrap();
+        let unparseable = root.path().join("mystery-dir");
+        let keep = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(&unparseable).unwrap();
+        std::fs::create_dir_all(&keep).unwrap();
+        std::fs::write(unparseable.join("backend.toml"), "this is not toml = = =").unwrap();
+
+        let removed =
+            super::retire_previous_dir(root.path(), "github.com/x/super-stt-voxtral", &keep).await;
+
+        assert!(removed.is_none());
+        assert!(
+            unparseable.exists(),
+            "a directory with an unparseable manifest must never be retired"
+        );
+    }
+
+    #[tokio::test]
+    async fn previous_dir_for_finds_the_directory_serving_a_source() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("super-stt-voxtral");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(
+            old.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/x/super-stt-voxtral"
+name = "Voxtral"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "voxtral"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+
+        let found = super::previous_dir_for(root.path(), "github.com/x/super-stt-voxtral").await;
+
+        assert_eq!(found.as_deref(), Some(old.as_path()));
+    }
+
+    #[tokio::test]
+    async fn previous_dir_for_is_none_when_no_directory_serves_the_source() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("something-else")).unwrap();
+
+        let found = super::previous_dir_for(root.path(), "github.com/x/super-stt-voxtral").await;
+
+        assert!(found.is_none());
+    }
+
+    /// The 8.8 GB case: a migration where `final_path` does not exist yet must
+    /// still carry the old directory's unchanged model files into staging, by
+    /// resolving the inherit-from directory through `previous_dir_for` rather
+    /// than comparing straight against `final_path`.
+    #[tokio::test]
+    async fn a_migration_preserves_model_files_via_previous_dir_for() {
+        let root = tempfile::tempdir().unwrap();
+        let old_dir = root.path().join("super-stt-voxtral");
+        let staging = root.path().join(".staging/app.super-stt.voxtral-1.0.1");
+        let final_path = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(old_dir.join("models/m")).unwrap();
+        std::fs::create_dir_all(&staging).unwrap();
+        assert!(!final_path.exists(), "final_path must not exist yet");
+
+        let toml = |version: &str| {
+            format!(
+                r#"
+[backend]
+    source     = "github.com/x/voxtral"
+    name       = "Voxtral"
+    version    = "{version}"
+    kind       = "subprocess"
+    entrypoint = "voxtral"
+    contract   = "v1"
+    license    = "Apache-2.0"
+    description = "Test backend."
+
+[[assets.subprocess]]
+    file   = "voxtral.tar.gz"
+    target = "x86_64-unknown-linux-gnu"
+    accel  = ["cpu"]
+
+[[models]]
+    name                = "m"
+    primary_language    = "en"
+    supported_languages = ["en"]
+    supported_devices   = ["cpu"]
+    files = [
+        {{ url = "https://h/a.bin", destination = "models/m/a.bin" }},
+    ]
+"#
+            )
+        };
+        std::fs::write(old_dir.join("backend.toml"), toml("1.0.0")).unwrap();
+        std::fs::write(staging.join("backend.toml"), toml("1.0.1")).unwrap();
+        std::fs::write(old_dir.join("models/m/a.bin"), b"weights").unwrap();
+
+        let inherit_from = super::previous_dir_for(root.path(), "github.com/x/voxtral")
+            .await
+            .unwrap_or_else(|| final_path.clone());
+        assert_eq!(inherit_from, old_dir, "must inherit from the old directory");
+
+        let moved = super::preserve_models(&staging, &inherit_from)
+            .await
+            .unwrap();
+
+        assert_eq!(moved, 7);
+        assert!(
+            staging.join("models/m/a.bin").exists(),
+            "the model file must survive the migration"
+        );
     }
 
     #[tokio::test]

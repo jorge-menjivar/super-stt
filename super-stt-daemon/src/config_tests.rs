@@ -804,3 +804,27 @@ fn clearing_the_model_preference_clears_the_provider() {
     c.clear_active_backend();
     assert_eq!(c.transcription.preferred_provider, "");
 }
+
+/// `rename_active_backend` (an install-time directory migration of the *same*
+/// backend) must not disturb the loaded-model preference the way
+/// `update_active_backend` (a user picking a *different* backend) does —
+/// otherwise updating a backend silently forgets the user's selected model.
+#[test]
+fn rename_active_backend_preserves_the_model_preference() {
+    let mut c = DaemonConfig::default();
+    c.transcription.active_backend = Some("super-stt-voxtral".to_string());
+    c.update_preferred_model(
+        "voxtral-mini".to_string(),
+        "github.com/super-stt/voxtral".to_string(),
+        Some("local_voxtral".to_string()),
+    );
+
+    c.rename_active_backend("app.super-stt.voxtral".to_string());
+
+    assert_eq!(
+        c.transcription.active_backend.as_deref(),
+        Some("app.super-stt.voxtral")
+    );
+    assert_eq!(c.transcription.preferred_model, "voxtral-mini");
+    assert_eq!(c.transcription.preferred_provider, "local_voxtral");
+}
