@@ -31,7 +31,7 @@ impl SuperSTTDaemon {
                     losers.len()
                 );
             } else {
-                let bytes = crate::registry::reconcile::reconcile(&losers, &winners).await;
+                let bytes = crate::registry::reconcile::reconcile(self, &losers, &winners).await;
                 log::info!("Reconciled duplicate backends, reclaiming {bytes} bytes");
             }
         }
@@ -185,5 +185,49 @@ mod tests {
         assert!(winner.exists());
         let backends = daemon.backends.read().await;
         assert_eq!(backends.len(), 1);
+    }
+
+    /// The upgrade path, end to end: a user who already has two directories
+    /// for one source gets them reconciled on the first refresh after the
+    /// daemon starts. If `active_backend` named the loser, that refresh
+    /// deletes the directory the pointer names — so the refresh has to move
+    /// the pointer with it, or the daemon comes up reporting no active
+    /// backend and no models while the backend sits installed next door.
+    #[tokio::test]
+    async fn a_refresh_that_reconciles_the_active_directory_repoints_it() {
+        let root = tempfile::tempdir().unwrap();
+        let winner = root.path().join("app.super-stt.y");
+        let loser = root.path().join("super-stt-y");
+        write_backend(&winner, "1.0.1");
+        write_backend(&loser, "1.0.0");
+
+        let daemon = test_daemon().await;
+        {
+            let mut cfg = daemon.config.write().await;
+            cfg.transcription.backends_dir = Some(root.path().to_string_lossy().into_owned());
+            cfg.transcription.active_backend = Some("super-stt-y".to_string());
+            cfg.update_preferred_model(
+                "m".to_string(),
+                "github.com/x/y".to_string(),
+                Some("local_y".to_string()),
+            );
+        }
+        *daemon.active_backend.write().await = Some("super-stt-y".to_string());
+
+        daemon.refresh_backends().await;
+
+        assert!(!loser.exists());
+        let cfg = daemon.config.read().await;
+        assert_eq!(
+            cfg.transcription.active_backend.as_deref(),
+            Some("app.super-stt.y"),
+            "the pointer must never be left naming a directory the refresh deleted"
+        );
+        assert_eq!(cfg.transcription.preferred_model, "m");
+        drop(cfg);
+        assert_eq!(
+            daemon.active_backend.read().await.as_deref(),
+            Some("app.super-stt.y")
+        );
     }
 }

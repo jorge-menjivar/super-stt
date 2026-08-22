@@ -121,13 +121,20 @@ impl Drop for InflightMarker {
 /// move `active_backend` — both the persisted config and the runtime mirror —
 /// to follow it.
 ///
-/// A no-op unless [`crate::registry::install::retire_previous_dir`] actually
-/// removed a predecessor, and even then repoints `active_backend` only when
-/// it named exactly the directory just retired: installing/updating a
-/// backend that is not the one currently selected must never touch the
-/// pointer. `rename_active_backend` (not `update_active_backend`) is
-/// deliberate — this is the same backend, same models, only the directory
-/// name changed, so the user's model selection must survive.
+/// A no-op unless [`crate::registry::install::retire_previous_dir`] found a
+/// predecessor, and even then repoints `active_backend` only when it named
+/// exactly that directory: installing/updating a backend that is not the one
+/// currently selected must never touch the pointer.
+/// `rename_active_backend` (not `update_active_backend`) is deliberate — this
+/// is the same backend, same models, only the directory name changed, so the
+/// user's model selection must survive.
+///
+/// The repoint follows the predecessor being *found*, not its removal
+/// succeeding: `installed_at` is the live directory either way. Should this
+/// path be skipped entirely — a concurrent refresh reconciled the predecessor
+/// away first, so there is nothing left to find — the pointer is repaired by
+/// [`crate::registry::reconcile::reconcile`], which repoints whatever it
+/// removes.
 async fn retire_and_repoint(
     daemon: &crate::daemon::types::SuperSTTDaemon,
     backends_dir: &std::path::Path,
