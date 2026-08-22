@@ -155,6 +155,9 @@ where
 
     (p.on_progress)(P::Installing, None);
     let final_path = p.backends_dir.join(&entry.id);
+    preserve_models(&staging, &final_path)
+        .await
+        .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
     swap_into_place(&staging, &final_path)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
@@ -285,6 +288,9 @@ where
 
     (p.on_progress)(P::Installing, None);
     let final_path = p.backends_dir.join(&entry.id);
+    preserve_models(&staging, &final_path)
+        .await
+        .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
     swap_into_place(&staging, &final_path)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
@@ -389,6 +395,35 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Move model files that survive the replacement from the installed directory
+/// into `staging`, returning the bytes moved.
+///
+/// Runs before the swap so the directory that lands is already complete and
+/// the swap stays atomic. Both paths live under the backends directory, so the
+/// moves are same-filesystem renames rather than multi-gigabyte copies.
+///
+/// A missing or unparseable manifest on either side carries nothing: without
+/// both file lists there is no way to tell an unchanged file from a changed
+/// one, and re-downloading is the safe answer.
+async fn preserve_models(staging: &Path, final_path: &Path) -> std::io::Result<u64> {
+    use super_stt_registry_types::manifest::Manifest;
+
+    let (Ok(old), Ok(new)) = (Manifest::load(final_path), Manifest::load(staging)) else {
+        return Ok(0);
+    };
+    let keep = crate::registry::carry_over::survivors(&old, &new);
+    if keep.is_empty() {
+        return Ok(0);
+    }
+    let moved = crate::registry::carry_over::carry(final_path, staging, &keep).await?;
+    log::info!(
+        "Preserved {} model file(s) ({moved} bytes) across the update of {}",
+        keep.len(),
+        final_path.display()
+    );
+    Ok(moved)
 }
 
 /// Move `staging` into `final_path` as atomically as the filesystem allows:
@@ -939,6 +974,128 @@ supported_devices = ["cpu"]
         let err =
             copy_staged_backend(src.path(), &dst.path().join("out"), "wasm", "y.wasm").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    /// Defect 2: replacing a backend directory took its downloaded weights
+    /// with it. The staged manifest declares the same file at the same URL, so
+    /// the bytes move across instead of re-downloading.
+    #[tokio::test]
+    async fn preserve_models_moves_unchanged_weights_into_staging() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join(".staging/y-1.0.1");
+        let final_path = root.path().join("y");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::create_dir_all(final_path.join("models/m")).unwrap();
+
+        let toml = |version: &str| {
+            format!(
+                r#"
+[backend]
+    source     = "github.com/x/y"
+    name       = "Y"
+    version    = "{version}"
+    kind       = "subprocess"
+    entrypoint = "y"
+    contract   = "v1"
+    license    = "Apache-2.0"
+    description = "Test backend."
+
+[[assets.subprocess]]
+    file   = "y.tar.gz"
+    target = "x86_64-unknown-linux-gnu"
+    accel  = ["cpu"]
+
+[[models]]
+    name                = "m"
+    primary_language    = "en"
+    supported_languages = ["en"]
+    supported_devices   = ["cpu"]
+    files = [
+        {{ url = "https://h/a.bin", destination = "models/m/a.bin" }},
+    ]
+"#
+            )
+        };
+        std::fs::write(final_path.join("backend.toml"), toml("1.0.0")).unwrap();
+        std::fs::write(staging.join("backend.toml"), toml("1.0.1")).unwrap();
+        std::fs::write(final_path.join("models/m/a.bin"), b"weights").unwrap();
+
+        let moved = super::preserve_models(&staging, &final_path).await.unwrap();
+        assert_eq!(moved, 7);
+        assert!(staging.join("models/m/a.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn preserve_models_is_a_no_op_without_an_installed_manifest() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        let moved = super::preserve_models(&staging, &root.path().join("absent"))
+            .await
+            .unwrap();
+        assert_eq!(moved, 0);
+    }
+
+    /// The other half of the predicate's contract at this integration layer:
+    /// a file whose `url` changed between the two manifests must be left
+    /// behind under the installed dir, not carried into staging, so the next
+    /// model load re-downloads the new bytes instead of serving stale ones.
+    #[tokio::test]
+    async fn preserve_models_leaves_a_changed_url_behind() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join(".staging/y-1.0.1");
+        let final_path = root.path().join("y");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::create_dir_all(final_path.join("models/m")).unwrap();
+
+        let toml = |version: &str, url: &str| {
+            format!(
+                r#"
+[backend]
+    source     = "github.com/x/y"
+    name       = "Y"
+    version    = "{version}"
+    kind       = "subprocess"
+    entrypoint = "y"
+    contract   = "v1"
+    license    = "Apache-2.0"
+    description = "Test backend."
+
+[[assets.subprocess]]
+    file   = "y.tar.gz"
+    target = "x86_64-unknown-linux-gnu"
+    accel  = ["cpu"]
+
+[[models]]
+    name                = "m"
+    primary_language    = "en"
+    supported_languages = ["en"]
+    supported_devices   = ["cpu"]
+    files = [
+        {{ url = "{url}", destination = "models/m/a.bin" }},
+    ]
+"#
+            )
+        };
+        std::fs::write(
+            final_path.join("backend.toml"),
+            toml("1.0.0", "https://h/a.bin"),
+        )
+        .unwrap();
+        std::fs::write(
+            staging.join("backend.toml"),
+            toml("1.0.1", "https://h/a-v2.bin"),
+        )
+        .unwrap();
+        std::fs::write(final_path.join("models/m/a.bin"), b"weights").unwrap();
+
+        let moved = super::preserve_models(&staging, &final_path).await.unwrap();
+        assert_eq!(moved, 0);
+        assert!(
+            final_path.join("models/m/a.bin").exists(),
+            "the old file must stay put so the daemon re-downloads the new URL"
+        );
+        assert!(!staging.join("models/m/a.bin").exists());
     }
 
     #[tokio::test]
