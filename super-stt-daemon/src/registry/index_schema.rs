@@ -73,18 +73,27 @@ pub fn warn_if_client_too_old(index: &Index) {
 /// whole index.
 ///
 /// `backend_id` is optional and its absence has a well-defined meaning (fall
-/// back to the registry key), so an unsafe value is cleared to `None` rather
+/// back to the registry key), so a rejected value is cleared to `None` rather
 /// than dropping the backend over it. `id` and `entrypoint` are required and
 /// have no such fallback, so an entry with an unsafe one of those is dropped
-/// outright, same as before this function also looked at `backend_id`.
+/// outright.
+///
+/// `backend_id` is held to the full `[backend].id` format rule
+/// ([`super_stt_registry_types::backend_id::is_valid`]) rather than to
+/// `is_safe_component`. Every other route into an install directory name goes
+/// through `Manifest::parse`, which enforces exactly that rule, so a looser
+/// check here would make `index.json` the one input the daemon accepts below
+/// its own contract. `.staging` shows why that matters: it is a legal path
+/// component, so a component-level check passes it, but it names the shared
+/// staging root every install stages through.
 pub fn retain_safe_backends(index: &mut Index) {
     use super_stt_shared::registry::{is_safe_component, is_safe_relative_path};
     for b in &mut index.backends {
         if let Some(id) = b.backend_id.as_deref()
-            && !is_safe_component(id)
+            && !super_stt_registry_types::backend_id::is_valid(id)
         {
             log::warn!(
-                "registry: clearing backend `{}` unsafe backend_id {id:?}",
+                "registry: clearing backend `{}` malformed backend_id {id:?}",
                 b.id
             );
             b.backend_id = None;
@@ -296,6 +305,52 @@ mod tests {
             index.backends[0].backend_id.is_none(),
             "an unsafe backend_id must be cleared, not passed through"
         );
+    }
+
+    /// `.staging` passes a component-level safety check but names the shared
+    /// staging root every install stages through, so an index that published
+    /// it would resolve an install directory onto that root. The boundary
+    /// holds `backend_id` to the `[backend].id` format rule, which rejects
+    /// it — and the entry itself still survives, falling back to its
+    /// registry key.
+    #[test]
+    fn retain_safe_backends_clears_the_shared_staging_root_as_a_backend_id() {
+        assert!(
+            super_stt_shared::registry::is_safe_component(".staging"),
+            "the premise: a component-level check accepts .staging"
+        );
+        let mut index = Index {
+            schema_version: 1,
+            generated_at: "now".into(),
+            min_client: "0.1.0".into(),
+            backends: vec![safe_backend("voxtral", Some(".staging"))],
+        };
+        retain_safe_backends(&mut index);
+        assert_eq!(index.backends.len(), 1, "the entry itself must survive");
+        assert!(
+            index.backends[0].backend_id.is_none(),
+            ".staging must never reach the install pipeline as a directory name"
+        );
+    }
+
+    /// Every other route into an install directory name goes through
+    /// `Manifest::parse`, which enforces the `[backend].id` format. This
+    /// boundary must not be more lenient than the daemon's own contract.
+    #[test]
+    fn retain_safe_backends_clears_a_malformed_backend_id() {
+        for malformed in ["voxtral", "app.voxtral", "app.super_stt.voxtral", "APP.X.Y"] {
+            let mut index = Index {
+                schema_version: 1,
+                generated_at: "now".into(),
+                min_client: "0.1.0".into(),
+                backends: vec![safe_backend("voxtral", Some(malformed))],
+            };
+            retain_safe_backends(&mut index);
+            assert!(
+                index.backends[0].backend_id.is_none(),
+                "malformed backend_id {malformed:?} must be cleared"
+            );
+        }
     }
 
     #[test]

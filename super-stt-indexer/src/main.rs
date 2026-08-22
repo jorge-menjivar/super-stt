@@ -132,6 +132,7 @@ async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
     }
 
     ensure_unique_sources(&out_backends)?;
+    ensure_unique_backend_ids(&out_backends)?;
 
     let index = index_json::Index {
         schema_version: index_json::SCHEMA_VERSION,
@@ -321,9 +322,10 @@ pub(crate) fn into_index_backend(
 }
 
 /// A backend's `source` is its unique identity. Two distinct entries that
-/// collide on `source` would be indistinguishable to every daemon (the
-/// daemon's `dedup_sources` guard silently drops all but the first), so a
-/// collision must never be published — fail the build instead.
+/// collide on `source` would be indistinguishable to every daemon — one of
+/// the two install directories is picked as the winner and the other is
+/// removed from disk — so a collision must never be published: fail the build
+/// instead.
 fn ensure_unique_sources(backends: &[index_json::IndexBackend]) -> anyhow::Result<()> {
     let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
     for b in backends {
@@ -331,6 +333,36 @@ fn ensure_unique_sources(backends: &[index_json::IndexBackend]) -> anyhow::Resul
             anyhow::bail!(
                 "duplicate source `{}` shared by entries `{}` and `{}`; each backend must have a distinct source",
                 b.source,
+                prev_id,
+                b.id,
+            );
+        }
+    }
+    Ok(())
+}
+
+/// A backend's `backend_id` names the directory it is installed into, so two
+/// entries publishing the same one would install over each other — the second
+/// install replaces the first, taking its downloaded model files with it.
+///
+/// Per-entry validation cannot see this: each release's manifest declares its
+/// own `id` in isolation, and both are individually well-formed. Like
+/// [`ensure_unique_sources`], the collision is only visible across the
+/// assembled index, so it is checked here and fails the build.
+///
+/// An entry without a `backend_id` installs under its registry key, which
+/// [`ensure_unique_sources`]' own key space already keeps distinct, so those
+/// entries are skipped rather than grouped together under a shared absence.
+fn ensure_unique_backend_ids(backends: &[index_json::IndexBackend]) -> anyhow::Result<()> {
+    let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for b in backends {
+        let Some(backend_id) = b.backend_id.as_deref() else {
+            continue;
+        };
+        if let Some(prev_id) = seen.insert(backend_id, b.id.as_str()) {
+            anyhow::bail!(
+                "duplicate backend id `{}` shared by entries `{}` and `{}`; each backend must declare a distinct [backend].id",
+                backend_id,
                 prev_id,
                 b.id,
             );
@@ -390,5 +422,46 @@ mod tests {
         ];
         let err = ensure_unique_sources(&backends).unwrap_err();
         assert!(err.to_string().contains("duplicate source"));
+    }
+
+    /// `backend_id` names the install directory, so publishing two entries
+    /// that share one would have the second install replace the first —
+    /// including the model files under it. Each entry's own manifest is
+    /// perfectly valid, so only this cross-entry check can catch it.
+    #[test]
+    fn duplicate_backend_ids_are_rejected() {
+        let mut a = backend("mistral", "github.com/x/mistral");
+        a.backend_id = Some("app.super-stt.voxtral".into());
+        let mut b = backend("voxtral", "github.com/x/voxtral");
+        b.backend_id = Some("app.super-stt.voxtral".into());
+
+        let err = ensure_unique_backend_ids(&[a, b]).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("duplicate backend id"), "{msg}");
+        assert!(msg.contains("app.super-stt.voxtral"), "{msg}");
+        assert!(msg.contains("mistral") && msg.contains("voxtral"), "{msg}");
+    }
+
+    #[test]
+    fn distinct_backend_ids_pass() {
+        let mut a = backend("mistral", "github.com/x/mistral");
+        a.backend_id = Some("app.super-stt.mistral".into());
+        let mut b = backend("voxtral", "github.com/x/voxtral");
+        b.backend_id = Some("app.super-stt.voxtral".into());
+
+        ensure_unique_backend_ids(&[a, b]).unwrap();
+    }
+
+    /// Entries that predate `[backend].id` install under their registry key,
+    /// which is already unique. Several of them sharing a `None` must not be
+    /// mistaken for a collision.
+    #[test]
+    fn entries_without_a_backend_id_never_collide() {
+        let backends = vec![
+            backend("mistral", "github.com/x/mistral"),
+            backend("voxtral", "github.com/x/voxtral"),
+        ];
+        assert!(backends.iter().all(|b| b.backend_id.is_none()));
+        ensure_unique_backend_ids(&backends).unwrap();
     }
 }

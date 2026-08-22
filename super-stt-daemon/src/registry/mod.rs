@@ -26,15 +26,20 @@ pub(crate) use super_stt_forge::accept_base_url;
 ///
 /// `backend_id` arrives from `index.json` over the network. This function
 /// does not assume the registry-client boundary (`retain_safe_backends`)
-/// already sanitized it: it re-checks `backend_id` itself with
-/// `is_safe_component` and falls back to the registry key whenever
-/// `backend_id` is absent, empty, `.`/`..`, contains a path separator, or
-/// otherwise is not a single safe path component — the same rule `id` is
-/// held to elsewhere.
+/// already sanitized it: it re-checks the value itself and falls back to the
+/// registry key whenever `backend_id` is absent or malformed.
+///
+/// The check is the full `[backend].id` format rule
+/// ([`super_stt_registry_types::backend_id::is_valid`]), not merely "usable
+/// as a path component". `Manifest::parse` already holds every other route
+/// to that rule, so anything looser here would make `index.json` the one
+/// input the daemon accepts below its own contract — and the gap is not
+/// theoretical: `.staging` is a perfectly good path component but names the
+/// shared staging root every install writes through.
 #[must_use]
 pub fn install_dir_name(entry: &index_schema::IndexBackend) -> &str {
     match entry.backend_id.as_deref() {
-        Some(id) if super_stt_shared::registry::is_safe_component(id) => id,
+        Some(id) if super_stt_registry_types::backend_id::is_valid(id) => id,
         _ => &entry.id,
     }
 }

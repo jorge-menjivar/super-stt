@@ -62,6 +62,12 @@ pub enum InstallError {
     /// validation, over the size cap, or an identity/entrypoint inconsistent
     /// with the index entry.
     ManifestInvalid,
+    /// The directory this backend installs into already holds a *different*
+    /// backend — one whose `backend.toml` declares another `[backend].source`.
+    /// Completing the install would replace that backend and delete the model
+    /// files under it, so it is refused and both directories are left as they
+    /// were.
+    InstallDirConflict,
 }
 
 impl std::fmt::Display for InstallError {
@@ -75,6 +81,7 @@ impl std::fmt::Display for InstallError {
             Self::TarballUnsafe => "the archive contained unsafe paths",
             Self::InstallIoError => "a filesystem error occurred during install",
             Self::ManifestInvalid => "the backend manifest was missing or invalid",
+            Self::InstallDirConflict => "the install directory already holds a different backend",
         })
     }
 }
