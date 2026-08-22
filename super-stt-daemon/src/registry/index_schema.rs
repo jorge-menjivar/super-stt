@@ -63,14 +63,33 @@ pub fn warn_if_client_too_old(index: &Index) {
     }
 }
 
-/// Drop backends whose `id` or `entrypoint` is not a safe path component.
-/// These values become directory names / are joined onto the backends dir
-/// at install time; an absolute or traversing value would escape it. A
-/// well-formed index (the indexer rejects them) never contains such a
-/// backend, so a stray one — e.g. from a poisoned `SUPER_STT_REGISTRY_URL`
-/// — is dropped with a warning rather than failing the whole index.
+/// Sanitize backends fetched from `index.json` before anything downstream
+/// (in particular [`super::install_dir_name`]) can join them onto the
+/// backends directory. These values become directory names / are joined onto
+/// the backends dir at install time; an absolute or traversing value would
+/// escape it. A well-formed index (the indexer rejects them) never contains
+/// such values, so a stray one — e.g. from a poisoned
+/// `SUPER_STT_REGISTRY_URL` — is sanitized here rather than failing the
+/// whole index.
+///
+/// `backend_id` is optional and its absence has a well-defined meaning (fall
+/// back to the registry key), so an unsafe value is cleared to `None` rather
+/// than dropping the backend over it. `id` and `entrypoint` are required and
+/// have no such fallback, so an entry with an unsafe one of those is dropped
+/// outright, same as before this function also looked at `backend_id`.
 pub fn retain_safe_backends(index: &mut Index) {
     use super_stt_shared::registry::{is_safe_component, is_safe_relative_path};
+    for b in &mut index.backends {
+        if let Some(id) = b.backend_id.as_deref()
+            && !is_safe_component(id)
+        {
+            log::warn!(
+                "registry: clearing backend `{}` unsafe backend_id {id:?}",
+                b.id
+            );
+            b.backend_id = None;
+        }
+    }
     index.backends.retain(|b| {
         let ok = is_safe_component(&b.id) && is_safe_relative_path(&b.entrypoint);
         if !ok {
@@ -227,6 +246,86 @@ mod tests {
             check_min_client(CLIENT_VERSION, "0.1.0"),
             MinClientStatus::Compatible
         );
+    }
+
+    /// A minimal-but-safe backend entry, for exercising `retain_safe_backends`
+    /// without constructing the full field list every time.
+    fn safe_backend(id: &str, backend_id: Option<&str>) -> IndexBackend {
+        IndexBackend {
+            id: id.into(),
+            backend_id: backend_id.map(String::from),
+            source: "github.com/x/y".into(),
+            version: "1.0.0".into(),
+            tag: "v1.0.0".into(),
+            name: "X".into(),
+            description: None,
+            license: String::new(),
+            kind: "subprocess".into(),
+            contract: "v1".into(),
+            entrypoint: "x".into(),
+            allowed_hosts: vec![],
+            online: false,
+            supports_gpu: false,
+            supports_cpu: true,
+            models: vec![],
+            secrets: vec![],
+            options: vec![],
+            assets: IndexAssets::default(),
+            index_stale: None,
+            manifest: None,
+        }
+    }
+
+    /// `backend_id` arrives over the network via `index.json`. An unsafe value
+    /// (here, path traversal) must not survive to reach the install pipeline —
+    /// but the entry itself, whose required `id`/`entrypoint` are fine, must
+    /// not be dropped over it: the field is optional and clearing it just
+    /// falls back to the registry key.
+    #[test]
+    fn retain_safe_backends_clears_an_unsafe_backend_id_but_keeps_the_entry() {
+        let mut index = Index {
+            schema_version: 1,
+            generated_at: "now".into(),
+            min_client: "0.1.0".into(),
+            backends: vec![safe_backend("voxtral", Some("../../../../home/jorge/.ssh"))],
+        };
+        retain_safe_backends(&mut index);
+        assert_eq!(index.backends.len(), 1, "the entry itself must survive");
+        assert_eq!(index.backends[0].id, "voxtral");
+        assert!(
+            index.backends[0].backend_id.is_none(),
+            "an unsafe backend_id must be cleared, not passed through"
+        );
+    }
+
+    #[test]
+    fn retain_safe_backends_keeps_a_safe_backend_id() {
+        let mut index = Index {
+            schema_version: 1,
+            generated_at: "now".into(),
+            min_client: "0.1.0".into(),
+            backends: vec![safe_backend("voxtral", Some("app.super-stt.voxtral"))],
+        };
+        retain_safe_backends(&mut index);
+        assert_eq!(
+            index.backends[0].backend_id.as_deref(),
+            Some("app.super-stt.voxtral")
+        );
+    }
+
+    /// Pre-existing behavior, now under explicit test: an unsafe `id` or
+    /// `entrypoint` drops the whole entry, since `id` is required and has no
+    /// well-defined fallback the way `backend_id` does.
+    #[test]
+    fn retain_safe_backends_still_drops_an_entry_with_an_unsafe_id() {
+        let mut index = Index {
+            schema_version: 1,
+            generated_at: "now".into(),
+            min_client: "0.1.0".into(),
+            backends: vec![safe_backend("../evil", None)],
+        };
+        retain_safe_backends(&mut index);
+        assert!(index.backends.is_empty());
     }
 
     #[test]

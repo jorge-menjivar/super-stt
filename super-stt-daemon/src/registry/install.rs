@@ -114,10 +114,11 @@ where
     download_and_verify(p, entry, selection, &partial_path).await?;
 
     (p.on_progress)(P::Extracting, None);
-    let staging = p
-        .backends_dir
-        .join(".staging")
-        .join(format!("{}-{}", entry.id, entry.version));
+    let staging = p.backends_dir.join(".staging").join(format!(
+        "{}-{}",
+        crate::registry::install_dir_name(entry),
+        entry.version
+    ));
     if staging.exists() {
         let _ = fs::remove_dir_all(&staging).await;
     }
@@ -154,7 +155,9 @@ where
     }
 
     (p.on_progress)(P::Installing, None);
-    let final_path = p.backends_dir.join(&entry.id);
+    let final_path = p
+        .backends_dir
+        .join(crate::registry::install_dir_name(entry));
     preserve_models(&staging, &final_path)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
@@ -263,10 +266,11 @@ where
 
     (p.on_progress)(P::Resolving, None);
 
-    let staging = p
-        .backends_dir
-        .join(".staging")
-        .join(format!("{}-{}", entry.id, entry.version));
+    let staging = p.backends_dir.join(".staging").join(format!(
+        "{}-{}",
+        crate::registry::install_dir_name(entry),
+        entry.version
+    ));
     if staging.exists() {
         let _ = fs::remove_dir_all(&staging).await;
     }
@@ -287,7 +291,9 @@ where
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
 
     (p.on_progress)(P::Installing, None);
-    let final_path = p.backends_dir.join(&entry.id);
+    let final_path = p
+        .backends_dir
+        .join(crate::registry::install_dir_name(entry));
     preserve_models(&staging, &final_path)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
@@ -754,6 +760,7 @@ async fn download_manifest_bytes(
 mod tests {
     use super::*;
     use crate::registry::index_schema::*;
+    use crate::registry::install_dir_name;
 
     const PINNED_MANIFEST: &str = r#"
 [backend]
@@ -835,6 +842,64 @@ supported_devices = ["cpu"]
             assets: IndexAssets::default(),
             index_stale: None,
             manifest: None,
+        }
+    }
+
+    fn index_entry(id: &str, backend_id: Option<&str>) -> IndexBackend {
+        let mut e = minimal_entry();
+        e.id = id.to_string();
+        e.backend_id = backend_id.map(str::to_string);
+        e
+    }
+
+    #[test]
+    fn the_install_dir_is_the_backend_id_when_one_is_declared() {
+        let e = index_entry("voxtral", Some("app.super-stt.voxtral"));
+        assert_eq!(install_dir_name(&e), "app.super-stt.voxtral");
+    }
+
+    #[test]
+    fn the_install_dir_falls_back_to_the_registry_key() {
+        let e = index_entry("voxtral", None);
+        assert_eq!(install_dir_name(&e), "voxtral");
+    }
+
+    /// `backend_id` arrives from `index.json` over the network. Even if the
+    /// registry-client boundary (`retain_safe_backends`) failed to sanitize
+    /// it, `install_dir_name` must never hand back a value that would let the
+    /// caller's `backends_dir.join(...)` escape the backends directory.
+    #[test]
+    fn install_dir_name_falls_back_when_backend_id_is_unsafe() {
+        for unsafe_id in [
+            "..",
+            "../../../../home/jorge/.ssh",
+            "/etc/passwd",
+            "a/b",
+            "",
+        ] {
+            let e = index_entry("voxtral", Some(unsafe_id));
+            assert_eq!(
+                install_dir_name(&e),
+                "voxtral",
+                "unsafe backend_id {unsafe_id:?} must not be used"
+            );
+        }
+    }
+
+    /// The same traversal cases, but proving the property that actually
+    /// matters: joining the returned name onto the backends dir never
+    /// produces a path outside it.
+    #[test]
+    fn install_dir_name_never_escapes_the_backends_dir_when_joined() {
+        let backends_dir = Path::new("/var/lib/super-stt/backends");
+        for unsafe_id in ["..", "../../../../home/jorge/.ssh", "/etc/passwd", "a/b"] {
+            let e = index_entry("voxtral", Some(unsafe_id));
+            let joined = backends_dir.join(install_dir_name(&e));
+            assert!(
+                joined.starts_with(backends_dir),
+                "backend_id {unsafe_id:?} escaped: {}",
+                joined.display()
+            );
         }
     }
 

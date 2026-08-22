@@ -89,6 +89,12 @@ fail at model load with a read error naming a path, long after the operator
 could connect it to what they staged. A source checkout is the usual cause: a
 build tree names its artifact after the crate, not after the entrypoint.
 
+**Install directory.** A backend is installed into a directory named by its
+`[backend].id`, whichever route installed it — the registry, a custom
+repository, or a local directory. A backend whose manifest declares no `id`
+is installed under the registry key instead, so installs that predate the
+identifier keep their directory.
+
 **Integrity & limits.** Operator base-URL overrides (`GITHUB_API_BASE`,
 `SUPER_STT_REGISTRY_URL`) must be `https://` (loopback `http://` is allowed for
 testing); insecure values are ignored and the secure default is used. Downloads
