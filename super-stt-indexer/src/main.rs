@@ -187,7 +187,8 @@ async fn build_entry(
     let text = String::from_utf8(bytes).map_err(|e| fail(&e))?;
     let m = manifest::Manifest::parse(&text).map_err(|e| fail(&e))?;
     let manifest_pin = Some(index_json::IndexAsset { url, size, sha256 });
-    manifest::validate(&m, &resolved.version, &entry.repo).map_err(|e| fail(&e))?;
+    manifest::validate(&m, &resolved.version, &entry.repo, entry.id.as_deref())
+        .map_err(|e| fail(&e))?;
     let idx_assets = resolve_index_assets(http, &m, &resolved.release.assets)
         .await
         .map_err(|e| fail(&e))?;

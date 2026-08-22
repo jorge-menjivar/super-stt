@@ -10,6 +10,7 @@ use std::process::Command;
 
 const MANIFEST_OK: &str = r#"
 [backend]
+id = "com.example.x-y"
 source = "github.com/x/y/foo"
 name = "Y"
 version = "1.0.0"
