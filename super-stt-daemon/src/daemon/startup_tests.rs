@@ -24,6 +24,7 @@ fn discovered(dir: &str, source: &str) -> DiscoveredBackend {
     DiscoveredBackend {
         dir: PathBuf::from("/var/lib/super-stt/backends").join(dir),
         source: source.to_string(),
+        id: None,
         name: "Whisper (local)".to_string(),
         version: "1.0.0".to_string(),
         kind: "subprocess".to_string(),

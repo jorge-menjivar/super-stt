@@ -27,6 +27,7 @@ pub(crate) fn openai_backend(
     DiscoveredBackend {
         dir: std::path::PathBuf::from("/tmp/openai"),
         source: source.to_string(),
+        id: None,
         name: "OpenAI".to_string(),
         version: "1.0.0".to_string(),
         kind: "wasm".to_string(),

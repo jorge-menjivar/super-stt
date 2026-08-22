@@ -244,6 +244,7 @@ mod tests {
         DiscoveredBackend {
             dir: PathBuf::from("/backends").join(dir),
             source: source.to_string(),
+            id: None,
             name: "Voxtral".to_string(),
             version: version.to_string(),
             kind: "subprocess".to_string(),

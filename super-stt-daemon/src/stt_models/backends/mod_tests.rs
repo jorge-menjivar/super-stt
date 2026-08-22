@@ -80,8 +80,9 @@ processing_interval_ms = 2000
     )
     .unwrap();
 
-    let backends = discover(&root);
+    let (backends, losers) = discover(&root);
     assert_eq!(backends.len(), 2, "expected two backends, got {backends:?}");
+    assert!(losers.is_empty(), "distinct sources are never duplicates");
 
     // Identity + secrets/options carried through.
     let oai = backends
@@ -145,13 +146,13 @@ fn skips_invalid_backend_dirs() {
     fs::create_dir_all(&broken).unwrap();
     fs::write(broken.join("backend.toml"), "this is not valid toml = =\n").unwrap();
 
-    assert!(discover(&root).is_empty());
+    assert!(discover(&root).0.is_empty());
 }
 
 #[test]
 fn missing_dir_is_empty() {
     let path = std::env::temp_dir().join("super-stt-backend-discovery/does-not-exist");
-    assert!(discover(&path).is_empty());
+    assert!(discover(&path).0.is_empty());
 }
 
 /// A backend whose manifest omits `supported_devices` on any model is
@@ -182,7 +183,7 @@ multilingual = true
     .unwrap();
 
     assert!(
-        discover(&root).is_empty(),
+        discover(&root).0.is_empty(),
         "a manifest without supported_devices must be rejected"
     );
 }
@@ -218,7 +219,7 @@ supported_devices = []
     .unwrap();
 
     assert!(
-        discover(&root).is_empty(),
+        discover(&root).0.is_empty(),
         "a manifest with supported_devices = [] must be rejected"
     );
 }
@@ -251,7 +252,7 @@ supported_devices = ["xpu"]
     )
     .unwrap();
 
-    assert!(discover(&root).is_empty());
+    assert!(discover(&root).0.is_empty());
 }
 
 /// `none` (online sentinel) mixed with a local device is rejected — they
@@ -283,7 +284,7 @@ supported_devices = ["none", "cpu"]
     )
     .unwrap();
 
-    assert!(discover(&root).is_empty());
+    assert!(discover(&root).0.is_empty());
 }
 
 /// `dir_name` returns the final path component — the relative install dir
@@ -297,6 +298,7 @@ fn dir_name_returns_final_component() {
         DiscoveredBackend {
             dir,
             source: "github.com/super-stt/openai".to_string(),
+            id: None,
             name: "OpenAI".to_string(),
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
@@ -383,8 +385,12 @@ fn distinct_sources_resolve_to_the_right_backend() {
         "Voxtral",
     );
 
-    let backends = discover(&root);
+    let (backends, losers) = discover(&root);
     assert_eq!(backends.len(), 3);
+    assert!(
+        losers.is_empty(),
+        "three distinct sources are never duplicates"
+    );
 
     for (source, want_dir) in [
         ("github.com/jorge-menjivar/super-stt/openai", "openai"),
@@ -403,21 +409,25 @@ fn distinct_sources_resolve_to_the_right_backend() {
     }
 }
 
-/// Two backends sharing a source is a misconfiguration: discovery keeps the
-/// first and drops the rest so resolution is never ambiguous.
+/// Two backends sharing a source is a misconfiguration: discovery keeps one
+/// deterministic winner and reports the rest as duplicates for reconciliation,
+/// so resolution is never ambiguous.
 #[test]
 fn duplicate_sources_are_deduplicated() {
     let root = scratch("dup-sources");
-    // Same source on two different dirs — the pre-fix bug condition.
+    // Same source, same version, neither id-named — the tie falls to the
+    // lexicographically first directory name.
     write_backend(&root, "aaa", "github.com/x/shared", "First");
     write_backend(&root, "bbb", "github.com/x/shared", "Second");
 
-    let backends = discover(&root);
+    let (backends, losers) = discover(&root);
     assert_eq!(
         backends.len(),
         1,
         "duplicate source must be collapsed to one"
     );
+    assert_eq!(losers.len(), 1, "the duplicate is reported, not dropped");
+    assert!(losers[0].dir.ends_with("bbb"));
 
     // Exactly one backend resolves for the shared source — no ambiguity.
     let matches: Vec<_> = backends
@@ -466,8 +476,9 @@ processing_interval_ms = 1500
     )
     .unwrap();
 
-    let backends = discover(&root);
+    let (backends, losers) = discover(&root);
     assert_eq!(backends.len(), 1);
+    assert!(losers.is_empty());
 
     let (b, def) = find_model(
         &backends,
@@ -495,14 +506,17 @@ processing_interval_ms = 1500
     assert_eq!(big.processing_interval, Duration::from_millis(1500));
 }
 
-/// `dedup_sources` keeps first-seen order and drops later duplicates.
+/// At equal (unparseable-as-distinguishing) version and with neither
+/// candidate id-named, `dedup_sources` falls back to the lexicographically
+/// first directory name, so the result is stable across runs.
 #[test]
-fn dedup_sources_keeps_first_occurrence() {
+fn dedup_sources_falls_back_to_lexicographic_order() {
     use crate::stt_models::ModelDefinition;
     fn fake(dir: &str, source: &str) -> DiscoveredBackend {
         DiscoveredBackend {
             dir: PathBuf::from(dir),
             source: source.to_string(),
+            id: None,
             name: dir.to_string(),
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
@@ -519,9 +533,11 @@ fn dedup_sources_keeps_first_occurrence() {
         fake("c", "src-1"), // dup of a
         fake("d", "src-3"),
     ];
-    let out = dedup_sources(input);
-    let dirs: Vec<_> = out.iter().filter_map(dir_name).collect();
+    let (winners, losers) = dedup_sources(input);
+    let dirs: Vec<_> = winners.iter().filter_map(dir_name).collect();
     assert_eq!(dirs, vec!["a", "b", "d"]);
+    assert_eq!(losers.len(), 1);
+    assert!(losers[0].dir.ends_with("c"));
 }
 
 /// The regression: `find_model` used to treat an empty `source` as "any
@@ -540,6 +556,7 @@ fn an_empty_source_resolves_nothing() {
         DiscoveredBackend {
             dir: PathBuf::from(dir),
             source: source.to_string(),
+            id: None,
             name: dir.to_string(),
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
@@ -633,7 +650,7 @@ supported_devices = ["none"]
     )
     .unwrap();
 
-    let backends = discover(&root);
+    let (backends, _) = discover(&root);
     assert_eq!(
         backends.len(),
         1,
@@ -665,4 +682,81 @@ fn the_catalog_reports_the_installed_accel() {
         .map(|r| r.selected.accel)
         .unwrap_or_default();
     assert_eq!(accel, vec!["cpu".to_string()]);
+}
+
+/// A minimal `DiscoveredBackend` at `/backends/<dir>`, for the
+/// `dedup_sources` selection tests below. No `discovered_fixture`/
+/// `tests_support` helper exists in this crate, so the literal is built
+/// inline here, matching the pattern `write_backend` and `fake` already use
+/// above.
+fn at(dir: &str, source: &str, version: &str, id: Option<&str>) -> DiscoveredBackend {
+    use crate::stt_models::ModelDefinition;
+    DiscoveredBackend {
+        dir: PathBuf::from("/backends").join(dir),
+        source: source.to_string(),
+        name: dir.to_string(),
+        version: version.to_string(),
+        kind: "wasm".to_string(),
+        entrypoint: "x.wasm".to_string(),
+        allowed_hosts: Vec::new(),
+        secrets: Vec::new(),
+        options: Vec::new(),
+        models: Vec::<ModelDefinition>::new(),
+        id: id.map(str::to_string),
+    }
+}
+
+/// Version outranks the id-named directory. A backend updated in place
+/// before migration existed sits at the repo-named directory on the newer
+/// version; preferring the id-named one would delete the newer install and
+/// silently downgrade the user.
+#[test]
+fn the_higher_version_wins_even_against_the_id_named_dir() {
+    let (winners, losers) = dedup_sources(vec![
+        at(
+            "app.super-stt.voxtral",
+            "github.com/x/v",
+            "0.1.0",
+            Some("app.super-stt.voxtral"),
+        ),
+        at(
+            "super-stt-voxtral",
+            "github.com/x/v",
+            "0.1.1",
+            Some("app.super-stt.voxtral"),
+        ),
+    ]);
+    assert_eq!(winners.len(), 1);
+    assert!(winners[0].dir.ends_with("super-stt-voxtral"));
+    assert_eq!(losers.len(), 1);
+}
+
+#[test]
+fn the_id_named_dir_wins_at_equal_versions() {
+    let (winners, losers) = dedup_sources(vec![
+        at(
+            "super-stt-voxtral",
+            "github.com/x/v",
+            "0.1.1",
+            Some("app.super-stt.voxtral"),
+        ),
+        at(
+            "app.super-stt.voxtral",
+            "github.com/x/v",
+            "0.1.1",
+            Some("app.super-stt.voxtral"),
+        ),
+    ]);
+    assert!(winners[0].dir.ends_with("app.super-stt.voxtral"));
+    assert_eq!(losers.len(), 1);
+}
+
+#[test]
+fn distinct_sources_are_never_duplicates() {
+    let (winners, losers) = dedup_sources(vec![
+        at("a", "github.com/x/a", "1.0.0", None),
+        at("b", "github.com/x/b", "1.0.0", None),
+    ]);
+    assert_eq!(winners.len(), 2);
+    assert!(losers.is_empty());
 }

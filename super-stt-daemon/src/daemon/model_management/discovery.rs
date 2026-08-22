@@ -12,13 +12,31 @@ impl SuperSTTDaemon {
             c.transcription.backends_dir.clone()
         };
         let dir = configured.map_or_else(backends::default_backends_dir, PathBuf::from);
-        let discovered = backends::discover(&dir);
+        let (winners, losers) = backends::discover(&dir);
         info!(
             "Backend registry: {} backend(s) from {}",
-            discovered.len(),
+            winners.len(),
             dir.display()
         );
-        *self.backends.write().await = discovered;
+
+        // Skipped while a session holds the switch guard: removing a
+        // directory under an in-flight recording would strand state it
+        // still depends on, the same reason uninstall refuses. The
+        // duplicate is harmless until the next refresh.
+        if !losers.is_empty() {
+            if self.switch_guard().await.is_some() {
+                log::warn!(
+                    "{} duplicate backend director(ies) left for a later refresh: \
+                     a backend is busy",
+                    losers.len()
+                );
+            } else {
+                let bytes = crate::registry::reconcile::reconcile(&losers, &winners).await;
+                log::info!("Reconciled duplicate backends, reclaiming {bytes} bytes");
+            }
+        }
+
+        *self.backends.write().await = winners;
     }
 
     /// Choose the model to load at startup: the configured preference, but only
@@ -77,5 +95,95 @@ impl SuperSTTDaemon {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::daemon::types::test_daemon;
+
+    /// A minimal backend manifest at `dir`, sharing `source` with whatever
+    /// else is written under the same backends root, at the given `version`.
+    fn write_backend(dir: &std::path::Path, version: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(
+            dir.join("backend.toml"),
+            format!(
+                r#"
+[backend]
+    source     = "github.com/x/y"
+    name       = "Y"
+    version    = "{version}"
+    kind       = "subprocess"
+    entrypoint = "y"
+    contract   = "v1"
+    description = "Test backend."
+
+[[models]]
+    name                = "m"
+    primary_language    = "en"
+    supported_languages = ["en"]
+    supported_devices   = ["cpu"]
+"#
+            ),
+        )
+        .unwrap();
+    }
+
+    /// Reconciliation must not touch the filesystem while a session holds the
+    /// switch guard: removing a directory under an in-flight recording would
+    /// strand state it still depends on. The duplicate stays in place — only
+    /// the winner is served — until a later, idle refresh cleans it up.
+    #[tokio::test]
+    async fn reconciliation_is_skipped_while_a_backend_is_busy() {
+        let root = tempfile::tempdir().unwrap();
+        let winner = root.path().join("app.super-stt.y");
+        let loser = root.path().join("super-stt-y");
+        write_backend(&winner, "1.0.1");
+        write_backend(&loser, "1.0.0");
+
+        let daemon = test_daemon().await;
+        *daemon.busy.write().await = true;
+        daemon.config.write().await.transcription.backends_dir =
+            Some(root.path().to_string_lossy().into_owned());
+
+        daemon.refresh_backends().await;
+
+        assert!(
+            loser.exists(),
+            "a duplicate must not be removed while a backend is busy"
+        );
+        assert!(winner.exists());
+        let backends = daemon.backends.read().await;
+        assert_eq!(
+            backends.len(),
+            1,
+            "the winner is still the only one served, even though the \
+             duplicate was left in place"
+        );
+    }
+
+    /// The mirror case: once idle, a refresh reconciles the duplicate away.
+    #[tokio::test]
+    async fn reconciliation_runs_and_removes_the_loser_when_idle() {
+        let root = tempfile::tempdir().unwrap();
+        let winner = root.path().join("app.super-stt.y");
+        let loser = root.path().join("super-stt-y");
+        write_backend(&winner, "1.0.1");
+        write_backend(&loser, "1.0.0");
+
+        let daemon = test_daemon().await;
+        daemon.config.write().await.transcription.backends_dir =
+            Some(root.path().to_string_lossy().into_owned());
+
+        daemon.refresh_backends().await;
+
+        assert!(
+            !loser.exists(),
+            "an idle refresh must reconcile the duplicate away"
+        );
+        assert!(winner.exists());
+        let backends = daemon.backends.read().await;
+        assert_eq!(backends.len(), 1);
     }
 }

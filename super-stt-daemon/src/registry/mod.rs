@@ -10,6 +10,7 @@ pub mod index_schema;
 pub mod install;
 pub mod installed;
 pub mod local_dir;
+pub mod reconcile;
 
 /// Re-export the shared operator-base-URL gate from `super-stt-forge` so the
 /// registry client and the forge adapters apply one identical rule.
