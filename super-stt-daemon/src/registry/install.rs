@@ -407,6 +407,21 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// A missing or unparseable manifest on either side carries nothing: without
 /// both file lists there is no way to tell an unchanged file from a changed
 /// one, and re-downloading is the safe answer.
+///
+/// `carry_over::carry` moves files one at a time with no rollback, so an I/O
+/// error partway through (e.g. file 3 of 5) aborts this function — and the
+/// install, before the swap — with files 1–2 already moved out of
+/// `final_path` and into `staging`. The live directory at `final_path` keeps
+/// serving but is now missing those files; the next model load re-downloads
+/// them via `usable_existing`'s hash check, so nothing wrong is ever served.
+///
+/// The one gap that safety net does not cover: `run`/`run_local` unconditionally
+/// wipe a stale `.staging/<id>-<version>` directory before reusing it, so an
+/// ordinary "retry the same version" after a partial failure destroys the
+/// very files this function already carried into it — a maintainer sees the
+/// update "succeed" having silently re-downloaded weights it should have
+/// preserved. This is a known, accepted gap (end state is still correct
+/// content), not a bug to fix here.
 async fn preserve_models(staging: &Path, final_path: &Path) -> std::io::Result<u64> {
     use super_stt_registry_types::manifest::Manifest;
 

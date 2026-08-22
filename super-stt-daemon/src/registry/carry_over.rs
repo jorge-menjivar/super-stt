@@ -85,9 +85,23 @@ pub fn survivors(old: &Manifest, new: &Manifest) -> Vec<String> {
 /// Both directories live under the backends directory, so these are
 /// same-filesystem renames: constant-time, with no multi-gigabyte copy.
 ///
+/// Destinations are moved one at a time with no rollback. If an error occurs
+/// partway through — a permissions failure, a full disk — the destinations
+/// already processed stay moved; the caller must not assume `from_dir` is
+/// still intact after an `Err`. This is safe for `install`'s caller
+/// (`preserve_models`) because a file this leaves behind under `from_dir` is
+/// simply re-downloaded the next time it is provisioned
+/// (`stt_models::download::usable_existing` re-verifies every file's hash
+/// before trusting it), so the end state is always correct content — it is
+/// only ever less carry-over than intended, never wrong bytes served. See
+/// `preserve_models`'s doc comment for the one place that safety net does not
+/// fully cover: a same-version retry after a partial failure.
+///
 /// # Errors
 /// Returns an `io::Error` if a destination is not a safe relative path, a
-/// directory cannot be created, or a rename fails.
+/// directory cannot be created, or a rename fails. The error is wrapped with
+/// the source and destination paths so a failure log line names which of
+/// potentially dozens of model files it was.
 pub async fn carry(
     from_dir: &Path,
     to_dir: &Path,
@@ -116,9 +130,27 @@ pub async fn carry(
             continue;
         }
         if let Some(parent) = dst.parent() {
-            fs::create_dir_all(parent).await?;
+            fs::create_dir_all(parent).await.map_err(|e| {
+                std::io::Error::new(
+                    e.kind(),
+                    format!(
+                        "carry_over: creating parent of `{}` ({}): {e}",
+                        dst.display(),
+                        parent.display()
+                    ),
+                )
+            })?;
         }
-        fs::rename(&src, &dst).await?;
+        fs::rename(&src, &dst).await.map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!(
+                    "carry_over: renaming `{}` to `{}`: {e}",
+                    src.display(),
+                    dst.display()
+                ),
+            )
+        })?;
         moved += meta.len();
     }
     Ok(moved)
@@ -308,6 +340,57 @@ mod tests {
         assert!(
             !from.path().join("models/m/a.bin").exists(),
             "moved, not copied"
+        );
+    }
+
+    /// `carry` has no rollback: a failure partway through must leave earlier
+    /// destinations moved and later ones untouched, never straddling both
+    /// directories or silently losing bytes. Pins the documented
+    /// no-rollback behaviour (see `carry`'s doc comment) so it cannot erode
+    /// silently.
+    ///
+    /// The failure is triggered portably, without platform-specific
+    /// permission tricks: the second destination's parent directory
+    /// (`sub/`) already exists under `to_dir` as a plain *file*, so
+    /// `create_dir_all` cannot turn it into a directory.
+    #[tokio::test]
+    async fn a_partial_failure_leaves_earlier_moves_in_place_and_later_ones_untouched() {
+        let from = tempfile::tempdir().unwrap();
+        let to = tempfile::tempdir().unwrap();
+
+        std::fs::write(from.path().join("a.bin"), b"aaaa").unwrap();
+        std::fs::create_dir_all(from.path().join("sub")).unwrap();
+        std::fs::write(from.path().join("sub/b.bin"), b"bb").unwrap();
+        // Blocks `create_dir_all(to_dir.join("sub"))` for the second
+        // destination: "sub" already exists under `to_dir`, but as a file.
+        std::fs::write(to.path().join("sub"), b"blocking file").unwrap();
+
+        let err = carry(
+            from.path(),
+            to.path(),
+            &["a.bin".to_string(), "sub/b.bin".to_string()],
+        )
+        .await
+        .expect_err("the second destination's parent cannot be created");
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+
+        assert!(
+            !from.path().join("a.bin").exists(),
+            "the first destination genuinely moved out of from_dir"
+        );
+        assert_eq!(
+            std::fs::read(to.path().join("a.bin")).unwrap(),
+            b"aaaa",
+            "the first destination genuinely moved into to_dir"
+        );
+        assert!(
+            from.path().join("sub/b.bin").exists(),
+            "the second destination is untouched by the failed move"
+        );
+        assert_eq!(
+            std::fs::read(to.path().join("sub")).unwrap(),
+            b"blocking file",
+            "the blocking file itself must be untouched"
         );
     }
 }
