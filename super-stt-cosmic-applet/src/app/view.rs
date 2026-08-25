@@ -3,24 +3,21 @@ use std::rc::Rc;
 
 use cosmic::{
     Element,
-    iced::{Alignment, Length, Size, widget as iced_widget},
+    iced::{Alignment, Length, widget as iced_widget},
     theme::{self, Button},
     widget::{self, button, container, layer_container, mouse_area},
 };
 
 use super::SuperSttApplet;
+use super::layout::AppletLayout;
 use crate::app::Message;
 use crate::models::state::{DaemonConnectionState, RecordingState};
 use crate::ui::views::{PopupContentParams, create_popup_content};
-use crate::util::u32_to_f32;
 
 // Cache icon bytes to avoid allocation on every render.
 static NORMAL_ICON: &[u8] = include_bytes!("../../resources/assets/super-stt-icon.svg");
 static TRANSPARENT_ICON: &[u8] = include_bytes!("../../resources/assets/transparent-icon.svg");
 static ERROR_ICON: &[u8] = include_bytes!("../../resources/assets/error-icon.svg");
-
-/// Visualization height in pixels.
-const VISUALIZATION_HEIGHT: f32 = 100.0;
 
 impl SuperSttApplet {
     pub(super) fn view_applet(&self) -> Element<'_, Message> {
@@ -31,24 +28,38 @@ impl SuperSttApplet {
         let should_show_working = matches!(self.recording_state, RecordingState::Processing)
             && self.config.ui.show_visualization;
 
-        let visualization_size = self.visualization_size();
+        // One box for every state, so switching between the icon and the
+        // visualizations never resizes the panel around us.
+        let layout = AppletLayout::compute(
+            &self.core.applet,
+            self.config.ui.show_visualization,
+            self.config.ui.applet_width,
+        );
 
         if self.daemon_state == DaemonConnectionState::Connected && should_show_visualizations {
-            let visualization_element =
-                container(mouse_area(self.visualization.clone()).on_press(Message::TogglePopup))
-                    .width(Length::Fixed(visualization_size.width))
-                    .height(Length::Fixed(visualization_size.height));
+            // The press handler wraps the padded box, not the canvas inside it,
+            // so the whole surface toggles the popup — the icon button does the
+            // same across its own padding.
+            let visualization_element = mouse_area(
+                container(self.visualization.clone())
+                    .width(Length::Fixed(layout.total.width))
+                    .height(Length::Fixed(layout.total.height))
+                    .padding(layout.padding),
+            )
+            .on_press(Message::TogglePopup);
 
             self.core
                 .applet
                 .autosize_window(visualization_element)
                 .into()
         } else if self.daemon_state == DaemonConnectionState::Connected && should_show_working {
-            let working_element = container(
-                mouse_area(self.working_animation.clone()).on_press(Message::TogglePopup),
+            let working_element = mouse_area(
+                container(self.working_animation.clone())
+                    .width(Length::Fixed(layout.total.width))
+                    .height(Length::Fixed(layout.total.height))
+                    .padding(layout.padding),
             )
-            .width(Length::Fixed(visualization_size.width))
-            .height(Length::Fixed(visualization_size.height));
+            .on_press(Message::TogglePopup);
 
             self.core.applet.autosize_window(working_element).into()
         } else {
@@ -65,17 +76,10 @@ impl SuperSttApplet {
                 (TRANSPARENT_ICON, false)
             };
 
-            let (applet_padding, _) = self.core.applet.suggested_padding(false);
-
             let icon_alignment = self.config.ui.icon_alignment.to_alignment();
 
-            let icon_button = transparent_icon_button(
-                icon_bytes,
-                symbolic,
-                visualization_size,
-                applet_padding,
-                icon_alignment,
-            );
+            let icon_button =
+                transparent_icon_button(icon_bytes, symbolic, &layout, icon_alignment);
 
             self.core.applet.autosize_window(icon_button).into()
         }
@@ -93,41 +97,13 @@ impl SuperSttApplet {
 
         self.core.applet.popup_container(content).into()
     }
-
-    /// Compute the applet's window size from the panel orientation and
-    /// user configuration. When visualizations are disabled the applet
-    /// shrinks to a compact icon-only square.
-    fn visualization_size(&self) -> Size {
-        let (suggested_width, suggested_height) = self.core.applet.suggested_window_size();
-        let (_, suggested_padding_h) = self.core.applet.suggested_padding(false);
-        let padding = f32::from(suggested_padding_h);
-        let horizontal = self.core.applet.is_horizontal();
-
-        if self.config.ui.show_visualization {
-            let configured_width = u32_to_f32(self.config.ui.applet_width);
-            if horizontal {
-                // Constrain by height but respect the user's width preference.
-                let available_height = u32_to_f32(suggested_height.get()) - (padding * 2.0);
-                let constrained_height = available_height.min(VISUALIZATION_HEIGHT + 8.0);
-                let constrained_width = configured_width.min(available_height * 8.0).max(60.0);
-                Size::new(constrained_width, constrained_height)
-            } else {
-                let available_width = u32_to_f32(suggested_width.get()) - (padding * 2.0);
-                let constrained_width = configured_width.min(available_width * 2.0).max(60.0);
-                Size::new(constrained_width, VISUALIZATION_HEIGHT + 8.0)
-            }
-        } else {
-            let icon_size = if horizontal {
-                (u32_to_f32(suggested_height.get()) - (padding * 2.0)).clamp(24.0, 48.0)
-            } else {
-                (u32_to_f32(suggested_width.get()) - (padding * 2.0)).clamp(24.0, 48.0)
-            };
-            Size::new(icon_size, icon_size)
-        }
-    }
 }
 
 /// Build the panel button wrapping `icon_bytes`.
+///
+/// `alignment` runs along the panel — horizontally on a top or bottom panel,
+/// vertically on a side one — so the glyph can be lined up with a neighbouring
+/// side applet's visualization. The cross axis is always centered.
 ///
 /// `symbolic` selects how the SVG is colored. When set, the icon is recolored
 /// wholesale to the panel's on-background color, which suits monochrome line
@@ -138,12 +114,10 @@ impl SuperSttApplet {
 fn transparent_icon_button<'a>(
     icon_bytes: &'static [u8],
     symbolic: bool,
-    visualization_size: Size,
-    applet_padding: u16,
+    layout: &AppletLayout,
     alignment: Alignment,
 ) -> cosmic::widget::Button<'a, Message> {
-    let icon_size =
-        (visualization_size.height.min(visualization_size.width) * 0.6).clamp(16.0, 32.0);
+    let icon_size = (layout.content.height.min(layout.content.width) * 0.6).clamp(16.0, 32.0);
 
     let mut icon = widget::icon(widget::icon::from_svg_bytes(icon_bytes))
         .width(Length::Fixed(icon_size))
@@ -157,17 +131,22 @@ fn transparent_icon_button<'a>(
         })));
     }
 
-    button::custom(
+    let aligned = if layout.horizontal {
         layer_container(icon)
             .align_x(alignment)
-            .center_y(Length::Fill),
-    )
-    .width(Length::Fixed(
-        visualization_size.width + 2f32 * f32::from(applet_padding),
-    ))
-    .height(Length::Fixed(
-        visualization_size.height + 2f32 * f32::from(applet_padding),
-    ))
-    .class(Button::AppletIcon)
-    .on_press_down(Message::TogglePopup)
+            .center_y(Length::Fill)
+    } else {
+        layer_container(icon)
+            .align_y(alignment)
+            .center_x(Length::Fill)
+    };
+
+    button::custom(aligned)
+        .width(Length::Fixed(layout.total.width))
+        .height(Length::Fixed(layout.total.height))
+        // Same inset as the visualizations get, so an aligned icon sits exactly
+        // where the visualization's edge would be.
+        .padding(layout.padding)
+        .class(Button::AppletIcon)
+        .on_press_down(Message::TogglePopup)
 }

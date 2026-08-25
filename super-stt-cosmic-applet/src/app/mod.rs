@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 mod init;
+mod layout;
 pub mod messages;
 mod subscription;
 mod update;

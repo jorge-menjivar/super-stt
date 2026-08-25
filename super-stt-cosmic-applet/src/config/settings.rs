@@ -43,7 +43,9 @@ pub struct UiConfig {
         deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub icon_alignment: IconAlignment,
-    pub applet_width: u32,        // Width in pixels
+    /// How far the visualization runs along the panel, in pixels:
+    /// its width on a top or bottom panel, its height on a side one.
+    pub applet_width: u32,
     pub show_visualization: bool, // Whether to show visualizations when recording
 }
 
