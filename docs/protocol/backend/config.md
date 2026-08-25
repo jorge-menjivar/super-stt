@@ -60,6 +60,7 @@ description = "Local Whisper speech-to-text."
 
 | Field        | Type   | Required        | Notes                                                                 |
 |--------------|--------|-----------------|-----------------------------------------------------------------------|
+| `id`         | string | for publication | Globally unique reverse-DNS identifier for the backend, e.g. `app.super-stt.voxtral`. Names the directory the backend is installed into. Required for a backend to be listed in the registry. |
 | `source`     | string | yes             | Canonical repository id for this backend. Becomes the `source` of every model it provides (see [identity](./contract.md#model-identity)). Must be unique across installed backends. |
 | `name`       | string | yes             | Human-readable display name.                                          |
 | `version`    | string | yes             | Backend version (semver).                                            |
@@ -76,6 +77,21 @@ literal `other`. License *expressions* (`MIT OR Apache-2.0`) are not accepted;
 declare a single identifier or `other`. A backend declaring `other` is still
 published — the app surfaces its license as "Other" — so the value is a
 conscious declaration, not an omission.
+
+#### `id` format
+
+- Lowercase ASCII letters, digits, `-`, and `.` only.
+- At least three `.`-separated segments.
+- Each segment is non-empty, begins with a letter, and does not end with `-`.
+- No leading, trailing, or consecutive dots.
+- At most 255 bytes.
+
+The reverse-DNS form namespaces a backend under a domain its author
+controls, so two unrelated authors may both publish a backend named
+`voxtral`: `app.super-stt.voxtral` and `com.example.voxtral` coexist.
+
+`id` names the install directory. It is not part of model identity, which is
+the `(name, source)` pair described in [contract.md](./contract.md).
 
 ## `[network]`
 
@@ -600,8 +616,27 @@ supported_devices   = ["none"]
   `label` is the human-readable text shown beside the input in the settings
   UI. Secret values are stored encrypted; option values are stored as
   plaintext.
-- `[backend].source` must be unique across installed backends; a collision
-  is a discovery error for the later backend.
+- `[backend].id`, when present, must match the [`id` format](#id-format)
+  above; a manifest declaring a malformed `id` fails to parse, and the
+  backend is skipped during discovery. It must also be unique across
+  installed backends, since it names the install directory: the registry
+  indexer refuses to publish an index in which two entries declare the same
+  `id`, and an install whose target directory already holds a backend
+  declaring a different `[backend].source` is refused rather than allowed to
+  replace it.
+- `[backend].source` must be unique across installed backends. When two
+  installed directories declare the same `source`, the daemon serves exactly
+  one of them and removes the other. The survivor is chosen in this order:
+  highest `[backend].version`; then the directory named after the backend's
+  own `[backend].id`, its canonical location; then the lexicographically
+  first directory name, so the outcome is stable across scans. Version leads
+  because a backend updated in place is the newer install whatever its
+  directory happens to be called. Before the other directory is removed,
+  every model file it holds that the survivor's manifest still declares at
+  the same `destination` *and* the same `url` is moved across, so resolving a
+  duplicate never costs a re-download. A directory whose `backend.toml` does
+  not parse is never a candidate — neither to survive nor to be removed:
+  without a readable `source` there is no evidence it is the same backend.
 - `[backend].description` is required: a one-line, human-readable summary
   shown in the registry/Browse listing. A manifest that omits it fails to
   parse, and the backend is skipped during discovery.

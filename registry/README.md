@@ -47,6 +47,20 @@ End users do not interact with this directory.
    release without the `backend.toml` asset is not installable and the indexer
    fails that entry.
 
+### `id`
+
+Every new entry must declare an `id`: a reverse-DNS identifier under a domain
+you control, e.g. `com.example.voxtral`. See
+[backend/config.md](../docs/protocol/backend/config.md) for the format.
+
+- It must be unique across the registry.
+- It must be identical to the `[backend].id` in the `backend.toml` published
+  by the release the entry points at. A release whose manifest declares a
+  different id, or none, is rejected.
+
+Entries that predate this requirement are accepted without an `id`. They stop
+being exempt as soon as they declare one.
+
 ## Removing or yanking
 
 - **Yank a specific bad version** without removing the backend: add

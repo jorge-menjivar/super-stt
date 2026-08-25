@@ -5,7 +5,6 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Request body for `POST /registry/backends/update`.
@@ -61,14 +60,6 @@ struct VersionLookup {
 /// index, not installed on disk); the caller's [`InflightMarker`] cleans up the
 /// inflight set.
 async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, ErrResp> {
-    let backends_dir = {
-        let c = s.daemon.config.read().await;
-        c.transcription.backends_dir.clone().map_or_else(
-            crate::stt_models::backends::default_backends_dir,
-            PathBuf::from,
-        )
-    };
-
     let Ok(index) = s.registry_client.get().await else {
         return Err(Box::new(super::registry_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -83,16 +74,11 @@ async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, Er
         )));
     };
 
-    // Determine installed version from disk.
+    // Matched by `source`, the same key `GET /registry/backends` uses to
+    // decide `update_available` — and the same helper, so the two never drift.
     let installed_version: Option<String> = {
-        let candidate = backends_dir.join(&entry.id).join("backend.toml");
-        if candidate.exists() {
-            crate::stt_models::backends::manifest::Manifest::load(&backends_dir.join(&entry.id))
-                .ok()
-                .map(|m| m.backend.version)
-        } else {
-            None
-        }
+        let backends = s.daemon.backends.read().await;
+        super::list::installed_version_for_source(&backends, &entry.source)
     };
 
     let Some(from_version) = installed_version else {

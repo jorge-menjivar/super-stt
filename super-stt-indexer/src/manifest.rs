@@ -17,6 +17,10 @@ pub enum ManifestError {
     VersionMismatch(String, Version),
     #[error("`backend.source = {0:?}` does not match registry entry repo `{1}`")]
     SourceMismatch(String, String),
+    /// The release manifest's `[backend].id` does not equal the `id` declared
+    /// by the `registry.toml` entry that points at this release.
+    #[error("manifest declares `id = {0:?}` but the registry entry declares {1:?}")]
+    IdMismatch(String, String),
     #[error("`backend.kind = \"wasm\"` requires `[assets.wasm]` but it is missing")]
     MissingWasmAsset,
     #[error("`backend.kind = \"subprocess\"` requires `[[assets.subprocess]]` but list is empty")]
@@ -42,6 +46,7 @@ pub fn validate(
     m: &Manifest,
     expected_version: &Version,
     expected_source: &str,
+    expected_id: Option<&str>,
 ) -> Result<(), ManifestError> {
     // Parse via the one shared version parser (v-prefix strip + semver) so the
     // manifest check can't drift from the daemon/app/resolve logic (Tier 1 #31).
@@ -65,6 +70,18 @@ pub fn validate(
         return Err(ManifestError::SourceMismatch(
             m.backend.source.clone(),
             expected_source.into(),
+        ));
+    }
+    // An entry that declares an `id` pins the release to it. This is the same
+    // class of check as `SourceMismatch`: whoever controls the entry controls
+    // which identity the release may claim, so a release cannot rename itself
+    // into another backend's install directory.
+    if let Some(want) = expected_id
+        && m.backend.id.as_deref() != Some(want)
+    {
+        return Err(ManifestError::IdMismatch(
+            m.backend.id.clone().unwrap_or_default(),
+            want.to_string(),
         ));
     }
     match m.backend.kind {
@@ -117,10 +134,61 @@ mod tests {
         wasm = "y.wasm"
     "#;
 
+    fn with_id(id: &str) -> String {
+        VALID.replace("[backend]", &format!("[backend]\n    id = \"{id}\""))
+    }
+
     #[test]
     fn validates_a_correct_wasm_manifest() {
         let m = Manifest::parse(VALID).unwrap();
-        validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap();
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None).unwrap();
+    }
+
+    #[test]
+    fn accepts_a_manifest_whose_id_matches_the_entry() {
+        let m = Manifest::parse(&with_id("com.example.y")).unwrap();
+        validate(
+            &m,
+            &Version::new(1, 0, 0),
+            "github.com/x/y",
+            Some("com.example.y"),
+        )
+        .expect("matching ids validate");
+    }
+
+    #[test]
+    fn rejects_a_manifest_whose_id_differs_from_the_entry() {
+        let m = Manifest::parse(&with_id("com.example.other")).unwrap();
+        let err = validate(
+            &m,
+            &Version::new(1, 0, 0),
+            "github.com/x/y",
+            Some("com.example.y"),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ManifestError::IdMismatch(_, _)), "{err:?}");
+    }
+
+    #[test]
+    fn rejects_a_manifest_with_no_id_when_the_entry_declares_one() {
+        let m = Manifest::parse(VALID).unwrap();
+        let err = validate(
+            &m,
+            &Version::new(1, 0, 0),
+            "github.com/x/y",
+            Some("com.example.y"),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ManifestError::IdMismatch(_, _)), "{err:?}");
+    }
+
+    /// A grandfathered entry declares no id, so the manifest is not pinned.
+    #[test]
+    fn accepts_any_id_when_the_entry_declares_none() {
+        let m = Manifest::parse(VALID).unwrap();
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None).expect("unpinned");
+        let m = Manifest::parse(&with_id("com.example.y")).unwrap();
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None).expect("unpinned");
     }
 
     /// The indexer fetches `backend.toml` from a backend's release, so it sees
@@ -143,7 +211,7 @@ mod tests {
             "
         );
         let m = Manifest::parse(&t).expect("a manifest declaring `provider` must still parse");
-        validate(&m, &Version::new(1, 0, 0), "github.com/x/y")
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None)
             .expect("`provider` must not fail indexer validation");
         assert_eq!(m.models.len(), 1);
     }
@@ -151,14 +219,14 @@ mod tests {
     #[test]
     fn rejects_version_mismatch() {
         let m = Manifest::parse(VALID).unwrap();
-        let err = validate(&m, &Version::new(2, 0, 0), "github.com/x/y").unwrap_err();
+        let err = validate(&m, &Version::new(2, 0, 0), "github.com/x/y", None).unwrap_err();
         assert!(matches!(err, ManifestError::VersionMismatch(_, _)));
     }
 
     #[test]
     fn rejects_source_mismatch() {
         let m = Manifest::parse(VALID).unwrap();
-        let err = validate(&m, &Version::new(1, 0, 0), "github.com/other/repo").unwrap_err();
+        let err = validate(&m, &Version::new(1, 0, 0), "github.com/other/repo", None).unwrap_err();
         assert!(matches!(err, ManifestError::SourceMismatch(_, _)));
     }
 
@@ -166,14 +234,14 @@ mod tests {
     fn accepts_monorepo_subpath_source() {
         let t = VALID.replace("github.com/x/y", "github.com/x/y/openai");
         let m = Manifest::parse(&t).unwrap();
-        validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap();
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None).unwrap();
     }
 
     #[test]
     fn rejects_source_that_only_shares_a_prefix_segment() {
         let t = VALID.replace("github.com/x/y", "github.com/x/yyy");
         let m = Manifest::parse(&t).unwrap();
-        let err = validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap_err();
+        let err = validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None).unwrap_err();
         assert!(matches!(err, ManifestError::SourceMismatch(_, _)));
     }
 
@@ -253,10 +321,10 @@ mod tests {
             type = "string"
         "#;
         let m = Manifest::parse(BASE).unwrap();
-        validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap();
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None).unwrap();
 
         let m = Manifest::parse(&format!("{BASE}\ndefault = \"https://api.y.com\"\n")).unwrap();
-        let err = validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap_err();
+        let err = validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None).unwrap_err();
         assert!(
             matches!(err, ManifestError::BaseUrlDefault),
             "expected BaseUrlDefault, got {err:?}"
@@ -265,7 +333,7 @@ mod tests {
         // Every other option keeps its default.
         let m =
             Manifest::parse(&BASE.replace(r#"name = "base_url""#, r#"name = "region""#)).unwrap();
-        validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap();
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None).unwrap();
     }
 
     #[test]
@@ -288,6 +356,6 @@ mod tests {
             cuda_major = 13
         "#;
         let m = Manifest::parse(t).unwrap();
-        validate(&m, &Version::new(1, 0, 0), "github.com/x/y").unwrap();
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None).unwrap();
     }
 }

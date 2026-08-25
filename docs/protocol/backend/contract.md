@@ -43,6 +43,9 @@ disambiguated by `source`. The daemon derives a model's `source` from the
 > [active_model.md](../endpoints/v1/active_model.md) and
 > [models.md](../endpoints/v1/models.md) are reconciled with this definition.
 
+> `[backend].id` is a separate identifier that names a backend's install
+> directory. It is not part of model identity.
+
 ## Transports
 
 | Concern             | WASM backend                            | Subprocess backend                       |

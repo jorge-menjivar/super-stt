@@ -33,6 +33,12 @@ pub struct Index {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexBackend {
     pub id: String,
+    /// The backend's reverse-DNS identifier from its release manifest. Names
+    /// the install directory. `None` for an entry that predates the field;
+    /// `id` remains the registry key and is unchanged, so a client that does
+    /// not read this field installs exactly where it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_id: Option<String>,
     pub source: String,
     pub version: String,
     pub tag: String,
@@ -173,6 +179,7 @@ impl IndexBackend {
         } = model_support(&m.models);
         Self {
             id,
+            backend_id: m.backend.id,
             source: m.backend.source,
             version,
             tag,
@@ -449,6 +456,7 @@ mod tests {
             min_client: MIN_CLIENT.into(),
             backends: vec![IndexBackend {
                 id: "openai".into(),
+                backend_id: None,
                 source: "github.com/x/y".into(),
                 version: "1.0.0".into(),
                 tag: "v1.0.0".into(),
@@ -530,6 +538,76 @@ mod tests {
         assert_eq!(b.options.len(), 1, "option must not be dropped");
         assert_eq!(b.options[0].label, "base_url", "label falls back to name");
         assert_eq!(b.options[0].r#type, "string", "type defaults to string");
+    }
+
+    /// `backend_id` carries the manifest's reverse-DNS `[backend].id`,
+    /// distinct from the caller-supplied registry `id`. An older daemon that
+    /// does not read this field still installs into the directory named by
+    /// `id`, so the two must never be conflated.
+    #[test]
+    fn from_manifest_propagates_the_manifest_id_into_backend_id() {
+        let m = crate::manifest::Manifest::parse(
+            r#"
+            [backend]
+            id = "app.super-stt.voxtral"
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "wasm"
+            entrypoint = "y.wasm"
+            contract = "v1"
+            description = "Test backend."
+
+            [assets]
+            wasm = "y.wasm"
+            "#,
+        )
+        .unwrap();
+
+        let b = IndexBackend::from_manifest(
+            id_from_source("github.com/x/y"),
+            m,
+            "1.0.0".into(),
+            "v1.0.0".into(),
+            IndexAssets::default(),
+            None,
+        );
+
+        assert_eq!(b.id, "y", "id stays the registry key, unaffected");
+        assert_eq!(b.backend_id.as_deref(), Some("app.super-stt.voxtral"));
+    }
+
+    /// A manifest that predates `[backend].id` yields a `None` `backend_id`,
+    /// not an empty string or a fallback to `source`.
+    #[test]
+    fn from_manifest_leaves_backend_id_none_when_the_manifest_has_none() {
+        let m = crate::manifest::Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "wasm"
+            entrypoint = "y.wasm"
+            contract = "v1"
+            description = "Test backend."
+
+            [assets]
+            wasm = "y.wasm"
+            "#,
+        )
+        .unwrap();
+
+        let b = IndexBackend::from_manifest(
+            id_from_source("github.com/x/y"),
+            m,
+            "1.0.0".into(),
+            "v1.0.0".into(),
+            IndexAssets::default(),
+            None,
+        );
+
+        assert!(b.backend_id.is_none());
     }
 
     /// Every install path — registry, custom repo, local dir — synthesizes its

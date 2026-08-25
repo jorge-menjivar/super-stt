@@ -291,6 +291,7 @@ mod tests {
     fn entry(kind: &str, subprocess: Vec<IndexSubprocessAsset>) -> IndexBackend {
         IndexBackend {
             id: "t".into(),
+            backend_id: None,
             source: "x".into(),
             version: "1.0.0".into(),
             tag: "v1.0.0".into(),

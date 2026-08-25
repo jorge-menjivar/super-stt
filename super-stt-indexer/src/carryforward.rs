@@ -59,6 +59,7 @@ mod tests {
     fn dummy(id: &str) -> IndexBackend {
         IndexBackend {
             id: id.into(),
+            backend_id: None,
             source: "x".into(),
             version: "1.0.0".into(),
             tag: "v1.0.0".into(),

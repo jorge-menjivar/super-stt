@@ -887,6 +887,7 @@ fn fixture_backend_devices(
     DiscoveredBackend {
         dir: std::path::PathBuf::from("/tmp").join(dir_name),
         source: source.to_string(),
+        id: None,
         name: name.to_string(),
         version: "1.0.0".to_string(),
         kind: "wasm".to_string(),

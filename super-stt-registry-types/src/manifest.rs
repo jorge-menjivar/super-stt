@@ -56,6 +56,12 @@ pub struct Manifest {
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BackendMeta {
+    /// Globally unique reverse-DNS identifier, e.g. `app.super-stt.voxtral`.
+    /// Names the directory this backend installs into. Optional on disk so a
+    /// backend installed before the field existed keeps loading; required for
+    /// registry listing, which the indexer enforces.
+    #[serde(default)]
+    pub id: Option<String>,
     /// Canonical repository id, e.g. `github.com/<owner>/<repo>`. Becomes the
     /// `source` of every model this backend provides and must be unique
     /// across installed backends. For a monorepo, namespace it under the repo
@@ -570,6 +576,9 @@ pub enum ManifestError {
     /// The `entrypoint` field is not a safe relative path.
     #[error("backend.toml entrypoint {0:?} is not a safe relative path")]
     UnsafeEntrypoint(String),
+    /// `[backend].id` is present but not a well-formed reverse-DNS id.
+    #[error("`[backend].id` is not a valid reverse-DNS id: {0}")]
+    InvalidId(String),
     /// A `[[models.files]]` `destination` is not a safe relative path.
     #[error("backend.toml file destination {0:?} is not a safe relative path")]
     UnsafeDestination(String),
@@ -640,6 +649,14 @@ impl Manifest {
         let mut m: Self = toml::from_str(text)?;
         if !crate::is_safe_relative_path(&m.backend.entrypoint) {
             return Err(ManifestError::UnsafeEntrypoint(m.backend.entrypoint));
+        }
+        // Validated in the canonical parser so the daemon (which joins it onto
+        // the backends dir) and the indexer (which pins it against
+        // registry.toml) inherit one definition.
+        if let Some(id) = &m.backend.id
+            && !crate::backend_id::is_valid(id)
+        {
+            return Err(ManifestError::InvalidId(id.clone()));
         }
         // Each file's `destination` is joined onto the backend dir before the
         // daemon writes the download; reject any value that would escape it.
@@ -722,6 +739,39 @@ impl Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A minimal manifest with no `[backend].id`, for tests that only care
+    /// about behavior around the field.
+    const VALID: &str = r#"
+        [backend]
+        source = "github.com/x/y"
+        name = "Y"
+        version = "1.0.0"
+        kind = "wasm"
+        entrypoint = "y.wasm"
+        contract = "v1"
+        description = "Test backend."
+        "#;
+
+    #[test]
+    fn parses_a_manifest_declaring_a_backend_id() {
+        let t = VALID.replace("[backend]", "[backend]\n    id = \"app.super-stt.voxtral\"");
+        let m = Manifest::parse(&t).expect("a manifest with a valid id parses");
+        assert_eq!(m.backend.id.as_deref(), Some("app.super-stt.voxtral"));
+    }
+
+    #[test]
+    fn a_manifest_without_an_id_still_parses() {
+        let m = Manifest::parse(VALID).expect("id is optional on disk");
+        assert!(m.backend.id.is_none());
+    }
+
+    #[test]
+    fn rejects_a_malformed_backend_id() {
+        let t = VALID.replace("[backend]", "[backend]\n    id = \"voxtral\"");
+        let err = Manifest::parse(&t).unwrap_err();
+        assert!(matches!(err, ManifestError::InvalidId(_)));
+    }
 
     #[test]
     fn parses_wasm_manifest_with_secrets_and_options() {

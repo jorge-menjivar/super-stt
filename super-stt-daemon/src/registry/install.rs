@@ -23,6 +23,14 @@ use super_stt_registry_types::verify::{
 const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// Slack allowed over a declared asset size before a download is rejected.
 const DOWNLOAD_SIZE_MARGIN: u64 = 1024 * 1024;
+/// The name of the shared staging root every install/update stages into
+/// before the atomic swap: `<backends_dir>/.staging/<id>-<version>`. It is
+/// a direct child of `backends_dir`, exactly like a backend's own install
+/// directory, but it is never one itself — a directory scan over
+/// `backends_dir` must always skip it explicitly rather than rely on its
+/// manifest lookup happening to fail one level too shallow.
+const STAGING_DIR_NAME: &str = ".staging";
+
 /// The byte ceiling for a download given the index-declared `expected_size`
 /// (0 when unknown).
 fn download_cap(expected_size: u64) -> u64 {
@@ -114,10 +122,11 @@ where
     download_and_verify(p, entry, selection, &partial_path).await?;
 
     (p.on_progress)(P::Extracting, None);
-    let staging = p
-        .backends_dir
-        .join(".staging")
-        .join(format!("{}-{}", entry.id, entry.version));
+    let staging = p.backends_dir.join(STAGING_DIR_NAME).join(format!(
+        "{}-{}",
+        crate::registry::install_dir_name(entry),
+        entry.version
+    ));
     if staging.exists() {
         let _ = fs::remove_dir_all(&staging).await;
     }
@@ -154,7 +163,20 @@ where
     }
 
     (p.on_progress)(P::Installing, None);
-    let final_path = p.backends_dir.join(&entry.id);
+    let final_path = p
+        .backends_dir
+        .join(crate::registry::install_dir_name(entry));
+    // Before anything else touches the filesystem outside `staging`: the
+    // swap below replaces whatever sits at `final_path`, and `preserve_models`
+    // moves model files out of the directory currently serving this `source`.
+    // Bailing here leaves both of those untouched.
+    ensure_dir_free_for(&final_path, &entry.source)?;
+    let inherit_from = previous_dir_for(&p.backends_dir, &entry.source)
+        .await
+        .unwrap_or_else(|| final_path.clone());
+    preserve_models(&staging, &inherit_from)
+        .await
+        .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
     swap_into_place(&staging, &final_path)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
@@ -260,10 +282,11 @@ where
 
     (p.on_progress)(P::Resolving, None);
 
-    let staging = p
-        .backends_dir
-        .join(".staging")
-        .join(format!("{}-{}", entry.id, entry.version));
+    let staging = p.backends_dir.join(STAGING_DIR_NAME).join(format!(
+        "{}-{}",
+        crate::registry::install_dir_name(entry),
+        entry.version
+    ));
     if staging.exists() {
         let _ = fs::remove_dir_all(&staging).await;
     }
@@ -284,7 +307,20 @@ where
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
 
     (p.on_progress)(P::Installing, None);
-    let final_path = p.backends_dir.join(&entry.id);
+    let final_path = p
+        .backends_dir
+        .join(crate::registry::install_dir_name(entry));
+    // Before anything else touches the filesystem outside `staging`: the
+    // swap below replaces whatever sits at `final_path`, and `preserve_models`
+    // moves model files out of the directory currently serving this `source`.
+    // Bailing here leaves both of those untouched.
+    ensure_dir_free_for(&final_path, &entry.source)?;
+    let inherit_from = previous_dir_for(&p.backends_dir, &entry.source)
+        .await
+        .unwrap_or_else(|| final_path.clone());
+    preserve_models(&staging, &inherit_from)
+        .await
+        .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
     swap_into_place(&staging, &final_path)
         .await
         .map_err(|e| PipelineError::Io(e).as_typed(P::Installing))?;
@@ -389,6 +425,170 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Scan the immediate children of `backends_dir` for the one whose manifest
+/// declares `source`, skipping `exclude` (when given) and always skipping
+/// [`STAGING_DIR_NAME`].
+///
+/// The `.staging` skip is an explicit rule, not an accident of directory
+/// depth: a real staged install's manifest lives one level *deeper*
+/// (`.staging/<id>-<version>/backend.toml`), so a naive scan happens to be
+/// safe today only because `Manifest::load(backends_dir/.staging)` fails.
+/// Callers that only read (like this one) would silently no-op if that
+/// stopped being true; [`retire_previous_dir`], which calls `remove_dir_all`
+/// on what this returns, would destroy the shared staging root instead. One
+/// scan with one skip rule means there is nowhere for the two to drift apart.
+///
+/// A directory whose manifest will not parse is never a match: without a
+/// readable `source` there is no evidence it is the same backend.
+async fn find_serving(
+    backends_dir: &Path,
+    source: &str,
+    exclude: Option<&Path>,
+) -> Option<PathBuf> {
+    use super_stt_registry_types::manifest::Manifest;
+
+    let mut entries = tokio::fs::read_dir(backends_dir).await.ok()?;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let dir = entry.path();
+        if dir.file_name().is_some_and(|n| n == STAGING_DIR_NAME) {
+            continue;
+        }
+        if exclude.is_some_and(|e| dir == e) || !dir.is_dir() {
+            continue;
+        }
+        if Manifest::load(&dir).is_ok_and(|m| m.backend.source == source) {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+/// The directory currently serving `source`, if any — the one whose model
+/// files a migrating install should inherit. Equals `final_path` for an
+/// ordinary in-place update, where `final_path` is itself the directory
+/// already serving `source`.
+async fn previous_dir_for(backends_dir: &Path, source: &str) -> Option<PathBuf> {
+    find_serving(backends_dir, source, None).await
+}
+
+/// Remove the directory that used to serve `source`, when the install just
+/// landed somewhere else (a migration).
+///
+/// Called only after a successful swap, so the backend is already being
+/// served from `keep` and removing the predecessor cannot take the last copy.
+///
+/// Returns the predecessor it found, or `None` when there was nothing to
+/// retire. A failed `remove_dir_all` is logged but still reports the
+/// predecessor: `keep` is the live directory either way, so a caller
+/// repointing at it is right regardless, and the directory left behind is a
+/// duplicate that the next refresh reconciles.
+pub async fn retire_previous_dir(
+    backends_dir: &Path,
+    source: &str,
+    keep: &Path,
+) -> Option<PathBuf> {
+    let dir = find_serving(backends_dir, source, Some(keep)).await?;
+    match tokio::fs::remove_dir_all(&dir).await {
+        Ok(()) => log::info!(
+            "Retired {} after installing {source} into {}",
+            dir.display(),
+            keep.display()
+        ),
+        Err(e) => log::error!(
+            "Failed to retire {}: {e}; it will be reconciled on a later refresh",
+            dir.display()
+        ),
+    }
+    Some(dir)
+}
+
+/// Move model files that survive the replacement from the installed directory
+/// into `staging`, returning the bytes moved.
+///
+/// Runs before the swap so the directory that lands is already complete and
+/// the swap stays atomic. Both paths live under the backends directory, so the
+/// moves are same-filesystem renames rather than multi-gigabyte copies.
+///
+/// A missing or unparseable manifest on either side carries nothing: without
+/// both file lists there is no way to tell an unchanged file from a changed
+/// one, and re-downloading is the safe answer.
+///
+/// `carry_over::carry` moves files one at a time with no rollback, so an I/O
+/// error partway through (e.g. file 3 of 5) aborts this function — and the
+/// install, before the swap — with files 1–2 already moved out of
+/// `final_path` and into `staging`. The live directory at `final_path` keeps
+/// serving but is now missing those files; the next model load re-downloads
+/// them via `usable_existing`'s hash check, so nothing wrong is ever served.
+///
+/// The one gap that safety net does not cover: `run`/`run_local` unconditionally
+/// wipe a stale `.staging/<id>-<version>` directory before reusing it, so an
+/// ordinary "retry the same version" after a partial failure destroys the
+/// very files this function already carried into it — a maintainer sees the
+/// update "succeed" having silently re-downloaded weights it should have
+/// preserved. This is a known, accepted gap (end state is still correct
+/// content), not a bug to fix here.
+async fn preserve_models(staging: &Path, final_path: &Path) -> std::io::Result<u64> {
+    use super_stt_registry_types::manifest::Manifest;
+
+    let (Ok(old), Ok(new)) = (Manifest::load(final_path), Manifest::load(staging)) else {
+        return Ok(0);
+    };
+    let keep = crate::registry::carry_over::survivors(&old, &new);
+    if keep.is_empty() {
+        return Ok(0);
+    }
+    let moved = crate::registry::carry_over::carry(final_path, staging, &keep).await?;
+    log::info!(
+        "Preserved {} model file(s) ({moved} bytes) across the update of {}",
+        keep.len(),
+        final_path.display()
+    );
+    Ok(moved)
+}
+
+/// Refuse to install over a directory that already serves a *different*
+/// backend.
+///
+/// [`crate::registry::install_dir_name`] names `final_path` from the entry's
+/// `backend_id`, and that value is only ever pinned to the backend it claims
+/// to be on part of one route: the registry pins it for an entry whose
+/// `registry.toml` row declares an `id`. A custom repository, a locally
+/// staged directory, and a registry entry that predates the identifier all
+/// publish whatever `[backend].id` their manifest declares — so any of them
+/// can name a directory another backend is already installed in.
+/// [`swap_into_place`] renames whatever sits there aside and deletes it, so
+/// without this check an install could destroy an unrelated backend and the
+/// multi-gigabyte model files under it. `source` is the identity the daemon
+/// resolves backends and models by, so it is what identity is judged on here.
+///
+/// A directory whose manifest does not parse is not a claim of identity and
+/// does not block the install: replacing a half-written or corrupt install is
+/// the ordinary repair path, and refusing it would leave the user with no way
+/// forward.
+///
+/// # Errors
+/// Returns `(Installing, InstallDirConflict)` when `final_path` holds a
+/// manifest declaring a different `source`.
+fn ensure_dir_free_for(
+    final_path: &Path,
+    source: &str,
+) -> Result<(), (InstallPhase, InstallError)> {
+    use super_stt_registry_types::manifest::Manifest;
+
+    let Ok(occupant) = Manifest::load(final_path) else {
+        return Ok(());
+    };
+    if occupant.backend.source == source {
+        return Ok(());
+    }
+    log::error!(
+        "Refusing to install {source} into {}: that directory already serves {}",
+        final_path.display(),
+        occupant.backend.source
+    );
+    Err((InstallPhase::Installing, InstallError::InstallDirConflict))
 }
 
 /// Move `staging` into `final_path` as atomically as the filesystem allows:
@@ -704,6 +904,7 @@ async fn download_manifest_bytes(
 mod tests {
     use super::*;
     use crate::registry::index_schema::*;
+    use crate::registry::install_dir_name;
 
     const PINNED_MANIFEST: &str = r#"
 [backend]
@@ -765,6 +966,7 @@ supported_devices = ["cpu"]
     fn minimal_entry() -> IndexBackend {
         IndexBackend {
             id: "x".into(),
+            backend_id: None,
             source: "github.com/x/y".into(),
             version: "1.0.0".into(),
             tag: "v1.0.0".into(),
@@ -784,6 +986,103 @@ supported_devices = ["cpu"]
             assets: IndexAssets::default(),
             index_stale: None,
             manifest: None,
+        }
+    }
+
+    fn index_entry(id: &str, backend_id: Option<&str>) -> IndexBackend {
+        let mut e = minimal_entry();
+        e.id = id.to_string();
+        e.backend_id = backend_id.map(str::to_string);
+        e
+    }
+
+    #[test]
+    fn the_install_dir_is_the_backend_id_when_one_is_declared() {
+        let e = index_entry("voxtral", Some("app.super-stt.voxtral"));
+        assert_eq!(install_dir_name(&e), "app.super-stt.voxtral");
+    }
+
+    #[test]
+    fn the_install_dir_falls_back_to_the_registry_key() {
+        let e = index_entry("voxtral", None);
+        assert_eq!(install_dir_name(&e), "voxtral");
+    }
+
+    /// `backend_id` arrives from `index.json` over the network. Even if the
+    /// registry-client boundary (`retain_safe_backends`) failed to sanitize
+    /// it, `install_dir_name` must never hand back a value that would let the
+    /// caller's `backends_dir.join(...)` escape the backends directory.
+    #[test]
+    fn install_dir_name_falls_back_when_backend_id_is_unsafe() {
+        for unsafe_id in [
+            "..",
+            "../../../../home/jorge/.ssh",
+            "/etc/passwd",
+            "a/b",
+            "",
+        ] {
+            let e = index_entry("voxtral", Some(unsafe_id));
+            assert_eq!(
+                install_dir_name(&e),
+                "voxtral",
+                "unsafe backend_id {unsafe_id:?} must not be used"
+            );
+        }
+    }
+
+    /// `.staging` is a legal path component, so a component-level safety
+    /// check waves it through — but it names the shared staging root every
+    /// install writes into, and resolving an install directory to it would
+    /// point the swap at every in-flight install at once. `backend_id` is
+    /// therefore held to the full `[backend].id` format rule, which
+    /// `.staging` fails (a leading dot, and one segment).
+    #[test]
+    fn install_dir_name_rejects_the_shared_staging_root() {
+        assert!(
+            super_stt_shared::registry::is_safe_component(".staging"),
+            "the premise: a component-level check accepts .staging"
+        );
+        let e = index_entry("voxtral", Some(".staging"));
+        assert_eq!(install_dir_name(&e), "voxtral");
+    }
+
+    /// More broadly: `index.json` is the only route into an install directory
+    /// name that does not pass through `Manifest::parse`, so it must apply the
+    /// same `[backend].id` rule rather than a looser one.
+    #[test]
+    fn install_dir_name_rejects_a_malformed_backend_id() {
+        for malformed in [
+            ".staging",
+            "voxtral",
+            "app.voxtral",
+            "App.Super-STT.Voxtral",
+            "app.super_stt.voxtral",
+            "app..voxtral",
+            "app.super-stt.voxtral-",
+        ] {
+            let e = index_entry("registry-key", Some(malformed));
+            assert_eq!(
+                install_dir_name(&e),
+                "registry-key",
+                "malformed backend_id {malformed:?} must not name a directory"
+            );
+        }
+    }
+
+    /// The same traversal cases, but proving the property that actually
+    /// matters: joining the returned name onto the backends dir never
+    /// produces a path outside it.
+    #[test]
+    fn install_dir_name_never_escapes_the_backends_dir_when_joined() {
+        let backends_dir = Path::new("/var/lib/super-stt/backends");
+        for unsafe_id in ["..", "../../../../home/jorge/.ssh", "/etc/passwd", "a/b"] {
+            let e = index_entry("voxtral", Some(unsafe_id));
+            let joined = backends_dir.join(install_dir_name(&e));
+            assert!(
+                joined.starts_with(backends_dir),
+                "backend_id {unsafe_id:?} escaped: {}",
+                joined.display()
+            );
         }
     }
 
@@ -938,6 +1237,571 @@ supported_devices = ["cpu"]
         let err =
             copy_staged_backend(src.path(), &dst.path().join("out"), "wasm", "y.wasm").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    /// Defect 2: replacing a backend directory took its downloaded weights
+    /// with it. The staged manifest declares the same file at the same URL, so
+    /// the bytes move across instead of re-downloading.
+    #[tokio::test]
+    async fn preserve_models_moves_unchanged_weights_into_staging() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join(".staging/y-1.0.1");
+        let final_path = root.path().join("y");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::create_dir_all(final_path.join("models/m")).unwrap();
+
+        let toml = |version: &str| {
+            format!(
+                r#"
+[backend]
+    source     = "github.com/x/y"
+    name       = "Y"
+    version    = "{version}"
+    kind       = "subprocess"
+    entrypoint = "y"
+    contract   = "v1"
+    license    = "Apache-2.0"
+    description = "Test backend."
+
+[[assets.subprocess]]
+    file   = "y.tar.gz"
+    target = "x86_64-unknown-linux-gnu"
+    accel  = ["cpu"]
+
+[[models]]
+    name                = "m"
+    primary_language    = "en"
+    supported_languages = ["en"]
+    supported_devices   = ["cpu"]
+    files = [
+        {{ url = "https://h/a.bin", destination = "models/m/a.bin" }},
+    ]
+"#
+            )
+        };
+        std::fs::write(final_path.join("backend.toml"), toml("1.0.0")).unwrap();
+        std::fs::write(staging.join("backend.toml"), toml("1.0.1")).unwrap();
+        std::fs::write(final_path.join("models/m/a.bin"), b"weights").unwrap();
+
+        let moved = super::preserve_models(&staging, &final_path).await.unwrap();
+        assert_eq!(moved, 7);
+        assert!(staging.join("models/m/a.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn preserve_models_is_a_no_op_without_an_installed_manifest() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        let moved = super::preserve_models(&staging, &root.path().join("absent"))
+            .await
+            .unwrap();
+        assert_eq!(moved, 0);
+    }
+
+    /// The other half of the predicate's contract at this integration layer:
+    /// a file whose `url` changed between the two manifests must be left
+    /// behind under the installed dir, not carried into staging, so the next
+    /// model load re-downloads the new bytes instead of serving stale ones.
+    #[tokio::test]
+    async fn preserve_models_leaves_a_changed_url_behind() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join(".staging/y-1.0.1");
+        let final_path = root.path().join("y");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::create_dir_all(final_path.join("models/m")).unwrap();
+
+        let toml = |version: &str, url: &str| {
+            format!(
+                r#"
+[backend]
+    source     = "github.com/x/y"
+    name       = "Y"
+    version    = "{version}"
+    kind       = "subprocess"
+    entrypoint = "y"
+    contract   = "v1"
+    license    = "Apache-2.0"
+    description = "Test backend."
+
+[[assets.subprocess]]
+    file   = "y.tar.gz"
+    target = "x86_64-unknown-linux-gnu"
+    accel  = ["cpu"]
+
+[[models]]
+    name                = "m"
+    primary_language    = "en"
+    supported_languages = ["en"]
+    supported_devices   = ["cpu"]
+    files = [
+        {{ url = "{url}", destination = "models/m/a.bin" }},
+    ]
+"#
+            )
+        };
+        std::fs::write(
+            final_path.join("backend.toml"),
+            toml("1.0.0", "https://h/a.bin"),
+        )
+        .unwrap();
+        std::fs::write(
+            staging.join("backend.toml"),
+            toml("1.0.1", "https://h/a-v2.bin"),
+        )
+        .unwrap();
+        std::fs::write(final_path.join("models/m/a.bin"), b"weights").unwrap();
+
+        let moved = super::preserve_models(&staging, &final_path).await.unwrap();
+        assert_eq!(moved, 0);
+        assert!(
+            final_path.join("models/m/a.bin").exists(),
+            "the old file must stay put so the daemon re-downloads the new URL"
+        );
+        assert!(!staging.join("models/m/a.bin").exists());
+    }
+
+    /// A backend directory holding `source`, with one downloaded weight file
+    /// under it — the thing an unguarded swap would delete.
+    fn occupied_backend_dir(dir: &Path, source: &str) {
+        std::fs::create_dir_all(dir.join("models/m")).unwrap();
+        std::fs::write(
+            dir.join("backend.toml"),
+            format!(
+                r#"
+[backend]
+source = "{source}"
+name = "Occupant"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "occupant"
+contract = "v1"
+description = "Test backend."
+"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(dir.join("models/m/a.bin"), b"expensive weights").unwrap();
+    }
+
+    #[test]
+    fn ensure_dir_free_for_allows_an_update_of_the_same_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("app.super-stt.voxtral");
+        occupied_backend_dir(&dir, "github.com/x/voxtral");
+        ensure_dir_free_for(&dir, "github.com/x/voxtral").expect("same source is an update");
+    }
+
+    /// Replacing a half-written or corrupt install is the ordinary repair
+    /// path: a directory whose manifest does not parse makes no claim of
+    /// identity, so it must not block an install.
+    #[test]
+    fn ensure_dir_free_for_allows_an_unreadable_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("backend.toml"), b"this is not toml = = =").unwrap();
+        ensure_dir_free_for(&dir, "github.com/x/voxtral")
+            .expect("a corrupt install is replaceable");
+
+        let empty = root.path().join("brand-new");
+        ensure_dir_free_for(&empty, "github.com/x/voxtral").expect("a fresh install has no dir");
+    }
+
+    #[test]
+    fn ensure_dir_free_for_refuses_a_directory_serving_another_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("app.super-stt.voxtral");
+        occupied_backend_dir(&dir, "github.com/x/voxtral");
+        let err = ensure_dir_free_for(&dir, "github.com/someone/thing").unwrap_err();
+        assert_eq!(err.1, InstallError::InstallDirConflict);
+    }
+
+    /// The whole reason the guard exists. `install_dir_name` reads
+    /// `backend_id`, which nothing pins to the backend that declares it on
+    /// the local-dir route — an operator-staged `backend.toml` can name any
+    /// `[backend].id` it likes. Landing on another backend's directory must
+    /// fail the install outright, because `swap_into_place` would otherwise
+    /// rename that directory aside and delete it, weights and all.
+    #[tokio::test]
+    async fn run_local_refuses_to_install_over_a_different_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let backends_dir = root.path().join("backends");
+        let victim = backends_dir.join("app.super-stt.voxtral");
+        occupied_backend_dir(&victim, "github.com/x/voxtral");
+        let victim_manifest = std::fs::read(victim.join("backend.toml")).unwrap();
+
+        // The staged import: a different backend, but claiming Voxtral's
+        // install directory via `backend_id`.
+        let staged = root.path().join("staged");
+        std::fs::create_dir_all(&staged).unwrap();
+        std::fs::write(
+            staged.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/someone/thing"
+id = "app.super-stt.voxtral"
+name = "Thing"
+version = "9.9.9"
+kind = "subprocess"
+entrypoint = "thing"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+        std::fs::write(staged.join("thing"), b"#!/bin/sh\n").unwrap();
+
+        let mut entry = minimal_entry();
+        entry.id = "thing".into();
+        entry.backend_id = Some("app.super-stt.voxtral".into());
+        entry.source = "github.com/someone/thing".into();
+        entry.entrypoint = "thing".into();
+
+        let pipeline = Pipeline {
+            backends_dir: backends_dir.clone(),
+            cache_dir: root.path().join("cache"),
+            http: reqwest::Client::new(),
+            on_progress: Arc::new(|_, _| {}),
+        };
+        let err = run_local(&pipeline, &entry, &staged)
+            .await
+            .expect_err("installing over another backend must be refused");
+
+        assert_eq!(err.1, InstallError::InstallDirConflict);
+        assert_eq!(err.0, InstallPhase::Installing);
+        assert!(
+            victim.join("models/m/a.bin").exists(),
+            "the occupant's downloaded weights must survive untouched"
+        );
+        assert_eq!(
+            std::fs::read(victim.join("backend.toml")).unwrap(),
+            victim_manifest,
+            "the occupant's manifest must be exactly as it was"
+        );
+        let mut sidecar = victim.as_os_str().to_owned();
+        sidecar.push(".old");
+        assert!(
+            !Path::new(&sidecar).exists(),
+            "the swap must not have started"
+        );
+    }
+
+    /// The same guard on the registry/custom-repo route, which reaches the
+    /// swap through [`run`] rather than [`run_local`]. Everything up to the
+    /// install directory is real: the asset and the pinned manifest are
+    /// downloaded and verified before the conflict is detected.
+    #[tokio::test]
+    async fn run_refuses_to_install_over_a_different_backend() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let root = tempfile::tempdir().unwrap();
+        let backends_dir = root.path().join("backends");
+        let victim = backends_dir.join("app.super-stt.voxtral");
+        occupied_backend_dir(&victim, "github.com/x/voxtral");
+
+        let component = b"\0asm-not-really".to_vec();
+        let manifest = r#"
+[backend]
+source = "github.com/someone/thing"
+id = "app.super-stt.voxtral"
+name = "Thing"
+version = "9.9.9"
+kind = "wasm"
+entrypoint = "thing.wasm"
+contract = "v1"
+description = "Test backend."
+
+[[models]]
+name = "m"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu"]
+"#;
+        let mut server = mockito::Server::new_async().await;
+        let asset_mock = server
+            .mock("GET", "/thing.wasm")
+            .with_status(200)
+            .with_body(component.as_slice())
+            .create_async()
+            .await;
+        let manifest_mock = server
+            .mock("GET", "/backend.toml")
+            .with_status(200)
+            .with_body(manifest)
+            .create_async()
+            .await;
+
+        let mut entry = minimal_entry();
+        entry.id = "thing".into();
+        // The poisoned value: a legitimate `source`, but an `id` naming a
+        // directory that belongs to someone else.
+        entry.backend_id = Some("app.super-stt.voxtral".into());
+        entry.source = "github.com/someone/thing".into();
+        entry.kind = "wasm".into();
+        entry.entrypoint = "thing.wasm".into();
+        entry.version = "9.9.9".into();
+        entry.assets.wasm = Some(IndexAsset {
+            url: format!("{}/thing.wasm", server.url()),
+            size: component.len() as u64,
+            sha256: sha_hex(&component),
+        });
+        entry.manifest = Some(IndexAsset {
+            url: format!("{}/backend.toml", server.url()),
+            size: manifest.len() as u64,
+            sha256: sha_hex(manifest.as_bytes()),
+        });
+
+        let pipeline = Pipeline {
+            backends_dir: backends_dir.clone(),
+            cache_dir: root.path().join("cache"),
+            http: reqwest::Client::new(),
+            on_progress: Arc::new(|_, _| {}),
+        };
+        let err = run(&pipeline, &entry, &Selection::Wasm)
+            .await
+            .expect_err("installing over another backend must be refused");
+
+        asset_mock.assert_async().await;
+        manifest_mock.assert_async().await;
+        assert_eq!(err.1, InstallError::InstallDirConflict);
+        assert!(
+            victim.join("models/m/a.bin").exists(),
+            "the occupant's downloaded weights must survive untouched"
+        );
+        assert!(
+            !victim.join("thing.wasm").exists(),
+            "nothing from the refused install may reach the occupant's directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn retire_previous_dir_removes_the_superseded_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("super-stt-voxtral");
+        let new = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(
+            old.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/x/super-stt-voxtral"
+name = "Voxtral"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "voxtral"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+
+        let removed =
+            super::retire_previous_dir(root.path(), "github.com/x/super-stt-voxtral", &new).await;
+
+        assert_eq!(removed.as_deref(), Some(old.as_path()));
+        assert!(!old.exists(), "the superseded directory is gone");
+        assert!(new.exists(), "the new directory survives");
+    }
+
+    #[tokio::test]
+    async fn retire_previous_dir_never_removes_the_directory_it_was_told_to_keep() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/x/super-stt-voxtral"
+name = "Voxtral"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "voxtral"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+
+        let removed =
+            super::retire_previous_dir(root.path(), "github.com/x/super-stt-voxtral", &dir).await;
+
+        assert!(removed.is_none());
+        assert!(dir.exists());
+    }
+
+    /// A directory whose manifest fails to parse carries no evidence it is the
+    /// same backend, so it must never be treated as a retirement candidate —
+    /// even if it happens to sit alongside `keep` and nothing else claims the
+    /// source.
+    #[tokio::test]
+    async fn retire_previous_dir_skips_a_directory_whose_manifest_does_not_parse() {
+        let root = tempfile::tempdir().unwrap();
+        let unparseable = root.path().join("mystery-dir");
+        let keep = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(&unparseable).unwrap();
+        std::fs::create_dir_all(&keep).unwrap();
+        std::fs::write(unparseable.join("backend.toml"), "this is not toml = = =").unwrap();
+
+        let removed =
+            super::retire_previous_dir(root.path(), "github.com/x/super-stt-voxtral", &keep).await;
+
+        assert!(removed.is_none());
+        assert!(
+            unparseable.exists(),
+            "a directory with an unparseable manifest must never be retired"
+        );
+    }
+
+    #[tokio::test]
+    async fn previous_dir_for_finds_the_directory_serving_a_source() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("super-stt-voxtral");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(
+            old.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/x/super-stt-voxtral"
+name = "Voxtral"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "voxtral"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+
+        let found = super::previous_dir_for(root.path(), "github.com/x/super-stt-voxtral").await;
+
+        assert_eq!(found.as_deref(), Some(old.as_path()));
+    }
+
+    #[tokio::test]
+    async fn previous_dir_for_is_none_when_no_directory_serves_the_source() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("something-else")).unwrap();
+
+        let found = super::previous_dir_for(root.path(), "github.com/x/super-stt-voxtral").await;
+
+        assert!(found.is_none());
+    }
+
+    /// `.staging` (the shared root every install/update stages into) sits one
+    /// level inside `backends_dir`, exactly where a real backend directory
+    /// would. Both scans are safe today only because a real staged install's
+    /// manifest lives one level *deeper* (`.staging/<id>-<version>/backend.toml`),
+    /// so a plain `Manifest::load(backends_dir/.staging)` fails. Nothing
+    /// enforces that shape, so this proves `.staging` is skipped by an
+    /// explicit rule rather than by accident — a manifest ever placed one
+    /// level shallower (a bug, a manual recovery) must never turn into
+    /// `retire_previous_dir` calling `remove_dir_all` on the shared staging
+    /// root out from under every in-flight install.
+    #[tokio::test]
+    async fn the_staging_root_is_never_matched_as_a_backend_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let staging_root = root.path().join(super::STAGING_DIR_NAME);
+        std::fs::create_dir_all(&staging_root).unwrap();
+        std::fs::write(
+            staging_root.join("backend.toml"),
+            r#"
+[backend]
+source = "github.com/x/super-stt-voxtral"
+name = "Voxtral"
+version = "1.0.0"
+kind = "subprocess"
+entrypoint = "voxtral"
+contract = "v1"
+description = "Test backend."
+"#,
+        )
+        .unwrap();
+        let keep = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(&keep).unwrap();
+
+        let found = super::previous_dir_for(root.path(), "github.com/x/super-stt-voxtral").await;
+        assert!(
+            found.is_none(),
+            ".staging must never be matched as a backend directory"
+        );
+
+        let removed =
+            super::retire_previous_dir(root.path(), "github.com/x/super-stt-voxtral", &keep).await;
+        assert!(removed.is_none());
+        assert!(
+            staging_root.exists(),
+            "the shared staging root must never be removed"
+        );
+    }
+
+    /// The 8.8 GB case: a migration where `final_path` does not exist yet must
+    /// still carry the old directory's unchanged model files into staging, by
+    /// resolving the inherit-from directory through `previous_dir_for` rather
+    /// than comparing straight against `final_path`.
+    #[tokio::test]
+    async fn a_migration_preserves_model_files_via_previous_dir_for() {
+        let root = tempfile::tempdir().unwrap();
+        let old_dir = root.path().join("super-stt-voxtral");
+        let staging = root.path().join(".staging/app.super-stt.voxtral-1.0.1");
+        let final_path = root.path().join("app.super-stt.voxtral");
+        std::fs::create_dir_all(old_dir.join("models/m")).unwrap();
+        std::fs::create_dir_all(&staging).unwrap();
+        assert!(!final_path.exists(), "final_path must not exist yet");
+
+        let toml = |version: &str| {
+            format!(
+                r#"
+[backend]
+    source     = "github.com/x/voxtral"
+    name       = "Voxtral"
+    version    = "{version}"
+    kind       = "subprocess"
+    entrypoint = "voxtral"
+    contract   = "v1"
+    license    = "Apache-2.0"
+    description = "Test backend."
+
+[[assets.subprocess]]
+    file   = "voxtral.tar.gz"
+    target = "x86_64-unknown-linux-gnu"
+    accel  = ["cpu"]
+
+[[models]]
+    name                = "m"
+    primary_language    = "en"
+    supported_languages = ["en"]
+    supported_devices   = ["cpu"]
+    files = [
+        {{ url = "https://h/a.bin", destination = "models/m/a.bin" }},
+    ]
+"#
+            )
+        };
+        std::fs::write(old_dir.join("backend.toml"), toml("1.0.0")).unwrap();
+        std::fs::write(staging.join("backend.toml"), toml("1.0.1")).unwrap();
+        std::fs::write(old_dir.join("models/m/a.bin"), b"weights").unwrap();
+
+        let inherit_from = super::previous_dir_for(root.path(), "github.com/x/voxtral")
+            .await
+            .unwrap_or_else(|| final_path.clone());
+        assert_eq!(inherit_from, old_dir, "must inherit from the old directory");
+
+        let moved = super::preserve_models(&staging, &inherit_from)
+            .await
+            .unwrap();
+
+        assert_eq!(moved, 7);
+        assert!(
+            staging.join("models/m/a.bin").exists(),
+            "the model file must survive the migration"
+        );
+        assert_eq!(
+            std::fs::read(staging.join("models/m/a.bin")).unwrap(),
+            b"weights",
+            "the carried file's bytes, not just its existence, must survive"
+        );
     }
 
     #[tokio::test]

@@ -10,6 +10,7 @@ use std::process::Command;
 
 const MANIFEST_OK: &str = r#"
 [backend]
+id = "com.example.x-y"
 source = "github.com/x/y/foo"
 name = "Y"
 version = "1.0.0"
@@ -76,6 +77,7 @@ async fn end_to_end_indexes_a_single_wasm_backend() {
         &registry_path,
         r#"
         [x-y]
+        id = "com.example.x-y"
         repo = "github.com/x/y"
         forge = "github"
     "#,

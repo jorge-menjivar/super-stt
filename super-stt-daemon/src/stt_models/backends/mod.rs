@@ -10,7 +10,6 @@
 pub(crate) mod base_url;
 pub mod manifest;
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -28,6 +27,9 @@ pub struct DiscoveredBackend {
     pub dir: PathBuf,
     /// Repo id (`[backend].source`); the `source` of every model it serves.
     pub source: String,
+    /// The backend's declared `[backend].id`, when it has one. Used to break a
+    /// duplicate-directory tie in favour of the canonical install path.
+    pub id: Option<String>,
     /// Human-facing backend name (`[backend].name`).
     pub name: String,
     /// The backend's own version (`[backend].version`) as of the last scan.
@@ -75,8 +77,13 @@ pub fn installed_version(dir: &Path) -> Option<String> {
 
 /// Scan `backends_dir` for installed backends. Subdirectories without a
 /// readable, parseable `backend.toml` are skipped with a warning.
+///
+/// A pure scan: it selects the backend that serves each `source` and returns
+/// the duplicates it supersedes alongside it, but performs no filesystem
+/// mutation. Removing a loser is `registry::reconcile`'s job — reading a
+/// directory and deleting one are different responsibilities.
 #[must_use]
-pub fn discover(backends_dir: &Path) -> Vec<DiscoveredBackend> {
+pub fn discover(backends_dir: &Path) -> (Vec<DiscoveredBackend>, Vec<DiscoveredBackend>) {
     let entries = match std::fs::read_dir(backends_dir) {
         Ok(e) => e,
         Err(e) => {
@@ -84,7 +91,7 @@ pub fn discover(backends_dir: &Path) -> Vec<DiscoveredBackend> {
                 "Backends directory {} not readable ({e}); no backends discovered",
                 backends_dir.display()
             );
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
     };
 
@@ -111,30 +118,65 @@ pub fn discover(backends_dir: &Path) -> Vec<DiscoveredBackend> {
     dedup_sources(backends)
 }
 
-/// Enforce that each discovered backend has a unique `source`. The `source` is
-/// the stable identity the daemon resolves both models and the *active backend*
-/// by, so a collision would make selection ambiguous — the first match would
-/// silently win (e.g. selecting Voxtral could activate Mistral if both declared
-/// the same source). Keep the first occurrence of each source and drop the rest
-/// with a loud error so the misconfiguration is visible rather than silent.
-fn dedup_sources(backends: Vec<DiscoveredBackend>) -> Vec<DiscoveredBackend> {
-    let mut seen: HashSet<String> = HashSet::with_capacity(backends.len());
-    let mut out = Vec::with_capacity(backends.len());
+/// Split discovered backends into the one that serves each `source` and the
+/// duplicates it supersedes.
+///
+/// `source` is the identity the daemon resolves models and the active backend
+/// by, so two directories claiming one source is ambiguous — and worse, the
+/// loser strands an orphaned `models/` subtree that nothing will ever load.
+/// The winner is chosen deterministically:
+///
+/// 1. highest `version` — a backend updated in place before migration existed
+///    is the newer install, whatever its directory is called;
+/// 2. the directory named after the backend's `id`, the canonical location;
+/// 3. the lexicographically first directory name, so the result is stable.
+///
+/// Selection only. Removing a loser is `registry::reconcile`'s job — reading a
+/// directory and deleting one are different responsibilities.
+fn dedup_sources(
+    backends: Vec<DiscoveredBackend>,
+) -> (Vec<DiscoveredBackend>, Vec<DiscoveredBackend>) {
+    use std::collections::HashMap;
+
+    let mut groups: HashMap<String, Vec<DiscoveredBackend>> = HashMap::new();
     for b in backends {
-        if seen.insert(b.source.clone()) {
-            out.push(b);
-        } else {
-            error!(
-                "Backend '{}' at {} declares source '{}', which is already used by \
-                 another discovered backend; skipping it. Each backend.toml must \
-                 declare a unique [backend].source.",
-                b.name,
-                b.dir.display(),
-                b.source
-            );
-        }
+        groups.entry(b.source.clone()).or_default().push(b);
     }
-    out
+
+    let mut winners = Vec::new();
+    let mut losers = Vec::new();
+    for (source, mut group) in groups {
+        group.sort_by(|a, b| {
+            let av = super_stt_registry_types::version::parse_version(&a.version);
+            let bv = super_stt_registry_types::version::parse_version(&b.version);
+            bv.cmp(&av)
+                .then_with(|| is_id_named(b).cmp(&is_id_named(a)))
+                .then_with(|| a.dir.cmp(&b.dir))
+        });
+        let mut it = group.into_iter();
+        let winner = it.next().expect("a group is never empty");
+        for dup in it {
+            error!(
+                "Backend '{}' at {} duplicates source '{source}', already served from {}; \
+                 it will be reconciled and removed.",
+                dup.name,
+                dup.dir.display(),
+                winner.dir.display()
+            );
+            losers.push(dup);
+        }
+        winners.push(winner);
+    }
+    winners.sort_by(|a, b| a.dir.cmp(&b.dir));
+    (winners, losers)
+}
+
+/// Whether a backend sits in the directory its own `id` names.
+fn is_id_named(b: &DiscoveredBackend) -> bool {
+    match (&b.id, b.dir.file_name().and_then(|n| n.to_str())) {
+        (Some(id), Some(name)) => id == name,
+        _ => false,
+    }
 }
 
 /// Parse one backend directory into a [`DiscoveredBackend`].
@@ -189,6 +231,7 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
     Ok(DiscoveredBackend {
         dir: dir.to_path_buf(),
         source,
+        id: m.backend.id.clone(),
         name: m.backend.name,
         version: m.backend.version,
         kind: m.backend.kind.to_string(),

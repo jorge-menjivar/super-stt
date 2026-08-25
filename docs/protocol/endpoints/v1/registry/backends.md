@@ -40,6 +40,7 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
   "backends": [
     {
       "id": "voxtral",
+      "backend_id": "app.super-stt.voxtral",
       "source": "github.com/jorge-menjivar/super-stt",
       "version": "0.2.0",
       "name": "Voxtral",
@@ -74,6 +75,16 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
 }
 ```
 
+`id` is the registry key from `registry.toml`. `backend_id` is the backend's
+reverse-DNS identifier, declared by `[backend].id` in its release manifest —
+`null` for an entry that predates the field. The two are maintained
+independently: neither is derived from the other.
+
+The install directory is named by `backend_id`, falling back to `id` when
+`backend_id` is `null` — see
+[`POST /registry/install`](./install.md#request) for the full rule. A client
+computing the path must apply that fallback rather than assume either field.
+
 `models[].provider` is always an empty string. It is emitted so clients that
 require the key can still parse the response, and carries no information —
 identify a model by `(name, source)` instead. It will be removed.
@@ -102,10 +113,12 @@ Per-entry fields beyond what `index.json` carries:
   compared as semver. The daemon decides this rather than leaving each client
   to re-derive it: the daemon is the side that reads the installed manifest and
   owns the index, so it is the only one that can answer without duplicating
-  both. `false` when nothing is installed, when the installed version is at or
-  ahead of the index's, or when either version does not parse — so a stale or
-  older index never advertises a downgrade. Clients that want to *show* the
-  versions still have both fields.
+  both. The daemon matches an installed backend to this entry by `source`, so
+  a backend installed from a custom repository or a local directory is matched
+  the same way one installed from the registry is. `false` when nothing is
+  installed, when the installed version is at or ahead of the index's, or when
+  either version does not parse — so a stale or older index never advertises a
+  downgrade. Clients that want to *show* the versions still have both fields.
 
 ## Failure modes
 

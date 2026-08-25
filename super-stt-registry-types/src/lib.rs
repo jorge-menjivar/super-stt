@@ -4,6 +4,7 @@
 //! See `docs/protocol/backend/config.md`.
 
 pub mod arch;
+pub mod backend_id;
 pub mod entry;
 pub mod forge;
 pub mod fs;

@@ -367,6 +367,21 @@ impl DaemonConfig {
         self.transcription.preferred_provider = String::new();
     }
 
+    /// Repoint the active backend to `new_dir` without touching the loaded
+    /// model preference.
+    ///
+    /// Deliberately narrower than [`update_active_backend`]: that method
+    /// clears `preferred_model`/`preferred_provider` because it models the
+    /// user *choosing a different backend*, where any previously loaded
+    /// model no longer applies. This method models an install-time directory
+    /// rename of the *same* backend — its identity, models, and selection are
+    /// unchanged, only the on-disk directory name moved. Using
+    /// `update_active_backend` here would silently wipe the user's model
+    /// choice as a side effect of an update. Do not merge the two.
+    pub fn rename_active_backend(&mut self, new_dir: String) {
+        self.transcription.active_backend = Some(new_dir);
+    }
+
     /// Clear the active backend and the loaded-model preference (→ idle).
     pub fn clear_active_backend(&mut self) {
         self.transcription.active_backend = None;
