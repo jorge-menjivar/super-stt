@@ -138,6 +138,14 @@
           "description": "Path, relative to the backend directory, to the executable\n(`subprocess`) or the `.wasm` component (`wasm`). May be a nested\nrelative path such as `bin/launcher` for multi-file bundles.\nMust not escape the backend directory: no absolute paths, no `..`\ncomponents, no backslashes, no embedded NUL.",
           "type": "string"
         },
+        "id": {
+          "default": null,
+          "description": "Globally unique reverse-DNS identifier, e.g. `app.super-stt.voxtral`.\nNames the directory this backend installs into. Optional on disk so a\nbackend installed before the field existed keeps loading; required for\nregistry listing, which the indexer enforces.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "kind": {
           "allOf": [
             {

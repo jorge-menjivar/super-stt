@@ -26,6 +26,14 @@
           ],
           "description": "The forge (git host) that publishes this backend's releases. See\n[`Forge`] for accepted values and the required/explicit policy."
         },
+        "id": {
+          "default": null,
+          "description": "Reverse-DNS identifier for the backend, e.g. `com.example.voxtral`.\nMust equal the `[backend].id` of the release manifest this entry points\nat. Required for entries added after the field was introduced; the\nentries that predate it are listed in `registry_toml::GRANDFATHERED`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "max_version": {
           "default": null,
           "description": "Version ceiling (yank). The indexer ignores any release whose resolved\nversion is greater than this value. Use it to pin away from a bad\nrelease without removing the entry.",
