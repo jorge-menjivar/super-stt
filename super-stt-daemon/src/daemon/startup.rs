@@ -111,9 +111,7 @@ impl SuperSTTDaemon {
             notifier: Arc::new(tokio::sync::Mutex::new(
                 crate::output::notification::Notifier::dbus(),
             )),
-            self_update: Arc::new(crate::self_update::SelfUpdateChecker::new(
-                super_stt_shared::paths::cache_dir().join("update-check.json"),
-            )),
+            self_update: Arc::new(crate::self_update::SelfUpdateChecker::new()),
         };
 
         daemon.post_init().await;

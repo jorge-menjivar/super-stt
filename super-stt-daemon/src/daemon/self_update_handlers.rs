@@ -9,8 +9,13 @@ use super_stt_shared::models::self_update::SelfUpdateStatus;
 
 impl SuperSTTDaemon {
     /// Run a self-update check, publish `UpdateAvailable` when a not-yet-seen
-    /// version turns up, and send a one-time desktop notification for it.
-    /// Used by both the periodic background task and `POST /update/check`.
+    /// version turns up, and send a desktop notification for it. Used by both
+    /// the periodic background task and `POST /update/check`.
+    ///
+    /// The notification fires once per version per daemon run
+    /// ([`crate::self_update::SelfUpdateChecker::should_notify`]). The startup check is the first
+    /// check of every run, so a daemon coming up with an update waiting always
+    /// announces it; the daily checks behind it in the same run do not.
     pub async fn run_self_update_check_and_notify(&self) -> SelfUpdateStatus {
         let optin = self.config.read().await.update.beta_optin;
         let before = self.self_update.status().await;

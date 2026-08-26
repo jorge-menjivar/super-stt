@@ -23,6 +23,18 @@ pub struct UpdateState {
     pub unsupported: bool,
     pub checking: bool,
     pub auto_check_enabled: Option<bool>,
+    /// Beta opt-in as the toggle should currently render it. Owned locally
+    /// rather than read straight off `status` so the switch can move the
+    /// instant it is pressed: `status.beta_optin_effective` only changes when
+    /// a whole new status arrives, and the re-check that produces one is a
+    /// network round-trip. Re-synced from every fresh status, so the daemon
+    /// still has the last word. `None` until the first status loads.
+    pub beta_optin: Option<bool>,
+    /// True while a beta-opt-in write and its follow-up re-check are in
+    /// flight. Locks the toggle so a second press cannot race the first —
+    /// the two would resolve in arrival order, not press order, and the
+    /// switch would settle on whichever finished last.
+    pub beta_pending: bool,
     /// In-flight or finished update run; None when idle.
     pub run: Option<UpdateRun>,
     /// Aborts the run's task stream. Only honored before the escalate
@@ -44,6 +56,13 @@ impl UpdateState {
         self.checking = false;
         match status {
             Some(s) => {
+                // The daemon has the last word on the beta channel — but not
+                // while our own write is still settling, or a status fetched
+                // before it would drag the switch back under the user's
+                // finger and then flip it again a moment later.
+                if !self.beta_pending {
+                    self.beta_optin = Some(s.beta_optin_effective);
+                }
                 self.unsupported = false;
                 self.status = Some(s);
             }
@@ -124,6 +143,7 @@ impl UpdateState {
             bytes_done: 0,
             bytes_total: 0,
             error: None,
+            error_code: None,
             completed_components: Vec::new(),
         });
     }
@@ -135,6 +155,44 @@ impl UpdateState {
     #[must_use]
     pub fn can_check_now(&self) -> bool {
         !self.checking && self.run.is_none() && !self.unsupported
+    }
+
+    /// Whether to ask the daemon for a check right now.
+    ///
+    /// A daemon defers its own first check for a minute after start so it
+    /// does not compete with the model load, and until then it has no
+    /// candidate to report: the Updates page reads empty and the header
+    /// badge is absent, however long an update has actually been waiting.
+    /// Restart the daemon and the app together — the development loop — and
+    /// that is the state the app opens in. Asking closes the gap without
+    /// changing when the daemon checks on its own.
+    ///
+    /// Self-limiting rather than latched: a *completed* check stamps
+    /// `checked_at` whether it succeeded or failed, so this turns false as
+    /// soon as one lands. A check that fails before completing reports
+    /// through `StatusError`, which stores no status and so cannot re-enter
+    /// this — it leaves the ask available to the next page open, which is
+    /// the retry a user would expect anyway.
+    ///
+    /// Not asked while a run is in flight (the run owns the page) or while a
+    /// check is already going.
+    #[must_use]
+    pub fn wants_first_check(&self) -> bool {
+        self.status.as_ref().is_some_and(|s| s.checked_at.is_none())
+            && !self.unsupported
+            && !self.checking
+            && self.run.is_none()
+    }
+
+    /// Whether the beta-updates toggle should render as on.
+    ///
+    /// The locally-owned value when there is one — it is the fresher of the
+    /// two the moment the switch is pressed — falling back to the daemon's
+    /// last-known status before any toggle or status has landed.
+    #[must_use]
+    pub fn beta_optin_shown(&self) -> bool {
+        self.beta_optin
+            .unwrap_or_else(|| self.status.as_ref().is_some_and(|s| s.beta_optin_effective))
     }
 
     /// Whether the daemon's last-known status reports an installable update.
@@ -215,6 +273,7 @@ impl UpdateState {
                 log::warn!("installer reported error {code}: {message}");
                 run.phase = RunPhase::Failed;
                 run.error = Some(message);
+                run.error_code = Some(code);
             }
             UpdateRunEvent::Failed(message) => {
                 run.phase = RunPhase::Failed;
@@ -259,10 +318,36 @@ pub struct UpdateRun {
     pub bytes_done: u64,
     pub bytes_total: u64,
     pub error: Option<String>,
+    /// The installer's typed error code for a `Failed` run (its closed set
+    /// lives in `super-stt-install`'s `InstallError::code`). `None` for a
+    /// failure raised app-side, which has no installer code to report.
+    ///
+    /// Kept beside `error` because the message is for the user to read and
+    /// the code is for the UI to branch on — see
+    /// [`Self::was_authorization_declined`].
+    pub error_code: Option<String>,
     pub completed_components: Vec<String>,
 }
 
 impl UpdateRun {
+    /// Whether this failure is the user declining the authorization prompt
+    /// rather than something going wrong.
+    ///
+    /// Worth telling apart: every other failure leaves the user with an
+    /// update they still cannot apply, and a way to install it outside the
+    /// app is a real answer. Declining the prompt is not a dead end — the
+    /// answer is to press Update again and authorize — so handing over a
+    /// shell command reads as a non-sequitur to someone who just pressed
+    /// Cancel.
+    ///
+    /// Keyed on the installer's typed code, never on the message's wording:
+    /// the codes are a closed contract (`InstallError::code`), the prose is
+    /// not, and `pkexec` localizes its own diagnostics.
+    #[must_use]
+    pub fn was_authorization_declined(&self) -> bool {
+        self.error_code.as_deref() == Some("escalation_denied")
+    }
+
     /// Cancel is only offered while nothing system-owned has been touched
     /// (spec §1: safe to kill before the escalate phase).
     #[must_use]
@@ -317,6 +402,7 @@ mod tests {
             bytes_done: 0,
             bytes_total: 0,
             error: None,
+            error_code: None,
             completed_components: Vec::new(),
         }
     }
@@ -336,6 +422,212 @@ mod tests {
                 sha256: "0".repeat(64),
             }),
         }
+    }
+
+    // ---- failure classification -------------------------------------------
+
+    /// The installer's typed code has to survive into state, or the panel has
+    /// nothing but prose to branch on — and `pkexec` localizes its prose.
+    #[test]
+    fn an_installer_failure_keeps_its_code_beside_its_message() {
+        let mut update = UpdateState::default();
+        update.begin_run();
+        let outcome = update.apply_run_event(UpdateRunEvent::Installer(InstallerEvent::Error {
+            code: "escalation_denied".to_string(),
+            message: "authorization was denied".to_string(),
+        }));
+        assert_eq!(outcome, RunOutcome::Continue);
+
+        let run = update.run.as_ref().expect("run");
+        assert_eq!(run.phase, RunPhase::Failed);
+        assert_eq!(run.error.as_deref(), Some("authorization was denied"));
+        assert_eq!(run.error_code.as_deref(), Some("escalation_denied"));
+    }
+
+    /// An app-side failure never came from the installer, so it carries no
+    /// code — and must not be mistaken for a declined prompt.
+    #[test]
+    fn an_app_side_failure_carries_no_installer_code() {
+        let mut update = UpdateState::default();
+        update.begin_run();
+        let _ = update.apply_run_event(UpdateRunEvent::Failed("spawn failed".to_string()));
+
+        let run = update.run.as_ref().expect("run");
+        assert_eq!(run.phase, RunPhase::Failed);
+        assert!(run.error_code.is_none());
+        assert!(!run.was_authorization_declined());
+    }
+
+    /// Only the declined prompt is a declined prompt. `escalation_unavailable`
+    /// in particular must NOT be: no polkit agent to authorize against is
+    /// exactly the case where installing outside the app is the only way
+    /// forward, so its panel has to keep offering that.
+    #[test]
+    fn only_escalation_denied_counts_as_a_declined_prompt() {
+        let declined = UpdateRun {
+            error_code: Some("escalation_denied".to_string()),
+            ..run(RunPhase::Failed)
+        };
+        assert!(declined.was_authorization_declined());
+
+        for code in [
+            "escalation_unavailable",
+            "install_failed",
+            "post_install_failed",
+            "checksum_mismatch",
+            "download_failed",
+            "no_release_found",
+            "unsupported_arch",
+        ] {
+            let other = UpdateRun {
+                error_code: Some(code.to_string()),
+                ..run(RunPhase::Failed)
+            };
+            assert!(
+                !other.was_authorization_declined(),
+                "{code} is a real failure, not a declined prompt"
+            );
+        }
+
+        assert!(!run(RunPhase::Failed).was_authorization_declined());
+    }
+
+    // ---- first-check kick ------------------------------------------------
+
+    /// A daemon that has not checked yet reports no candidate at all, so the
+    /// page and the badge read empty until its deferred first check runs.
+    /// Asking once closes that window; the latch is what keeps a failing
+    /// check from asking forever.
+    #[test]
+    fn a_never_checked_daemon_is_asked_to_check() {
+        let mut update = UpdateState::default();
+        update.apply_status_loaded(Some(SelfUpdateStatus {
+            checked_at: None,
+            ..status(false)
+        }));
+        assert!(update.wants_first_check());
+
+        // The check that follows sets `checking`, which closes the ask for
+        // the round trip; the status it returns closes it for good.
+        update.checking = true;
+        assert!(!update.wants_first_check());
+    }
+
+    #[test]
+    fn a_daemon_that_has_already_checked_is_left_alone() {
+        let mut update = UpdateState::default();
+        update.apply_status_loaded(Some(SelfUpdateStatus {
+            checked_at: Some("2026-08-25T00:00:00Z".to_string()),
+            ..status(false)
+        }));
+        assert!(!update.wants_first_check());
+    }
+
+    #[test]
+    fn no_first_check_before_a_status_or_against_an_unsupported_daemon() {
+        assert!(
+            !UpdateState::default().wants_first_check(),
+            "nothing to conclude before the first status lands"
+        );
+
+        let mut update = UpdateState::default();
+        update.apply_status_loaded(None);
+        assert!(update.unsupported);
+        assert!(!update.wants_first_check());
+    }
+
+    #[test]
+    fn no_first_check_while_busy() {
+        let never = SelfUpdateStatus {
+            checked_at: None,
+            ..status(false)
+        };
+
+        let checking = UpdateState {
+            status: Some(never.clone()),
+            checking: true,
+            ..Default::default()
+        };
+        assert!(!checking.wants_first_check());
+
+        let running = UpdateState {
+            status: Some(never),
+            run: Some(run(RunPhase::Download)),
+            ..Default::default()
+        };
+        assert!(!running.wants_first_check());
+    }
+
+    fn beta_status(beta_optin_effective: bool) -> SelfUpdateStatus {
+        SelfUpdateStatus {
+            beta_optin_effective,
+            ..status(false)
+        }
+    }
+
+    // ---- beta opt-in toggle ---------------------------------------------
+
+    /// Before anything is toggled the switch reports what the daemon says —
+    /// including the pre-status default, where there is nothing to report.
+    #[test]
+    fn beta_toggle_falls_back_to_the_daemon_until_it_is_touched() {
+        assert!(!UpdateState::default().beta_optin_shown());
+
+        let mut update = UpdateState::default();
+        update.apply_status_loaded(Some(beta_status(true)));
+        assert!(update.beta_optin_shown());
+    }
+
+    /// The point of owning the value locally: pressing the switch moves it,
+    /// without waiting for the network re-check that follows.
+    #[test]
+    fn beta_toggle_shows_the_pressed_value_before_a_status_arrives() {
+        let mut update = UpdateState::default();
+        update.apply_status_loaded(Some(beta_status(false)));
+
+        // What the handler does on press.
+        update.beta_optin = Some(true);
+        update.beta_pending = true;
+
+        assert!(update.beta_optin_shown());
+        assert!(
+            !update
+                .status
+                .as_ref()
+                .expect("status stored")
+                .beta_optin_effective,
+            "the daemon has not been told yet — only the local value moved"
+        );
+    }
+
+    /// A status fetched before our write landed must not drag the switch back
+    /// under the user's finger, only for our own re-check to flip it again.
+    #[test]
+    fn a_stale_status_does_not_move_a_pending_beta_toggle() {
+        let mut update = UpdateState {
+            beta_optin: Some(true),
+            beta_pending: true,
+            ..Default::default()
+        };
+        update.apply_status_loaded(Some(beta_status(false)));
+        assert!(update.beta_optin_shown(), "pending write wins");
+
+        // Once the write settles, the daemon has the last word again.
+        update.beta_pending = false;
+        update.apply_status_loaded(Some(beta_status(false)));
+        assert!(!update.beta_optin_shown());
+    }
+
+    /// Another client changing the channel is a real change, and the switch
+    /// must follow it — the local value is a cache, not an override.
+    #[test]
+    fn an_unpending_status_resyncs_the_beta_toggle() {
+        let mut update = UpdateState {
+            beta_optin: Some(false),
+            ..Default::default()
+        };
+        update.apply_status_loaded(Some(beta_status(true)));
+        assert!(update.beta_optin_shown());
     }
 
     // ---- apply_status_loaded --------------------------------------------
