@@ -412,6 +412,38 @@ mod tests {
         assert_eq!(select_candidate(&releases, false).unwrap().tag, "v0.2.2");
     }
 
+    /// When a series graduates, its release and its last prerelease are both
+    /// published. The release must win either way — a beta user on
+    /// `v0.2.2-beta.3` is offered `v0.2.2` whether or not they still have
+    /// prereleases turned on, because `0.2.2-beta.3 < 0.2.2`. Picking the
+    /// prerelease with beta on would leave them pinned to it with nothing
+    /// newer to move to.
+    #[test]
+    fn a_release_beats_its_own_prerelease_on_either_channel() {
+        let releases = vec![
+            rel("v0.2.2-beta.3", ReleaseKind::Prerelease),
+            rel("v0.2.2", ReleaseKind::Published),
+        ];
+        assert_eq!(select_candidate(&releases, true).unwrap().tag, "v0.2.2");
+        assert_eq!(select_candidate(&releases, false).unwrap().tag, "v0.2.2");
+    }
+
+    /// ...but a prerelease of the NEXT series is still newer than that
+    /// release, and is what an opted-in user should be offered.
+    #[test]
+    fn the_next_series_prerelease_still_wins_when_opted_in() {
+        let releases = vec![
+            rel("v0.2.2-beta.3", ReleaseKind::Prerelease),
+            rel("v0.2.2", ReleaseKind::Published),
+            rel("v0.2.3-beta.1", ReleaseKind::Prerelease),
+        ];
+        assert_eq!(
+            select_candidate(&releases, true).unwrap().tag,
+            "v0.2.3-beta.1"
+        );
+        assert_eq!(select_candidate(&releases, false).unwrap().tag, "v0.2.2");
+    }
+
     #[test]
     fn candidate_includes_prereleases_when_opted_in() {
         let releases = vec![

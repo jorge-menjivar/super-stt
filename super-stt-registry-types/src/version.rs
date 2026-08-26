@@ -49,6 +49,34 @@ mod tests {
         assert!(update_available("1.0.0", "v1.0.1")); // v-prefix tolerated
     }
 
+    /// The graduation path: a prerelease sorts BEFORE its own release, so
+    /// `0.2.2-beta.3` → `0.2.2` is an update, not a downgrade. Every beta
+    /// user makes this transition exactly once, and getting it backwards
+    /// would strand them on a prerelease forever with no update ever offered.
+    #[test]
+    fn a_prerelease_is_older_than_its_own_release() {
+        assert!(update_available("0.2.2-beta.3", "0.2.2"));
+        assert!(update_available("v0.2.2-beta.3", "v0.2.2"));
+        // ...and the reverse is a downgrade, never offered.
+        assert!(!update_available("0.2.2", "0.2.2-beta.3"));
+    }
+
+    #[test]
+    fn prerelease_identifiers_order_numerically_not_lexically() {
+        assert!(update_available("0.2.2-beta.2", "0.2.2-beta.3"));
+        assert!(update_available("0.2.2-beta.9", "0.2.2-beta.10"));
+        assert!(!update_available("0.2.2-beta.10", "0.2.2-beta.9"));
+        assert!(!update_available("0.2.2-beta.3", "0.2.2-beta.3"));
+    }
+
+    /// A later release always wins over an earlier one's prerelease.
+    #[test]
+    fn a_stable_release_beats_an_older_series_prerelease() {
+        assert!(update_available("0.2.2-beta.3", "0.2.3"));
+        assert!(update_available("0.2.1", "0.2.2-beta.1"));
+        assert!(!update_available("0.2.2", "0.2.2-beta.99"));
+    }
+
     #[test]
     fn no_update_for_equal_older_or_unparseable() {
         assert!(!update_available("1.2.3", "1.2.3")); // equal
