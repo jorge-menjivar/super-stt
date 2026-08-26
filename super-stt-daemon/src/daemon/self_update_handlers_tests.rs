@@ -107,6 +107,50 @@ async fn overlapping_checks_notify_at_most_once() {
     );
 }
 
+/// A daemon that comes up with an update waiting announces it, and keeps
+/// announcing it on every later start — but the periodic checks behind that
+/// first one, in the same run, stay quiet. The startup check is simply the
+/// first check of a run, so "notify once per run" is what delivers both
+/// halves.
+#[tokio::test]
+async fn every_daemon_run_announces_a_waiting_update_exactly_once() {
+    let _env_guard = github_env_lock().lock().await;
+    crate::install_crypto_provider();
+    let mut s = mockito::Server::new_async().await;
+    s.mock(
+        "GET",
+        "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+    )
+    .with_status(200)
+    .with_body(r#"[{"tag_name":"v91.0.0","prerelease":false,"assets":[]}]"#)
+    .expect_at_least(2)
+    .create_async()
+    .await;
+    let _api_base = GithubApiBaseGuard::set(&s.url());
+
+    let mut daemon = test_daemon().await;
+    let (notifier, sent) = Notifier::fake(false);
+    daemon.notifier = std::sync::Arc::new(tokio::sync::Mutex::new(notifier));
+
+    // Startup check, then a later periodic one in the same run.
+    daemon.run_self_update_check_and_notify().await;
+    daemon.run_self_update_check_and_notify().await;
+    assert_eq!(
+        sent.lock().unwrap().len(),
+        1,
+        "a running daemon must not repeat itself on every periodic check"
+    );
+
+    // Restart: a fresh checker, the same version still waiting.
+    daemon.self_update = std::sync::Arc::new(crate::self_update::SelfUpdateChecker::new());
+    daemon.run_self_update_check_and_notify().await;
+    assert_eq!(
+        sent.lock().unwrap().len(),
+        2,
+        "a daemon start must announce an update that is still waiting"
+    );
+}
+
 /// The `UpdateAvailable` event is published when a check newly finds an
 /// update, but a subsequent check that finds the *same* candidate again
 /// must not publish a second one (`docs/protocol/endpoints/v1/events.md`:

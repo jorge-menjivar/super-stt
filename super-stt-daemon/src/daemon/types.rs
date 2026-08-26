@@ -118,11 +118,6 @@ pub struct SuperSTTDaemon {
 #[cfg(test)]
 pub(crate) async fn test_daemon() -> SuperSTTDaemon {
     let (shutdown_tx, _) = broadcast::channel(1);
-    // Unique per test AND per pid: parallel tests in this binary that touch
-    // `should_notify`/`record_notified` must not share the notify-state file
-    // (mirrors `self_update::SelfUpdateChecker`'s own `test_notify_path`).
-    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     SuperSTTDaemon {
         model: Arc::new(tokio::sync::RwLock::new(None)),
         audio_processor: Arc::new(AudioProcessor::new()),
@@ -154,15 +149,7 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         notifier: Arc::new(tokio::sync::Mutex::new(
             crate::output::notification::Notifier::fake(true).0,
         )),
-        // Per-pid, per-test temp path: no test may touch the real
-        // update-check cache, and two tests in this binary must not share
-        // on-disk notify state.
-        self_update: Arc::new(crate::self_update::SelfUpdateChecker::new(
-            std::env::temp_dir().join(format!(
-                "super-stt-test-daemon-update-{}-{n}.json",
-                std::process::id()
-            )),
-        )),
+        self_update: Arc::new(crate::self_update::SelfUpdateChecker::new()),
     }
 }
 

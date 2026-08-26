@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Self-update checking. Contract: docs/protocol/endpoints/v1/update.md
 
-use std::path::PathBuf;
 use super_stt_forge::{ForgeClient, Release, ReleaseAsset, ReleaseKind, RepoRef};
 use super_stt_shared::models::self_update::{InstallerAsset, SelfUpdateStatus};
 use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
@@ -125,31 +124,6 @@ async fn resolve_installer_asset(
     })
 }
 
-/// On-disk shape of the notify-once state: the last release tag a desktop
-/// notification was already sent for. A missing or corrupt file reads as "no
-/// version notified yet" — losing this file must never suppress a real
-/// notification, only (at worst) repeat one.
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct NotifyState {
-    #[serde(default)]
-    last_notified_version: Option<String>,
-}
-
-/// Read the notify-state file leniently: missing or corrupt reads as
-/// `NotifyState::default()` (no version recorded). Runs on a blocking thread
-/// since it's plain `std::fs`, mirroring `registry::client::load_from_disk`.
-async fn read_notify_state(path: &std::path::Path) -> NotifyState {
-    let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
-    })
-    .await
-    .unwrap_or_default()
-}
-
 /// Internal checker state: the last completed check's wire-visible result,
 /// plus the effective beta opt-in its candidate fields were resolved under.
 ///
@@ -170,9 +144,13 @@ struct CheckerState {
     resolved_include_pre: Option<bool>,
 }
 
-/// Self-update check state: the last completed check's result, plus
-/// notify-once persistence so a restart doesn't re-notify for a version the
-/// user has already been told about.
+/// Self-update check state: the last completed check's result, plus the
+/// per-run record of which version has already been announced, so a
+/// long-running daemon's daily checks don't repeat themselves.
+///
+/// That record lives here and nowhere else — it is deliberately not
+/// persisted, so a daemon start announces a waiting update again. See
+/// [`Self::should_notify`].
 pub struct SelfUpdateChecker {
     state: tokio::sync::RwLock<CheckerState>,
     // Serializes concurrent `run_check` calls: `POST /update/check`'s
@@ -187,12 +165,20 @@ pub struct SelfUpdateChecker {
     // is acquired, some other caller's check completed in the meantime, so
     // this caller returns that fresh state instead of checking again.
     generation: std::sync::atomic::AtomicU64,
-    notify_path: PathBuf,
+    /// The release tag a desktop notification was already sent for in THIS
+    /// daemon run. Deliberately not persisted — see [`Self::should_notify`].
+    notified: tokio::sync::Mutex<Option<String>>,
+}
+
+impl Default for SelfUpdateChecker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SelfUpdateChecker {
     #[must_use]
-    pub fn new(notify_path: PathBuf) -> Self {
+    pub fn new() -> Self {
         Self {
             state: tokio::sync::RwLock::new(CheckerState {
                 status: SelfUpdateStatus {
@@ -208,7 +194,7 @@ impl SelfUpdateChecker {
             }),
             check_lock: tokio::sync::Mutex::new(()),
             generation: std::sync::atomic::AtomicU64::new(0),
-            notify_path,
+            notified: tokio::sync::Mutex::new(None),
         }
     }
 
@@ -216,6 +202,32 @@ impl SelfUpdateChecker {
     /// triggers a new check.
     pub async fn status(&self) -> SelfUpdateStatus {
         self.state.read().await.status.clone()
+    }
+
+    /// The last completed check's result as clients should see it: as
+    /// [`Self::status`], but with `beta_optin_effective` resolved from
+    /// `optin` while no successful check has resolved a candidate under a
+    /// channel of its own.
+    ///
+    /// `GET /update` documents that field as resolved from the
+    /// `update_beta_optin` setting, and before the first check the stored
+    /// status carries a placeholder instead — reporting the beta channel off
+    /// however it was configured, for the whole minute between daemon start
+    /// and the first background check. Clients that render the setting from
+    /// this field (the app's Updates page) read that as the daemon having
+    /// forgotten it.
+    ///
+    /// Only applied while `resolved_include_pre` is `None`. Once a check has
+    /// succeeded, its own value stands: the candidate fields were resolved
+    /// under that channel, and overwriting the channel alone would report a
+    /// candidate from one channel beside the label of another.
+    pub async fn status_for(&self, optin: UpdateBetaOptIn) -> SelfUpdateStatus {
+        let state = self.state.read().await;
+        let mut status = state.status.clone();
+        if state.resolved_include_pre.is_none() {
+            status.beta_optin_effective = effective_beta_optin(optin);
+        }
+        status
     }
 
     /// Run a check against `client`, updating and returning the new status
@@ -356,40 +368,29 @@ impl SelfUpdateChecker {
         (new_status, true)
     }
 
-    /// Whether a desktop notification for `tag` has not yet been sent.
+    /// Whether a desktop notification for `tag` has not yet been sent in this
+    /// daemon run.
+    ///
+    /// Scoped to the run, not persisted across restarts: a daemon start is
+    /// the one moment the user is reliably at the machine, so an update still
+    /// waiting is worth saying again then — even if they were told about that
+    /// same version before. The startup check is the first check of every
+    /// run, so it always notifies; the daily checks behind it in the same run
+    /// do not repeat it.
     pub async fn should_notify(&self, tag: &str) -> bool {
-        let state = read_notify_state(&self.notify_path).await;
-        state.last_notified_version.as_deref() != Some(tag)
+        self.notified.lock().await.as_deref() != Some(tag)
     }
 
     /// Record that a desktop notification for `tag` was sent, so a later
-    /// check for the same tag doesn't notify again — including across a
-    /// daemon restart, since this persists to `notify_path`.
+    /// check in this same run doesn't repeat it.
     pub async fn record_notified(&self, tag: &str) {
-        let path = self.notify_path.clone();
-        let state = NotifyState {
-            last_notified_version: Some(tag.to_string()),
-        };
-        let outcome = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let bytes = serde_json::to_vec(&state).unwrap_or_default();
-            super_stt_registry_types::fs::write_atomic(&path, &bytes)
-        })
-        .await;
-        match outcome {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => log::warn!("failed to persist self-update notify state: {e}"),
-            Err(e) => log::warn!("self-update notify state task panicked: {e}"),
-        }
+        *self.notified.lock().await = Some(tag.to_string());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use super_stt_forge::{Release, ReleaseAsset, ReleaseKind};
     use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
 
@@ -399,16 +400,6 @@ mod tests {
             kind,
             assets: vec![],
         }
-    }
-
-    fn test_notify_path() -> PathBuf {
-        // Unique per test AND per pid: parallel tests must not share state.
-        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "sstt-update-notify-{}-{n}.json",
-            std::process::id()
-        ))
     }
 
     #[test]
@@ -691,7 +682,7 @@ mod tests {
             .create_async()
             .await;
         let gh = super_stt_forge::Github::new(s.url(), None);
-        let checker = SelfUpdateChecker::new(test_notify_path());
+        let checker = SelfUpdateChecker::new();
         let (st, did_check) = checker.run_check(&gh, UpdateBetaOptIn::Disabled).await;
         assert!(did_check, "uncontended call must perform its own check");
         assert!(st.update_available);
@@ -737,7 +728,7 @@ mod tests {
             .create_async()
             .await;
         let gh = super_stt_forge::Github::new(s.url(), None);
-        let checker = SelfUpdateChecker::new(test_notify_path());
+        let checker = SelfUpdateChecker::new();
         let (st, did_check) = checker.run_check(&gh, UpdateBetaOptIn::Disabled).await;
         assert!(did_check);
         assert!(st.update_available);
@@ -770,7 +761,7 @@ mod tests {
         .create_async()
         .await;
         let gh = super_stt_forge::Github::new(s.url(), None);
-        let checker = SelfUpdateChecker::new(test_notify_path());
+        let checker = SelfUpdateChecker::new();
 
         // Succeed with beta ON: resolves a beta candidate.
         let (st1, did_check1) = checker.run_check(&gh, UpdateBetaOptIn::Enabled).await;
@@ -819,7 +810,7 @@ mod tests {
             .create_async()
             .await;
         let gh = super_stt_forge::Github::new(s.url(), None);
-        let checker = SelfUpdateChecker::new(test_notify_path());
+        let checker = SelfUpdateChecker::new();
 
         let ((a, a_did_check), (b, b_did_check)) = tokio::join!(
             checker.run_check(&gh, UpdateBetaOptIn::Disabled),
@@ -835,16 +826,88 @@ mod tests {
         mock.assert_async().await;
     }
 
+    /// A daemon restart leaves the checker with no completed check, and the
+    /// pre-check status must still answer `beta_optin_effective` from the
+    /// configured setting. Reporting the placeholder instead read, to any
+    /// client rendering the setting from this field, as the daemon having
+    /// forgotten it for the minute before the first background check.
     #[tokio::test]
-    async fn notify_once_per_version_persists() {
-        let path = test_notify_path();
-        let c = SelfUpdateChecker::new(path.clone());
+    async fn pre_check_status_reports_the_configured_channel() {
+        let checker = SelfUpdateChecker::new();
+
+        assert!(
+            !checker.status().await.beta_optin_effective,
+            "the raw snapshot keeps its placeholder"
+        );
+        assert!(
+            checker
+                .status_for(UpdateBetaOptIn::Enabled)
+                .await
+                .beta_optin_effective
+        );
+        assert!(
+            !checker
+                .status_for(UpdateBetaOptIn::Disabled)
+                .await
+                .beta_optin_effective
+        );
+        // `auto` still resolves against the running version, as everywhere else.
+        assert_eq!(
+            checker
+                .status_for(UpdateBetaOptIn::Auto)
+                .await
+                .beta_optin_effective,
+            effective_beta_optin(UpdateBetaOptIn::Auto)
+        );
+    }
+
+    /// Once a check has resolved a candidate, that check's channel is what
+    /// clients see: the candidate fields were resolved under it, and relabeling
+    /// the channel alone would report a candidate from one channel beside the
+    /// label of another.
+    #[tokio::test]
+    async fn a_completed_check_keeps_its_own_channel() {
+        crate::install_crypto_provider();
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock(
+                "GET",
+                "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+            )
+            .with_status(200)
+            .with_body(r#"[{"tag_name":"v0.9.0","prerelease":false,"assets":[]}]"#)
+            .create_async()
+            .await;
+        let gh = super_stt_forge::Github::new(server.url(), None);
+        let checker = SelfUpdateChecker::new();
+
+        let (status, _) = checker.run_check(&gh, UpdateBetaOptIn::Disabled).await;
+        assert!(!status.beta_optin_effective);
+        assert_eq!(status.latest_version.as_deref(), Some("v0.9.0"));
+
+        assert!(
+            !checker
+                .status_for(UpdateBetaOptIn::Enabled)
+                .await
+                .beta_optin_effective,
+            "a resolved candidate's channel is not overwritten"
+        );
+    }
+
+    /// Within one run the same version is announced once; a restart announces
+    /// it again. A user who left an update pending is told about it each time
+    /// the daemon comes up, which is when they are reliably at the machine —
+    /// but a daemon that stays up for weeks does not repeat itself daily.
+    #[tokio::test]
+    async fn notify_once_per_version_per_run() {
+        let c = SelfUpdateChecker::new();
         assert!(c.should_notify("v0.3.0").await);
         c.record_notified("v0.3.0").await;
         assert!(!c.should_notify("v0.3.0").await);
         assert!(c.should_notify("v0.3.1").await);
-        // A fresh checker on the same path (daemon restart) still remembers.
-        let c2 = SelfUpdateChecker::new(path);
-        assert!(!c2.should_notify("v0.3.0").await);
+
+        // A fresh checker is a daemon restart: the same version is due again.
+        let restarted = SelfUpdateChecker::new();
+        assert!(restarted.should_notify("v0.3.0").await);
     }
 }
