@@ -6742,7 +6742,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "super-stt-app"
-version = "0.2.2-beta.4"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "dirs",
@@ -6774,7 +6774,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-cli"
-version = "0.2.2-beta.4"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -6784,7 +6784,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-consent"
-version = "0.2.2-beta.4"
+version = "0.2.2"
 dependencies = [
  "libc",
  "libcosmic",
@@ -6794,7 +6794,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-cosmic-applet"
-version = "0.2.2-beta.4"
+version = "0.2.2"
 dependencies = [
  "base64",
  "clap",
@@ -6811,7 +6811,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-daemon"
-version = "0.2.2-beta.4"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6871,7 +6871,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-forge"
-version = "0.2.2-beta.4"
+version = "0.2.2"
 dependencies = [
  "async-trait",
  "log",
@@ -6914,7 +6914,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-install"
-version = "0.2.2-beta.4"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -6937,7 +6937,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-registry-types"
-version = "0.2.2-beta.4"
+version = "0.2.2"
 dependencies = [
  "hex",
  "jsonschema",
@@ -6953,7 +6953,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-shared"
-version = "0.2.2-beta.4"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "async-stream",
