@@ -53,23 +53,6 @@ pub(super) fn update_chip(
     let spacing = cosmic::theme::spacing();
     let radius = cosmic::theme::active().cosmic().corner_radii.radius_xl;
     let fg: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
-    // Same translucent fill the capability chips use, so the row reads as one
-    // family; the accent hue is what sets this one apart.
-    let style = move |alpha: f32| {
-        let mut fill = fg;
-        fill.a = alpha;
-        let mut edge = fg;
-        edge.a = 0.32;
-        cosmic::widget::button::Style {
-            background: Some(cosmic::iced::Background::Color(fill)),
-            border_radius: radius.into(),
-            border_width: 1.0,
-            border_color: edge,
-            icon_color: Some(fg),
-            text_color: Some(fg),
-            ..cosmic::widget::button::Style::new()
-        }
-    };
 
     let chip = widget::button::custom(
         row![
@@ -80,12 +63,7 @@ pub(super) fn update_chip(
         .align_y(Alignment::Center),
     )
     .padding([spacing.space_xxxs, spacing.space_xs])
-    .class(cosmic::theme::Button::Custom {
-        active: Box::new(move |_, _| style(0.14)),
-        disabled: Box::new(move |_| style(0.14)),
-        hovered: Box::new(move |_, _| style(0.26)),
-        pressed: Box::new(move |_, _| style(0.34)),
-    })
+    .class(super::surface::accent_button_class(radius))
     .on_press(Message::ModelsPage(
         crate::ui::messages::ModelsPageMessage::UpdateBackend(source.to_string()),
     ))

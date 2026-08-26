@@ -277,3 +277,40 @@ pub(in crate::ui::views) fn rounded_tooltip<'a>(
         .gap(1)
         .into()
 }
+
+/// The accent-tinted button styling worn by the backend Update chip and the
+/// header bar's "Update available" badge.
+///
+/// Shared rather than copied because the two are the same control in two
+/// places: both say a newer version is waiting, and both apply it. A user who
+/// learns the chip on the Models page should recognize the badge in the header
+/// without being told.
+///
+/// The translucent fill is the capability chips' so the family reads as one;
+/// the accent hue is what marks this one as actionable. `disabled` repeats the
+/// `active` fill because these are never rendered disabled — they are removed
+/// instead — and a dimmed ghost would misreport that.
+pub(in crate::ui::views) fn accent_button_class(radius: [f32; 4]) -> cosmic::theme::Button {
+    let fg: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
+    let style = move |alpha: f32| {
+        let mut fill = fg;
+        fill.a = alpha;
+        let mut edge = fg;
+        edge.a = 0.32;
+        cosmic::widget::button::Style {
+            background: Some(cosmic::iced::Background::Color(fill)),
+            border_radius: radius.into(),
+            border_width: 1.0,
+            border_color: edge,
+            icon_color: Some(fg),
+            text_color: Some(fg),
+            ..cosmic::widget::button::Style::new()
+        }
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_, _| style(0.14)),
+        disabled: Box::new(move |_| style(0.14)),
+        hovered: Box::new(move |_, _| style(0.26)),
+        pressed: Box::new(move |_, _| style(0.34)),
+    }
+}

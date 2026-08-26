@@ -43,6 +43,10 @@ pub(crate) use chips::offered_devices;
 /// instead of cosmic's default near-semicircular one.
 pub(in crate::ui::views) use surface::rounded_tooltip;
 
+/// Re-exported so the Updates page's header badge wears the same accent
+/// styling as the Models/Library Update chip — one control, two places.
+pub(in crate::ui::views) use surface::accent_button_class;
+
 /// Wrap a header readout (GPU meter / status) in a neutral "pill": a soft
 /// surface fill, hairline border, and fully-rounded corners, so the readouts
 /// read as discrete indicators rather than text floating in the title bar.
@@ -67,6 +71,21 @@ pub(crate) fn pill_label<'a>(
     content: impl Into<std::borrow::Cow<'a, str>> + 'a,
 ) -> Element<'a, Message> {
     widget::text(content).size(14.0).line_height(1.0).into()
+}
+
+/// [`pill_label`] in an explicit color, for a pill that is a control rather
+/// than a readout: the accent-filled "Update available" badge tints its label
+/// to match its icon and border. Shares the sizing so a tinted pill and a
+/// neutral one still line up at the same height in the header bar.
+pub(crate) fn pill_label_tinted<'a>(
+    content: impl Into<std::borrow::Cow<'a, str>> + 'a,
+    color: cosmic::iced::Color,
+) -> Element<'a, Message> {
+    widget::text(content)
+        .size(14.0)
+        .line_height(1.0)
+        .class(cosmic::theme::Text::Color(color))
+        .into()
 }
 
 /// A pill in the window header showing model readiness: a small colored dot

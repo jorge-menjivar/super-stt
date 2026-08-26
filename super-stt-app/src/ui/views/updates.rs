@@ -10,7 +10,7 @@ use cosmic::widget::{self, settings, text};
 use super_stt_shared::models::self_update::SelfUpdateStatus;
 
 use super::common::{error_banner, page_layout};
-use super::models::{header_pill, pill_label, rounded_tooltip};
+use super::models::{accent_button_class, pill_label_tinted, rounded_tooltip};
 use crate::core::app::AppModel;
 use crate::state::update::{RunPhase, UpdateState};
 use crate::ui::messages::{Message, UpdateMessage};
@@ -34,17 +34,38 @@ fn tag_of(status: Option<&SelfUpdateStatus>) -> &str {
         .unwrap_or("the latest version")
 }
 
-/// The curl-bootstrap fallback shown when the daemon reports an update but
-/// published no installer asset for this host (unsupported arch, or the
-/// release simply lacks one).
-fn curl_fallback_caption(tag: &str) -> String {
+/// The curl-bootstrap command, with the `--beta` flag a prerelease tag needs.
+/// Shared by the two captions below so the command itself is written once.
+fn curl_bootstrap(tag: &str) -> String {
     let beta_flag = if tag_is_prerelease(tag) {
         " -s -- --beta"
     } else {
         ""
     };
+    format!("curl -sSL {INSTALL_SH_URL} | bash{beta_flag}")
+}
+
+/// The curl-bootstrap fallback shown when the daemon reports an update but
+/// published no installer asset for this host (unsupported arch, or the
+/// release simply lacks one). There is no button to press in that case, and
+/// this stands in for it.
+fn curl_fallback_caption(tag: &str) -> String {
     format!(
-        "Update available, but no installer asset was published for this system. Run: curl -sSL {INSTALL_SH_URL} | bash{beta_flag}"
+        "Update available, but no installer asset was published for this system. Run: {}",
+        curl_bootstrap(tag)
+    )
+}
+
+/// The way forward offered after a run that *failed*.
+///
+/// Distinct from [`curl_fallback_caption`], which explains an update that
+/// never had a button: reaching a failure means an asset was published,
+/// downloaded and verified, so saying none was published is simply false —
+/// and it was, on the panel a dismissed authorization prompt produced.
+fn manual_install_caption(tag: &str) -> String {
+    format!(
+        "To install it outside the app, run: {}",
+        curl_bootstrap(tag)
     )
 }
 
@@ -102,10 +123,6 @@ fn version_section(state: &UpdateState) -> Element<'_, Message> {
 /// Settings section: the two togglers, both disabled while a run is active.
 fn settings_section(state: &UpdateState) -> Element<'_, Message> {
     let run_active = state.run.is_some();
-    let beta_effective = state
-        .status
-        .as_ref()
-        .is_some_and(|s| s.beta_optin_effective);
 
     settings::section()
         .title("Settings")
@@ -123,8 +140,11 @@ fn settings_section(state: &UpdateState) -> Element<'_, Message> {
             settings::item::builder("Receive beta updates")
                 .description("Consider prerelease versions when checking for updates")
                 .control(
-                    widget::toggler(beta_effective).on_toggle_maybe(
-                        (!run_active)
+                    // Inert while the write and its re-check are in flight:
+                    // the switch has already moved, and a second press would
+                    // race the first.
+                    widget::toggler(state.beta_optin_shown()).on_toggle_maybe(
+                        (!run_active && !state.beta_pending)
                             .then_some(|b| Message::Update(UpdateMessage::BetaOptinToggled(b))),
                     ),
                 ),
@@ -196,13 +216,19 @@ fn update_body<'a>(
             }
             col.push(dismiss_button()).into()
         }
-        RunPhase::Failed => column![
-            error_banner(run.error.as_deref().unwrap_or("Update failed")),
-            text::caption(curl_fallback_caption(tag)),
-            dismiss_button(),
-        ]
-        .spacing(spacing)
-        .into(),
+        RunPhase::Failed => {
+            let mut col = column![error_banner(
+                run.error.as_deref().unwrap_or("Update failed")
+            )]
+            .spacing(spacing);
+            // Declining the prompt is not a dead end — pressing Update again
+            // and authorizing is the answer, so a shell command here would
+            // read as a non-sequitur to someone who just pressed Cancel.
+            if !run.was_authorization_declined() {
+                col = col.push(text::caption(manual_install_caption(tag)));
+            }
+            col.push(dismiss_button()).into()
+        }
         phase => {
             let mut col = column![text::body(phase_label(phase))].spacing(spacing);
             if matches!(phase, RunPhase::FetchingInstaller | RunPhase::Download) {
@@ -280,20 +306,65 @@ pub(crate) fn header_badge(app: &AppModel) -> Option<Element<'_, Message>> {
         return None;
     }
 
+    let fg: cosmic::iced::Color = cosmic::theme::active().cosmic().accent.base.into();
     let inner = row![
-        crate::ui::icons::phosphor_tinted(
-            crate::ui::icons::ARROWS_CLOCKWISE,
-            14.0,
-            cosmic::theme::active().cosmic().accent.base.into(),
-        ),
-        pill_label("Update available"),
+        crate::ui::icons::phosphor_tinted(crate::ui::icons::ARROWS_CLOCKWISE, 14.0, fg),
+        pill_label_tinted("Update available", fg),
     ]
     .spacing(6.0)
     .align_y(Alignment::Center);
 
+    // A button, wearing the same accent styling as the backend Update chip:
+    // it is the same kind of control — an available version, and the way to
+    // get to it. As a bare pill it looked pressable and wasn't.
+    //
+    // The padding is [`header_pill`]'s fixed pixels, not theme spacing, for
+    // the reason given there: the header bar's height does not grow with the
+    // system spacing setting.
+    let badge = widget::button::custom(inner)
+        .padding([8, 12])
+        .class(accent_button_class(
+            cosmic::theme::active().cosmic().corner_radii.radius_xl,
+        ))
+        .on_press(Message::Update(UpdateMessage::OpenUpdatesPage));
+
     Some(rounded_tooltip(
-        header_pill(inner),
-        text::body("A new Super STT version is ready to install — see the Updates page"),
+        badge,
+        text::body("A new Super STT version is ready to install — open the Updates page"),
         widget::tooltip::Position::Bottom,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{curl_fallback_caption, manual_install_caption, tag_is_prerelease};
+
+    #[test]
+    fn a_prerelease_tag_carries_the_beta_flag_into_both_captions() {
+        assert!(tag_is_prerelease("v0.2.3-beta.1"));
+        assert!(!tag_is_prerelease("v0.2.3"));
+
+        assert!(manual_install_caption("v0.2.3-beta.1").ends_with("| bash -s -- --beta"));
+        assert!(manual_install_caption("v0.2.3").ends_with("| bash"));
+        assert!(curl_fallback_caption("v0.2.3-beta.1").ends_with("| bash -s -- --beta"));
+        assert!(curl_fallback_caption("v0.2.3").ends_with("| bash"));
+    }
+
+    /// The regression: a run that FAILED had reported "no installer asset was
+    /// published for this system", on a panel produced by dismissing the
+    /// authorization prompt. Reaching a failure means an asset was published,
+    /// downloaded and verified — the claim is false wherever a run got far
+    /// enough to fail, so the two captions must not be interchangeable.
+    #[test]
+    fn only_the_idle_caption_claims_no_asset_was_published() {
+        let idle = curl_fallback_caption("v0.2.3");
+        let failed = manual_install_caption("v0.2.3");
+
+        assert!(idle.contains("no installer asset was published"));
+        assert!(
+            !failed.contains("no installer asset was published"),
+            "a failed run proves an asset existed: {failed}"
+        );
+        assert!(failed.contains("To install it outside the app"));
+    }
 }
