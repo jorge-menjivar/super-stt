@@ -1,0 +1,89 @@
+name: Install E2E
+
+# Real installs of real published releases, gated on the install surface.
+#
+# This is deliberately NOT part of ci.yml: it only needs to run when the
+# install path changes, and a `paths:` filter applies to a whole workflow.
+# For the same reason it must NOT be made a required status check — a
+# path-filtered workflow that doesn't run leaves a required check pending
+# forever and blocks the merge.
+#
+# What actually runs is scripts/test-install-e2e.sh; see its header for the
+# two passes and why the fixture is a published release rather than a tarball
+# built here.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - install.sh
+      - uninstall.sh
+      - scripts/**
+      - super-stt-install/**
+      - super-stt-forge/**
+      - .github/workflows/install-e2e.yml
+  push:
+    branches: [main]
+    paths:
+      - install.sh
+      - uninstall.sh
+      - scripts/**
+      - super-stt-install/**
+      - super-stt-forge/**
+      - .github/workflows/install-e2e.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  install-e2e:
+    name: Install E2E (${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [stable, beta]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-install-e2e-${{ hashFiles('**/Cargo.lock') }}
+
+      # Only the installer is built — the release tarball it installs is the
+      # published one. Unlike every other job here, this needs no apt step:
+      # super-stt-install's dependency tree is reqwest/tokio/clap/tar, with
+      # none of the Wayland/xkbcommon/alsa/dbus libraries the GUI crates pull.
+      - name: Build the installer
+        run: cargo build -p super-stt-install
+
+      # curl, jq, tar, sudo, and `script` (the pty wrapper the harness needs to
+      # put the installer on its sudo escalation path) all ship on the runner.
+      - name: Install, verify, uninstall (${{ matrix.channel }})
+        env:
+          SUPER_STT_INSTALL_E2E_YES: "1"
+          SUPER_STT_INSTALLER_BIN: ${{ github.workspace }}/target/debug/super-stt-install
+          # api.github.com allows 60 unauthenticated requests/hour per source
+          # IP and runners share addresses. The token lifts that for all three
+          # readers of it: the harness's own release resolution, install.sh,
+          # and the installer itself (super_stt_forge::Github::from_env).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/test-install-e2e.sh ${{ matrix.channel }}
