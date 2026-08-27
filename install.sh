@@ -13,8 +13,10 @@
 # (rustup-style), so the bootstrap can never disagree with the release
 # layout it installs.
 #
-# Releases that predate the installer binary fall back to the legacy
-# channel scripts (scripts/install-stable.sh / scripts/install-beta.sh).
+# Every install goes through that binary, so a release must ship one to be
+# installable this way — v0.2.2-beta.3 is the earliest that does. Pinning an
+# older tag with --version= is reported as an error rather than installed by
+# some other means.
 #
 # Flags consumed here:
 #   --beta / --stable / --channel=<name>   Pick the release channel
@@ -28,7 +30,6 @@
 # the bottom of the file for how that source-only mode is triggered.
 
 GITHUB_REPO="jorge-menjivar/super-stt"
-DEFAULT_BRANCH="main"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -207,30 +208,20 @@ main() {
         exec "$TEMP_DIR/$INSTALLER_ASSET" "${EXTRA_ARGS[@]}" "${PASSTHROUGH[@]}"
     fi
 
-    [ -n "$VERSION" ] && PASSTHROUGH+=("--version=$VERSION")
-
+    # A 404 is the one failure with a specific, actionable cause: the release
+    # exists but ships no installer for this host. Every other status is a
+    # transport-or-server problem, and the two are reported distinctly so the
+    # message names the cause the user can act on.
     if [ "$HTTP_CODE" = "404" ]; then
-        # ---- Legacy fallback: release has no installer binary ----
-        print_info "Release $VERSION has no installer binary; using the legacy $CHANNEL script."
-    else
-        CURL_ERR="$(cat "$CURL_ERR_FILE" 2>/dev/null)" || true
-        print_error "Installer download failed (HTTP ${HTTP_CODE:-unknown}): ${CURL_ERR:-curl reported no output}"
-        print_info "Falling back to the legacy $CHANNEL script."
-    fi
-
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
-    if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/scripts/install-${CHANNEL}.sh" ]; then
-        exec bash "$SCRIPT_DIR/scripts/install-${CHANNEL}.sh" "${PASSTHROUGH[@]}"
-    fi
-
-    REMOTE_SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPO}/${DEFAULT_BRANCH}/scripts/install-${CHANNEL}.sh"
-    SCRIPT_BODY=$(curl -fsSL "$REMOTE_SCRIPT")
-    if [ -z "$SCRIPT_BODY" ]; then
-        print_error "Failed to fetch installer from $REMOTE_SCRIPT"
+        print_error "Release $VERSION ships no installer binary for $TRIPLE."
+        print_error "Installing requires v0.2.2-beta.3 or newer — drop --version= to take the latest $CHANNEL release."
         exit 1
     fi
-    # Process substitution keeps /dev/tty available for the legacy script's menu.
-    exec bash <(echo "$SCRIPT_BODY") "${PASSTHROUGH[@]}"
+
+    CURL_ERR="$(cat "$CURL_ERR_FILE" 2>/dev/null)" || true
+    print_error "Installer download failed (HTTP ${HTTP_CODE:-unknown}): ${CURL_ERR:-curl reported no output}"
+    print_error "Check your connection and retry; $INSTALLER_URL is the file being fetched."
+    exit 1
 }
 
 # Run the real install flow only outside of test sourcing.

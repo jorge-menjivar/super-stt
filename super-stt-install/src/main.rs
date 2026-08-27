@@ -113,10 +113,10 @@ fn menu_choice(input: &str, cosmic_available: bool) -> MenuChoice {
     }
 }
 
-/// The interactive component-selection menu (`scripts/install-beta.sh:397-460`),
-/// printed to stderr and read from `/dev/tty` (independent of stdin, which
-/// `--json-progress` callers may be piping/redirecting). Returns `None` on
-/// `q`/EOF (the caller exits 0, mirroring the script's "cancelled").
+/// The interactive component-selection menu, printed to stderr and read from
+/// `/dev/tty` (independent of stdin, which `--json-progress` callers may be
+/// piping/redirecting). Returns `None` on `q`/EOF; the caller treats that as
+/// a cancelled install and exits 0.
 fn run_interactive_menu(
     triple: &str,
     cosmic_available: bool,
