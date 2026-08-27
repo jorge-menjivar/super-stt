@@ -2,9 +2,9 @@
 //! Post-install steps run back in the unprivileged user process after the
 //! root phase has placed files: systemd service (re)start, applet panel
 //! restart, launcher-cache nudge, legacy `~/.local` cleanup, and the COSMIC
-//! keyboard-shortcut migrate/add. A faithful port of `scripts/install-beta.sh`'s
-//! equivalent steps. Every step is best-effort (`log::warn!` on failure)
-//! except the daemon restart, the one failure the app must hear about.
+//! keyboard-shortcut migrate/add. Every step is best-effort (`log::warn!` on
+//! failure) except the daemon restart, the one failure the app must hear
+//! about.
 //!
 //! `run`'s WHAT-to-do is a pure decision, separated from the HOW: [`plan`]
 //! takes the coarse facts already known (or cheap to check) before any file
@@ -74,15 +74,13 @@ pub enum Step {
 /// `components.applet && applet_was_installed` — a caller may cheaply pass
 /// `true` unconditionally for any other combination and it's simply ignored.
 ///
-/// Order mirrors `scripts/install-beta.sh`: systemd install/enable/restart,
-/// then the applet's panel restart, then the launcher-cache nudge, then
-/// legacy cleanup, then the COSMIC shortcut. The script interleaves each
-/// component's legacy-file cleanup with that component's own binary
-/// placement; here all placement already happened earlier, in the root
-/// phase, so [`Step::CleanupLegacy`] runs once, unconditionally, instead of
-/// once per component — removing files that were never there to begin with
-/// is a no-op, so this changes only *when* the (idempotent) sweep happens,
-/// never what ends up on disk.
+/// Order: systemd install/enable/restart, then the applet's panel restart,
+/// then the launcher-cache nudge, then legacy cleanup, then the COSMIC
+/// shortcut. Every file is already placed by the time this runs — that all
+/// happens earlier, in the root phase — so [`Step::CleanupLegacy`] is a
+/// single unconditional sweep rather than one pass per component; removing
+/// files that were never there is a no-op, so the sweep is idempotent
+/// whatever the selection.
 #[must_use]
 #[allow(clippy::fn_params_excessive_bools)] // interface fixed by the design doc: the five booleans are the planner's whole point
 pub fn plan(
@@ -106,9 +104,9 @@ pub fn plan(
         steps.push(Step::RestartPanel);
     }
 
-    // The script skips the launcher nudge only for `INSTALL_OPTION=daemon`
-    // (daemon-only): an app or applet install both add launcher-visible
-    // entries that benefit from the rescan.
+    // The launcher nudge is skipped only for a daemon-only install: an app
+    // or applet install both add launcher-visible entries that benefit from
+    // the rescan.
     let daemon_only = components.daemon && !components.app && !components.applet;
     if !daemon_only {
         steps.push(Step::NudgeLaunchers);
@@ -196,7 +194,7 @@ async fn step_nudge_launchers() {
 
 /// Bins, desktop files, and icons the pre-`/usr/local` per-user install left
 /// behind — cleared so they don't shadow (or duplicate in launchers) the
-/// fresh install. Exact lists from `scripts/install-beta.sh`.
+/// fresh install.
 fn cleanup_legacy() {
     let Some(home) = dirs::home_dir() else {
         return;
@@ -260,11 +258,10 @@ fn shortcut_entry(stt_command: &str) -> String {
 }
 
 /// Add a `Super+Space` → `stt_command` shortcut entry to `content` (the
-/// COSMIC custom-shortcuts file's current text), mirroring
-/// `scripts/install-beta.sh:277-377`'s coarse checks: skip (return `None`)
-/// if a "Super STT" entry already exists, or if `key: "space"` is already
-/// bound to a `Super`-modified shortcut (approximated, like the script's
-/// grep, as both substrings appearing anywhere in `content`). Empty or
+/// COSMIC custom-shortcuts file's current text), subject to two coarse
+/// checks: skip (return `None`) if a "Super STT" entry already exists, or if
+/// `key: "space"` is already bound to a `Super`-modified shortcut
+/// (approximated as both substrings appearing anywhere in `content`). Empty or
 /// `{}`-only content gets the full-file template; otherwise the entry is
 /// inserted before the final closing brace.
 #[must_use]
@@ -657,14 +654,13 @@ mod tests {
     }
 
     #[test]
-    fn plan_full_update_interactive_matches_scripts_step_order() {
+    fn plan_full_update_interactive_uses_the_documented_step_order() {
         // Everything on: daemon+app+applet all selected (an "all" update),
         // the applet was already installed and its panel is currently
         // running, systemctl and cosmic-panel both available, interactive
-        // session. This is `scripts/install-beta.sh`'s own order for the
-        // "all" case: systemd install/enable/(re)start, applet panel
-        // restart, launcher nudge, legacy cleanup, COSMIC shortcut
-        // migrate-then-prompt.
+        // session. The documented order for the "all" case: systemd
+        // install/enable/(re)start, applet panel restart, launcher nudge,
+        // legacy cleanup, COSMIC shortcut migrate-then-prompt.
         let steps = plan(all_three(), true, true, true, true, true);
         assert_eq!(
             steps,

@@ -12,9 +12,9 @@ name: Release (Beta)
 #   1. Tarball names get a `-beta` suffix so the two channels can
 #      coexist on the same GitHub releases page without colliding
 #      (`super-stt-x86_64-unknown-linux-gnu-beta.tar.gz`).
-#   2. The GitHub release is created with `prerelease: true` so
-#      install-stable.sh's `/releases/latest` query continues to
-#      skip betas. install-beta.sh walks the full release list and
+#   2. The GitHub release is created with `prerelease: true` so the
+#      stable channel's `/releases/latest` query continues to skip
+#      betas, while the beta channel walks the full release list and
 #      picks the newest one whose prerelease flag is true.
 
 on:
@@ -211,8 +211,8 @@ jobs:
           # The whole point of this workflow: mark every release it
           # creates as a prerelease so the GitHub API's
           # `/releases/latest` endpoint continues to return only
-          # stable releases. install-beta.sh walks the full release
-          # list and picks the first `prerelease: true` entry.
+          # stable releases. The beta channel walks the full release
+          # list instead and picks the first `prerelease: true` entry.
           prerelease: true
           generate_release_notes: true
         env:

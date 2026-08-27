@@ -196,8 +196,7 @@ pub fn extract_tarball(tarball: &Path, staging: &Path) -> Result<(), InstallErro
 }
 
 /// The `stt` convenience wrapper — invokes `super-stt-cli` directly. Used by
-/// keyboard shortcuts (e.g. Super+Space → `stt record --write`). Content is
-/// exactly what `scripts/install-beta.sh` has installed to date.
+/// keyboard shortcuts (e.g. Super+Space → `stt record --write`).
 #[must_use]
 pub fn wrapper_script(prefix: &Path) -> String {
     format!(

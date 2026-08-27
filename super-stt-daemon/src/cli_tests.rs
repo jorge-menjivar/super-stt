@@ -13,12 +13,7 @@ fn repo_root() -> PathBuf {
 }
 
 /// Packaging files that either ship an `ExecStart=` line or rewrite one.
-const PACKAGING: &[&str] = &[
-    "super-stt-daemon/systemd/super-stt.service",
-    "justfile",
-    "scripts/install-stable.sh",
-    "scripts/install-beta.sh",
-];
+const PACKAGING: &[&str] = &["super-stt-daemon/systemd/super-stt.service", "justfile"];
 
 /// Every `ExecStart=` occurrence in `text`, as the argument tokens that follow
 /// the binary.
