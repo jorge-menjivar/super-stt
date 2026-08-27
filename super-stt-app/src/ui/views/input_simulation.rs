@@ -21,6 +21,7 @@ pub fn page<'a>(
     write_method: WriteMethod,
     test_text: &'a str,
     resolved: Option<WriteMethod>,
+    countdown: Option<u8>,
     action_error: Option<&'a str>,
 ) -> Element<'a, Message> {
     let methods = [
@@ -61,14 +62,14 @@ pub fn page<'a>(
     }
     blocks.push(method_section.into());
 
-    blocks.push(test_section(test_text));
+    blocks.push(test_section(test_text, countdown));
 
     page_layout("Input Simulation", settings::view_column(blocks))
 }
 
-/// Test section: a focused field plus the button that makes the daemon type
-/// into it.
-fn test_section(test_text: &str) -> Element<'_, Message> {
+/// Test section: the in-app typing test, plus the delayed one that targets
+/// whatever window the user switches to.
+fn test_section(test_text: &str, countdown: Option<u8>) -> Element<'_, Message> {
     let test_row = row![
         widget::text_input("Typed text lands here…", test_text)
             .id(test_field_id())
@@ -80,6 +81,18 @@ fn test_section(test_text: &str) -> Element<'_, Message> {
     .align_y(Alignment::Center)
     .spacing(10);
 
+    // Mid-countdown the only useful action is calling it off: starting a second
+    // test would race the first into whichever window won the focus.
+    let delayed_control: Element<'_, Message> = if let Some(secs) = countdown {
+        button::destructive(format!("Cancel — typing in {secs}…"))
+            .on_press(Message::WriteMethod(WriteMethodMessage::TestCancel))
+            .into()
+    } else {
+        button::standard("Start countdown")
+            .on_press(Message::WriteMethod(WriteMethodMessage::TestDelayed))
+            .into()
+    };
+
     settings::section()
         .title("Test")
         .add(
@@ -89,6 +102,14 @@ fn test_section(test_text: &str) -> Element<'_, Message> {
                     that will be used by the daemon.",
                 )
                 .flex_control(test_row),
+        )
+        .add(
+            settings::item::builder("Test another window")
+                .description(
+                    "Counts down before typing, so you can switch to the app you \
+                    actually dictate into.",
+                )
+                .control(delayed_control),
         )
         .into()
 }

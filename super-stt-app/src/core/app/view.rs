@@ -176,6 +176,7 @@ impl AppModel {
                 self.write_method,
                 &self.write_method_test_text,
                 self.resolved_write_method,
+                self.write_method_test_countdown,
                 self.action_error_for(crate::state::ErrorScope::InputSimulation),
             ),
             Page::Models => views::models::page(self),

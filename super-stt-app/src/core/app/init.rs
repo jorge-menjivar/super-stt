@@ -134,6 +134,7 @@ impl AppModel {
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),
             write_method_test_text: String::new(),
             resolved_write_method: None,
+            write_method_test_countdown: None,
             notification_method:
                 super_stt_shared::models::notification_method::NotificationMethod::default(),
             volume: 100,

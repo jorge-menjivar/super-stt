@@ -132,21 +132,41 @@ impl AppModel {
                 cosmic::widget::text_input::focus(
                     crate::ui::views::input_simulation::test_field_id(),
                 )
-                .chain(Task::perform(test_write_method(), |result| match result {
-                    // `None` is a daemon that typed but named no backend this
-                    // build knows: the test still passed, so report it and
-                    // leave the backend readout empty rather than guessing.
-                    Ok(resolved) => cosmic::Action::App(Message::WriteMethod(
-                        WriteMethodMessage::Tested(resolved),
-                    )),
-                    Err(e) => cosmic::Action::App(Message::WriteMethod(WriteMethodMessage::Error(
-                        format!("test failed: {e}"),
-                    ))),
-                }))
+                .chain(write_method_test_task())
+            }
+
+            // The delayed test deliberately does *not* focus the field: the
+            // user is switching to another window, and the apps that silently
+            // drop simulated keys are exactly the ones this page cannot host.
+            WriteMethodMessage::TestDelayed => {
+                self.write_method_test_text.clear();
+                self.clear_action_error(crate::state::ErrorScope::InputSimulation);
+                self.write_method_test_countdown = Some(TEST_COUNTDOWN_SECS);
+                countdown_tick_task()
+            }
+
+            WriteMethodMessage::TestTick => {
+                match advance_countdown(self.write_method_test_countdown) {
+                    Tick::Idle => Task::none(),
+                    Tick::Continue(next) => {
+                        self.write_method_test_countdown = Some(next);
+                        countdown_tick_task()
+                    }
+                    Tick::Fire => {
+                        self.write_method_test_countdown = None;
+                        write_method_test_task()
+                    }
+                }
+            }
+
+            WriteMethodMessage::TestCancel => {
+                self.write_method_test_countdown = None;
+                Task::none()
             }
 
             WriteMethodMessage::Tested(resolved) => {
                 self.resolved_write_method = resolved;
+                self.write_method_test_countdown = None;
                 Task::none()
             }
 
@@ -157,6 +177,7 @@ impl AppModel {
 
             WriteMethodMessage::Error(err) => {
                 log::warn!("Write method error: {err}");
+                self.write_method_test_countdown = None;
                 self.set_action_error(
                     crate::state::ErrorScope::InputSimulation,
                     format!("Write method: {err}"),
@@ -204,5 +225,112 @@ impl AppModel {
                 Task::none()
             }
         }
+    }
+}
+
+/// Seconds a delayed write-method test waits before typing — long enough to
+/// alt-tab into the target window, short enough that the user doesn't wonder
+/// whether the button worked.
+const TEST_COUNTDOWN_SECS: u8 = 3;
+
+/// Ask the daemon to type the test string, mapping the outcome onto the
+/// write-method messages. Shared by the immediate and delayed tests, which
+/// differ only in what happens *before* this runs.
+fn write_method_test_task() -> Task<cosmic::Action<Message>> {
+    Task::perform(test_write_method(), |result| match result {
+        // `None` is a daemon that typed but named no backend this build
+        // knows: the test still passed, so report it and leave the backend
+        // readout empty rather than guessing.
+        Ok(resolved) => {
+            cosmic::Action::App(Message::WriteMethod(WriteMethodMessage::Tested(resolved)))
+        }
+        Err(e) => cosmic::Action::App(Message::WriteMethod(WriteMethodMessage::Error(format!(
+            "test failed: {e}"
+        )))),
+    })
+}
+
+/// What a countdown tick should do.
+#[derive(Debug, PartialEq, Eq)]
+enum Tick {
+    /// No countdown is running — the tick belongs to one already cancelled.
+    Idle,
+    /// Keep counting, with this many seconds left.
+    Continue(u8),
+    /// Time is up: type now.
+    Fire,
+}
+
+/// Advance a countdown by one second.
+///
+/// `None` in means `Idle` out, and that is the whole point: cancelling clears
+/// the countdown but cannot unschedule the tick already in flight, so without
+/// this the stale tick would restart the countdown the user just stopped —
+/// and then type into their window.
+fn advance_countdown(remaining: Option<u8>) -> Tick {
+    match remaining {
+        None => Tick::Idle,
+        // `saturating_sub` also covers a `Some(0)` that no code path should
+        // produce: firing is the safe reading of "no time left".
+        Some(secs) => match secs.saturating_sub(1) {
+            0 => Tick::Fire,
+            next => Tick::Continue(next),
+        },
+    }
+}
+
+/// One second of countdown. Re-armed per tick rather than run as a
+/// subscription so the timer exists only while a countdown does.
+fn countdown_tick_task() -> Task<cosmic::Action<Message>> {
+    Task::perform(
+        async {
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        },
+        |()| cosmic::Action::App(Message::WriteMethod(WriteMethodMessage::TestTick)),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TEST_COUNTDOWN_SECS, Tick, advance_countdown};
+
+    /// The full run from button press to typing: one tick per second, firing
+    /// on the last. Getting this wrong types either a second early or never.
+    #[test]
+    fn counts_down_once_per_second_then_fires() {
+        let mut remaining = Some(TEST_COUNTDOWN_SECS);
+        let mut ticks = 0;
+        loop {
+            match advance_countdown(remaining) {
+                Tick::Continue(next) => {
+                    remaining = Some(next);
+                    ticks += 1;
+                }
+                Tick::Fire => {
+                    ticks += 1;
+                    break;
+                }
+                Tick::Idle => panic!("a running countdown must not report idle"),
+            }
+        }
+        assert_eq!(
+            ticks, TEST_COUNTDOWN_SECS,
+            "one tick per displayed second, no more"
+        );
+    }
+
+    /// A cancel clears the countdown but cannot unschedule the tick already in
+    /// flight. That tick must do nothing — otherwise the cancelled test still
+    /// types into whatever window the user moved to.
+    #[test]
+    fn a_tick_after_cancel_does_nothing() {
+        assert_eq!(advance_countdown(None), Tick::Idle);
+    }
+
+    /// Defensive: no path sets zero, but "no time left" can only mean fire.
+    #[test]
+    fn zero_fires_rather_than_underflowing() {
+        assert_eq!(advance_countdown(Some(0)), Tick::Fire);
+        assert_eq!(advance_countdown(Some(1)), Tick::Fire);
     }
 }
