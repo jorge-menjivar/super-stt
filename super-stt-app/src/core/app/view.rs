@@ -174,6 +174,8 @@ impl AppModel {
             ),
             Page::InputSimulation => views::input_simulation::page(
                 self.write_method,
+                &self.write_method_test_text,
+                self.resolved_write_method,
                 self.action_error_for(crate::state::ErrorScope::InputSimulation),
             ),
             Page::Models => views::models::page(self),

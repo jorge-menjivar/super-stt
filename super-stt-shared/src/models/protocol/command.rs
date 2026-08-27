@@ -59,6 +59,10 @@ pub enum Command {
         method: WriteMethod,
     },
     GetWriteMethod,
+    /// Type a fixed string with the configured write method so a settings UI
+    /// can show whether keyboard simulation reaches the focused window.
+    /// Contract: `docs/protocol/endpoints/v1/write_method/test.md`.
+    TestWriteMethod,
     /// The raw wire string, unparsed. `handle_set_notification_method` parses
     /// it (mirrors `SetAudioTheme`) so an unrecognized value can be rejected
     /// with a classified `error_code` (400), not just a bare error string.

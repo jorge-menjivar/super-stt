@@ -51,6 +51,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/recording_stop_mode`](../endpoints/v1/recording_stop_mode.md) | POST, GET | Default stop behavior for `/transcribe` (silence_only / silence_and_manual / manual_only)                  |
 | [`/preview_typing`](../endpoints/v1/preview_typing.md)      | POST, GET  | Toggle live typing of preview text while recording                                                    |
 | [`/write_method`](../endpoints/v1/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg_desktop_portal / ydotool / wayland_protocol)                   |
+| [`/write_method/test`](../endpoints/v1/write_method/test.md) | POST      | Type a test string with the configured method; reports the backend it resolved to                     |
 | [`/notification_method`](../endpoints/v1/notification_method.md) | POST, GET  | How recording failures are surfaced (auto / dbus / typed / off)                                       |
 | [`/allow_online_models`](../endpoints/v1/allow_online_models.md) | POST, GET | Privacy gate for online providers (OpenAI / Mistral / Deepgram)                                       |
 | [`/custom_models_dir`](../endpoints/v1/custom_models_dir.md) | POST, GET | Where to scan for user-supplied models                                                                |

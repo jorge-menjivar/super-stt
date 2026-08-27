@@ -6,3 +6,4 @@ settings_setter!(
     "method"
 );
 settings_dispatch!(get_write_method, "get_write_method");
+settings_dispatch!(test_write_method, "test_write_method");

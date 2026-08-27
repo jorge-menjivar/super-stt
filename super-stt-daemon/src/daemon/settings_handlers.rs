@@ -2,6 +2,7 @@
 
 use crate::config::DaemonConfig;
 use crate::daemon::types::SuperSTTDaemon;
+use crate::output::keyboard::Simulator;
 use log::{info, warn};
 use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
@@ -10,6 +11,12 @@ use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
 use super_stt_shared::models::write_method::WriteMethod;
 
 impl SuperSTTDaemon {
+    /// What `POST /write_method/test` types. Fixed and documented in
+    /// `docs/protocol/endpoints/v1/write_method/test.md`, so a client can tell
+    /// the user what to expect; kept ASCII so a pass means the common case
+    /// works rather than exercising high-keysym paths a backend may not map.
+    const WRITE_METHOD_TEST_TEXT: &str = "Super STT input test 123";
+
     /// Mutate the config under the write lock, then persist it. Centralizes the
     /// lock → mutate → persist sequence so a settings handler can't hand-roll it
     /// and forget the persist (see Tier 1 #3). Returns the persist outcome so the
@@ -110,6 +117,60 @@ impl SuperSTTDaemon {
             format!("Write method set to {method}"),
             persist,
         )
+    }
+
+    /// Handle test write method command: type a fixed string with the
+    /// configured method so the user can see whether it reaches their focused
+    /// window. Contract: `docs/protocol/endpoints/v1/write_method/test.md`.
+    pub async fn handle_test_write_method(&self) -> DaemonResponse {
+        if *self.busy.read().await {
+            return DaemonResponse::error_with_code(
+                ErrorCode::RecordingInProgress,
+                "recording_in_progress",
+            );
+        }
+
+        let method = self.config.read().await.transcription.write_method;
+
+        // Borrow the cached simulator rather than building a second one: a
+        // fresh portal session costs three D-Bus round-trips and may re-prompt
+        // for authorization, and the test would leave that session behind.
+        let cached = self.simulator.write().await.take();
+        let mut simulator = match cached {
+            Some(s) => s,
+            None => match Simulator::new(method).await {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Write-method test could not build a simulator: {e}");
+                    return DaemonResponse::error_with_code(
+                        ErrorCode::Internal,
+                        "write_method_unavailable",
+                    );
+                }
+            },
+        };
+
+        let resolved = simulator.resolved_method();
+        let result = simulator.type_text(Self::WRITE_METHOD_TEST_TEXT).await;
+
+        // Same cache discipline as a recording (see `Simulator::is_cacheable`).
+        if simulator.is_cacheable() {
+            *self.simulator.write().await = Some(simulator);
+        }
+
+        match result {
+            Ok(()) => {
+                info!("Write-method test typed via {resolved}");
+                DaemonResponse::success()
+                    .with_message(format!("Typed test text via {}", resolved.pretty_name()))
+                    .with_write_method(method.to_string())
+                    .with_resolved_write_method(resolved.to_string())
+            }
+            Err(e) => {
+                warn!("Write-method test failed to type via {resolved}: {e}");
+                DaemonResponse::error_with_code(ErrorCode::Internal, "typing_failed")
+            }
+        }
     }
 
     /// Handle get write method command

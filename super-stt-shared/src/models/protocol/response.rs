@@ -121,6 +121,13 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write_method: Option<String>,
 
+    /// The concrete backend a `POST /write_method/test` actually typed
+    /// through — never `auto`. Differs from `write_method` whenever the
+    /// configured value is `auto`, which is the only way a client can learn
+    /// which rung of the auto chain is in use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_write_method: Option<String>,
+
     // Notification method
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notification_method: Option<String>,
@@ -411,6 +418,12 @@ impl DaemonResponse {
     }
 
     #[must_use]
+    pub fn with_resolved_write_method(mut self, method: String) -> Self {
+        self.resolved_write_method = Some(method);
+        self
+    }
+
+    #[must_use]
     pub fn with_notification_method(mut self, method: String) -> Self {
         self.notification_method = Some(method);
         self
@@ -503,4 +516,31 @@ pub struct RocmHostInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VulkanHostInfo {
     pub api_version: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DaemonResponse;
+
+    /// `resolved_write_method` stays off the wire until a write-method test
+    /// actually resolves a backend. Every other response would otherwise gain
+    /// the field, and clients that treat its presence as "a test ran" — which
+    /// is the only reason it exists — would misread every settings reply.
+    #[test]
+    fn resolved_write_method_is_omitted_until_set() {
+        let json = serde_json::to_string(&DaemonResponse::success()).expect("serialize");
+        assert!(
+            !json.contains("resolved_write_method"),
+            "absent field must not be serialized: {json}"
+        );
+
+        let json = serde_json::to_string(
+            &DaemonResponse::success().with_resolved_write_method("wayland_protocol".to_string()),
+        )
+        .expect("serialize");
+        assert!(
+            json.contains(r#""resolved_write_method":"wayland_protocol""#),
+            "resolved backend must reach the wire verbatim: {json}"
+        );
+    }
 }

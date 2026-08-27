@@ -128,6 +128,7 @@ pub(crate) fn routes() -> Router<AppState> {
             "/write_method",
             get(write_method::get_write_method).post(write_method::set_write_method),
         )
+        .route("/write_method/test", post(write_method::test_write_method))
         .route(
             "/notification_method",
             get(notification_method::get_notification_method)
