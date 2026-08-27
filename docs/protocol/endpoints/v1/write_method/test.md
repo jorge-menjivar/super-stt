@@ -9,8 +9,12 @@ The string typed is `Super STT input test 123`.
 
 The text goes to whatever window holds keyboard focus on the daemon
 host at the moment of the call — the daemon cannot target a specific
-window. A client offering this as a button should focus a text field
-of its own first, so the user has somewhere to see the result.
+window, and takes no delay parameter. A client offering this as a
+button has two useful shapes: focus a text field of its own first, so
+the user has somewhere to see the result; or count down before
+calling, so the user can switch to the window they actually dictate
+into. The second is the stronger check, since an app that accepts
+simulated keys in one client may still drop them in another.
 Calling it from a remote / sandboxed client types into the *daemon
 host's* focused window, not the caller's.
 

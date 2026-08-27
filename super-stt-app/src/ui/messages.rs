@@ -270,6 +270,13 @@ pub enum WriteMethodMessage {
     /// Ask the daemon to type the test string. The Input Simulation test field
     /// is focused first so the keystrokes have somewhere to land.
     Test,
+    /// Start the countdown before an unfocused test, giving the user time to
+    /// switch to the window they actually dictate into.
+    TestDelayed,
+    /// One second of that countdown elapsed.
+    TestTick,
+    /// Abandon a running countdown before it types.
+    TestCancel,
     /// The daemon typed the test string; carries the backend it resolved to,
     /// which is the only way to see which rung `Auto` picked. `None` when the
     /// daemon named no backend this build understands — the typing still

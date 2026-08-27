@@ -137,6 +137,9 @@ pub struct AppModel {
     /// Backend the last test actually typed through. `None` until a test runs;
     /// with `write_method == Auto` this is the only readout of the real backend.
     pub resolved_write_method: Option<super_stt_shared::models::write_method::WriteMethod>,
+    /// Seconds left before a delayed write-method test types. `None` when no
+    /// countdown is running, which is also how a cancel is recorded.
+    pub write_method_test_countdown: Option<u8>,
 
     // Notification method
     pub notification_method: super_stt_shared::models::notification_method::NotificationMethod,
