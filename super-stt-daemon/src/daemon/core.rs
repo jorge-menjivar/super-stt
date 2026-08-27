@@ -53,6 +53,7 @@ impl SuperSTTDaemon {
             Command::GetRecordingStopMode => self.handle_get_recording_stop_mode().await,
             Command::SetWriteMethod { method } => self.handle_set_write_method(method).await,
             Command::GetWriteMethod => self.handle_get_write_method().await,
+            Command::TestWriteMethod => self.handle_test_write_method().await,
             Command::SetNotificationMethod { method } => {
                 self.handle_set_notification_method(method).await
             }

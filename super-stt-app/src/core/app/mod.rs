@@ -131,6 +131,12 @@ pub struct AppModel {
 
     // Write method
     pub write_method: super_stt_shared::models::write_method::WriteMethod,
+    /// Text in the Input Simulation test field — where `POST /write_method/test`
+    /// lands, since the daemon types into whatever window has focus.
+    pub write_method_test_text: String,
+    /// Backend the last test actually typed through. `None` until a test runs;
+    /// with `write_method == Auto` this is the only readout of the real backend.
+    pub resolved_write_method: Option<super_stt_shared::models::write_method::WriteMethod>,
 
     // Notification method
     pub notification_method: super_stt_shared::models::notification_method::NotificationMethod,

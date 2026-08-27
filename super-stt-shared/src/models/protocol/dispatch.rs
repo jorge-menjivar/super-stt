@@ -38,6 +38,7 @@ impl TryFrom<DaemonRequest> for Command {
             "get_recording_stop_mode" => Ok(Command::GetRecordingStopMode),
             "set_write_method" => cmd_set_write_method(&request),
             "get_write_method" => Ok(Command::GetWriteMethod),
+            "test_write_method" => Ok(Command::TestWriteMethod),
             "set_notification_method" => cmd_set_notification_method(&request),
             "get_notification_method" => Ok(Command::GetNotificationMethod),
             "set_update_check_enabled" => cmd_set_update_check_enabled(&request),

@@ -5,14 +5,20 @@ Read and set the keyboard simulation method used when a
 true` and needs to type the final transcription into the focused
 window.
 
-| Method                | Notes                                                                                |
-|-----------------------|--------------------------------------------------------------------------------------|
-| `auto`                | Pick the best available method for the current session (the default).               |
-| `xdg_desktop_portal`  | Use the portal's `RemoteDesktop` interface; requires a portal available on the bus.  |
-| `ydotool`             | Use the `ydotool` daemon if present; works without a portal on most Wayland sessions. |
-| `wayland_protocol`    | Use a direct Wayland protocol path (compositor-dependent).                            |
+| Method               | Notes                                                                                                                    |
+|----------------------|--------------------------------------------------------------------------------------------------------------------------|
+| `auto`               | Try `wayland_protocol`, then `xdg_desktop_portal`, then `ydotool`, and use the first the session supports (the default). |
+| `xdg_desktop_portal` | Use the portal's `RemoteDesktop` interface; requires a portal exporting it on the session bus.                            |
+| `ydotool`            | Use the `ydotool` daemon if present; works without a portal on most Wayland sessions.                                    |
+| `wayland_protocol`   | Use a direct Wayland protocol path; requires a compositor exposing `zwp_virtual_keyboard_manager_v1`.                     |
 
-The new method takes effect on the next `/transcribe` request.
+A specific method is used as given: when it is unavailable the request that
+needs it fails rather than falling back. Only `auto` walks the chain.
+
+The new method takes effect on the next `/transcribe` request. To
+check that the configured method can actually type — and, for `auto`,
+to learn which backend it resolves to — use
+[`POST /write_method/test`](./write_method/test.md).
 
 ## Auth
 

@@ -3,6 +3,7 @@
 use crate::core::app::AppModel;
 use crate::daemon::client::{
     set_notification_method, set_preview_typing, set_recording_stop_mode, set_write_method,
+    test_write_method,
 };
 use crate::ui::messages::{
     Message, NotificationMethodMessage, PreviewTypingMessage, RecordingStopModeMessage,
@@ -108,14 +109,49 @@ impl AppModel {
                         WriteMethodMessage::Loaded(method),
                     )),
                     Err(e) => cosmic::Action::App(Message::WriteMethod(WriteMethodMessage::Error(
-                        e.to_string(),
+                        format!("couldn't save: {e}"),
                     ))),
                 })
             }
 
             WriteMethodMessage::Loaded(method) => {
                 self.write_method = method;
+                // The stored resolution belonged to the previous method.
+                self.resolved_write_method = None;
                 self.clear_action_error(crate::state::ErrorScope::InputSimulation);
+                Task::none()
+            }
+
+            // Focus the test field *before* asking the daemon to type: it types
+            // into whatever window holds focus, and pressing the button leaves
+            // focus on the button. `chain` orders the two, where `batch` would
+            // race the focus against the round-trip.
+            WriteMethodMessage::Test => {
+                self.write_method_test_text.clear();
+                self.clear_action_error(crate::state::ErrorScope::InputSimulation);
+                cosmic::widget::text_input::focus(
+                    crate::ui::views::input_simulation::test_field_id(),
+                )
+                .chain(Task::perform(test_write_method(), |result| match result {
+                    // `None` is a daemon that typed but named no backend this
+                    // build knows: the test still passed, so report it and
+                    // leave the backend readout empty rather than guessing.
+                    Ok(resolved) => cosmic::Action::App(Message::WriteMethod(
+                        WriteMethodMessage::Tested(resolved),
+                    )),
+                    Err(e) => cosmic::Action::App(Message::WriteMethod(WriteMethodMessage::Error(
+                        format!("test failed: {e}"),
+                    ))),
+                }))
+            }
+
+            WriteMethodMessage::Tested(resolved) => {
+                self.resolved_write_method = resolved;
+                Task::none()
+            }
+
+            WriteMethodMessage::TestInput(text) => {
+                self.write_method_test_text = text;
                 Task::none()
             }
 
@@ -123,7 +159,7 @@ impl AppModel {
                 log::warn!("Write method error: {err}");
                 self.set_action_error(
                     crate::state::ErrorScope::InputSimulation,
-                    format!("Couldn't save write method: {err}"),
+                    format!("Write method: {err}"),
                 );
                 Task::none()
             }

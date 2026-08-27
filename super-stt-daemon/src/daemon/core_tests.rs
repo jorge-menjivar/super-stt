@@ -1622,3 +1622,54 @@ async fn record_with_no_model_types_nothing_without_write_mode() {
         "nothing may be typed outside write mode"
     );
 }
+
+/// The write-method test types the string the protocol doc promises, reports
+/// the backend that typed it, and hands the simulator back to the cache. A
+/// regression that skipped the cache return would rebuild the portal session —
+/// three D-Bus round-trips and possibly an authorization prompt — per test.
+#[tokio::test]
+async fn write_method_test_types_the_documented_string_and_recaches() {
+    let daemon = test_daemon().await;
+    let (sim, buf) = crate::output::keyboard::Simulator::capture();
+    *daemon.simulator.write().await = Some(sim);
+
+    let resp = daemon
+        .handle_command(make_request("test_write_method"))
+        .await;
+
+    assert_eq!(resp.status, "success");
+    assert_eq!(*buf.lock().unwrap(), "Super STT input test 123");
+    // The configured method (`auto` by default) and the backend that actually
+    // typed are reported separately — the whole point of the endpoint.
+    assert_eq!(resp.write_method.as_deref(), Some("auto"));
+    assert!(
+        resp.resolved_write_method.is_some(),
+        "a client with `auto` configured has no other way to see the real backend"
+    );
+    assert!(
+        daemon.simulator.read().await.is_some(),
+        "a cacheable simulator must go back to the cache"
+    );
+}
+
+/// A recording already owns the keyboard, so the test must refuse rather than
+/// interleave its string into the user's dictation.
+#[tokio::test]
+async fn write_method_test_refuses_while_recording() {
+    let daemon = test_daemon().await;
+    let (sim, buf) = crate::output::keyboard::Simulator::capture();
+    *daemon.simulator.write().await = Some(sim);
+    *daemon.busy.write().await = true;
+
+    let resp = daemon
+        .handle_command(make_request("test_write_method"))
+        .await;
+
+    assert_eq!(resp.status, "error");
+    assert_eq!(resp.error_code, Some(ErrorCode::RecordingInProgress));
+    assert_eq!(
+        *buf.lock().unwrap(),
+        "",
+        "nothing may be typed while a recording holds the keyboard"
+    );
+}

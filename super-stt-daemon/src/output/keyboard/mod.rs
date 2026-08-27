@@ -39,8 +39,8 @@ impl Simulator {
     /// Create a simulator for the requested write method.
     ///
     /// # Errors
-    /// Returns an error only when a *specific* method is requested and fails.
-    /// `Auto` always falls back to Wayland protocol.
+    /// Returns an error when a *specific* method is requested and fails, or —
+    /// for `Auto` — when every backend in the chain is unavailable.
     pub async fn new(method: WriteMethod) -> Result<Self> {
         let sim = match method {
             WriteMethod::Auto => Self::auto().await?,
@@ -57,17 +57,44 @@ impl Simulator {
         Ok(sim)
     }
 
-    /// Auto-detect: XDG Portal → ydotool → Wayland protocol.
+    /// Auto-detect: Wayland protocol → XDG Portal → ydotool.
+    ///
+    /// The Wayland protocol leads because it needs nothing installed beyond a
+    /// compositor exposing `zwp_virtual_keyboard_manager_v1`, types the user's
+    /// actual layout, and costs no D-Bus round-trips or authorization prompt.
+    /// The portal follows for sessions that withhold the virtual-keyboard
+    /// global, and ydotool last since it needs a running `ydotoold` and types a
+    /// hardcoded US-QWERTY map.
+    ///
+    /// # Errors
+    /// Only when every backend is unavailable. The message carries each rung's
+    /// reason: a failed recording is the daemon's sole chance to explain why
+    /// nothing can type.
     async fn auto() -> Result<Self> {
         debug!("Auto-detecting write method...");
+        let mut unavailable = Vec::new();
+
+        match EnigoBackend::new() {
+            Ok(backend) => return Ok(Self::WaylandProtocol(Box::new(backend))),
+            Err(e) => {
+                debug!("Wayland protocol unavailable: {e}");
+                unavailable.push(format!("Wayland protocol ({e})"));
+            }
+        }
 
         let portal_available = XdgPortalBackend::is_available().await;
         debug!("XDG Desktop Portal available: {portal_available}");
         if portal_available {
             match XdgPortalBackend::new().await {
                 Ok(backend) => return Ok(Self::XdgPortal(backend)),
-                Err(e) => warn!("XDG Portal available but session failed: {e}"),
+                Err(e) => {
+                    warn!("XDG Portal available but session failed: {e}");
+                    unavailable.push(format!("XDG Desktop Portal ({e})"));
+                }
             }
+        } else {
+            unavailable
+                .push("XDG Desktop Portal (RemoteDesktop interface not on the session bus)".into());
         }
 
         let ydotool_available = YdotoolBackend::is_available();
@@ -75,9 +102,12 @@ impl Simulator {
         if ydotool_available {
             return Ok(Self::Ydotool(YdotoolBackend::new()));
         }
+        unavailable.push("ydotool (not installed or ydotoold not running)".into());
 
-        debug!("Falling back to Wayland protocol");
-        Ok(Self::WaylandProtocol(Box::new(EnigoBackend::new()?)))
+        anyhow::bail!(
+            "no write method available — tried {}",
+            unavailable.join(", ")
+        )
     }
 
     /// Whether this backend may be held across recordings.
@@ -91,6 +121,23 @@ impl Simulator {
     #[must_use]
     pub fn is_cacheable(&self) -> bool {
         !matches!(self, Self::WaylandProtocol(_))
+    }
+
+    /// The concrete method this simulator drives.
+    ///
+    /// Never `Auto` in a shipped build: `auto()` resolves the chain at
+    /// construction, and this is the only way a client can learn which rung it
+    /// landed on (`POST /write_method/test`). The test-only capture backend
+    /// types through no real method and so reports the unresolved `Auto`.
+    #[must_use]
+    pub fn resolved_method(&self) -> WriteMethod {
+        match self {
+            Self::XdgPortal(_) => WriteMethod::XdgDesktopPortal,
+            Self::Ydotool(_) => WriteMethod::Ydotool,
+            Self::WaylandProtocol(_) => WriteMethod::WaylandProtocol,
+            #[cfg(test)]
+            Self::Capture(_) => WriteMethod::Auto,
+        }
     }
 
     /// Human-readable name for logging.

@@ -267,6 +267,16 @@ pub enum RecordingStopModeMessage {
 pub enum WriteMethodMessage {
     Changed(WriteMethod),
     Loaded(WriteMethod),
+    /// Ask the daemon to type the test string. The Input Simulation test field
+    /// is focused first so the keystrokes have somewhere to land.
+    Test,
+    /// The daemon typed the test string; carries the backend it resolved to,
+    /// which is the only way to see which rung `Auto` picked. `None` when the
+    /// daemon named no backend this build understands — the typing still
+    /// happened, so that is a pass with an empty readout, not a failure.
+    Tested(Option<WriteMethod>),
+    /// Contents of the test field — whatever the daemon (or the user) typed.
+    TestInput(String),
     Error(String),
 }
 
