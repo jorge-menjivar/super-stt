@@ -4,7 +4,7 @@ use super::wire_enum::wire_enum_strings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WriteMethod {
-    /// Auto-detect: try XDG Portal, then ydotool, then wayland-protocol.
+    /// Auto-detect: try wayland-protocol, then XDG Portal, then ydotool.
     #[default]
     Auto,
     /// XDG Desktop Portal `RemoteDesktop` keyboard input.
