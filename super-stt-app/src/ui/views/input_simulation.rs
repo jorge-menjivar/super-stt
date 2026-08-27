@@ -21,6 +21,7 @@ pub fn page<'a>(
     write_method: WriteMethod,
     test_text: &'a str,
     resolved: Option<WriteMethod>,
+    countdown: Option<u8>,
     action_error: Option<&'a str>,
 ) -> Element<'a, Message> {
     let methods = [
@@ -61,21 +62,36 @@ pub fn page<'a>(
     }
     blocks.push(method_section.into());
 
-    blocks.push(test_section(test_text));
+    blocks.push(test_section(test_text, countdown));
 
     page_layout("Input Simulation", settings::view_column(blocks))
 }
 
-/// Test section: a focused field plus the button that makes the daemon type
-/// into it.
-fn test_section(test_text: &str) -> Element<'_, Message> {
+/// Test section: a field to catch the typing, plus the two ways to trigger it
+/// — here, or in whatever window the user switches to during a countdown.
+fn test_section(test_text: &str, countdown: Option<u8>) -> Element<'_, Message> {
+    // Mid-countdown the only useful action is calling it off: firing a second
+    // test would race the first into whichever window won the focus.
+    let controls: Element<'_, Message> = if let Some(secs) = countdown {
+        button::destructive(format!("Cancel — typing in {secs}…"))
+            .on_press(Message::WriteMethod(WriteMethodMessage::TestCancel))
+            .into()
+    } else {
+        row![
+            button::suggested("Test here").on_press(Message::WriteMethod(WriteMethodMessage::Test)),
+            button::standard("Test another window")
+                .on_press(Message::WriteMethod(WriteMethodMessage::TestDelayed)),
+        ]
+        .spacing(10)
+        .into()
+    };
+
     let test_row = row![
         widget::text_input("Typed text lands here…", test_text)
             .id(test_field_id())
             .on_input(|text| Message::WriteMethod(WriteMethodMessage::TestInput(text)))
             .width(Length::Fill),
-        button::suggested("Type test text")
-            .on_press(Message::WriteMethod(WriteMethodMessage::Test)),
+        controls,
     ]
     .align_y(Alignment::Center)
     .spacing(10);
@@ -86,7 +102,8 @@ fn test_section(test_text: &str) -> Element<'_, Message> {
             settings::item::builder("Typing test")
                 .description(
                     "Types a short string into the field using the same writing method \
-                    that will be used by the daemon.",
+                    that will be used by the daemon. \"Test another window\" counts down \
+                    first, so you can switch to the app you actually dictate into.",
                 )
                 .flex_control(test_row),
         )
