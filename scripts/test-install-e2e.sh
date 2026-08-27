@@ -148,14 +148,6 @@ INSTALLED_FILES=(
     "644:/usr/local/share/metainfo/super-stt-app.metainfo.xml"
 )
 
-# KNOWN GAP — uninstall.sh's binary loop (the `for bin in ...` list) omits
-# `super-stt-install`, so every install leaves that one file behind after an
-# uninstall. It is asserted below as an expected failure rather than dropped
-# from the list, so the gap stays visible and this harness still lands green;
-# the follow-up that adds the binary to uninstall.sh removes both this
-# constant and the `sudo rm -f` that compensates for it between passes.
-KNOWN_UNINSTALL_LEFTOVER="/usr/local/bin/super-stt-install"
-
 path_of() { echo "${1#*:}"; }
 mode_of() { echo "${1%%:*}"; }
 
@@ -335,15 +327,6 @@ assert_clean_tree() {
 
     for entry in "${INSTALLED_FILES[@]}"; do
         path="$(path_of "$entry")"
-        if [ "$path" = "$KNOWN_UNINSTALL_LEFTOVER" ]; then
-            if [ -e "$path" ]; then
-                xfail "$label: $path is removed (uninstall.sh's binary list omits it)"
-            else
-                pass "$label: $path is removed"
-                note "the known uninstall gap is fixed — drop KNOWN_UNINSTALL_LEFTOVER from this script"
-            fi
-            continue
-        fi
         if [ -e "$path" ] || [ -L "$path" ]; then
             fail "$label: $path is removed" "absent" "still present"
             leftovers=$((leftovers + 1))
@@ -352,10 +335,6 @@ assert_clean_tree() {
     if [ "$leftovers" -eq 0 ]; then
         pass "$label: uninstall left nothing behind"
     fi
-
-    # Compensates for the known gap so the next pass starts from a genuinely
-    # clean host; removed together with KNOWN_UNINSTALL_LEFTOVER.
-    sudo rm -f "$KNOWN_UNINSTALL_LEFTOVER"
 }
 
 # ---- Passes ---------------------------------------------------------------

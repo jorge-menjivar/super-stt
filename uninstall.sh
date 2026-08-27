@@ -116,6 +116,7 @@ for bin in \
     super-stt-daemon \
     super-stt-cli \
     super-stt-consent \
+    super-stt-install \
     super-stt-app \
     super-stt-cosmic-applet \
     super-stt-applet-full \
