@@ -20,6 +20,9 @@
 #   - systemd user unit (/usr/lib/systemd/user + ~/.config/systemd/user)
 #   - COSMIC keyboard shortcut (only if it's the lone entry)
 #
+# The COSMIC panel is restarted when an installed applet was removed, so the
+# tray drops it without a relogin.
+#
 # Root-owned files are removed via sudo; it is only invoked when such
 # files are actually present.
 #
@@ -96,6 +99,21 @@ do
     [ -e "$probe" ] && SYSTEM_INSTALL_PRESENT=true
 done
 
+# Whether a COSMIC applet was installed, captured here for the same reason:
+# it decides whether the panel needs restarting once the files are gone
+# (step 6), and by then there is nothing left to probe. Both the system and
+# the legacy per-user layouts count, and the desktop entries are probed as
+# well as the binary so an install missing one of the two still registers.
+APPLET_INSTALLED=false
+for probe in \
+    "$SYSTEM_BIN_DIR/super-stt-cosmic-applet" \
+    "$LEGACY_BIN_DIR/super-stt-cosmic-applet" \
+    "$SYSTEM_DESKTOP_DIR/super-stt-cosmic-applet-full.desktop" \
+    "$DESKTOP_DIR/super-stt-cosmic-applet-full.desktop"
+do
+    [ -e "$probe" ] && APPLET_INSTALLED=true
+done
+
 print_info "Uninstalling Super STT..."
 
 # 1. Disable the unit so it doesn't auto-start after the next reboot,
@@ -169,6 +187,17 @@ if command -v update-desktop-database &> /dev/null; then
         $SUDO update-desktop-database "$SYSTEM_DESKTOP_DIR" 2>/dev/null || true
     fi
 fi
+# The panel keeps a loaded applet in the tray until it restarts, so a removed
+# applet lingers there until the next relogin. Restart it when the applet was
+# actually installed (captured before removal, above) and a panel is actually
+# running; cosmic-session respawns it. Unanchored `-f`, matching the
+# installer's own post-install panel restart, because the panel runs from an
+# absolute path rather than a bare name like the launchers below.
+if [ "$APPLET_INSTALLED" = true ] && pgrep -f cosmic-panel > /dev/null 2>&1; then
+    print_info "Restarting cosmic-panel to drop the removed applet..."
+    pkill -f cosmic-panel 2>/dev/null || true
+fi
+
 # Nudge COSMIC's launcher caches so the removed entries disappear without
 # a relogin; both processes respawn on demand and rescan.
 pkill -f '^cosmic-app-library$' 2>/dev/null || true
