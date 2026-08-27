@@ -120,6 +120,21 @@ resolve_beta_tag() {
     fi
 }
 
+# `curl -fsSL "$1"` against the GitHub REST API, authenticated when a
+# `GITHUB_TOKEN` is present in the environment. Unauthenticated API access is
+# capped at 60 requests/hour per source IP, which a shared NAT or a CI runner
+# can exhaust; a token lifts that. A token is never required for a normal
+# install, and this is deliberately scoped to the API host only — the release
+# asset download below redirects to a different host, which rejects requests
+# that carry an Authorization header curl would forward across the redirect.
+gh_api_curl() {
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "$1"
+    else
+        curl -fsSL "$1"
+    fi
+}
+
 # ---- Main install flow -----------------------------------------------------
 
 main() {
@@ -159,10 +174,10 @@ main() {
     # that step is where a wrongly-generic message previously misled users.
     if [ -z "$VERSION" ]; then
         if [ "$CHANNEL" = "stable" ]; then
-            RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases/latest") || true
+            RELEASE_JSON=$(gh_api_curl "https://api.github.com/repos/$GITHUB_REPO/releases/latest") || true
             VERSION=$(resolve_stable_tag "$RELEASE_JSON")
         else
-            RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/$GITHUB_REPO/releases") || true
+            RELEASE_JSON=$(gh_api_curl "https://api.github.com/repos/$GITHUB_REPO/releases") || true
             VERSION=$(resolve_beta_tag "$RELEASE_JSON")
         fi
     fi

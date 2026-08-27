@@ -144,6 +144,17 @@ test-gui *args:
 test-install:
     bash scripts/test-install.sh
 
+# End-to-end install verification: installs a real published release, asserts
+# the complete installed tree, then uninstalls and asserts nothing is left.
+# DESTRUCTIVE — it writes to (and clears) the real /usr/local and
+# /usr/lib/systemd/user, so it is deliberately NOT part of `just ci` and
+# refuses to run without SUPER_STT_INSTALL_E2E_YES=1. CI runs it on disposable
+# runners (.github/workflows/install-e2e.yml); locally, run it in a container.
+# Usage: just test-install-e2e [stable|beta]
+[doc("End-to-end install test (DESTRUCTIVE: real install into /usr/local)")]
+test-install-e2e channel="stable":
+    bash scripts/test-install-e2e.sh {{ channel }}
+
 # Load every committed old-config fixture against the current config types.
 config-compat *args:
     cargo test -p super-stt-daemon --lib config {{ args }}
