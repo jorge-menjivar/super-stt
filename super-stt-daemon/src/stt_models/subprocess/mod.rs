@@ -105,10 +105,16 @@ impl SubprocessBackend {
         // Route through the shared validated helper so it gets the same
         // traversal/prefix/length guards as the daemon's own sockets, instead
         // of a raw `$XDG_RUNTIME_DIR` join (Tier 2 #7).
-        let socket = super_stt_shared::validation::secure_runtime_path(&format!(
-            "backends/{}.sock",
-            sanitize(model_name)
-        ));
+        //
+        // Keyed by backend directory *and* model, not by model alone: the
+        // daemon runs two backend instances at once (the transcription model
+        // and the post-processor), and two backends may legitimately serve the
+        // same model name. Keyed by model alone, the second spawn's
+        // `remove_file` below would unlink the live instance's socket and
+        // either teardown would take out the other's.
+        let instance = instance_key(backend_dir, model_name);
+        let socket =
+            super_stt_shared::validation::secure_runtime_path(&format!("backends/{instance}.sock"));
         let socket_dir = socket.parent().map_or_else(
             || PathBuf::from("/tmp/stt/backends"),
             std::path::Path::to_path_buf,
@@ -123,11 +129,11 @@ impl SubprocessBackend {
             binary.display()
         );
 
-        let unit = format!(
-            "super-stt-backend-{}-{}",
-            sanitize(model_name),
-            std::process::id()
-        );
+        // Same key as the socket, for the same reason — `systemd-run --unit=`
+        // fails outright when the name is already taken. The
+        // `super-stt-backend-` prefix is load-bearing: `cleanup_orphan_units`
+        // sweeps by it at daemon startup.
+        let unit = format!("super-stt-backend-{instance}-{}", std::process::id());
 
         systemd::spawn_systemd_unit(
             &unit,
@@ -351,6 +357,14 @@ impl Transcribe for SubprocessBackend {
             .await?;
         crate::stt_models::v1::parse_transcribe_response(status, &resp)
     }
+
+    async fn process_text(&mut self, text: &str, language: Option<&str>) -> Result<String> {
+        let body = crate::stt_models::v1::build_process_body(text, language)?;
+        let mut headers = json_headers();
+        headers.push(("x-stt-model".to_string(), self.model_id.clone()));
+        let (status, resp) = self.request("POST", "/v1/process", &headers, body).await?;
+        crate::stt_models::v1::parse_process_response(status, &resp)
+    }
 }
 
 fn json_headers() -> Vec<(String, String)> {
@@ -376,6 +390,43 @@ fn load_body(name: &str, provider: Option<&str>, device_pref: &str) -> serde_jso
         load["device"] = serde_json::json!(device_pref);
     }
     load
+}
+
+/// Longest instance key that still leaves room for the socket path.
+///
+/// A pathname Unix socket must fit in `sun_path` — 108 bytes on Linux,
+/// including the terminator. The prefix is
+/// `$XDG_RUNTIME_DIR/stt/backends/` (about 30 bytes for the usual
+/// `/run/user/<uid>`) and the suffix is `.sock`, so 64 leaves comfortable
+/// headroom. Keys are almost always far shorter; this bounds the tail case,
+/// since a backend `id` — which names the install directory — may be up to
+/// 255 bytes on its own.
+const MAX_INSTANCE_KEY: usize = 64;
+
+/// The name that identifies one running backend instance — its socket file and
+/// its systemd unit. Derived from the backend's install directory and the model
+/// it serves, so the daemon's two concurrent instances (transcription model and
+/// post-processor) never collide, including when two backends serve the same
+/// model name.
+///
+/// A key over [`MAX_INSTANCE_KEY`] is truncated with a hash of the full value
+/// appended, so an over-long backend id yields a short name that is still
+/// unique and still the same on every spawn — rather than a socket path the
+/// kernel refuses to bind.
+fn instance_key(backend_dir: &Path, model_name: &str) -> String {
+    let dir = backend_dir
+        .file_name()
+        .map_or_else(String::new, |n| sanitize(&n.to_string_lossy()));
+    let key = format!("{dir}-{}", sanitize(model_name));
+    if key.len() <= MAX_INSTANCE_KEY {
+        return key;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&key, &mut hasher);
+    let digest = format!("{:016x}", std::hash::Hasher::finish(&hasher));
+    // `MAX_INSTANCE_KEY` total: the truncated head, a separator, and the digest.
+    let head = &key[..MAX_INSTANCE_KEY - digest.len() - 1];
+    format!("{head}-{digest}")
 }
 
 fn sanitize(s: &str) -> String {

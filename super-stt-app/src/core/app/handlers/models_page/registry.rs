@@ -45,6 +45,18 @@ impl AppModel {
                 self.registry.filters.online = o;
                 Task::none()
             }
+            ModelsPageMessage::RegistryRoleFilter(r) => {
+                self.registry.filters.role = r;
+                Task::none()
+            }
+            ModelsPageMessage::InstalledOnlineFilter(o) => {
+                self.models_page.installed_filters.online = o;
+                Task::none()
+            }
+            ModelsPageMessage::InstalledRoleFilter(r) => {
+                self.models_page.installed_filters.role = r;
+                Task::none()
+            }
 
             ModelsPageMessage::ImportBackendFromDir => Task::perform(
                 async {

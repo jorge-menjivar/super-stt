@@ -5,7 +5,6 @@ use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use log::{info, warn};
-use serde::Deserialize;
 
 pub(crate) async fn list_backends(State(s): State<AppState>) -> impl IntoResponse {
     dispatch_command(&s.daemon, "list_backends", None).await
@@ -85,31 +84,6 @@ pub(crate) async fn uninstall_backend(
         serde_json::to_string(&resp).unwrap_or_default(),
     )
         .into_response()
-}
-
-pub(crate) async fn get_active_backend(State(s): State<AppState>) -> impl IntoResponse {
-    dispatch_command(&s.daemon, "get_active_backend", None).await
-}
-
-#[derive(Deserialize)]
-pub(crate) struct SetActiveBackendBody {
-    pub(crate) source: String,
-}
-
-pub(crate) async fn set_active_backend(
-    State(s): State<AppState>,
-    axum::Json(body): axum::Json<SetActiveBackendBody>,
-) -> impl IntoResponse {
-    dispatch_command(
-        &s.daemon,
-        "set_active_backend",
-        Some(serde_json::json!({ "source": body.source })),
-    )
-    .await
-}
-
-pub(crate) async fn clear_active_backend(State(s): State<AppState>) -> impl IntoResponse {
-    dispatch_command(&s.daemon, "clear_active_backend", None).await
 }
 
 pub(crate) async fn get_gpu_info(State(s): State<AppState>) -> impl IntoResponse {

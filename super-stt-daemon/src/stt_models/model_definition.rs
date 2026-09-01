@@ -19,7 +19,7 @@
 
 use std::time::Duration;
 
-use super_stt_registry_types::manifest::Device;
+use super_stt_registry_types::manifest::{Device, ModelRole};
 
 /// Fully resolved description of a single model served by a backend.
 ///
@@ -50,6 +50,10 @@ pub struct ModelDefinition {
     /// Whether this model is reached over the realtime WebSocket path
     /// (`/v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`.
     pub realtime: bool,
+    /// What the model is for — transcribing audio, or post-processing a
+    /// finished transcript. Decides which of the daemon's two model slots it
+    /// may be selected into, and which `/v1` route it is driven over.
+    pub role: ModelRole,
     /// Compatibility shim carried from
     /// [`ModelEntry::provider`](super_stt_registry_types::manifest::ModelEntry::provider);
     /// not part of identity, which is `(name, source)`.
@@ -71,5 +75,12 @@ impl ModelDefinition {
     #[must_use]
     pub fn is_online(&self) -> bool {
         self.supported_devices.contains(&Device::None)
+    }
+
+    /// Whether this model post-processes transcripts rather than producing
+    /// them.
+    #[must_use]
+    pub fn is_post_processor(&self) -> bool {
+        self.role.is_post_processor()
     }
 }

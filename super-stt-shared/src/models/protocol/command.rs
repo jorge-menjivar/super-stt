@@ -51,6 +51,29 @@ pub enum Command {
         enabled: bool,
     },
     GetPreviewTyping,
+    /// Run final transcripts through `model`. An empty `source` resolves to
+    /// the selected post-processor backend, the way `SetModel` resolves against
+    /// the active backend. The model must be one its backend declares with
+    /// `role = "post_processor"`.
+    SetPostProcessor {
+        model: String,
+        source: String,
+    },
+    GetPostProcessor,
+    /// Stop running the post-processor, keeping the selection.
+    ClearPostProcessor,
+    /// Select the backend that provides the post-processor. The post-processing
+    /// twin of `SetActiveBackend`: it records *which* backend and validates
+    /// that it serves one, without loading anything.
+    SetPostProcessorBackend {
+        source: String,
+    },
+    /// Deselect the post-processor backend, forgetting the model with it.
+    ClearPostProcessorBackend,
+    /// Report the whole transcription pipeline: every stage in order, with the
+    /// backend and model filling it. Stage 1 transcribes; later stages
+    /// post-process what it produced.
+    GetPipeline,
     SetRecordingStopMode {
         mode: RecordingStopMode,
     },

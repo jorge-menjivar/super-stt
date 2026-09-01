@@ -27,6 +27,7 @@ pub enum Message {
     Device(DeviceMessage),
     Download(DownloadMessage),
     PreviewTyping(PreviewTypingMessage),
+    PostProcessor(PostProcessorMessage),
     RecordingStopMode(RecordingStopModeMessage),
     WriteMethod(WriteMethodMessage),
     NotificationMethod(NotificationMethodMessage),
@@ -212,6 +213,12 @@ pub enum ModelsPageMessage {
     RegistryIncludeIncompatible(bool),
     /// User chose an online filter.
     RegistryOnlineFilter(Option<bool>),
+    /// User chose which kind of model a Browse entry must serve.
+    RegistryRoleFilter(crate::state::registry::RoleFilter),
+    /// User chose an online filter for the Installed tab.
+    InstalledOnlineFilter(Option<bool>),
+    /// User chose which kind of model an installed backend must serve.
+    InstalledRoleFilter(crate::state::registry::RoleFilter),
     /// Toggle the per-row overflow ("⋯") menu on an installed-backend card,
     /// keyed by backend `source`. Opening one closes any other.
     ToggleInstalledMenu(String),
@@ -252,6 +259,40 @@ pub enum PreviewTypingMessage {
     Toggled(bool),       // User toggled the setting
     SettingLoaded(bool), // Setting loaded from daemon
     Error(String),       // Error setting or getting preview typing
+}
+
+/// Post-processor setting: the model that rewrites final transcripts.
+///
+/// Mirrors the transcription model's stage-then-load flow
+/// ([`ModelsPageMessage::StageActiveModel`] / `LoadStagedModel` /
+/// `UnloadActiveModel`): picking a model is local, and a separate Enable
+/// commits it. Choosing from a dropdown should not start running a model.
+#[derive(Debug, Clone)]
+pub enum PostProcessorMessage {
+    /// User chose which backend provides the post-processor, from the
+    /// "Select a post-processor" sheet. Mirrors
+    /// [`ModelsPageMessage::SelectBackend`]: the backend is selected without
+    /// anything running yet.
+    SelectBackend(String),
+    /// Clear the backend selection entirely and stop processing. Mirrors
+    /// [`ModelsPageMessage::DeselectBackend`].
+    Deselect,
+    /// User picked a model from the dropdown — staged locally, nothing sent.
+    /// The index is into the selected backend's post-processor models, in the
+    /// order `crate::ui::views::models::post_processor_models` returns them.
+    Staged(usize),
+    /// Commit the staged (or already-selected) model and turn processing on.
+    Enable,
+    /// Turn processing off. The selection is kept, so re-enabling needs no
+    /// second pick.
+    Disable,
+    /// A write succeeded; re-read the daemon's own state rather than assuming
+    /// the write's arguments took effect verbatim.
+    ReloadRequested,
+    /// The daemon's current state, from the initial load or after a change.
+    Loaded(crate::daemon::client::PostProcessorState),
+    /// A get/set failed; the message is shown inline.
+    Error(String),
 }
 
 /// Recording stop-mode setting.
@@ -494,6 +535,7 @@ message_from! {
     Device => DeviceMessage,
     Download => DownloadMessage,
     PreviewTyping => PreviewTypingMessage,
+    PostProcessor => PostProcessorMessage,
     RecordingStopMode => RecordingStopModeMessage,
     WriteMethod => WriteMethodMessage,
     NotificationMethod => NotificationMethodMessage,

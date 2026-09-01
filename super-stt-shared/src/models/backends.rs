@@ -113,6 +113,20 @@ pub struct BackendModel {
     /// batch `POST /v1/transcribe`.
     #[serde(default)]
     pub realtime: bool,
+    /// What the model is for: `"transcription"` (the default) or
+    /// `"post_processor"`. A settings UI filters its transcription-model picker
+    /// and its post-processor picker on this.
+    ///
+    /// `default` rather than required, so a catalog from a daemon that predates
+    /// the field still parses — reading every model as transcribing, which is
+    /// what it was.
+    #[serde(default = "default_role")]
+    pub role: String,
+}
+
+/// The role a catalog entry without the key is read as.
+fn default_role() -> String {
+    "transcription".to_string()
 }
 
 /// A sensitive value the backend requires, stored in the system keyring.
@@ -177,6 +191,7 @@ mod tests {
             supported_languages: Vec::new(),
             primary_language: String::new(),
             realtime: false,
+            role: "transcription".into(),
         };
         let v = serde_json::to_value(&m).expect("serializes");
         assert!(
@@ -203,6 +218,21 @@ mod tests {
         let m: BackendModel =
             serde_json::from_value(without).expect("parses with `provider` absent");
         assert_eq!(m.provider, "");
+    }
+
+    /// A catalog from a daemon that predates `role` still parses, and its
+    /// models read as transcription models — which is what they were. A
+    /// required field here would black out the whole settings UI against any
+    /// daemon not yet upgraded.
+    #[test]
+    fn a_model_without_a_role_reads_as_transcription() {
+        let json = serde_json::json!({ "name": "whisper-1" });
+        let m: BackendModel = serde_json::from_value(json).expect("older payload must parse");
+        assert_eq!(m.role, "transcription");
+
+        let json = serde_json::json!({ "name": "cleanup", "role": "post_processor" });
+        let m: BackendModel = serde_json::from_value(json).expect("parses");
+        assert_eq!(m.role, "post_processor");
     }
 
     /// `GET /backends` reports each backend's `[network].allowed_hosts`; the

@@ -30,16 +30,14 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 
 | Mutation                                                                                                                          | Mirrored as an SSE event?                                                                            |
 |-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| `/active_model`, `/active_backend`, `/active_device`, `/allow_online_models` (when it triggers a fallback)                       | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled)                 |
-| `/update_check_enabled`, `/update_beta_optin`                                                                                    | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
+| `/pipeline/1/model`, `/pipeline/1`, `/active_device`, `/allow_online_models` (when it triggers a fallback)                       | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled)                 |
+| `/update_check_enabled`, `/update_beta_optin`, `/pipeline/{stage}` (post-processing stages)                                     | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
 | `/audio_theme`, `/volume`, `/write_method`, `/notification_method`, `/recording_stop_mode`, `/preview_typing`, `/allow_online_models` (no fallback), `/custom_models_dir` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
 
 ## Endpoint reference
 
 | Endpoint                                                    | Methods    | Notes                                                                                                |
 |-------------------------------------------------------------|------------|------------------------------------------------------------------------------------------------------|
-| [`/active_model`](../endpoints/v1/active_model.md)          | POST, GET  | Switch the active STT model and read its current state + any in-flight switch                        |
-| [`/active_model/cancel`](../endpoints/v1/active_model/cancel.md) | POST  | Abort an in-flight model switch                                                                       |
 | [`/backends/{source}/models/{model}/language`](../endpoints/v1/backends/model-language.md) | GET, POST, DELETE | Per-model language override + resolved effective language |
 | [`/models`](../endpoints/v1/models.md)                      | GET        | List built-in + custom models                                                                         |
 | [`/active_device`](../endpoints/v1/active_device.md)        | POST, GET  | Switch CPU vs CUDA; read current device + GPU memory                                                  |
@@ -50,6 +48,11 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/volume`](../endpoints/v1/volume.md)                      | POST, GET  | Set / read audio cue volume (0–100)                                                                   |
 | [`/recording_stop_mode`](../endpoints/v1/recording_stop_mode.md) | POST, GET | Default stop behavior for `/transcribe` (silence_only / silence_and_manual / manual_only)                  |
 | [`/preview_typing`](../endpoints/v1/preview_typing.md)      | POST, GET  | Toggle live typing of preview text while recording                                                    |
+| [`/pipeline`](../endpoints/v1/pipeline.md)                  | GET        | The ordered stages a transcript passes through                                                        |
+| [`/pipeline/{stage}`](../endpoints/v1/pipeline.md)          | GET, POST, DELETE | Select / deselect the backend filling one stage                                                |
+| [`/pipeline/{stage}/model`](../endpoints/v1/pipeline.md)    | POST, DELETE | Run / stop a model in one stage                                                                     |
+| [`/pipeline/{stage}/model/cancel`](../endpoints/v1/pipeline.md) | POST   | Abort an in-flight load for one stage                                                             |
+| [`/pipeline/{stage}/model/reload`](../endpoints/v1/pipeline.md) | POST   | Re-instantiate a stage in place, applying changed secrets/options                                 |
 | [`/write_method`](../endpoints/v1/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg_desktop_portal / ydotool / wayland_protocol)                   |
 | [`/write_method/test`](../endpoints/v1/write_method/test.md) | POST      | Type a test string with the configured method; reports the backend it resolved to                     |
 | [`/notification_method`](../endpoints/v1/notification_method.md) | POST, GET  | How recording failures are surfaced (auto / dbus / typed / off)                                       |
@@ -57,7 +60,6 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/custom_models_dir`](../endpoints/v1/custom_models_dir.md) | POST, GET | Where to scan for user-supplied models                                                                |
 | [`/backends`](../endpoints/v1/backends.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |
 | [`/backends/{source}/options`](../endpoints/v1/backends/options.md) | GET, POST, DELETE | List / read / set / reset a backend's non-sensitive options                          |
-| [`/active_backend`](../endpoints/v1/active_backend.md)      | GET, POST, DELETE | Read / set / clear the active backend                                                          |
 | [`/gpu_info`](../endpoints/v1/gpu_info.md)                  | GET        | GPU / VRAM information                                                                                 |
 | [`/registry/backends`](../endpoints/v1/registry/backends.md) | GET      | List backends available in the registry                                                               |
 | [`/registry/backends/refresh`](../endpoints/v1/registry/refresh.md) | POST | Refresh the registry index                                                                            |
@@ -87,7 +89,7 @@ sequenceDiagram
     D-->>App: 200 { session_token, scopes }
 
     Note over App,D: 2. Load current state — one round-trip per panel
-    App->>D: GET /models, GET /active_model, GET /active_device,<br/>      GET /audio_themes, GET /audio_theme, GET /volume, …
+    App->>D: GET /models, GET /pipeline, GET /active_device,<br/>      GET /audio_themes, GET /audio_theme, GET /volume, …
     D-->>App: …
 
     Note over App,D: 3. Subscribe to status + progress events (separate connection)
@@ -95,7 +97,7 @@ sequenceDiagram
     D-->>App: 200 SSE stream
 
     Note over App,D: 4. User picks a different model
-    App->>D: POST /active_model<br/>{ model: "voxtral-mini", source: "github.com/super-stt/voxtral" }
+    App->>D: POST /pipeline/1/model<br/>{ model: "voxtral-mini", source: "github.com/super-stt/voxtral" }
     D-->>App: 202 { message: "Model switch started" }
 
     Note over App,D: 5. Switch progress arrives on the SSE stream

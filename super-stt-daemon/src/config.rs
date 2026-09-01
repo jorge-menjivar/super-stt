@@ -21,6 +21,8 @@ pub struct DaemonConfig {
     pub backends: BackendsConfig,
     #[serde(default)]
     pub update: UpdateConfig,
+    #[serde(default)]
+    pub post_processor: PostProcessorConfig,
 }
 
 /// Self-update checking. Contract: docs/protocol/endpoints/v1/update.md
@@ -93,6 +95,50 @@ pub struct AudioConfig {
 
 fn default_volume() -> u8 {
     100
+}
+
+/// The transcript post-processor: a second model, selected independently of
+/// the transcription model, that rewrites each final transcript before the
+/// daemon types or returns it.
+///
+/// Contract: `docs/protocol/endpoints/v1/pipeline.md` (stage 2). Every field is
+/// defaulted, so a `daemon.toml` written before the section existed loads with
+/// post-processing off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct PostProcessorConfig {
+    /// Whether final transcripts are run through the selected post-processor.
+    /// Off by default: post-processing costs latency, and a cloud processor
+    /// would send the transcript text to a third party.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Wire name of the selected post-processor model. Empty when none is
+    /// selected.
+    #[serde(default)]
+    pub model: String,
+    /// Repo id of the backend serving `model`. Empty when none is selected.
+    /// Held with `model` as the `(name, source)` identity pair every other
+    /// model selection uses.
+    #[serde(default)]
+    pub source: String,
+}
+
+impl PostProcessorConfig {
+    /// The selected `(model, source)` pair, or `None` when the selection is
+    /// incomplete. Both halves are required: a name without the backend that
+    /// serves it resolves to nothing.
+    #[must_use]
+    pub fn selection(&self) -> Option<(&str, &str)> {
+        (!self.model.is_empty() && !self.source.is_empty())
+            .then_some((self.model.as_str(), self.source.as_str()))
+    }
+
+    /// Whether post-processing should actually run: enabled *and* pointed at a
+    /// model. The two are stored separately so toggling the feature off does
+    /// not discard the user's choice.
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.enabled && self.selection().is_some()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -193,6 +239,7 @@ impl Default for DaemonConfig {
             online: OnlineConfig::default(),
             backends: BackendsConfig::default(),
             update: UpdateConfig::default(),
+            post_processor: PostProcessorConfig::default(),
         }
     }
 }
@@ -388,6 +435,40 @@ impl DaemonConfig {
         self.transcription.preferred_model = String::new();
         self.transcription.preferred_source = String::new();
         self.transcription.preferred_provider = String::new();
+    }
+
+    /// Select the post-processor model and whether it runs. Stored as the same
+    /// `(name, source)` pair every model selection uses.
+    pub fn enable_post_processor(&mut self, model: String, source: String) {
+        self.post_processor.enabled = true;
+        self.post_processor.model = model;
+        self.post_processor.source = source;
+    }
+
+    /// Stop running the post-processor, keeping the selection so re-enabling
+    /// is one call. The counterpart of `DELETE /active_model`, which unloads
+    /// the model but leaves its backend selected.
+    pub fn disable_post_processor(&mut self) {
+        self.post_processor.enabled = false;
+    }
+
+    /// Select the backend that provides the post-processor.
+    ///
+    /// Switching to a *different* backend drops the model with it: the name
+    /// belonged to the old backend and means nothing under the new one. This
+    /// mirrors `POST /active_backend`, which unloads the current model when the
+    /// backend changes.
+    pub fn select_post_processor_backend(&mut self, source: String) {
+        if self.post_processor.source != source {
+            self.post_processor.model.clear();
+            self.post_processor.enabled = false;
+        }
+        self.post_processor.source = source;
+    }
+
+    /// Deselect the backend and forget everything with it (→ nothing loaded).
+    pub fn clear_post_processor_backend(&mut self) {
+        self.post_processor = PostProcessorConfig::default();
     }
 
     /// Update master volume.

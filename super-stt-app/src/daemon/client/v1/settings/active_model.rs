@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/active_model` and `/models` — model selection, download, and reload.
+//! Stage 1 of the pipeline — the model that turns audio into text — plus the
+//! flat `/models` catalog.
+//!
+//! A transcript passes through ordered stages, and every stage answers the same
+//! paths: `/pipeline/{stage}` selects the backend filling it,
+//! `/pipeline/{stage}/model` runs a model in it. These wrappers are stage 1.
 
 use crate::daemon::client::internal::response::{require_message, require_success};
 use crate::daemon::client::internal::session::with_settings_token;
@@ -7,24 +12,29 @@ use serde::Deserialize;
 use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
-// Only the `/active_model` fields the settings app consumes are modeled; serde ignores the rest.
+/// Transcription is stage 1 of the pipeline. Named here so the position appears
+/// once, and a re-ordering is a one-line change.
+const STT_STAGE: &str = "/pipeline/1";
+const STT_STAGE_MODEL: &str = "/pipeline/1/model";
+const STT_STAGE_CANCEL: &str = "/pipeline/1/model/cancel";
 
-/// Wire shape returned by `GET /active_model`.
+// Only the stage fields the settings app consumes are modeled; serde ignores
+// the rest.
+
+/// Wire shape returned by `GET /pipeline/{stage}`.
 #[derive(Debug, Clone, Deserialize)]
-pub struct ActiveModelStatus {
-    pub active_model: ActiveModelPayload,
+pub struct StageStatus {
+    pub stage: StagePayload,
 }
 
+/// One pipeline stage: which backend fills it, what is running, and the
+/// progress of a load that is still in flight.
 #[derive(Debug, Clone, Deserialize)]
-pub struct ActiveModelPayload {
-    pub current: ActiveModelCurrent,
-    pub switch: Option<ActiveModelSwitch>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ActiveModelCurrent {
+pub struct StagePayload {
     pub model: Option<String>,
     pub source: Option<String>,
+    #[serde(default)]
+    pub switch: Option<ActiveModelSwitch>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -46,19 +56,15 @@ pub struct ActiveModelDownload {
     pub eta_seconds: Option<u64>,
 }
 
-async fn fetch_active_model(
-    socket: std::path::PathBuf,
-    token: &str,
-) -> HttpResult<ActiveModelStatus> {
-    transport::get_json::<ActiveModelStatus>(socket, token, "/active_model").await
+async fn fetch_stage(socket: std::path::PathBuf, token: &str) -> HttpResult<StageStatus> {
+    transport::get_json::<StageStatus>(socket, token, STT_STAGE).await
 }
 
 /// Get current loaded model from daemon as `(name source)`
-/// (HTTP `GET /active_model`).
+/// (HTTP `GET /pipeline/1`).
 pub async fn get_current_model() -> HttpResult<(String, String)> {
     with_settings_token(|socket, token| async move {
-        let status = fetch_active_model(socket, &token).await?;
-        let current = status.active_model.current;
+        let current = fetch_stage(socket, &token).await?.stage;
         // Idle daemon (no model loaded) is a valid state: report an empty
         // selection rather than erroring, so the UI shows nothing selected.
         let Some(model) = current.model else {
@@ -71,13 +77,13 @@ pub async fn get_current_model() -> HttpResult<(String, String)> {
     .await
 }
 
-/// Get current download status. Composed from `/active_model`'s
-/// `switch.download` sub-object.
+/// Get current download status. Composed from the stage's `switch.download`
+/// sub-object.
 pub async fn get_download_status()
 -> HttpResult<Option<super_stt_shared::models::protocol::DownloadProgress>> {
     with_settings_token(|socket, token| async move {
-        let status = fetch_active_model(socket, &token).await?;
-        let Some(switch) = status.active_model.switch else {
+        let status = fetch_stage(socket, &token).await?;
+        let Some(switch) = status.stage.switch else {
             return Ok(None);
         };
         let Some(download) = switch.download else {
@@ -100,7 +106,7 @@ pub async fn get_download_status()
             status: switch.phase,
             started_at: switch.started_at.unwrap_or_default(),
             eta_seconds: download.eta_seconds,
-            // The polled `/active_model.switch` shape carries no error detail;
+            // The polled `stage.switch` shape carries no error detail;
             // failure text arrives on the `download_progress` SSE event.
             error: None,
         };
@@ -109,7 +115,7 @@ pub async fn get_download_status()
     .await
 }
 
-/// Set/switch to a different model (HTTP `POST /active_model`).
+/// Set/switch to a different model (HTTP `POST /pipeline/1/model`).
 pub async fn set_model(model: String, source: String) -> HttpResult<String> {
     let source_str = source;
     with_settings_token(move |socket, token| {
@@ -123,7 +129,7 @@ pub async fn set_model(model: String, source: String) -> HttpResult<String> {
             // the fixed timeout would drop the connection and cancel the load.
             // Progress/outcome is observed via the `download_progress` SSE topic.
             let resp =
-                transport::settings_post_no_timeout(socket, &token, "/active_model", &body).await?;
+                transport::settings_post_no_timeout(socket, &token, STT_STAGE_MODEL, &body).await?;
             require_message(resp, "set_model")
         }
     })
@@ -142,27 +148,24 @@ pub async fn list_available_models() -> HttpResult<Vec<(String, String)>> {
     .await
 }
 
-/// Cancel any ongoing model-switch download (HTTP `POST /active_model/cancel`).
+/// Cancel any ongoing model-switch download
+/// (HTTP `POST /pipeline/1/model/cancel`).
 pub async fn cancel_download() -> HttpResult<String> {
     with_settings_token(|socket, token| async move {
-        let resp = transport::settings_post(
-            socket,
-            &token,
-            "/active_model/cancel",
-            &serde_json::json!({}),
-        )
-        .await?;
+        let resp =
+            transport::settings_post(socket, &token, STT_STAGE_CANCEL, &serde_json::json!({}))
+                .await?;
         require_message(resp, "cancel_download")
     })
     .await
 }
 
-/// Unload the currently loaded model (HTTP `DELETE /active_model`). The
-/// active backend stays selected; the user can then pick another of its
-/// models. Use [`clear_active_backend`] to return the daemon to idle.
+/// Unload the currently loaded model (HTTP `DELETE /pipeline/1/model`). The
+/// stage keeps its backend, so the user can pick another of its models. Use
+/// [`clear_active_backend`] to empty the stage entirely.
 pub async fn unload_active_model() -> HttpResult<String> {
     with_settings_token(|socket, token| async move {
-        let resp = transport::settings_delete(socket, &token, "/active_model").await?;
+        let resp = transport::settings_delete(socket, &token, STT_STAGE_MODEL).await?;
         require_message(resp, "unload_active_model")
     })
     .await

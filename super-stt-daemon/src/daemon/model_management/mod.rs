@@ -10,4 +10,5 @@
 mod discovery;
 mod instantiate;
 mod lifecycle;
+mod post_processor;
 mod switch;

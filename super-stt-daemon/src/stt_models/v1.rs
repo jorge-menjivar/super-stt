@@ -29,6 +29,33 @@ pub(crate) fn build_transcribe_body(
     Ok(serde_json::to_vec(&body)?)
 }
 
+/// Serialize a `/v1/process` request body: the transcript to post-process,
+/// plus the optional language it was transcribed in (a post-processor needs it
+/// to punctuate or capitalize in the right language).
+///
+/// # Errors
+/// Returns an error if JSON serialization fails (not expected for this shape).
+pub(crate) fn build_process_body(text: &str, language: Option<&str>) -> Result<Vec<u8>> {
+    let mut body = serde_json::json!({ "text": text });
+    if let Some(lang) = language {
+        body["language"] = serde_json::Value::String(lang.to_string());
+    }
+    Ok(serde_json::to_vec(&body)?)
+}
+
+/// The backend's own error text for a non-`200`, preferring `detail` then
+/// `message` and falling back to `fallback`.
+///
+/// Shared by both response parsers: the extraction is identical and the module
+/// exists precisely to keep the two from drifting.
+fn backend_error(json: &serde_json::Value, fallback: &str) -> String {
+    json.get("detail")
+        .and_then(|v| v.as_str())
+        .or_else(|| json.get("message").and_then(|v| v.as_str()))
+        .unwrap_or(fallback)
+        .to_string()
+}
+
 /// Parse a `/v1/transcribe` response: the transcript on `200`, else the
 /// backend's own `detail`/`message` surfaced as the error (it's shown to the
 /// user, so prefer it over the raw HTTP body).
@@ -45,18 +72,35 @@ pub(crate) fn parse_transcribe_response(status: u16, resp: &[u8]) -> Result<Stri
             .map(String::from)
             .ok_or_else(|| anyhow!("backend response missing transcription"))
     } else {
-        let msg = json
-            .get("detail")
-            .and_then(|v| v.as_str())
-            .or_else(|| json.get("message").and_then(|v| v.as_str()))
-            .unwrap_or("transcription failed");
-        bail!("{msg}");
+        bail!("{}", backend_error(&json, "transcription failed"));
+    }
+}
+
+/// Parse a `/v1/process` response: the processed text on `200`, else the
+/// backend's own error message.
+///
+/// # Errors
+/// Returns an error if the body isn't JSON, a `200` is missing `text`, or a
+/// non-`200` carries a backend error message.
+pub(crate) fn parse_process_response(status: u16, resp: &[u8]) -> Result<String> {
+    let json: serde_json::Value = serde_json::from_slice(resp)
+        .map_err(|e| anyhow!("parsing backend process response: {e}"))?;
+    if status == 200 {
+        json["text"]
+            .as_str()
+            .map(String::from)
+            .ok_or_else(|| anyhow!("backend response missing text"))
+    } else {
+        bail!("{}", backend_error(&json, "post-processing failed"));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_transcribe_body, parse_transcribe_response};
+    use super::{
+        build_process_body, build_transcribe_body, parse_process_response,
+        parse_transcribe_response,
+    };
 
     #[test]
     fn body_embeds_audio_rate_and_optional_language() {
@@ -90,5 +134,41 @@ mod tests {
     #[test]
     fn parse_errors_on_200_without_transcription() {
         assert!(parse_transcribe_response(200, br#"{"other":1}"#).is_err());
+    }
+
+    #[test]
+    fn process_body_carries_text_and_optional_language() {
+        let with_lang = build_process_body("um hello", Some("en")).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&with_lang).unwrap();
+        assert_eq!(v["text"], "um hello");
+        assert_eq!(v["language"], "en");
+
+        let no_lang = build_process_body("hi", None).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&no_lang).unwrap();
+        assert!(v.get("language").is_none());
+    }
+
+    #[test]
+    fn process_parse_returns_text_on_200() {
+        let out = parse_process_response(200, br#"{"status":"success","text":"Hello."}"#).unwrap();
+        assert_eq!(out, "Hello.");
+    }
+
+    /// The error extraction is shared with the transcribe parser, so the same
+    /// `detail` > `message` > fallback precedence has to hold here — only the
+    /// fallback wording differs.
+    #[test]
+    fn process_parse_surfaces_detail_then_message() {
+        let e = parse_process_response(500, br#"{"detail":"oom","message":"m"}"#).unwrap_err();
+        assert_eq!(e.to_string(), "oom");
+        let e = parse_process_response(500, br#"{"message":"just message"}"#).unwrap_err();
+        assert_eq!(e.to_string(), "just message");
+        let e = parse_process_response(500, br"{}").unwrap_err();
+        assert_eq!(e.to_string(), "post-processing failed");
+    }
+
+    #[test]
+    fn process_parse_errors_on_200_without_text() {
+        assert!(parse_process_response(200, br#"{"other":1}"#).is_err());
     }
 }

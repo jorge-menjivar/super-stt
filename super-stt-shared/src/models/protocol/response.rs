@@ -88,6 +88,23 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_backend: Option<Value>,
 
+    // Post-processor (GET/POST /post_processor):
+    // `{ enabled, model, source, loaded }`. See
+    // docs/protocol/endpoints/v1/pipeline.md (stage 2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_processor: Option<Value>,
+
+    // The transcription pipeline (GET /pipeline): the ordered stages, each
+    // `{ stage, role, source, name, model, loaded }`. See
+    // docs/protocol/endpoints/v1/pipeline.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<Value>,
+
+    // One stage of it (GET /pipeline/{stage}): the same object the array
+    // carries, for a client that only cares about one position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<Value>,
+
     // GPU inventory (GET /gpu_info): array of `GpuInfo` objects.
     // See docs/protocol/endpoints/v1/gpu_info.md.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -366,6 +383,24 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_active_backend(mut self, active_backend: Value) -> Self {
         self.active_backend = Some(active_backend);
+        self
+    }
+
+    #[must_use]
+    pub fn with_pipeline(mut self, pipeline: Value) -> Self {
+        self.pipeline = Some(pipeline);
+        self
+    }
+
+    #[must_use]
+    pub fn with_stage(mut self, stage: Value) -> Self {
+        self.stage = Some(stage);
+        self
+    }
+
+    #[must_use]
+    pub fn with_post_processor(mut self, post_processor: Value) -> Self {
+        self.post_processor = Some(post_processor);
         self
     }
 

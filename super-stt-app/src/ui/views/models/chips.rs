@@ -4,6 +4,7 @@ use cosmic::iced::widget::row;
 use cosmic::widget::{self, text};
 use cosmic::{Apply, Element};
 
+use crate::state::registry::RoleFilter;
 use crate::ui::icons;
 use crate::ui::messages::Message;
 
@@ -348,27 +349,96 @@ pub(super) fn model_tag(name: String) -> Element<'static, Message> {
         .into()
 }
 
-/// A backend's model inventory: a muted "Models" label, the first
-/// [`MAX_MODEL_TAGS`] model names as outline [`model_tag`]s, then a filled
-/// "+N" [`count_chip`] summarizing the rest. `None` when the backend serves no
-/// models, so the caller skips the row.
-pub(super) fn models_inventory(names: &[String]) -> Option<Element<'static, Message>> {
-    if names.is_empty() {
+/// The models a backend ships, split by what they are for.
+///
+/// A backend may serve both kinds from one install — a weights bundle that
+/// transcribes *and* cleans up — and the Library cards say so, since which
+/// kinds you get is the first thing that decides whether a backend is the one
+/// you want.
+pub(super) struct RoleGroup {
+    /// Human label for the role, e.g. `"Speech to text"`.
+    pub label: &'static str,
+    /// The model names in this group, in catalog order.
+    pub names: Vec<String>,
+}
+
+/// How a model `role` reads on a card.
+///
+/// An unknown role — one a newer backend declares and this build has no name
+/// for — reads as speech-to-text, matching the wire default and the daemon's
+/// own reading of a missing value.
+pub(super) fn role_label(role: &str) -> &'static str {
+    match role {
+        "post_processor" => "Post-processing",
+        _ => "Speech to text",
+    }
+}
+
+/// Group `(name, role)` pairs by role, transcription first.
+///
+/// The order is fixed rather than catalog-derived so two backends with the same
+/// kinds present them the same way round. Empty groups are dropped, so a
+/// single-role backend yields exactly one.
+pub(super) fn role_groups<'a>(models: impl Iterator<Item = (&'a str, &'a str)>) -> Vec<RoleGroup> {
+    let mut transcription = Vec::new();
+    let mut post_processing = Vec::new();
+    for (name, role) in models {
+        if role_label(role) == "Post-processing" {
+            post_processing.push(name.to_string());
+        } else {
+            transcription.push(name.to_string());
+        }
+    }
+    [
+        RoleGroup {
+            label: "Speech to text",
+            names: transcription,
+        },
+        RoleGroup {
+            label: "Post-processing",
+            names: post_processing,
+        },
+    ]
+    .into_iter()
+    .filter(|g| !g.names.is_empty())
+    .collect()
+}
+
+/// A backend's model inventory: one row per kind of model it ships — a muted
+/// role label, the first [`MAX_MODEL_TAGS`] names as outline [`model_tag`]s,
+/// then a filled "+N" [`count_chip`] for the rest. `None` when the backend
+/// serves no models, so the caller skips the row.
+///
+/// The label names the kind rather than saying "Models", so a card answers
+/// "what does this ship?" without the user opening it.
+pub(super) fn models_inventory(groups: &[RoleGroup]) -> Option<Element<'static, Message>> {
+    if groups.is_empty() {
         return None;
     }
     let spacing = cosmic::theme::spacing();
     let muted = muted_text_color();
-    let mut inventory = row![text::caption("Models").class(cosmic::theme::Text::Color(muted))]
-        .spacing(spacing.space_xxs)
-        .align_y(Alignment::Center);
-    for name in names.iter().take(MAX_MODEL_TAGS) {
-        inventory = inventory.push(model_tag(name.clone()));
-    }
-    let rest = names.len().saturating_sub(MAX_MODEL_TAGS);
-    if rest > 0 {
-        inventory = inventory.push(count_chip(format!("+{rest}")));
-    }
-    Some(inventory.into())
+    let rows: Vec<Element<'static, Message>> = groups
+        .iter()
+        .map(|group| {
+            let mut inventory =
+                row![text::caption(group.label).class(cosmic::theme::Text::Color(muted))]
+                    .spacing(spacing.space_xxs)
+                    .align_y(Alignment::Center);
+            for name in group.names.iter().take(MAX_MODEL_TAGS) {
+                inventory = inventory.push(model_tag(name.clone()));
+            }
+            let rest = group.names.len().saturating_sub(MAX_MODEL_TAGS);
+            if rest > 0 {
+                inventory = inventory.push(count_chip(format!("+{rest}")));
+            }
+            inventory.into()
+        })
+        .collect();
+    Some(
+        cosmic::iced::widget::column(rows)
+            .spacing(spacing.space_xxs)
+            .into(),
+    )
 }
 
 /// Where an online backend sends audio, as a card can describe it: the hosts
@@ -484,6 +554,52 @@ pub(super) fn capability_chips(
 /// chip is filled — accent by default, or a neutral surface when `neutral` is
 /// set (used for the secondary "Format" filter); inactive chips are transparent
 /// so the track shows through.
+/// The "Kind" segmented filter: which stage's models a backend must serve.
+///
+/// Both Library tabs render it from here, so the wording and the order of the
+/// choices cannot drift between Installed and Browse.
+pub(super) fn role_filter_chips(
+    current: RoleFilter,
+    on_pick: fn(RoleFilter) -> Message,
+) -> Element<'static, Message> {
+    chip_group(
+        "Kind",
+        false,
+        vec![
+            ("All", current == RoleFilter::All, on_pick(RoleFilter::All)),
+            (
+                "Transcription",
+                current == RoleFilter::Transcription,
+                on_pick(RoleFilter::Transcription),
+            ),
+            (
+                "Post-processing",
+                current == RoleFilter::PostProcessing,
+                on_pick(RoleFilter::PostProcessing),
+            ),
+        ],
+    )
+}
+
+/// The "Runs on" segmented filter: local models, cloud models, or both.
+///
+/// Shared for the same reason [`role_filter_chips`] is — the Installed tab
+/// gained this filter after Browse had it, and two copies would drift.
+pub(super) fn runs_on_chips(
+    current: Option<bool>,
+    on_pick: fn(Option<bool>) -> Message,
+) -> Element<'static, Message> {
+    chip_group(
+        "Runs on",
+        false,
+        vec![
+            ("All", current.is_none(), on_pick(None)),
+            ("Local", current == Some(false), on_pick(Some(false))),
+            ("Cloud", current == Some(true), on_pick(Some(true))),
+        ],
+    )
+}
+
 pub(super) fn chip_group(
     label: &str,
     neutral: bool,
@@ -591,6 +707,7 @@ mod capability_tests {
                     supported_languages: Vec::new(),
                     primary_language: String::new(),
                     realtime: false,
+                    role: "transcription".into(),
                 })
                 .collect(),
             secrets: Vec::new(),

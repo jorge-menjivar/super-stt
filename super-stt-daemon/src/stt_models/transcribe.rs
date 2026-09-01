@@ -104,6 +104,21 @@ pub trait Transcribe: ModelState {
         language: Option<&str>,
     ) -> Result<String>;
 
+    /// Rewrite a finished transcript — filler removal, punctuation,
+    /// formatting — over the backend's `POST /v1/process` route.
+    ///
+    /// `language` is the tag the text was transcribed in, so the processor
+    /// punctuates in the right language; `None` lets the backend decide.
+    ///
+    /// Default: unsupported. Both transports override it, but a model whose
+    /// backend does not serve the route answers with the backend's own error,
+    /// and the daemon's post-processing is best-effort either way — a failure
+    /// here costs the user the cleanup, never the transcript.
+    async fn process_text(&mut self, text: &str, language: Option<&str>) -> Result<String> {
+        let _ = (text, language);
+        anyhow::bail!("this model does not support post-processing")
+    }
+
     /// Run a realtime streaming session, pumping frames between the
     /// consumer and an upstream until the session ends. Default:
     /// unsupported. Only WASM backends serving a `realtime` model override

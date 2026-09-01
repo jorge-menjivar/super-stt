@@ -192,11 +192,15 @@ impl SuperSTTDaemon {
         let language = self.resolve_active_language(request_language).await;
         let start_time = std::time::Instant::now();
 
-        match dispatch_transcription(&self.model, processed_audio, 16000, language).await {
+        match dispatch_transcription(&self.model, processed_audio, 16000, language.clone()).await {
             Ok(text) => {
                 let duration = start_time.elapsed();
                 info!("Transcription completed in {duration:?}: '{text}'");
-                Ok(Ok((text, duration)))
+                // Post-processing is part of producing the final transcript, so
+                // it lands inside the reported duration. Best-effort: this
+                // returns the raw text unchanged when it is off or fails.
+                let text = self.post_process_final(text, language).await;
+                Ok(Ok((text, start_time.elapsed())))
             }
             // A real backend failure is surfaced, not masked as empty success —
             // "no speech" is an `Ok("")` from the backend, so `Failed` here is a

@@ -70,13 +70,14 @@ macro_rules! settings_toggle {
 }
 
 pub(crate) mod active_device;
-pub(crate) mod active_model;
 pub(crate) mod allow_online_models;
 pub(crate) mod audio_theme;
 pub(crate) mod backends;
 pub(crate) mod custom_models_dir;
 pub(crate) mod language;
+pub(crate) mod models;
 pub(crate) mod notification_method;
+pub(crate) mod pipeline;
 pub(crate) mod preview_typing;
 pub(crate) mod recording_stop_mode;
 pub(crate) mod self_update;
@@ -93,21 +94,7 @@ use axum::routing::{delete, get, post};
 /// scope, so they are merged in here.
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
-        .route(
-            "/active_model",
-            get(active_model::get_active_model)
-                .post(active_model::set_active_model)
-                .delete(active_model::unload_active_model),
-        )
-        .route(
-            "/active_model/cancel",
-            post(active_model::cancel_set_active_model),
-        )
-        .route(
-            "/active_model/reload",
-            post(active_model::reload_active_model),
-        )
-        .route("/models", get(active_model::list_models))
+        .route("/models", get(models::list_models))
         .route(
             "/active_device",
             get(active_device::get_active_device).post(active_device::set_active_device),
@@ -133,6 +120,25 @@ pub(crate) fn routes() -> Router<AppState> {
             "/notification_method",
             get(notification_method::get_notification_method)
                 .post(notification_method::set_notification_method),
+        )
+        .route("/pipeline", get(pipeline::get_pipeline))
+        .route(
+            "/pipeline/{stage}",
+            get(pipeline::get_stage)
+                .post(pipeline::set_stage_backend)
+                .delete(pipeline::clear_stage_backend),
+        )
+        .route(
+            "/pipeline/{stage}/model",
+            post(pipeline::set_stage_model).delete(pipeline::clear_stage_model),
+        )
+        .route(
+            "/pipeline/{stage}/model/cancel",
+            post(pipeline::cancel_stage_model),
+        )
+        .route(
+            "/pipeline/{stage}/model/reload",
+            post(pipeline::reload_stage_model),
         )
         .route(
             "/preview_typing",
@@ -162,12 +168,6 @@ pub(crate) fn routes() -> Router<AppState> {
         .route("/update/check", post(self_update::post_check))
         .route("/backends", get(backends::list_backends))
         .route("/backends/{source}", delete(backends::uninstall_backend))
-        .route(
-            "/active_backend",
-            get(backends::get_active_backend)
-                .post(backends::set_active_backend)
-                .delete(backends::clear_active_backend),
-        )
         .route("/gpu_info", get(backends::get_gpu_info))
         .route(
             "/language",

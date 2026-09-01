@@ -22,6 +22,7 @@ impl AppModel {
             Message::Device(m) => self.handle_device_messages(m),
             Message::Download(m) => self.handle_download_messages(m),
             Message::PreviewTyping(m) => self.handle_preview_typing_messages(m),
+            Message::PostProcessor(m) => self.handle_post_processor_messages(m),
             Message::RecordingStopMode(m) => self.handle_recording_stop_mode_messages(m),
             Message::WriteMethod(m) => self.handle_write_method_messages(m),
             Message::NotificationMethod(m) => self.handle_notification_method_messages(m),

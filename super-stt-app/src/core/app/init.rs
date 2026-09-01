@@ -129,6 +129,10 @@ impl AppModel {
 
             // Initialize preview typing state (disabled by default as beta feature)
             preview_typing_enabled: false,
+            // Replaced by the daemon's own state as soon as the settings load
+            // completes; the default is the daemon's default too (off).
+            post_processor: crate::daemon::client::PostProcessorState::default(),
+            staged_post_processor: None,
             recording_stop_mode:
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),

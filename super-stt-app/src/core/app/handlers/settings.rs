@@ -2,12 +2,13 @@
 
 use crate::core::app::AppModel;
 use crate::daemon::client::{
-    set_notification_method, set_preview_typing, set_recording_stop_mode, set_write_method,
-    test_write_method,
+    clear_post_processor, clear_post_processor_backend, set_notification_method,
+    set_post_processor, set_post_processor_backend, set_preview_typing, set_recording_stop_mode,
+    set_write_method, test_write_method,
 };
 use crate::ui::messages::{
-    Message, NotificationMethodMessage, PreviewTypingMessage, RecordingStopModeMessage,
-    WriteMethodMessage,
+    Message, NotificationMethodMessage, PostProcessorMessage, PreviewTypingMessage,
+    RecordingStopModeMessage, WriteMethodMessage,
 };
 use cosmic::prelude::*;
 
@@ -51,6 +52,145 @@ impl AppModel {
                 );
                 Task::none()
             }
+        }
+    }
+
+    /// Handle post-processor messages.
+    ///
+    /// Confirm-then-apply throughout, like every other setting here: the local
+    /// state is replaced only by what the daemon reports back, so a refused or
+    /// failed save leaves the card showing the truth rather than an optimistic
+    /// value that never took.
+    pub(in crate::core::app) fn handle_post_processor_messages(
+        &mut self,
+        message: PostProcessorMessage,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
+            // Selecting a backend is the "chosen, not running" state, the same
+            // one `SelectBackend` gives transcription — and it goes to the same
+            // shape of endpoint, so nothing loads until a model is enabled.
+            PostProcessorMessage::SelectBackend(source) => {
+                self.staged_post_processor = None;
+                // The choice came from the picker sheet; dismiss it now that it
+                // has been made, exactly as `SelectBackend` does.
+                self.core.window.show_context = false;
+                Task::perform(
+                    set_post_processor_backend(source),
+                    Self::reload_post_processor,
+                )
+            }
+
+            PostProcessorMessage::Deselect => {
+                self.staged_post_processor = None;
+                Task::perform(clear_post_processor_backend(), Self::reload_post_processor)
+            }
+
+            // Local only, exactly like staging a transcription model: picking
+            // from the dropdown must not start running a model.
+            PostProcessorMessage::Staged(index) => {
+                if let Some(backend) = self
+                    .post_processor
+                    .source
+                    .as_deref()
+                    .and_then(|source| self.backends.iter().find(|b| b.source == source))
+                    && let Some(model) = crate::ui::views::models::post_processor_models(backend)
+                        .into_iter()
+                        .nth(index)
+                {
+                    self.staged_post_processor = Some((model, backend.source.clone()));
+                    self.clear_action_error(crate::state::ErrorScope::PostProcessing);
+                }
+                Task::none()
+            }
+
+            PostProcessorMessage::Enable => {
+                // The staged pick wins; otherwise re-enable whatever model is
+                // already selected. With neither — a backend chosen but no
+                // model picked — there is nothing to run.
+                let Some(selection) = self
+                    .staged_post_processor
+                    .clone()
+                    .or_else(|| self.post_processor.selection())
+                else {
+                    self.set_action_error(
+                        crate::state::ErrorScope::PostProcessing,
+                        "Choose a model first.".to_string(),
+                    );
+                    return Task::none();
+                };
+                let (model, source) = selection;
+                Task::perform(
+                    set_post_processor(model, Some(source)),
+                    Self::reload_post_processor,
+                )
+            }
+
+            // Off, but the selection is kept: the user is turning the feature
+            // off, not forgetting which model they picked. That is exactly what
+            // `DELETE /post_processor` means, so the call carries no state to
+            // echo back and cannot accidentally clear the backend.
+            PostProcessorMessage::Disable => {
+                Task::perform(clear_post_processor(), Self::reload_post_processor)
+            }
+
+            PostProcessorMessage::ReloadRequested => Task::perform(
+                crate::daemon::client::get_post_processor(),
+                Self::reloaded_post_processor,
+            ),
+
+            PostProcessorMessage::Loaded(state) => {
+                // The daemon is authoritative, so a staged pick that has landed
+                // is no longer pending. Clearing it also keeps the dropdown
+                // showing the daemon's selection after a refused save.
+                if self.staged_post_processor == state.selection() {
+                    self.staged_post_processor = None;
+                }
+                self.post_processor = state;
+                self.clear_action_error(crate::state::ErrorScope::PostProcessing);
+                Task::none()
+            }
+
+            PostProcessorMessage::Error(err) => {
+                log::warn!("Post-processor error: {err}");
+                self.set_action_error(
+                    crate::state::ErrorScope::PostProcessing,
+                    format!("Couldn't save the post-processor: {err}"),
+                );
+                Task::none()
+            }
+        }
+    }
+
+    /// Map a set result into the follow-up that re-reads the daemon's own
+    /// state. The write's response carries no payload, and the daemon may have
+    /// adjusted things (a selection that would not load, say), so the card
+    /// renders what the daemon reports rather than what was sent.
+    fn reload_post_processor(
+        result: super_stt_shared::daemon::http_client::HttpResult<()>,
+    ) -> cosmic::Action<Message> {
+        match result {
+            Ok(()) => cosmic::Action::App(Message::PostProcessor(
+                PostProcessorMessage::ReloadRequested,
+            )),
+            Err(e) => cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Error(
+                e.to_string(),
+            ))),
+        }
+    }
+
+    /// Map a `GET /post_processor` result into its message.
+    fn reloaded_post_processor(
+        result: super_stt_shared::daemon::http_client::HttpResult<
+            crate::daemon::client::PostProcessorState,
+        >,
+    ) -> cosmic::Action<Message> {
+        match result {
+            Ok(state) => {
+                cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(state)))
+            }
+            Err(e) => cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Error(
+                e.to_string(),
+            ))),
         }
     }
 

@@ -5,6 +5,9 @@ use crate::daemon::backends::BackendInfo;
 use crate::daemon::client::internal::response::{require_success, require_unit};
 use crate::daemon::client::internal::session::with_settings_token;
 use super_stt_shared::daemon::http_client::transport;
+
+/// Transcription is stage 1 of the pipeline.
+const STT_STAGE: &str = "/pipeline/1";
 use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
 
 /// List installed backends with the models, secrets, and options they
@@ -65,16 +68,16 @@ pub async fn clear_backend_option(source: String, name: String) -> HttpResult<()
     .await
 }
 
-/// Get the active backend's `source` (HTTP `GET /active_backend`). `None` when
-/// the daemon is idle (no backend selected).
+/// Get the backend filling stage 1 (HTTP `GET /pipeline/1`). `None` when the
+/// stage is empty (no backend selected).
 pub async fn get_active_backend() -> HttpResult<Option<String>> {
     with_settings_token(|socket, token| async move {
         let resp = require_success(
-            transport::settings_get(socket, &token, "/active_backend").await?,
-            "get_active_backend",
+            transport::settings_get(socket, &token, STT_STAGE).await?,
+            "get_pipeline_stage",
         )?;
         Ok(resp
-            .active_backend
+            .stage
             .as_ref()
             .and_then(|v| v.get("source"))
             .and_then(serde_json::Value::as_str)
@@ -83,9 +86,9 @@ pub async fn get_active_backend() -> HttpResult<Option<String>> {
     .await
 }
 
-/// Select the active backend by `source` (HTTP `POST /active_backend`).
-/// Records which backend is active and unloads a foreign model — does NOT
-/// load a model. Pair with `set_model` to also load one.
+/// Select the backend filling stage 1 (HTTP `POST /pipeline/1`). Records which
+/// backend transcribes and unloads a foreign model — does NOT load one. Pair
+/// with `set_model` to also load a model.
 pub async fn set_active_backend(source: String) -> HttpResult<()> {
     with_settings_token(move |socket, token| {
         let source = source.clone();
@@ -93,21 +96,21 @@ pub async fn set_active_backend(source: String) -> HttpResult<()> {
             let resp = transport::settings_post(
                 socket,
                 &token,
-                "/active_backend",
+                STT_STAGE,
                 &serde_json::json!({ "source": source }),
             )
             .await?;
-            require_unit(resp, "set_active_backend")
+            require_unit(resp, "set_stage_backend")
         }
     })
     .await
 }
 
-/// Deselect the active backend (HTTP `DELETE /active_backend`) → daemon idle.
+/// Empty stage 1 (HTTP `DELETE /pipeline/1`) → daemon idle.
 pub async fn clear_active_backend() -> HttpResult<()> {
     with_settings_token(|socket, token| async move {
-        let resp = transport::settings_delete(socket, &token, "/active_backend").await?;
-        require_unit(resp, "clear_active_backend")
+        let resp = transport::settings_delete(socket, &token, STT_STAGE).await?;
+        require_unit(resp, "clear_stage_backend")
     })
     .await
 }

@@ -740,6 +740,7 @@ async fn list_backends_catalog_and_option_override() {
             processing_interval: Duration::from_secs(1),
             supported_devices: vec![super_stt_registry_types::manifest::Device::None],
             realtime: false,
+            role: super_stt_registry_types::manifest::ModelRole::Transcription,
             provider: None,
         }],
         // A manifest may not declare a default for `base_url`, so the catalog's
@@ -905,6 +906,7 @@ fn fixture_backend_devices(
             processing_interval: Duration::from_secs(1),
             supported_devices,
             realtime: false,
+            role: super_stt_registry_types::manifest::ModelRole::Transcription,
             provider: None,
         }],
     }
@@ -1149,6 +1151,7 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
         processing_interval: Duration::from_secs(1),
         supported_devices: vec![super_stt_registry_types::manifest::Device::None],
         realtime: false,
+        role: super_stt_registry_types::manifest::ModelRole::Transcription,
         provider: None,
     };
     let info = ModelInfoData::new(name, source, true, true, Duration::from_secs(1));
@@ -1500,6 +1503,7 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
         processing_interval: Duration::from_secs(1),
         supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
         realtime: false,
+        role: super_stt_registry_types::manifest::ModelRole::Transcription,
         provider: None,
     };
     let info = ModelInfoData::new(

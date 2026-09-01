@@ -121,7 +121,7 @@ denial), 5xx for server-side failures.
 | HTTP status | When                                                        |
 |-------------|-------------------------------------------------------------|
 | 200 OK      | Successful read or mutation                                 |
-| 202 Accepted| Successful mutation that runs asynchronously (e.g. `POST /active_model`) |
+| 202 Accepted| Successful mutation that runs asynchronously (e.g. `POST /pipeline/1/model`) |
 | 400 Bad Request | Request validation failed (missing fields, bad enum)    |
 | 401 Unauthorized | Missing or invalid `Authorization` header              |
 | 403 Forbidden | Token valid but scope insufficient (`scope_denied`)       |
@@ -210,7 +210,7 @@ A subscriber that doesn't drain fast enough has its oldest queued
 events dropped — the connection itself isn't closed, and the next
 live event arrives normally. Clients that want to verify they
 didn't miss critical state can issue a fresh `GET` on the relevant
-resource (e.g. `GET /active_model`) — those snapshots are
+resource (e.g. `GET /pipeline/1`) — those snapshots are
 authoritative.
 
 ### Closing the stream

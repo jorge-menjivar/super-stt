@@ -88,6 +88,7 @@ impl SuperSTTDaemon {
 
         let daemon = SuperSTTDaemon {
             model: components.model,
+            post_processor: Arc::new(tokio::sync::RwLock::new(None)),
             audio_processor: components.audio_processor,
             shutdown_tx: components.shutdown_tx,
             dbus_manager: components.dbus_manager,
@@ -155,6 +156,21 @@ impl SuperSTTDaemon {
             info!("No startup model configured; daemon is idle until one is selected");
         }
 
+        // The post-processor loads in the background too, and independently of
+        // the transcription model: it is a separate selection, so a
+        // transcription model that fails to load must not cost the user their
+        // post-processor (or the reverse). A failure here is logged and
+        // nothing else — post-processing is best-effort, so an unloaded
+        // processor simply means transcripts pass through unchanged.
+        if self.config.read().await.post_processor.is_active() {
+            let bg = self.clone();
+            tokio::spawn(async move {
+                if let Err(e) = bg.load_configured_post_processor().await {
+                    warn!("Failed to load the post-processor: {e}; transcripts are not processed");
+                }
+            });
+        }
+
         // Periodic self-update check: first ~60s after start (don't compete
         // with model load), then daily. POST /v1/update/check bypasses the
         // check_enabled gate; this loop honors it.
@@ -191,7 +207,7 @@ impl SuperSTTDaemon {
     /// carries no `active_backend` — a config written before that field
     /// existed loads it as `None`. Without this the daemon transcribes
     /// happily while `GET /active_backend` stays null, so the settings app
-    /// shows its "no backend loaded" empty state and `GET /models` (scoped to
+    /// shows its "no backend selected" empty state and `GET /models` (scoped to
     /// the active backend) returns nothing.
     ///
     /// Guarded on `is_none()`, so it only ever fills a gap: an explicit

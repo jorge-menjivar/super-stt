@@ -47,6 +47,16 @@ impl SuperSTTDaemon {
             Command::ListAudioThemes => self.handle_list_audio_themes(),
             Command::SetPreviewTyping { enabled } => self.handle_set_preview_typing(enabled).await,
             Command::GetPreviewTyping => self.handle_get_preview_typing(),
+            Command::SetPostProcessor { model, source } => {
+                self.handle_set_post_processor(model, source).await
+            }
+            Command::GetPostProcessor => self.handle_get_post_processor().await,
+            Command::ClearPostProcessor => self.handle_clear_post_processor().await,
+            Command::SetPostProcessorBackend { source } => {
+                self.handle_set_post_processor_backend(source).await
+            }
+            Command::ClearPostProcessorBackend => self.handle_clear_post_processor_backend().await,
+            Command::GetPipeline => self.handle_get_pipeline().await,
             Command::SetRecordingStopMode { mode } => {
                 self.handle_set_recording_stop_mode(mode).await
             }

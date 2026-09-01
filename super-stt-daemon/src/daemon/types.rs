@@ -67,6 +67,16 @@ pub type PreviewSlot =
 #[derive(Clone)]
 pub struct SuperSTTDaemon {
     pub model: SharedLoadedModel,
+    /// The loaded post-processor, or `None` when post-processing is off or
+    /// nothing is selected.
+    ///
+    /// A second slot rather than a second daemon: a post-processor is an
+    /// ordinary backend model — same discovery, same instantiation, same
+    /// `Transcribe` box — that happens to be driven over `POST /v1/process`
+    /// instead of `/v1/transcribe`. Keeping it beside [`Self::model`] is what
+    /// lets it be selected independently of the transcription backend and
+    /// survive a backend switch.
+    pub post_processor: SharedLoadedModel,
     pub audio_processor: Arc<AudioProcessor>,
     pub shutdown_tx: broadcast::Sender<()>,
     pub dbus_manager: Option<Arc<DBusManager>>,
@@ -120,6 +130,7 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
     let (shutdown_tx, _) = broadcast::channel(1);
     SuperSTTDaemon {
         model: Arc::new(tokio::sync::RwLock::new(None)),
+        post_processor: Arc::new(tokio::sync::RwLock::new(None)),
         audio_processor: Arc::new(AudioProcessor::new()),
         shutdown_tx,
         dbus_manager: None,

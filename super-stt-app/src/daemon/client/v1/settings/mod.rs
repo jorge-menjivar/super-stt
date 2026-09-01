@@ -66,6 +66,7 @@ pub(crate) mod backends;
 pub(crate) mod custom_models_dir;
 pub(crate) mod language;
 pub(crate) mod notification_method;
+pub(crate) mod post_processor;
 pub(crate) mod preview_typing;
 pub(crate) mod recording_stop_mode;
 pub(crate) mod update_beta_optin;

@@ -224,6 +224,7 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
             processing_interval: interval,
             supported_devices,
             realtime: entry.realtime,
+            role: entry.role,
             provider: entry.provider.clone(),
         });
     }

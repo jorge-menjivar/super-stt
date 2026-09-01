@@ -6,7 +6,9 @@ mod configure;
 mod download;
 mod fmt;
 mod installed;
-mod load_sheet;
+mod post_processing;
+mod roles;
+mod select_sheet;
 mod status;
 mod surface;
 mod tabs;
@@ -29,9 +31,16 @@ use crate::state::ModelsTab;
 use crate::ui::icons;
 use crate::ui::messages::Message;
 
+/// The post-processor models one backend serves, in the same order the
+/// Post-processing dropdown renders them — the settings handler resolves a
+/// picked index through this, so both sides must agree.
+pub(crate) use post_processing::post_processor_models;
+
+pub use post_processing::post_processor_sheet;
+
 pub use add_sheet::add_backend_sheet;
 pub use configure::configure_sheet;
-pub use load_sheet::load_backend_sheet;
+pub use select_sheet::select_backend_sheet;
 
 /// The device list the card's picker offers. Re-exported because staging a
 /// model has to seed the same list the dropdown will render — seeding from the
@@ -194,33 +203,50 @@ pub(crate) fn gpu_summary(app: &AppModel) -> Option<Element<'_, Message>> {
 
 // ── Models page ─────────────────────────────────────────────────────────────
 
-/// Models page view: the single active-backend card (its model picker,
-/// load/unload, Configure, Deselect, and a "Switch backend" trigger), or an
-/// empty state with a "Load a backend" button when none is active. Installing
-/// and managing backends lives on the Library page; activation happens here via
-/// the "Load a backend" side sheet.
+/// Models page view: one section per pipeline stage — Transcription (the
+/// active backend's card, or an empty state that opens the "Select a backend"
+/// sheet) and Post-processing. Installing and managing backends lives on the
+/// Library page; selecting them happens here.
+///
+/// The two sections are deliberately the same shape, because the stages are:
+/// each names a backend, its capabilities, and the model running in it. The
+/// headings are what tell them apart.
 pub fn page(app: &AppModel) -> Element<'_, Message> {
     let title_row = widget::row::with_capacity(1)
         .align_y(Alignment::Center)
         .push(text::title3("Models").width(Length::Fill));
 
     // The active backend's card when one is selected (and still installed);
-    // otherwise the empty state that opens the "Load a backend" sheet.
-    let body = match app
+    // otherwise the empty state that opens the "Select a backend" sheet.
+    let transcription = match app
         .models_page
         .active_backend
         .as_deref()
         .and_then(|source| app.backends.iter().find(|b| b.source == source))
     {
         Some(backend) => page_container(active_backend_card(backend, app)),
-        None => page_container(load_sheet::no_backend_empty_state()),
+        None => page_container(select_sheet::no_backend_empty_state()),
     };
 
-    widget::column::with_capacity(2)
+    widget::column::with_capacity(6)
         .push(page_container(title_row))
-        .push(body)
+        .push(page_container(section_heading("Transcription")))
+        .push(transcription)
+        // The post-processor is selected independently of the transcription
+        // backend, so its section is shown whether or not one is selected.
+        .push(page_container(section_heading("Post-processing")))
+        .push(page_container(post_processing::section(app)))
         .height(Length::Fill)
         .spacing(0)
+        .into()
+}
+
+/// A Models-page section heading. One helper so the two sections cannot drift
+/// apart in weight or spacing.
+fn section_heading(label: &str) -> Element<'_, Message> {
+    widget::row::with_capacity(1)
+        .align_y(Alignment::Center)
+        .push(text::title4(label).width(Length::Fill))
         .into()
 }
 

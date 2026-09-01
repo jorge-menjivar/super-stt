@@ -161,19 +161,21 @@ pub(super) fn active_backend_card<'a>(
     let missing = unmet_requirements(&app.backend_secret_configured, backend);
 
     // Header: glyph + name/description, then the repo button, a "Switch
-    // backend" trigger (reopens the Load-a-backend sheet), Configure, and
+    // backend" trigger (reopens the Select-a-backend sheet), Configure, and
     // Deselect. The repo button + description replace the old source caption.
     let description = super::surface::backend_description(app, &source);
     let actions = row![
         super::surface::repo_button(&source),
         button::standard("Switch backend").on_press(Message::Shell(
-            ShellMessage::ToggleContextPage(ContextPage::LoadBackend),
+            ShellMessage::ToggleContextPage(ContextPage::SelectBackend),
         )),
         button::standard("Configure").on_press(Message::ModelsPage(
             ModelsPageMessage::OpenBackendConfig(source.clone()),
         )),
-        button::destructive("Deselect")
-            .on_press(Message::ModelsPage(ModelsPageMessage::DeselectBackend)),
+        super::surface::deselect_button(
+            "Deselect this backend",
+            Message::ModelsPage(ModelsPageMessage::DeselectBackend),
+        ),
     ]
     .spacing(spacing.space_xs)
     .align_y(Alignment::Center);
@@ -205,7 +207,10 @@ pub(super) fn active_backend_card<'a>(
     ) {
         chip_row = chip_row.push(chips);
     }
-    let model_count = backend.models.len();
+    // Count what this stage can run, not everything the backend ships — a
+    // backend serving two transcription models and a post-processor offers two
+    // here, and the Library card is where the full inventory belongs.
+    let model_count = super::roles::models_for(backend, false).len();
     if model_count > 0 {
         let label = if model_count == 1 {
             "1 model".to_string()
@@ -354,8 +359,10 @@ pub(super) fn staged_model_picker<'a>(
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
-    // Model dropdown — staged picks live in `app.models_page.staged_model`, not loaded.
-    let model_names: Vec<String> = backend.models.iter().map(|m| m.name.clone()).collect();
+    // Model dropdown — staged picks live in `app.models_page.staged_model`, not
+    // loaded. Scoped to this stage's role: a post-processor here would be a
+    // pick the daemon then refuses.
+    let model_names: Vec<String> = super::roles::models_for(backend, false);
     let staged_model = app.models_page.staged_model.as_deref();
     let model_index = staged_model.and_then(|m| model_names.iter().position(|n| n == m));
     let model_names_pick = model_names.clone();

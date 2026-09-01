@@ -26,7 +26,7 @@ This document is the companion to:
 
 A model is identified by the `(name, source)` pair — the same
 pair external clients use on
-[`/active_model`](../endpoints/v1/active_model.md):
+[`/pipeline/1/model`](../endpoints/v1/pipeline.md):
 
 | Field      | Type   | Notes                                                                       |
 |------------|--------|-----------------------------------------------------------------------------|
@@ -40,7 +40,7 @@ disambiguated by `source`. The daemon derives a model's `source` from the
 [config.md](./config.md).
 
 > `source` supersedes the older `builtin | custom | online` discriminator.
-> [active_model.md](../endpoints/v1/active_model.md) and
+> [pipeline.md](../endpoints/v1/pipeline.md) and
 > [models.md](../endpoints/v1/models.md) are reconciled with this definition.
 
 > `[backend].id` is a separate identifier that names a backend's install
@@ -74,6 +74,7 @@ a top-level `status` field of `"success"` or `"error"`.
 | GET    | `/v1/status`     | Readiness state and load progress.                 |
 | GET    | `/v1/ping`       | Liveness.                                          |
 | POST   | `/v1/transcribe` | Transcribe audio; one-shot or streaming.           |
+| POST   | `/v1/process`    | Rewrite a finished transcript. **Post-processors only.** |
 | POST   | `/v1/cancel`     | Cancel an in-flight transcription.                 |
 
 ### Request headers
@@ -302,6 +303,69 @@ Content-Type: application/json
 Once a streaming response has started, late errors arrive as an in-stream
 `event: error` frame followed by the connection closing.
 
+### `POST /v1/process`
+
+Rewrite a finished transcript — filler removal, punctuation, capitalization,
+formatting. This is the **post-processor** route: it is served by models the
+backend declares with [`role = "post_processor"`](./config.md#models), and the
+daemon drives such a model over this route instead of `/v1/transcribe`.
+
+The daemon never sends audio here and never sends transcripts to a
+transcription-role model, so a backend that provides no post-processor need not
+implement the route at all.
+
+A post-processor loads exactly like a transcription model — the daemon calls
+`POST /v1/load` and waits for `ready` before routing any text — and reads its
+configuration from the same injected [request headers](#request-headers). How
+the rewrite is performed, and what knobs the user gets (a style prompt, a
+temperature, a model endpoint), is entirely the backend's own business,
+declared through its [`[[options]]` and `[[secrets]]`](./config.md#options).
+
+**Request:**
+
+```jsonc
+{
+  "text":     "um so i think we should uh ship it",  // required
+  "language": "en"                                   // optional
+}
+```
+
+| Field      | Type   | Required | Notes                                                                  |
+|------------|--------|----------|------------------------------------------------------------------------|
+| `text`     | string | yes      | The transcript to rewrite. Never empty — the daemon skips the call for an empty transcript. |
+| `language` | string | no       | BCP-47 tag the transcript was produced in, so the backend punctuates in the right language. Resolved the same way as on `/v1/transcribe`; omitted when the daemon has none. |
+
+**Response (200):**
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{ "status": "success", "text": "So I think we should ship it." }
+```
+
+| Field  | Type   | Notes                                                        |
+|--------|--------|--------------------------------------------------------------|
+| `text` | string | The rewritten transcript. Returning `text` unchanged is a valid answer — it means "nothing to clean up". |
+
+There is no streaming form: post-processing runs on a transcript the user has
+already finished dictating, and the daemon delivers the result in one piece.
+
+**Errors:**
+
+| HTTP | `message`           | Meaning                                                     |
+|------|---------------------|-------------------------------------------------------------|
+| 400  | `invalid_text`      | `text` is missing or empty.                                 |
+| 409  | `not_ready`         | No model is loaded; check `GET /v1/status`.                 |
+| 500  | `processing_failed` | The backend failed while rewriting.                         |
+
+**The daemon's failure policy is to keep the words.** Every error here — along
+with a timeout, currently 30 seconds — makes the daemon deliver the *raw*
+transcript and log a warning. A backend that cannot improve a transcript should
+therefore fail loudly rather than return something degraded: the fallback is
+the user's original text, which is never worse. See
+[`/pipeline`](../endpoints/v1/pipeline.md).
+
 ### `POST /v1/cancel`
 
 Cancel the in-flight transcription, if any. The corresponding
@@ -377,8 +441,11 @@ When a model is selected the daemon:
    network-isolated, so the daemon — not the backend — performs every
    download.
 2. **Terminates the currently active backend before starting the new one.**
-   A switch never runs two model-loaded backends at once, so GPU memory is
-   never doubled.
+   A switch never runs two model-loaded *transcription* backends at once, so
+   GPU memory is never doubled. A selected
+   [post-processor](../endpoints/v1/pipeline.md) is a separate instance
+   with its own lifecycle, and is not disturbed by a transcription-model
+   switch — the daemon runs at most one of each.
 3. Spawns (subprocess) or instantiates (WASM) the selected backend.
 4. Calls `POST /v1/load` and polls `GET /v1/status` until `state` is
    `ready`.

@@ -145,6 +145,12 @@ impl AppModel {
                         }
                         Some(Task::batch(tasks))
                     }
+                    // Another client (or this one) changed the post-processor.
+                    // Re-read it so the section shows the current selection and
+                    // its live `loaded` state.
+                    "post_processor" => {
+                        Some(crate::core::app::handlers::tasks::load_post_processor())
+                    }
                     // Both self-update settings need something beyond a plain
                     // `SettingsChanged` no-op, but *what* they need differs —
                     // see `self_update_setting_route`'s doc comment for why

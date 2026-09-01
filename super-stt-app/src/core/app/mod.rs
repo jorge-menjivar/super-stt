@@ -126,6 +126,18 @@ pub struct AppModel {
     /// Whether preview typing is enabled (beta feature)
     pub preview_typing_enabled: bool,
 
+    /// The transcript post-processor: whether it runs, which model is
+    /// selected, and whether that model is actually loaded. Mirrors the
+    /// daemon's `/post_processor` block; the daemon stays authoritative, so
+    /// this is replaced wholesale by every `Loaded` message rather than being
+    /// edited field-by-field.
+    pub post_processor: crate::daemon::client::PostProcessorState,
+    /// The post-processor the user picked but has not enabled yet, as
+    /// `(model, source)`. Mirrors `models_page.staged_model`: a dropdown pick
+    /// is local until the Enable button commits it. `None` means "use whatever
+    /// the daemon already has selected".
+    pub staged_post_processor: Option<(String, String)>,
+
     // Recording stop mode
     pub recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
 

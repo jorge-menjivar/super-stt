@@ -8,7 +8,7 @@
 //! `preferred_source` config, which carries no `active_backend` at all. When
 //! the startup path forgets to record it the daemon still transcribes, so
 //! nothing fails and no log line complains; the only symptom is that the
-//! settings app renders its "no backend loaded" empty state and the model
+//! settings app renders its "no backend selected" empty state and the model
 //! picker comes back empty.
 
 use crate::daemon::types::test_daemon;

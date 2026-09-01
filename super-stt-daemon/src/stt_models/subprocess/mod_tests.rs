@@ -113,3 +113,41 @@ supported_devices = ["cuda"]
         "the manifest's provider did not reach the load body: {body}"
     );
 }
+
+/// The instance key separates the daemon's two concurrent backends. Keyed by
+/// model name alone — as it was before post-processing — a second spawn would
+/// unlink the first's live socket and clash on its systemd unit name.
+#[test]
+fn the_instance_key_distinguishes_backend_and_model() {
+    let a = instance_key(Path::new("/backends/app.super-stt.whisper"), "whisper-tiny");
+    let b = instance_key(Path::new("/backends/app.super-stt.whisper"), "cleanup");
+    let c = instance_key(Path::new("/backends/com.example.whisper"), "whisper-tiny");
+
+    assert_eq!(a, "app-super-stt-whisper-whisper-tiny");
+    assert_ne!(a, b, "two models in one backend must not share an instance");
+    assert_ne!(
+        a, c,
+        "two backends serving the same model name must not share an instance"
+    );
+}
+
+/// A backend `id` may be up to 255 bytes, and it names the install directory.
+/// Left whole, the socket path would exceed `sun_path` (108 bytes) and the bind
+/// would fail; the key is bounded instead, and stays unique and deterministic.
+#[test]
+fn an_over_long_instance_key_is_bounded_but_still_unique() {
+    let long = format!("/backends/{}", "a".repeat(255));
+    let a = instance_key(Path::new(&long), "whisper-tiny");
+    let b = instance_key(Path::new(&long), "cleanup");
+
+    assert!(a.len() <= MAX_INSTANCE_KEY, "key must fit the socket path");
+    assert_ne!(
+        a, b,
+        "truncation must not collapse distinct models together"
+    );
+    assert_eq!(
+        a,
+        instance_key(Path::new(&long), "whisper-tiny"),
+        "the same input must yield the same key on every spawn"
+    );
+}

@@ -2,7 +2,7 @@
 
 The privacy gate for online STT providers (OpenAI, Mistral,
 Deepgram). While this flag is `false`, attempts to switch to an
-online model via [`POST /active_model`](./active_model.md) are
+online model via [`POST /pipeline/1/model`](./pipeline.md) are
 rejected with `400 online_models_disabled`. Flipping `true` →
 `false` while an online model is *currently* active reverts to a
 local default; subscribers to

@@ -162,6 +162,13 @@ impl SuperSTTDaemon {
             info!("Shutdown: unloading current model so subprocess units exit cleanly");
             self.unload_current_model().await;
         }
+        // The post-processor is a second backend instance with its own
+        // subprocess unit, so it leaks exactly the same way if it is not
+        // stopped here.
+        if self.post_processor.read().await.is_some() {
+            info!("Shutdown: unloading post-processor so subprocess units exit cleanly");
+            self.unload_post_processor().await;
+        }
     }
 
     /// Drop the currently loaded model. The active backend stays selected

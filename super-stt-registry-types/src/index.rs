@@ -204,6 +204,7 @@ impl IndexBackend {
                         .iter()
                         .map(ToString::to_string)
                         .collect(),
+                    role: md.role.to_string(),
                 })
                 .collect(),
             secrets: m
@@ -268,6 +269,20 @@ pub struct IndexModel {
     #[serde(default, skip_deserializing)]
     pub provider: String,
     pub supported_devices: Vec<String>,
+    /// What the model is for: `"transcription"` (the default) or
+    /// `"post_processor"`. Lets Browse show that a backend provides a
+    /// post-processor before it is installed. `default` so an index published
+    /// before the field existed still parses, reading every model as
+    /// transcribing — which is what it was.
+    #[serde(default = "default_role")]
+    pub role: String,
+}
+
+/// The role an index entry without the key is read as. Every model predates
+/// the field, so they all transcribe. Spelled via the canonical enum so this
+/// cannot drift from [`ModelRole::default`](crate::manifest::ModelRole::default).
+fn default_role() -> String {
+    crate::manifest::ModelRole::default().to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -352,7 +367,7 @@ pub struct IndexStale {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::ModelEntry;
+    use crate::manifest::{ModelEntry, ModelRole};
 
     /// The published `index.json` must keep carrying `provider` on every model.
     /// Daemons through v0.2.0 declare it as a required `String`, so an index
@@ -368,6 +383,7 @@ mod tests {
             name: "m1".into(),
             provider: String::new(),
             supported_devices: vec!["cpu".into()],
+            role: ModelRole::Transcription.to_string(),
         };
         let v = serde_json::to_value(&m).expect("serializes");
         assert!(
@@ -393,6 +409,23 @@ mod tests {
         assert_eq!(without.name, "m1");
     }
 
+    /// An index published before `role` existed still parses, and its models
+    /// read as transcription models — which is what they were. A required
+    /// field here would stop the registry resolving against any such index.
+    #[test]
+    fn an_index_model_without_a_role_reads_as_transcription() {
+        let without: IndexModel =
+            serde_json::from_str(r#"{"name":"m1","supported_devices":["cpu"]}"#)
+                .expect("an index without `role` must parse");
+        assert_eq!(without.role, "transcription");
+
+        let with: IndexModel = serde_json::from_str(
+            r#"{"name":"m1","supported_devices":["cpu"],"role":"post_processor"}"#,
+        )
+        .expect("an index carrying `role` must parse");
+        assert_eq!(with.role, "post_processor");
+    }
+
     /// Build a `ModelEntry` with the given devices; the other
     /// fields are irrelevant to `model_support` (which reads only devices).
     fn model(devices: &[Device]) -> ModelEntry {
@@ -405,6 +438,7 @@ mod tests {
             estimated_vram_bytes: 0,
             processing_interval_ms: None,
             realtime: false,
+            role: ModelRole::Transcription,
             files: vec![],
             provider: None,
         }
