@@ -187,6 +187,44 @@ coverage-lcov:
 coverage-html *args:
     cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --html {{ args }}
 
+# --- CI coverage: collect once, render many ---
+# The recipes above each run the instrumented suite. CI wants several reports
+# from one run, so it collects profile data with --no-report and renders from
+# it. Same flags, split in two — a report rendered with a different
+# --ignore-filename-regex than the collection would silently count other files.
+
+# Run the instrumented suite and keep the profile data without rendering.
+coverage-collect:
+    cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --no-report
+
+# Write lcov.info from collected data and print the summary.
+coverage-report-lcov:
+    cargo llvm-cov report --lcov --output-path lcov.info --ignore-filename-regex 'tests/'
+    cargo llvm-cov report --summary-only --ignore-filename-regex 'tests/'
+
+# Render the HTML report from collected data into ./coverage-html.
+coverage-report-html:
+    cargo llvm-cov report --html --ignore-filename-regex 'tests/'
+    rm -rf coverage-html && cp -r target/llvm-cov/html coverage-html
+
+# Drop a shields.io "endpoint" JSON inside the rendered report so the README
+# badge reads the latest line-% straight from Pages — no Gist or PAT. Run after
+# coverage-report-html, which creates the directory it writes into.
+coverage-badge:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pct=$(cargo llvm-cov report --json --summary-only --ignore-filename-regex 'tests/' \
+      | jq -r '.data[0].totals.lines.percent')
+    if   awk "BEGIN{exit !($pct>=90)}"; then color=brightgreen
+    elif awk "BEGIN{exit !($pct>=75)}"; then color=green
+    elif awk "BEGIN{exit !($pct>=60)}"; then color=yellow
+    elif awk "BEGIN{exit !($pct>=40)}"; then color=orange
+    else color=red
+    fi
+    printf '{"schemaVersion":1,"label":"coverage","message":"%.1f%%","color":"%s"}\n' \
+      "$pct" "$color" > coverage-html/coverage.json
+    cat coverage-html/coverage.json
+
 # Full local CI gate: format, lint, feature-combo compile, tests, install.sh
 # tests, doctests, schemas
 ci: fmt-check check check-features test test-install doctest schema-check
