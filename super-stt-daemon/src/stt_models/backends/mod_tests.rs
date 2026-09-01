@@ -296,6 +296,7 @@ fn dir_name_returns_final_component() {
 
     fn fake_backend(dir: PathBuf) -> DiscoveredBackend {
         DiscoveredBackend {
+            description: String::new(),
             dir,
             source: "github.com/super-stt/openai".to_string(),
             id: None,
@@ -514,6 +515,7 @@ fn dedup_sources_falls_back_to_lexicographic_order() {
     use crate::stt_models::ModelDefinition;
     fn fake(dir: &str, source: &str) -> DiscoveredBackend {
         DiscoveredBackend {
+            description: String::new(),
             dir: PathBuf::from(dir),
             source: source.to_string(),
             id: None,
@@ -554,6 +556,7 @@ fn an_empty_source_resolves_nothing() {
 
     fn serving(dir: &str, source: &str, model: &str) -> DiscoveredBackend {
         DiscoveredBackend {
+            description: String::new(),
             dir: PathBuf::from(dir),
             source: source.to_string(),
             id: None,
@@ -693,6 +696,7 @@ fn the_catalog_reports_the_installed_accel() {
 fn at(dir: &str, source: &str, version: &str, id: Option<&str>) -> DiscoveredBackend {
     use crate::stt_models::ModelDefinition;
     DiscoveredBackend {
+        description: String::new(),
         dir: PathBuf::from("/backends").join(dir),
         source: source.to_string(),
         name: dir.to_string(),

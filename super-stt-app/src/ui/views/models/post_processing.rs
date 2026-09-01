@@ -409,6 +409,7 @@ mod tests {
     fn backend(source: &str, name: &str, models: Vec<BackendModel>) -> BackendInfo {
         BackendInfo {
             source: source.into(),
+            description: String::new(),
             name: name.into(),
             version: "1.0.0".into(),
             kind: "wasm".into(),

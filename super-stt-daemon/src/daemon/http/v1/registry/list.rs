@@ -243,6 +243,7 @@ mod tests {
 
     fn discovered(dir: &str, source: &str, version: &str) -> DiscoveredBackend {
         DiscoveredBackend {
+            description: String::new(),
             dir: PathBuf::from("/backends").join(dir),
             source: source.to_string(),
             id: None,

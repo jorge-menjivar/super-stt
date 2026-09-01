@@ -886,6 +886,7 @@ fn fixture_backend_devices(
     use std::time::Duration;
 
     DiscoveredBackend {
+        description: String::new(),
         dir: std::path::PathBuf::from("/tmp").join(dir_name),
         source: source.to_string(),
         id: None,

@@ -437,6 +437,7 @@ mod tests {
     fn backend(source: &str, model: &str, devices: &[&str]) -> BackendInfo {
         BackendInfo {
             source: source.to_string(),
+            description: String::new(),
             name: "Test".to_string(),
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
