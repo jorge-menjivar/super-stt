@@ -9,7 +9,8 @@ use crate::daemon::client::{
 use crate::state::ErrorScope;
 use crate::ui::messages::{BackendMessage, Message};
 use cosmic::prelude::*;
-use super_stt_shared::daemon::http_client::HttpError;
+use std::future::Future;
+use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
 
 /// Build a Configure-sheet-scoped banner message for a failed secret/option save.
 fn configure_backend_error(e: &HttpError) -> Message {
@@ -17,6 +18,18 @@ fn configure_backend_error(e: &HttpError) -> Message {
         scope: ErrorScope::ConfigureBackend,
         message: e.to_string(),
     }
+}
+
+/// Run an option write and settle the sheet either way: reload the catalog so
+/// the row re-renders from what the daemon actually stored, or surface the
+/// failure in the sheet's banner. Set, clear and toggle all end here.
+fn option_write(
+    write: impl Future<Output = HttpResult<()>> + Send + 'static,
+) -> Task<cosmic::Action<Message>> {
+    Task::perform(write, |result| match result {
+        Ok(()) => cosmic::Action::App(Message::Backend(BackendMessage::BackendsReload)),
+        Err(e) => cosmic::Action::App(configure_backend_error(&e)),
+    })
 }
 
 impl AppModel {
@@ -114,6 +127,18 @@ impl AppModel {
         }
     }
 
+    /// The `default` a `bool` option declares, read as a bool.
+    ///
+    /// A switch flipped back to it is reverting, not choosing, so the write
+    /// clears the override instead of storing a copy of the default.
+    fn option_bool_default(&self, source: &str, name: &str) -> Option<bool> {
+        self.backends
+            .iter()
+            .find(|b| b.source == source)
+            .and_then(|b| b.options.iter().find(|o| o.name == name))
+            .and_then(BackendOption::bool_default)
+    }
+
     /// Handle per-backend secret and option configuration messages.
     fn handle_backend_config(&mut self, message: BackendMessage) -> Task<cosmic::Action<Message>> {
         match message {
@@ -193,22 +218,9 @@ impl AppModel {
                     .cloned()
                     .unwrap_or_default();
                 if value.is_empty() {
-                    Task::perform(clear_backend_option(source, name), |result| match result {
-                        Ok(()) => {
-                            cosmic::Action::App(Message::Backend(BackendMessage::BackendsReload))
-                        }
-                        Err(e) => cosmic::Action::App(configure_backend_error(&e)),
-                    })
+                    option_write(clear_backend_option(source, name))
                 } else {
-                    Task::perform(
-                        set_backend_option(source, name, value),
-                        |result| match result {
-                            Ok(()) => cosmic::Action::App(Message::Backend(
-                                BackendMessage::BackendsReload,
-                            )),
-                            Err(e) => cosmic::Action::App(configure_backend_error(&e)),
-                        },
-                    )
+                    option_write(set_backend_option(source, name, value))
                 }
             }
 
@@ -225,31 +237,10 @@ impl AppModel {
                 value,
             } => {
                 self.action_error = None;
-                let is_default = self
-                    .backends
-                    .iter()
-                    .find(|b| b.source == source)
-                    .and_then(|b| b.options.iter().find(|o| o.name == name))
-                    .and_then(BackendOption::bool_default)
-                    == Some(value);
-                if is_default {
-                    Task::perform(clear_backend_option(source, name), |result| match result {
-                        Ok(()) => {
-                            cosmic::Action::App(Message::Backend(BackendMessage::BackendsReload))
-                        }
-                        Err(e) => cosmic::Action::App(configure_backend_error(&e)),
-                    })
+                if self.option_bool_default(&source, &name) == Some(value) {
+                    option_write(clear_backend_option(source, name))
                 } else {
-                    let value = if value { "true" } else { "false" };
-                    Task::perform(
-                        set_backend_option(source, name, value.to_string()),
-                        |result| match result {
-                            Ok(()) => cosmic::Action::App(Message::Backend(
-                                BackendMessage::BackendsReload,
-                            )),
-                            Err(e) => cosmic::Action::App(configure_backend_error(&e)),
-                        },
-                    )
+                    option_write(set_backend_option(source, name, value.to_string()))
                 }
             }
 
@@ -257,10 +248,7 @@ impl AppModel {
             // option reverts to its daemon default.
             BackendMessage::BackendOptionReset { source, name } => {
                 self.action_error = None;
-                Task::perform(clear_backend_option(source, name), |result| match result {
-                    Ok(()) => cosmic::Action::App(Message::Backend(BackendMessage::BackendsReload)),
-                    Err(e) => cosmic::Action::App(configure_backend_error(&e)),
-                })
+                option_write(clear_backend_option(source, name))
             }
 
             _ => Task::none(),
