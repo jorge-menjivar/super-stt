@@ -274,10 +274,8 @@ pub(super) fn card_title_block<'a>(
     col.into()
 }
 
-/// A backend's one-line description, looked up on its registry entry by
-/// `source`. The installed `/backends` payload carries no description, so the
-/// registry index is the source; `None` when it isn't loaded or has no
-/// (non-empty) description for this backend.
+/// A backend's one-line description, resolved by `source`; `None` when neither
+/// source has a non-empty one.
 pub(super) fn backend_description(app: &AppModel, source: &str) -> Option<String> {
     // The registry's copy wins: it tracks the published release, which may be
     // newer than the manifest sitting on disk. The installed manifest is the

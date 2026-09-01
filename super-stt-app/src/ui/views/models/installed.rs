@@ -117,9 +117,9 @@ pub(super) fn installed_card<'a>(
     let online = backend_is_online(backend);
     let source = backend.source.clone();
 
-    // Registry entry (by source) supplies the description shown under the name
-    // and the latest version that drives the optional Update item. Compared as
-    // semver so a stale/older index never prompts a downgrade.
+    // Registry entry (by source) supplies the latest version that drives the
+    // optional Update item. Compared as semver so a stale/older index never
+    // prompts a downgrade.
     let registry_map = app.registry.by_source();
     let registry_entry = registry_map.get(source.as_str());
     // An update this card started is the same install pipeline Browse drives,
@@ -128,9 +128,9 @@ pub(super) fn installed_card<'a>(
     // that reads to the user.
     let in_flight = app.registry.installs.get(source.as_str());
     let update_version = update_offer(registry_entry.copied(), in_flight.is_some());
-    let description = registry_entry
-        .and_then(|e| e.description.clone())
-        .filter(|d| !d.is_empty());
+    // Registry first, installed manifest second — the same resolution the
+    // Models page uses, so a sideloaded backend still describes itself here.
+    let description = super::surface::backend_description(app, &source);
 
     // Overflow ("⋯") menu: the optional Update, then Uninstall. Configure left
     // the menu to become a visible button beside it.
