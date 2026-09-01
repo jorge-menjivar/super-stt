@@ -116,16 +116,14 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
 }
 
 /// The card header for a selected backend: glyph tile, the backend's name /
-/// version / description, then the repo button, "Switch backend", Configure and
-/// Deselect — the same action set the transcription card carries.
+/// version / description, then the repo button, Configure and Deselect — the
+/// same action set the transcription card carries. Changing backend is ✕ then
+/// pick again.
 fn header<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let source = backend.source.clone();
     let actions = row![
         repo_button(&source),
-        button::standard("Switch backend").on_press(Message::Shell(
-            ShellMessage::ToggleContextPage(ContextPage::SelectPostProcessor),
-        )),
         button::standard("Configure").on_press(Message::ModelsPage(
             ModelsPageMessage::OpenBackendConfig(source.clone()),
         )),
