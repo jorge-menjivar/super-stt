@@ -43,6 +43,13 @@ pub fn configure_sheet<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Eleme
             section = section.add(secret_row(&backend.source, secret, configured, input));
         }
         for option in &backend.options {
+            // A boolean has exactly two values and no way to be typed wrong,
+            // so it gets a switch that writes on the press. Everything else is
+            // free text and keeps its field + Save.
+            if option.is_bool() {
+                section = section.add(bool_option_row(&backend.source, option));
+                continue;
+            }
             let key = (backend.source.clone(), option.name.clone());
             let input = app
                 .backend_option_inputs
@@ -153,6 +160,36 @@ pub(super) fn secret_row<'a>(
             .into(),
     ])
     .into()
+}
+
+/// One `type = "bool"` option as a settings row with a switch: label,
+/// description, and the toggle opposite them.
+///
+/// No Save and no Reset — the flip is the save, and flipping back to the
+/// backend's default is what clearing an override means for two values. The
+/// switch shows the current state, so the "(default: …)" suffix the text rows
+/// carry would only restate it.
+pub(super) fn bool_option_row<'a>(
+    source: &'a str,
+    option: &'a BackendOption,
+) -> Element<'a, Message> {
+    let display = option.label.clone().unwrap_or_else(|| option.name.clone());
+    let source = source.to_string();
+    let name = option.name.clone();
+
+    let toggle = widget::toggler(option.bool_value()).on_toggle(move |value| {
+        Message::Backend(BackendMessage::BackendOptionToggled {
+            source: source.clone(),
+            name: name.clone(),
+            value,
+        })
+    });
+
+    let mut item = settings::item::builder(display);
+    if !option.description.is_empty() {
+        item = item.description(option.description.clone());
+    }
+    item.control(toggle).into()
 }
 
 /// One option-entry row for a backend (e.g. `base_url`): the label/description

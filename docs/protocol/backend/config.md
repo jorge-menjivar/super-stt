@@ -159,14 +159,27 @@ label       = "Request timeout"
 description = "Per-request timeout in seconds."
 type        = "integer"
 default     = 30
+
+[[options]]
+name        = "strip_filler_words"
+label       = "Remove filler sounds"
+description = "Drop um, uh and similar from the transcript."
+type        = "bool"
+default     = true
 ```
+
+A `bool` option is rendered as a switch, so it has no Save button: flipping it
+writes immediately, and flipping it back to `default` clears the stored
+override rather than writing a value identical to it. Declare a `default` for
+every `bool` — without one the switch starts off, and turning it off again has
+nothing to revert to.
 
 | Field         | Type           | Required | Notes                                                  |
 |---------------|----------------|----------|--------------------------------------------------------|
 | `name`        | string         | yes      | snake_case identifier the backend reads the value by. `[a-z][a-z0-9_]*`, unique within the table. |
 | `label`       | string         | no       | Human-readable label shown in the settings UI. Falls back to `name` when absent. |
 | `description` | string         | yes      | Help text shown beside the input in the settings UI.   |
-| `type`        | string         | no       | `string`, `integer`, or `bool`. Drives the input the UI renders. Default `string`. |
+| `type`        | string         | no       | `string`, `integer`, or `bool`. Drives the input the UI renders: `bool` gets a switch that writes on the flip, everything else a text field the user saves. Default `string`. |
 | `default`     | matches `type` | no       | Value used when the user sets none. Forbidden on `base_url` — see below. |
 | `required`    | bool           | no       | Whether a value must be set before the backend can load. Default `false`. |
 

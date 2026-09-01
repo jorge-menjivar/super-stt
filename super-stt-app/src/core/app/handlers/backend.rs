@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::AppModel;
+use crate::daemon::backends::BackendOption;
 use crate::daemon::client::{
     clear_backend_option, clear_backend_secret, list_backend_secrets, set_backend_option,
     set_backend_secret,
@@ -39,6 +40,7 @@ impl AppModel {
             | BackendMessage::BackendSecretRemoved { .. }
             | BackendMessage::BackendOptionInputChanged { .. }
             | BackendMessage::BackendOptionSaved { .. }
+            | BackendMessage::BackendOptionToggled { .. }
             | BackendMessage::BackendOptionReset { .. } => self.handle_backend_config(message),
         }
     }
@@ -200,6 +202,47 @@ impl AppModel {
                 } else {
                     Task::perform(
                         set_backend_option(source, name, value),
+                        |result| match result {
+                            Ok(()) => cosmic::Action::App(Message::Backend(
+                                BackendMessage::BackendsReload,
+                            )),
+                            Err(e) => cosmic::Action::App(configure_backend_error(&e)),
+                        },
+                    )
+                }
+            }
+
+            // A switch writes on the press: there is no field to type into and
+            // no Save to reach for, so the flip is the save.
+            //
+            // Flipping back to the manifest default clears the override rather
+            // than storing a value identical to it, which keeps the daemon
+            // config a record of real deviations and lets the backend's own
+            // default move later without a stale copy pinning it.
+            BackendMessage::BackendOptionToggled {
+                source,
+                name,
+                value,
+            } => {
+                self.action_error = None;
+                let is_default = self
+                    .backends
+                    .iter()
+                    .find(|b| b.source == source)
+                    .and_then(|b| b.options.iter().find(|o| o.name == name))
+                    .and_then(BackendOption::bool_default)
+                    == Some(value);
+                if is_default {
+                    Task::perform(clear_backend_option(source, name), |result| match result {
+                        Ok(()) => {
+                            cosmic::Action::App(Message::Backend(BackendMessage::BackendsReload))
+                        }
+                        Err(e) => cosmic::Action::App(configure_backend_error(&e)),
+                    })
+                } else {
+                    let value = if value { "true" } else { "false" };
+                    Task::perform(
+                        set_backend_option(source, name, value.to_string()),
                         |result| match result {
                             Ok(()) => cosmic::Action::App(Message::Backend(
                                 BackendMessage::BackendsReload,

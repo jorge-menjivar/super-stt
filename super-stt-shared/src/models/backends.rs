@@ -177,9 +177,55 @@ pub struct BackendOption {
     pub value: Option<String>,
 }
 
+impl BackendOption {
+    /// Whether the backend declared this option a boolean, so a client can
+    /// offer a switch rather than a free-text field.
+    ///
+    /// An option that declares no type is a string (the manifest default), so
+    /// only an explicit `bool` qualifies.
+    #[must_use]
+    pub fn is_bool(&self) -> bool {
+        self.r#type
+            .as_deref()
+            .is_some_and(|t| t.eq_ignore_ascii_case("bool"))
+    }
+
+    /// This option's effective value read as a boolean.
+    ///
+    /// `value` already carries the override-or-default the daemon resolved;
+    /// `default` is the fallback for a payload that omits it. Anything that
+    /// isn't a recognized true spelling is false, so a malformed stored value
+    /// reads as off rather than failing the row.
+    #[must_use]
+    pub fn bool_value(&self) -> bool {
+        let raw = self.value.as_deref().or(self.default.as_deref());
+        raw.is_some_and(parse_bool)
+    }
+
+    /// The declared default read as a boolean; `None` when none was declared.
+    ///
+    /// Lets a client tell "the user chose this" from "this is just the
+    /// default" — a toggle back to the default clears the override instead of
+    /// storing a value identical to it.
+    #[must_use]
+    pub fn bool_default(&self) -> Option<bool> {
+        self.default.as_deref().map(parse_bool)
+    }
+}
+
+/// The true spellings a manifest or a stored override may use. TOML writes
+/// `true`, but a config edited by hand (or a backend documenting `on`) should
+/// not silently read as off.
+fn parse_bool(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "true" | "1" | "yes" | "on"
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{BackendInfo, BackendModel};
+    use super::{BackendInfo, BackendModel, BackendOption};
 
     /// `GET /backends` must keep carrying `provider` on every model. Clients
     /// through v0.2.0 declare it a required `String`, so a payload without it
@@ -294,6 +340,70 @@ mod tests {
         assert_eq!(
             b.version, "",
             "a missing version reads as unknown, not an error"
+        );
+    }
+
+    fn option(r#type: Option<&str>, default: Option<&str>, value: Option<&str>) -> BackendOption {
+        BackendOption {
+            name: "flag".into(),
+            label: None,
+            description: String::new(),
+            r#type: r#type.map(Into::into),
+            default: default.map(Into::into),
+            required: false,
+            value: value.map(Into::into),
+        }
+    }
+
+    /// Only an explicit `bool` gets a switch: an untyped option is a string by
+    /// manifest default, and rendering it as a toggle would silently rewrite
+    /// whatever the user had stored in it.
+    #[test]
+    fn only_an_explicitly_bool_option_is_a_bool() {
+        assert!(option(Some("bool"), None, None).is_bool());
+        assert!(option(Some("BOOL"), None, None).is_bool());
+        assert!(!option(Some("string"), None, None).is_bool());
+        assert!(!option(None, None, None).is_bool());
+    }
+
+    /// The stored value wins over the default, and a payload carrying neither
+    /// reads as off rather than panicking the row.
+    #[test]
+    fn a_bool_option_reads_its_value_then_its_default() {
+        assert!(option(Some("bool"), Some("false"), Some("true")).bool_value());
+        assert!(!option(Some("bool"), Some("true"), Some("false")).bool_value());
+        assert!(option(Some("bool"), Some("true"), None).bool_value());
+        assert!(!option(Some("bool"), None, None).bool_value());
+    }
+
+    /// A hand-edited config may spell truth several ways; anything else is off.
+    #[test]
+    fn the_spoken_spellings_of_true_all_read_as_on() {
+        for raw in ["true", "TRUE", " 1 ", "yes", "on"] {
+            assert!(
+                option(Some("bool"), None, Some(raw)).bool_value(),
+                "{raw:?} should read as on"
+            );
+        }
+        for raw in ["false", "0", "no", "off", "", "maybe"] {
+            assert!(
+                !option(Some("bool"), None, Some(raw)).bool_value(),
+                "{raw:?} should read as off"
+            );
+        }
+    }
+
+    /// An option declaring no default has none to compare against, so a client
+    /// cannot decide a toggle is "back to default" and must store the value.
+    #[test]
+    fn an_option_without_a_default_reports_no_bool_default() {
+        assert_eq!(
+            option(Some("bool"), Some("true"), None).bool_default(),
+            Some(true)
+        );
+        assert_eq!(
+            option(Some("bool"), None, Some("true")).bool_default(),
+            None
         );
     }
 }
