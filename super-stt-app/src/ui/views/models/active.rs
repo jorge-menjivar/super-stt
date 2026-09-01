@@ -7,11 +7,8 @@ use super_stt_shared::models::protocol::DownloadProgress;
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;
-use crate::state::ContextPage;
 use crate::ui::icons;
-use crate::ui::messages::{
-    DownloadMessage, LanguageMessage, Message, ModelsPageMessage, ShellMessage,
-};
+use crate::ui::messages::{DownloadMessage, LanguageMessage, Message, ModelsPageMessage};
 
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
@@ -160,15 +157,13 @@ pub(super) fn active_backend_card<'a>(
     let model_loaded = !app.current_source.is_empty() && app.current_source == backend.source;
     let missing = unmet_requirements(&app.backend_secret_configured, backend);
 
-    // Header: glyph + name/description, then the repo button, a "Switch
-    // backend" trigger (reopens the Select-a-backend sheet), Configure, and
+    // Header: glyph + name/description, then the repo button, Configure, and
     // Deselect. The repo button + description replace the old source caption.
+    // Changing backend is ✕ then pick again: one way in, one way out, and no
+    // button that silently swaps what a loaded card is about.
     let description = super::surface::backend_description(app, &source);
     let actions = row![
         super::surface::repo_button(&source),
-        button::standard("Switch backend").on_press(Message::Shell(
-            ShellMessage::ToggleContextPage(ContextPage::SelectBackend),
-        )),
         button::standard("Configure").on_press(Message::ModelsPage(
             ModelsPageMessage::OpenBackendConfig(source.clone()),
         )),

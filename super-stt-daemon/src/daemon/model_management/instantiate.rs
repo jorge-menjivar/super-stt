@@ -645,6 +645,7 @@ mod tests {
         // A backend declaring no `base_url` option contributes nothing, even
         // with the override still in config.
         let no_base = DiscoveredBackend {
+            description: String::new(),
             options: vec![],
             ..backend
         };
@@ -666,6 +667,7 @@ mod tests {
         // No secrets: the assertions run through the real header path, which
         // would otherwise reach the keyring for the fixture's required key.
         let backend = DiscoveredBackend {
+            description: String::new(),
             secrets: Vec::new(),
             ..openai_backend(source, Vec::new(), None)
         };
@@ -721,6 +723,7 @@ mod tests {
         // No secrets: this drives the real header path, which would otherwise
         // reach the keyring for the fixture's required key.
         let backend = DiscoveredBackend {
+            description: String::new(),
             secrets: Vec::new(),
             ..openai_backend(source, Vec::new(), None)
         };
@@ -789,6 +792,7 @@ mod tests {
         assert!(err.to_string().contains("API base URL"), "{err}");
 
         let undeclared = DiscoveredBackend {
+            description: String::new(),
             options: Vec::new(),
             ..backend
         };
@@ -813,6 +817,7 @@ mod tests {
         // No secrets: this drives the real `backend_headers`, which would
         // otherwise reach the keyring for the fixture's required key.
         let backend = DiscoveredBackend {
+            description: String::new(),
             secrets: Vec::new(),
             ..openai_backend(source, Vec::new(), None)
         };

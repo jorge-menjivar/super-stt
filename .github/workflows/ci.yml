@@ -214,12 +214,10 @@ jobs:
       # Collect coverage once; the report steps below render lcov/html/json from
       # this profile data without re-running the suite.
       - name: Collect coverage
-        run: cargo llvm-cov --workspace --remap-path-prefix --ignore-filename-regex 'tests/' --no-report
+        run: just coverage-collect
 
       - name: LCOV report + summary
-        run: |
-          cargo llvm-cov report --lcov --output-path lcov.info --ignore-filename-regex 'tests/'
-          cargo llvm-cov report --summary-only --ignore-filename-regex 'tests/'
+        run: just coverage-report-lcov
 
       - uses: actions/upload-artifact@v7
         with:
@@ -231,27 +229,13 @@ jobs:
       # tree would need lcov's genhtml or grcov; we intentionally keep to the
       # llvm-cov toolchain and accept the flat index.)
       - name: Render HTML coverage report
-        run: |
-          cargo llvm-cov report --html --ignore-filename-regex 'tests/'
-          rm -rf coverage-html && cp -r target/llvm-cov/html coverage-html
+        run: just coverage-report-html
 
       # Drop a shields.io "endpoint" JSON inside the report so the README badge
       # reads the latest line-% straight from Pages — no Gist or PAT. jq ships on
       # the runner.
       - name: Write coverage badge JSON
-        run: |
-          set -euo pipefail
-          pct=$(cargo llvm-cov report --json --summary-only --ignore-filename-regex 'tests/' \
-            | jq -r '.data[0].totals.lines.percent')
-          if   awk "BEGIN{exit !($pct>=90)}"; then color=brightgreen
-          elif awk "BEGIN{exit !($pct>=75)}"; then color=green
-          elif awk "BEGIN{exit !($pct>=60)}"; then color=yellow
-          elif awk "BEGIN{exit !($pct>=40)}"; then color=orange
-          else color=red
-          fi
-          printf '{"schemaVersion":1,"label":"coverage","message":"%.1f%%","color":"%s"}\n' \
-            "$pct" "$color" > coverage-html/coverage.json
-          cat coverage-html/coverage.json
+        run: just coverage-badge
 
       # Browsable HTML artifact for the run, alongside the gh-pages publish below.
       - uses: actions/upload-artifact@v7

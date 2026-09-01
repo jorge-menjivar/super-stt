@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::AppModel;
+use crate::daemon::backends::BackendOption;
 use crate::daemon::client::{
     clear_backend_option, clear_backend_secret, list_backend_secrets, set_backend_option,
     set_backend_secret,
@@ -8,7 +9,8 @@ use crate::daemon::client::{
 use crate::state::ErrorScope;
 use crate::ui::messages::{BackendMessage, Message};
 use cosmic::prelude::*;
-use super_stt_shared::daemon::http_client::HttpError;
+use std::future::Future;
+use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
 
 /// Build a Configure-sheet-scoped banner message for a failed secret/option save.
 fn configure_backend_error(e: &HttpError) -> Message {
@@ -16,6 +18,18 @@ fn configure_backend_error(e: &HttpError) -> Message {
         scope: ErrorScope::ConfigureBackend,
         message: e.to_string(),
     }
+}
+
+/// Run an option write and settle the sheet either way: reload the catalog so
+/// the row re-renders from what the daemon actually stored, or surface the
+/// failure in the sheet's banner. Set, clear and toggle all end here.
+fn option_write(
+    write: impl Future<Output = HttpResult<()>> + Send + 'static,
+) -> Task<cosmic::Action<Message>> {
+    Task::perform(write, |result| match result {
+        Ok(()) => cosmic::Action::App(Message::Backend(BackendMessage::BackendsReload)),
+        Err(e) => cosmic::Action::App(configure_backend_error(&e)),
+    })
 }
 
 impl AppModel {
@@ -39,6 +53,7 @@ impl AppModel {
             | BackendMessage::BackendSecretRemoved { .. }
             | BackendMessage::BackendOptionInputChanged { .. }
             | BackendMessage::BackendOptionSaved { .. }
+            | BackendMessage::BackendOptionToggled { .. }
             | BackendMessage::BackendOptionReset { .. } => self.handle_backend_config(message),
         }
     }
@@ -110,6 +125,18 @@ impl AppModel {
 
             _ => Task::none(),
         }
+    }
+
+    /// The `default` a `bool` option declares, read as a bool.
+    ///
+    /// A switch flipped back to it is reverting, not choosing, so the write
+    /// clears the override instead of storing a copy of the default.
+    fn option_bool_default(&self, source: &str, name: &str) -> Option<bool> {
+        self.backends
+            .iter()
+            .find(|b| b.source == source)
+            .and_then(|b| b.options.iter().find(|o| o.name == name))
+            .and_then(BackendOption::bool_default)
     }
 
     /// Handle per-backend secret and option configuration messages.
@@ -191,22 +218,29 @@ impl AppModel {
                     .cloned()
                     .unwrap_or_default();
                 if value.is_empty() {
-                    Task::perform(clear_backend_option(source, name), |result| match result {
-                        Ok(()) => {
-                            cosmic::Action::App(Message::Backend(BackendMessage::BackendsReload))
-                        }
-                        Err(e) => cosmic::Action::App(configure_backend_error(&e)),
-                    })
+                    option_write(clear_backend_option(source, name))
                 } else {
-                    Task::perform(
-                        set_backend_option(source, name, value),
-                        |result| match result {
-                            Ok(()) => cosmic::Action::App(Message::Backend(
-                                BackendMessage::BackendsReload,
-                            )),
-                            Err(e) => cosmic::Action::App(configure_backend_error(&e)),
-                        },
-                    )
+                    option_write(set_backend_option(source, name, value))
+                }
+            }
+
+            // A switch writes on the press: there is no field to type into and
+            // no Save to reach for, so the flip is the save.
+            //
+            // Flipping back to the manifest default clears the override rather
+            // than storing a value identical to it, which keeps the daemon
+            // config a record of real deviations and lets the backend's own
+            // default move later without a stale copy pinning it.
+            BackendMessage::BackendOptionToggled {
+                source,
+                name,
+                value,
+            } => {
+                self.action_error = None;
+                if self.option_bool_default(&source, &name) == Some(value) {
+                    option_write(clear_backend_option(source, name))
+                } else {
+                    option_write(set_backend_option(source, name, value.to_string()))
                 }
             }
 
@@ -214,10 +248,7 @@ impl AppModel {
             // option reverts to its daemon default.
             BackendMessage::BackendOptionReset { source, name } => {
                 self.action_error = None;
-                Task::perform(clear_backend_option(source, name), |result| match result {
-                    Ok(()) => cosmic::Action::App(Message::Backend(BackendMessage::BackendsReload)),
-                    Err(e) => cosmic::Action::App(configure_backend_error(&e)),
-                })
+                option_write(clear_backend_option(source, name))
             }
 
             _ => Task::none(),

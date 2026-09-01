@@ -228,14 +228,26 @@ pub fn page(app: &AppModel) -> Element<'_, Message> {
         None => page_container(select_sheet::no_backend_empty_state()),
     };
 
-    widget::column::with_capacity(6)
-        .push(page_container(title_row))
+    // Two sections in a fixed-height column compete for it: the column hands
+    // each child its share, and the loser is drawn clipped — a card cut off
+    // mid-description, missing the model picker below it. Scrolling gives both
+    // their natural height instead, so a short window scrolls rather than
+    // truncates. Only the body scrolls; the page title stays put.
+    let body = widget::column::with_capacity(4)
         .push(page_container(section_heading("Transcription")))
         .push(transcription)
         // The post-processor is selected independently of the transcription
         // backend, so its section is shown whether or not one is selected.
         .push(page_container(section_heading("Post-processing")))
-        .push(page_container(post_processing::section(app)))
+        .push(page_container(post_processing::section(app)));
+
+    widget::column::with_capacity(2)
+        .push(page_container(title_row))
+        .push(
+            widget::scrollable(body)
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
         .height(Length::Fill)
         .spacing(0)
         .into()

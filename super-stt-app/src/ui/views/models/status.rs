@@ -51,6 +51,7 @@ mod unmet_requirements_tests {
     fn backend(secrets: Vec<BackendSecret>, options: Vec<BackendOption>) -> BackendInfo {
         BackendInfo {
             source: "github.com/super-stt/openai".to_string(),
+            description: String::new(),
             name: "OpenAI".to_string(),
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),
@@ -282,6 +283,7 @@ mod model_status_tests {
     fn backend_with_required_secret() -> BackendInfo {
         BackendInfo {
             source: "github.com/super-stt/openai".to_string(),
+            description: String::new(),
             name: "OpenAI".to_string(),
             version: "1.0.0".to_string(),
             kind: "wasm".to_string(),

@@ -690,6 +690,7 @@ mod capability_tests {
     fn backend_with_devices(per_model: &[&[&str]]) -> BackendInfo {
         BackendInfo {
             source: "github.com/super-stt/test".to_string(),
+            description: String::new(),
             name: "Test".to_string(),
             version: "1.0.0".to_string(),
             kind: "subprocess".to_string(),

@@ -67,7 +67,7 @@ pub enum ContextPage {
     /// (global vs per-model) is carried by `AppModel::language_picker_target`.
     LanguagePicker,
     /// Right-side sheet for choosing which installed backend to activate (the
-    /// Models page's "Select a backend" / "Switch backend" flow). Scoped to the
+    /// Models page's "Select transcription backend" flow). Scoped to the
     /// Models page; picking a backend activates it and closes the sheet.
     SelectBackend,
     /// Right-side sheet for choosing which installed backend provides the

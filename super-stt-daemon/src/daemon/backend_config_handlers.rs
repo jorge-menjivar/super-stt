@@ -78,6 +78,7 @@ impl SuperSTTDaemon {
                 BackendInfo {
                     source: b.source.clone(),
                     name: b.name.clone(),
+                    description: b.description.clone(),
                     // Re-read rather than reported from the scan: a client
                     // showing this beside an update badge would otherwise name
                     // the version the daemon started with while the badge was

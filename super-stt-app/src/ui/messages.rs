@@ -380,6 +380,13 @@ pub enum BackendMessage {
         source: String,
         name: String,
     },
+    /// A `type = "bool"` option's switch was flipped. A switch has no Save
+    /// button to press, so this both records the new value and writes it.
+    BackendOptionToggled {
+        source: String,
+        name: String,
+        value: bool,
+    },
     BackendOptionReset {
         source: String,
         name: String,
