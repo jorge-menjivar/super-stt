@@ -120,7 +120,7 @@ when a capture is already in progress.
 | 400  | `stream_realtime_with_audio_data`  | Request carried both `audio_data` and `stream_realtime: true`           |
 | 401  | `invalid_session`                  | Token unknown / expired / `exe_changed` — re-auth and retry             |
 | 403  | `scope_denied`                     | Token lacks the `transcribe` scope                                      |
-| 409  | `model_not_loaded`                 | No model is loaded, so no transcription is possible; load one via `POST /active_model` and retry |
+| 409  | `model_not_loaded`                 | No model is loaded, so no transcription is possible; load one via `POST /pipeline/1/model` and retry |
 | 409  | `recording_in_progress`            | A daemon-mic capture was already running; check `busy` on `/status` and call `/transcribe/stop` instead |
 | 429  | `rate_limited`                     | Per-client rate limit hit; back off and retry                           |
 | 503  | `connection_rejected`              | Server refused the connection                                           |

@@ -434,6 +434,7 @@ processing_interval_ms = 1000
 | `estimated_vram_bytes`   | integer         | no       | Conservative GPU memory estimate. Default `0`; use `0` for cloud models. |
 | `processing_interval_ms` | integer         | no       | Suggested minimum interval between streaming passes, in ms.      |
 | `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. |
+| `role`                   | string          | no       | What the model is for: `transcription` (default) or `post_processor`. A `post_processor` model is driven over [`POST /v1/process`](./contract.md#post-v1process) instead of `/v1/transcribe`, and is run in [stage 2 of the pipeline](../endpoints/v1/pipeline.md) rather than stage 1. |
 | `provider`               | string          | no       | Compatibility field. Not part of model identity and read by nothing in the daemon; it is echoed back verbatim as `provider` in [`POST /v1/load`](./contract.md#post-v1load) so a backend that still validates it keeps loading. |
 
 > **Compatibility.** `provider` was part of model identity before it became
@@ -448,6 +449,40 @@ describe language capability. When `multilingual` is `true`,
 `POST /v1/transcribe` may carry a `language`, which must be one of
 `supported_languages`; when omitted, `primary_language` is used. When
 `multilingual` is `false`, the model transcribes only `primary_language`.
+
+### Model roles
+
+`role` decides which `/v1` route the daemon drives a model over, and which of
+its two model slots the model may be selected into:
+
+| `role`           | Route                    | Selected through                                        |
+|------------------|--------------------------|---------------------------------------------------------|
+| `transcription`  | `POST /v1/transcribe`    | [`/pipeline/1/model`](../endpoints/v1/pipeline.md)      |
+| `post_processor` | `POST /v1/process`       | [`/pipeline/2`](../endpoints/v1/pipeline.md)            |
+
+The roles do not cross: selecting a post-processor as the transcription model
+(or the reverse) is refused with `400 invalid_model`, since the model would be
+driven over a route its backend does not serve.
+
+A backend may declare models of both roles in one manifest — a local weights
+bundle that both transcribes and cleans up, say — and the daemon will run two
+instances of it side by side, one per slot. Everything else about a
+post-processor model is unchanged: it declares `files`, `supported_devices`,
+and languages the same way, is installed and provisioned the same way, and
+reads the same `[[options]]` and `[[secrets]]`.
+
+A post-processor cannot set `realtime = true`: realtime is a property of
+streaming audio in, and a post-processor is handed a finished transcript. A
+manifest declaring both is rejected at discovery, and refused at publication.
+
+```toml
+[[models]]
+name                = "cleanup-small"
+role                = "post_processor"
+primary_language    = "en"
+supported_languages = ["en", "es", "fr"]
+supported_devices   = ["cpu", "gpu"]
+```
 
 `supported_devices` declares whether the model can use an accelerator at all.
 It says nothing about *which* accelerator — CUDA, ROCm, Vulkan — since one
@@ -663,3 +698,9 @@ supported_devices   = ["none"]
   rejected at discovery — realtime WebSocket support is wasm-only.
 - Any model entry with `realtime = true` in a backend whose
   `[capabilities] websocket` is `false` or absent is rejected at discovery.
+- `role`, when present, must be `transcription` or `post_processor`; an
+  unrecognized value fails to parse and the backend is skipped during
+  discovery (a typo'd role would otherwise silently put the model in the wrong
+  slot). A model declaring `role = "post_processor"` together with
+  `realtime = true` is rejected at discovery, and the registry indexer refuses
+  such a release.

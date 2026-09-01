@@ -11,6 +11,10 @@ use wasi::http::types::{Fields, IncomingRequest, Method, OutgoingBody, OutgoingR
 /// The fixed transcription the mock returns; assertions in `wasm_mock.rs` pin it.
 pub const MOCK_TRANSCRIPTION: &str = "mock transcription";
 
+/// Prefix the mock's `/v1/process` response wraps its input in, so a test can
+/// tell a processed transcript from a passed-through one.
+pub const MOCK_PROCESSED_PREFIX: &str = "processed: ";
+
 struct Component;
 
 impl Guest for Component {
@@ -44,11 +48,43 @@ fn route(request: &IncomingRequest) -> (u16, Vec<u8>) {
         (Method::Post, "/v1/transcribe") => ok(&serde_json::json!({
             "status": "success", "transcription": MOCK_TRANSCRIPTION
         })),
+        // Echoes its input back prefixed, so the host test can assert the text
+        // it sent actually reached the component and came back rewritten.
+        (Method::Post, "/v1/process") => {
+            let text = read_body(request)
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(str::to_string))
+                .unwrap_or_default();
+            if text.is_empty() {
+                return (
+                    400,
+                    to_vec(&serde_json::json!({ "status": "error", "message": "invalid_text" })),
+                );
+            }
+            ok(&serde_json::json!({
+                "status": "success", "text": format!("{MOCK_PROCESSED_PREFIX}{text}")
+            }))
+        }
         _ => (
             404,
             to_vec(&serde_json::json!({ "status": "error", "message": "not_found" })),
         ),
     }
+}
+
+/// Drain the request body. Reads until the stream reports end-of-input, which
+/// `blocking_read` signals as an error once the sender has finished.
+fn read_body(request: &IncomingRequest) -> Option<Vec<u8>> {
+    let body = request.consume().ok()?;
+    let stream = body.stream().ok()?;
+    let mut buf = Vec::new();
+    while let Ok(chunk) = stream.blocking_read(4096) {
+        if chunk.is_empty() {
+            break;
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Some(buf)
 }
 
 fn ok(value: &serde_json::Value) -> (u16, Vec<u8>) {

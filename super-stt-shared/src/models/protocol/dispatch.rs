@@ -34,6 +34,12 @@ impl TryFrom<DaemonRequest> for Command {
             "list_audio_themes" => Ok(Command::ListAudioThemes),
             "set_preview_typing" => cmd_set_preview_typing(&request),
             "get_preview_typing" => Ok(Command::GetPreviewTyping),
+            "set_post_processor" => cmd_set_post_processor(&request),
+            "get_post_processor" => Ok(Command::GetPostProcessor),
+            "clear_post_processor" => Ok(Command::ClearPostProcessor),
+            "set_post_processor_backend" => cmd_set_post_processor_backend(&request),
+            "clear_post_processor_backend" => Ok(Command::ClearPostProcessorBackend),
+            "get_pipeline" => Ok(Command::GetPipeline),
             "set_recording_stop_mode" => cmd_set_recording_stop_mode(&request),
             "get_recording_stop_mode" => Ok(Command::GetRecordingStopMode),
             "set_write_method" => cmd_set_write_method(&request),
@@ -188,6 +194,65 @@ fn cmd_set_device(request: &DaemonRequest) -> Result<Command, String> {
     }
 
     Ok(Command::SetDevice { device })
+}
+
+/// Parse `set_post_processor`: the model to run final transcripts through.
+///
+/// `source` is optional and resolves to the selected post-processor backend
+/// when omitted, exactly as `set_model` resolves against the active backend.
+/// There is no `enabled` field — this command *is* "enable with this model",
+/// and `clear_post_processor` is its off switch.
+fn cmd_set_post_processor(request: &DaemonRequest) -> Result<Command, String> {
+    let data = request
+        .data
+        .as_ref()
+        .ok_or("Missing data for set_post_processor command")?;
+
+    let model = data
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if model.is_empty() {
+        return Err("Missing model for set_post_processor command".to_string());
+    }
+    let source = data
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    if let Err(e) =
+        validation::validate_string(&model, "model", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+    if !source.is_empty()
+        && let Err(e) =
+            validation::validate_string(&source, "source", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+
+    Ok(Command::SetPostProcessor { model, source })
+}
+
+/// Parse `set_post_processor_backend`: which backend provides the
+/// post-processor. The twin of `cmd_set_active_backend`.
+fn cmd_set_post_processor_backend(request: &DaemonRequest) -> Result<Command, String> {
+    let source = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("source"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing source for set_post_processor_backend")?
+        .to_string();
+    if let Err(e) =
+        validation::validate_string(&source, "source", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+    Ok(Command::SetPostProcessorBackend { source })
 }
 
 fn cmd_set_preview_typing(request: &DaemonRequest) -> Result<Command, String> {

@@ -50,7 +50,10 @@ pub struct WasmBackend {
     /// the settings UI). Exempt from the SSRF guard — see [`AllowlistHooks`].
     user_allowed_hosts: Arc<[String]>,
     allow_loopback: bool,
-    transcribe_headers: Vec<(String, String)>,
+    /// The `x-stt-*` header set injected on every `/v1` request to this
+    /// backend — the user's secrets and options, resolved once at load. Shared
+    /// by transcribe, process, and realtime alike.
+    request_headers: Vec<(String, String)>,
     model_id: String,
     /// Whether the active model is realtime-only (`[[models]] realtime = true`).
     /// When set, the batch `transcribe_audio` path is served by an internal
@@ -75,7 +78,7 @@ impl WasmBackend {
         allowed_hosts: Vec<String>,
         user_allowed_hosts: Vec<String>,
         info: ModelInfoData,
-        transcribe_headers: Vec<(String, String)>,
+        request_headers: Vec<(String, String)>,
         websocket_capability: bool,
         realtime: bool,
     ) -> Result<Self> {
@@ -120,7 +123,7 @@ impl WasmBackend {
             allowed_hosts: allowed_hosts.into(),
             user_allowed_hosts: user_allowed_hosts.into(),
             allow_loopback: false,
-            transcribe_headers,
+            request_headers,
             model_id,
             realtime,
             info,
@@ -180,7 +183,7 @@ impl WasmBackend {
         component_path: &Path,
         allowed_hosts: Vec<String>,
         model_id: String,
-        transcribe_headers: Vec<(String, String)>,
+        request_headers: Vec<(String, String)>,
     ) -> Result<Self> {
         let info = ModelInfoData::new(
             model_id,
@@ -194,7 +197,7 @@ impl WasmBackend {
             allowed_hosts,
             Vec::new(),
             info,
-            transcribe_headers,
+            request_headers,
             false,
             false,
         )
@@ -210,7 +213,7 @@ impl WasmBackend {
         component_path: &Path,
         allowed_hosts: Vec<String>,
         model_id: String,
-        transcribe_headers: Vec<(String, String)>,
+        request_headers: Vec<(String, String)>,
     ) -> Result<Self> {
         let info = ModelInfoData::new(
             model_id,
@@ -224,7 +227,7 @@ impl WasmBackend {
             allowed_hosts,
             Vec::new(),
             info,
-            transcribe_headers,
+            request_headers,
             true,
             false,
         )
@@ -320,6 +323,16 @@ impl WasmBackend {
         let status = response.status().as_u16();
         let collected = response.into_body().collect().await?.to_bytes();
         Ok((status, collected.to_vec()))
+    }
+
+    /// The headers every model-bound `/v1` request carries: the load-time
+    /// `x-stt-*` set plus the active model and a JSON content type. Built per
+    /// call because `x-stt-model` is appended to a clone of the stored set.
+    fn v1_headers(&self) -> Vec<(String, String)> {
+        let mut headers = self.request_headers.clone();
+        headers.push(("content-type".to_string(), "application/json".to_string()));
+        headers.push(("x-stt-model".to_string(), self.model_id.clone()));
+        headers
     }
 
     /// `GET /v1/status` — readiness snapshot.
@@ -460,12 +473,18 @@ impl Transcribe for WasmBackend {
             return self.transcribe_via_realtime(audio, sample_rate).await;
         }
         let body = crate::stt_models::v1::build_transcribe_body(audio, sample_rate, language)?;
-        let mut headers = self.transcribe_headers.clone();
-        headers.push(("x-stt-model".to_string(), self.model_id.clone()));
+        let headers = self.v1_headers();
         let (status, resp) = self
             .invoke("POST", "/v1/transcribe", &headers, body)
             .await?;
         crate::stt_models::v1::parse_transcribe_response(status, &resp)
+    }
+
+    async fn process_text(&mut self, text: &str, language: Option<&str>) -> Result<String> {
+        let body = crate::stt_models::v1::build_process_body(text, language)?;
+        let headers = self.v1_headers();
+        let (status, resp) = self.invoke("POST", "/v1/process", &headers, body).await?;
+        crate::stt_models::v1::parse_process_response(status, &resp)
     }
 
     /// Run one consumer realtime session: instantiate the component and invoke
@@ -490,7 +509,7 @@ impl Transcribe for WasmBackend {
         let mut store = Store::new(&self.engine, host);
         // Inject the same x-stt-* headers a batch call gets, plus the model id.
         let mut headers: Vec<(String, Vec<u8>)> = self
-            .transcribe_headers
+            .request_headers
             .iter()
             .map(|(k, v)| (k.clone(), v.clone().into_bytes()))
             .collect();

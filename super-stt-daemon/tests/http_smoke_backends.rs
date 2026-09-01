@@ -185,19 +185,19 @@ async fn backend_management_endpoints() {
         "no backends are installed in the isolated data dir, got: {body}"
     );
 
-    // --- GET /active_backend: idle daemon → null ---
-    let (s, body) = get(&sock, "/active_backend", &settings_token).await;
-    assert_eq!(s, StatusCode::OK, "GET /active_backend: {body}");
+    // --- GET /pipeline/1: idle daemon → an empty stage ---
+    let (s, body) = get(&sock, "/pipeline/1", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /pipeline/1: {body}");
     assert_eq!(body["status"], "success");
     assert!(
-        body["active_backend"].is_null(),
-        "no backend should be selected on a fresh daemon: {body}"
+        body["stage"]["source"].is_null(),
+        "no backend should fill stage 1 on a fresh daemon: {body}"
     );
 
-    // --- POST /active_backend with an unknown source → 400 invalid_backend ---
+    // --- POST /pipeline/1 with an unknown source → 400 invalid_backend ---
     let (s, body) = post(
         &sock,
-        "/active_backend",
+        "/pipeline/1",
         &settings_token,
         serde_json::json!({ "source": "github.com/does-not/exist" }),
     )
@@ -216,14 +216,14 @@ async fn backend_management_endpoints() {
     );
 
     // The failed selection must not have changed state.
-    let (_, after) = get(&sock, "/active_backend", &settings_token).await;
+    let (_, after) = get(&sock, "/pipeline/1", &settings_token).await;
     assert!(
-        after["active_backend"].is_null(),
+        after["stage"]["source"].is_null(),
         "a rejected selection must leave the daemon idle: {after}"
     );
 
-    // --- DELETE /active_backend: idempotent when already idle ---
-    let (s, body) = delete(&sock, "/active_backend", &settings_token).await;
+    // --- DELETE /pipeline/1: idempotent when already idle ---
+    let (s, body) = delete(&sock, "/pipeline/1", &settings_token).await;
     assert_eq!(
         s,
         StatusCode::OK,
@@ -274,7 +274,7 @@ async fn backend_endpoints_reject_client_scope() {
 
     for (method, path) in [
         (Method::GET, "/backends"),
-        (Method::GET, "/active_backend"),
+        (Method::GET, "/pipeline/1"),
         (Method::GET, "/gpu_info"),
     ] {
         let (s, body) = raw_request(&sock, method.clone(), path, &client_token, None).await;
@@ -292,7 +292,7 @@ async fn backend_endpoints_reject_client_scope() {
     // A settings POST must be rejected too.
     let (s, body) = post(
         &sock,
-        "/active_backend",
+        "/pipeline/1",
         &client_token,
         serde_json::json!({ "source": "github.com/x/y" }),
     )

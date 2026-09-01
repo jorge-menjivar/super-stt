@@ -50,6 +50,50 @@ async fn wasm_orchestration_against_mock() {
     assert_eq!(text, "mock transcription");
 }
 
+/// The post-processing route rides the same host machinery as transcription:
+/// the same `invoke` path, the same injected headers. The mock echoes the text
+/// back prefixed, so this proves the transcript reached the component and the
+/// rewritten answer came back — not merely that the call returned.
+#[tokio::test]
+async fn wasm_process_route_against_mock() {
+    let Some(path) = mock_component() else {
+        eprintln!("skipping: mock component not built (run `just build-mock-wasm-backend`)");
+        return;
+    };
+
+    let mut backend = WasmBackend::new(&path, Vec::new(), "mock".to_string(), Vec::new())
+        .expect("load mock backend");
+
+    let processed = backend
+        .process_text("um so hello there", Some("en"))
+        .await
+        .expect("post-processing should succeed");
+    assert_eq!(processed, "processed: um so hello there");
+}
+
+/// A backend answering `400 invalid_text` surfaces as an `Err`, so the daemon's
+/// best-effort layer above can fall back to the raw transcript instead of
+/// typing an error string.
+#[tokio::test]
+async fn wasm_process_surfaces_a_backend_refusal() {
+    let Some(path) = mock_component() else {
+        eprintln!("skipping: mock component not built (run `just build-mock-wasm-backend`)");
+        return;
+    };
+
+    let mut backend = WasmBackend::new(&path, Vec::new(), "mock".to_string(), Vec::new())
+        .expect("load mock backend");
+
+    let err = backend
+        .process_text("", None)
+        .await
+        .expect_err("an empty text is refused by the backend");
+    assert!(
+        err.to_string().contains("invalid_text"),
+        "the backend's own message should surface: {err}"
+    );
+}
+
 /// The two egress lists must reach the hooks in the right slots. Nothing else
 /// covers this: the guard's own tests build argument lists directly, and every
 /// other harness here passes an empty user list, so swapping the two adjacent

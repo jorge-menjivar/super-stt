@@ -107,6 +107,19 @@ impl SuperSTTDaemon {
             );
         };
 
+        // A backend that only post-processes cannot transcribe. Refuse it here
+        // rather than accepting the selection and leaving stage 1 pointed at a
+        // backend whose model picker is empty.
+        if !self.backend_serves_role(&source, false).await {
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidBackend,
+                &format!(
+                    "Backend {source} serves no transcription model. If it \
+                     post-processes, select it for that stage with POST /pipeline/2."
+                ),
+            );
+        }
+
         // Always unload when the active backend actually changes — this is the
         // documented postcondition: after `set_active_backend`, the loaded
         // model (if any) is from the requested backend, otherwise the daemon
@@ -188,8 +201,9 @@ impl SuperSTTDaemon {
             let Some(resolved) = self.active_backend_source().await else {
                 return DaemonResponse::error_with_code(
                     ErrorCode::InvalidBackend,
-                    "No active backend to switch models within. \
-                     Select a backend first, or name the model's `source`.",
+                    "No transcription backend is selected, so there is nothing to \
+                     resolve the model against. Select one with POST /pipeline/1, \
+                     or name the model's `source`.",
                 );
             };
             info!("Empty source resolved to the active backend: {resolved}");
@@ -203,18 +217,39 @@ impl SuperSTTDaemon {
         // resolved model, so capture it here too.
         let resolved = {
             let backends = self.backends.read().await;
-            backends::find_model(&backends, &model, &source)
-                .map(|(b, d)| (b.source.clone(), backends::dir_name(b), d.is_online()))
+            backends::find_model(&backends, &model, &source).map(|(b, d)| {
+                (
+                    b.source.clone(),
+                    backends::dir_name(b),
+                    d.is_online(),
+                    d.is_post_processor(),
+                )
+            })
         };
-        let Some((backend_source, backend_dir, is_online)) = resolved else {
+        let Some((backend_source, backend_dir, is_online, is_post_processor)) = resolved else {
             return DaemonResponse::error_with_code(
                 ErrorCode::InvalidModel,
                 &format!(
-                    "No installed backend serves {model}. \
-                     Install the backend or check the model name."
+                    "No installed backend serves the transcription model {model} \
+                     (source={source}). Install the backend or check the model name."
                 ),
             );
         };
+
+        // A post-processor serves `POST /v1/process`, not `/v1/transcribe`, so
+        // loading one here would fail on every recording. It belongs to the
+        // post-processing stage instead — say which one, since the two stages
+        // take the same shape of request and the only difference is the path.
+        if is_post_processor {
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidModel,
+                &format!(
+                    "Model {model} is a post-processing model, not a transcription \
+                     model. Run it in the post-processing stage with \
+                     POST /pipeline/2/model instead."
+                ),
+            );
+        }
 
         // Online models must be explicitly enabled — gated after resolution
         // since online-ness is a property of the resolved model. Emit the

@@ -2,37 +2,105 @@
 use cosmic::Element;
 use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{self, button, text};
+use cosmic::widget::{self, button, space::horizontal as horizontal_space, text};
 
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
+use crate::state::registry::InstalledFilters;
 use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage};
 
 use super::active::backend_glyph_tile;
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips, models_inventory, update_chip, update_offer,
-    update_progress_chip,
+    backend_supports_gpu, capability_chips, models_inventory, role_groups, update_chip,
+    update_offer, update_progress_chip,
 };
 use super::surface::{card_divider, card_surface, card_title_block, repo_button};
 
-/// The Library's Installed tab: every backend the daemon discovered on disk,
-/// one card each. The active backend is included too — activation lives on the
-/// Models page, so the Library is a flat catalog of what's installed.
+/// The Library's Installed tab: a filter toolbar over every backend the daemon
+/// discovered on disk, one card each. The active backend is included too —
+/// activation lives on the Models page, so the Library is a flat catalog of
+/// what's installed.
 pub(super) fn installed_tab(app: &AppModel) -> Element<'_, Message> {
+    let spacing = cosmic::theme::spacing();
+    let filters = &app.models_page.installed_filters;
+
     let cards: Vec<Element<'_, Message>> = app
         .backends
         .iter()
+        .filter(|b| installed_matches(b, filters))
         .map(|backend| installed_card(backend, app))
         .collect();
 
-    if cards.is_empty() {
-        return text::body("No backends installed. Open the Browse tab to install one.").into();
-    }
+    // "Nothing installed" and "nothing matches" are different problems with
+    // different fixes, so they get different sentences.
+    let body: Element<'_, Message> = if cards.is_empty() {
+        if app.backends.is_empty() {
+            text::body("No backends installed. Open the Browse tab to install one.").into()
+        } else {
+            text::body("No installed backends match these filters.").into()
+        }
+    } else {
+        column(cards)
+            .spacing(spacing.space_s)
+            .width(Length::Fill)
+            .into()
+    };
 
-    column(cards)
-        .spacing(cosmic::theme::spacing().space_s)
+    widget::column::with_capacity(2)
+        .spacing(spacing.space_s)
+        .width(Length::Fill)
+        .push(installed_toolbar(filters, cards_shown(app, filters)))
+        .push(body)
+        .into()
+}
+
+/// Whether an installed backend survives the Installed tab's filters.
+///
+/// Kept free of [`AppModel`] so the rule is directly unit-testable.
+fn installed_matches(backend: &BackendInfo, filters: &InstalledFilters) -> bool {
+    if let Some(online) = filters.online
+        && backend_is_online(backend) != online
+    {
+        return false;
+    }
+    filters
+        .role
+        .admits(backend.models.iter().map(|m| m.role.as_str()))
+}
+
+/// "{shown} of {total}", matching the Browse tab's count.
+fn cards_shown(app: &AppModel, filters: &InstalledFilters) -> (usize, usize) {
+    let shown = app
+        .backends
+        .iter()
+        .filter(|b| installed_matches(b, filters))
+        .count();
+    (shown, app.backends.len())
+}
+
+/// The Installed tab's filter bar: the same "Runs on" and "Kind" chips the
+/// Browse tab carries, over its own state so narrowing one list leaves the
+/// other alone.
+fn installed_toolbar<'a>(
+    filters: &InstalledFilters,
+    (shown, total): (usize, usize),
+) -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
+    let runs_on = super::chips::runs_on_chips(filters.online, |o| {
+        Message::ModelsPage(ModelsPageMessage::InstalledOnlineFilter(o))
+    });
+    let kind = super::chips::role_filter_chips(filters.role, |r| {
+        Message::ModelsPage(ModelsPageMessage::InstalledRoleFilter(r))
+    });
+    let count = text::caption(format!("{shown} of {total}")).class(cosmic::theme::Text::Color(
+        super::surface::muted_text_color(),
+    ));
+
+    row![runs_on, kind, horizontal_space(), count]
+        .spacing(spacing.space_m)
+        .align_y(Alignment::Center)
         .width(Length::Fill)
         .into()
 }
@@ -99,14 +167,20 @@ pub(super) fn installed_card<'a>(
     .spacing(spacing.space_s)
     .align_y(Alignment::Center);
 
-    // Facts row: the served-models inventory takes the width; the GPU / CPU /
-    // Cloud capability chips sit opposite it.
-    let model_names: Vec<String> = backend.models.iter().map(|m| m.name.clone()).collect();
+    // Facts row: the served-models inventory — one line per kind of model the
+    // backend ships — takes the width; the GPU / CPU / Cloud capability chips
+    // sit opposite it.
+    let groups = role_groups(
+        backend
+            .models
+            .iter()
+            .map(|m| (m.name.as_str(), m.role.as_str())),
+    );
     let egress = online.then(|| CloudEgress {
         hosts: backend.allowed_hosts.as_slice(),
         user_url: backend_has_user_url(backend),
     });
-    let inventory = models_inventory(&model_names);
+    let inventory = models_inventory(&groups);
     let caps = capability_chips(
         backend_supports_gpu(backend),
         backend_supports_cpu(backend),

@@ -17,9 +17,13 @@ use super::chips::{
 };
 use super::surface::muted_text_color;
 
-/// The Models-page empty state, shown when no backend is active: a soft glyph
-/// tile, a short prompt, and a primary "Load a backend" button that opens the
-/// [`load_backend_sheet`]. Fills the page so it sits centered.
+/// The Transcription section's empty state, shown when no backend is selected:
+/// a soft glyph tile, a short prompt, and a primary "Select a backend" button
+/// that opens the [`select_backend_sheet`].
+///
+/// Centered horizontally but sized to its content — it is one section of two,
+/// and filling the page height would push the Post-processing heading to the
+/// bottom of the window.
 pub(super) fn no_backend_empty_state<'a>() -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let ring = super::active::glyph_tile(72.0, 34.0, true);
@@ -28,36 +32,39 @@ pub(super) fn no_backend_empty_state<'a>() -> Element<'a, Message> {
         .align_x(Alignment::Center)
         .spacing(spacing.space_xs)
         .push(ring)
-        .push(text::title4("No backend loaded"))
+        .push(text::title4("No backend selected"))
         .push(
-            text::body("Load a backend to start transcribing.")
+            text::body("Select a backend to start transcribing.")
                 .class(cosmic::theme::Text::Color(muted_text_color())),
         )
         .push(
-            button::suggested("Load a backend")
+            button::suggested("Select transcription backend")
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
                 .on_press(Message::Shell(ShellMessage::ToggleContextPage(
-                    ContextPage::LoadBackend,
+                    ContextPage::SelectBackend,
                 ))),
         );
 
     widget::container(col)
         .center_x(Length::Fill)
-        .center_y(Length::Fill)
         .width(Length::Fill)
-        .height(Length::Fill)
+        .padding([spacing.space_m, 0, spacing.space_m, 0])
         .into()
 }
 
-/// The "Load a backend" side sheet: a hint line plus one row per installed
-/// backend. The active backend is flagged; every other row carries a Load
+/// The "Select transcription backend" side sheet: a hint line plus one row per installed
+/// backend. The active backend is flagged; every other row carries a Select
 /// button that activates it (and dismisses the sheet).
-pub fn load_backend_sheet(app: &AppModel) -> Element<'_, Message> {
+pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let muted = muted_text_color();
     let active = app.models_page.active_backend.as_deref();
 
-    let mut col = widget::column::with_capacity(app.backends.len() + 1)
+    // Only backends that actually transcribe: one serving nothing but
+    // post-processors would be selected, then show an empty model picker — and
+    // the daemon refuses it anyway.
+    let eligible = super::roles::backends_for(&app.backends, false);
+    let mut col = widget::column::with_capacity(eligible.len() + 1)
         .spacing(spacing.space_xs)
         .width(Length::Fill)
         .push(
@@ -67,16 +74,17 @@ pub fn load_backend_sheet(app: &AppModel) -> Element<'_, Message> {
             .class(cosmic::theme::Text::Color(muted)),
         );
 
-    if app.backends.is_empty() {
+    if eligible.is_empty() {
         return col
             .push(text::body(
-                "No backends installed yet. Open the Library to install one.",
+                "No installed backend provides a transcription model. Open the Library to \
+                 install one.",
             ))
             .into();
     }
 
-    for backend in &app.backends {
-        col = col.push(load_backend_row(
+    for backend in eligible {
+        col = col.push(select_backend_row(
             backend,
             active == Some(backend.source.as_str()),
         ));
@@ -84,9 +92,9 @@ pub fn load_backend_sheet(app: &AppModel) -> Element<'_, Message> {
     col.into()
 }
 
-/// One backend row inside the load sheet: glyph + name + capability chips, then
-/// either an "Active" flag or a Load button.
-fn load_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, Message> {
+/// One backend row inside the sheet: glyph + name + capability chips, then
+/// either an "Active" flag or a Select button.
+fn select_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
     let online = backend_is_online(backend);
     let egress = online.then(|| CloudEgress {
@@ -112,7 +120,7 @@ fn load_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, 
             .class(cosmic::theme::Text::Accent)
             .into()
     } else {
-        button::suggested("Load")
+        button::suggested("Select")
             .leading_icon(icons::phosphor_handle(icons::PLAY))
             .on_press(Message::ModelsPage(ModelsPageMessage::SelectBackend(
                 backend.source.clone(),

@@ -14,8 +14,8 @@ pub use super_stt_registry_types::manifest::*;
 /// `websocket` capability or a non-empty `allowed_hosts` (the transport
 /// provides no network), if a model's `primary_language` is absent from its
 /// `supported_languages`, if a non-multilingual model's `supported_languages`
-/// is not exactly `[primary_language]`, or if a model sets `realtime` without
-/// the `websocket` capability.
+/// is not exactly `[primary_language]`, if a model sets `realtime` without
+/// the `websocket` capability, or if a post-processor model sets `realtime`.
 pub fn validate_runtime(m: &Manifest) -> Result<()> {
     if m.backend.kind == Kind::Subprocess && m.capabilities.websocket {
         anyhow::bail!(
@@ -46,6 +46,17 @@ pub fn validate_runtime(m: &Manifest) -> Result<()> {
         if model.realtime && !m.capabilities.websocket {
             anyhow::bail!(
                 "model `{}` has realtime = true but capabilities.websocket is not set",
+                model.name
+            );
+        }
+        // Realtime is a property of streaming audio in; a post-processor is
+        // handed a finished transcript over `POST /v1/process` and never sees
+        // the WebSocket path. Declaring both is a manifest contradiction, so
+        // it is refused here rather than silently ignored at load.
+        if model.realtime && model.role.is_post_processor() {
+            anyhow::bail!(
+                "model `{}` has role = post_processor but realtime = true; \
+                 post-processors are driven over POST /v1/process, not the realtime path",
                 model.name
             );
         }
@@ -424,6 +435,112 @@ description = "Test backend."
         assert!(
             matches!(&err, ManifestError::Parse { err, .. } if matches!(**err, ManifestError::UnsafeEntrypoint(_))),
             "expected Parse {{ UnsafeEntrypoint }}, got: {err}"
+        );
+    }
+    /// `role` defaults to transcription, so every manifest written before the
+    /// field existed keeps serving the models it always did.
+    #[test]
+    fn a_model_without_a_role_is_a_transcription_model() {
+        let toml_src = r#"
+[backend]
+source = "github.com/x/y"
+name = "Y"
+version = "0.1.0"
+kind = "wasm"
+entrypoint = "y.wasm"
+contract = "v1"
+description = "Test backend."
+
+[[models]]
+name = "whisper-1"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
+"#;
+        let m = Manifest::parse(toml_src).expect("parse");
+        assert_eq!(m.models[0].role, ModelRole::Transcription);
+        assert!(!m.models[0].role.is_post_processor());
+    }
+
+    #[test]
+    fn a_post_processor_role_parses() {
+        let toml_src = r#"
+[backend]
+source = "github.com/x/y"
+name = "Y"
+version = "0.1.0"
+kind = "wasm"
+entrypoint = "y.wasm"
+contract = "v1"
+description = "Test backend."
+
+[[models]]
+name = "cleanup"
+role = "post_processor"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
+"#;
+        let m = Manifest::parse(toml_src).expect("parse");
+        assert!(m.models[0].role.is_post_processor());
+        assert_eq!(m.models[0].role.to_string(), "post_processor");
+    }
+
+    /// An unknown spelling is refused at parse rather than silently read as the
+    /// default — a typo'd role would otherwise put the model in the wrong slot.
+    #[test]
+    fn an_unknown_role_is_rejected() {
+        let toml_src = r#"
+[backend]
+source = "github.com/x/y"
+name = "Y"
+version = "0.1.0"
+kind = "wasm"
+entrypoint = "y.wasm"
+contract = "v1"
+description = "Test backend."
+
+[[models]]
+name = "cleanup"
+role = "postprocessor"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
+"#;
+        assert!(Manifest::parse(toml_src).is_err());
+    }
+
+    /// A post-processor is handed a finished transcript over `POST /v1/process`
+    /// and never sees the realtime path, so declaring both is a contradiction
+    /// the daemon refuses at discovery.
+    #[test]
+    fn a_realtime_post_processor_is_rejected() {
+        let toml_src = r#"
+[backend]
+source = "github.com/x/y"
+name = "Y"
+version = "0.1.0"
+kind = "wasm"
+entrypoint = "y.wasm"
+contract = "v1"
+description = "Test backend."
+
+[capabilities]
+websocket = true
+
+[[models]]
+name = "cleanup"
+role = "post_processor"
+realtime = true
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
+"#;
+        let m = Manifest::parse(toml_src).expect("parses; the rule is a runtime one");
+        let err = validate_runtime(&m).expect_err("a realtime post-processor is refused");
+        assert!(
+            err.to_string().contains("post_processor"),
+            "the message should name the contradiction: {err}"
         );
     }
 }

@@ -85,6 +85,55 @@ pub(crate) async fn dispatch_transcription(
     }
 }
 
+/// Run one post-processing pass against the loaded post-processor.
+///
+/// The transcription twin of this function is [`dispatch_transcription`]; the
+/// online/local split is the same and for the same reason — a cloud processor
+/// is awaited on the runtime, a local one runs on a blocking thread so its
+/// synchronous compute does not stall the async runtime.
+///
+/// Returns the rewritten text, or a [`DispatchError`] the caller maps to its
+/// own policy. The daemon's policy is best-effort: see
+/// [`SuperSTTDaemon::post_process_final`](crate::daemon::types::SuperSTTDaemon).
+pub(crate) async fn dispatch_post_process(
+    post_processor: &SharedLoadedModel,
+    text: String,
+    language: Option<String>,
+) -> Result<String, DispatchError> {
+    let is_online = {
+        let guard = post_processor.read().await;
+        guard
+            .as_ref()
+            .is_some_and(|loaded| loaded.instance.is_online())
+    };
+
+    if is_online {
+        let mut guard = post_processor.write().await;
+        let Some(loaded) = guard.as_mut() else {
+            return Err(DispatchError::NotLoaded);
+        };
+        loaded
+            .instance
+            .process_text(&text, language.as_deref())
+            .await
+            .map_err(DispatchError::Failed)
+    } else {
+        let post_processor = Arc::clone(post_processor);
+        tokio::task::spawn_blocking(move || {
+            let handle = tokio::runtime::Handle::current();
+            let mut guard = post_processor.blocking_write();
+            let Some(loaded) = guard.as_mut() else {
+                return Err(DispatchError::NotLoaded);
+            };
+            handle
+                .block_on(loaded.instance.process_text(&text, language.as_deref()))
+                .map_err(DispatchError::Failed)
+        })
+        .await
+        .map_err(DispatchError::Join)?
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +152,10 @@ mod tests {
 
     /// Configurable `Transcribe` fake. Records the args of the last call so
     /// tests can assert the dispatch forwards audio + language unchanged.
+    #[allow(
+        dead_code,
+        reason = "fields are read by whichever dispatch a test drives"
+    )]
     struct FakeModel {
         info: ModelInfoData,
         outcome: Outcome,
@@ -138,6 +191,20 @@ mod tests {
                 Outcome::Err => anyhow::bail!("backend boom"),
             }
         }
+
+        async fn process_text(
+            &mut self,
+            text: &str,
+            language: Option<&str>,
+        ) -> anyhow::Result<String> {
+            *self.seen_language.lock().unwrap() = Some(language.map(str::to_string));
+            match &self.outcome {
+                // Wrap the input so a test can tell a processed transcript from
+                // a passed-through one.
+                Outcome::Ok(marker) => Ok(format!("{marker}:{text}")),
+                Outcome::Err => anyhow::bail!("processor boom"),
+            }
+        }
     }
 
     type Probes = (
@@ -166,6 +233,7 @@ mod tests {
             processing_interval: Duration::from_secs(1),
             supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
             realtime: false,
+            role: super_stt_registry_types::manifest::ModelRole::Transcription,
             provider: None,
         };
         let instance = Box::new(FakeModel {
@@ -221,6 +289,51 @@ mod tests {
         let model: SharedLoadedModel = Arc::new(tokio::sync::RwLock::new(None));
         let out = dispatch_transcription(&model, vec![0.0; 16000], 16000, None).await;
         assert!(matches!(out, Err(DispatchError::NotLoaded)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn online_post_processor_returns_processed_text() {
+        let (model, _, _) = loaded(true, Outcome::Ok("clean".to_string()));
+        let out = dispatch_post_process(&model, "um hello".to_string(), None).await;
+        assert!(
+            matches!(out, Ok(ref t) if t == "clean:um hello"),
+            "online path should return the processor's text"
+        );
+    }
+
+    /// The blocking path exists so a local processor's synchronous compute does
+    /// not stall the runtime; it must return the same text as the online one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn local_post_processor_returns_processed_text() {
+        let (model, _, _) = loaded(false, Outcome::Ok("clean".to_string()));
+        let out = dispatch_post_process(&model, "um hello".to_string(), None).await;
+        assert!(matches!(out, Ok(ref t) if t == "clean:um hello"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn post_processor_error_maps_to_failed() {
+        let (model, _, _) = loaded(true, Outcome::Err);
+        let out = dispatch_post_process(&model, "hi".to_string(), None).await;
+        assert!(matches!(out, Err(DispatchError::Failed(_))));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn no_post_processor_loaded_maps_to_not_loaded() {
+        let model: SharedLoadedModel = Arc::new(tokio::sync::RwLock::new(None));
+        let out = dispatch_post_process(&model, "hi".to_string(), None).await;
+        assert!(matches!(out, Err(DispatchError::NotLoaded)));
+    }
+
+    /// The processor punctuates in the transcript's language, so the resolved
+    /// tag has to reach it the same way it reaches the transcription backend.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn language_is_forwarded_to_the_post_processor() {
+        let (model, seen_lang, _) = loaded(true, Outcome::Ok("clean".to_string()));
+        let _ = dispatch_post_process(&model, "hola".to_string(), Some("es-MX".to_string())).await;
+        assert_eq!(
+            seen_lang.lock().unwrap().clone(),
+            Some(Some("es-MX".to_string()))
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

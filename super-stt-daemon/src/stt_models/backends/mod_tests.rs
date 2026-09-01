@@ -574,6 +574,7 @@ fn an_empty_source_resolves_nothing() {
                 processing_interval: StdDuration::from_secs(1),
                 supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
                 realtime: false,
+                role: super_stt_registry_types::manifest::ModelRole::Transcription,
                 provider: None,
             }],
         }

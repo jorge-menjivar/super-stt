@@ -132,13 +132,15 @@ impl SuperSTTDaemon {
         let language = self.resolve_active_language(request_language).await;
         let start_time = std::time::Instant::now();
 
-        match dispatch_transcription(&self.model, processed_audio, 16000, language).await {
+        match dispatch_transcription(&self.model, processed_audio, 16000, language.clone()).await {
             Ok(text) => {
                 info!(
                     "Transcription completed in {:?}: '{text}'",
                     start_time.elapsed()
                 );
-                Ok(text)
+                // Best-effort cleanup of the final transcript before it is
+                // typed; returns the raw text when disabled or on failure.
+                Ok(self.post_process_final(text, language).await)
             }
             // One place decides the origin, so the notice cannot disagree with
             // the variant; the arms below only shape the message and log it.

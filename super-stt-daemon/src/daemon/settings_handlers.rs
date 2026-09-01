@@ -21,7 +21,7 @@ impl SuperSTTDaemon {
     /// lock → mutate → persist sequence so a settings handler can't hand-roll it
     /// and forget the persist (see Tier 1 #3). Returns the persist outcome so the
     /// caller can fold a save failure into its response.
-    async fn set_config_field<F>(&self, mutate: F) -> anyhow::Result<()>
+    pub(in crate::daemon) async fn set_config_field<F>(&self, mutate: F) -> anyhow::Result<()>
     where
         F: FnOnce(&mut DaemonConfig),
     {
@@ -37,7 +37,7 @@ impl SuperSTTDaemon {
     /// A save failure keeps the (already-applied) in-memory change — the daemon
     /// stays authoritative for the process lifetime — and appends the error to
     /// the message, logging a warning.
-    fn settings_saved(
+    pub(in crate::daemon) fn settings_saved(
         base: DaemonResponse,
         message: String,
         persist: anyhow::Result<()>,

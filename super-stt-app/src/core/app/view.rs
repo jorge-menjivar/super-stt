@@ -81,17 +81,33 @@ impl AppModel {
                     .title("Add a backend")
                 })
             }
-            // The "Load a backend" sheet is scoped to the Models page: it lists
-            // installed backends and activates the chosen one.
-            ContextPage::LoadBackend => {
+            // The post-processing twin of the Select-a-backend sheet, scoped
+            // the same way: it lists the backends that serve a post-processor
+            // and selects the chosen one.
+            ContextPage::SelectPostProcessor => {
                 let on_models_page = self.daemon_status == DaemonStatus::Connected
                     && matches!(self.nav.data::<Page>(self.nav.active()), Some(Page::Models));
                 on_models_page.then(|| {
                     context_drawer::context_drawer(
-                        views::models::load_backend_sheet(self),
-                        Message::Shell(ShellMessage::ToggleContextPage(ContextPage::LoadBackend)),
+                        views::models::post_processor_sheet(self),
+                        Message::Shell(ShellMessage::ToggleContextPage(
+                            ContextPage::SelectPostProcessor,
+                        )),
                     )
-                    .title("Load a backend")
+                    .title("Select post-processor backend")
+                })
+            }
+            // The "Select a backend" sheet is scoped to the Models page: it
+            // lists installed backends and activates the chosen one.
+            ContextPage::SelectBackend => {
+                let on_models_page = self.daemon_status == DaemonStatus::Connected
+                    && matches!(self.nav.data::<Page>(self.nav.active()), Some(Page::Models));
+                on_models_page.then(|| {
+                    context_drawer::context_drawer(
+                        views::models::select_backend_sheet(self),
+                        Message::Shell(ShellMessage::ToggleContextPage(ContextPage::SelectBackend)),
+                    )
+                    .title("Select transcription backend")
                 })
             }
             // Language picker sheet — a search-box + scrollable selectable list

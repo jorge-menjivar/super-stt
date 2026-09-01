@@ -432,6 +432,11 @@ pub struct ModelEntry {
     /// `[capabilities] websocket = true`. Default `false`.
     #[serde(default)]
     pub realtime: bool,
+    /// What the model is for: transcribing audio, or post-processing a
+    /// transcript. Default [`ModelRole::Transcription`], so every manifest
+    /// written before the field existed keeps its models transcribing.
+    #[serde(default)]
+    pub role: ModelRole,
     /// Files the model needs, each provisioned to its own `destination`
     /// before `POST /v1/load`. Cloud models declare none.
     #[serde(default)]
@@ -465,6 +470,68 @@ impl ModelEntry {
     #[must_use]
     pub fn is_online(&self) -> bool {
         self.supported_devices.contains(&Device::None)
+    }
+}
+
+/// What a model is for.
+///
+/// A backend serves both roles from the same manifest and the same install: a
+/// role only decides which `/v1` route the daemon drives the model over —
+/// `POST /v1/transcribe` for [`Transcription`](Self::Transcription),
+/// `POST /v1/process` for [`PostProcessor`](Self::PostProcessor) — and which
+/// of the daemon's two model slots it may be selected into. Everything else
+/// (files, devices, secrets, options, discovery, install) is identical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ModelRole {
+    /// Transcribes audio. The default, and what every model was before the
+    /// field existed.
+    #[default]
+    Transcription,
+    /// Rewrites a finished transcript — filler removal, punctuation,
+    /// formatting. Driven over `POST /v1/process`.
+    PostProcessor,
+}
+
+impl fmt::Display for ModelRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Transcription => write!(f, "transcription"),
+            Self::PostProcessor => write!(f, "post_processor"),
+        }
+    }
+}
+
+impl std::str::FromStr for ModelRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "transcription" => Ok(Self::Transcription),
+            "post_processor" => Ok(Self::PostProcessor),
+            _ => Err(format!("Unknown model role: {s}")),
+        }
+    }
+}
+
+/// Routed through `FromStr` so the spelling is validated identically wherever
+/// a role is deserialized — TOML manifests and JSON index entries alike.
+impl<'de> Deserialize<'de> for ModelRole {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let text = String::deserialize(d)?;
+        text.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl ModelRole {
+    /// Whether this is the post-processing role.
+    #[must_use]
+    pub fn is_post_processor(self) -> bool {
+        matches!(self, Self::PostProcessor)
     }
 }
 

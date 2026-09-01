@@ -74,6 +74,12 @@ impl SuperSTTDaemon {
             .map(|b| {
                 b.models
                     .iter()
+                    // Post-processors are not switchable *transcription*
+                    // models; they are selected through `/post_processor`.
+                    // Listing them here would offer the user a model that
+                    // fails on every recording. The full catalog, roles
+                    // included, is at `GET /backends`.
+                    .filter(|d| !d.is_post_processor())
                     .map(|d| (d.name.clone(), d.source.clone()))
                     .collect::<Vec<_>>()
             })

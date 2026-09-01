@@ -26,6 +26,8 @@ pub struct ModelsPageState {
     /// `source` of the installed-backend card whose overflow ("⋯") menu is
     /// open, if any. Only one is open at a time.
     pub installed_menu_open: Option<String>,
+    /// The Installed tab's "Runs on" / kind filters.
+    pub installed_filters: crate::state::registry::InstalledFilters,
 }
 
 impl Default for ModelsPageState {
@@ -47,6 +49,7 @@ impl Default for ModelsPageState {
             staged_device: None,
             configure_backend: None,
             installed_menu_open: None,
+            installed_filters: crate::state::registry::InstalledFilters::default(),
         }
     }
 }

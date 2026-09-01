@@ -61,6 +61,9 @@ impl AppModel {
             | ModelsPageMessage::RegistrySearchChanged(_)
             | ModelsPageMessage::RegistryIncludeIncompatible(_)
             | ModelsPageMessage::RegistryOnlineFilter(_)
+            | ModelsPageMessage::RegistryRoleFilter(_)
+            | ModelsPageMessage::InstalledOnlineFilter(_)
+            | ModelsPageMessage::InstalledRoleFilter(_)
             | ModelsPageMessage::ImportBackendFromDir
             | ModelsPageMessage::ImportBackendFromDirPicked(_)
             | ModelsPageMessage::RegistryCustomRepoInputChanged(_) => {
@@ -273,7 +276,7 @@ impl AppModel {
                 self.models_page.active_backend = Some(source.clone());
                 self.clear_loaded_model();
                 self.model_operation_state = ModelOperationState::Ready;
-                // Activation comes from the Models page's "Load a backend" sheet;
+                // Activation comes from the Models page's "Select a backend" sheet;
                 // dismiss it now that a choice was made.
                 self.core.window.show_context = false;
                 Task::perform(set_active_backend(source), move |result| match result {
@@ -448,6 +451,7 @@ mod tests {
                 supported_languages: Vec::new(),
                 primary_language: String::new(),
                 realtime: false,
+                role: "transcription".into(),
             }],
             secrets: Vec::new(),
             options: Vec::new(),

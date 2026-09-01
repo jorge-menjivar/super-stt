@@ -271,7 +271,7 @@ Content-Type: application/json
 ```
 
 This is a bug in the client (a token without the `settings` scope
-trying to call `POST /active_model`, for example). Re-issuing
+trying to call `POST /pipeline/1/model`, for example). Re-issuing
 `/auth/request` with the missing scope added is the only path
 forward, and the user has to explicitly approve the new set.
 

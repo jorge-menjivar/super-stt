@@ -65,6 +65,7 @@ mod unmet_requirements_tests {
                 supported_languages: Vec::new(),
                 primary_language: String::new(),
                 realtime: false,
+                role: "transcription".into(),
             }],
             secrets,
             options,
@@ -295,6 +296,7 @@ mod model_status_tests {
                 supported_languages: Vec::new(),
                 primary_language: String::new(),
                 realtime: false,
+                role: "transcription".into(),
             }],
             secrets: vec![BackendSecret {
                 name: "openai_api_key".to_string(),

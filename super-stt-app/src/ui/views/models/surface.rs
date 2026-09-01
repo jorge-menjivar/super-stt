@@ -5,6 +5,7 @@ use cosmic::widget::{self, text};
 use cosmic::{Apply, Element};
 
 use crate::core::app::AppModel;
+use crate::ui::icons;
 use crate::ui::messages::{Message, ShellMessage};
 
 /// Wrap the Models page's tab body in a bordered, page-width frame: the
@@ -151,6 +152,28 @@ pub(super) fn card_surface<'a>(
         .into()
 }
 
+/// The card header's "empty this stage" action: a ✕ on the destructive pill,
+/// with a tooltip naming what it does.
+///
+/// An icon rather than the word "Deselect" because it sits third in a row of
+/// actions and a ✕ reads as "clear this" at a glance. It keeps the destructive
+/// background the labelled button had — that red is what marks this as the one
+/// action in the row that throws something away, and a bare glyph would sit in
+/// the row looking as harmless as Configure. The tooltip carries the label the
+/// icon drops, so the action stays discoverable.
+pub(super) fn deselect_button(tooltip_text: &str, message: Message) -> Element<'_, Message> {
+    // The icon is left untinted so it takes the pill's foreground colour;
+    // tinting it destructive would paint red on red.
+    let button = widget::button::icon(icons::phosphor_handle(icons::X))
+        .class(cosmic::theme::Button::Destructive)
+        .on_press(message);
+    rounded_tooltip(
+        button,
+        text::body(tooltip_text),
+        cosmic::widget::tooltip::Position::Bottom,
+    )
+}
+
 /// A faint full-width rule used inside cards to separate the header/body from a
 /// footer action row.
 pub(super) fn card_divider<'a>() -> Element<'a, Message> {
@@ -170,17 +193,34 @@ pub(super) fn muted_text_color() -> cosmic::iced::Color {
     c
 }
 
-/// One-line caption listing the model names a backend serves, joined by " · "
-/// (e.g. `"whisper-large-v3 · whisper-medium"`). De-emphasized so it reads as a
-/// secondary detail under the card's description. `None` when there are none.
-pub(super) fn models_line<'a>(names: &[String]) -> Option<Element<'a, Message>> {
-    if names.is_empty() {
+/// One caption per kind of model a backend serves, each naming the kind and
+/// then its models joined by " · " (e.g.
+/// `"Speech to text: whisper-large-v3 · whisper-medium"`). De-emphasized so it
+/// reads as a secondary detail under the card's description. `None` when the
+/// backend serves no models.
+///
+/// Browse describes a backend the user has not installed, so which kinds it
+/// ships is exactly what decides whether they want it.
+pub(super) fn models_line<'a>(groups: &[super::chips::RoleGroup]) -> Option<Element<'a, Message>> {
+    if groups.is_empty() {
         return None;
     }
     let muted = muted_text_color();
-    Some(
-        text::caption(names.join(" \u{00b7} "))
+    let lines: Vec<Element<'a, Message>> = groups
+        .iter()
+        .map(|group| {
+            text::caption(format!(
+                "{}: {}",
+                group.label,
+                group.names.join(" \u{00b7} ")
+            ))
             .class(cosmic::theme::Text::Color(muted))
+            .into()
+        })
+        .collect();
+    Some(
+        cosmic::iced::widget::column(lines)
+            .spacing(cosmic::theme::spacing().space_xxxs)
             .into(),
     )
 }

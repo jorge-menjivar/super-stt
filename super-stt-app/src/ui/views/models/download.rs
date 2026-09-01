@@ -10,7 +10,7 @@ use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
 
 use super::active::backend_header;
-use super::chips::{CloudEgress, capability_chips, result_count};
+use super::chips::{CloudEgress, capability_chips, result_count, role_groups};
 use super::surface::{card_divider, card_surface, models_line, muted_text_color};
 
 /// Browse tab split into its two regions: the fixed search + filter toolbar
@@ -45,6 +45,12 @@ pub(super) fn download_split(app: &AppModel) -> (Element<'_, Message>, Element<'
         }
         if let Some(o) = filters.online
             && entry.online != o
+        {
+            continue;
+        }
+        if !filters
+            .role
+            .admits(entry.models.iter().map(|m| m.role.as_str()))
         {
             continue;
         }
@@ -83,13 +89,12 @@ pub(super) fn download_split(app: &AppModel) -> (Element<'_, Message>, Element<'
 
 /// Search + filter toolbar for the Browse tab. Top row: a prominent search
 /// field (with a built-in clear button) plus the Add-backend and Refresh
-/// actions. Bottom row: the "Runs on" segmented filter, the incompatible
-/// toggle, and — pushed to the right — the live result count.
+/// actions. Bottom row: the "Runs on" and "Kind" segmented filters, the
+/// incompatible toggle, and — pushed to the right — the live result count.
 pub(super) fn download_toolbar<'a>(
     app: &'a AppModel,
     count: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    use super::chips::chip_group;
     let spacing = cosmic::theme::spacing();
     let filters = &app.registry.filters;
 
@@ -130,34 +135,20 @@ pub(super) fn download_toolbar<'a>(
         .width(Length::Fill);
 
     // Low-cardinality filters as one-tap chips (active = accent-filled).
-    let runs_on = chip_group(
-        "Runs on",
-        false,
-        vec![
-            (
-                "All",
-                filters.online.is_none(),
-                Message::ModelsPage(ModelsPageMessage::RegistryOnlineFilter(None)),
-            ),
-            (
-                "Local",
-                filters.online == Some(false),
-                Message::ModelsPage(ModelsPageMessage::RegistryOnlineFilter(Some(false))),
-            ),
-            (
-                "Cloud",
-                filters.online == Some(true),
-                Message::ModelsPage(ModelsPageMessage::RegistryOnlineFilter(Some(true))),
-            ),
-        ],
-    );
+    let runs_on = super::chips::runs_on_chips(filters.online, |o| {
+        Message::ModelsPage(ModelsPageMessage::RegistryOnlineFilter(o))
+    });
+    let kind = super::chips::role_filter_chips(filters.role, |r| {
+        Message::ModelsPage(ModelsPageMessage::RegistryRoleFilter(r))
+    });
     let show_incompat = cosmic::widget::toggler(filters.include_incompatible)
         .label("Show incompatible".to_string())
         .spacing(spacing.space_xs)
         .on_toggle(|x| Message::ModelsPage(ModelsPageMessage::RegistryIncludeIncompatible(x)));
 
-    // RUNS ON chips on the left; the incompatible toggle pushed to the right edge.
-    let filter_row = row![runs_on, horizontal_space(), show_incompat]
+    // Runs-on and Kind chips on the left; the incompatible toggle pushed to the
+    // right edge.
+    let filter_row = row![runs_on, kind, horizontal_space(), show_incompat]
         .spacing(spacing.space_m)
         .align_y(Alignment::Center)
         .width(Length::Fill);
@@ -261,8 +252,13 @@ pub(super) fn download_card<'a>(
         card = card.push(text::body(desc.to_string()).class(cosmic::theme::Text::Color(muted)));
     }
 
-    let model_names: Vec<String> = entry.models.iter().map(|m| m.name.clone()).collect();
-    if let Some(line) = models_line(&model_names) {
+    let groups = role_groups(
+        entry
+            .models
+            .iter()
+            .map(|m| (m.name.as_str(), m.role.as_str())),
+    );
+    if let Some(line) = models_line(&groups) {
         card = card.push(line);
     }
 

@@ -542,3 +542,102 @@ fn gpu_host_info_serializes_the_published_field_names() {
     assert_eq!(value["host"]["vulkan"]["api_version"], "1.4.354");
     assert_eq!(value["gpu_info"][0]["arch_target"], "sm_86");
 }
+
+/// `set_post_processor` names the model to run. There is no `enabled` field —
+/// the command *is* "enable with this model".
+#[test]
+fn set_post_processor_parses_the_model_and_source() {
+    let req = make_request(
+        "set_post_processor",
+        Some(serde_json::json!({
+            "model": "cleanup-small",
+            "source": "github.com/super-stt/cleanup",
+        })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::SetPostProcessor { model, source } => {
+            assert_eq!(model, "cleanup-small");
+            assert_eq!(source, "github.com/super-stt/cleanup");
+        }
+        other => panic!("wrong command: {other:?}"),
+    }
+}
+
+/// An omitted `source` resolves to the selected post-processor backend at
+/// handling time, the way `set_model` resolves against the active backend, so
+/// the parser accepts a bare model name.
+#[test]
+fn set_post_processor_takes_a_bare_model_name() {
+    let req = make_request(
+        "set_post_processor",
+        Some(serde_json::json!({ "model": "cleanup-small" })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::SetPostProcessor { model, source } => {
+            assert_eq!(model, "cleanup-small");
+            assert_eq!(source, "");
+        }
+        other => panic!("wrong command: {other:?}"),
+    }
+}
+
+/// Running nothing is `clear_post_processor`, not a `set` with an empty model,
+/// so a missing name is refused rather than silently meaning "off".
+#[test]
+fn set_post_processor_requires_a_model() {
+    for data in [
+        serde_json::json!({}),
+        serde_json::json!({ "source": "github.com/x/y" }),
+        serde_json::json!({ "model": "" }),
+    ] {
+        let req = make_request("set_post_processor", Some(data));
+        assert!(
+            Command::try_from(req).is_err(),
+            "a set without a model must be refused"
+        );
+    }
+}
+
+/// The backend half of the split: `set_post_processor_backend` takes the source
+/// alone, exactly as `set_active_backend` does for transcription.
+#[test]
+fn set_post_processor_backend_parses_its_source() {
+    let req = make_request(
+        "set_post_processor_backend",
+        Some(serde_json::json!({ "source": "github.com/super-stt/cleanup" })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::SetPostProcessorBackend { source } => {
+            assert_eq!(source, "github.com/super-stt/cleanup");
+        }
+        other => panic!("wrong command: {other:?}"),
+    }
+}
+
+#[test]
+fn set_post_processor_backend_requires_a_source() {
+    assert!(Command::try_from(make_request("set_post_processor_backend", None)).is_err());
+    assert!(
+        Command::try_from(make_request(
+            "set_post_processor_backend",
+            Some(serde_json::json!({}))
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn post_processor_getters_parse() {
+    assert!(matches!(
+        Command::try_from(make_request("get_post_processor", None)).expect("parses"),
+        Command::GetPostProcessor
+    ));
+    assert!(matches!(
+        Command::try_from(make_request("clear_post_processor", None)).expect("parses"),
+        Command::ClearPostProcessor
+    ));
+    assert!(matches!(
+        Command::try_from(make_request("clear_post_processor_backend", None)).expect("parses"),
+        Command::ClearPostProcessorBackend
+    ));
+}

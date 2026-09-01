@@ -30,6 +30,10 @@ pub use v1::settings::backends::{
 };
 pub use v1::settings::custom_models_dir::get_custom_models_dir;
 pub use v1::settings::notification_method::{get_notification_method, set_notification_method};
+pub use v1::settings::post_processor::{
+    PostProcessorState, clear_post_processor, clear_post_processor_backend, get_post_processor,
+    set_post_processor, set_post_processor_backend,
+};
 pub use v1::settings::preview_typing::{get_preview_typing, set_preview_typing};
 pub use v1::settings::recording_stop_mode::{get_recording_stop_mode, set_recording_stop_mode};
 pub use v1::settings::update_beta_optin::set_update_beta_optin;

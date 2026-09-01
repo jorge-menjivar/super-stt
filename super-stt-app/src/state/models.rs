@@ -67,9 +67,14 @@ pub enum ContextPage {
     /// (global vs per-model) is carried by `AppModel::language_picker_target`.
     LanguagePicker,
     /// Right-side sheet for choosing which installed backend to activate (the
-    /// Models page's "Load a backend" / "Switch backend" flow). Scoped to the
+    /// Models page's "Select a backend" / "Switch backend" flow). Scoped to the
     /// Models page; picking a backend activates it and closes the sheet.
-    LoadBackend,
+    SelectBackend,
+    /// Right-side sheet for choosing which installed backend provides the
+    /// transcript post-processor. The post-processing twin of
+    /// [`Self::SelectBackend`], listing only backends that serve a
+    /// `post_processor` model; also Models-scoped.
+    SelectPostProcessor,
 }
 
 /// Where a transient action error belongs, so a failed save surfaces as an
@@ -89,6 +94,9 @@ pub enum ErrorScope {
     Recording,
     /// The Input Simulation page: write-method save.
     InputSimulation,
+    /// The Models page's Post-processing section: post-processor toggle and
+    /// model selection saves.
+    PostProcessing,
 }
 
 /// A scope-tagged, transient action failure rendered as an inline banner on the

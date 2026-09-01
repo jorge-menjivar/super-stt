@@ -254,20 +254,22 @@ async fn settings_scope_endpoints() {
     .await;
     assert_eq!(s, StatusCode::OK);
 
-    // --- GET /active_model: composed shape with `current` + `switch` ---
-    let (s, body) = raw_get_json(&http_socket, "/active_model", &settings_token).await;
-    assert_eq!(s, StatusCode::OK, "GET /active_model: {body}");
+    // --- GET /pipeline/1: the transcription stage, with `switch` progress ---
+    let (s, body) = raw_get_json(&http_socket, "/pipeline/1", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /pipeline/1: {body}");
     assert_eq!(body["status"], "success");
-    let active_model = &body["active_model"];
+    let stage = &body["stage"];
+    assert_eq!(stage["stage"], 1);
+    assert_eq!(stage["role"], "transcription");
     // With no backends installed (hermetic test), the daemon is idle and the
     // current model is null; with a backend it would be a string. Accept both.
-    let current_model = &active_model["current"]["model"];
+    let current_model = &stage["model"];
     assert!(
         current_model.is_string() || current_model.is_null(),
-        "active_model.current.model has unexpected shape: {active_model}"
+        "stage.model has unexpected shape: {stage}"
     );
     // No switch in flight at startup
-    assert!(active_model["switch"].is_null());
+    assert!(stage["switch"].is_null());
 
     // --- GET /models ---
     let (s, body) = raw_get_json(&http_socket, "/models", &settings_token).await;
@@ -557,12 +559,12 @@ async fn settings_scope_endpoints() {
     .await;
     assert_eq!(s, StatusCode::OK, "POST /audio_theme/test: {body}");
 
-    // --- POST /active_model/cancel: with no switch in flight, the
+    // --- POST /pipeline/1/model/cancel: with no switch in flight, the
     // daemon returns 409 Conflict with
     // `{ "status": "error", "message": "No download in progress" }`.
     let (s, body) = raw_post_json(
         &http_socket,
-        "/active_model/cancel",
+        "/pipeline/1/model/cancel",
         &settings_token,
         serde_json::json!({}),
     )
@@ -570,7 +572,7 @@ async fn settings_scope_endpoints() {
     assert_eq!(
         s,
         StatusCode::CONFLICT,
-        "POST /active_model/cancel with no switch should be 409: {body}"
+        "cancel with no switch in flight should be 409: {body}"
     );
     assert_eq!(body["status"], "error");
     assert!(
@@ -580,12 +582,12 @@ async fn settings_scope_endpoints() {
         "cancel response missing expected message: {body}"
     );
 
-    // --- POST /active_model: unknown model name should be 400 Bad
+    // --- POST /pipeline/1/model: unknown model name should be 400 Bad
     // Request with status:"error". We don't want to trigger an
     // actual model download in CI, so we probe the error path.
     let (s, body) = raw_post_json(
         &http_socket,
-        "/active_model",
+        "/pipeline/1/model",
         &settings_token,
         serde_json::json!({
             "model": "definitely-not-a-real-model-xyz",
@@ -596,7 +598,7 @@ async fn settings_scope_endpoints() {
     assert_eq!(
         s,
         StatusCode::BAD_REQUEST,
-        "POST /active_model unknown-model expected 400: {body}"
+        "POST /pipeline/1/model unknown-model expected 400: {body}"
     );
     assert_eq!(body["status"], "error");
     let msg = body["message"].as_str().unwrap_or("");
