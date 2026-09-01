@@ -14,6 +14,11 @@
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 
+# Coverage output. CI renders these into a throwaway runner and uploads them;
+# running the same recipes locally writes them to the repo root.
+lcov.info
+coverage-html/
+
 docs/design/
 docs/superpowers/
 .superpowers/
