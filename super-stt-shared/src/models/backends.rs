@@ -24,6 +24,15 @@ pub struct BackendInfo {
     pub source: String,
     /// Human-readable backend name, e.g. `OpenAI`.
     pub name: String,
+    /// The installed `backend.toml`'s `[backend].description`, empty when the
+    /// manifest omits it.
+    ///
+    /// A registry entry carries one too, but only for backends the registry
+    /// lists: a sideloaded or imported-from-dir backend has no entry, and its
+    /// description would otherwise be invisible everywhere in the UI. `default`
+    /// so a payload written before the field existed still deserializes.
+    #[serde(default)]
+    pub description: String,
     /// The installed backend's `[backend].version`, read from the `backend.toml`
     /// on disk — what is installed, not what is published.
     ///

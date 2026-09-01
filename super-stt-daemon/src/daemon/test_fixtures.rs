@@ -25,6 +25,7 @@ pub(crate) fn openai_backend(
     base_url_default: Option<&str>,
 ) -> DiscoveredBackend {
     DiscoveredBackend {
+        description: String::new(),
         dir: std::path::PathBuf::from("/tmp/openai"),
         source: source.to_string(),
         id: None,

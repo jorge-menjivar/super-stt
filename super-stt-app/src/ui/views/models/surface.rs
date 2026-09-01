@@ -279,10 +279,20 @@ pub(super) fn card_title_block<'a>(
 /// registry index is the source; `None` when it isn't loaded or has no
 /// (non-empty) description for this backend.
 pub(super) fn backend_description(app: &AppModel, source: &str) -> Option<String> {
+    // The registry's copy wins: it tracks the published release, which may be
+    // newer than the manifest sitting on disk. The installed manifest is the
+    // fallback, and the only source for a backend the registry does not list —
+    // sideloaded, or imported from a directory.
     app.registry
         .by_source()
         .get(source)
         .and_then(|e| e.description.clone())
+        .or_else(|| {
+            app.backends
+                .iter()
+                .find(|b| b.source == source)
+                .map(|b| b.description.clone())
+        })
         .filter(|d| !d.is_empty())
 }
 

@@ -32,6 +32,10 @@ pub struct DiscoveredBackend {
     pub id: Option<String>,
     /// Human-facing backend name (`[backend].name`).
     pub name: String,
+    /// `[backend].description` from the manifest, empty when omitted. Carried
+    /// so `GET /backends` can report it: the registry index has one only for
+    /// backends it lists, leaving a sideloaded backend with none anywhere.
+    pub description: String,
     /// The backend's own version (`[backend].version`) as of the last scan.
     ///
     /// Carried from the manifest so the catalog can report what is installed
@@ -234,6 +238,7 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
         source,
         id: m.backend.id.clone(),
         name: m.backend.name,
+        description: m.backend.description,
         version: m.backend.version,
         kind: m.backend.kind.to_string(),
         entrypoint: m.backend.entrypoint,

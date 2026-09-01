@@ -60,6 +60,7 @@ Authorization: Bearer stt_…64hex…
     {
       "source": "github.com/super-stt/openai",
       "name":   "OpenAI",
+      "description": "Cloud speech-to-text via the OpenAI API.",
       "version": "0.1.1",               // installed version, re-read from disk per request
       "kind":   "wasm",                 // "wasm" | "subprocess"
       "allowed_hosts": ["api.openai.com"],  // hosts the manifest declares; [] for subprocess/local
@@ -105,6 +106,7 @@ Authorization: Bearer stt_…64hex…
 | `backends`        | array of objects | One per installed backend.                                            |
 | `…[].source`      | string           | Backend repo id; the `source` of every model it serves.              |
 | `…[].name`        | string           | Human-readable backend name.                                         |
+| `…[].description` | string           | The installed manifest's `[backend].description`; `""` when it declares none. A registry entry carries one too, but only for backends the registry lists — for a sideloaded or imported-from-dir backend this is the only description there is. |
 | `…[].version`     | string           | The installed backend's `[backend].version`, read from the `backend.toml` on disk **on every request** — what is on the machine now, not what the daemon saw when it last scanned. This is what is installed, not what is published: it is the only version available for a backend the registry does not list — one imported from a directory or installed from an arbitrary repo — and it is authoritative for the rest, since the registry reports what a release offers rather than what this machine has. The same read backs [`installed_version`](./registry/backends.md) on the registry listing, so the version reported here and the one an update is judged against cannot disagree. Falls back to the version recorded at the last scan if the manifest cannot be read; empty only for a backend installed before the field existed. |
 | `…[].kind`        | string           | `wasm` or `subprocess`.                                              |
 | `…[].allowed_hosts` | array of strings | Hosts the backend **declared** in its `backend.toml` (`[network].allowed_hosts`). Empty for `subprocess` backends (which run with no network) and for backends that declare none. Surfaced in the settings UI's "Online model" badge so the user sees where a cloud backend's audio would go. It is the manifest's declaration alone: a user-set [`base_url`](../../backend/config.md#base_url-and-egress) authorizes a further endpoint, which clients read from that option's `value` rather than from this list. |
