@@ -504,6 +504,15 @@
           "description": "When `true`, the model is driven over the consumer WebSocket endpoint\nrather than batch `POST /v1/transcribe`. Requires\n`[capabilities] websocket = true`. Default `false`.",
           "type": "boolean"
         },
+        "role": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelRole"
+            }
+          ],
+          "default": "transcription",
+          "description": "What the model is for: transcribing audio, or post-processing a\ntranscript. Default [`ModelRole::Transcription`], so every manifest\nwritten before the field existed keeps its models transcribing."
+        },
         "supported_devices": {
           "description": "Devices the model can be loaded onto. The sentinel `none` (remote /\nonline model with no local compute) must be the only entry when\npresent. Non-empty.",
           "items": {
@@ -527,6 +536,21 @@
         "supported_devices"
       ],
       "type": "object"
+    },
+    "ModelRole": {
+      "description": "What a model is for.\n\nA backend serves both roles from the same manifest and the same install: a\nrole only decides which `/v1` route the daemon drives the model over —\n`POST /v1/transcribe` for [`Transcription`](Self::Transcription),\n`POST /v1/process` for [`PostProcessor`](Self::PostProcessor) — and which\nof the daemon's two model slots it may be selected into. Everything else\n(files, devices, secrets, options, discovery, install) is identical.",
+      "oneOf": [
+        {
+          "const": "transcription",
+          "description": "Transcribes audio. The default, and what every model was before the\nfield existed.",
+          "type": "string"
+        },
+        {
+          "const": "post_processor",
+          "description": "Rewrites a finished transcript — filler removal, punctuation,\nformatting. Driven over `POST /v1/process`.",
+          "type": "string"
+        }
+      ]
     },
     "Network": {
       "additionalProperties": false,

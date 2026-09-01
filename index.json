@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-01T06:15:13Z",
+  "generated_at": "2026-09-01T08:41:43Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -26,7 +26,8 @@
           "provider": "",
           "supported_devices": [
             "none"
-          ]
+          ],
+          "role": "transcription"
         }
       ],
       "secrets": [
@@ -73,14 +74,16 @@
           "provider": "",
           "supported_devices": [
             "none"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "voxtral-mini-transcribe-realtime-2602",
           "provider": "",
           "supported_devices": [
             "none"
-          ]
+          ],
+          "role": "transcription"
         }
       ],
       "secrets": [
@@ -127,28 +130,32 @@
           "provider": "",
           "supported_devices": [
             "none"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "gpt-4o-transcribe",
           "provider": "",
           "supported_devices": [
             "none"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "gpt-4o-mini-transcribe",
           "provider": "",
           "supported_devices": [
             "none"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "other",
           "provider": "",
           "supported_devices": [
             "none"
-          ]
+          ],
+          "role": "transcription"
         }
       ],
       "secrets": [
@@ -205,7 +212,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "qwen3-asr-1.7b",
@@ -213,7 +221,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         }
       ],
       "secrets": [],
@@ -273,14 +282,16 @@
           "provider": "",
           "supported_devices": [
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "voxtral-small-24b-2507",
           "provider": "",
           "supported_devices": [
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         }
       ],
       "secrets": [],
@@ -439,7 +450,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "whisper-tiny.en",
@@ -447,7 +459,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "whisper-base",
@@ -455,7 +468,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "whisper-base.en",
@@ -463,7 +477,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "whisper-small",
@@ -471,7 +486,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "whisper-small.en",
@@ -479,7 +495,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "whisper-medium",
@@ -487,7 +504,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "whisper-medium.en",
@@ -495,7 +513,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         },
         {
           "name": "whisper-large",
@@ -503,7 +522,8 @@
           "supported_devices": [
             "cpu",
             "gpu"
-          ]
+          ],
+          "role": "transcription"
         }
       ],
       "secrets": [],
