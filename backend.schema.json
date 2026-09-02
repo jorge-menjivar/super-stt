@@ -112,6 +112,34 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "backend": {
+            "properties": {
+              "contract": {
+                "const": "v2"
+              }
+            },
+            "required": [
+              "contract"
+            ]
+          }
+        },
+        "required": [
+          "backend"
+        ]
+      },
+      "then": {
+        "properties": {
+          "backend": {
+            "required": [
+              "id"
+            ]
+          }
+        }
+      }
     }
   ],
   "definitions": {
