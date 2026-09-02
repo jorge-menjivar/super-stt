@@ -17,8 +17,8 @@
     reqwest.workspace = true
     serde.workspace = true
     serde_json.workspace = true
-    super-stt-forge = { version = "0.2.2-beta.2", path = "../super-stt-forge" }
-    super-stt-registry-types = { version = "0.2.2-beta.2", path = "../super-stt-registry-types" }
+    super-stt-forge = { path = "../super-stt-forge" }
+    super-stt-registry-types = { path = "../super-stt-registry-types" }
     tar = "0.4.46"
     thiserror.workspace = true
     tokio.workspace = true
