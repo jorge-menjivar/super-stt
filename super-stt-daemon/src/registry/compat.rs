@@ -4,6 +4,7 @@
 //! the runtime device preference is intentionally decoupled and never affects
 //! which asset is downloaded.
 
+use semver::Version;
 use super_stt_registry_types::manifest::Contract;
 use super_stt_shared::registry::SelectedAsset;
 
@@ -13,8 +14,39 @@ use crate::registry::index_schema::{IndexBackend, IndexSubprocessAsset};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
     Wasm,
-    Subprocess { index: usize },
-    Incompatible { reason: String },
+    Subprocess {
+        index: usize,
+    },
+    Incompatible {
+        reason: String,
+    },
+    /// This build does not know the entry's contract generation. Distinct
+    /// from [`Incompatible`](Self::Incompatible) because the remedy is
+    /// different in kind: a host that lacks the right GPU will never run this
+    /// asset, but a Super STT that is merely too old is one update away — so
+    /// clients surface this even where they hide hardware mismatches.
+    NeedsClientUpdate {
+        reason: String,
+    },
+}
+
+impl Selection {
+    /// The human-readable reason this entry cannot be installed, or `None`
+    /// when it can.
+    #[must_use]
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            Self::Wasm | Self::Subprocess { .. } => None,
+            Self::Incompatible { reason } | Self::NeedsClientUpdate { reason } => Some(reason),
+        }
+    }
+
+    /// Whether the block is "your Super STT is too old" rather than "this
+    /// machine cannot run it".
+    #[must_use]
+    pub fn needs_client_update(&self) -> bool {
+        matches!(self, Self::NeedsClientUpdate { .. })
+    }
 }
 
 /// Below this major version an AMD architecture's *stepping* is a whole
@@ -51,6 +83,11 @@ fn gfx_is_exact(
     asset.major == host.major && asset.minor == host.minor && asset.step == host.step
 }
 
+/// Longest registry-supplied contract string echoed into a reason. A
+/// generation is `v` plus digits; anything longer is not one, and the reason
+/// is user-facing text assembled from a document this daemon did not write.
+const MAX_ECHOED_CONTRACT: usize = 16;
+
 /// Why an entry's contract generation cannot be driven by this daemon, or
 /// `None` when it can.
 ///
@@ -60,20 +97,33 @@ fn gfx_is_exact(
 /// test. The index also stamps the release that introduced the generation, so
 /// the reason can say what to update to even for a generation this build has
 /// never heard of.
+///
+/// Both echoed values come from `index.json`, which is fetched — and
+/// `SUPER_STT_REGISTRY_URL` can point somewhere else, which is why
+/// `retain_safe_backends` already sanitizes the fields that become paths.
+/// These two only become text, so they are bounded rather than rejected: the
+/// contract is truncated, and `min_client` is quoted only when it parses as
+/// semver *and* actually exceeds this build. A floor at or below the running
+/// version would otherwise produce advice the user has already followed.
 fn contract_block(entry: &IndexBackend) -> Option<String> {
     if entry.contract.parse::<Contract>().is_ok() {
         return None;
     }
     let daemon = crate::registry::index_schema::CLIENT_VERSION;
-    Some(match entry.min_client.as_deref() {
-        Some(min) => format!(
-            "needs Super STT {min} or newer (backend contract {}); this is {daemon}",
-            entry.contract
-        ),
-        None => format!(
-            "needs a newer Super STT (backend contract {}); this is {daemon}",
-            entry.contract
-        ),
+    let contract: String = entry.contract.chars().take(MAX_ECHOED_CONTRACT).collect();
+    let floor = entry.min_client.as_deref().filter(|min| {
+        match (Version::parse(min), Version::parse(daemon)) {
+            (Ok(min), Ok(running)) => min > running,
+            _ => false,
+        }
+    });
+    Some(match floor {
+        Some(min) => {
+            format!(
+                "needs Super STT {min} or newer (backend contract {contract}); this is {daemon}"
+            )
+        }
+        None => format!("needs a newer Super STT (backend contract {contract}); this is {daemon}"),
     })
 }
 
@@ -83,7 +133,7 @@ pub fn select(host: &Host, entry: &IndexBackend) -> Selection {
     // compatible asset, whatever the host looks like. Listing, install and
     // update all route through here, so one check covers all three.
     if let Some(reason) = contract_block(entry) {
-        return Selection::Incompatible { reason };
+        return Selection::NeedsClientUpdate { reason };
     }
     if entry.kind == "wasm" {
         return if entry.assets.wasm.is_some() {
@@ -311,7 +361,7 @@ pub fn to_selected_asset(entry: &IndexBackend, sel: &Selection) -> Option<Select
                 cudnn: a.cudnn,
             })
         }
-        Selection::Incompatible { .. } => None,
+        Selection::Incompatible { .. } | Selection::NeedsClientUpdate { .. } => None,
     }
 }
 
@@ -940,9 +990,15 @@ mod tests {
         });
         e.contract = "v99".into();
         e.min_client = Some("9.9.9".into());
-        let Selection::Incompatible { reason } = select(&host_cpu(), &e) else {
-            panic!("an unknown contract must be incompatible");
-        };
+        let sel = select(&host_cpu(), &e);
+        assert!(
+            sel.needs_client_update(),
+            "the remedy is a Super STT update"
+        );
+        let reason = sel
+            .reason()
+            .expect("a blocked entry states why")
+            .to_string();
         assert!(reason.contains("9.9.9"), "{reason}");
         assert!(reason.contains("v99"), "{reason}");
         assert!(
@@ -953,9 +1009,10 @@ mod tests {
         // An index published before the stamp still refuses, just without the
         // number.
         e.min_client = None;
-        let Selection::Incompatible { reason } = select(&host_cpu(), &e) else {
-            panic!("still incompatible without a stamp");
-        };
+        let reason = select(&host_cpu(), &e)
+            .reason()
+            .expect("still blocked without a stamp")
+            .to_string();
         assert!(reason.contains("newer Super STT"), "{reason}");
     }
 }

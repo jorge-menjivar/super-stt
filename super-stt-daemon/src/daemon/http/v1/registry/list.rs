@@ -75,17 +75,27 @@ pub(super) fn installed_version_for_source(
     )
 }
 
-/// Whether the index offers something newer than what is installed.
+/// Whether the index offers something newer than what is installed *and this
+/// daemon could install it*.
 ///
 /// The daemon answers this rather than each client re-deriving it: it is the
 /// side that reads the installed manifest and owns the index. A backend that is
 /// not installed here has no update to offer — it has an *install* — so `None`
 /// is `false` rather than "everything is an update".
 ///
+/// `compatible` is part of the answer, not a separate concern. A newer release
+/// this host cannot run is not an update the user can take: offering it puts an
+/// Update button on a card whose only outcome is `422 incompatible`. The
+/// commonest way for that to happen now is a release that moved to a contract
+/// generation this daemon predates — precisely the case where the user needs to
+/// update Super STT, not the backend.
+///
 /// The comparison itself is the shared semver one, which already refuses a
 /// downgrade and refuses to guess at a version it cannot parse.
-fn update_available(installed: Option<&str>, index_version: &str) -> bool {
-    installed.is_some_and(|i| super_stt_registry_types::version::update_available(i, index_version))
+fn update_available(installed: Option<&str>, index_version: &str, compatible: bool) -> bool {
+    compatible
+        && installed
+            .is_some_and(|i| super_stt_registry_types::version::update_available(i, index_version))
 }
 
 /// Map a registry entry + compatibility result to the wire `RegistryBackend` shape.
@@ -140,8 +150,12 @@ fn map_entry(
                 default: o.default.clone(),
             })
             .collect(),
+        update_available: update_available(
+            installed_version.as_deref(),
+            &entry.version,
+            compat_field.compatible,
+        ),
         compatibility: compat_field,
-        update_available: update_available(installed_version.as_deref(), &entry.version),
         installed_version,
         index_stale: entry
             .index_stale
@@ -176,23 +190,22 @@ pub(crate) async fn list_registry_backends(
         }
 
         let sel = compat::select(&host, entry);
-        let compatible = !matches!(sel, compat::Selection::Incompatible { .. });
+        let compatible = sel.reason().is_none();
+        let needs_client_update = sel.needs_client_update();
 
-        if !compatible && !q.include_incompatible {
+        // A client-update block is always listed: `include_incompatible` is
+        // about hardware this host will never satisfy, and swallowing "your
+        // Super STT is too old" behind the same toggle hides the one notice
+        // that would tell the user what to do.
+        if !compatible && !needs_client_update && !q.include_incompatible {
             continue;
         }
 
-        let selected_asset = compat::to_selected_asset(entry, &sel);
-        let reason = if let compat::Selection::Incompatible { ref reason } = sel {
-            Some(reason.clone())
-        } else {
-            None
-        };
-
         let compat_field = Compatibility {
             compatible,
-            selected_asset,
-            reason,
+            selected_asset: compat::to_selected_asset(entry, &sel),
+            reason: sel.reason().map(ToOwned::to_owned),
+            needs_client_update,
         };
 
         result.push(map_entry(
@@ -226,17 +239,27 @@ mod tests {
     /// unreadable version never becomes one on the way to the wire.
     #[test]
     fn only_an_installed_older_version_has_an_update() {
-        assert!(update_available(Some("0.1.0"), "0.1.1"));
-        assert!(update_available(Some("v1.0.0"), "1.0.1"));
+        assert!(update_available(Some("0.1.0"), "0.1.1", true));
+        assert!(update_available(Some("v1.0.0"), "1.0.1", true));
 
         // Not installed: the client is offered an install, not an update.
-        assert!(!update_available(None, "0.1.1"));
+        assert!(!update_available(None, "0.1.1", true));
         // Already current, and a stale index that would prompt a downgrade.
-        assert!(!update_available(Some("0.1.1"), "0.1.1"));
-        assert!(!update_available(Some("0.2.0"), "0.1.1"));
+        assert!(!update_available(Some("0.1.1"), "0.1.1", true));
+        assert!(!update_available(Some("0.2.0"), "0.1.1", true));
         // Neither side is guessed at when it cannot be parsed.
-        assert!(!update_available(Some("1.0.0"), "nightly"));
-        assert!(!update_available(Some(""), "1.0.0"));
+        assert!(!update_available(Some("1.0.0"), "nightly", true));
+        assert!(!update_available(Some(""), "1.0.0", true));
+    }
+
+    /// A newer release this daemon cannot install is not an update on offer.
+    /// The Update button it would otherwise draw leads only to
+    /// `422 incompatible` — and when the cause is a contract generation this
+    /// build predates, updating the *backend* was never the fix.
+    #[test]
+    fn an_incompatible_release_is_not_offered_as_an_update() {
+        assert!(update_available(Some("0.1.0"), "0.2.0", true));
+        assert!(!update_available(Some("0.1.0"), "0.2.0", false));
     }
 
     use crate::stt_models::backends::DiscoveredBackend;
@@ -276,7 +299,7 @@ mod tests {
             ),
             Some("0.1.0".to_string())
         );
-        assert!(update_available(Some("0.1.0"), "0.1.1"));
+        assert!(update_available(Some("0.1.0"), "0.1.1", true));
     }
 
     #[test]

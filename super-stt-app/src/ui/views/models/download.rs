@@ -40,7 +40,14 @@ pub(super) fn download_split(app: &AppModel) -> (Element<'_, Message>, Element<'
         if installed_sources.contains(entry.source.as_str()) {
             continue;
         }
-        if !filters.include_incompatible && !entry.compatibility.compatible {
+        // "Show incompatible" is about hardware this machine will never
+        // satisfy. A backend that needs a newer Super STT is a different thing
+        // — the user can act on it — so it is listed either way, with the
+        // version to update to in its footer.
+        if !filters.include_incompatible
+            && !entry.compatibility.compatible
+            && !entry.compatibility.needs_client_update
+        {
             continue;
         }
         if let Some(o) = filters.online
@@ -275,6 +282,8 @@ pub(super) fn download_card<'a>(
                 entry.source.clone(),
             )))
             .into()
+    } else if entry.compatibility.needs_client_update {
+        button::standard("Update Super STT").into()
     } else {
         button::standard("Not compatible").into()
     };
@@ -301,14 +310,18 @@ pub(super) fn download_card<'a>(
         .align_y(Alignment::Center)
         .into()
     } else if !entry.compatibility.compatible {
-        let reason = entry
-            .compatibility
-            .reason
-            .as_deref()
-            .unwrap_or("incompatible hardware or OS");
+        let (lead, fallback) = if entry.compatibility.needs_client_update {
+            (
+                "Needs a newer Super STT",
+                "this backend needs a newer Super STT",
+            )
+        } else {
+            ("Not compatible", "incompatible hardware or OS")
+        };
+        let reason = entry.compatibility.reason.as_deref().unwrap_or(fallback);
         row![
             icons::phosphor_destructive(icons::WARNING, 14.0),
-            text::caption(format!("Not compatible: {reason}")),
+            text::caption(format!("{lead}: {reason}")),
         ]
         .spacing(spacing.space_xxs)
         .align_y(Alignment::Center)

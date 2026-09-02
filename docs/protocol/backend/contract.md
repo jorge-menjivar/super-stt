@@ -81,8 +81,13 @@ a top-level `status` field of `"success"` or `"error"`.
 
 The manifest's [`contract`](./config.md#contract-generations) names a
 *generation* of this agreement — which fields a `backend.toml` may declare
-and which routes a backend must serve. Generations are additive: `v2` is
+and which routes exist to be served. Each generation extends the last: `v2` is
 `v1` plus `[[models]].role` and `POST /v1/process`.
+
+A generation does not oblige a backend to serve all of it. What a backend must
+implement follows from the models it declares — a `v2` backend serving only
+`post_processor` models implements `POST /v1/process` and never
+`POST /v1/transcribe`.
 
 The `/v1` in the route paths is not that number. It is a path segment inside
 the agreement, and an additive generation leaves it alone: a `v2` backend

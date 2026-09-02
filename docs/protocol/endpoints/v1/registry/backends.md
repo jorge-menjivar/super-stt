@@ -108,8 +108,13 @@ Per-entry fields beyond what `index.json` carries:
   A backend whose [`contract`](../../../backend/config.md#contract-generations)
   generation this daemon does not know is reported here too — before any
   asset question — as `needs Super STT <min_client> or newer (backend contract
-  <contract>); this is <daemon version>`, so the fix is stated rather than
-  discovered on install.
+  <contract>); this is <daemon version>`. `POST .../install` and
+  `POST .../update` return the same sentence as their `422 incompatible`
+  `message`, so the fix is stated wherever the block is met.
+- `compatibility.needs_client_update` — `true` when the block is the contract
+  generation rather than this host's hardware. Such an entry is listed even
+  without `include_incompatible`: the toggle is for hardware a machine will
+  never satisfy, and the remedy here is an update the user can act on.
 - `installed_version` — present if the backend is already installed on this
   host, regardless of its registry status. Read from the installed
   `backend.toml` on every request, so it reflects what is on disk now rather
