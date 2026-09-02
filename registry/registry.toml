@@ -20,6 +20,7 @@
     forge = "github"
 
 [tidy]
+    id = "app.super-stt.tidy"
     repo = "github.com/jorge-menjivar/super-stt-tidy"
     forge = "github"
 
