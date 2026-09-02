@@ -14,7 +14,7 @@
 
 use super_stt_shared::models::protocol::DaemonResponse;
 
-use crate::daemon::types::SuperSTTDaemon;
+use crate::daemon::types::{SuperSTTDaemon, normalize_device};
 
 /// Wire name for a stage's role, matching `ModelRole` in the manifest.
 const ROLE_TRANSCRIPTION: &str = "transcription";
@@ -43,6 +43,13 @@ impl SuperSTTDaemon {
             Some(d) => (Some(d.source.clone()), Some(d.name.clone())),
             None => (None, None),
         };
+        // The device the model is actually on, not the user's cpu/gpu
+        // preference — a stage reports where its work runs, and nothing runs
+        // anywhere when nothing is loaded. Each model's preference is its own,
+        // read through `/pipeline/{stage}/model/{model}/device`.
+        let device = loaded
+            .as_ref()
+            .map(|m| normalize_device(&m.instance.device()));
 
         // A backend can be selected with nothing loaded, which is the state
         // `/active_backend` holds on its own; prefer the loaded model's source
@@ -52,11 +59,6 @@ impl SuperSTTDaemon {
             None => self.active_backend_source().await,
         };
         let name = self.backend_name(source.as_deref()).await;
-
-        // The device the model is actually on, not the user's cpu/gpu
-        // preference — a stage reports where its work runs. Read directly
-        // rather than through `handle_get_device`, which probes the host.
-        let device = self.actual_device.read().await.clone();
 
         serde_json::json!({
             "stage": 1,
@@ -102,6 +104,10 @@ impl SuperSTTDaemon {
         };
         let source = (!source.is_empty()).then_some(source);
         let name = self.backend_name(source.as_deref()).await;
+        let loaded = self.post_processor.read().await;
+        let device = loaded
+            .as_ref()
+            .map(|m| normalize_device(&m.instance.device()));
 
         serde_json::json!({
             "stage": 2,
@@ -109,7 +115,8 @@ impl SuperSTTDaemon {
             "source": source,
             "name": name,
             "model": (!model.is_empty()).then_some(model),
-            "loaded": self.post_processor_loaded().await,
+            "loaded": loaded.is_some(),
+            "device": device,
             // Processor stages carry the user's on/off choice separately from
             // whether the model actually came up: a selection can be enabled
             // while its load failed, and transcripts then pass through.

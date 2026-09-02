@@ -77,8 +77,6 @@ impl SuperSTTDaemon {
         let config = Self::load_and_persist_config();
 
         // Extract config fields needed for the struct before config is moved in.
-        let preferred_device = config.device.preferred_device.clone();
-        let actual_device = preferred_device.clone(); // Will be updated when model loads
         let active_backend = config.transcription.active_backend.clone();
         let preview_typing_enabled = config.transcription.preview_typing_enabled;
         let audio_theme = config.audio.theme;
@@ -97,8 +95,6 @@ impl SuperSTTDaemon {
             volume: Arc::new(RwLock::new(volume)),
             busy: Arc::new(tokio::sync::RwLock::new(false)),
             download_manager: components.download_manager,
-            preferred_device: Arc::new(tokio::sync::RwLock::new(preferred_device)),
-            actual_device: Arc::new(tokio::sync::RwLock::new(actual_device)),
             config: Arc::new(tokio::sync::RwLock::new(config)),
             resource_manager: components.resource_manager,
             preview_typing_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
@@ -242,7 +238,7 @@ impl SuperSTTDaemon {
     ) -> Result<()> {
         daemon.broadcast_model_loading_status(&name);
 
-        let device_pref = daemon.preferred_device.read().await.clone();
+        let device_pref = daemon.config.read().await.effective_device(&source, &name);
         let (instance, definition) = daemon
             .instantiate_backend(&name, &source, &device_pref)
             .await?;
@@ -259,7 +255,6 @@ impl SuperSTTDaemon {
         // `LoadedModel` — `ready` event consumers (e.g. the settings app's
         // current_device tracking) only update when `actual_device` is present.
         let actual_device = normalize_device(&instance.device());
-        *daemon.actual_device.write().await = actual_device.clone();
         *daemon.model.write().await = Some(LoadedModel {
             definition,
             instance,

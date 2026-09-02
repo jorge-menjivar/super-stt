@@ -26,8 +26,10 @@ impl TryFrom<DaemonRequest> for Command {
             "set_model" => cmd_set_model(&request),
             "get_model" => Ok(Command::GetModel),
             "list_models" => Ok(Command::ListModels),
-            "set_device" => cmd_set_device(&request),
-            "get_device" => Ok(Command::GetDevice),
+            "set_model_device" => cmd_set_model_device(&request),
+            "get_model_device" => cmd_get_model_device(&request),
+            "set_post_processor_device" => cmd_set_post_processor_device(&request),
+            "get_post_processor_device" => cmd_get_post_processor_device(&request),
             "get_config" => Ok(Command::GetConfig),
             "cancel_download" => Ok(Command::CancelDownload),
             "get_download_status" => Ok(Command::GetDownloadStatus),
@@ -178,22 +180,67 @@ fn cmd_set_model(request: &DaemonRequest) -> Result<Command, String> {
     })
 }
 
-fn cmd_set_device(request: &DaemonRequest) -> Result<Command, String> {
+/// The `model` a per-model device command addresses. Required and non-empty:
+/// a device belongs to a model, and there is no "the current one" fallback
+/// because the command must work for a model that is not loaded.
+fn model_device_target(request: &DaemonRequest, command: &str) -> Result<String, String> {
+    let model = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("model"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if model.is_empty() {
+        return Err(format!("Missing model for {command} command"));
+    }
+    if let Err(e) =
+        validation::validate_string(&model, "model", validation::limits::MAX_NAME_LENGTH)
+    {
+        return Err(e.to_string());
+    }
+    Ok(model)
+}
+
+/// The `device` a per-model device setter carries. Only presence and length
+/// are checked here; the daemon validates the value itself (`cpu`/`gpu` and
+/// the deprecated spellings) so it can answer `invalid_device`.
+fn model_device_value(request: &DaemonRequest, command: &str) -> Result<String, String> {
     let device = request
         .data
         .as_ref()
-        .and_then(|data| data.get("device"))
+        .and_then(|d| d.get("device"))
         .and_then(|v| v.as_str())
-        .ok_or("Missing device for set_device command")?
+        .ok_or_else(|| format!("Missing device for {command} command"))?
         .to_string();
-
     if let Err(e) =
         validation::validate_string(&device, "device", validation::limits::MAX_NAME_LENGTH)
     {
         return Err(e.to_string());
     }
+    Ok(device)
+}
 
-    Ok(Command::SetDevice { device })
+fn cmd_set_model_device(request: &DaemonRequest) -> Result<Command, String> {
+    let model = model_device_target(request, "set_model_device")?;
+    let device = model_device_value(request, "set_model_device")?;
+    Ok(Command::SetModelDevice { model, device })
+}
+
+fn cmd_get_model_device(request: &DaemonRequest) -> Result<Command, String> {
+    let model = model_device_target(request, "get_model_device")?;
+    Ok(Command::GetModelDevice { model })
+}
+
+fn cmd_set_post_processor_device(request: &DaemonRequest) -> Result<Command, String> {
+    let model = model_device_target(request, "set_post_processor_device")?;
+    let device = model_device_value(request, "set_post_processor_device")?;
+    Ok(Command::SetPostProcessorDevice { model, device })
+}
+
+fn cmd_get_post_processor_device(request: &DaemonRequest) -> Result<Command, String> {
+    let model = model_device_target(request, "get_post_processor_device")?;
+    Ok(Command::GetPostProcessorDevice { model })
 }
 
 /// Parse `set_post_processor`: the model to run final transcripts through.

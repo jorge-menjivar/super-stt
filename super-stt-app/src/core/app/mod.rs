@@ -106,10 +106,11 @@ pub struct AppModel {
     pub model_operation_state: ModelOperationState,
 
     // Device management state
-    /// Current device (cpu/cuda) from daemon
+    /// The accelerator the loaded stage-1 model is on (`cpu`/`cuda`/…), from
+    /// the daemon's `ready` events; empty when nothing is loaded. Each
+    /// model's own cpu/gpu *preference* is read from the daemon when the
+    /// model is staged.
     pub current_device: String,
-    /// Available devices from daemon
-    pub available_devices: Vec<String>,
     /// GPU inventory + memory from the daemon's `GET /gpu_info` (gpu-probe).
     pub gpu_info: Vec<super_stt_shared::models::protocol::GpuInfo>,
     /// Device switching state
@@ -137,6 +138,12 @@ pub struct AppModel {
     /// is local until the Enable button commits it. `None` means "use whatever
     /// the daemon already has selected".
     pub staged_post_processor: Option<(String, String)>,
+    /// The device staged for the post-processor pick, the stage-2 twin of
+    /// `models_page.staged_device`: seeded from what this install offers the
+    /// staged model, replaced by the model's own once the daemon answers, and
+    /// sent as the model's device when Enable commits it. `None` when the
+    /// staged model has no device to pick (an online one).
+    pub staged_post_processor_device: Option<String>,
 
     // Recording stop mode
     pub recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,

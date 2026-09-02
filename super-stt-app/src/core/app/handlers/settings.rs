@@ -2,15 +2,19 @@
 
 use crate::core::app::AppModel;
 use crate::daemon::client::{
-    clear_post_processor, clear_post_processor_backend, set_notification_method,
-    set_post_processor, set_post_processor_backend, set_preview_typing, set_recording_stop_mode,
-    set_write_method, test_write_method,
+    clear_post_processor, clear_post_processor_backend, get_model_device, set_model_device,
+    set_notification_method, set_post_processor, set_post_processor_backend, set_preview_typing,
+    set_recording_stop_mode, set_write_method, test_write_method,
 };
 use crate::ui::messages::{
     Message, NotificationMethodMessage, PostProcessorMessage, PreviewTypingMessage,
     RecordingStopModeMessage, WriteMethodMessage,
 };
 use cosmic::prelude::*;
+
+/// Post-processing is stage 2 of the pipeline — the stage a staged
+/// post-processor's device is addressed through.
+const PP_STAGE: u32 = 2;
 
 impl AppModel {
     /// Handle preview typing messages
@@ -71,6 +75,7 @@ impl AppModel {
             // shape of endpoint, so nothing loads until a model is enabled.
             PostProcessorMessage::SelectBackend(source) => {
                 self.staged_post_processor = None;
+                self.staged_post_processor_device = None;
                 // The choice came from the picker sheet; dismiss it now that it
                 // has been made, exactly as `SelectBackend` does.
                 self.core.window.show_context = false;
@@ -82,48 +87,34 @@ impl AppModel {
 
             PostProcessorMessage::Deselect => {
                 self.staged_post_processor = None;
+                self.staged_post_processor_device = None;
                 Task::perform(clear_post_processor_backend(), Self::reload_post_processor)
             }
 
             // Local only, exactly like staging a transcription model: picking
             // from the dropdown must not start running a model.
-            PostProcessorMessage::Staged(index) => {
-                if let Some(backend) = self
-                    .post_processor
-                    .source
-                    .as_deref()
-                    .and_then(|source| self.backends.iter().find(|b| b.source == source))
-                    && let Some(model) = crate::ui::views::models::post_processor_models(backend)
-                        .into_iter()
-                        .nth(index)
+            PostProcessorMessage::Staged(index) => self.stage_post_processor(index),
+
+            PostProcessorMessage::StagedDevice(device) => {
+                self.staged_post_processor_device = Some(device);
+                Task::none()
+            }
+
+            PostProcessorMessage::StagedDeviceLoaded { model, device } => {
+                // The answer is for the model staged when it was asked; a pick
+                // made since wins, and so does a pick the dropdown cannot show.
+                if let Some((staged, source)) = &self.staged_post_processor
+                    && *staged == model
+                    && let Some(backend) = self.backends.iter().find(|b| &b.source == source)
+                    && crate::ui::views::models::offered_devices(backend, &model)
+                        .contains(&device.device)
                 {
-                    self.staged_post_processor = Some((model, backend.source.clone()));
-                    self.clear_action_error(crate::state::ErrorScope::PostProcessing);
+                    self.staged_post_processor_device = Some(device.device);
                 }
                 Task::none()
             }
 
-            PostProcessorMessage::Enable => {
-                // The staged pick wins; otherwise re-enable whatever model is
-                // already selected. With neither — a backend chosen but no
-                // model picked — there is nothing to run.
-                let Some(selection) = self
-                    .staged_post_processor
-                    .clone()
-                    .or_else(|| self.post_processor.selection())
-                else {
-                    self.set_action_error(
-                        crate::state::ErrorScope::PostProcessing,
-                        "Choose a model first.".to_string(),
-                    );
-                    return Task::none();
-                };
-                let (model, source) = selection;
-                Task::perform(
-                    set_post_processor(model, Some(source)),
-                    Self::reload_post_processor,
-                )
-            }
+            PostProcessorMessage::Enable => self.enable_post_processor(),
 
             // Off, but the selection is kept: the user is turning the feature
             // off, not forgetting which model they picked. That is exactly what
@@ -144,6 +135,7 @@ impl AppModel {
                 // showing the daemon's selection after a refused save.
                 if self.staged_post_processor == state.selection() {
                     self.staged_post_processor = None;
+                    self.staged_post_processor_device = None;
                 }
                 self.post_processor = state;
                 self.clear_action_error(crate::state::ErrorScope::PostProcessing);
@@ -159,6 +151,89 @@ impl AppModel {
                 Task::none()
             }
         }
+    }
+
+    /// Stage the post-processor at `index` in the selected backend's list:
+    /// seed its device from what this install offers, then ask the daemon for
+    /// the model's own — the same two steps staging a transcription model
+    /// takes.
+    fn stage_post_processor(&mut self, index: usize) -> Task<cosmic::Action<Message>> {
+        let Some(backend) = self
+            .post_processor
+            .source
+            .as_deref()
+            .and_then(|source| self.backends.iter().find(|b| b.source == source))
+        else {
+            return Task::none();
+        };
+        let Some(model) = crate::ui::views::models::post_processor_models(backend)
+            .into_iter()
+            .nth(index)
+        else {
+            return Task::none();
+        };
+        let device = crate::ui::views::models::offered_devices(backend, &model)
+            .first()
+            .cloned();
+        self.staged_post_processor = Some((model.clone(), backend.source.clone()));
+        self.staged_post_processor_device.clone_from(&device);
+        self.clear_action_error(crate::state::ErrorScope::PostProcessing);
+        // Nothing to ask for an online model, which stages no device at all.
+        if device.is_none() {
+            return Task::none();
+        }
+        Task::perform(get_model_device(PP_STAGE, model.clone()), move |result| {
+            match result {
+                Ok(device) => cosmic::Action::App(Message::PostProcessor(
+                    PostProcessorMessage::StagedDeviceLoaded {
+                        model: model.clone(),
+                        device,
+                    },
+                )),
+                // The local default is already staged; a failed read only
+                // means the model's own choice is not reflected.
+                Err(e) => {
+                    log::warn!("Could not read the device for {model}: {e}");
+                    cosmic::Action::None
+                }
+            }
+        })
+    }
+
+    /// Commit the staged pick — or re-enable the daemon's own selection —
+    /// setting the staged model's device first when one is staged.
+    fn enable_post_processor(&mut self) -> Task<cosmic::Action<Message>> {
+        // The staged pick wins; otherwise re-enable whatever model is already
+        // selected. With neither — a backend chosen but no model picked —
+        // there is nothing to run.
+        let Some((model, source)) = self
+            .staged_post_processor
+            .clone()
+            .or_else(|| self.post_processor.selection())
+        else {
+            self.set_action_error(
+                crate::state::ErrorScope::PostProcessing,
+                "Choose a model first.".to_string(),
+            );
+            return Task::none();
+        };
+        // A staged device belongs to the staged model; re-enabling the
+        // daemon's own selection keeps whatever device it has.
+        let device = self
+            .staged_post_processor
+            .as_ref()
+            .and_then(|_| self.staged_post_processor_device.clone());
+        Task::perform(
+            async move {
+                // Set before the load so the load picks it up; for a model
+                // that is not loaded the daemon only records it.
+                if let Some(device) = device {
+                    set_model_device(PP_STAGE, model.clone(), device).await?;
+                }
+                set_post_processor(model, Some(source)).await
+            },
+            Self::reload_post_processor,
+        )
     }
 
     /// Map a set result into the follow-up that re-reads the daemon's own

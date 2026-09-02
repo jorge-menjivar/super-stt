@@ -11,6 +11,8 @@
 //!    refused for `/active_model` — the two roles do not cross.
 //! 6. `GET /backends` reports each model's `role`.
 //! 7. `GET /pipeline` lists both stages, and an out-of-range stage 404s.
+//! 8. `/pipeline/{stage}/model/{model}/device` reads and records a model's
+//!    device through its stage, per model, with the same validation.
 //!
 //! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
 //! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
@@ -116,6 +118,12 @@ name = "whisper-1"
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["none"]
+
+[[models]]
+name = "whisper-local"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu", "gpu"]
 
 [[models]]
 name = "cleanup-1"
@@ -681,4 +689,154 @@ async fn a_post_processor_only_backend_cannot_fill_stage_one() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "the same backend does fill stage 2");
+}
+
+/// A device belongs to a model: setting one for a model that is not loaded
+/// records it — loading nothing — and reading it back through its stage
+/// answers from the same record. Two models on the same backend keep their
+/// own.
+#[tokio::test]
+async fn a_models_device_is_its_own() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let (status, body) = post_req(
+        &sock,
+        "/pipeline/1",
+        &token,
+        serde_json::json!({ "source": FIXTURE_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+
+    // The default, before anything is set.
+    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["device"], "cpu");
+    assert_eq!(body["resolved_accel"], "cpu", "cpu needs no resolution");
+    let offered = body["available_devices"]
+        .as_array()
+        .expect("available_devices is a list");
+    assert!(
+        offered.iter().any(|d| d == "cpu"),
+        "every host offers the CPU: {body}"
+    );
+
+    // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
+    let (status, body) = post_req(
+        &sock,
+        "/pipeline/1/model/whisper-local/device",
+        &token,
+        serde_json::json!({ "device": "cuda" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["device"], "gpu");
+    assert_eq!(
+        body["resolved_accel"],
+        serde_json::Value::Null,
+        "a gpu choice has resolved to nothing before a load confirms it"
+    );
+
+    let (_, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
+    assert_eq!(body["device"], "gpu", "the choice is recorded");
+    let (_, body) = get(&sock, "/pipeline/1", &token).await;
+    assert_eq!(body["stage"]["loaded"], false, "nothing was loaded");
+
+    // The post-processor on the same backend has its own device.
+    let (status, _) = post_req(
+        &sock,
+        PP_STAGE,
+        &token,
+        serde_json::json!({ "source": FIXTURE_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/device", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["device"], "cpu");
+}
+
+/// What the device verb refuses: a value that is not a device, a device the
+/// model's manifest rules out, an online model (no local device at all), a
+/// model of the other stage's role, and a stage with no backend to resolve
+/// the model against.
+#[tokio::test]
+async fn the_device_verb_validates_the_model_and_the_device() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    // Nothing selected for stage 1 yet.
+    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_backend");
+
+    let (status, _) = post_req(
+        &sock,
+        "/pipeline/1",
+        &token,
+        serde_json::json!({ "source": FIXTURE_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = post_req(
+        &sock,
+        "/pipeline/1/model/whisper-local/device",
+        &token,
+        serde_json::json!({ "device": "definitely-not-a-real-device" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_device");
+    let (_, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
+    assert_eq!(body["device"], "cpu", "the bogus value was not recorded");
+
+    // An online model has no device: reading reports the manifest's `none`,
+    // setting is refused.
+    let (status, body) = get(&sock, "/pipeline/1/model/whisper-1/device", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["device"], "none");
+    assert_eq!(body["available_devices"], serde_json::json!([]));
+    let (status, body) = post_req(
+        &sock,
+        "/pipeline/1/model/whisper-1/device",
+        &token,
+        serde_json::json!({ "device": "cpu" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_device");
+
+    // A post-processor is not a stage-1 model, whichever backend serves it.
+    let (status, body) = get(&sock, "/pipeline/1/model/cleanup-1/device", &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_model");
+    assert!(
+        body["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("/pipeline/2/model/cleanup-1/device")),
+        "and the message points at the stage that runs it: {body}"
+    );
+
+    // A model the manifest confines to the CPU cannot be sent to the GPU.
+    let (status, _) = post_req(
+        &sock,
+        PP_STAGE,
+        &token,
+        serde_json::json!({ "source": FIXTURE_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = post_req(
+        &sock,
+        "/pipeline/2/model/cleanup-1/device",
+        &token,
+        serde_json::json!({ "device": "gpu" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_device");
+
+    // And the stage itself still has to exist.
+    let (status, body) = get(&sock, "/pipeline/3/model/whisper-local/device", &token).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
+    assert_eq!(body["error_code"], "unknown_stage");
 }

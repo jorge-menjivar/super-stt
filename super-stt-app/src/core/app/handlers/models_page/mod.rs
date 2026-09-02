@@ -5,8 +5,8 @@ mod registry;
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::client::{
-    clear_active_backend, get_gpu_info, set_active_backend, set_device, set_model,
-    unload_active_model,
+    clear_active_backend, get_gpu_info, get_model_device, set_active_backend, set_model,
+    set_model_device, unload_active_model,
 };
 use crate::state::{ContextPage, DaemonStatus, ModelsTab};
 use crate::ui::messages::{DownloadMessage, Message, ModelMessage, ModelsPageMessage};
@@ -24,6 +24,7 @@ impl AppModel {
             ModelsPageMessage::ModelsTabActivated(_)
             | ModelsPageMessage::StageActiveModel(_)
             | ModelsPageMessage::StageActiveDevice(_)
+            | ModelsPageMessage::StagedDeviceLoaded { .. }
             | ModelsPageMessage::LoadStagedModel
             | ModelsPageMessage::UnloadActiveModel => self.handle_models_tab_selection(message),
 
@@ -101,19 +102,43 @@ impl AppModel {
                 let source = self.models_page.active_backend.clone();
                 let device = staged_default_device(&self.backends, source.as_deref(), &model);
                 self.models_page.staged_model = Some(model.clone());
-                self.models_page.staged_device = device;
-                // Fetch the per-model language block at selection time so the
-                // active-backend card can show the language control before Load.
-                // Wire point 2: model staged (StageActiveModel).
-                if let Some(src) = source {
-                    self.load_model_language(src, model)
-                } else {
-                    Task::none()
-                }
+                self.models_page.staged_device.clone_from(&device);
+                let Some(src) = source else {
+                    return Task::none();
+                };
+                Task::batch([
+                    // Fetch the per-model language block at selection time so
+                    // the active-backend card can show the language control
+                    // before Load. Wire point 2: model staged (StageActiveModel).
+                    self.load_model_language(src, model.clone()),
+                    // And the model's own device, so a model the user once put
+                    // on the GPU is staged there again rather than on the
+                    // first device its manifest lists. Nothing to ask for an
+                    // online model, which stages no device at all.
+                    if device.is_some() {
+                        Self::load_staged_device(model)
+                    } else {
+                        Task::none()
+                    },
+                ])
             }
 
             ModelsPageMessage::StageActiveDevice(device) => {
                 self.models_page.staged_device = Some(device);
+                Task::none()
+            }
+
+            ModelsPageMessage::StagedDeviceLoaded { model, device } => {
+                // The answer is for the model staged when it was asked; a pick
+                // made since wins, and so does a pick the dropdown cannot show.
+                if self.models_page.staged_model.as_deref() == Some(model.as_str())
+                    && let Some(source) = self.models_page.active_backend.as_deref()
+                    && let Some(backend) = self.backends.iter().find(|b| b.source == source)
+                    && crate::ui::views::models::offered_devices(backend, &model)
+                        .contains(&device.device)
+                {
+                    self.models_page.staged_device = Some(device.device);
+                }
                 Task::none()
             }
 
@@ -159,7 +184,6 @@ impl AppModel {
             &source,
             &model,
             self.models_page.staged_device.as_deref(),
-            &self.current_device,
         ) {
             StagedLoad::NotInCatalog => {
                 log::warn!(
@@ -185,8 +209,12 @@ impl AppModel {
         Task::batch([
             Task::perform(
                 async move {
+                    // The device is the model's own, set before the load so
+                    // the load picks it up. For a model that is not loaded the
+                    // daemon only records it; for the one already loaded it is
+                    // the reload, and `set_model` then has nothing left to do.
                     if let Some(dev) = device_to_set {
-                        set_device(dev).await?;
+                        set_model_device(STT_STAGE, model.clone(), dev).await?;
                     }
                     set_model(model, source).await.map(|_| ())
                 },
@@ -341,16 +369,44 @@ impl AppModel {
     }
 }
 
+/// Transcription is stage 1 of the pipeline — the stage a staged model's
+/// device is addressed through.
+const STT_STAGE: u32 = 1;
+
+impl AppModel {
+    /// Ask the daemon which device `model` has, for [`ModelsPageMessage::StagedDeviceLoaded`].
+    fn load_staged_device(model: String) -> Task<cosmic::Action<Message>> {
+        Task::perform(
+            get_model_device(STT_STAGE, model.clone()),
+            move |result| match result {
+                Ok(device) => cosmic::Action::App(Message::ModelsPage(
+                    ModelsPageMessage::StagedDeviceLoaded {
+                        model: model.clone(),
+                        device,
+                    },
+                )),
+                // The local default is already staged; a failed read only
+                // means the model's own choice is not reflected.
+                Err(e) => {
+                    log::warn!("Could not read the device for {model}: {e}");
+                    cosmic::Action::None
+                }
+            },
+        )
+    }
+}
+
 /// The device a freshly staged model starts on: the first device this install
 /// can actually offer for it, or `None` when it can offer none.
 ///
 /// The narrowing is what makes `None` reachable, and `None` is what the Load
 /// button reads: a model declaring `gpu` on a backend whose installed asset is
 /// CPU-only can run on no device here, and staging one from the manifest would
-/// leave Load enabled next to the advisory saying so — sending a `set_device`
-/// that persists a GPU preference the user was just told is unusable. Seeding
-/// from the offered list also keeps the staged device inside the set the
-/// dropdown renders, so the picker never shows an unselected value.
+/// leave Load enabled next to the advisory saying so — sending a device the
+/// user was just told is unusable. Seeding from the offered list also keeps the
+/// staged device inside the set the dropdown renders, so the picker never
+/// shows an unselected value. The model's own recorded device, when it has
+/// one, replaces this once the daemon answers.
 fn staged_default_device(
     backends: &[crate::daemon::backends::BackendInfo],
     source: Option<&str>,
@@ -375,24 +431,18 @@ enum StagedLoad {
 
 /// Resolve a Load click against the installed-backend catalog.
 ///
-/// The catalog check is not merely an optimization. A backend can be
-/// uninstalled — or the catalog refreshed — between staging a model and
-/// clicking Load. Without it, a miss reads as "not online", the staged device
-/// is sent as a real `set_device`, and the daemon unloads the working model,
-/// reloads it on the new device, and *persists* that device — before the
-/// `set_model` that follows fails with `invalid_model`. The user ends up on a
-/// device they never chose, from a click that could not have succeeded.
-///
-/// For online models (the `none` sentinel in `supported_devices`) there is no
-/// device to set; otherwise the staged device is sent only when it actually
-/// differs from the current one, compared on the preference axis (see
-/// [`preference_axis`]).
+/// A backend can be uninstalled — or the catalog refreshed — between staging a
+/// model and clicking Load, and a click for a pair that is gone must not reach
+/// the daemon at all: the daemon would refuse both calls, but with two errors
+/// for one click. For online models (the `none` sentinel in
+/// `supported_devices`) there is no device to set; otherwise the staged device
+/// is sent as the model's own. The daemon compares it with where the model
+/// already is, so resending an unchanged device costs nothing.
 fn staged_load_device(
     backends: &[crate::daemon::backends::BackendInfo],
     source: &str,
     model: &str,
     staged_device: Option<&str>,
-    current_device: &str,
 ) -> StagedLoad {
     let Some(online) = backends
         .iter()
@@ -406,27 +456,10 @@ fn staged_load_device(
         None
     } else {
         staged_device
-            .filter(|d| *d != "none" && preference_axis(d) != preference_axis(current_device))
+            .filter(|d| *d != "none")
             .map(ToString::to_string)
     };
     StagedLoad::Switch { device_to_set }
-}
-
-/// Collapse a device label onto the `cpu`/`gpu` axis the preference is
-/// expressed in.
-///
-/// A staged device is a preference (`set_device` takes `cpu` or `gpu`), while
-/// `current_device` is the accelerator that preference resolved to — `cuda` on
-/// an NVIDIA host. The two are only comparable here: raw, a staged `gpu` never
-/// equals a current `cuda`, so every GPU model switch resends the preference
-/// and the daemon unloads and reloads the running model on the same GPU before
-/// the model switch begins. A `gpu` preference that fell back to `cpu` still
-/// differs on this axis, so retrying the accelerator keeps working.
-fn preference_axis(device: &str) -> &str {
-    match device {
-        "cuda" | "rocm" | "metal" | "vulkan" => "gpu",
-        other => other,
-    }
 }
 
 #[cfg(test)]
@@ -460,10 +493,7 @@ mod tests {
     }
 
     /// The regression: a Load click for a pair that is no longer installed
-    /// must not reach the daemon at all. Treating the catalog miss as merely
-    /// "not online" sends a real `set_device` first, which unloads the working
-    /// model and persists a device the user never chose — and only then does
-    /// the `set_model` fail with `invalid_model`.
+    /// must not reach the daemon at all.
     #[test]
     fn a_stale_pair_sends_nothing() {
         let installed = vec![backend(
@@ -479,7 +509,6 @@ mod tests {
                 "github.com/super-stt/gone",
                 "whisper-tiny",
                 Some("cuda"),
-                "cpu"
             ),
             StagedLoad::NotInCatalog,
         );
@@ -490,7 +519,6 @@ mod tests {
                 "github.com/super-stt/whisper",
                 "whisper-large",
                 Some("cuda"),
-                "cpu"
             ),
             StagedLoad::NotInCatalog,
         );
@@ -501,59 +529,44 @@ mod tests {
                 "github.com/super-stt/whisper",
                 "whisper-tiny",
                 Some("cuda"),
-                "cpu"
             ),
             StagedLoad::NotInCatalog,
         );
     }
 
-    /// A staged local model on a different device still sets it — the guard
-    /// must not swallow the case it sits in front of.
+    /// A staged local model sends its device — the model's own, whatever the
+    /// daemon happens to be running now — and none when none is staged.
     #[test]
-    fn a_local_model_on_a_new_device_sets_it() {
+    fn a_local_model_sends_its_staged_device() {
         let installed = vec![backend(
             "github.com/super-stt/whisper",
             "whisper-tiny",
-            &["cpu", "cuda"],
+            &["cpu", "gpu"],
         )];
-        assert_eq!(
-            staged_load_device(
-                &installed,
-                "github.com/super-stt/whisper",
-                "whisper-tiny",
-                Some("cuda"),
-                "cpu"
-            ),
-            StagedLoad::Switch {
-                device_to_set: Some("cuda".to_string())
-            },
-        );
-    }
-
-    /// No `set_device` when it would be a no-op: the daemon is already on that
-    /// device, or none was staged.
-    #[test]
-    fn an_unchanged_device_is_not_resent() {
-        let installed = vec![backend(
-            "github.com/super-stt/whisper",
-            "whisper-tiny",
-            &["cpu", "cuda"],
-        )];
-        for staged in [Some("cpu"), None] {
+        for staged in ["gpu", "cpu"] {
             assert_eq!(
                 staged_load_device(
                     &installed,
                     "github.com/super-stt/whisper",
                     "whisper-tiny",
-                    staged,
-                    "cpu"
+                    Some(staged),
                 ),
                 StagedLoad::Switch {
-                    device_to_set: None
+                    device_to_set: Some(staged.to_string())
                 },
-                "staged={staged:?} must not resend the current device"
             );
         }
+        assert_eq!(
+            staged_load_device(
+                &installed,
+                "github.com/super-stt/whisper",
+                "whisper-tiny",
+                None
+            ),
+            StagedLoad::Switch {
+                device_to_set: None
+            },
+        );
     }
 
     /// Online models carry the `none` sentinel and have no device to set;
@@ -571,7 +584,6 @@ mod tests {
                 "github.com/super-stt/openai",
                 "whisper-1",
                 Some("none"),
-                "cpu"
             ),
             StagedLoad::Switch {
                 device_to_set: None
@@ -584,7 +596,6 @@ mod tests {
                 "github.com/super-stt/openai",
                 "whisper-1",
                 Some("cuda"),
-                "cpu"
             ),
             StagedLoad::Switch {
                 device_to_set: None
@@ -601,75 +612,9 @@ mod tests {
                 "github.com/super-stt/whisper",
                 "whisper-tiny",
                 Some("none"),
-                "cpu"
             ),
             StagedLoad::Switch {
                 device_to_set: None
-            },
-        );
-    }
-
-    /// A staged `gpu` against a daemon already on CUDA is the *same* choice
-    /// spelled two ways: `set_device` takes the `cpu`/`gpu` preference, while
-    /// the current device is the accelerator that preference resolved to.
-    /// Comparing them raw makes every GPU model switch resend the preference,
-    /// which unloads the running model and reloads it on the same GPU before
-    /// the model switch even starts.
-    #[test]
-    fn a_staged_gpu_is_not_resent_to_a_daemon_already_on_an_accelerator() {
-        let installed = vec![backend(
-            "github.com/super-stt/whisper",
-            "whisper-tiny",
-            &["cpu", "gpu"],
-        )];
-        for current in ["cuda", "rocm", "metal", "vulkan", "gpu"] {
-            assert_eq!(
-                staged_load_device(
-                    &installed,
-                    "github.com/super-stt/whisper",
-                    "whisper-tiny",
-                    Some("gpu"),
-                    current
-                ),
-                StagedLoad::Switch {
-                    device_to_set: None
-                },
-                "current={current} is already the gpu preference"
-            );
-        }
-    }
-
-    /// The deliberate exception: a `gpu` preference that fell back to the CPU
-    /// still differs on the preference axis, so Load retries the accelerator.
-    #[test]
-    fn a_staged_gpu_is_resent_when_the_daemon_actually_fell_back_to_the_cpu() {
-        let installed = vec![backend(
-            "github.com/super-stt/whisper",
-            "whisper-tiny",
-            &["cpu", "gpu"],
-        )];
-        assert_eq!(
-            staged_load_device(
-                &installed,
-                "github.com/super-stt/whisper",
-                "whisper-tiny",
-                Some("gpu"),
-                "cpu"
-            ),
-            StagedLoad::Switch {
-                device_to_set: Some("gpu".to_string())
-            },
-        );
-        assert_eq!(
-            staged_load_device(
-                &installed,
-                "github.com/super-stt/whisper",
-                "whisper-tiny",
-                Some("cpu"),
-                "cuda"
-            ),
-            StagedLoad::Switch {
-                device_to_set: Some("cpu".to_string())
             },
         );
     }

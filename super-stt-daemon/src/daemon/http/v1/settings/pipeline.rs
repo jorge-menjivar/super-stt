@@ -4,11 +4,12 @@
 //!
 //! Contract: `docs/protocol/endpoints/v1/pipeline.md`.
 //!
-//! Every stage answers the same four verbs — select a backend, deselect it, run
-//! a model, stop it — so a client learns one shape and applies it at any
-//! position. What differs per stage is only *which* command implements the
-//! verb, which is what [`Stage`] resolves; the handlers themselves are the ones
-//! each stage always had, so there is a single implementation of each operation.
+//! Every stage answers the same verbs — select a backend, deselect it, run a
+//! model, stop it, and read or set the device one of its models runs on — so a
+//! client learns one shape and applies it at any position. What differs per
+//! stage is only *which* command implements the verb, which is what [`Stage`]
+//! resolves; the handlers themselves are the ones each stage always had, so
+//! there is a single implementation of each operation.
 
 use crate::daemon::http::internal::helpers::dispatch::{
     build_request, dispatch, dispatch_command, json_response,
@@ -38,6 +39,10 @@ struct Stage {
     cancel_model: Option<&'static str>,
     /// Re-instantiate in place to pick up changed secrets/options.
     reload_model: Option<&'static str>,
+    /// Read the device one of this stage's models runs on.
+    get_model_device: &'static str,
+    /// Set it.
+    set_model_device: &'static str,
 }
 
 impl Stage {
@@ -51,6 +56,8 @@ impl Stage {
                 clear_model: "unload_active_model",
                 cancel_model: Some("cancel_download"),
                 reload_model: Some("reload_active_model"),
+                get_model_device: "get_model_device",
+                set_model_device: "set_model_device",
             }),
             2 => Some(Self {
                 set_backend: "set_post_processor_backend",
@@ -62,6 +69,8 @@ impl Stage {
                 // `POST .../model` does the same job.
                 cancel_model: None,
                 reload_model: None,
+                get_model_device: "get_post_processor_device",
+                set_model_device: "set_post_processor_device",
             }),
             _ => None,
         }
@@ -224,4 +233,46 @@ async fn stage_action(
     dispatch_command(&state.daemon, command, None)
         .await
         .into_response()
+}
+
+/// `GET /pipeline/{stage}/model/{model}/device` — the device `model` prefers,
+/// what it resolved to, and what this install can offer it.
+pub(crate) async fn get_model_device(
+    State(s): State<AppState>,
+    Path((stage, model)): Path<(u32, String)>,
+) -> Response {
+    let Some(cmds) = Stage::resolve(stage) else {
+        return unknown_stage(stage);
+    };
+    dispatch_command(
+        &s.daemon,
+        cmds.get_model_device,
+        Some(serde_json::json!({ "model": model })),
+    )
+    .await
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SetDeviceBody {
+    pub(crate) device: String,
+}
+
+/// `POST /pipeline/{stage}/model/{model}/device` — run `model` on `device`,
+/// reloading it when it is the one this stage is running.
+pub(crate) async fn set_model_device(
+    State(s): State<AppState>,
+    Path((stage, model)): Path<(u32, String)>,
+    axum::Json(body): axum::Json<SetDeviceBody>,
+) -> Response {
+    let Some(cmds) = Stage::resolve(stage) else {
+        return unknown_stage(stage);
+    };
+    dispatch_command(
+        &s.daemon,
+        cmds.set_model_device,
+        Some(serde_json::json!({ "model": model, "device": body.device })),
+    )
+    .await
+    .into_response()
 }

@@ -30,7 +30,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 
 | Mutation                                                                                                                          | Mirrored as an SSE event?                                                                            |
 |-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| `/pipeline/1/model`, `/pipeline/1`, `/active_device`, `/allow_online_models` (when it triggers a fallback)                       | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled)                 |
+| `/pipeline/1/model`, `/pipeline/1`, `/pipeline/1/model/{model}/device` (when it reloads), `/allow_online_models` (when it triggers a fallback) | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled)                 |
 | `/update_check_enabled`, `/update_beta_optin`, `/pipeline/{stage}` (post-processing stages)                                     | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
 | `/audio_theme`, `/volume`, `/write_method`, `/notification_method`, `/recording_stop_mode`, `/preview_typing`, `/allow_online_models` (no fallback), `/custom_models_dir` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
 
@@ -40,7 +40,6 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 |-------------------------------------------------------------|------------|------------------------------------------------------------------------------------------------------|
 | [`/backends/{source}/models/{model}/language`](../endpoints/v1/backends/model-language.md) | GET, POST, DELETE | Per-model language override + resolved effective language |
 | [`/models`](../endpoints/v1/models.md)                      | GET        | List built-in + custom models                                                                         |
-| [`/active_device`](../endpoints/v1/active_device.md)        | POST, GET  | Switch CPU vs CUDA; read current device + GPU memory                                                  |
 | [`/language`](../endpoints/v1/language.md)                  | GET, POST, DELETE | Global Primary Language (BCP-47 tag / `auto` / unset)                          |
 | [`/audio_theme`](../endpoints/v1/audio_theme.md)            | POST, GET  | Set / read the audio cue theme                                                                        |
 | [`/audio_theme/test`](../endpoints/v1/audio_theme/test.md)  | POST       | Audition the current theme's start + stop cues                                                        |
@@ -53,6 +52,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/pipeline/{stage}/model`](../endpoints/v1/pipeline.md)    | POST, DELETE | Run / stop a model in one stage                                                                     |
 | [`/pipeline/{stage}/model/cancel`](../endpoints/v1/pipeline.md) | POST   | Abort an in-flight load for one stage                                                             |
 | [`/pipeline/{stage}/model/reload`](../endpoints/v1/pipeline.md) | POST   | Re-instantiate a stage in place, applying changed secrets/options                                 |
+| [`/pipeline/{stage}/model/{model}/device`](../endpoints/v1/pipeline.md#get-pipelinestagemodelmodeldevice) | GET, POST | Read / set the device one of a stage's models runs on (cpu / gpu)                    |
 | [`/write_method`](../endpoints/v1/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg_desktop_portal / ydotool / wayland_protocol)                   |
 | [`/write_method/test`](../endpoints/v1/write_method/test.md) | POST      | Type a test string with the configured method; reports the backend it resolved to                     |
 | [`/notification_method`](../endpoints/v1/notification_method.md) | POST, GET  | How recording failures are surfaced (auto / dbus / typed / off)                                       |
@@ -89,7 +89,7 @@ sequenceDiagram
     D-->>App: 200 { session_token, scopes }
 
     Note over App,D: 2. Load current state — one round-trip per panel
-    App->>D: GET /models, GET /pipeline, GET /active_device,<br/>      GET /audio_themes, GET /audio_theme, GET /volume, …
+    App->>D: GET /models, GET /pipeline,<br/>      GET /audio_themes, GET /audio_theme, GET /volume, …
     D-->>App: …
 
     Note over App,D: 3. Subscribe to status + progress events (separate connection)

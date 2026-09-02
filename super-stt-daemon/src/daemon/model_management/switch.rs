@@ -278,7 +278,11 @@ impl SuperSTTDaemon {
 
         self.broadcast_model_loading_status(&model);
         self.unload_current_model().await;
-        let device_pref = self.preferred_device.read().await.clone();
+        let device_pref = self
+            .config
+            .read()
+            .await
+            .effective_device(&backend_source, &model);
 
         match self
             .instantiate_backend(&model, &backend_source, &device_pref)

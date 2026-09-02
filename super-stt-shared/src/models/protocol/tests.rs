@@ -598,6 +598,77 @@ fn set_post_processor_requires_a_model() {
     }
 }
 
+/// A device belongs to a model, so the per-model device commands name one and
+/// carry no "current model" fallback: they must work for a model that is not
+/// loaded.
+#[test]
+fn model_device_commands_parse_the_model_and_device() {
+    let req = make_request(
+        "set_model_device",
+        Some(json!({ "model": "whisper-large-v3", "device": "gpu" })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::SetModelDevice { model, device } => {
+            assert_eq!(model, "whisper-large-v3");
+            assert_eq!(device, "gpu");
+        }
+        other => panic!("wrong command: {other:?}"),
+    }
+
+    let req = make_request(
+        "get_model_device",
+        Some(json!({ "model": "whisper-large-v3" })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::GetModelDevice { model } => assert_eq!(model, "whisper-large-v3"),
+        other => panic!("wrong command: {other:?}"),
+    }
+}
+
+/// The stage-2 twins carry the same shape.
+#[test]
+fn post_processor_device_commands_parse_the_model_and_device() {
+    let req = make_request(
+        "set_post_processor_device",
+        Some(json!({ "model": "s1-mini-q4_k_m", "device": "cpu" })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::SetPostProcessorDevice { model, device } => {
+            assert_eq!(model, "s1-mini-q4_k_m");
+            assert_eq!(device, "cpu");
+        }
+        other => panic!("wrong command: {other:?}"),
+    }
+
+    let req = make_request(
+        "get_post_processor_device",
+        Some(json!({ "model": "s1-mini-q4_k_m" })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::GetPostProcessorDevice { model } => assert_eq!(model, "s1-mini-q4_k_m"),
+        other => panic!("wrong command: {other:?}"),
+    }
+}
+
+/// Neither half may be omitted: a setter without a device has nothing to set,
+/// and either verb without a model has nothing to address.
+#[test]
+fn model_device_commands_require_both_halves() {
+    for (command, data) in [
+        ("set_model_device", json!({ "device": "gpu" })),
+        ("set_model_device", json!({ "model": "", "device": "gpu" })),
+        ("set_model_device", json!({ "model": "whisper" })),
+        ("get_model_device", json!({})),
+        ("set_post_processor_device", json!({ "device": "gpu" })),
+        ("get_post_processor_device", json!({ "model": "" })),
+    ] {
+        assert!(
+            Command::try_from(make_request(command, Some(data.clone()))).is_err(),
+            "{command} with {data} must be refused"
+        );
+    }
+}
+
 /// The backend half of the split: `set_post_processor_backend` takes the source
 /// alone, exactly as `set_active_backend` does for transcription.
 #[test]

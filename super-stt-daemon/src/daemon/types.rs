@@ -14,8 +14,8 @@ use tokio::sync::broadcast;
 
 /// Normalize a backend-reported device label to the short wire-name
 /// (`"cpu"` / `"cuda"` / `"rocm"` / `"metal"` / `"vulkan"` / `"remote"`) used
-/// in `daemon_status_changed` SSE payloads and on the `/active_device`
-/// endpoint.
+/// in `daemon_status_changed` SSE payloads and as `resolved_accel` on the
+/// per-model device endpoint.
 #[must_use]
 pub(crate) fn normalize_device(label: &str) -> String {
     let l = label.to_ascii_lowercase();
@@ -87,9 +87,6 @@ pub struct SuperSTTDaemon {
     pub volume: Arc<RwLock<u8>>,
     pub busy: Arc<tokio::sync::RwLock<bool>>,
     pub download_manager: Arc<DownloadStateManager>,
-    // Device management
-    pub preferred_device: Arc<tokio::sync::RwLock<String>>, // "cpu" or "cuda"
-    pub actual_device: Arc<tokio::sync::RwLock<String>>,    // actual device in use (may fallback)
     // Configuration management
     pub config: Arc<tokio::sync::RwLock<DaemonConfig>>,
     // Resource management for connection and rate limiting
@@ -139,8 +136,6 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         volume: Arc::new(RwLock::new(100)),
         busy: Arc::new(tokio::sync::RwLock::new(false)),
         download_manager: Arc::new(DownloadStateManager::new()),
-        preferred_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
-        actual_device: Arc::new(tokio::sync::RwLock::new("cpu".to_string())),
         config: Arc::new(tokio::sync::RwLock::new(DaemonConfig::default())),
         resource_manager: Arc::new(ResourceManager::development()),
         preview_typing_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
