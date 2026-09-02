@@ -113,6 +113,26 @@ fn the_schema_still_accepts_the_legacy_provider_key() {
     );
 }
 
+/// The schema requires an `id` of every entry. Six predate the requirement and
+/// cannot be fixed from this file: an entry that declares an `id` pins the
+/// release to it, and none of those six backends publishes a manifest
+/// declaring one — so adding it here would turn a missing id into an
+/// `IdMismatch` and drop the backend out of the catalog. Fixing one means
+/// adding `[backend].id` to that backend's own repo, cutting a release, and
+/// only then editing this file.
+///
+/// They are named here so the backlog is visible and shrinking: delete a name
+/// when its entry gains an `id`. Anything *else* the schema objects to — a new
+/// entry with no id, a malformed key — fails this test.
+const ENTRIES_STILL_WITHOUT_AN_ID: &[&str] = &[
+    "deepgram",
+    "mistral",
+    "openai",
+    "qwen3_asr",
+    "voxtral",
+    "whisper",
+];
+
 #[test]
 fn accepts_registry_toml() {
     let v = jsonschema::validator_for(&super_stt_registry_types::schema::registry_schema())
@@ -121,18 +141,41 @@ fn accepts_registry_toml() {
         .parent()
         .unwrap();
     let doc = toml_to_json(&std::fs::read_to_string(root.join("registry/registry.toml")).unwrap());
-    let errors: Vec<String> = v.iter_errors(&doc).map(|e| format!("{e}")).collect();
-    assert!(
-        errors.is_empty(),
-        "registry.toml schema errors: {errors:#?}"
+
+    let mut missing_id: Vec<String> = Vec::new();
+    let mut other: Vec<String> = Vec::new();
+    for e in v.iter_errors(&doc) {
+        // The offending entry is the first segment of the instance path.
+        let key = e
+            .instance_path()
+            .to_string()
+            .trim_start_matches('/')
+            .split('/')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        if e.to_string().contains("\"id\" is a required property") {
+            missing_id.push(key);
+        } else {
+            other.push(format!("{key}: {e}"));
+        }
+    }
+    missing_id.sort();
+
+    assert!(other.is_empty(), "registry.toml schema errors: {other:#?}");
+    assert_eq!(
+        missing_id, ENTRIES_STILL_WITHOUT_AN_ID,
+        "the set of entries without an `id` changed; update \
+         ENTRIES_STILL_WITHOUT_AN_ID (shrinking it is the point)"
     );
 }
 
 fn wasm_base() -> Value {
     json!({
-        "backend": { "source": "github.com/x/y", "name": "Y", "version": "1.0.0",
-                      "kind": "wasm", "entrypoint": "y.wasm", "contract": "v1",
-                      "license": "Apache-2.0", "description": "Y backend." },
+        "backend": { "id": "app.test.y", "source": "github.com/x/y", "name": "Y",
+                      "version": "1.0.0", "kind": "wasm", "entrypoint": "y.wasm",
+                      "contract": "v1", "license": "Apache-2.0",
+                      "description": "Y backend." },
         "assets": { "wasm": "y.wasm" }
     })
 }
@@ -255,14 +298,22 @@ fn base_url_may_be_declared_without_a_default() {
 /// `close_objects` only walks root + definitions; if a future type change
 /// produces inline object schemas elsewhere, strictness would silently be
 /// lost. Walk the whole output and fail loudly instead.
+///
+/// "Closed" means unlisted keys are not waved through. `additionalProperties:
+/// false` is one way; a *schema* there is the other, and is stricter rather
+/// than looser — the registry root uses it to hold every entry that is not a
+/// grandfathered key to the id-requiring definition. Only a missing or `true`
+/// `additionalProperties` is open.
 #[test]
 fn every_data_object_is_closed() {
     fn walk(v: &Value, path: &str, errors: &mut Vec<String>) {
         match v {
             Value::Object(obj) => {
-                if obj.contains_key("properties")
-                    && obj.get("additionalProperties") != Some(&Value::Bool(false))
-                {
+                let unlisted_keys_constrained = match obj.get("additionalProperties") {
+                    Some(Value::Bool(false)) | Some(Value::Object(_)) => true,
+                    _ => false,
+                };
+                if obj.contains_key("properties") && !unlisted_keys_constrained {
                     errors.push(path.to_string());
                 }
                 for (k, child) in obj {
@@ -374,6 +425,7 @@ fn every_mappable_contract_table_has_a_schema_definition() {
     for table in ["backend", "models", "secrets", "options"] {
         let field = ContractField {
             since: Contract::LATEST,
+            rule: super_stt_registry_types::manifest::FieldRule::Added,
             table,
             key: "unused",
         };

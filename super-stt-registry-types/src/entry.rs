@@ -14,8 +14,13 @@ use crate::forge::Forge;
 pub struct Entry {
     /// Reverse-DNS identifier for the backend, e.g. `com.example.voxtral`.
     /// Must equal the `[backend].id` of the release manifest this entry points
-    /// at. Required for entries added after the field was introduced; the
-    /// entries that predate it are listed in `registry_toml::GRANDFATHERED`.
+    /// at. Required — the generated `registry.schema.json` says so, and the
+    /// indexer refuses an entry without one.
+    ///
+    /// `Option` only because six entries predate the requirement and their
+    /// published manifests declare no `[backend].id` to match against. The
+    /// indexer tolerates exactly those (`registry_toml::GRANDFATHERED`) so the
+    /// catalog keeps building; the schema flags them, which is the backlog.
     #[serde(default)]
     pub id: Option<String>,
     /// Repository hosting the backend, as `<host>/<owner>/<repo>` (e.g.

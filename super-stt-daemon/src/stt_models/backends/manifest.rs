@@ -472,6 +472,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "y.wasm"
 contract = "v2"
+id = "app.super-stt.openai"
 description = "Test backend."
 
 [[models]]
@@ -498,6 +499,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "y.wasm"
 contract = "v2"
+id = "app.super-stt.openai"
 description = "Test backend."
 
 [[models]]
@@ -523,6 +525,7 @@ version = "0.1.0"
 kind = "wasm"
 entrypoint = "y.wasm"
 contract = "v2"
+id = "app.super-stt.openai"
 description = "Test backend."
 
 [capabilities]

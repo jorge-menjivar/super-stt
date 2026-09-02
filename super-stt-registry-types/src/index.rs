@@ -632,6 +632,7 @@ mod tests {
             let m = crate::manifest::Manifest::parse(&format!(
                 r#"
                 [backend]
+                id = "app.test.y"
                 source = "github.com/x/y"
                 name = "Y"
                 version = "1.0.0"

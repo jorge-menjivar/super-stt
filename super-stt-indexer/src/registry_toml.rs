@@ -34,9 +34,18 @@ pub enum ParseError {
     DuplicateId { a: String, b: String, id: String },
 }
 
-/// Entries that predate the `id` requirement. They parse without one; every
-/// other entry must declare one. Remove a key from this list once its entry
-/// declares an `id` — the list is meant to shrink to empty.
+/// Entries that predate the `id` requirement, and the migration backlog.
+///
+/// `registry.schema.json` requires an `id` of *every* entry, so an editor
+/// already flags these six. They are tolerated here so the scheduled index
+/// build keeps publishing a catalog while they are fixed one at a time —
+/// removing a name without fixing its backend would take every user's Browse
+/// listing down with it.
+///
+/// Fixing one is not a `registry.toml` edit. An entry that declares an `id`
+/// pins the release to it, so the order is: add `[backend].id` to that
+/// backend's own `backend.toml`, cut a release, *then* add the same id here
+/// and delete the name below. Adding the id here first earns an `IdMismatch`.
 const GRANDFATHERED: &[&str] = &[
     "deepgram",
     "mistral",
