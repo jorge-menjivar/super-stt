@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-02T04:35:27Z",
+  "generated_at": "2026-09-02T05:35:12Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -13,7 +13,7 @@
       "license": "GPL-3.0-only",
       "kind": "wasm",
       "contract": "v1",
-      "min_client": "0.1.0",
+      "min_client": "0.2.0",
       "entrypoint": "deepgram.wasm",
       "allowed_hosts": [
         "api.deepgram.com"
@@ -62,7 +62,7 @@
       "license": "GPL-3.0-only",
       "kind": "wasm",
       "contract": "v1",
-      "min_client": "0.1.0",
+      "min_client": "0.2.0",
       "entrypoint": "mistral.wasm",
       "allowed_hosts": [
         "api.mistral.ai"
@@ -119,7 +119,7 @@
       "license": "GPL-3.0-only",
       "kind": "wasm",
       "contract": "v1",
-      "min_client": "0.1.0",
+      "min_client": "0.2.0",
       "entrypoint": "openai.wasm",
       "allowed_hosts": [
         "api.openai.com"
@@ -203,7 +203,7 @@
       "license": "GPL-3.0-only",
       "kind": "subprocess",
       "contract": "v1",
-      "min_client": "0.1.0",
+      "min_client": "0.2.0",
       "entrypoint": "bin/qwen3-asr",
       "allowed_hosts": [],
       "online": false,
@@ -275,7 +275,7 @@
       "license": "GPL-3.0-only",
       "kind": "subprocess",
       "contract": "v1",
-      "min_client": "0.1.0",
+      "min_client": "0.2.0",
       "entrypoint": "super-stt-backend-voxtral",
       "allowed_hosts": [],
       "online": false,
@@ -443,7 +443,7 @@
       "license": "GPL-3.0-only",
       "kind": "subprocess",
       "contract": "v1",
-      "min_client": "0.1.0",
+      "min_client": "0.2.0",
       "entrypoint": "super-stt-backend-whisper",
       "allowed_hosts": [],
       "online": false,
