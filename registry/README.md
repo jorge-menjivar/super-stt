@@ -44,6 +44,13 @@ End users do not interact with this directory.
    registry schema (`registry.schema.json`, linked from the `#:schema` line
    at the top of `registry.toml`).
 
+   `id` is **required**. The schema linked from `registry.toml` flags an entry
+   without one, and the indexer refuses it. Six entries predate the rule and
+   still lack an `id`; they are tolerated so the catalog keeps building, and
+   each is fixed by adding `[backend].id` to that backend's own repo and
+   cutting a release *before* the id is added here — an entry that declares an
+   `id` pins the release to it, so the file must be edited last.
+
 3. Reviewers check: the id isn't already claimed by an existing or
    `removed = true` entry; your repo's license is acceptable; you control
    `repo` (CODEOWNERS or a one-time challenge file at HEAD); and

@@ -60,7 +60,7 @@ description = "Local Whisper speech-to-text."
 
 | Field        | Type   | Required        | Notes                                                                 |
 |--------------|--------|-----------------|-----------------------------------------------------------------------|
-| `id`         | string | for publication | Globally unique reverse-DNS identifier for the backend, e.g. `app.super-stt.voxtral`. Names the directory the backend is installed into. Required for a backend to be listed in the registry. |
+| `id`         | string | **yes** under `contract = "v2"`; for publication under `v1` | Globally unique reverse-DNS identifier for the backend, e.g. `app.super-stt.voxtral`. Names the directory the backend is installed into. Required for a backend to be listed in the registry, and required outright from `v2` — see [contract generations](#contract-generations). |
 | `source`     | string | yes             | Canonical repository id for this backend. Becomes the `source` of every model it provides (see [identity](./contract.md#model-identity)). Must be unique across installed backends. |
 | `name`       | string | yes             | Human-readable display name.                                          |
 | `version`    | string | yes             | Backend version (semver).                                            |
@@ -105,7 +105,7 @@ is.
 | Generation | Adds                                                                         | First supported by |
 |------------|------------------------------------------------------------------------------|--------------------|
 | `v1`       | The base contract: transcription over `POST /v1/transcribe`.                 | Super STT 0.2.0    |
-| `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors. | Super STT 0.2.4    |
+| `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors. Also **requires** [`[backend].id`](#backend). | Super STT 0.2.4    |
 
 Extending the contract does not oblige a backend to serve all of it. Which
 routes a backend must implement is decided by the models it declares, not by
@@ -134,6 +134,18 @@ same generation, so an editor bound to the schema flags it before anything is
 released. Spelling a newer field with its default value still counts as
 declaring it — which is why the message names removing the field too: writing
 a default by hand should not cost every older client.
+
+A generation can also *require* a field that an older one left optional. `id`
+is the first: a published backend has always needed one — the indexer refuses
+a release without it — but the field stayed optional so that backends
+installed before it existed keep loading. No `v2` backend can predate it, so
+`v2` requires it, and the failure moves from a rejected release to the
+author's editor:
+
+```
+`contract = "v2"` requires `[backend].id`, which this manifest does not declare
+— add it, or drop to `contract = "v1"` where it is optional
+```
 
 Only field *names* are versioned this way. A generation that widens an
 existing field's value set instead — a new model `role`, a new device — cannot

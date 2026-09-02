@@ -268,29 +268,52 @@ pub fn backend_schema() -> Value {
     root
 }
 
-/// For each contract generation below the latest, an `if`/`then` that
-/// disallows the fields later generations introduced when a manifest declares
-/// that generation. Empty when every generation shares one field set.
+/// One `if`/`then` per contract generation, encoding the same
+/// [`CONTRACT_FIELDS`](crate::manifest::CONTRACT_FIELDS) rules the parser
+/// enforces: fields a later generation introduced are disallowed, and fields
+/// this generation requires are required.
 ///
-/// A `[[models]]`-style table is an array of objects, so the disallowance
-/// goes on `items`; a plain table gets it directly. `false` as a property
-/// schema is what the other conditionals here use for "not under this
-/// condition" (see `cuda_major`), so an editor reports it the same way.
+/// A `[[models]]`-style table is an array of objects, so the rule goes on
+/// `items`; a plain table gets it directly. `false` as a property schema is
+/// what the other conditionals here use for "not under this condition" (see
+/// `cuda_major`), so an editor reports it the same way.
 fn contract_rules() -> Vec<Value> {
-    use crate::manifest::{CONTRACT_FIELDS, Contract};
+    use crate::manifest::{CONTRACT_FIELDS, Contract, FieldRule};
     Contract::ALL
         .iter()
-        .filter(|c| **c < Contract::LATEST)
         .filter_map(|declared| {
             let mut then = json!({});
-            for field in CONTRACT_FIELDS.iter().filter(|f| f.since > *declared) {
-                // Indexing a `Value` with `[]` creates the object on the way
-                // down, so the shape is written once, at the leaf.
-                let table = &mut then[field.table];
-                if field.is_array_table() {
-                    table["items"]["properties"][field.key] = json!(false);
-                } else {
-                    table["properties"][field.key] = json!(false);
+            for field in CONTRACT_FIELDS {
+                // Indexed only inside the arms: `then[table]` auto-vivifies a
+                // JSON null, and a null is not a subschema — a table touched
+                // without a rule to add would emit `{"backend": null}`.
+                match field.rule {
+                    FieldRule::Added if field.since > *declared => {
+                        let table = &mut then[field.table];
+                        if field.is_array_table() {
+                            table["items"]["properties"][field.key] = json!(false);
+                        } else {
+                            table["properties"][field.key] = json!(false);
+                        }
+                    }
+                    FieldRule::RequiredFrom if *declared >= field.since => {
+                        let table = &mut then[field.table];
+                        // `required` is a list, so push rather than assign —
+                        // one generation may require several fields of a table.
+                        let required = if field.is_array_table() {
+                            &mut table["items"]["required"]
+                        } else {
+                            &mut table["required"]
+                        };
+                        if !required.is_array() {
+                            *required = json!([]);
+                        }
+                        required
+                            .as_array_mut()
+                            .expect("required list")
+                            .push(json!(field.key));
+                    }
+                    _ => {}
                 }
             }
             let has_rules = then.as_object().is_some_and(|m| !m.is_empty());
@@ -339,6 +362,23 @@ pub fn registry_schema() -> Value {
     }
 
     close_objects(&mut entry);
+
+    // `id` is `Option` on the Rust type only because six entries predate the
+    // requirement, not because a new entry may omit it. The schema states the
+    // rule for everyone — including those six, so the backlog shows up in an
+    // editor rather than only in the indexer's tolerance list. The indexer
+    // still resolves them, or publishing this rule would take the catalog down
+    // with it.
+    if let Some(obj) = entry.as_object_mut() {
+        let required = obj
+            .entry("required")
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .expect("required list");
+        if !required.iter().any(|v| v == "id") {
+            required.push(json!("id"));
+        }
+    }
 
     let mut definitions = hoisted;
     definitions.insert("entry".into(), entry);

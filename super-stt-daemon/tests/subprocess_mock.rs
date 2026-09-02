@@ -40,6 +40,7 @@ version = "0.0.0"
 kind = "subprocess"
 entrypoint = "mock-backend"
 contract = "v2"
+id = "app.super-stt.mock"
 description = "Test backend."
 
 [[models]]

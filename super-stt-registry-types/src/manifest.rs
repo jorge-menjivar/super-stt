@@ -151,6 +151,16 @@ impl Contract {
     /// Every generation, oldest first.
     pub const ALL: &'static [Self] = &[Self::V1, Self::V2];
 
+    /// The generation immediately before this one; `None` for the first.
+    #[must_use]
+    pub fn previous(self) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .rev()
+            .copied()
+            .find(|candidate| *candidate < self)
+    }
+
     /// The Super STT release that first understood this generation — the
     /// floor below which a daemon cannot install a backend declaring it.
     ///
@@ -221,17 +231,34 @@ impl<'de> Deserialize<'de> for Contract {
     }
 }
 
-/// A manifest field and the contract generation that introduced it.
+/// What a generation does to a field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldRule {
+    /// The field does not exist below `since`. Declaring it under an older
+    /// generation is an error, because that generation's schema has no such
+    /// key — an author validating against it would be told the field is
+    /// unknown while the daemon quietly honored it.
+    Added,
+    /// The field exists in every generation, but from `since` on a manifest
+    /// must declare it. Used to close an optionality that only survived for
+    /// backward compatibility: the new generation is a clean break, so it can
+    /// demand what older ones could only recommend.
+    RequiredFrom,
+}
+
+/// A manifest field and what a contract generation does to it.
 ///
-/// The one table behind both enforcement points: [`Manifest::parse`] rejects
-/// a manifest that uses a field newer than the contract it declares, and the
-/// generated schema disallows the same field under the same contract, so an
-/// editor flags it before anything is published. Adding a field to a new
-/// generation means adding a row here, and nothing else has to be taught.
+/// The one table behind both enforcement points: [`Manifest::parse`] holds a
+/// manifest to the rules of the contract it declares, and the generated schema
+/// encodes the same rules, so an editor flags a violation before anything is
+/// published. Adding a field to a new generation means adding a row here, and
+/// nothing else has to be taught.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContractField {
-    /// The generation that introduced the field.
+    /// The generation the rule takes effect in.
     pub since: Contract,
+    /// Which rule this row expresses.
+    pub rule: FieldRule,
     /// The top-level table the field lives in: `backend` for `[backend]`,
     /// `models` for each `[[models]]` entry, and so on.
     pub table: &'static str,
@@ -278,17 +305,32 @@ impl ContractField {
     }
 }
 
-/// Every field introduced after v1, with the generation that introduced it.
+/// Every field rule a generation after v1 introduces.
 ///
 /// Field **names** only. A generation that widens an existing field's value
 /// set instead — a new `ModelRole`, a new `Device` — cannot be expressed here,
 /// and a manifest using such a value under an older `contract` is caught by
 /// that field's own `FromStr` rather than by this table.
-pub const CONTRACT_FIELDS: &[ContractField] = &[ContractField {
-    since: Contract::V2,
-    table: "models",
-    key: "role",
-}];
+pub const CONTRACT_FIELDS: &[ContractField] = &[
+    ContractField {
+        since: Contract::V2,
+        rule: FieldRule::Added,
+        table: "models",
+        key: "role",
+    },
+    // `id` names the install directory and is what the registry matches an
+    // entry against, so a published backend has always needed one — the
+    // indexer refuses a release without it. It stayed optional in the type
+    // only so backends installed before the field existed keep loading, and v2
+    // is new enough that no such backend can declare it. Requiring it here
+    // moves the failure from a rejected release to the author's editor.
+    ContractField {
+        since: Contract::V2,
+        rule: FieldRule::RequiredFrom,
+        table: "backend",
+        key: "id",
+    },
+];
 
 /// `[network]` — outbound network policy.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -826,6 +868,19 @@ pub enum ManifestError {
         /// The generation the manifest declares.
         declared: Contract,
     },
+    /// A field the manifest's `contract` requires was not declared.
+    #[error(
+        "`contract = \"{declared}\"` requires `{field}`, which this manifest does not \
+         declare — add it, or drop to `contract = \"{previous}\"` where it is optional"
+    )]
+    FieldRequiredByContract {
+        /// The field, spelled as in the manifest (e.g. `[backend].id`).
+        field: String,
+        /// The generation the manifest declares.
+        declared: Contract,
+        /// The newest generation that does not require it.
+        previous: Contract,
+    },
     /// A `[[models.files]]` `destination` is not a safe relative path.
     #[error("backend.toml file destination {0:?} is not a safe relative path")]
     UnsafeDestination(String),
@@ -883,29 +938,56 @@ pub enum ManifestError {
     },
 }
 
-/// The first [`CONTRACT_FIELDS`] entry the document spells that `declared`
-/// does not include, in table order. `None` when the manifest stays within its
-/// contract.
+/// Whether any [`CONTRACT_FIELDS`] rule can bite at `declared`. When none can
+/// — which for a manifest declaring the latest generation with no required
+/// fields is the common case — the raw document never has to be parsed.
+fn applies_to(declared: Contract) -> bool {
+    CONTRACT_FIELDS.iter().any(|field| match field.rule {
+        FieldRule::Added => field.since > declared,
+        FieldRule::RequiredFrom => declared >= field.since,
+    })
+}
+
+/// Whether the raw document declares a field, anywhere its table allows it.
 ///
-/// Looks at the raw document rather than the typed struct so an explicitly
-/// written default still counts as declared. A table that is an array
-/// (`[[models]]`) is checked entry by entry; a plain table (`[backend]`) once.
-fn first_field_beyond_contract(
-    raw: &toml::Table,
-    declared: Contract,
-) -> Option<&'static ContractField> {
-    CONTRACT_FIELDS
-        .iter()
-        .filter(|field| field.since > declared)
-        .find(|field| match raw.get(field.table) {
-            Some(toml::Value::Array(entries)) if field.is_array_table() => entries
-                .iter()
-                .any(|entry| entry.as_table().is_some_and(|t| t.contains_key(field.key))),
-            Some(toml::Value::Table(table)) if !field.is_array_table() => {
-                table.contains_key(field.key)
-            }
-            _ => false,
-        })
+/// Reads the raw document rather than the typed struct so an explicitly
+/// written default still counts as declared, and an absent field is absent
+/// rather than defaulted. A table that is an array (`[[models]]`) counts a
+/// field declared if *any* entry declares it; a plain table (`[backend]`) is
+/// checked once.
+fn declares(raw: &toml::Table, field: &ContractField) -> bool {
+    match raw.get(field.table) {
+        Some(toml::Value::Array(entries)) if field.is_array_table() => entries
+            .iter()
+            .any(|entry| entry.as_table().is_some_and(|t| t.contains_key(field.key))),
+        Some(toml::Value::Table(table)) if !field.is_array_table() => table.contains_key(field.key),
+        _ => false,
+    }
+}
+
+/// The first [`CONTRACT_FIELDS`] rule the document breaks, in table order, as
+/// the error it should be reported as. `None` when the manifest stays within
+/// its contract.
+fn contract_violation(raw: &toml::Table, declared: Contract) -> Option<ManifestError> {
+    CONTRACT_FIELDS.iter().find_map(|field| match field.rule {
+        // A field from a later generation, spelled under an earlier one.
+        FieldRule::Added if field.since > declared && declares(raw, field) => {
+            Some(ManifestError::FieldRequiresContract {
+                field: field.path(),
+                since: field.since,
+                declared,
+            })
+        }
+        // A field this generation requires, left out.
+        FieldRule::RequiredFrom if declared >= field.since && !declares(raw, field) => {
+            Some(ManifestError::FieldRequiredByContract {
+                field: field.path(),
+                declared,
+                previous: field.since.previous().unwrap_or(field.since),
+            })
+        }
+        _ => None,
+    })
 }
 
 impl Manifest {
@@ -956,16 +1038,10 @@ impl Manifest {
         // line/column spans in error messages — and only when some field could
         // actually be in breach, which for a manifest declaring the latest
         // generation is never.
-        if fields == ContractFields::Enforced
-            && CONTRACT_FIELDS.iter().any(|f| f.since > m.backend.contract)
-        {
+        if fields == ContractFields::Enforced && applies_to(m.backend.contract) {
             let raw: toml::Table = toml::from_str(text)?;
-            if let Some(field) = first_field_beyond_contract(&raw, m.backend.contract) {
-                return Err(ManifestError::FieldRequiresContract {
-                    field: field.path(),
-                    since: field.since,
-                    declared: m.backend.contract,
-                });
+            if let Some(violation) = contract_violation(&raw, m.backend.contract) {
+                return Err(violation);
             }
         }
         if !crate::is_safe_relative_path(&m.backend.entrypoint) {
@@ -1291,6 +1367,7 @@ mod tests {
         format!(
             r#"
             [backend]
+            id = "app.test.y"
             source = "github.com/x/y"
             name = "Y"
             version = "1.0.0"
@@ -1334,6 +1411,42 @@ mod tests {
             }
             other => panic!("expected FieldRequiresContract, got {other}"),
         }
+    }
+
+    /// v2 requires `[backend].id`. A published backend has always needed one
+    /// — the indexer refuses a release without it — so the new generation
+    /// says it where an author can see it, rather than leaving it to a
+    /// rejected release.
+    #[test]
+    fn a_v2_manifest_must_declare_a_backend_id() {
+        let without_id = manifest_with("v2", "").replace("            id = \"app.test.y\"\n", "");
+        let err = Manifest::parse(&without_id).expect_err("v2 requires an id");
+        assert_eq!(
+            err.to_string(),
+            "`contract = \"v2\"` requires `[backend].id`, which this manifest does not \
+             declare — add it, or drop to `contract = \"v1\"` where it is optional"
+        );
+        assert!(matches!(err, ManifestError::FieldRequiredByContract { .. }));
+    }
+
+    /// v1 keeps `id` optional: a backend installed before the field existed
+    /// still loads, which is the only reason the field is an `Option` at all.
+    #[test]
+    fn a_v1_manifest_may_still_omit_the_backend_id() {
+        let without_id = manifest_with("v1", "").replace("            id = \"app.test.y\"\n", "");
+        let m = Manifest::parse(&without_id).expect("v1 does not require an id");
+        assert_eq!(m.backend.id, None);
+    }
+
+    /// The requirement is on *declaring* the field, and the value is still
+    /// held to the id format — the two rules compose rather than shadow.
+    #[test]
+    fn a_v2_manifest_with_a_malformed_id_is_still_rejected_as_malformed() {
+        let bad = manifest_with("v2", "").replace("app.test.y", "not-reverse-dns");
+        assert!(matches!(
+            Manifest::parse(&bad),
+            Err(ManifestError::InvalidId(_))
+        ));
     }
 
     /// A manifest already installed here is exempt. Enforcing the rule at
@@ -1435,6 +1548,13 @@ mod tests {
             );
             assert!(a <= b, "{}: floor must not go down", pair[1]);
         }
+    }
+
+    /// `previous` walks generations backwards, and the first has none.
+    #[test]
+    fn a_generation_knows_the_one_before_it() {
+        assert_eq!(Contract::V1.previous(), None);
+        assert_eq!(Contract::V2.previous(), Some(Contract::V1));
     }
 
     /// Every row in the field table points at a real table, so the audit can
