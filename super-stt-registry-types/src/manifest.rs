@@ -114,22 +114,117 @@ impl fmt::Display for Kind {
     }
 }
 
-/// Backend-protocol contract version.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Backend-protocol contract version: the one thing a manifest declares about
+/// what it implements.
+///
+/// A contract generation names a set of manifest fields and backend routes.
+/// Each generation is additive over the one before — v2 is v1 plus the
+/// `[[models]].role` field and the `POST /v1/process` route — so a backend
+/// declares the *lowest* generation whose fields it uses, and a daemon
+/// supports every generation up to the one it was built with.
+///
+/// This is a closed enum on purpose. A daemon that predates a generation
+/// cannot parse a manifest declaring it, which is what stops such a daemon
+/// from installing a backend it cannot drive: the refusal needs no field the
+/// old daemon would have to know about, because it is the *absence* of
+/// knowledge that refuses. Every generation added here therefore also gates
+/// itself against every daemon released before it.
+///
+/// Variant order is generation order; the derived `Ord` relies on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum Contract {
-    /// The v1 contract (`docs/protocol/backend/contract.md`).
+    /// The v1 contract (`docs/protocol/backend/contract.md`): transcription
+    /// only.
     #[serde(rename = "v1")]
     V1,
+    /// v1 plus `[[models]].role` and `POST /v1/process` — a backend may serve
+    /// transcript post-processors.
+    #[serde(rename = "v2")]
+    V2,
+}
+
+impl Contract {
+    /// The newest generation this crate understands. A manifest may not
+    /// declare anything above it, because the closed enum refuses to parse it.
+    pub const LATEST: Self = Self::V2;
+
+    /// Every generation, oldest first.
+    pub const ALL: &'static [Self] = &[Self::V1, Self::V2];
+
+    /// The Super STT release that first understood this generation — the
+    /// floor below which a daemon cannot install a backend declaring it.
+    ///
+    /// The indexer stamps this onto each index entry as `min_client`, so a
+    /// daemon that does not know the generation can still tell the user what
+    /// to update to. A backend author never writes a Super STT version: they
+    /// declare the contract, and this table is what it means.
+    #[must_use]
+    pub const fn min_client(self) -> &'static str {
+        match self {
+            Self::V1 => "0.1.0",
+            Self::V2 => "0.2.4",
+        }
+    }
 }
 
 impl fmt::Display for Contract {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::V1 => write!(f, "v1"),
+            Self::V2 => write!(f, "v2"),
         }
     }
 }
+
+impl std::str::FromStr for Contract {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "v1" => Ok(Self::V1),
+            "v2" => Ok(Self::V2),
+            _ => Err(format!("Unknown contract: {s}")),
+        }
+    }
+}
+
+/// A manifest field and the contract generation that introduced it.
+///
+/// The one table behind both enforcement points: [`Manifest::parse`] rejects
+/// a manifest that uses a field newer than the contract it declares, and the
+/// generated schema disallows the same field under the same contract, so an
+/// editor flags it before anything is published. Adding a field to a new
+/// generation means adding a row here, and nothing else has to be taught.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContractField {
+    /// The generation that introduced the field.
+    pub since: Contract,
+    /// The top-level table the field lives in: `backend` for `[backend]`,
+    /// `models` for each `[[models]]` entry, and so on.
+    pub table: &'static str,
+    /// The field's key within that table.
+    pub key: &'static str,
+}
+
+impl ContractField {
+    /// How the field is spelled in a manifest and in error messages, e.g.
+    /// `[[models]].role`.
+    #[must_use]
+    pub fn path(&self) -> String {
+        match self.table {
+            "models" | "secrets" | "options" => format!("[[{}]].{}", self.table, self.key),
+            table => format!("[{table}].{}", self.key),
+        }
+    }
+}
+
+/// Every field introduced after v1, with the generation that introduced it.
+pub const CONTRACT_FIELDS: &[ContractField] = &[ContractField {
+    since: Contract::V2,
+    table: "models",
+    key: "role",
+}];
 
 /// `[network]` — outbound network policy.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -435,6 +530,8 @@ pub struct ModelEntry {
     /// What the model is for: transcribing audio, or post-processing a
     /// transcript. Default [`ModelRole::Transcription`], so every manifest
     /// written before the field existed keeps its models transcribing.
+    ///
+    /// A v2 field: declaring it under `contract = "v1"` is a parse error.
     #[serde(default)]
     pub role: ModelRole,
     /// Files the model needs, each provisioned to its own `destination`
@@ -646,6 +743,19 @@ pub enum ManifestError {
     /// `[backend].id` is present but not a well-formed reverse-DNS id.
     #[error("`[backend].id` is not a valid reverse-DNS id: {0}")]
     InvalidId(String),
+    /// A field was declared that the manifest's `contract` does not include.
+    #[error(
+        "`{field}` requires `contract = \"{since}\"`, but this manifest declares \
+         `contract = \"{declared}\"`"
+    )]
+    FieldRequiresContract {
+        /// The field, spelled as in the manifest (e.g. `[[models]].role`).
+        field: String,
+        /// The generation that introduced it.
+        since: Contract,
+        /// The generation the manifest declares.
+        declared: Contract,
+    },
     /// A `[[models.files]]` `destination` is not a safe relative path.
     #[error("backend.toml file destination {0:?} is not a safe relative path")]
     UnsafeDestination(String),
@@ -703,6 +813,29 @@ pub enum ManifestError {
     },
 }
 
+/// The first [`CONTRACT_FIELDS`] entry the document spells that `declared`
+/// does not include, in table order. `None` when the manifest stays within its
+/// contract.
+///
+/// Looks at the raw document rather than the typed struct so an explicitly
+/// written default still counts as declared. A table that is an array
+/// (`[[models]]`) is checked entry by entry; a plain table (`[backend]`) once.
+fn first_field_beyond_contract(
+    raw: &toml::Table,
+    declared: Contract,
+) -> Option<&'static ContractField> {
+    CONTRACT_FIELDS
+        .iter()
+        .filter(|field| field.since > declared)
+        .find(|field| match raw.get(field.table) {
+            Some(toml::Value::Array(entries)) => entries
+                .iter()
+                .any(|entry| entry.as_table().is_some_and(|t| t.contains_key(field.key))),
+            Some(toml::Value::Table(table)) => table.contains_key(field.key),
+            _ => false,
+        })
+}
+
 impl Manifest {
     /// Parse a `backend.toml` from its text.
     ///
@@ -714,6 +847,21 @@ impl Manifest {
     /// Returns a [`ManifestError`] on TOML errors or an unsafe entrypoint.
     pub fn parse(text: &str) -> Result<Self, ManifestError> {
         let mut m: Self = toml::from_str(text)?;
+        // Every field defaults when absent, so the typed struct cannot tell
+        // "declared `role`" from "left it out". The raw document can, and the
+        // rule is about what was written: a v1 manifest may not spell a v2
+        // field at all, not even with its default value, because the v1
+        // schema does not have it. Parsed from the text a second time rather
+        // than converted from one `Table`, so the typed parse above keeps its
+        // line/column spans in error messages.
+        let raw: toml::Table = toml::from_str(text)?;
+        if let Some(field) = first_field_beyond_contract(&raw, m.backend.contract) {
+            return Err(ManifestError::FieldRequiresContract {
+                field: field.path(),
+                since: field.since,
+                declared: m.backend.contract,
+            });
+        }
         if !crate::is_safe_relative_path(&m.backend.entrypoint) {
             return Err(ManifestError::UnsafeEntrypoint(m.backend.entrypoint));
         }
@@ -1012,6 +1160,143 @@ mod tests {
     /// index time, so rejecting an unread key would drop every already-released
     /// backend out of the index rather than fail some local build.
     ///
+    /// A manifest declaring `contract` and one `[[models]]` entry carrying
+    /// `extra`, for the contract-field tests.
+    fn manifest_with(contract: &str, extra: &str) -> String {
+        format!(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "wasm"
+            entrypoint = "y.wasm"
+            contract = "{contract}"
+            description = "Test backend."
+
+            [[models]]
+            name = "m1"
+            primary_language = "en"
+            supported_languages = ["en"]
+            supported_devices = ["cpu"]
+            {extra}
+            "#
+        )
+    }
+
+    /// `role` is a v2 field. A v1 manifest that spells it is refused with an
+    /// error naming the field and both contracts — the author's fix is one
+    /// line either way.
+    #[test]
+    fn a_v1_manifest_may_not_declare_a_v2_field() {
+        let err = Manifest::parse(&manifest_with("v1", r#"role = "post_processor""#))
+            .expect_err("role under v1 must be refused");
+        assert_eq!(
+            err.to_string(),
+            "`[[models]].role` requires `contract = \"v2\"`, but this manifest declares \
+             `contract = \"v1\"`"
+        );
+        match err {
+            ManifestError::FieldRequiresContract {
+                field,
+                since,
+                declared,
+            } => {
+                assert_eq!(field, "[[models]].role");
+                assert_eq!(since, Contract::V2);
+                assert_eq!(declared, Contract::V1);
+            }
+            other => panic!("expected FieldRequiresContract, got {other}"),
+        }
+    }
+
+    /// The rule is about what was written, not what it means: spelling the
+    /// default under v1 is still a v1 manifest using a v2 field, and the v1
+    /// schema an editor validates against does not have it.
+    #[test]
+    fn spelling_the_default_role_under_v1_is_still_refused() {
+        let err = Manifest::parse(&manifest_with("v1", r#"role = "transcription""#))
+            .expect_err("an explicit default is still a declared field");
+        assert!(matches!(err, ManifestError::FieldRequiresContract { .. }));
+    }
+
+    /// Only the fields a manifest actually spells count against its contract.
+    #[test]
+    fn a_v1_manifest_without_v2_fields_parses_and_defaults_the_role() {
+        let m = Manifest::parse(&manifest_with("v1", "")).expect("plain v1 parses");
+        assert_eq!(m.backend.contract, Contract::V1);
+        assert_eq!(m.models[0].role, ModelRole::Transcription);
+    }
+
+    /// v2 is v1 plus the new fields: it accepts both a manifest that uses them
+    /// and one that does not.
+    #[test]
+    fn a_v2_manifest_may_declare_role_or_omit_it() {
+        let with = Manifest::parse(&manifest_with("v2", r#"role = "post_processor""#))
+            .expect("role under v2 parses");
+        assert!(with.models[0].role.is_post_processor());
+        let without = Manifest::parse(&manifest_with("v2", "")).expect("plain v2 parses");
+        assert_eq!(without.models[0].role, ModelRole::Transcription);
+    }
+
+    /// The closed enum is the gate: a generation this crate does not know is a
+    /// parse error, which is what keeps a daemon from installing a backend it
+    /// cannot drive. The error keeps its location, so an author sees where.
+    #[test]
+    fn an_unknown_contract_is_a_located_parse_error() {
+        let err = Manifest::parse(&manifest_with("v3", "")).expect_err("v3 is unknown");
+        let text = err.to_string();
+        assert!(matches!(err, ManifestError::Toml(_)), "got {text}");
+        assert!(
+            text.contains("line"),
+            "error should carry a location: {text}"
+        );
+    }
+
+    /// Generation order is what `since > declared` relies on, and every
+    /// generation names the release that introduced it.
+    #[test]
+    fn contracts_order_by_generation_and_each_names_its_floor() {
+        assert!(Contract::V1 < Contract::V2);
+        assert_eq!(Contract::LATEST, *Contract::ALL.last().unwrap());
+        for pair in Contract::ALL.windows(2) {
+            assert!(pair[0] < pair[1], "ALL must be oldest first");
+        }
+        for c in Contract::ALL {
+            assert_eq!(c.to_string().parse::<Contract>(), Ok(*c));
+            assert!(
+                semver::Version::parse(c.min_client()).is_ok(),
+                "{c}: min_client must be semver"
+            );
+        }
+        // A newer generation never lowers the floor.
+        for pair in Contract::ALL.windows(2) {
+            let (a, b) = (
+                semver::Version::parse(pair[0].min_client()).unwrap(),
+                semver::Version::parse(pair[1].min_client()).unwrap(),
+            );
+            assert!(a <= b, "{}: floor must not go down", pair[1]);
+        }
+    }
+
+    /// Every row in the field table points at a real table, so the audit can
+    /// find it in a document.
+    #[test]
+    fn every_contract_field_is_spelled_the_way_a_manifest_spells_it() {
+        for field in CONTRACT_FIELDS {
+            assert!(
+                field.since > Contract::V1,
+                "v1 is the base; it introduces nothing"
+            );
+            assert!(
+                matches!(field.table, "backend" | "models" | "secrets" | "options"),
+                "{}: unknown table",
+                field.path()
+            );
+        }
+        assert_eq!(CONTRACT_FIELDS[0].path(), "[[models]].role");
+    }
+
     /// Concretely, this is the test that fails if `deny_unknown_fields` is ever
     /// added to `ModelEntry`.
     #[test]

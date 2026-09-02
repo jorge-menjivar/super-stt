@@ -4,6 +4,7 @@
 //! the runtime device preference is intentionally decoupled and never affects
 //! which asset is downloaded.
 
+use super_stt_registry_types::manifest::Contract;
 use super_stt_shared::registry::SelectedAsset;
 
 use crate::registry::host_detect::Host;
@@ -50,8 +51,40 @@ fn gfx_is_exact(
     asset.major == host.major && asset.minor == host.minor && asset.step == host.step
 }
 
+/// Why an entry's contract generation cannot be driven by this daemon, or
+/// `None` when it can.
+///
+/// The generation is the one thing a manifest declares about what it needs
+/// from a daemon, and a daemon knows every generation up to the one it was
+/// built with — so "does the string parse as a [`Contract`]" is the whole
+/// test. The index also stamps the release that introduced the generation, so
+/// the reason can say what to update to even for a generation this build has
+/// never heard of.
+fn contract_block(entry: &IndexBackend) -> Option<String> {
+    if entry.contract.parse::<Contract>().is_ok() {
+        return None;
+    }
+    let daemon = crate::registry::index_schema::CLIENT_VERSION;
+    Some(match entry.min_client.as_deref() {
+        Some(min) => format!(
+            "needs Super STT {min} or newer (backend contract {}); this is {daemon}",
+            entry.contract
+        ),
+        None => format!(
+            "needs a newer Super STT (backend contract {}); this is {daemon}",
+            entry.contract
+        ),
+    })
+}
+
 #[must_use]
 pub fn select(host: &Host, entry: &IndexBackend) -> Selection {
+    // Before any asset question: a backend this daemon cannot drive has no
+    // compatible asset, whatever the host looks like. Listing, install and
+    // update all route through here, so one check covers all three.
+    if let Some(reason) = contract_block(entry) {
+        return Selection::Incompatible { reason };
+    }
     if entry.kind == "wasm" {
         return if entry.assets.wasm.is_some() {
             Selection::Wasm
@@ -300,6 +333,7 @@ mod tests {
             license: "Apache-2.0".into(),
             kind: kind.into(),
             contract: "v1".into(),
+            min_client: None,
             entrypoint: "t".into(),
             allowed_hosts: vec![],
             online: false,
@@ -875,5 +909,53 @@ mod tests {
         );
         let sel = select(&host_cuda(86, 12, false), &e);
         assert!(matches!(sel, Selection::Incompatible { .. }));
+    }
+
+    /// Every generation this build knows selects normally; the gate is only
+    /// for the ones it does not.
+    #[test]
+    fn every_known_contract_selects() {
+        for c in Contract::ALL {
+            let mut e = entry("wasm", vec![]);
+            e.assets.wasm = Some(IndexAsset {
+                url: "https://x".into(),
+                size: 1,
+                sha256: "abc".into(),
+            });
+            e.contract = c.to_string();
+            assert_eq!(select(&host_cpu(), &e), Selection::Wasm, "{c}");
+        }
+    }
+
+    /// A generation this build does not know is incompatible before any asset
+    /// question — even a perfectly good wasm asset cannot help — and the
+    /// reason names the release to update to when the index stamped one.
+    #[test]
+    fn an_unknown_contract_is_incompatible_and_names_the_floor() {
+        let mut e = entry("wasm", vec![]);
+        e.assets.wasm = Some(IndexAsset {
+            url: "https://x".into(),
+            size: 1,
+            sha256: "abc".into(),
+        });
+        e.contract = "v99".into();
+        e.min_client = Some("9.9.9".into());
+        let Selection::Incompatible { reason } = select(&host_cpu(), &e) else {
+            panic!("an unknown contract must be incompatible");
+        };
+        assert!(reason.contains("9.9.9"), "{reason}");
+        assert!(reason.contains("v99"), "{reason}");
+        assert!(
+            reason.contains(crate::registry::index_schema::CLIENT_VERSION),
+            "{reason}"
+        );
+
+        // An index published before the stamp still refuses, just without the
+        // number.
+        e.min_client = None;
+        let Selection::Incompatible { reason } = select(&host_cpu(), &e) else {
+            panic!("still incompatible without a stamp");
+        };
+        assert!(reason.contains("newer Super STT"), "{reason}");
     }
 }

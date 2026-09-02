@@ -30,7 +30,14 @@ pub struct RegistryBackend {
     pub description: Option<String>,
     pub license: String,
     pub kind: String,
+    /// The contract generation the backend declares, as published. Carried
+    /// as a string so a client lists an entry whose generation it does not
+    /// know; `compatibility` says whether this daemon can drive it.
     pub contract: String,
+    /// The Super STT release that first understood `contract`, as stamped by
+    /// the indexer. `None` for an index that predates the stamp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_client: Option<String>,
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
     pub online: bool,

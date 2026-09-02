@@ -471,7 +471,7 @@ name = "Y"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "y.wasm"
-contract = "v1"
+contract = "v2"
 description = "Test backend."
 
 [[models]]
@@ -497,7 +497,7 @@ name = "Y"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "y.wasm"
-contract = "v1"
+contract = "v2"
 description = "Test backend."
 
 [[models]]
@@ -522,7 +522,7 @@ name = "Y"
 version = "0.1.0"
 kind = "wasm"
 entrypoint = "y.wasm"
-contract = "v1"
+contract = "v2"
 description = "Test backend."
 
 [capabilities]

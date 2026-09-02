@@ -51,7 +51,17 @@ pub struct IndexBackend {
     #[serde(default)]
     pub license: String,
     pub kind: String,
+    /// The contract generation the release manifest declares. A loose string
+    /// here, so a daemon still lists an entry whose generation it does not
+    /// know — and can then say so, rather than failing the whole catalog.
     pub contract: String,
+    /// The Super STT release that first understood `contract`, from
+    /// [`Contract::min_client`](crate::manifest::Contract::min_client). Stamped
+    /// by the indexer so a daemon that predates the generation can still name
+    /// the version to update to. `None` on an index published before the
+    /// field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_client: Option<String>,
     pub entrypoint: String,
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
@@ -188,6 +198,7 @@ impl IndexBackend {
             license: m.backend.license.unwrap_or_default(),
             kind: m.backend.kind.to_string(),
             contract: m.backend.contract.to_string(),
+            min_client: Some(m.backend.contract.min_client().to_string()),
             entrypoint: m.backend.entrypoint,
             allowed_hosts: m.network.allowed_hosts,
             online,
@@ -499,6 +510,7 @@ mod tests {
                 license: "Apache-2.0".into(),
                 kind: "wasm".into(),
                 contract: "v1".into(),
+                min_client: None,
                 entrypoint: "openai.wasm".into(),
                 allowed_hosts: vec!["api.openai.com".into()],
                 online: true,
@@ -609,6 +621,55 @@ mod tests {
 
         assert_eq!(b.id, "y", "id stays the registry key, unaffected");
         assert_eq!(b.backend_id.as_deref(), Some("app.super-stt.voxtral"));
+    }
+
+    /// The entry carries both the contract the manifest declares and the
+    /// release floor that contract implies, so a daemon that does not know the
+    /// generation can still name the version to update to.
+    #[test]
+    fn from_manifest_stamps_the_contract_and_its_client_floor() {
+        for contract in crate::manifest::Contract::ALL {
+            let m = crate::manifest::Manifest::parse(&format!(
+                r#"
+                [backend]
+                source = "github.com/x/y"
+                name = "Y"
+                version = "1.0.0"
+                kind = "wasm"
+                entrypoint = "y.wasm"
+                contract = "{contract}"
+                description = "Test backend."
+
+                [assets]
+                wasm = "y.wasm"
+                "#
+            ))
+            .unwrap();
+            let b = IndexBackend::from_manifest(
+                "y".into(),
+                m,
+                "1.0.0".into(),
+                "v1.0.0".into(),
+                IndexAssets::default(),
+                None,
+            );
+            assert_eq!(b.contract, contract.to_string());
+            assert_eq!(b.min_client.as_deref(), Some(contract.min_client()));
+        }
+    }
+
+    /// An index published before per-entry `min_client` existed still parses,
+    /// with the field absent rather than the whole catalog failing.
+    #[test]
+    fn an_index_entry_without_a_min_client_still_parses() {
+        let json = serde_json::json!({
+            "id": "y", "source": "github.com/x/y", "version": "1.0.0", "tag": "v1.0.0",
+            "name": "Y", "kind": "wasm", "contract": "v1", "entrypoint": "y.wasm",
+            "online": false, "supports_gpu": false, "supports_cpu": true,
+            "models": [], "secrets": [], "options": [], "assets": {}
+        });
+        let b: IndexBackend = serde_json::from_value(json).expect("older entry parses");
+        assert_eq!(b.min_client, None);
     }
 
     /// A manifest that predates `[backend].id` yields a `None` `backend_id`,

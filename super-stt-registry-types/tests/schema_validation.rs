@@ -362,6 +362,97 @@ fn conditional_property_names_exist() {
     }
 }
 
+/// A model entry that declares `role`, the field v2 introduced.
+fn post_processor_model() -> Value {
+    json!({
+        "name": "cleanup", "role": "post_processor", "primary_language": "en",
+        "supported_languages": ["en"], "supported_devices": ["cpu"]
+    })
+}
+
+/// The schema is contract-aware the same way the parser is: `role` is
+/// accepted under `contract = "v2"` and refused under `"v1"`, and the
+/// refusal names the field so an editor points at the right line. This is
+/// the schema half of `Manifest::parse`'s `FieldRequiresContract`.
+#[test]
+fn the_schema_gates_role_on_contract_v2() {
+    let v = backend_validator();
+
+    let mut v2 = wasm_base();
+    v2["backend"]["contract"] = json!("v2");
+    v2["models"] = json!([post_processor_model()]);
+    let errors: Vec<String> = v.iter_errors(&v2).map(|e| e.to_string()).collect();
+    assert!(
+        errors.is_empty(),
+        "role under v2 must validate: {errors:#?}"
+    );
+
+    let mut v1 = wasm_base();
+    v1["models"] = json!([post_processor_model()]);
+    let at: Vec<String> = v
+        .iter_errors(&v1)
+        .map(|e| e.instance_path().to_string())
+        .collect();
+    assert!(!at.is_empty(), "role under v1 must be refused");
+    assert!(
+        at.iter().any(|path| path.ends_with("/role")),
+        "the refusal should point at the field: {at:#?}"
+    );
+
+    // A v1 manifest that stays within v1 is untouched by the rule.
+    let mut plain = wasm_base();
+    plain["models"] = json!([{
+        "name": "m1", "primary_language": "en",
+        "supported_languages": ["en"], "supported_devices": ["cpu"]
+    }]);
+    assert!(
+        v.is_valid(&plain),
+        "a v1 manifest without v2 fields stays valid"
+    );
+}
+
+/// Every generation the parser knows is one the schema offers, and nothing
+/// else: the `contract` enum is the closed set that gates old daemons, so it
+/// must not drift from `Contract::ALL`.
+#[test]
+fn the_schema_offers_exactly_the_known_contracts() {
+    use super_stt_registry_types::manifest::Contract;
+    let schema = super_stt_registry_types::schema::backend_schema();
+    // Documented variants come out of schemars as a `oneOf` of `const`s.
+    let offered: Vec<Value> = schema["definitions"]["Contract"]["oneOf"]
+        .as_array()
+        .expect("Contract definition must be a oneOf of consts")
+        .iter()
+        .map(|v| v["const"].clone())
+        .collect();
+    let known: Vec<Value> = Contract::ALL.iter().map(|c| json!(c.to_string())).collect();
+    assert_eq!(offered, known);
+}
+
+/// The contract rule references field names as string literals; a serde
+/// rename of `role` would make the rule disallow a key that no longer exists
+/// while the real one slips through.
+#[test]
+fn contract_rule_field_names_exist() {
+    use super_stt_registry_types::manifest::CONTRACT_FIELDS;
+    let schema = super_stt_registry_types::schema::backend_schema();
+    let defs = schema["definitions"].as_object().expect("definitions");
+    for field in CONTRACT_FIELDS {
+        let def = match field.table {
+            "models" => "ModelEntry",
+            "backend" => "BackendMeta",
+            other => panic!("no definition mapping for table `{other}`"),
+        };
+        assert!(
+            defs[def]["properties"]
+                .as_object()
+                .is_some_and(|p| p.contains_key(field.key)),
+            "{} is not a property of {def}",
+            field.path()
+        );
+    }
+}
+
 /// Build a minimal valid manifest around one asset body so a schema test
 /// carries only the lines under test.
 fn manifest_json(asset_body: &str) -> Value {

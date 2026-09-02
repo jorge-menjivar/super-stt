@@ -935,6 +935,7 @@ mod update_offer_tests {
             license: "Apache-2.0".to_string(),
             kind: "wasm".to_string(),
             contract: "v1".to_string(),
+            min_client: None,
             allowed_hosts: Vec::new(),
             online: true,
             supports_gpu: false,

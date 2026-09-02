@@ -39,7 +39,7 @@ name = "Mock"
 version = "0.0.0"
 kind = "subprocess"
 entrypoint = "mock-backend"
-contract = "v1"
+contract = "v2"
 description = "Test backend."
 
 [[models]]

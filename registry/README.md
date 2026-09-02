@@ -17,6 +17,13 @@ End users do not interact with this directory.
    subprocess backends), and a `[backend].license` — a recognized open-source
    [SPDX identifier](https://spdx.org/licenses/) (OSI-approved or FSF Free/Libre) or the literal `other`.
    See `docs/protocol/backend/config.md`.
+
+   Declare the lowest [`contract`](../docs/protocol/backend/config.md#contract-generations)
+   generation whose fields your manifest uses — `v1` for a backend that only
+   transcribes, `v2` for one that declares a `post_processor` model. That is
+   the only compatibility statement you make: the indexer stamps each entry
+   with the Super STT release its generation needs, and older clients list
+   the backend as not compatible rather than installing it.
 2. Open a PR adding a new entry to `registry.toml` in **alphabetical order**:
 
    ```toml
