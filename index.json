@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-02T07:05:34Z",
+  "generated_at": "2026-09-02T07:10:23Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -263,6 +263,85 @@
         "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/backend.toml",
         "size": 5463,
         "sha256": "0925ab3b1a02a362943ec73dad525817079b2192c34356fbdf96cccbf70dbfc1"
+      }
+    },
+    {
+      "id": "tidy",
+      "backend_id": "app.super-stt.tidy",
+      "source": "github.com/jorge-menjivar/super-stt-tidy",
+      "version": "0.1.0",
+      "tag": "v0.1.0",
+      "name": "Tidy",
+      "description": "Tidies up dictated text before it is typed. Removes filler sounds, collapses stutters, repairs punctuation and spacing, and fixes sentence casing.",
+      "license": "GPL-3.0-only",
+      "kind": "wasm",
+      "contract": "v2",
+      "min_client": "0.2.4-beta.1",
+      "entrypoint": "tidy.wasm",
+      "allowed_hosts": [],
+      "online": false,
+      "supports_gpu": false,
+      "supports_cpu": true,
+      "models": [
+        {
+          "name": "rules-v1",
+          "provider": "",
+          "supported_devices": [
+            "cpu"
+          ],
+          "role": "post_processor"
+        }
+      ],
+      "secrets": [],
+      "options": [
+        {
+          "name": "normalize_unicode",
+          "label": "Normalize punctuation",
+          "type": "bool",
+          "default": true
+        },
+        {
+          "name": "remove_fillers",
+          "label": "Remove filler sounds",
+          "type": "bool",
+          "default": true
+        },
+        {
+          "name": "dedupe_words",
+          "label": "Collapse stutters",
+          "type": "bool",
+          "default": true
+        },
+        {
+          "name": "fix_punctuation",
+          "label": "Repair punctuation spacing",
+          "type": "bool",
+          "default": true
+        },
+        {
+          "name": "collapse_whitespace",
+          "label": "Collapse whitespace",
+          "type": "bool",
+          "default": true
+        },
+        {
+          "name": "sentence_case",
+          "label": "Fix sentence casing",
+          "type": "bool",
+          "default": true
+        }
+      ],
+      "assets": {
+        "wasm": {
+          "url": "https://github.com/jorge-menjivar/super-stt-tidy/releases/download/v0.1.0/tidy.wasm",
+          "size": 202247,
+          "sha256": "b7a599e277a6cff87b993ff81230410f02c11e91c38c6de3661fa21746d4339b"
+        }
+      },
+      "manifest": {
+        "url": "https://github.com/jorge-menjivar/super-stt-tidy/releases/download/v0.1.0/backend.toml",
+        "size": 3470,
+        "sha256": "5aa3e58e1773b45b36fd8fe8e36f7048c2472fc244401214d1f6e04be37c15c6"
       }
     },
     {
