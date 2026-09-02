@@ -82,6 +82,36 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "backend": {
+            "properties": {
+              "contract": {
+                "const": "v1"
+              }
+            },
+            "required": [
+              "contract"
+            ]
+          }
+        },
+        "required": [
+          "backend"
+        ]
+      },
+      "then": {
+        "properties": {
+          "models": {
+            "items": {
+              "properties": {
+                "role": false
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {
@@ -384,11 +414,16 @@
       "type": "object"
     },
     "Contract": {
-      "description": "Backend-protocol contract version.",
+      "description": "Backend-protocol contract version: the one thing a manifest declares about\nwhat it implements.\n\nA contract generation names a set of manifest fields and backend routes.\nEach generation is additive over the one before — v2 is v1 plus the\n`[[models]].role` field and the `POST /v1/process` route — so a backend\ndeclares the *lowest* generation whose fields it uses, and a daemon\nsupports every generation up to the one it was built with.\n\nThis is a closed enum on purpose. A daemon that predates a generation\ncannot parse a manifest declaring it, which is what stops such a daemon\nfrom installing a backend it cannot drive: the refusal needs no field the\nold daemon would have to know about, because it is the *absence* of\nknowledge that refuses. Every generation added here therefore also gates\nitself against every daemon released before it.\n\nVariant order is generation order; the derived `Ord` relies on it.",
       "oneOf": [
         {
           "const": "v1",
-          "description": "The v1 contract (`docs/protocol/backend/contract.md`).",
+          "description": "The v1 contract (`docs/protocol/backend/contract.md`): transcription\nonly.",
+          "type": "string"
+        },
+        {
+          "const": "v2",
+          "description": "v1 plus `[[models]].role` and `POST /v1/process` — a backend may serve\ntranscript post-processors.",
           "type": "string"
         }
       ]
@@ -511,7 +546,7 @@
             }
           ],
           "default": "transcription",
-          "description": "What the model is for: transcribing audio, or post-processing a\ntranscript. Default [`ModelRole::Transcription`], so every manifest\nwritten before the field existed keeps its models transcribing."
+          "description": "What the model is for: transcribing audio, or post-processing a\ntranscript. Default [`ModelRole::Transcription`], so every manifest\nwritten before the field existed keeps its models transcribing.\n\nA v2 field: declaring it under `contract = \"v1\"` is a parse error."
         },
         "supported_devices": {
           "description": "Devices the model can be loaded onto. The sentinel `none` (remote /\nonline model with no local compute) must be the only entry when\npresent. Non-empty.",
