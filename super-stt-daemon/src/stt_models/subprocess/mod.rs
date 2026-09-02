@@ -39,6 +39,10 @@ pub struct SubprocessBackend {
     info: ModelInfoData,
     /// Device label reported by the backend's `/v1/status` (e.g. `"cuda"`).
     device: String,
+    /// The `x-stt-secret-*` / `x-stt-option-*` pairs injected on every `/v1`
+    /// request, per the contract's request-header section. Formed once at
+    /// spawn from the user's settings, like the WASM transport's.
+    context_headers: Vec<(String, String)>,
 }
 
 impl SubprocessBackend {
@@ -48,7 +52,8 @@ impl SubprocessBackend {
     /// files are downloaded into `<backend_dir>/<dest>`. `device_pref` is the
     /// resolved accelerator (`"cpu"`, `"cuda"`, `"rocm"`, `"metal"`,
     /// `"vulkan"`), or empty when none resolved, which leaves the backend to
-    /// select for itself.
+    /// select for itself. `context_headers` are the already-formed
+    /// `x-stt-secret-*` / `x-stt-option-*` pairs to inject on every request.
     ///
     /// # Errors
     /// Returns an error if provisioning, spawning, or loading fails.
@@ -57,6 +62,7 @@ impl SubprocessBackend {
         model_name: &str,
         device_pref: &str,
         tracker: Option<&Arc<crate::download_progress::DownloadProgressTracker>>,
+        context_headers: Vec<(String, String)>,
     ) -> Result<Self> {
         let manifest = Manifest::load(backend_dir)?;
 
@@ -162,6 +168,7 @@ impl SubprocessBackend {
             model_id: model_name.to_string(),
             info,
             device: "unknown".to_string(),
+            context_headers,
         };
 
         backend.wait_for_ping(Duration::from_secs(30)).await?;
@@ -228,7 +235,8 @@ impl SubprocessBackend {
         }
     }
 
-    /// One HTTP request over the backend's Unix socket.
+    /// One HTTP request over the backend's Unix socket, carrying `headers`
+    /// plus the secret/option context every `/v1` request gets.
     async fn request(
         &self,
         method: &str,
@@ -249,7 +257,7 @@ impl SubprocessBackend {
             .method(method)
             .uri(path)
             .header("host", "backend.local");
-        for (k, v) in headers {
+        for (k, v) in headers.iter().chain(&self.context_headers) {
             builder = builder.header(k.as_str(), v.as_str());
         }
         let req = builder.body(Full::new(Bytes::from(body)))?;
