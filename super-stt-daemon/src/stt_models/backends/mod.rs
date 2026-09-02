@@ -74,7 +74,7 @@ pub struct DiscoveredBackend {
 /// is judged against cannot disagree.
 #[must_use]
 pub fn installed_version(dir: &Path) -> Option<String> {
-    manifest::Manifest::load(dir)
+    manifest::Manifest::load_installed(dir)
         .ok()
         .map(|m| m.backend.version)
 }
@@ -191,7 +191,12 @@ fn is_id_named(b: &DiscoveredBackend) -> bool {
 /// manifest; this function enforces the cross-field device rules via
 /// [`validate_supported_devices`].
 fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
-    let mut m = Manifest::load(dir)?;
+    // `load_installed`, not `load`: this backend is already on disk, and the
+    // contract-field rule exists to stop a *new* manifest getting in. Holding
+    // an installed one to it would drop a backend that installed cleanly under
+    // an earlier build out of the catalog, models and all, over a file the
+    // user never wrote.
+    let mut m = Manifest::load_installed(dir)?;
     manifest::validate_runtime(&m)?;
     // A `base_url` value authorizes egress the sandbox would otherwise refuse,
     // so only the user may supply one. A manifest that declares a default is

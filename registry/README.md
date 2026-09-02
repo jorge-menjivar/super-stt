@@ -22,8 +22,14 @@ End users do not interact with this directory.
    generation whose fields your manifest uses — `v1` for a backend that only
    transcribes, `v2` for one that declares a `post_processor` model. That is
    the only compatibility statement you make: the indexer stamps each entry
-   with the Super STT release its generation needs, and older clients list
-   the backend as not compatible rather than installing it.
+   with the Super STT release its generation needs, and a client that predates
+   it says so instead of installing something it cannot drive.
+
+   A client older than the generation *check itself* (0.2.3 and earlier) does
+   not have the stamp to read: it lists the entry as installable and refuses
+   later, when it parses the manifest it downloaded. The refusal is correct
+   either way — nothing is installed that cannot run — but only a client from
+   0.2.4 on can explain it up front.
 2. Open a PR adding a new entry to `registry.toml` in **alphabetical order**:
 
    ```toml
