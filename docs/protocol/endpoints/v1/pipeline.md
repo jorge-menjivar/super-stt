@@ -78,6 +78,8 @@ become insertable, renumbering is the thing to design — a client holding
 | `name`   | string? | That backend's display name; `null` when the stage is empty.            |
 | `model`  | string? | Wire name of the selected model; `null` when none is selected.          |
 | `loaded` | bool    | Whether the model is loaded and running right now.                       |
+| `device` | string? | Where the work runs: the accelerator the loaded model is actually on — `cpu`, `cuda`, `rocm`, `metal`, `vulkan`, or `remote` for a cloud model. `null` until a model has loaded. |
+| `preferred_device` | string? | *Processor stages only.* The stage's own `cpu`/`gpu` ask, set with [`POST /pipeline/{stage}/model`](#post-pipelinestagemodel); `device` is what it resolved to. `null` when the stage has none and follows stage 1's, whose preference lives at [`/active_device`](./active_device.md). |
 | `enabled`| bool    | *Processor stages only.* Whether it should run. Distinct from `loaded`: a stage can be enabled while its model failed to load, and transcripts then pass through unchanged. |
 
 ## `GET /pipeline`
@@ -107,16 +109,19 @@ Content-Type: application/json
       "source": "github.com/super-stt/whisper",
       "name":   "Whisper (local)",
       "model":  "whisper-large-v3",
-      "loaded": true
+      "loaded": true,
+      "device": "cuda"
     },
     {
-      "stage":   2,
-      "role":    "post_processor",
-      "source":  "github.com/jorge-menjivar/super-stt-textclean",
-      "name":    "Text Cleanup",
-      "model":   "textclean",
-      "loaded":  true,
-      "enabled": true
+      "stage":            2,
+      "role":             "post_processor",
+      "source":           "github.com/jorge-menjivar/super-stt-textclean",
+      "name":             "Text Cleanup",
+      "model":            "textclean",
+      "loaded":           true,
+      "device":           "cpu",
+      "preferred_device": "cpu",
+      "enabled":          true
     }
   ]
 }
@@ -133,13 +138,15 @@ Content-Type: application/json
 {
   "status": "success",
   "stage": {
-    "stage":   2,
-    "role":    "post_processor",
-    "source":  "github.com/jorge-menjivar/super-stt-textclean",
-    "name":    "Text Cleanup",
-    "model":   "textclean",
-    "loaded":  true,
-    "enabled": true
+    "stage":            2,
+    "role":             "post_processor",
+    "source":           "github.com/jorge-menjivar/super-stt-textclean",
+    "name":             "Text Cleanup",
+    "model":            "textclean",
+    "loaded":           true,
+    "device":           "cpu",
+    "preferred_device": "cpu",
+    "enabled":          true
   }
 }
 ```
@@ -200,13 +207,18 @@ Host: stt.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
-{ "model": "textclean" }
+{ "model": "textclean", "device": "gpu" }
 ```
 
 | Field    | Type   | Required | Notes                                                                    |
 |----------|--------|----------|--------------------------------------------------------------------------|
 | `model`  | string | yes      | A model its backend declares with this stage's `role`                    |
 | `source` | string | no       | Repo id of the serving backend. Omitted resolves to the backend selected for this stage. |
+| `device` | string | no       | *Processor stages only.* The stage's own `cpu`/`gpu` preference, normalized as [`/active_device`](./active_device.md) normalizes (`cuda`/`metal` → `gpu`). Omitted keeps the stored one; a stage that has never been given one follows stage 1's. Stage 1 refuses the field (`400 invalid_value`): its device is the daemon-wide preference at `/active_device`, with a reload of its own. |
+
+A processor stage runs beside the transcription model, so it gets hardware
+chosen for it: a small cleanup model can sit on the CPU while a large
+transcription model has the GPU, or the reverse.
 
 Stage 1 answers `202 Accepted` and switches asynchronously (see
 [`/pipeline/1/model`](./pipeline.md)); stage 2 answers `200` once the load has
@@ -219,7 +231,8 @@ passing text through rather than costing the user their words.
 | HTTP | `error_code`             | Meaning                                                              |
 |------|--------------------------|----------------------------------------------------------------------|
 | 404  | `unknown_stage`          | No such position in the pipeline                                     |
-| 400  | `invalid_value`          | `model` missing or empty. To stop a stage, use `DELETE`.             |
+| 400  | `invalid_value`          | `model` missing or empty (to stop a stage, use `DELETE`), or `device` sent to a stage that does not take one |
+| 400  | `invalid_device`         | `device` is not `cpu` or `gpu`                                       |
 | 400  | `invalid_model`          | No installed backend serves `(model, source)`, or its role does not match this stage |
 | 400  | `invalid_backend`        | `source` omitted and no backend is selected for this stage           |
 | 400  | `online_models_disabled` | The model is online and online models are disabled                   |

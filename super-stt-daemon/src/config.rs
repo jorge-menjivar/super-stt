@@ -120,6 +120,13 @@ pub struct PostProcessorConfig {
     /// model selection uses.
     #[serde(default)]
     pub source: String,
+    /// The stage's own device preference, `cpu` or `gpu`. The post-processor
+    /// runs beside the transcription model, so it gets hardware chosen for it
+    /// rather than stage 1's. Empty — every config written before the field
+    /// existed — means "follow the transcription preference", which is what
+    /// those loads always did.
+    #[serde(default)]
+    pub device: String,
 }
 
 impl PostProcessorConfig {
@@ -439,10 +446,13 @@ impl DaemonConfig {
 
     /// Select the post-processor model and whether it runs. Stored as the same
     /// `(name, source)` pair every model selection uses.
-    pub fn enable_post_processor(&mut self, model: String, source: String) {
+    pub fn enable_post_processor(&mut self, model: String, source: String, device: Option<String>) {
         self.post_processor.enabled = true;
         self.post_processor.model = model;
         self.post_processor.source = source;
+        if let Some(device) = device {
+            self.post_processor.device = device;
+        }
     }
 
     /// Stop running the post-processor, keeping the selection so re-enabling

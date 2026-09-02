@@ -29,7 +29,7 @@ use crate::ui::messages::{Message, ModelsPageMessage, PostProcessorMessage, Shel
 use super::active::backend_glyph_tile;
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips, count_chip,
+    backend_supports_gpu, capability_chips, count_chip, offered_devices,
 };
 use super::surface::{
     backend_description, card_divider, card_surface, card_title_block, muted_text_color,
@@ -52,6 +52,26 @@ pub(crate) fn post_processor_backends(backends: &[BackendInfo]) -> Vec<&BackendI
 /// called by both.
 pub(crate) fn post_processor_models(backend: &BackendInfo) -> Vec<String> {
     super::roles::models_for(backend, true)
+}
+
+/// The device a freshly staged post-processor should load on, or `None` when
+/// the model offers no device to choose (an online model, or one this install
+/// cannot run anywhere).
+///
+/// The stage's stored preference wins when the model can honor it; otherwise
+/// the first device the model offers, which is what staging a transcription
+/// model defaults to. One function for the view and the handler, so the
+/// dropdown shows exactly what Load sends.
+pub(crate) fn post_processor_default_device(
+    backend: &BackendInfo,
+    model: &str,
+    preferred: Option<&str>,
+) -> Option<String> {
+    let offered = offered_devices(backend, model);
+    preferred
+        .filter(|p| offered.iter().any(|d| d == p))
+        .map(str::to_string)
+        .or_else(|| offered.first().cloned())
 }
 
 /// The backend the card is about: the one the daemon has selected.
@@ -200,7 +220,16 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
             .model
             .clone()
             .unwrap_or_else(|| "post-processor".to_string());
-        let label = text::body(format!("Active: {model}"))
+        // Where it runs, the way the transcription card says "· cpu": the
+        // daemon reports the accelerator the load landed on, once it has.
+        let device_suffix = app
+            .post_processor
+            .device
+            .as_deref()
+            .filter(|d| !d.is_empty() && *d != "none")
+            .map(|d| format!(" · {d}"))
+            .unwrap_or_default();
+        let label = text::body(format!("Active: {model}{device_suffix}"))
             .class(cosmic::theme::Text::Accent)
             .width(Length::Fill);
         return row![
@@ -223,22 +252,58 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         .filter(|(_, source)| source == &backend.source)
         .map(|(model, _)| model.clone())
         .or_else(|| app.post_processor.model.clone());
-    let selected = shown.and_then(|m| models.iter().position(|n| n == &m));
+    let selected = shown
+        .as_ref()
+        .and_then(|m| models.iter().position(|n| n == m));
+    // Model select takes twice the width of the device select, as on the
+    // transcription card.
     let dropdown = widget::dropdown(models, selected, |index| {
         Message::PostProcessor(PostProcessorMessage::Staged(index))
     })
     .placeholder("Select model")
-    .width(Length::Fill);
+    .width(Length::FillPortion(2));
 
-    row![
-        dropdown,
-        button::suggested("Load model")
-            .leading_icon(icons::phosphor_handle(icons::PLAY))
-            .on_press_maybe(selected.map(|_| Message::PostProcessor(PostProcessorMessage::Enable))),
-    ]
-    .spacing(spacing.space_s)
-    .align_y(Alignment::Center)
-    .into()
+    let mut picker_row = row![dropdown]
+        .spacing(spacing.space_s)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+    // Device dropdown — only when the shown model offers a device to choose.
+    // The staged pick wins; otherwise the default Load would send, so the
+    // dropdown never shows one thing while Load does another.
+    if let Some(model) = shown.as_deref() {
+        let devices = offered_devices(backend, model);
+        if !devices.is_empty() {
+            let current = app.staged_post_processor_device.clone().or_else(|| {
+                post_processor_default_device(
+                    backend,
+                    model,
+                    app.post_processor.preferred_device.as_deref(),
+                )
+            });
+            let device_index = current.and_then(|d| devices.iter().position(|x| x == &d));
+            let devices_pick = devices.clone();
+            picker_row = picker_row.push(
+                widget::dropdown(devices, device_index, move |index| {
+                    Message::PostProcessor(PostProcessorMessage::StagedDevice(
+                        devices_pick[index].clone(),
+                    ))
+                })
+                .placeholder("Device")
+                .width(Length::FillPortion(1)),
+            );
+        }
+    }
+
+    picker_row
+        .push(
+            button::suggested("Load model")
+                .leading_icon(icons::phosphor_handle(icons::PLAY))
+                .on_press_maybe(
+                    selected.map(|_| Message::PostProcessor(PostProcessorMessage::Enable)),
+                ),
+        )
+        .into()
 }
 
 /// Shown when post-processors are installed but none is chosen: a prompt and
@@ -487,5 +552,95 @@ mod tests {
             ],
         );
         assert_eq!(post_processor_models(&b), vec!["zeta", "alpha"]);
+    }
+}
+
+#[cfg(test)]
+mod device_tests {
+    use super::*;
+    use crate::daemon::backends::BackendModel;
+
+    fn model_on(name: &str, devices: &[&str]) -> BackendModel {
+        BackendModel {
+            name: name.into(),
+            provider: String::new(),
+            supported_devices: devices.iter().map(|d| (*d).to_string()).collect(),
+            estimated_vram_bytes: 0,
+            multilingual: false,
+            supported_languages: Vec::new(),
+            primary_language: "en".into(),
+            realtime: false,
+            role: "post_processor".into(),
+        }
+    }
+
+    fn backend_with(models: Vec<BackendModel>, installed_accel: &[&str]) -> BackendInfo {
+        BackendInfo {
+            source: "github.com/x/clean".into(),
+            description: String::new(),
+            name: "Clean".into(),
+            version: "1.0.0".into(),
+            kind: "subprocess".into(),
+            allowed_hosts: Vec::new(),
+            installed_accel: installed_accel.iter().map(|a| (*a).to_string()).collect(),
+            models,
+            secrets: Vec::new(),
+            options: Vec::new(),
+        }
+    }
+
+    /// The stage's stored preference is honored when the model can run there.
+    #[test]
+    fn the_stored_preference_wins_when_the_model_offers_it() {
+        let b = backend_with(vec![model_on("s1", &["cpu", "gpu"])], &["cuda"]);
+        assert_eq!(
+            post_processor_default_device(&b, "s1", Some("gpu")).as_deref(),
+            Some("gpu")
+        );
+        assert_eq!(
+            post_processor_default_device(&b, "s1", Some("cpu")).as_deref(),
+            Some("cpu")
+        );
+    }
+
+    /// With no preference, or one the model cannot honor, the first offered
+    /// device is the default — the same rule staging a transcription model
+    /// follows.
+    #[test]
+    fn otherwise_the_first_offered_device_is_the_default() {
+        let b = backend_with(vec![model_on("s1", &["cpu", "gpu"])], &["cuda"]);
+        assert_eq!(
+            post_processor_default_device(&b, "s1", None).as_deref(),
+            Some("cpu")
+        );
+        // A CPU-only model cannot honor a `gpu` preference.
+        let cpu_only = backend_with(vec![model_on("rules", &["cpu"])], &[]);
+        assert_eq!(
+            post_processor_default_device(&cpu_only, "rules", Some("gpu")).as_deref(),
+            Some("cpu")
+        );
+    }
+
+    /// A GPU the install cannot use is not offered: a CPU-only build of a
+    /// backend whose model declares `gpu` still defaults to the CPU.
+    #[test]
+    fn a_cpu_only_install_never_defaults_to_the_gpu() {
+        let b = backend_with(vec![model_on("s1", &["cpu", "gpu"])], &["cpu"]);
+        assert_eq!(
+            post_processor_default_device(&b, "s1", Some("gpu")).as_deref(),
+            Some("cpu")
+        );
+    }
+
+    /// An online model offers nothing to choose, so there is no default and
+    /// Load sends no device.
+    #[test]
+    fn an_online_model_has_no_device_to_default() {
+        let b = backend_with(vec![model_on("cloud", &["none"])], &[]);
+        assert_eq!(
+            post_processor_default_device(&b, "cloud", Some("gpu")),
+            None
+        );
+        assert_eq!(post_processor_default_device(&b, "missing", None), None);
     }
 }

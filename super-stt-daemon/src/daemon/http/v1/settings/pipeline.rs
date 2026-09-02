@@ -38,6 +38,10 @@ struct Stage {
     cancel_model: Option<&'static str>,
     /// Re-instantiate in place to pick up changed secrets/options.
     reload_model: Option<&'static str>,
+    /// Whether `set_model` takes the stage's `device` with it. Stage 1's device
+    /// is a daemon-wide preference with its own endpoint (`/active_device`)
+    /// and a reload of its own; a later stage's is a property of that stage.
+    takes_device: bool,
 }
 
 impl Stage {
@@ -51,6 +55,7 @@ impl Stage {
                 clear_model: "unload_active_model",
                 cancel_model: Some("cancel_download"),
                 reload_model: Some("reload_active_model"),
+                takes_device: false,
             }),
             2 => Some(Self {
                 set_backend: "set_post_processor_backend",
@@ -62,6 +67,7 @@ impl Stage {
                 // `POST .../model` does the same job.
                 cancel_model: None,
                 reload_model: None,
+                takes_device: true,
             }),
             _ => None,
         }
@@ -153,6 +159,10 @@ pub(crate) struct SetModelBody {
     /// Omitted resolves to the backend selected for this stage.
     #[serde(default)]
     pub(crate) source: Option<String>,
+    /// The stage's `cpu`/`gpu` preference. Omitted keeps the stored one.
+    /// Stages whose device lives elsewhere refuse it (see [`Stage::takes_device`]).
+    #[serde(default)]
+    pub(crate) device: Option<String>,
 }
 
 /// `POST /pipeline/{stage}/model` — run a model in this stage.
@@ -167,6 +177,21 @@ pub(crate) async fn set_stage_model(
     let mut data = serde_json::json!({ "model": body.model });
     if let Some(source) = body.source {
         data["source"] = serde_json::Value::String(source);
+    }
+    if let Some(device) = body.device {
+        // Refused rather than ignored: a client that sent a device for stage
+        // 1 expects the model to land on it, and silently loading it
+        // elsewhere is the worse surprise.
+        if !cmds.takes_device {
+            return json_error_msg(
+                StatusCode::BAD_REQUEST,
+                "invalid_value",
+                &format!(
+                    "Stage {stage} does not take a device here; set it with POST /active_device."
+                ),
+            );
+        }
+        data["device"] = serde_json::Value::String(device);
     }
     let resp = dispatch(&s.daemon, build_request(cmds.set_model, Some(data))).await;
     json_response(&resp).into_response()

@@ -281,6 +281,9 @@ pub enum PostProcessorMessage {
     /// The index is into the selected backend's post-processor models, in the
     /// order `crate::ui::views::models::post_processor_models` returns them.
     Staged(usize),
+    /// User picked the device the staged model should load on — staged
+    /// locally, sent with Enable. Mirrors [`ModelsPageMessage::StageActiveDevice`].
+    StagedDevice(String),
     /// Commit the staged (or already-selected) model and turn processing on.
     Enable,
     /// Turn processing off. The selection is kept, so re-enabling needs no

@@ -137,6 +137,11 @@ pub struct AppModel {
     /// is local until the Enable button commits it. `None` means "use whatever
     /// the daemon already has selected".
     pub staged_post_processor: Option<(String, String)>,
+    /// The device the staged post-processor should load on, `cpu` or `gpu`.
+    /// Mirrors `models_page.staged_device`: defaulted when a model is staged,
+    /// changed from the dropdown, sent with Load. `None` when the staged
+    /// model offers no device to choose (an online model).
+    pub staged_post_processor_device: Option<String>,
 
     // Recording stop mode
     pub recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,

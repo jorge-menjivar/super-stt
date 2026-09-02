@@ -133,6 +133,7 @@ impl AppModel {
             // completes; the default is the daemon's default too (off).
             post_processor: crate::daemon::client::PostProcessorState::default(),
             staged_post_processor: None,
+            staged_post_processor_device: None,
             recording_stop_mode:
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),

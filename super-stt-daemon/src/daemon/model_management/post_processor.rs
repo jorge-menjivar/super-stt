@@ -53,7 +53,16 @@ impl SuperSTTDaemon {
             );
         }
 
-        let device_pref = self.preferred_device.read().await.clone();
+        // The stage's own preference when it has one; otherwise stage 1's,
+        // which is what every load did before the field existed.
+        let device_pref = {
+            let own = self.config.read().await.post_processor.device.clone();
+            if own.is_empty() {
+                self.preferred_device.read().await.clone()
+            } else {
+                own
+            }
+        };
         let (instance, definition) = self
             .instantiate_backend(&name, &source, &device_pref)
             .await?;
@@ -88,5 +97,18 @@ impl SuperSTTDaemon {
     /// Whether a post-processor is currently loaded.
     pub(in crate::daemon) async fn post_processor_loaded(&self) -> bool {
         self.post_processor.read().await.is_some()
+    }
+
+    /// The accelerator the loaded post-processor actually runs on, as the
+    /// short wire name (`cpu`, `cuda`, `rocm`, `metal`, `vulkan`, `remote`);
+    /// `None` when nothing is loaded. The preference asks for `gpu`; this is
+    /// what that resolved to, the way `/active_device` reports
+    /// `resolved_accel` for stage 1.
+    pub(in crate::daemon) async fn post_processor_device(&self) -> Option<String> {
+        self.post_processor
+            .read()
+            .await
+            .as_ref()
+            .map(|loaded| crate::daemon::types::normalize_device(&loaded.instance.device()))
     }
 }

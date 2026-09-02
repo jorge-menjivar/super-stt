@@ -200,6 +200,7 @@ fn cmd_set_device(request: &DaemonRequest) -> Result<Command, String> {
 ///
 /// `source` is optional and resolves to the selected post-processor backend
 /// when omitted, exactly as `set_model` resolves against the active backend.
+/// `device` is optional too; omitted, the stage keeps its stored preference.
 /// There is no `enabled` field — this command *is* "enable with this model",
 /// and `clear_post_processor` is its off switch.
 fn cmd_set_post_processor(request: &DaemonRequest) -> Result<Command, String> {
@@ -234,7 +235,27 @@ fn cmd_set_post_processor(request: &DaemonRequest) -> Result<Command, String> {
         return Err(e.to_string());
     }
 
-    Ok(Command::SetPostProcessor { model, source })
+    // Present-but-not-a-string is a malformed request, not an omitted field:
+    // silently reading `"device": 7` as "keep the current one" would hide the
+    // caller's bug.
+    let device = match data.get("device") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(d)) => {
+            if let Err(e) =
+                validation::validate_string(d, "device", validation::limits::MAX_NAME_LENGTH)
+            {
+                return Err(e.to_string());
+            }
+            Some(d.clone())
+        }
+        Some(_) => return Err("device must be a string for set_post_processor command".into()),
+    };
+
+    Ok(Command::SetPostProcessor {
+        model,
+        source,
+        device,
+    })
 }
 
 /// Parse `set_post_processor_backend`: which backend provides the

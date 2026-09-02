@@ -55,9 +55,14 @@ pub enum Command {
     /// the selected post-processor backend, the way `SetModel` resolves against
     /// the active backend. The model must be one its backend declares with
     /// `role = "post_processor"`.
+    ///
+    /// `device` is the stage's own `cpu`/`gpu` preference: the post-processor
+    /// runs beside the transcription model, on hardware chosen for it, not
+    /// inherited from stage 1. `None` keeps whatever the stage already has.
     SetPostProcessor {
         model: String,
         source: String,
+        device: Option<String>,
     },
     GetPostProcessor,
     /// Stop running the post-processor, keeping the selection.

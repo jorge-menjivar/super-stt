@@ -71,6 +71,7 @@ impl AppModel {
             // shape of endpoint, so nothing loads until a model is enabled.
             PostProcessorMessage::SelectBackend(source) => {
                 self.staged_post_processor = None;
+                self.staged_post_processor_device = None;
                 // The choice came from the picker sheet; dismiss it now that it
                 // has been made, exactly as `SelectBackend` does.
                 self.core.window.show_context = false;
@@ -82,6 +83,7 @@ impl AppModel {
 
             PostProcessorMessage::Deselect => {
                 self.staged_post_processor = None;
+                self.staged_post_processor_device = None;
                 Task::perform(clear_post_processor_backend(), Self::reload_post_processor)
             }
 
@@ -97,9 +99,22 @@ impl AppModel {
                         .into_iter()
                         .nth(index)
                 {
+                    // Default the device with the model, as staging a
+                    // transcription model does, so Load has one to send.
+                    self.staged_post_processor_device =
+                        crate::ui::views::models::post_processor_default_device(
+                            backend,
+                            &model,
+                            self.post_processor.preferred_device.as_deref(),
+                        );
                     self.staged_post_processor = Some((model, backend.source.clone()));
                     self.clear_action_error(crate::state::ErrorScope::PostProcessing);
                 }
+                Task::none()
+            }
+
+            PostProcessorMessage::StagedDevice(device) => {
+                self.staged_post_processor_device = Some(device);
                 Task::none()
             }
 
@@ -119,8 +134,20 @@ impl AppModel {
                     return Task::none();
                 };
                 let (model, source) = selection;
+                // The device the dropdown shows: the staged pick, else the
+                // default the view computes for the model — so what is sent
+                // is what the user saw. `None` for a model with no device to
+                // choose, which the daemon reads as "keep what is stored".
+                let device = self.staged_post_processor_device.clone().or_else(|| {
+                    let backend = self.backends.iter().find(|b| b.source == source)?;
+                    crate::ui::views::models::post_processor_default_device(
+                        backend,
+                        &model,
+                        self.post_processor.preferred_device.as_deref(),
+                    )
+                });
                 Task::perform(
-                    set_post_processor(model, Some(source)),
+                    set_post_processor(model, Some(source), device),
                     Self::reload_post_processor,
                 )
             }
@@ -144,6 +171,7 @@ impl AppModel {
                 // showing the daemon's selection after a refused save.
                 if self.staged_post_processor == state.selection() {
                     self.staged_post_processor = None;
+                    self.staged_post_processor_device = None;
                 }
                 self.post_processor = state;
                 self.clear_action_error(crate::state::ErrorScope::PostProcessing);

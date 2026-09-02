@@ -292,6 +292,105 @@ async fn post_processor_defaults_to_disabled_and_unselected() {
     assert_eq!(pp["model"], serde_json::Value::Null);
     assert_eq!(pp["source"], serde_json::Value::Null);
     assert_eq!(pp["loaded"], false);
+    // No preference of its own yet (it would follow stage 1), and nothing has
+    // loaded to run anywhere.
+    assert_eq!(pp["preferred_device"], serde_json::Value::Null);
+    assert_eq!(pp["device"], serde_json::Value::Null);
+}
+
+/// The stage has a device of its own. It rides along with the model, is
+/// normalized the way `/active_device` normalizes (`cuda` → `gpu`), survives
+/// as configuration, and a later `POST` without one keeps it.
+#[tokio::test]
+async fn the_stages_device_is_its_own_and_is_kept() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    let (status, body) = post_req(
+        &sock,
+        PP_STAGE_MODEL,
+        &token,
+        serde_json::json!({ "model": "cleanup-1", "source": FIXTURE_SOURCE, "device": "cuda" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(
+        body["post_processor"]["preferred_device"], "gpu",
+        "cuda normalizes to gpu"
+    );
+
+    let (_, body) = get(&sock, PP_STAGE, &token).await;
+    assert_eq!(body["stage"]["preferred_device"], "gpu");
+    // The fixture's placeholder entrypoint cannot load, so nothing is running
+    // anywhere yet: the ask is recorded, the answer is still null.
+    assert_eq!(body["stage"]["device"], serde_json::Value::Null);
+
+    // Re-running the model without naming a device keeps the one stored.
+    let (status, body) = post_req(
+        &sock,
+        PP_STAGE_MODEL,
+        &token,
+        serde_json::json!({ "model": "cleanup-1" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["post_processor"]["preferred_device"], "gpu");
+
+    // And naming one replaces it.
+    let (status, body) = post_req(
+        &sock,
+        PP_STAGE_MODEL,
+        &token,
+        serde_json::json!({ "model": "cleanup-1", "device": "cpu" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["post_processor"]["preferred_device"], "cpu");
+}
+
+/// A device that is not `cpu`/`gpu` is refused with the code `/active_device`
+/// uses, before anything is persisted — the selection must not half-apply.
+#[tokio::test]
+async fn an_unknown_device_is_refused_before_anything_is_saved() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    let (status, body) = post_req(
+        &sock,
+        PP_STAGE_MODEL,
+        &token,
+        serde_json::json!({ "model": "cleanup-1", "source": FIXTURE_SOURCE, "device": "tpu" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_device");
+
+    let (_, body) = get(&sock, PP_STAGE, &token).await;
+    assert_eq!(body["stage"]["enabled"], false, "nothing was saved");
+    assert_eq!(body["stage"]["model"], serde_json::Value::Null);
+}
+
+/// Stage 1's device is the daemon-wide preference behind `/active_device`,
+/// with a reload of its own; sending one here is refused rather than ignored,
+/// since the caller expects the model to land on it.
+#[tokio::test]
+async fn stage_one_does_not_take_a_device_with_its_model() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    let (status, body) = post_req(
+        &sock,
+        "/pipeline/1/model",
+        &token,
+        serde_json::json!({ "model": "whisper-1", "source": FIXTURE_SOURCE, "device": "gpu" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_value");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("/active_device"),
+        "the refusal names where the device does go: {body}"
+    );
 }
 
 /// Enable → read back → disable. `POST` names the model to run; `DELETE` stops

@@ -555,12 +555,49 @@ fn set_post_processor_parses_the_model_and_source() {
         })),
     );
     match Command::try_from(req).expect("parses") {
-        Command::SetPostProcessor { model, source } => {
+        Command::SetPostProcessor {
+            model,
+            source,
+            device,
+        } => {
             assert_eq!(model, "cleanup-small");
             assert_eq!(source, "github.com/super-stt/cleanup");
+            assert_eq!(device, None, "no device named means keep the stored one");
         }
         other => panic!("wrong command: {other:?}"),
     }
+}
+
+/// The stage's device rides along with the model: the post-processor runs on
+/// hardware picked for it, not on whatever stage 1 happens to use. The parser
+/// only carries the string; the daemon decides what `cpu`/`gpu`/`cuda` mean.
+#[test]
+fn set_post_processor_carries_the_stages_device() {
+    let req = make_request(
+        "set_post_processor",
+        Some(serde_json::json!({ "model": "cleanup-small", "device": "gpu" })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::SetPostProcessor { device, .. } => assert_eq!(device.as_deref(), Some("gpu")),
+        other => panic!("wrong command: {other:?}"),
+    }
+
+    // An explicit null is the same as absent.
+    let req = make_request(
+        "set_post_processor",
+        Some(serde_json::json!({ "model": "cleanup-small", "device": null })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::SetPostProcessor { device, .. } => assert_eq!(device, None),
+        other => panic!("wrong command: {other:?}"),
+    }
+
+    // A device that is not a string is a malformed request, not "keep it".
+    let req = make_request(
+        "set_post_processor",
+        Some(serde_json::json!({ "model": "cleanup-small", "device": 7 })),
+    );
+    assert!(Command::try_from(req).is_err());
 }
 
 /// An omitted `source` resolves to the selected post-processor backend at
@@ -573,7 +610,7 @@ fn set_post_processor_takes_a_bare_model_name() {
         Some(serde_json::json!({ "model": "cleanup-small" })),
     );
     match Command::try_from(req).expect("parses") {
-        Command::SetPostProcessor { model, source } => {
+        Command::SetPostProcessor { model, source, .. } => {
             assert_eq!(model, "cleanup-small");
             assert_eq!(source, "");
         }

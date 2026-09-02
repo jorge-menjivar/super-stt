@@ -94,11 +94,19 @@ impl SuperSTTDaemon {
     }
 
     /// Stage 2: the post-processor that rewrites each final transcript.
-    async fn post_processor_stage(&self) -> serde_json::Value {
-        let (enabled, model, source) = {
+    ///
+    /// Also what `POST`/`DELETE /pipeline/2[/model]` answer with, so the
+    /// shape cannot drift between a read and a write.
+    pub(in crate::daemon) async fn post_processor_stage(&self) -> serde_json::Value {
+        let (enabled, model, source, preferred_device) = {
             let config = self.config.read().await;
             let pp = &config.post_processor;
-            (pp.enabled, pp.model.clone(), pp.source.clone())
+            (
+                pp.enabled,
+                pp.model.clone(),
+                pp.source.clone(),
+                pp.device.clone(),
+            )
         };
         let source = (!source.is_empty()).then_some(source);
         let name = self.backend_name(source.as_deref()).await;
@@ -110,6 +118,12 @@ impl SuperSTTDaemon {
             "name": name,
             "model": (!model.is_empty()).then_some(model),
             "loaded": self.post_processor_loaded().await,
+            // Where the work runs, as stage 1 reports it: the accelerator the
+            // loaded instance is actually on, null until one has loaded.
+            "device": self.post_processor_device().await,
+            // The stage's own `cpu`/`gpu` ask, which `device` is the answer
+            // to. Null when it has none and follows stage 1's.
+            "preferred_device": (!preferred_device.is_empty()).then_some(preferred_device),
             // Processor stages carry the user's on/off choice separately from
             // whether the model actually came up: a selection can be enabled
             // while its load failed, and transcripts then pass through.

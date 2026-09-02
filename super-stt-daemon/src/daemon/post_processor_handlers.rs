@@ -36,13 +36,35 @@ impl SuperSTTDaemon {
     /// `POST /active_model`.
     ///
     /// An empty `source` resolves to the selected post-processor backend, so a
-    /// client that has already chosen one names only the model.
-    pub async fn handle_set_post_processor(&self, model: String, source: String) -> DaemonResponse {
+    /// client that has already chosen one names only the model. `device` is
+    /// the stage's own `cpu`/`gpu` preference; `None` keeps the stored one.
+    pub async fn handle_set_post_processor(
+        &self,
+        model: String,
+        source: String,
+        device: Option<String>,
+    ) -> DaemonResponse {
         // Loading and unloading a backend instance during a recording is the
         // same hazard as switching the transcription model mid-recording.
         if let Some(resp) = self.guard_model_mutation("change the post-processor").await {
             return resp;
         }
+
+        // Validate and normalize (`cuda`/`metal` → `gpu`) before anything is
+        // persisted, with the same code and wording `/active_device` uses for
+        // the same mistake.
+        let device = match device {
+            None => None,
+            Some(raw) => match crate::daemon::device_management::parse_device_preference(&raw) {
+                Some(normalized) => Some(normalized),
+                None => {
+                    return DaemonResponse::error_with_code(
+                        ErrorCode::InvalidDevice,
+                        &format!("Invalid device '{raw}'. Must be 'cpu' or 'gpu'"),
+                    );
+                }
+            },
+        };
 
         // Resolve the backend the same way `set_model` does: an omitted source
         // means "the one already selected", and having none selected is the
@@ -92,7 +114,9 @@ impl SuperSTTDaemon {
         }
 
         let persist = self
-            .set_config_field(|c| c.enable_post_processor(model.clone(), source.clone()))
+            .set_config_field(|c| {
+                c.enable_post_processor(model.clone(), source.clone(), device.clone());
+            })
             .await;
 
         // A load failure is reported in the message but does not fail the call:
@@ -203,21 +227,10 @@ impl SuperSTTDaemon {
         )
     }
 
-    /// The `{ enabled, model, source, loaded }` body both the getter and the
-    /// setters answer with, so the shape cannot drift between them.
+    /// The stage object every setter answers with — the same one
+    /// `GET /pipeline/2` reads, so a write's echo and the next read cannot
+    /// disagree.
     async fn post_processor_payload(&self) -> serde_json::Value {
-        let (enabled, model, source) = {
-            let config = self.config.read().await;
-            let pp = &config.post_processor;
-            (pp.enabled, pp.model.clone(), pp.source.clone())
-        };
-        serde_json::json!({
-            "enabled": enabled,
-            // Null rather than "" for an empty selection: the field is an
-            // identity, and an empty string is not one.
-            "model": (!model.is_empty()).then_some(model),
-            "source": (!source.is_empty()).then_some(source),
-            "loaded": self.post_processor_loaded().await,
-        })
+        self.post_processor_stage().await
     }
 }

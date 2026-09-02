@@ -40,6 +40,15 @@ pub struct PostProcessorState {
     pub source: Option<String>,
     #[serde(default)]
     pub loaded: bool,
+    /// The accelerator the loaded model actually runs on (`cpu`, `cuda`, …);
+    /// `None` until one has loaded.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// The stage's own `cpu`/`gpu` preference; `None` when it has none and
+    /// follows the transcription stage's. Absent from a daemon that predates
+    /// per-stage devices, which reads the same way.
+    #[serde(default)]
+    pub preferred_device: Option<String>,
 }
 
 impl PostProcessorState {
@@ -81,15 +90,23 @@ pub async fn clear_post_processor() -> HttpResult<()> {
     .await
 }
 
-/// Run final transcripts through `model` (HTTP `POST /post_processor`).
+/// Run final transcripts through `model` (HTTP `POST /pipeline/2/model`).
 ///
 /// `source` is optional: omitted, the daemon resolves the model against the
 /// selected post-processor backend, exactly as `POST /active_model` resolves
-/// against the active one.
-pub async fn set_post_processor(model: String, source: Option<String>) -> HttpResult<()> {
+/// against the active one. `device` is the stage's own `cpu`/`gpu`; omitted,
+/// the daemon keeps the one it has stored.
+pub async fn set_post_processor(
+    model: String,
+    source: Option<String>,
+    device: Option<String>,
+) -> HttpResult<()> {
     let mut body = serde_json::json!({ "model": model });
     if let Some(source) = source {
         body["source"] = serde_json::Value::String(source);
+    }
+    if let Some(device) = device {
+        body["device"] = serde_json::Value::String(device);
     }
     with_settings_token(move |socket, token| {
         let body = body.clone();
@@ -124,4 +141,40 @@ pub async fn clear_post_processor_backend() -> HttpResult<()> {
         require_unit(resp, "clear_stage_backend")
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PostProcessorState;
+
+    /// A daemon that predates per-stage devices sends neither field; the
+    /// state reads as "no preference, nothing resolved" rather than failing
+    /// the settings load.
+    #[test]
+    fn a_stage_without_device_fields_still_parses() {
+        let state: PostProcessorState = serde_json::from_value(serde_json::json!({
+            "stage": 2, "role": "post_processor",
+            "source": "github.com/x/y", "model": "cleanup", "loaded": true, "enabled": true
+        }))
+        .expect("older payload must parse");
+        assert_eq!(state.device, None);
+        assert_eq!(state.preferred_device, None);
+        assert_eq!(
+            state.selection(),
+            Some(("cleanup".to_string(), "github.com/x/y".to_string()))
+        );
+    }
+
+    /// The ask and the answer are separate fields and both come through.
+    #[test]
+    fn the_stages_device_fields_carry_through() {
+        let state: PostProcessorState = serde_json::from_value(serde_json::json!({
+            "model": "cleanup", "source": "github.com/x/y",
+            "loaded": true, "enabled": true,
+            "device": "cuda", "preferred_device": "gpu"
+        }))
+        .expect("parses");
+        assert_eq!(state.device.as_deref(), Some("cuda"));
+        assert_eq!(state.preferred_device.as_deref(), Some("gpu"));
+    }
 }

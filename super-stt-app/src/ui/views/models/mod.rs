@@ -34,7 +34,7 @@ use crate::ui::messages::Message;
 /// The post-processor models one backend serves, in the same order the
 /// Post-processing dropdown renders them — the settings handler resolves a
 /// picked index through this, so both sides must agree.
-pub(crate) use post_processing::post_processor_models;
+pub(crate) use post_processing::{post_processor_default_device, post_processor_models};
 
 pub use post_processing::post_processor_sheet;
 
