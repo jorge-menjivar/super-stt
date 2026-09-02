@@ -100,7 +100,7 @@ where
     let kind_subdir = match selection {
         Selection::Wasm => false,
         Selection::Subprocess { .. } => true,
-        Selection::Incompatible { reason: _ } => {
+        Selection::Incompatible { .. } | Selection::NeedsClientUpdate { .. } => {
             return Err((P::Resolving, InstallError::Incompatible));
         }
     };
@@ -251,7 +251,9 @@ where
                 Ok(())
             }
         }
-        Selection::Incompatible { reason: _ } => Err((P::Resolving, InstallError::Incompatible)),
+        Selection::Incompatible { .. } | Selection::NeedsClientUpdate { .. } => {
+            Err((P::Resolving, InstallError::Incompatible))
+        }
     }
 }
 

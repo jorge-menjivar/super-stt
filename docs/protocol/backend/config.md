@@ -70,39 +70,6 @@ description = "Local Whisper speech-to-text."
 | `license`    | string | for publication | SPDX identifier of a current OSI-approved or FSF Free/Libre license (e.g. `Apache-2.0`, `MIT`, `GPL-3.0-only`), or the literal `other` for a license outside that set. Required for registry publication; optional for locally installed backends. |
 | `description`| string | yes             | One-line, human-readable summary shown in the registry/Browse listing. |
 
-### Contract generations
-
-`contract` is the one thing a manifest says about what it needs from Super
-STT. Each generation is a set of manifest fields and backend routes, and each
-is **additive** over the one before: a `v2` backend serves everything a `v1`
-backend serves, plus what `v2` introduced. Declare the lowest generation whose
-fields you use — a backend that only transcribes is `v1` however new it is.
-
-| Generation | Adds                                                                         | First supported by |
-|------------|------------------------------------------------------------------------------|--------------------|
-| `v1`       | The base contract: transcription over `POST /v1/transcribe`.                 | Super STT 0.1.0    |
-| `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors. | Super STT 0.2.4    |
-
-You never write a Super STT version. The generation implies one, and the
-registry carries it: the indexer stamps each entry with the release that
-introduced its generation, so a Super STT that predates it lists the backend
-as *Not compatible* with the version to update to, rather than installing
-something it cannot drive. A Super STT older than the field itself cannot
-parse the manifest at all — which refuses the install just the same, only
-without the explanation.
-
-The rule is enforced twice from one table. The parser refuses a manifest that
-declares a field newer than its generation:
-
-```
-`[[models]].role` requires `contract = "v2"`, but this manifest declares `contract = "v1"`
-```
-
-and the published `backend.schema.json` disallows the same field under the
-same generation, so an editor bound to the schema flags it before anything is
-released. Spelling a newer field with its default value still counts as
-declaring it.
-
 `license` is checked against the SPDX license list embedded in the registry
 indexer — no network access — and must be a single, current (non-deprecated)
 SPDX identifier that the list marks OSI-approved or FSF Free/Libre, or the
@@ -125,6 +92,52 @@ controls, so two unrelated authors may both publish a backend named
 
 `id` names the install directory. It is not part of model identity, which is
 the `(name, source)` pair described in [contract.md](./contract.md).
+
+### Contract generations
+
+`contract` is the one thing a manifest says about what it needs from Super
+STT. A generation names a set of manifest fields and backend routes, and each
+generation **extends** the one before rather than replacing it: `v2` is
+everything `v1` defines, plus what `v2` adds. Declare the lowest generation
+whose fields you use — a backend that only transcribes is `v1` however new it
+is.
+
+| Generation | Adds                                                                         | First supported by |
+|------------|------------------------------------------------------------------------------|--------------------|
+| `v1`       | The base contract: transcription over `POST /v1/transcribe`.                 | Super STT 0.2.0    |
+| `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors. | Super STT 0.2.4    |
+
+Extending the contract does not oblige a backend to serve all of it. Which
+routes a backend must implement is decided by the models it declares, not by
+its generation: a `v2` backend serving only `post_processor` models implements
+`POST /v1/process` and never `POST /v1/transcribe`. The generation says what
+the daemon may *expect to find*; the models say what it will actually call.
+
+You never write a Super STT version. The generation implies one, and the
+registry carries it: the indexer stamps each entry with the release that
+introduced its generation. A Super STT that predates the generation cannot
+parse it, so it shows the backend in **Browse** as needing a newer Super STT,
+naming the version — and does so whether or not "Show incompatible" is on,
+since that toggle is for hardware this machine cannot satisfy, not for
+something the user can fix by updating.
+
+The rule is enforced twice from one table. The parser refuses a manifest that
+declares a field newer than its generation:
+
+```
+`[[models]].role` requires `contract = "v2"`, but this manifest declares `contract = "v1"`
+— raise the contract to use the field, or remove the field to stay on `v1`
+```
+
+and the published `backend.schema.json` disallows the same field under the
+same generation, so an editor bound to the schema flags it before anything is
+released. Spelling a newer field with its default value still counts as
+declaring it — which is why the message names removing the field too: writing
+a default by hand should not cost every older client.
+
+Only field *names* are versioned this way. A generation that widens an
+existing field's value set instead — a new model `role`, a new device — cannot
+be expressed in that table, and is caught by that field's own parser.
 
 ## `[network]`
 

@@ -233,9 +233,13 @@ fn select_install_compat(
     let host = host_detect::detect();
     let sel = compat::select(&host, entry);
     let Some(asset) = compat::to_selected_asset(entry, &sel) else {
-        return Err(Box::new(super::registry_error(
+        // `select` already worked out why; dropping it here is what made this
+        // a bare `incompatible` the caller had to guess at — and the reason is
+        // the whole value of the check when the remedy is "update Super STT".
+        return Err(Box::new(super::registry_error_msg(
             StatusCode::UNPROCESSABLE_ENTITY,
             "incompatible",
+            sel.reason().unwrap_or("no compatible asset for this host"),
         )));
     };
     Ok((sel, asset))

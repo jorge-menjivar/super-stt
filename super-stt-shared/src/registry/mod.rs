@@ -80,6 +80,16 @@ pub struct Compatibility {
     pub selected_asset: Option<SelectedAsset>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Whether the block is "this Super STT is too old" rather than "this
+    /// machine cannot run it".
+    ///
+    /// The two are hidden differently. A host that lacks the right GPU will
+    /// never run the asset, so Browse tucks it behind "Show incompatible"; a
+    /// Super STT one version behind is a thing the user can fix in a minute,
+    /// and hiding it hides the only notice they would get. `false` on an older
+    /// daemon that does not send the field, which lists as it always did.
+    #[serde(default)]
+    pub needs_client_update: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -362,6 +362,28 @@ fn conditional_property_names_exist() {
     }
 }
 
+/// Every table a `CONTRACT_FIELDS` row may name resolves to a definition the
+/// schema actually has, so a future row cannot generate a rule that matches
+/// nothing. Checked over the mapping rather than over today's rows, which name
+/// only `models`.
+#[test]
+fn every_mappable_contract_table_has_a_schema_definition() {
+    use super_stt_registry_types::manifest::{Contract, ContractField};
+    let schema = super_stt_registry_types::schema::backend_schema();
+    let defs = schema["definitions"].as_object().expect("definitions");
+    for table in ["backend", "models", "secrets", "options"] {
+        let field = ContractField {
+            since: Contract::LATEST,
+            table,
+            key: "unused",
+        };
+        let def = field
+            .schema_definition()
+            .unwrap_or_else(|| panic!("`{table}` has no schema definition mapped"));
+        assert!(defs.contains_key(def), "`{table}` maps to missing `{def}`");
+    }
+}
+
 /// A model entry that declares `role`, the field v2 introduced.
 fn post_processor_model() -> Value {
     json!({
@@ -438,11 +460,21 @@ fn contract_rule_field_names_exist() {
     let schema = super_stt_registry_types::schema::backend_schema();
     let defs = schema["definitions"].as_object().expect("definitions");
     for field in CONTRACT_FIELDS {
-        let def = match field.table {
-            "models" => "ModelEntry",
-            "backend" => "BackendMeta",
-            other => panic!("no definition mapping for table `{other}`"),
+        // A row naming a table the schema builder cannot map would generate a
+        // rule matching nothing — silently un-gating the field. That is a
+        // failure to report, not a reason to abort the run.
+        let Some(def) = field.schema_definition() else {
+            panic!(
+                "{}: no schema definition mapped for table `{}`",
+                field.path(),
+                field.table
+            );
         };
+        assert!(
+            defs.contains_key(def),
+            "{}: schema has no `{def}` definition",
+            field.path()
+        );
         assert!(
             defs[def]["properties"]
                 .as_object()

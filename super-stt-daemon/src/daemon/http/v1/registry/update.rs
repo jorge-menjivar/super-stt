@@ -107,9 +107,12 @@ fn select_update_compat(
     let sel = compat::select(&host, entry);
 
     if compat::to_selected_asset(entry, &sel).is_none() {
-        return Err(Box::new(super::registry_error(
+        // Same as the install path: say why, rather than making the client
+        // re-derive it from a listing it may not have refreshed.
+        return Err(Box::new(super::registry_error_msg(
             StatusCode::UNPROCESSABLE_ENTITY,
             "incompatible",
+            sel.reason().unwrap_or("no compatible asset for this host"),
         )));
     }
 

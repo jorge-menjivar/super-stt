@@ -947,6 +947,7 @@ mod update_offer_tests {
                 compatible: true,
                 selected_asset: None,
                 reason: None,
+                needs_client_update: false,
             },
             installed_version: installed.map(String::from),
             update_available,

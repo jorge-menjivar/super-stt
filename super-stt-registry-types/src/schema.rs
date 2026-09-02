@@ -287,7 +287,7 @@ fn contract_rules() -> Vec<Value> {
                 // Indexing a `Value` with `[]` creates the object on the way
                 // down, so the shape is written once, at the leaf.
                 let table = &mut then[field.table];
-                if matches!(field.table, "models" | "secrets" | "options") {
+                if field.is_array_table() {
                     table["items"]["properties"][field.key] = json!(false);
                 } else {
                     table["properties"][field.key] = json!(false);
