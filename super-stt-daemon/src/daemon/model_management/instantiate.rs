@@ -106,6 +106,13 @@ impl SuperSTTDaemon {
         name: &str,
         device_pref: &str,
     ) -> Result<Box<dyn Transcribe>> {
+        // The same secret/option headers the WASM transport is handed: a
+        // subprocess backend reads its `[[options]]` off the request too.
+        // Resolved before the download tracker exists, so a missing required
+        // secret fails the load without leaving a progress card behind.
+        let overrides = self.backend_option_overrides(backend).await?;
+        let headers = self.backend_headers(backend, &overrides).await?;
+
         // Count the files we'll provision so the tracker's denominator is
         // accurate from the first broadcast. Each `[[models.files]]` entry is
         // one file. Empty-files models (cloud-only) skip the tracker entirely —
@@ -151,6 +158,7 @@ impl SuperSTTDaemon {
             name,
             device_pref,
             tracker.as_ref(),
+            headers,
         )
         .await;
 
@@ -182,14 +190,15 @@ impl SuperSTTDaemon {
         )
     }
 
-    /// Form `x-stt-secret-*` / `x-stt-option-*` headers for a WASM backend.
+    /// Form the `x-stt-secret-*` / `x-stt-option-*` headers a backend is
+    /// handed on every `/v1` request, whichever transport carries it.
     ///
     /// Secrets come solely from the generic per-backend keyring store
     /// (`backend:<source>:<name>`) written by the settings app — there is no
     /// legacy `<provider>-api-key` fallback, so the key must be set for this
     /// specific backend. Options use the config override if set, else the
     /// manifest default. A required secret that resolves to nothing is an error.
-    #[cfg(feature = "wasm-backends")]
+    #[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
     async fn backend_headers(
         &self,
         backend: &DiscoveredBackend,
@@ -262,11 +271,12 @@ impl SuperSTTDaemon {
     ///
     /// # Errors
     /// Returns an error when a declared, non-empty `base_url` yields no host.
-    #[cfg(feature = "wasm-backends")]
+    #[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
     async fn backend_option_overrides(
         &self,
         backend: &DiscoveredBackend,
     ) -> Result<std::collections::HashMap<String, String>> {
+        #[allow(unused_mut)] // mutated only by the canonicalization below
         let mut overrides: std::collections::HashMap<String, String> = self
             .config
             .read()
@@ -276,35 +286,13 @@ impl SuperSTTDaemon {
             .get(&backend.source)
             .cloned()
             .unwrap_or_default();
-        let name = backends::base_url::OPTION_NAME;
-        let Some(opt) = backend.options.iter().find(|o| o.name == name) else {
-            return Ok(overrides);
-        };
-        let Some(raw) = overrides.get(name).cloned() else {
-            return Ok(overrides);
-        };
-        if raw.trim().is_empty() {
-            overrides.remove(name);
-        } else if let Some(canonical) = backends::base_url::normalize(&raw) {
-            // The scheme the daemon chose for a value that named none decides
-            // whether the request is encrypted, so an operator asking later why
-            // a gateway was reached in the clear needs it on the record.
-            if !raw.contains("://") {
-                log::info!(
-                    "Backend {}: base_url `{}` names no scheme; reading it as `{canonical}`",
-                    backend.source,
-                    raw.trim()
-                );
-            }
-            overrides.insert(name.to_string(), canonical);
-        } else {
-            // Shaped like the missing-secret error above: name the setting the
-            // user can act on, never the internals.
-            bail!(
-                "{} is not a valid URL.",
-                opt.label.as_deref().unwrap_or(&opt.name)
-            );
-        }
+        // `base_url` is an endpoint to dial, and only the WASM transport can
+        // dial anything — a subprocess backend has no network. Reading it
+        // shares the WASM host's URL code, so a build without that transport
+        // passes the value through as set, which costs nothing for the only
+        // backends such a build can run.
+        #[cfg(feature = "wasm-backends")]
+        canonicalize_base_url(backend, &mut overrides)?;
         Ok(overrides)
     }
 
@@ -573,6 +561,49 @@ mod resolve_accel_tests {
     }
 }
 
+/// Canonicalize a declared `base_url` override in place (see
+/// [`normalize`](backends::base_url::normalize)); drop one that is only
+/// whitespace; fail on one no host can be read from.
+///
+/// # Errors
+/// Returns an error when a declared, non-empty `base_url` yields no host.
+#[cfg(feature = "wasm-backends")]
+fn canonicalize_base_url(
+    backend: &DiscoveredBackend,
+    overrides: &mut std::collections::HashMap<String, String>,
+) -> Result<()> {
+    let name = backends::base_url::OPTION_NAME;
+    let Some(opt) = backend.options.iter().find(|o| o.name == name) else {
+        return Ok(());
+    };
+    let Some(raw) = overrides.get(name).cloned() else {
+        return Ok(());
+    };
+    if raw.trim().is_empty() {
+        overrides.remove(name);
+    } else if let Some(canonical) = backends::base_url::normalize(&raw) {
+        // The scheme the daemon chose for a value that named none decides
+        // whether the request is encrypted, so an operator asking later why
+        // a gateway was reached in the clear needs it on the record.
+        if !raw.contains("://") {
+            log::info!(
+                "Backend {}: base_url `{}` names no scheme; reading it as `{canonical}`",
+                backend.source,
+                raw.trim()
+            );
+        }
+        overrides.insert(name.to_string(), canonical);
+    } else {
+        // Shaped like the missing-secret error above: name the setting the
+        // user can act on, never the internals.
+        bail!(
+            "{} is not a valid URL.",
+            opt.label.as_deref().unwrap_or(&opt.name)
+        );
+    }
+    Ok(())
+}
+
 /// The effective value of a backend option — the user's override if set, else
 /// the manifest default — as injected into the backend's headers by
 /// [`SuperSTTDaemon::backend_headers`].
@@ -582,7 +613,7 @@ mod resolve_accel_tests {
 /// must not widen the sandbox. The settings-facing read path
 /// (`http/v1/backends/options.rs::effective`) resolves the same two sources
 /// separately, for display.
-#[cfg(feature = "wasm-backends")]
+#[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
 fn resolved_backend_option(
     overrides: &std::collections::HashMap<String, String>,
     opt: &backends::manifest::Opt,

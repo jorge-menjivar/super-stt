@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -98,8 +98,14 @@ async fn transcribe(State(s): State<Arc<AppState>>, _body: String) -> (StatusCod
 
 /// `POST /v1/process` — echoes the submitted text back prefixed, behind the
 /// same `loaded` gate as `transcribe`, so a test can assert both that the route
-/// is reached and that the text round-tripped.
-async fn process(State(s): State<Arc<AppState>>, body: String) -> (StatusCode, Json<Value>) {
+/// is reached and that the text round-tripped. Any `x-stt-option-*` headers
+/// on the request are echoed too, sorted, as ` [name=value …]`, so a test can
+/// assert the daemon injected them.
+async fn process(
+    State(s): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: String,
+) -> (StatusCode, Json<Value>) {
     if !s.loaded.load(Ordering::SeqCst) {
         return (
             StatusCode::CONFLICT,
@@ -116,8 +122,21 @@ async fn process(State(s): State<Arc<AppState>>, body: String) -> (StatusCode, J
             Json(json!({ "status": "error", "message": "invalid_text" })),
         );
     }
+    let mut options: Vec<String> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            let name = k.as_str().strip_prefix("x-stt-option-")?;
+            Some(format!("{name}={}", v.to_str().unwrap_or("?")))
+        })
+        .collect();
+    options.sort();
+    let echoed = if options.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", options.join(" "))
+    };
     (
         StatusCode::OK,
-        Json(json!({ "status": "success", "text": format!("processed: {text}") })),
+        Json(json!({ "status": "success", "text": format!("processed: {text}{echoed}") })),
     )
 }

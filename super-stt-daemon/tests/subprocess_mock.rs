@@ -89,7 +89,7 @@ async fn subprocess_orchestration_against_mock() {
     let (dir, _cleanup) = seed_backend_dir("orchestration");
 
     // Spawn + load via the real daemon orchestration.
-    let mut backend = SubprocessBackend::spawn(&dir, "mock", "cpu", None)
+    let mut backend = SubprocessBackend::spawn(&dir, "mock", "cpu", None, Vec::new())
         .await
         .expect("spawn + load mock backend");
 
@@ -121,10 +121,10 @@ async fn two_backends_from_one_directory_run_concurrently() {
 
     let (dir, _cleanup) = seed_backend_dir("concurrent");
 
-    let mut transcriber = SubprocessBackend::spawn(&dir, "mock", "cpu", None)
+    let mut transcriber = SubprocessBackend::spawn(&dir, "mock", "cpu", None, Vec::new())
         .await
         .expect("spawn + load the transcription model");
-    let mut processor = SubprocessBackend::spawn(&dir, "mock-cleanup", "cpu", None)
+    let mut processor = SubprocessBackend::spawn(&dir, "mock-cleanup", "cpu", None, Vec::new())
         .await
         .expect("spawn + load the post-processor alongside it");
 
@@ -154,4 +154,37 @@ async fn two_backends_from_one_directory_run_concurrently() {
     assert_eq!(text, "mock transcription");
 
     transcriber.shutdown().await.expect("clean shutdown");
+}
+
+/// The contract says every `/v1` request carries the user's `[[options]]` as
+/// `x-stt-option-*` headers, whichever transport. A subprocess backend that
+/// steers on an option — a register, a style prompt — reads them off the
+/// request, so the daemon has to put them there; the mock echoes what it got.
+#[tokio::test]
+async fn option_headers_reach_the_subprocess() {
+    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+        return; // needs a systemd --user session
+    }
+    install_crypto_provider();
+
+    let (dir, _cleanup) = seed_backend_dir("headers");
+
+    let headers = vec![
+        ("x-stt-option-styling".to_string(), "formal".to_string()),
+        ("x-stt-option-context".to_string(), "email".to_string()),
+    ];
+    let mut processor = SubprocessBackend::spawn(&dir, "mock-cleanup", "cpu", None, headers)
+        .await
+        .expect("spawn + load the post-processor");
+
+    let processed = processor
+        .process_text("um so hello", Some("en"))
+        .await
+        .expect("the post-processor serves /v1/process");
+    assert_eq!(
+        processed, "processed: um so hello [context=email styling=formal]",
+        "the option headers must arrive on the request"
+    );
+
+    processor.shutdown().await.expect("clean shutdown");
 }
