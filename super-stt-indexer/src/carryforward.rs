@@ -68,6 +68,7 @@ mod tests {
             license: "Apache-2.0".into(),
             kind: "wasm".into(),
             contract: "v1".into(),
+            min_client: None,
             entrypoint: format!("{id}.wasm"),
             allowed_hosts: vec![],
             online: false,

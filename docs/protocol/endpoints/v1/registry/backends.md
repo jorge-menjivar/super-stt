@@ -48,6 +48,7 @@ GET /registry/backends?include_incompatible=false&kind=wasm&online=true&q=openai
       "license": "Apache-2.0",
       "kind": "subprocess",
       "contract": "v1",
+      "min_client": "0.1.0",
       "allowed_hosts": [],
       "online": false,
       "supports_gpu": true,
@@ -104,6 +105,11 @@ Per-entry fields beyond what `index.json` carries:
   for one carrying several — the same two spellings
   [`backend.toml`](../../../backend/config.md#assets) accepts.
 - `compatibility.reason` — present only when `compatible = false`. Human-readable.
+  A backend whose [`contract`](../../../backend/config.md#contract-generations)
+  generation this daemon does not know is reported here too — before any
+  asset question — as `needs Super STT <min_client> or newer (backend contract
+  <contract>); this is <daemon version>`, so the fix is stated rather than
+  discovered on install.
 - `installed_version` — present if the backend is already installed on this
   host, regardless of its registry status. Read from the installed
   `backend.toml` on every request, so it reflects what is on disk now rather

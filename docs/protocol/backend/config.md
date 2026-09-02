@@ -66,9 +66,42 @@ description = "Local Whisper speech-to-text."
 | `version`    | string | yes             | Backend version (semver).                                            |
 | `kind`       | string | yes             | `subprocess` or `wasm` — selects the transport.                       |
 | `entrypoint` | string | yes             | Path, relative to the backend directory, to the executable (`subprocess`) or the `.wasm` component (`wasm`). |
-| `contract`   | string | yes             | The contract version the backend implements. Must be `v1`; unknown versions are rejected. |
+| `contract`   | string | yes             | The [contract generation](#contract-generations) the backend implements: `v1` or `v2`. Declare the lowest generation whose fields you use. Unknown values are rejected. |
 | `license`    | string | for publication | SPDX identifier of a current OSI-approved or FSF Free/Libre license (e.g. `Apache-2.0`, `MIT`, `GPL-3.0-only`), or the literal `other` for a license outside that set. Required for registry publication; optional for locally installed backends. |
 | `description`| string | yes             | One-line, human-readable summary shown in the registry/Browse listing. |
+
+### Contract generations
+
+`contract` is the one thing a manifest says about what it needs from Super
+STT. Each generation is a set of manifest fields and backend routes, and each
+is **additive** over the one before: a `v2` backend serves everything a `v1`
+backend serves, plus what `v2` introduced. Declare the lowest generation whose
+fields you use — a backend that only transcribes is `v1` however new it is.
+
+| Generation | Adds                                                                         | First supported by |
+|------------|------------------------------------------------------------------------------|--------------------|
+| `v1`       | The base contract: transcription over `POST /v1/transcribe`.                 | Super STT 0.1.0    |
+| `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors. | Super STT 0.2.4    |
+
+You never write a Super STT version. The generation implies one, and the
+registry carries it: the indexer stamps each entry with the release that
+introduced its generation, so a Super STT that predates it lists the backend
+as *Not compatible* with the version to update to, rather than installing
+something it cannot drive. A Super STT older than the field itself cannot
+parse the manifest at all — which refuses the install just the same, only
+without the explanation.
+
+The rule is enforced twice from one table. The parser refuses a manifest that
+declares a field newer than its generation:
+
+```
+`[[models]].role` requires `contract = "v2"`, but this manifest declares `contract = "v1"`
+```
+
+and the published `backend.schema.json` disallows the same field under the
+same generation, so an editor bound to the schema flags it before anything is
+released. Spelling a newer field with its default value still counts as
+declaring it.
 
 `license` is checked against the SPDX license list embedded in the registry
 indexer — no network access — and must be a single, current (non-deprecated)
@@ -447,7 +480,7 @@ processing_interval_ms = 1000
 | `estimated_vram_bytes`   | integer         | no       | Conservative GPU memory estimate. Default `0`; use `0` for cloud models. |
 | `processing_interval_ms` | integer         | no       | Suggested minimum interval between streaming passes, in ms.      |
 | `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. |
-| `role`                   | string          | no       | What the model is for: `transcription` (default) or `post_processor`. A `post_processor` model is driven over [`POST /v1/process`](./contract.md#post-v1process) instead of `/v1/transcribe`, and is run in [stage 2 of the pipeline](../endpoints/v1/pipeline.md) rather than stage 1. |
+| `role`                   | string          | no       | **`contract = "v2"`.** What the model is for: `transcription` (default) or `post_processor`. A `post_processor` model is driven over [`POST /v1/process`](./contract.md#post-v1process) instead of `/v1/transcribe`, and is run in [stage 2 of the pipeline](../endpoints/v1/pipeline.md) rather than stage 1. |
 | `provider`               | string          | no       | Compatibility field. Not part of model identity and read by nothing in the daemon; it is echoed back verbatim as `provider` in [`POST /v1/load`](./contract.md#post-v1load) so a backend that still validates it keeps loading. |
 
 > **Compatibility.** `provider` was part of model identity before it became
@@ -464,6 +497,9 @@ describe language capability. When `multilingual` is `true`,
 `multilingual` is `false`, the model transcribes only `primary_language`.
 
 ### Model roles
+
+`role` is a `v2` field: a manifest that declares it must declare
+[`contract = "v2"`](#contract-generations).
 
 `role` decides which `/v1` route the daemon drives a model over, and which of
 its two model slots the model may be selected into:
@@ -489,6 +525,10 @@ streaming audio in, and a post-processor is handed a finished transcript. A
 manifest declaring both is rejected at discovery, and refused at publication.
 
 ```toml
+[backend]
+# ...
+contract = "v2"
+
 [[models]]
 name                = "cleanup-small"
 role                = "post_processor"

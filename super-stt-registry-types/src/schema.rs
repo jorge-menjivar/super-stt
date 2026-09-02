@@ -248,6 +248,15 @@ pub fn backend_schema() -> Value {
         }),
     );
 
+    // Contract generations: a manifest may only use the fields its declared
+    // `contract` includes. One rule per generation below the latest, each
+    // disallowing every field a later generation introduced. Built from the
+    // same table the parser enforces (`CONTRACT_FIELDS`), so an editor bound
+    // to this schema flags exactly what `Manifest::parse` would refuse.
+    for rule in contract_rules() {
+        push_all_of(&mut root, rule);
+    }
+
     // Per-definition conditionals.
     inject_definition_rules(
         root.get_mut("definitions")
@@ -257,6 +266,48 @@ pub fn backend_schema() -> Value {
 
     close_objects(&mut root);
     root
+}
+
+/// For each contract generation below the latest, an `if`/`then` that
+/// disallows the fields later generations introduced when a manifest declares
+/// that generation. Empty when every generation shares one field set.
+///
+/// A `[[models]]`-style table is an array of objects, so the disallowance
+/// goes on `items`; a plain table gets it directly. `false` as a property
+/// schema is what the other conditionals here use for "not under this
+/// condition" (see `cuda_major`), so an editor reports it the same way.
+fn contract_rules() -> Vec<Value> {
+    use crate::manifest::{CONTRACT_FIELDS, Contract};
+    Contract::ALL
+        .iter()
+        .filter(|c| **c < Contract::LATEST)
+        .filter_map(|declared| {
+            let mut then = json!({});
+            for field in CONTRACT_FIELDS.iter().filter(|f| f.since > *declared) {
+                // Indexing a `Value` with `[]` creates the object on the way
+                // down, so the shape is written once, at the leaf.
+                let table = &mut then[field.table];
+                if matches!(field.table, "models" | "secrets" | "options") {
+                    table["items"]["properties"][field.key] = json!(false);
+                } else {
+                    table["properties"][field.key] = json!(false);
+                }
+            }
+            let has_rules = then.as_object().is_some_and(|m| !m.is_empty());
+            has_rules.then(|| {
+                json!({
+                    "if": {
+                        "required": ["backend"],
+                        "properties": { "backend": {
+                            "required": ["contract"],
+                            "properties": { "contract": { "const": declared.to_string() } }
+                        } }
+                    },
+                    "then": { "properties": then }
+                })
+            })
+        })
+        .collect()
 }
 
 /// The full `registry.toml` schema: a map of backend-id → entry.

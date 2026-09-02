@@ -104,6 +104,7 @@ fn map_entry(
         license: entry.license.clone(),
         kind: entry.kind.clone(),
         contract: entry.contract.clone(),
+        min_client: entry.min_client.clone(),
         allowed_hosts: entry.allowed_hosts.clone(),
         online: entry.online,
         supports_gpu: entry.supports_gpu,

@@ -74,8 +74,21 @@ a top-level `status` field of `"success"` or `"error"`.
 | GET    | `/v1/status`     | Readiness state and load progress.                 |
 | GET    | `/v1/ping`       | Liveness.                                          |
 | POST   | `/v1/transcribe` | Transcribe audio; one-shot or streaming.           |
-| POST   | `/v1/process`    | Rewrite a finished transcript. **Post-processors only.** |
+| POST   | `/v1/process`    | Rewrite a finished transcript. **Post-processors only** (`contract = "v2"`). |
 | POST   | `/v1/cancel`     | Cancel an in-flight transcription.                 |
+
+### Contract generations and the `/v1` prefix
+
+The manifest's [`contract`](./config.md#contract-generations) names a
+*generation* of this agreement — which fields a `backend.toml` may declare
+and which routes a backend must serve. Generations are additive: `v2` is
+`v1` plus `[[models]].role` and `POST /v1/process`.
+
+The `/v1` in the route paths is not that number. It is a path segment inside
+the agreement, and an additive generation leaves it alone: a `v2` backend
+serves `/v1/process` next to `/v1/transcribe`, and renames nothing. The prefix
+would move only for a generation that changed the shape of an existing route,
+which none has.
 
 ### Request headers
 

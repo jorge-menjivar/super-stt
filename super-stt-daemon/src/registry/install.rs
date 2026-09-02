@@ -975,6 +975,7 @@ supported_devices = ["cpu"]
             license: String::new(),
             kind: "subprocess".into(),
             contract: "v1".into(),
+            min_client: None,
             entrypoint: "x".into(),
             allowed_hosts: vec![],
             online: false,
