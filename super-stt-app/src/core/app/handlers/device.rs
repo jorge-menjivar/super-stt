@@ -12,13 +12,12 @@ impl AppModel {
         message: DeviceMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            DeviceMessage::DeviceInfoLoaded(device, available_devices) => {
-                info!("DeviceInfoLoaded: device={device}, available_devices={available_devices:?}");
-                self.current_device.clone_from(&device);
-                self.available_devices.clone_from(&available_devices);
+            DeviceMessage::DeviceInfoLoaded(device) => {
+                info!("DeviceInfoLoaded: device={device:?}");
+                self.current_device = device.unwrap_or_default();
 
                 if matches!(self.device_state, DeviceState::Switching { .. }) {
-                    info!("Device switch completed to: {device}");
+                    info!("Device switch completed to: {}", self.current_device);
                     self.device_state = DeviceState::Cooldown;
                     // No need to reload models - device switch complete and model state maintained via events
                     Task::none()

@@ -121,7 +121,6 @@ impl AppModel {
 
             // Initialize device state
             current_device: String::new(), // Empty until loaded from daemon
-            available_devices: vec!["cpu".to_string()], // Default until loaded from daemon
             gpu_info: Vec::new(),
             device_state: DeviceState::Ready,
             last_switch_progress_at: None,
@@ -133,6 +132,7 @@ impl AppModel {
             // completes; the default is the daemon's default too (off).
             post_processor: crate::daemon::client::PostProcessorState::default(),
             staged_post_processor: None,
+            staged_post_processor_device: None,
             recording_stop_mode:
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),

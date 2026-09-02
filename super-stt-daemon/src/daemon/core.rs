@@ -39,8 +39,10 @@ impl SuperSTTDaemon {
             Command::SetModel { model, source } => self.handle_set_model(model, source).await,
             Command::GetModel => self.handle_get_model().await,
             Command::ListModels => self.handle_list_models().await,
-            Command::SetDevice { device } => self.handle_set_device(device).await,
-            Command::GetDevice => self.handle_get_device().await,
+            cmd @ (Command::SetModelDevice { .. }
+            | Command::GetModelDevice { .. }
+            | Command::SetPostProcessorDevice { .. }
+            | Command::GetPostProcessorDevice { .. }) => self.handle_model_device(cmd).await,
             Command::GetConfig => self.handle_get_config().await,
             Command::CancelDownload => self.handle_cancel_download(),
             Command::GetDownloadStatus => self.handle_get_download_status(),

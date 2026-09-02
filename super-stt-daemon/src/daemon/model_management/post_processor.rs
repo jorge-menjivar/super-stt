@@ -53,7 +53,7 @@ impl SuperSTTDaemon {
             );
         }
 
-        let device_pref = self.preferred_device.read().await.clone();
+        let device_pref = self.config.read().await.effective_device(&source, &name);
         let (instance, definition) = self
             .instantiate_backend(&name, &source, &device_pref)
             .await?;

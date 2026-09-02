@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};
+use crate::stt_models::ModelDefinition;
 use crate::stt_models::transcribe::Transcribe;
 use anyhow::Result;
 use log::{error, info, warn};
@@ -15,6 +16,10 @@ impl SuperSTTDaemon {
     /// is actually handed on `POST /v1/load`, per
     /// `docs/protocol/backend/contract.md`.
     ///
+    /// Returns the instance with the definition it was instantiated from, so
+    /// the caller finalizes against the same lookup — the backend can be
+    /// uninstalled concurrently, and a second lookup could come back empty.
+    ///
     /// # Errors
     /// Returns an error if no backend serves the model or instantiation fails.
     pub async fn load_model_with_target_device(
@@ -22,16 +27,17 @@ impl SuperSTTDaemon {
         name: &str,
         source: &str,
         target_device: &str,
-    ) -> Result<Box<dyn Transcribe>> {
+    ) -> Result<(Box<dyn Transcribe>, ModelDefinition)> {
         info!("Loading model {name} with target device: {target_device}");
         self.broadcast_device_model_loading_status(name, target_device);
-        let (instance, _def) = self
+        let (instance, definition) = self
             .instantiate_backend(name, source, target_device)
             .await?;
-        let actual = normalize_device(&instance.device());
-        *self.actual_device.write().await = actual.clone();
-        info!("Model {name} loaded on {actual}");
-        Ok(instance)
+        info!(
+            "Model {name} loaded on {}",
+            normalize_device(&instance.device())
+        );
+        Ok((instance, definition))
     }
 
     /// Re-instantiate the currently-loaded model in place (same identity) so a
@@ -55,7 +61,7 @@ impl SuperSTTDaemon {
         info!("Reloading active model {name} to apply configuration changes");
         self.broadcast_model_loading_status(&name);
         self.unload_current_model().await;
-        let device_pref = self.preferred_device.read().await.clone();
+        let device_pref = self.config.read().await.effective_device(&source, &name);
         match self.instantiate_backend(&name, &source, &device_pref).await {
             Ok((instance, definition)) => {
                 self.finalize_model_switch_success(name, source, definition, instance)
@@ -131,9 +137,9 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// Install a freshly-loaded model as the active one: record its normalized
-    /// device label and write the `LoadedModel` into the slot, returning that
-    /// label. The caller must have already emptied the slot gracefully via
+    /// Install a freshly-loaded model as the active one: write the
+    /// `LoadedModel` into the slot and return its normalized device label.
+    /// The caller must have already emptied the slot gracefully via
     /// [`unload_current_model`], so this assignment drops nothing under the
     /// write lock. Shared by the model-switch and device-switch finalize paths
     /// (Tier 3 #2).
@@ -143,7 +149,6 @@ impl SuperSTTDaemon {
         instance: Box<dyn Transcribe>,
     ) -> String {
         let actual_device = normalize_device(&instance.device());
-        *self.actual_device.write().await = actual_device.clone();
         *self.model.write().await = Some(crate::daemon::types::LoadedModel {
             definition,
             instance,

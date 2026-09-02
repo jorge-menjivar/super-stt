@@ -57,7 +57,6 @@ macro_rules! settings_setter {
     };
 }
 
-pub(crate) mod active_device;
 pub(crate) mod active_model;
 pub(crate) mod allow_online_models;
 pub(crate) mod audio_theme;
@@ -65,6 +64,7 @@ pub(crate) mod backend_secrets;
 pub(crate) mod backends;
 pub(crate) mod custom_models_dir;
 pub(crate) mod language;
+pub(crate) mod model_device;
 pub(crate) mod notification_method;
 pub(crate) mod post_processor;
 pub(crate) mod preview_typing;

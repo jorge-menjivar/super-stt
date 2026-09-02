@@ -5,8 +5,9 @@ each has. Powered by driver-level queries only (NVIDIA NVML, Linux DRM sysfs,
 macOS `system_profiler`/`sysctl`) — no CUDA toolkit or vendor SDK is involved,
 and the call never mutates daemon state.
 
-This is hardware discovery, distinct from [`/active_device`](./active_device.md),
-which selects the *compute device* (`cpu`/`gpu`) a model loads on. The result
+This is hardware discovery, distinct from a model's
+[device](./pipeline.md#get-pipelinestagemodelmodeldevice), which selects the
+*compute device* (`cpu`/`gpu`) that model loads on. The result
 is a point-in-time snapshot: `total_bytes` is effectively static, but
 `free_bytes`/`used_bytes` reflect the moment of the call. The daemon re-probes
 on every request, so a client may poll this endpoint for a live memory view —
@@ -81,9 +82,10 @@ A non-null `host.vulkan` likewise does **not** mean this host has usable GPU
 compute: it reports whether a Vulkan *loader* is installed, and Mesa's
 lavapipe — a software rasterizer shipped by default on many distributions —
 is a loader like any other, so a machine with no GPU at all can still report
-a `host.vulkan` version here. `available_devices` on
-[`/active_device`](./active_device.md) is the authoritative capability
-answer; `host.vulkan` is advisory only, the same as `host.rocm` above.
+a `host.vulkan` version here. `available_devices` on a model's
+[device](./pipeline.md#get-pipelinestagemodelmodeldevice) is the
+authoritative capability answer; `host.vulkan` is advisory only, the same as
+`host.rocm` above.
 
 **Errors:**
 

@@ -1278,81 +1278,308 @@ async fn set_active_backend_from_idle_keeps_model_none() {
     assert!(daemon.model.read().await.is_none());
 }
 
-/// `set_device` with no model loaded only records the preference — it
-/// does not error. The next model load picks up the new device. This
-/// makes the GPU toggle usable in the active-backend card before a model
-/// has been selected.
+/// A device belongs to a model, and setting it for a model that is not
+/// loaded only records the choice — it does not error, and it loads nothing.
+/// The model's next load picks it up. This is what lets the device picker
+/// work before Load is pressed.
 #[tokio::test]
-async fn set_device_when_idle_only_updates_preference() {
+async fn set_model_device_when_not_loaded_only_records_the_preference() {
+    use crate::daemon::device_management::PipelineStage;
     let daemon = test_daemon().await;
-    // Start with the default "cpu" preference and an empty model lock —
-    // the test_daemon fixture already initializes both that way.
+    let source = "github.com/super-stt/whisper";
+    *daemon.backends.write().await = vec![fixture_backend_devices(
+        "whisper",
+        source,
+        "Whisper",
+        "large",
+        vec![
+            super_stt_registry_types::manifest::Device::Cpu,
+            super_stt_registry_types::manifest::Device::Gpu,
+        ],
+    )];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
     assert!(daemon.model.read().await.is_none());
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
+    assert_eq!(
+        daemon.config.read().await.effective_device(source, "large"),
+        "cpu"
+    );
 
     // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
-    let response = daemon.handle_set_device("cuda".to_string()).await;
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::Transcription,
+            "large".to_string(),
+            "cuda".to_string(),
+        )
+        .await;
     assert_eq!(
         response.status, "success",
-        "set_device must succeed when no model is loaded; got error: {:?}",
+        "setting a device for an unloaded model must succeed; got error: {:?}",
         response.message,
     );
-    // Both runtime locks updated (normalized), and the model lock is still empty.
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "gpu");
-    assert_eq!(daemon.actual_device.read().await.as_str(), "gpu");
-    assert!(daemon.model.read().await.is_none());
+    assert_eq!(response.device.as_deref(), Some("gpu"));
+    assert_eq!(
+        response.resolved_accel,
+        Some(None),
+        "a gpu choice has resolved to nothing before a load confirms it"
+    );
+    assert!(
+        response
+            .available_devices
+            .as_ref()
+            .is_some_and(|d| d.iter().any(|d| d == "cpu")),
+        "the model declares the CPU and every host has one: {:?}",
+        response.available_devices
+    );
+    assert!(daemon.model.read().await.is_none(), "nothing was loaded");
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "large"),
+        Some("gpu"),
+        "the choice is the model's own now"
+    );
     assert_eq!(
         daemon.config.read().await.device.preferred_device,
-        "gpu",
-        "preference must be persisted to in-memory config so the next load uses it"
+        "cpu",
+        "the global default is not what a per-model setter writes"
     );
+
+    // The getter answers from the same state.
+    let response = daemon
+        .handle_get_model_device(PipelineStage::Transcription, "large".to_string())
+        .await;
+    assert_eq!(response.status, "success");
+    assert_eq!(response.device.as_deref(), Some("gpu"));
 }
 
-/// An invalid device value is still rejected when idle — the preference
-/// must validate before being recorded.
+/// An invalid device value is rejected before anything is looked up or
+/// stored, with the documented `invalid_device` code.
 #[tokio::test]
-async fn set_device_when_idle_rejects_invalid_device() {
+async fn set_model_device_rejects_invalid_device() {
+    use crate::daemon::device_management::PipelineStage;
     let daemon = test_daemon().await;
 
-    let response = daemon.handle_set_device("xpu".to_string()).await;
-    assert_eq!(response.status, "error");
-    assert_eq!(
-        response.error_code,
-        Some(ErrorCode::InvalidDevice),
-        "the documented 400 invalid_device carries its code, or an uncoded \
-         error would map to 500 instead"
-    );
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
-    assert_eq!(daemon.actual_device.read().await.as_str(), "cpu");
+    for device in ["xpu", "none"] {
+        let response = daemon
+            .handle_set_model_device(
+                PipelineStage::Transcription,
+                "large".to_string(),
+                device.to_string(),
+            )
+            .await;
+        assert_eq!(response.status, "error", "{device}");
+        assert_eq!(
+            response.error_code,
+            Some(ErrorCode::InvalidDevice),
+            "the documented 400 invalid_device carries its code, or an uncoded \
+             error would map to 500 instead ({device})"
+        );
+    }
+    assert!(daemon.config.read().await.backends.models.is_empty());
+}
 
-    // `none` parses via `Device::from_str` (it is a real device variant) but
-    // is a per-model sentinel, not a preference a client may set — the wire
-    // setter must still reject it rather than deferring to the parser.
-    let response = daemon.handle_set_device("none".to_string()).await;
-    assert_eq!(response.status, "error");
+/// The path names a stage, so the model resolves against that stage's
+/// selected backend — and with none selected there is nothing to resolve
+/// against.
+#[tokio::test]
+async fn model_device_needs_the_stage_to_have_a_backend() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+
+    let response = daemon
+        .handle_get_model_device(PipelineStage::Transcription, "large".to_string())
+        .await;
+    assert_eq!(response.error_code, Some(ErrorCode::InvalidBackend));
+
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::PostProcessor,
+            "cleanup".to_string(),
+            "cpu".to_string(),
+        )
+        .await;
+    assert_eq!(response.error_code, Some(ErrorCode::InvalidBackend));
+}
+
+/// A model the stage's backend does not serve, or one of the other stage's
+/// role, is `invalid_model`.
+#[tokio::test]
+async fn model_device_refuses_a_model_the_stage_cannot_run() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/both";
+    let mut backend = fixture_backend_local("both", source, "Both", "whisper");
+    let mut cleanup = backend.models[0].clone();
+    cleanup.name = "cleanup".to_string();
+    cleanup.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    backend.models.push(cleanup);
+    *daemon.backends.write().await = vec![backend];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    daemon.config.write().await.post_processor.source = source.to_string();
+
+    let response = daemon
+        .handle_get_model_device(PipelineStage::Transcription, "absent".to_string())
+        .await;
+    assert_eq!(response.error_code, Some(ErrorCode::InvalidModel));
+
+    // Right backend, wrong stage: the post-processor is not a stage-1 model.
+    let response = daemon
+        .handle_get_model_device(PipelineStage::Transcription, "cleanup".to_string())
+        .await;
+    assert_eq!(response.error_code, Some(ErrorCode::InvalidModel));
+    let response = daemon
+        .handle_get_model_device(PipelineStage::PostProcessor, "whisper".to_string())
+        .await;
+    assert_eq!(response.error_code, Some(ErrorCode::InvalidModel));
+
+    // Each through its own stage resolves.
+    let response = daemon
+        .handle_get_model_device(PipelineStage::Transcription, "whisper".to_string())
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    let response = daemon
+        .handle_get_model_device(PipelineStage::PostProcessor, "cleanup".to_string())
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+}
+
+/// An online model runs remotely: it has no device to set, and reading one
+/// reports the manifest's own `none` with nothing offered.
+#[tokio::test]
+async fn an_online_model_has_no_device() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/openai";
+    *daemon.backends.write().await = vec![fixture_backend("openai", source, "OpenAI", "whisper-1")];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    seed_loaded_model(&daemon, "whisper-1", source).await;
+
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::Transcription,
+            "whisper-1".to_string(),
+            "cuda".to_string(),
+        )
+        .await;
     assert_eq!(response.error_code, Some(ErrorCode::InvalidDevice));
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "cpu");
-    assert_eq!(daemon.actual_device.read().await.as_str(), "cpu");
-}
-
-/// Switching devices while an online model is loaded only records the
-/// preference — online models run remotely, so there is nothing to reload.
-/// Exercises `get_device_switch_context` (which reads the loaded model) on
-/// the reachable path, verifying it returns the model context + `is_online`.
-#[tokio::test]
-async fn set_device_with_online_model_keeps_model_and_updates_preference() {
-    let daemon = test_daemon().await;
-    // `seed_loaded_model` sets supported_devices = ["none"] → an online model.
-    seed_loaded_model(&daemon, "m", "github.com/x/online").await;
-
-    let response = daemon.handle_set_device("cuda".to_string()).await;
-
-    assert_eq!(response.status, "success", "got: {:?}", response.message);
-    // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
-    assert_eq!(daemon.preferred_device.read().await.as_str(), "gpu");
     assert!(
         daemon.model.read().await.is_some(),
-        "online model must not be unloaded by a device switch"
+        "an online model must not be unloaded by a device request"
+    );
+
+    let response = daemon
+        .handle_get_model_device(PipelineStage::Transcription, "whisper-1".to_string())
+        .await;
+    assert_eq!(response.status, "success");
+    assert_eq!(response.device.as_deref(), Some("none"));
+    assert_eq!(response.resolved_accel, Some(None));
+    assert_eq!(response.available_devices, Some(Vec::new()));
+}
+
+/// The manifest rules: a model declaring only the CPU cannot be sent to the
+/// GPU, and the refusal leaves nothing stored.
+#[tokio::test]
+async fn set_model_device_refuses_a_device_the_model_does_not_declare() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/tiny";
+    *daemon.backends.write().await = vec![fixture_backend_local("tiny", source, "Tiny", "tiny")];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::Transcription,
+            "tiny".to_string(),
+            "gpu".to_string(),
+        )
+        .await;
+    assert_eq!(response.error_code, Some(ErrorCode::InvalidDevice));
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "tiny"),
+        None
+    );
+}
+
+/// Asking the loaded model for the device it is already on reloads nothing
+/// — but still makes the device the model's own, since it may have been on
+/// it only through the global default.
+#[tokio::test]
+async fn set_model_device_on_the_device_in_use_reloads_nothing() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/whisper";
+    *daemon.backends.write().await =
+        vec![fixture_backend_local("whisper", source, "Whisper", "small")];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    // A loaded local model, reporting `cpu` from its instance.
+    seed_loaded_model(&daemon, "small", source).await;
+    daemon
+        .model
+        .write()
+        .await
+        .as_mut()
+        .unwrap()
+        .definition
+        .supported_devices = vec![super_stt_registry_types::manifest::Device::Cpu];
+
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::Transcription,
+            "small".to_string(),
+            "cpu".to_string(),
+        )
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    assert_eq!(response.device.as_deref(), Some("cpu"));
+    assert_eq!(
+        response.resolved_accel,
+        Some(Some("cpu".to_string())),
+        "a loaded model reports the device it is on"
+    );
+    assert!(daemon.model.read().await.is_some(), "not unloaded");
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "small"),
+        Some("cpu")
+    );
+}
+
+/// Stage 2 stores the same way: a post-processor that is not loaded gets
+/// its device recorded against its own `(source, model)`, leaving stage 1's
+/// models alone.
+#[tokio::test]
+async fn set_post_processor_device_when_not_loaded_only_records_the_preference() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/cleanup";
+    let mut backend = fixture_backend_devices(
+        "cleanup",
+        source,
+        "Cleanup",
+        "cleanup",
+        vec![
+            super_stt_registry_types::manifest::Device::Cpu,
+            super_stt_registry_types::manifest::Device::Gpu,
+        ],
+    );
+    backend.models[0].role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    *daemon.backends.write().await = vec![backend];
+    daemon.config.write().await.post_processor.source = source.to_string();
+
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::PostProcessor,
+            "cleanup".to_string(),
+            "gpu".to_string(),
+        )
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    assert_eq!(response.device.as_deref(), Some("gpu"));
+    assert!(
+        daemon.post_processor.read().await.is_none(),
+        "nothing was loaded"
+    );
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "cleanup"),
+        Some("gpu")
     );
 }
 

@@ -126,15 +126,22 @@ pub enum ModelsPageMessage {
     /// Activate a Models-page tab (Installed / Download) in the tab bar.
     ModelsTabActivated(segmented_button::Entity),
     /// User picked a model in the active-backend card's model dropdown.
-    /// Stages it for the Load button — does *not* call the daemon. Resets
-    /// the staged device to the model's first supported device.
+    /// Stages it for the Load button — does *not* load. Resets the staged
+    /// device to the first this install offers the model, then asks the
+    /// daemon for the model's own.
     StageActiveModel(String),
     /// User picked a device in the active-backend card's device dropdown.
     /// Stages it for the Load button — does *not* call the daemon.
     StageActiveDevice(String),
-    /// User clicked the Load button. Fires `set_device(staged_device)` then
-    /// `set_model(staged_model)` for the active backend. No-op when nothing
-    /// is staged or a load is already in progress.
+    /// The daemon answered which device `model` has. Restages it when `model`
+    /// is still the staged one and the picker offers that device.
+    StagedDeviceLoaded {
+        model: String,
+        device: crate::daemon::client::ModelDevice,
+    },
+    /// User clicked the Load button. Sets the staged model's device, then
+    /// runs `set_model(staged_model)` for the active backend. No-op when
+    /// nothing is staged or a load is already in progress.
     LoadStagedModel,
     /// User clicked the Unload button. `DELETE /active_model` drops the
     /// model but keeps the active backend selected.
@@ -234,11 +241,13 @@ pub enum ModelsPageMessage {
     RegistryCustomRepoInputChanged(String),
 }
 
-/// Device inventory + device-switch errors.
+/// The stage-1 model's device + device-switch errors.
 #[derive(Debug, Clone)]
 pub enum DeviceMessage {
-    DeviceInfoLoaded(String, Vec<String>), // Current device, available devices
-    DeviceError(String),                   // Device switching error
+    /// The accelerator the loaded model is on, from the startup read of
+    /// `GET /pipeline/1`; `None` when nothing is loaded.
+    DeviceInfoLoaded(Option<String>),
+    DeviceError(String), // Device switching error
 }
 
 /// Model-download progress lifecycle.
@@ -280,8 +289,19 @@ pub enum PostProcessorMessage {
     /// User picked a model from the dropdown — staged locally, nothing sent.
     /// The index is into the selected backend's post-processor models, in the
     /// order `crate::ui::views::models::post_processor_models` returns them.
+    /// Resets the staged device the way [`ModelsPageMessage::StageActiveModel`]
+    /// does, then asks the daemon for the model's own.
     Staged(usize),
-    /// Commit the staged (or already-selected) model and turn processing on.
+    /// User picked a device in the card's device dropdown — staged locally.
+    StagedDevice(String),
+    /// The daemon answered which device `model` has; the stage-2 twin of
+    /// [`ModelsPageMessage::StagedDeviceLoaded`].
+    StagedDeviceLoaded {
+        model: String,
+        device: crate::daemon::client::ModelDevice,
+    },
+    /// Commit the staged (or already-selected) model and turn processing on,
+    /// setting its device first when one is staged.
     Enable,
     /// Turn processing off. The selection is kept, so re-enabling needs no
     /// second pick.

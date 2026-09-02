@@ -29,7 +29,7 @@ use crate::ui::messages::{Message, ModelsPageMessage, PostProcessorMessage, Shel
 use super::active::backend_glyph_tile;
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips, count_chip,
+    backend_supports_gpu, capability_chips, count_chip, offered_devices,
 };
 use super::surface::{
     backend_description, card_divider, card_surface, card_title_block, muted_text_color,
@@ -183,12 +183,12 @@ fn chip_row(backend: &BackendInfo) -> Option<Element<'_, Message>> {
     Some(chips.into())
 }
 
-/// The control row: running state and a Disable button, or the model picker and
-/// an Enable button.
+/// The control row: running state and a Disable button, or the model and
+/// device pickers and an Enable button.
 ///
 /// Deliberately the same shape *and the same words* as the transcription card's
 /// `loaded_model_summary` / `staged_model_picker` pair — accent "Active:" line
-/// with a stop-glyph Unload one way, dropdown with a play-glyph Load model the
+/// with a stop-glyph Unload one way, dropdowns with a play-glyph Load model the
 /// other. Both stages run a model in a stage, so both say so: Unload stops
 /// processing and keeps the backend, while the header's ✕ clears the selection.
 fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, Message> {
@@ -200,7 +200,16 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
             .model
             .clone()
             .unwrap_or_else(|| "post-processor".to_string());
-        let label = text::body(format!("Active: {model}"))
+        // The accelerator it is actually on, the way the transcription card
+        // suffixes its active model — absent while it is not loaded.
+        let device_suffix = app
+            .post_processor
+            .device
+            .as_deref()
+            .filter(|d| !d.is_empty() && *d != "none")
+            .map(|d| format!(" \u{00b7} {d}"))
+            .unwrap_or_default();
+        let label = text::body(format!("Active: {model}{device_suffix}"))
             .class(cosmic::theme::Text::Accent)
             .width(Length::Fill);
         return row![
@@ -223,22 +232,59 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         .filter(|(_, source)| source == &backend.source)
         .map(|(model, _)| model.clone())
         .or_else(|| app.post_processor.model.clone());
-    let selected = shown.and_then(|m| models.iter().position(|n| n == &m));
+    let selected = shown
+        .as_deref()
+        .and_then(|m| models.iter().position(|n| n == m));
+    // Model select takes twice the width of the device select, as on the
+    // transcription card.
     let dropdown = widget::dropdown(models, selected, |index| {
         Message::PostProcessor(PostProcessorMessage::Staged(index))
     })
     .placeholder("Select model")
-    .width(Length::Fill);
+    .width(Length::FillPortion(2));
 
-    row![
-        dropdown,
-        button::suggested("Load model")
-            .leading_icon(icons::phosphor_handle(icons::PLAY))
-            .on_press_maybe(selected.map(|_| Message::PostProcessor(PostProcessorMessage::Enable))),
-    ]
-    .spacing(spacing.space_s)
-    .align_y(Alignment::Center)
-    .into()
+    let mut picker_row = row![dropdown]
+        .spacing(spacing.space_s)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+    // Device dropdown — only for a staged pick this install can offer at
+    // least one device for. Offered devices are the model's declared ones
+    // narrowed by what the installed build can do, so an online model
+    // (offering nothing) shows no picker.
+    let staged = app
+        .staged_post_processor
+        .as_ref()
+        .filter(|(_, source)| source == &backend.source)
+        .map(|(model, _)| model.as_str());
+    let devices: Vec<String> = staged
+        .map(|m| offered_devices(backend, m))
+        .unwrap_or_default();
+    if !devices.is_empty() {
+        let device_index = app
+            .staged_post_processor_device
+            .as_deref()
+            .and_then(|d| devices.iter().position(|x| x == d));
+        let devices_pick = devices.clone();
+        let device_dropdown = widget::dropdown(devices, device_index, move |index| {
+            Message::PostProcessor(PostProcessorMessage::StagedDevice(
+                devices_pick[index].clone(),
+            ))
+        })
+        .placeholder("Device")
+        .width(Length::FillPortion(1));
+        picker_row = picker_row.push(device_dropdown);
+    }
+
+    picker_row
+        .push(
+            button::suggested("Load model")
+                .leading_icon(icons::phosphor_handle(icons::PLAY))
+                .on_press_maybe(
+                    selected.map(|_| Message::PostProcessor(PostProcessorMessage::Enable)),
+                ),
+        )
+        .into()
 }
 
 /// Shown when post-processors are installed but none is chosen: a prompt and

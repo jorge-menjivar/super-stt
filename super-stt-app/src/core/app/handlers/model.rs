@@ -42,14 +42,9 @@ impl AppModel {
             }),
             self.fetch_current_model(),
             Task::perform(get_current_device(), |result| match result {
-                Ok((device, available_devices)) => {
-                    info!(
-                        "Initial device load successful: device={device}, available_devices={available_devices:?}"
-                    );
-                    cosmic::Action::App(Message::Device(DeviceMessage::DeviceInfoLoaded(
-                        device,
-                        available_devices,
-                    )))
+                Ok(device) => {
+                    info!("Initial device load successful: device={device:?}");
+                    cosmic::Action::App(Message::Device(DeviceMessage::DeviceInfoLoaded(device)))
                 }
                 Err(e) => {
                     warn!("Initial device load failed: {e}");

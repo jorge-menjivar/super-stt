@@ -33,6 +33,10 @@ pub struct StageStatus {
 pub struct StagePayload {
     pub model: Option<String>,
     pub source: Option<String>,
+    /// The accelerator the loaded model is running on; `None` when nothing
+    /// is loaded.
+    #[serde(default)]
+    pub device: Option<String>,
     #[serde(default)]
     pub switch: Option<ActiveModelSwitch>,
 }
@@ -73,6 +77,16 @@ pub async fn get_current_model() -> HttpResult<(String, String)> {
 
         let source = current.source.unwrap_or_default();
         Ok((model, source))
+    })
+    .await
+}
+
+/// The accelerator the loaded stage-1 model is running on (HTTP
+/// `GET /pipeline/1`, `stage.device`) — what the active card's `· device`
+/// suffix shows. `None` when nothing is loaded.
+pub async fn get_current_device() -> HttpResult<Option<String>> {
+    with_settings_token(|socket, token| async move {
+        Ok(fetch_stage(socket, &token).await?.stage.device)
     })
     .await
 }

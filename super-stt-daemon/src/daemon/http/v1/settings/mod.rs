@@ -69,7 +69,6 @@ macro_rules! settings_toggle {
     };
 }
 
-pub(crate) mod active_device;
 pub(crate) mod allow_online_models;
 pub(crate) mod audio_theme;
 pub(crate) mod backends;
@@ -95,10 +94,6 @@ use axum::routing::{delete, get, post};
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/models", get(models::list_models))
-        .route(
-            "/active_device",
-            get(active_device::get_active_device).post(active_device::set_active_device),
-        )
         .route(
             "/audio_theme",
             get(audio_theme::get_audio_theme).post(audio_theme::set_audio_theme),
@@ -139,6 +134,10 @@ pub(crate) fn routes() -> Router<AppState> {
         .route(
             "/pipeline/{stage}/model/reload",
             post(pipeline::reload_stage_model),
+        )
+        .route(
+            "/pipeline/{stage}/model/{model}/device",
+            get(pipeline::get_model_device).post(pipeline::set_model_device),
         )
         .route(
             "/preview_typing",

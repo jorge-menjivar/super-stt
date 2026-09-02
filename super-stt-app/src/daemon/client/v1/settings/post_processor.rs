@@ -40,6 +40,10 @@ pub struct PostProcessorState {
     pub source: Option<String>,
     #[serde(default)]
     pub loaded: bool,
+    /// The accelerator the loaded model is running on; `None` when nothing
+    /// is loaded.
+    #[serde(default)]
+    pub device: Option<String>,
 }
 
 impl PostProcessorState {

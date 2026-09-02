@@ -39,10 +39,28 @@ pub enum Command {
     },
     GetModel,
     ListModels,
-    SetDevice {
-        device: String, // "cpu" or "cuda"
+    /// Set the device a transcription (stage 1) model runs on: `cpu` or
+    /// `gpu`. `model` is resolved against the selected transcription backend.
+    /// Reloads the model when it is the loaded one; otherwise only records
+    /// the choice for its next load.
+    SetModelDevice {
+        model: String,
+        device: String,
     },
-    GetDevice,
+    /// Read a transcription model's device: the recorded preference, what it
+    /// resolved to, and the devices this install can offer it.
+    GetModelDevice {
+        model: String,
+    },
+    /// The stage-2 twins of `SetModelDevice`/`GetModelDevice`, resolving
+    /// `model` against the selected post-processor backend.
+    SetPostProcessorDevice {
+        model: String,
+        device: String,
+    },
+    GetPostProcessorDevice {
+        model: String,
+    },
     GetConfig,
     CancelDownload,
     GetDownloadStatus,

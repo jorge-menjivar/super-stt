@@ -63,7 +63,7 @@ pub async fn run() -> Result<()> {
 
     info!("Starting Super STT Daemon");
     info!("Model: {}", config.transcription.preferred_model);
-    info!("Device: {}", config.device.preferred_device);
+    info!("Default device: {}", config.device.preferred_device);
     info!("Audio theme: {}", config.audio.theme);
 
     let daemon = SuperSTTDaemon::new().await?;

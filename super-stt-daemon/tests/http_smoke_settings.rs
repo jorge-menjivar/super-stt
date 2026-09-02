@@ -330,32 +330,11 @@ async fn settings_scope_endpoints() {
     assert_eq!(s, StatusCode::OK);
     assert!(body["custom_models_dir"].is_null());
 
-    // --- GET /active_device ---
-    let (s, body) = raw_get_json(&http_socket, "/active_device", &settings_token).await;
-    assert_eq!(s, StatusCode::OK, "GET /active_device: {body}");
-    assert_eq!(body["status"], "success");
-    assert!(body["device"].is_string(), "device field missing: {body}");
-    assert!(
-        body["available_devices"].is_array(),
-        "available_devices missing: {body}"
-    );
-
-    // --- POST /active_device: invalid device name should error ---
-    let (s, body) = raw_post_json(
-        &http_socket,
-        "/active_device",
-        &settings_token,
-        serde_json::json!({ "device": "definitely-not-a-real-device" }),
-    )
-    .await;
-    // The daemon returns 200 with status:"error" or 400 — both are
-    // acceptable as long as the device wasn't switched. Verify we
-    // didn't end up on a new device.
-    let (_, after) = raw_get_json(&http_socket, "/active_device", &settings_token).await;
-    assert_ne!(
-        after["device"], "definitely-not-a-real-device",
-        "bogus device should not have been accepted (response was {s}: {body})"
-    );
+    // --- /active_device is gone: a device belongs to a model, and is read
+    // and set at /pipeline/{stage}/model/{model}/device (covered by
+    // http_smoke_pipeline.rs). ---
+    let (s, _) = raw_get_json(&http_socket, "/active_device", &settings_token).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "GET /active_device must be gone");
 
     // --- GET /recording_stop_mode ---
     let (s, body) = raw_get_json(&http_socket, "/recording_stop_mode", &settings_token).await;
