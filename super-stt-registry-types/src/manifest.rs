@@ -175,7 +175,7 @@ impl Contract {
             // itself — first shipped in 0.2.0 (#212). A 0.1.x daemon has no
             // notion of an installable backend to gate.
             Self::V1 => "0.2.0",
-            Self::V2 => "0.2.4",
+            Self::V2 => "0.2.4-beta.1",
         }
     }
 }
