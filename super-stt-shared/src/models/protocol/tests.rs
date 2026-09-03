@@ -128,69 +128,6 @@ fn record_command_valid_stop_mode_parses() {
 }
 
 #[test]
-fn set_allow_online_models_parses() {
-    let mut request = make_request("set_allow_online_models", None);
-    request.enabled = Some(true);
-    let command = Command::try_from(request).expect("command should parse");
-    match command {
-        Command::SetAllowOnlineModels { enabled } => assert!(enabled),
-        _ => panic!("expected Command::SetAllowOnlineModels"),
-    }
-}
-
-#[test]
-fn set_allow_online_models_missing_enabled_fails() {
-    let request = make_request("set_allow_online_models", None);
-    let result = Command::try_from(request);
-    assert!(result.is_err());
-}
-
-#[test]
-fn get_allow_online_models_parses() {
-    let request = make_request("get_allow_online_models", None);
-    let command = Command::try_from(request).expect("command should parse");
-    assert!(matches!(command, Command::GetAllowOnlineModels));
-}
-
-#[test]
-fn response_with_allow_online_models() {
-    let response = DaemonResponse::success().with_allow_online_models(true);
-    assert_eq!(response.allow_online_models, Some(true));
-
-    let json = serde_json::to_value(&response).unwrap();
-    assert_eq!(json["allow_online_models"], true);
-}
-
-#[test]
-fn set_allow_online_models_false() {
-    let mut request = make_request("set_allow_online_models", None);
-    request.enabled = Some(false);
-    let command = Command::try_from(request).expect("command should parse");
-    match command {
-        Command::SetAllowOnlineModels { enabled } => assert!(!enabled),
-        _ => panic!("expected Command::SetAllowOnlineModels"),
-    }
-}
-
-#[test]
-fn response_allow_online_models_false_serializes() {
-    let response = DaemonResponse::success().with_allow_online_models(false);
-    assert_eq!(response.allow_online_models, Some(false));
-
-    let json = serde_json::to_value(&response).unwrap();
-    assert_eq!(json["allow_online_models"], false);
-}
-
-#[test]
-fn response_allow_online_models_skipped_when_none() {
-    let response = DaemonResponse::success();
-    assert_eq!(response.allow_online_models, None);
-
-    let json = serde_json::to_value(&response).unwrap();
-    assert!(json.get("allow_online_models").is_none());
-}
-
-#[test]
 fn set_model_parses_online_models() {
     let cases: &[&str] = &[
         "whisper-1",
@@ -650,6 +587,57 @@ fn post_processor_device_commands_parse_the_model_and_device() {
     }
 }
 
+/// The list verbs: per model they name one, per backend they name nothing —
+/// the stage's selection is the backend.
+#[test]
+fn device_list_commands_parse() {
+    let req = make_request("list_model_devices", Some(json!({ "model": "whisper" })));
+    match Command::try_from(req).expect("parses") {
+        Command::ListModelDevices { model } => assert_eq!(model, "whisper"),
+        other => panic!("wrong command: {other:?}"),
+    }
+    let req = make_request(
+        "list_post_processor_devices",
+        Some(json!({ "model": "s1-mini-q4_k_m" })),
+    );
+    match Command::try_from(req).expect("parses") {
+        Command::ListPostProcessorDevices { model } => assert_eq!(model, "s1-mini-q4_k_m"),
+        other => panic!("wrong command: {other:?}"),
+    }
+    assert!(matches!(
+        Command::try_from(make_request("list_active_backend_devices", None)),
+        Ok(Command::ListActiveBackendDevices)
+    ));
+    assert!(matches!(
+        Command::try_from(make_request("list_post_processor_backend_devices", None)),
+        Ok(Command::ListPostProcessorBackendDevices)
+    ));
+}
+
+/// Stage 2 owns the same in-flight verbs stage 1 does. Each cancels and
+/// reloads only its own model: the stages provision independently, so a cancel
+/// addressed to one must not abandon the other's load.
+#[test]
+fn the_post_processor_stage_has_its_own_cancel_and_reload() {
+    assert!(matches!(
+        Command::try_from(make_request("cancel_post_processor_download", None)),
+        Ok(Command::CancelPostProcessorDownload)
+    ));
+    assert!(matches!(
+        Command::try_from(make_request("reload_post_processor", None)),
+        Ok(Command::ReloadPostProcessor)
+    ));
+    // And stage 1's keep their own names.
+    assert!(matches!(
+        Command::try_from(make_request("cancel_download", None)),
+        Ok(Command::CancelDownload)
+    ));
+    assert!(matches!(
+        Command::try_from(make_request("reload_active_model", None)),
+        Ok(Command::ReloadActiveModel)
+    ));
+}
+
 /// Neither half may be omitted: a setter without a device has nothing to set,
 /// and either verb without a model has nothing to address.
 #[test]
@@ -659,8 +647,10 @@ fn model_device_commands_require_both_halves() {
         ("set_model_device", json!({ "model": "", "device": "gpu" })),
         ("set_model_device", json!({ "model": "whisper" })),
         ("get_model_device", json!({})),
+        ("list_model_devices", json!({})),
         ("set_post_processor_device", json!({ "device": "gpu" })),
         ("get_post_processor_device", json!({ "model": "" })),
+        ("list_post_processor_devices", json!({ "model": "" })),
     ] {
         assert!(
             Command::try_from(make_request(command, Some(data.clone()))).is_err(),

@@ -118,6 +118,7 @@ impl AppModel {
                 target_model: String::new(),
                 status_message: "Loading initial model state...".to_string(),
             },
+            model_operation_stage: crate::state::device_offers::STT_STAGE,
 
             // Initialize device state
             current_device: String::new(), // Empty until loaded from daemon
@@ -133,6 +134,7 @@ impl AppModel {
             post_processor: crate::daemon::client::PostProcessorState::default(),
             staged_post_processor: None,
             staged_post_processor_device: None,
+            device_offers: crate::state::device_offers::DeviceOffers::default(),
             recording_stop_mode:
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),

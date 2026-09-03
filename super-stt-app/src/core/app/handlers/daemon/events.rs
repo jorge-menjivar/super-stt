@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, DeviceState, ModelOperationState};
+use crate::state::device_offers::PP_STAGE;
 use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message, UpdateMessage};
 use cosmic::prelude::*;
 use log::{debug, info, warn};
@@ -94,6 +95,17 @@ impl AppModel {
             }
         };
         match event {
+            // Stage 2 reports its own lifecycle on this topic, so every arm
+            // that acts on a stage's model checks whose it is first: reading a
+            // post-processor's load as the transcription model's would clear
+            // the wrong card and report the wrong device.
+            DaemonStatusEvent::Ready { stage, .. } if stage == PP_STAGE => {
+                self.finish_post_processor_operation();
+                // The daemon is authoritative about what stage 2 is running,
+                // and this is the only notice of a load it started itself (at
+                // startup, say) or one another client asked for.
+                Some(crate::core::app::handlers::tasks::load_post_processor())
+            }
             DaemonStatusEvent::Ready {
                 model_loaded,
                 actual_device,
@@ -105,6 +117,10 @@ impl AppModel {
             DaemonStatusEvent::DeviceSwitchError { error, .. } => {
                 Some(self.handle_daemon_device_error(&error))
             }
+            // Stage 2's identity change needs no separate handling: the
+            // `ready` that follows it re-reads the post-processor block, which
+            // is where the app keeps that stage's identity.
+            DaemonStatusEvent::ModelSwitched { stage, .. } if stage == PP_STAGE => None,
             DaemonStatusEvent::ModelSwitched {
                 model_name, source, ..
             } => Some(self.handle_daemon_model_switched(&model_name, &source)),
@@ -121,6 +137,7 @@ impl AppModel {
             DaemonStatusEvent::LoadingModelForDevice {
                 model,
                 target_device,
+                ..
             } => {
                 info!("Received loading_model_for_device event: {model} on {target_device}");
                 let status_message = format!(
@@ -176,8 +193,15 @@ impl AppModel {
                     },
                 }
             }
-            // No app-side effect today: the load-start and active-backend-changed
-            // notifications don't drive UI state here.
+            // Stage 2's load-start is the card's only cue for a load with
+            // nothing to download, and for one this app did not ask for.
+            DaemonStatusEvent::LoadingModel { new_model, stage } if stage == PP_STAGE => {
+                self.set_model_loading(new_model, "Loading model...".to_string(), PP_STAGE);
+                None
+            }
+            // Stage 1's is still ignored: its own Load click already set the
+            // card loading, and a load from elsewhere is reported by the
+            // `model_switched` / `ready` pair that closes it.
             DaemonStatusEvent::LoadingModel { .. }
             | DaemonStatusEvent::ActiveBackendChanged { .. } => None,
             // The daemon completed a periodic self-update check and found a

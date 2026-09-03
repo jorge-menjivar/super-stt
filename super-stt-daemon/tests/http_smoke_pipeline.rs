@@ -13,6 +13,12 @@
 //! 7. `GET /pipeline` lists both stages, and an out-of-range stage 404s.
 //! 8. `/pipeline/{stage}/model/{model}/device` reads and records a model's
 //!    device through its stage, per model, with the same validation.
+//! 9. `/pipeline/{stage}/device/list` and `.../model/{model}/device/list`
+//!    say what a stage's backend, and one of its models, can be run on here.
+//! 10. `/pipeline/{stage}/model/{cancel,reload}` answer for every stage, each
+//!     about its own model.
+//! 11. Uninstalling a backend empties every stage it was filling.
+//!     The answer names each stage it was filling, and only those.
 //!
 //! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
 //! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
@@ -839,4 +845,181 @@ async fn the_device_verb_validates_the_model_and_the_device() {
     let (status, body) = get(&sock, "/pipeline/3/model/whisper-local/device", &token).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
     assert_eq!(body["error_code"], "unknown_stage");
+}
+
+/// The two device lists: a model's is what this install offers it, a stage's
+/// is the union over the models that stage can run from its backend. The
+/// fixture backend serves an online transcription model (offering nothing),
+/// a local one declaring both devices, and a CPU-only post-processor.
+#[tokio::test]
+async fn device_lists_for_a_model_and_for_a_stage() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    // Nothing selected: nothing to list against, and the stage itself still
+    // has to exist.
+    let (status, body) = get(&sock, "/pipeline/1/device/list", &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_backend");
+    let (status, body) = get(&sock, "/pipeline/3/device/list", &token).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
+    assert_eq!(body["error_code"], "unknown_stage");
+
+    for stage in ["/pipeline/1", PP_STAGE] {
+        let (status, _) = post_req(
+            &sock,
+            stage,
+            &token,
+            serde_json::json!({ "source": FIXTURE_SOURCE }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let offered = body["available_devices"].as_array().expect("a list");
+    assert_eq!(offered.first(), Some(&serde_json::json!("cpu")));
+    let (status, body) = get(&sock, "/pipeline/1/model/whisper-1/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["available_devices"], serde_json::json!([]));
+    let (status, body) = get(&sock, "/pipeline/1/model/cleanup-1/device/list", &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_model");
+
+    // The stage-1 list is the union: the online model adds nothing, the local
+    // one brings the CPU and, where the host has one, the GPU.
+    let (status, body) = get(&sock, "/pipeline/1/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let stage_devices = body["available_devices"].as_array().expect("a list");
+    assert_eq!(stage_devices.first(), Some(&serde_json::json!("cpu")));
+    assert_eq!(
+        stage_devices, offered,
+        "with one local model, the stage's list is that model's"
+    );
+
+    // Stage 2's backend is the same install, but only its post-processor
+    // counts there, and that one is CPU-only.
+    let (status, body) = get(&sock, "/pipeline/2/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["available_devices"], serde_json::json!(["cpu"]));
+    let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["available_devices"], serde_json::json!(["cpu"]));
+}
+
+/// Both in-flight verbs answer for every stage. Stage 2 used to answer
+/// `404 unsupported_action` on the grounds that a post-processor had no
+/// download to abandon — it does, and its Cancel button was reaching stage 1's
+/// route instead. Cancel is scoped to the stage that asks: with nothing in
+/// flight anywhere, each stage says so about itself.
+#[tokio::test]
+async fn every_stage_answers_cancel_and_reload() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    for stage in [1, 2] {
+        let (status, body) = post_req(
+            &sock,
+            &format!("/pipeline/{stage}/model/cancel"),
+            &token,
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "stage {stage} body: {body}");
+        assert_eq!(body["error_code"], "no_switch_in_progress");
+
+        // Nothing loaded in either stage, so a reload is a no-op success.
+        let (status, body) = post_req(
+            &sock,
+            &format!("/pipeline/{stage}/model/reload"),
+            &token,
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "stage {stage} body: {body}");
+        assert_eq!(body["status"], "success");
+    }
+
+    // And the stage still has to exist.
+    for path in ["/pipeline/3/model/cancel", "/pipeline/3/model/reload"] {
+        let (status, body) = post_req(&sock, path, &token, serde_json::json!({})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
+        assert_eq!(body["error_code"], "unknown_stage");
+    }
+}
+
+/// The reported gap: uninstalling a backend emptied stage 1 and nothing
+/// else, so a backend selected as the post-processor kept its selection —
+/// and, when loaded, its subprocess — pointed at a directory that no longer
+/// existed. Both stages are emptied now, and the answer says which were.
+#[tokio::test]
+async fn uninstalling_a_backend_empties_every_stage_it_filled() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    let (status, _) = post_req(
+        &sock,
+        PP_STAGE,
+        &token,
+        serde_json::json!({ "source": PP_ONLY_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = get(&sock, PP_STAGE, &token).await;
+    assert_eq!(body["stage"]["source"], PP_ONLY_SOURCE);
+
+    let encoded = PP_ONLY_SOURCE.replace('/', "%2F");
+    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["uninstalled"], true);
+    assert_eq!(body["was_active"], false, "it was never stage 1's");
+    assert_eq!(body["was_post_processor"], true);
+
+    // The selection went with the files.
+    let (status, body) = get(&sock, PP_STAGE, &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert!(body["stage"]["source"].is_null(), "body: {body}");
+    assert!(body["stage"]["model"].is_null(), "body: {body}");
+}
+
+/// The fixture backend serves a model for each stage, so one install can fill
+/// both. Uninstalling it empties both, and the answer names both; a backend
+/// filling neither is uninstalled with neither named. The two flags are read
+/// from different places (stage 1 from the active-backend directory, stage 2
+/// from the selection's source), so each is checked true and false.
+#[tokio::test]
+async fn uninstalling_a_backend_names_every_stage_it_filled() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    for stage in ["/pipeline/1", PP_STAGE] {
+        let (status, body) = post_req(
+            &sock,
+            stage,
+            &token,
+            serde_json::json!({ "source": FIXTURE_SOURCE }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{stage} body: {body}");
+    }
+
+    let encoded = FIXTURE_SOURCE.replace('/', "%2F");
+    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["uninstalled"], true);
+    assert_eq!(body["was_active"], true, "it was stage 1's: {body}");
+    assert_eq!(body["was_post_processor"], true, "and stage 2's: {body}");
+
+    for stage in ["/pipeline/1", PP_STAGE] {
+        let (status, body) = get(&sock, stage, &token).await;
+        assert_eq!(status, StatusCode::OK, "{stage} body: {body}");
+        assert!(body["stage"]["source"].is_null(), "{stage} body: {body}");
+        assert!(body["stage"]["model"].is_null(), "{stage} body: {body}");
+    }
+
+    // The other install was never selected anywhere: gone, and no stage to
+    // report.
+    let encoded = PP_ONLY_SOURCE.replace('/', "%2F");
+    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["uninstalled"], true);
+    assert_eq!(body["was_active"], false, "body: {body}");
+    assert_eq!(body["was_post_processor"], false, "body: {body}");
 }

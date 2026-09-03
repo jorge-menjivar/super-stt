@@ -105,8 +105,11 @@ Authorization: Bearer stt_…64hex…
 
 ## `POST /backends/{source}/options/{name}`
 
-Set the option override. Takes effect the next time that backend's model is
-loaded.
+Set the option override. Every stage currently running a model from that
+backend is reloaded so the new value takes effect at once — a transcription
+model and a post-processor alike; anything not loaded picks it up on its next
+load. A reload that fails is reported in `message`, and the stage keeps
+running the old instance.
 
 **Request:**
 

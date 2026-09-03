@@ -18,6 +18,10 @@ so a client learns one shape and applies it anywhere in the pipeline:
 | Stop it          | `DELETE /pipeline/{stage}/model` | Unload, keeping the backend selected      |
 | Read a model's device | `GET /pipeline/{stage}/model/{model}/device`  | Where one of that backend's models runs |
 | Set it           | `POST /pipeline/{stage}/model/{model}/device` | Run it on the CPU or the GPU, reloading if it is loaded |
+| List a model's devices | `GET /pipeline/{stage}/model/{model}/device/list` | What this install can run that model on |
+| List the backend's devices | `GET /pipeline/{stage}/device/list` | What this install can run that backend on, for this stage |
+| Abandon a load   | `POST /pipeline/{stage}/model/cancel` | Stop the load this stage has in flight, download included |
+| Reload in place  | `POST /pipeline/{stage}/model/reload` | Re-instantiate it to pick up changed secrets or options |
 
 That split is the same one `/pipeline/1` and `/pipeline/1/model` draw for
 transcription, and for the same reason: choosing a backend is cheap and cannot
@@ -91,6 +95,22 @@ become insertable, renumbering is the thing to design — a client holding
 | `loaded` | bool    | Whether the model is loaded and running right now.                       |
 | `device` | string? | The accelerator the loaded model is actually on: `cpu`, `cuda`, `rocm`, `metal`, `vulkan`, or `remote` for an online model. `null` when nothing is loaded. This is where the work runs, not the user's preference — for that, and for what a `gpu` choice resolved to, read the model's [device](#get-pipelinestagemodelmodeldevice). |
 | `enabled`| bool    | *Processor stages only.* Whether it should run. Distinct from `loaded`: a stage can be enabled while its model failed to load, and transcripts then pass through unchanged. |
+| `switch` | object? | The load this stage has in flight, or `null` when it has none. Scoped to the stage: a post-processor's download never appears under stage 1. |
+
+### The `switch` object
+
+Present while a stage is provisioning a model — downloading its files, then
+loading the weights.
+
+| Field        | Type    | Notes                                                          |
+|--------------|---------|-----------------------------------------------------------------|
+| `phase`      | string  | `downloading`, `loading_model`, `completed`, `cancelled`, or `error` — the same vocabulary the `download_progress` event's `status` uses. |
+| `target`     | object  | `{ model, source }` — what is being loaded, and the backend serving it. |
+| `started_at` | string  | RFC 3339 timestamp of when the load began.                      |
+| `download`   | object  | `{ current_file, file_index, total_files, bytes_downloaded, total_bytes, percentage, eta_seconds }`, per file — see [`download_progress`](./events.md#daemon-status) for what the counters mean. |
+
+The polled mirror of the [events](#events) below: a client that wants live
+progress subscribes, and one that reconnects mid-load reads it here.
 
 ## `GET /pipeline`
 
@@ -120,7 +140,8 @@ Content-Type: application/json
       "name":   "Whisper (local)",
       "model":  "whisper-large-v3",
       "loaded": true,
-      "device": "cuda"
+      "device": "cuda",
+      "switch": null
     },
     {
       "stage":   2,
@@ -130,6 +151,7 @@ Content-Type: application/json
       "model":   "textclean",
       "loaded":  true,
       "device":  "cpu",
+      "switch":  null,
       "enabled": true
     }
   ]
@@ -154,6 +176,7 @@ Content-Type: application/json
     "model":   "textclean",
     "loaded":  true,
     "device":  "cpu",
+    "switch":  null,
     "enabled": true
   }
 }
@@ -241,7 +264,6 @@ passing text through rather than costing the user their words.
 | 400  | `invalid_value`          | `model` missing or empty. To stop a stage, use `DELETE`.             |
 | 400  | `invalid_model`          | No installed backend serves `(model, source)`, or its role does not match this stage |
 | 400  | `invalid_backend`        | `source` omitted and no backend is selected for this stage           |
-| 400  | `online_models_disabled` | The model is online and online models are disabled                   |
 | 409  | `recording_in_progress`  | A recording is in flight                                             |
 | 401  | `invalid_session`        | Token unknown / expired / `exe_changed`                              |
 | 403  | `scope_denied`           | Token lacks the `settings` scope                                     |
@@ -260,25 +282,29 @@ errors above.
 
 ## `POST /pipeline/{stage}/model/cancel`
 
-Abandon a load that is still in flight, including the download feeding it.
+Abandon the load **this stage** has in flight, including the download feeding
+it. Every stage implements it: a post-processor downloads its weights like any
+other model.
 
-Only stages that can be interrupted implement it: stage 1 does, and stage 2
-answers `404 unsupported_action` because a post-processor load is not something
-there is a partial download to abandon.
+Scoped to the stage that asked. A stage with nothing of its own in flight
+answers `409` even while another stage is downloading — that load is not this
+one's to abandon.
 
-**Errors:** `409` when no load is in progress (`No download in progress`),
-`404 unknown_stage`, `404 unsupported_action`, plus the auth errors above.
+**Errors:** `409 no_switch_in_progress` when this stage has no load in progress,
+`404 unknown_stage`, plus the auth errors above.
 
 ## `POST /pipeline/{stage}/model/reload`
 
 Re-instantiate this stage's model in place, picking up changed
-[secrets and options](./backends.md) without a manual stop/start.
+[secrets and options](./backends.md) without a manual stop/start. A stage with
+nothing loaded answers `200` and does nothing.
 
-Stage 1 implements it; stage 2 answers `404 unsupported_action` — re-running
-`POST /pipeline/2/model` does the same job for a post-processor today.
+Rarely needed by hand: writing a
+[backend option or secret](./backends/options.md) already reloads every stage
+running a model from that backend, so the new value takes effect immediately.
 
-**Errors:** `404 unknown_stage`, `404 unsupported_action`,
-`409 recording_in_progress`, plus the auth errors above.
+**Errors:** `404 unknown_stage`, `409 recording_in_progress`, plus the auth
+errors above.
 
 ## `GET /pipeline/{stage}/model/{model}/device`
 
@@ -378,6 +404,47 @@ the CPU, surfaced as `resolved_accel: "cpu"` and the `ready` event's
 `actual_device`. A client that wants to offer only what will work narrows its
 picker to `available_devices`.
 
+## `GET /pipeline/{stage}/model/{model}/device/list`
+
+The devices this install can offer `model` on this host — the
+`available_devices` of the model's [device](#get-pipelinestagemodelmodeldevice),
+on its own, for a client that only wants to fill a picker. `model` resolves
+the same way, and the same errors apply.
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "status":            "success",
+  "available_devices": ["cpu", "gpu"]
+}
+```
+
+Empty for an online model, and for a local model this install cannot run on
+any device (a GPU-only model whose installed asset is CPU-only).
+
+## `GET /pipeline/{stage}/device/list`
+
+The devices the backend selected for this stage can be run on here: the union
+of the list above over the models it serves **for this stage's role**. A
+backend serving both a transcription model and a post-processor answers stage
+1 for the former and stage 2 for the latter, since that is what "this backend"
+means from a stage. Always in `cpu`, `gpu` order.
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "status":            "success",
+  "available_devices": ["cpu", "gpu"]
+}
+```
+
+**Errors:** `404 unknown_stage`; `400 invalid_backend` when no backend is
+selected for the stage; plus the auth errors above.
+
 ## Post-processing behavior
 
 **Best-effort.** If a post-processing stage is unloaded, errors, or takes longer
@@ -396,9 +463,22 @@ its [options and secrets](./backends.md) like any other model.
 
 ## Events
 
-A change to any stage publishes `daemon_status_changed` on
-[`/events`](./events.md): stage 1 through the existing `active_backend_changed` /
-`model_switched` variants, stage 2 as `settings_changed` with
+Every stage reports its own model lifecycle on
+[`daemon_status_changed`](./events.md#daemon-status), and each of those events
+carries the `stage` it is about — a client watching one stage must not read the
+other's load as its own. Loading a model publishes `loading_model`, then
+`model_switched` and `ready` once it is running; unloading publishes `ready`
+with `model_loaded: false`. A load that downloads also publishes
+[`download_progress`](./events.md#daemon-status) ticks, which carry the same
+`stage` (and the `source` serving the model), so progress lands on the stage
+that asked for it.
+
+An event without a `stage` field comes from a daemon older than the field, and
+is stage 1's: transcription was the only stage that emitted these.
+
+Backend *selection* is separate from the model lifecycle: stage 1's publishes
+`active_backend_changed`, stage 2's publishes `settings_changed` with
 `setting: "post_processor"`. A device change that reloads stage 1's model
 publishes `switching_device`, `loading_model_for_device` and then `ready` (or
-`device_switch_error`); one that only records a choice publishes nothing.
+`device_switch_error`); stage 2's device change is a plain reload and reports
+itself as one. A device change that only records a choice publishes nothing.

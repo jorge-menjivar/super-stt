@@ -30,9 +30,10 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 
 | Mutation                                                                                                                          | Mirrored as an SSE event?                                                                            |
 |-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| `/pipeline/1/model`, `/pipeline/1`, `/pipeline/1/model/{model}/device` (when it reloads), `/allow_online_models` (when it triggers a fallback) | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled)                 |
+| `/pipeline/{stage}/model`, `/pipeline/{stage}/model/{model}/device` (when it reloads) | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled). Both carry the `stage` they are about: every stage reports its own model lifecycle. |
+| `/pipeline/1` (backend selection)                                                                                               | Yes — `daemon_status_changed` (`active_backend_changed` variant)                                      |
 | `/update_check_enabled`, `/update_beta_optin`, `/pipeline/{stage}` (post-processing stages)                                     | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
-| `/audio_theme`, `/volume`, `/write_method`, `/notification_method`, `/recording_stop_mode`, `/preview_typing`, `/allow_online_models` (no fallback), `/custom_models_dir` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
+| `/audio_theme`, `/volume`, `/write_method`, `/notification_method`, `/recording_stop_mode`, `/preview_typing`, `/custom_models_dir` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
 
 ## Endpoint reference
 
@@ -53,10 +54,11 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/pipeline/{stage}/model/cancel`](../endpoints/v1/pipeline.md) | POST   | Abort an in-flight load for one stage                                                             |
 | [`/pipeline/{stage}/model/reload`](../endpoints/v1/pipeline.md) | POST   | Re-instantiate a stage in place, applying changed secrets/options                                 |
 | [`/pipeline/{stage}/model/{model}/device`](../endpoints/v1/pipeline.md#get-pipelinestagemodelmodeldevice) | GET, POST | Read / set the device one of a stage's models runs on (cpu / gpu)                    |
+| [`/pipeline/{stage}/model/{model}/device/list`](../endpoints/v1/pipeline.md#get-pipelinestagemodelmodeldevicelist) | GET | The devices this install can run one of a stage's models on                     |
+| [`/pipeline/{stage}/device/list`](../endpoints/v1/pipeline.md#get-pipelinestagedevicelist) | GET | The devices this install can run a stage's backend on                                 |
 | [`/write_method`](../endpoints/v1/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg_desktop_portal / ydotool / wayland_protocol)                   |
 | [`/write_method/test`](../endpoints/v1/write_method/test.md) | POST      | Type a test string with the configured method; reports the backend it resolved to                     |
 | [`/notification_method`](../endpoints/v1/notification_method.md) | POST, GET  | How recording failures are surfaced (auto / dbus / typed / off)                                       |
-| [`/allow_online_models`](../endpoints/v1/allow_online_models.md) | POST, GET | Privacy gate for online providers (OpenAI / Mistral / Deepgram)                                       |
 | [`/custom_models_dir`](../endpoints/v1/custom_models_dir.md) | POST, GET | Where to scan for user-supplied models                                                                |
 | [`/backends`](../endpoints/v1/backends.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |
 | [`/backends/{source}/options`](../endpoints/v1/backends/options.md) | GET, POST, DELETE | List / read / set / reset a backend's non-sensitive options                          |

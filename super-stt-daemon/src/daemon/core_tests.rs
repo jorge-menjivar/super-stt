@@ -286,33 +286,6 @@ async fn busy_reset_after_error_cleanup() {
     assert!(daemon.manual_stop_tx.read().await.is_none());
 }
 
-#[tokio::test]
-async fn set_allow_online_models_updates_config() {
-    let daemon = test_daemon().await;
-
-    let request = DaemonRequest {
-        command: "set_allow_online_models".to_string(),
-        audio_data: None,
-        sample_rate: None,
-        client_id: None,
-        event_types: None,
-        client_info: None,
-        since_timestamp: None,
-        limit: None,
-        event_type: None,
-        data: None,
-        language: None,
-        enabled: Some(true),
-    };
-
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "success");
-    assert_eq!(response.allow_online_models, Some(true));
-
-    let config = daemon.config.read().await;
-    assert!(config.online.allow_online_models);
-}
-
 /// An unknown theme name is a client error: `docs/protocol/endpoints/v1/audio_theme.md`
 /// documents `400 invalid_audio_theme`. The daemon must reject it (not silently
 /// apply the default theme and report success).
@@ -451,86 +424,6 @@ async fn set_update_beta_optin_rejects_unknown_value() {
     assert_eq!(daemon.config.read().await.update.beta_optin, before);
 }
 
-#[tokio::test]
-async fn get_allow_online_models_returns_config_value() {
-    let daemon = test_daemon().await;
-
-    // Set it to true first
-    {
-        let mut config = daemon.config.write().await;
-        config.online.allow_online_models = true;
-    }
-
-    let request = DaemonRequest {
-        command: "get_allow_online_models".to_string(),
-        audio_data: None,
-        sample_rate: None,
-        client_id: None,
-        event_types: None,
-        client_info: None,
-        since_timestamp: None,
-        limit: None,
-        event_type: None,
-        data: None,
-        language: None,
-        enabled: None,
-    };
-
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "success");
-    assert_eq!(response.allow_online_models, Some(true));
-}
-
-#[tokio::test]
-async fn set_model_online_rejected_when_disabled() {
-    let daemon = test_daemon().await;
-
-    // Ensure online models are disabled (default)
-    {
-        let config = daemon.config.read().await;
-        assert!(!config.online.allow_online_models);
-    }
-
-    // Online-ness is now resolved from the model's `supported_devices` (`none`),
-    // so the online gate only fires once the model resolves. Register an online
-    // backend serving `whisper-1` so resolution succeeds and the gate engages.
-    *daemon.backends.write().await = vec![fixture_backend(
-        "openai",
-        "github.com/super-stt/openai",
-        "OpenAI",
-        "whisper-1",
-    )];
-
-    // No `source` on the request: it resolves to the selected backend, so
-    // select the one just registered.
-    *daemon.active_backend.write().await = Some("openai".to_string());
-
-    let request = DaemonRequest {
-        command: "set_model".to_string(),
-        audio_data: None,
-        sample_rate: None,
-        client_id: None,
-        event_types: None,
-        client_info: None,
-        since_timestamp: None,
-        limit: None,
-        event_type: None,
-        data: Some(serde_json::json!({ "model": "whisper-1"})),
-        language: None,
-        enabled: None,
-    };
-
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "error");
-    assert_eq!(
-        response.error_code,
-        Some(ErrorCode::OnlineModelsDisabled),
-        "expected the online gate to reject whisper-1, got: {:?} / {:?}",
-        response.error_code,
-        response.message
-    );
-}
-
 /// An omitted `source` resolves to the active backend — not to whichever
 /// installed backend happens to serve the name. Two backends serve
 /// `whisper-tiny` here; the selected one must win regardless of their order in
@@ -589,80 +482,6 @@ async fn an_omitted_source_with_no_active_backend_is_an_error() {
     );
 }
 
-/// The online gate is what these cover, so the model has to *resolve* first —
-/// online-ness is a property of the resolved model (`supported_devices` =
-/// `["none"]`), and the gate is checked after resolution. Without a registered
-/// backend the response is `invalid_model` and a bare `status == "error"`
-/// assertion passes with the gate deleted entirely.
-async fn assert_online_model_rejected(source: &str, dir: &str, model: &str) {
-    let daemon = test_daemon().await;
-    assert!(
-        !daemon.config.read().await.online.allow_online_models,
-        "online models must be disabled for this test to mean anything"
-    );
-    *daemon.backends.write().await = vec![fixture_backend(dir, source, dir, model)];
-
-    let mut request = make_request("set_model");
-    request.data = Some(serde_json::json!({ "model": model, "source": source }));
-
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "error");
-    assert_eq!(
-        response.error_code,
-        Some(ErrorCode::OnlineModelsDisabled),
-        "expected the online gate to reject {model}, got: {:?} / {:?}",
-        response.error_code,
-        response.message
-    );
-}
-
-#[tokio::test]
-async fn set_model_mistral_rejected_when_disabled() {
-    assert_online_model_rejected(
-        "github.com/super-stt/mistral",
-        "mistral",
-        "voxtral-mini-transcribe-v2",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn set_model_deepgram_rejected_when_disabled() {
-    assert_online_model_rejected("github.com/super-stt/deepgram", "deepgram", "nova-3").await;
-}
-
-#[tokio::test]
-async fn toggle_online_models_off_defaults_to_false() {
-    let daemon = test_daemon().await;
-    let config = daemon.config.read().await;
-    assert!(
-        !config.online.allow_online_models,
-        "online models should be disabled by default"
-    );
-}
-
-#[tokio::test]
-async fn toggle_online_models_on_then_off() {
-    let daemon = test_daemon().await;
-
-    // Enable
-    let mut request = make_request("set_allow_online_models");
-    request.enabled = Some(true);
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "success");
-    assert_eq!(response.allow_online_models, Some(true));
-
-    // Disable
-    let mut request = make_request("set_allow_online_models");
-    request.enabled = Some(false);
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "success");
-    assert_eq!(response.allow_online_models, Some(false));
-
-    let config = daemon.config.read().await;
-    assert!(!config.online.allow_online_models);
-}
-
 #[tokio::test]
 async fn list_models_reflects_discovered_backends() {
     // With no backends installed, the list is empty but well-formed.
@@ -681,38 +500,35 @@ async fn list_models_reflects_discovered_backends() {
     );
 }
 
-/// The online gate must not fire for a local model. This only means anything
-/// once the model resolves — with no backend registered the switch stops at
-/// `invalid_model` and the gate is never reached, so the assertion would hold
-/// with the gate deleted.
+/// Online and local models load alike: there is no runtime gate on online
+/// providers. The choice to send audio to a third party is made once, when
+/// an online backend is installed, and a model's own `supported_devices`
+/// (`none`) is what marks it online for the UI. The load itself fails here —
+/// the fixture has no component on disk — but it must get *past* resolution.
 #[tokio::test]
-async fn set_model_local_works_without_online_toggle() {
+async fn an_online_model_loads_without_a_gate() {
     let daemon = test_daemon().await;
-    let source = "github.com/super-stt/whisper";
-    *daemon.backends.write().await = vec![fixture_backend_local(
-        "whisper",
-        source,
-        "Whisper",
-        "whisper-tiny",
-    )];
-    assert!(!daemon.config.read().await.online.allow_online_models);
+    let source = "github.com/super-stt/openai";
+    *daemon.backends.write().await = vec![fixture_backend("openai", source, "OpenAI", "whisper-1")];
 
     let mut request = make_request("set_model");
-    request.data = Some(serde_json::json!({ "model": "whisper-tiny", "source": source }));
+    request.data = Some(serde_json::json!({ "model": "whisper-1", "source": source }));
 
     let response = daemon.handle_command(request).await;
-    // The load itself fails (the fixture has no files on disk), but it must get
-    // *past* the gate: a local model is never blocked by the online toggle.
-    assert_ne!(
-        response.error_code,
-        Some(ErrorCode::OnlineModelsDisabled),
-        "a local model was blocked by the online toggle: {:?}",
-        response.message
-    );
     assert_ne!(
         response.error_code,
         Some(ErrorCode::InvalidModel),
-        "the model did not resolve, so the gate was never exercised: {:?}",
+        "the model did not resolve: {:?}",
+        response.message
+    );
+    assert!(
+        !response
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("online models are disabled"),
+        "an online model was blocked: {:?}",
         response.message
     );
 }
@@ -1188,33 +1004,6 @@ async fn set_backend_option_surfaces_reload_failure() {
     );
 }
 
-/// Disabling online models while an online model is loaded reverts to a local
-/// model. With no local backend installed, the daemon unloads the online model —
-/// the response must say so rather than claim "all transcription is local".
-#[tokio::test]
-async fn disabling_online_without_local_fallback_surfaces_warning() {
-    let daemon = test_daemon().await;
-    // supported_devices = ["none"] → an online model.
-    seed_loaded_model(&daemon, "m", "github.com/x/online").await;
-    {
-        let mut config = daemon.config.write().await;
-        config.online.allow_online_models = true;
-    }
-
-    let resp = daemon.handle_set_allow_online_models(false).await;
-
-    assert_eq!(resp.status, "success");
-    assert!(
-        daemon.model.read().await.is_none(),
-        "online model should be unloaded"
-    );
-    let msg = resp.message.unwrap_or_default();
-    assert!(
-        msg.to_lowercase().contains("no local"),
-        "no-local-fallback should be surfaced, got: {msg}"
-    );
-}
-
 /// Switching from backend A (with a loaded model) to backend B drops the
 /// loaded model — the documented postcondition: after `set_active_backend`,
 /// `/active_model` returns `null` until the user explicitly picks one.
@@ -1542,6 +1331,72 @@ async fn set_model_device_on_the_device_in_use_reloads_nothing() {
     );
 }
 
+/// The list verbs answer from the same narrowing the device verb reports as
+/// `available_devices`: per model, its own list; per stage, the union over
+/// the models the stage can run — so a backend's online model contributes
+/// nothing and its post-processor is stage 2's business, not stage 1's.
+#[tokio::test]
+async fn device_lists_answer_per_model_and_per_stage() {
+    use crate::daemon::device_management::PipelineStage;
+    use super_stt_registry_types::manifest::{Device, ModelRole};
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/mixed";
+    let mut backend = fixture_backend_devices("mixed", source, "Mixed", "local", vec![Device::Cpu]);
+    let mut online = backend.models[0].clone();
+    online.name = "online".to_string();
+    online.supported_devices = vec![Device::None];
+    let mut cleanup = backend.models[0].clone();
+    cleanup.name = "cleanup".to_string();
+    cleanup.role = ModelRole::PostProcessor;
+    cleanup.supported_devices = vec![Device::Cpu, Device::Gpu];
+    backend.models.extend([online, cleanup]);
+    *daemon.backends.write().await = vec![backend];
+
+    // Nothing selected: nothing to list against.
+    let response = daemon
+        .handle_list_stage_devices(PipelineStage::Transcription)
+        .await;
+    assert_eq!(response.error_code, Some(ErrorCode::InvalidBackend));
+
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    daemon.config.write().await.post_processor.source = source.to_string();
+
+    let response = daemon
+        .handle_list_model_devices(PipelineStage::Transcription, "local".to_string())
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    assert_eq!(response.available_devices, Some(vec!["cpu".to_string()]));
+    let response = daemon
+        .handle_list_model_devices(PipelineStage::Transcription, "online".to_string())
+        .await;
+    assert_eq!(response.available_devices, Some(Vec::new()));
+    let response = daemon
+        .handle_list_model_devices(PipelineStage::Transcription, "cleanup".to_string())
+        .await;
+    assert_eq!(
+        response.error_code,
+        Some(ErrorCode::InvalidModel),
+        "a post-processor is not a stage-1 model"
+    );
+
+    // Stage 1 sees only the transcription models: the CPU-only one.
+    let response = daemon
+        .handle_list_stage_devices(PipelineStage::Transcription)
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    assert_eq!(response.available_devices, Some(vec!["cpu".to_string()]));
+
+    // Stage 2 sees the post-processor, which declares the GPU too — offered
+    // only where the host has one, and the CPU everywhere.
+    let response = daemon
+        .handle_list_stage_devices(PipelineStage::PostProcessor)
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    let devices = response.available_devices.expect("a list");
+    assert_eq!(devices.first().map(String::as_str), Some("cpu"));
+    assert!(devices.iter().all(|d| d == "cpu" || d == "gpu"));
+}
+
 /// Stage 2 stores the same way: a post-processor that is not loaded gets
 /// its device recorded against its own `(source, model)`, leaving stage 1's
 /// models alone.
@@ -1667,7 +1522,12 @@ async fn broadcast_model_active_carries_full_identity() {
     let daemon = test_daemon().await;
     let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
 
-    daemon.broadcast_model_active("voxtral-mini", "github.com/super-stt/mistral", "cuda");
+    daemon.broadcast_model_active(
+        "voxtral-mini",
+        "github.com/super-stt/mistral",
+        "cuda",
+        crate::daemon::device_management::PipelineStage::Transcription,
+    );
 
     let (_topic, switched) = rx.recv_json().await.expect("model_switched event");
     assert_eq!(switched["status"], "model_switched");
@@ -1678,6 +1538,246 @@ async fn broadcast_model_active_carries_full_identity() {
     assert_eq!(ready["status"], "ready");
     assert_eq!(ready["model_loaded"], true);
     assert_eq!(ready["model_name"], "voxtral-mini");
+}
+
+/// Stage 2 reports its own model lifecycle. Without that, the only notice a
+/// client got of a post-processor load was the download ticks, which named a
+/// model and left the client to guess whose it was — and a load with nothing
+/// to download, or an unload, was announced not at all.
+#[tokio::test]
+async fn a_post_processor_load_announces_itself_as_stage_two() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::daemon::events::Topic;
+
+    let daemon = test_daemon().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    daemon.broadcast_model_loading_status("s1-mini", PipelineStage::PostProcessor);
+    daemon.broadcast_model_active(
+        "s1-mini",
+        "github.com/super-stt/s1-mini",
+        "cpu",
+        PipelineStage::PostProcessor,
+    );
+
+    let (_topic, loading) = rx.recv_json().await.expect("loading_model event");
+    assert_eq!(loading["status"], "loading_model");
+    assert_eq!(loading["stage"], 2);
+
+    let (_topic, switched) = rx.recv_json().await.expect("model_switched event");
+    assert_eq!(switched["status"], "model_switched");
+    assert_eq!(switched["model_name"], "s1-mini");
+    assert_eq!(switched["stage"], 2);
+
+    let (_topic, ready) = rx.recv_json().await.expect("ready event");
+    assert_eq!(ready["status"], "ready");
+    assert_eq!(ready["model_loaded"], true);
+    assert_eq!(ready["stage"], 2);
+}
+
+/// The handler path, not only the helper: selecting a post-processor over the
+/// wire announces `loading_model` for stage 2 before the load is attempted.
+/// That announcement is the only cue a client that did not ask for the load
+/// ever gets, so it must not depend on the load succeeding. The fixture
+/// cannot be instantiated, which is the point: the announcement arrives, the
+/// selection is kept, and the response says the model is not loaded.
+#[tokio::test]
+async fn selecting_a_post_processor_announces_its_load_as_stage_two() {
+    use crate::daemon::events::Topic;
+    use super_stt_registry_types::manifest::ModelRole;
+
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/textclean";
+    let mut backend = fixture_backend_local("textclean", source, "TextClean", "cleanup");
+    backend.models[0].role = ModelRole::PostProcessor;
+    *daemon.backends.write().await = vec![backend];
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    let mut request = make_request("set_post_processor");
+    request.data = Some(serde_json::json!({ "model": "cleanup", "source": source }));
+    let response = daemon.handle_command(request).await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    let message = response.message.unwrap_or_default();
+    assert!(
+        message.contains("not loaded"),
+        "the fixture cannot load, and the answer must say so: {message}"
+    );
+
+    let (_topic, loading) = rx.recv_json().await.expect("loading_model event");
+    assert_eq!(loading["status"], "loading_model");
+    assert_eq!(loading["new_model"], "cleanup");
+    assert_eq!(loading["stage"], 2);
+
+    // The failed load did not undo the selection.
+    let config = daemon.config.read().await;
+    assert_eq!(config.post_processor.selection(), Some(("cleanup", source)));
+}
+
+/// The polled mirror of the same rule: `GET /pipeline` reports an in-flight
+/// download under the stage that started it. The daemon runs one at a time,
+/// and before it said which stage that was, a post-processor's download
+/// surfaced as stage 1's — the progress bar under the transcription card.
+#[tokio::test]
+async fn a_stage_reports_only_its_own_download() {
+    use crate::download_progress::DownloadProgressTracker;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
+
+    let daemon = test_daemon().await;
+    let tracker = Arc::new(DownloadProgressTracker::new(
+        "s1-mini-q4_k_m".to_string(),
+        "github.com/super-stt/s1-mini".to_string(),
+        POST_PROCESSOR_STAGE,
+        2,
+        Arc::new(AtomicBool::new(false)),
+    ));
+    daemon
+        .download_manager
+        .start_download(tracker)
+        .expect("register download");
+
+    let pipeline = daemon
+        .handle_get_pipeline()
+        .await
+        .pipeline
+        .expect("pipeline");
+    let stages = pipeline.as_array().expect("stages");
+    assert!(
+        stages[0]["switch"].is_null(),
+        "stage 1 must not report the post-processor's download"
+    );
+    assert_eq!(stages[1]["switch"]["target"]["model"], "s1-mini-q4_k_m");
+    assert_eq!(
+        stages[1]["switch"]["target"]["source"],
+        "github.com/super-stt/s1-mini"
+    );
+}
+
+/// Cancel is addressed to a stage, so a stage with nothing of its own in
+/// flight has nothing to cancel — even while the other stage downloads. Before
+/// stage 2 had a cancel at all, its card's Cancel button reached stage 1's.
+#[tokio::test]
+async fn cancel_abandons_only_the_addressed_stages_download() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::download_progress::DownloadProgressTracker;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use super_stt_shared::models::protocol::{ErrorCode, POST_PROCESSOR_STAGE};
+
+    let daemon = test_daemon().await;
+    let stage_two = Arc::new(DownloadProgressTracker::new(
+        "s1-mini-q4_k_m".to_string(),
+        "github.com/super-stt/s1-mini".to_string(),
+        POST_PROCESSOR_STAGE,
+        2,
+        Arc::new(AtomicBool::new(false)),
+    ));
+    daemon
+        .download_manager
+        .start_download(Arc::clone(&stage_two))
+        .expect("register download");
+
+    // Stage 1 has nothing in flight, and the post-processor's download is not
+    // its to abandon.
+    let resp = daemon.handle_cancel_download(PipelineStage::Transcription);
+    assert_eq!(resp.status, "error");
+    assert_eq!(resp.error_code, Some(ErrorCode::NoSwitchInProgress));
+    assert!(!stage_two.is_cancelled());
+
+    let resp = daemon.handle_cancel_download(PipelineStage::PostProcessor);
+    assert_eq!(resp.status, "success");
+    assert!(stage_two.is_cancelled());
+}
+
+/// Reloading an idle stage is a no-op, not an error: the caller asked for the
+/// running model to pick up a change, and there is no running model.
+#[tokio::test]
+async fn reloading_an_idle_post_processor_is_a_no_op() {
+    let daemon = test_daemon().await;
+    let resp = daemon.handle_reload_post_processor().await;
+    assert_eq!(resp.status, "success");
+    assert_eq!(resp.message.as_deref(), Some("No post-processor to reload"));
+}
+
+/// The reported gap: an option or secret written for a backend reloaded only
+/// the transcription model, so a post-processor kept running with the value
+/// the user had just replaced — an API key change that silently did nothing.
+/// Both stages are reloaded now; the fake's source resolves to no installed
+/// backend, so the attempt fails and says so, which is what proves it ran.
+#[tokio::test]
+async fn changing_an_option_reloads_the_post_processor_too() {
+    let daemon = test_daemon().await;
+    seed_scripted_post_processor(&daemon).await;
+
+    let resp = daemon
+        .handle_set_backend_option(
+            "github.com/super-stt/test".to_string(),
+            "style".to_string(),
+            "terse".to_string(),
+        )
+        .await;
+    assert_eq!(resp.status, "success");
+    let message = resp.message.unwrap_or_default();
+    assert!(
+        message.contains("reloading the running model failed"),
+        "the post-processor's stage must be reloaded: {message}"
+    );
+
+    // A backend neither stage is running is not reloaded at all.
+    let resp = daemon
+        .handle_set_backend_option(
+            "github.com/super-stt/other".to_string(),
+            "style".to_string(),
+            "terse".to_string(),
+        )
+        .await;
+    assert_eq!(resp.message.as_deref(), Some("Option style updated"));
+}
+
+/// Stage 1's events keep saying stage 1, so a client filtering on the field
+/// sees the transcription lifecycle exactly where it always was.
+#[tokio::test]
+async fn a_transcription_load_still_announces_itself_as_stage_one() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::daemon::events::Topic;
+
+    let daemon = test_daemon().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    daemon.broadcast_model_loading_status("whisper-tiny", PipelineStage::Transcription);
+    let (_topic, loading) = rx.recv_json().await.expect("loading_model event");
+    assert_eq!(loading["stage"], 1);
+}
+
+/// An unload that answers a user request says stage 2 went idle; an unload of
+/// a stage that was already idle says nothing, since an event reporting a stop
+/// should mean something was running.
+#[tokio::test]
+async fn unloading_the_post_processor_announces_only_when_one_was_loaded() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::daemon::events::Topic;
+
+    let daemon = test_daemon().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    // Nothing loaded: the unload must announce nothing. A marker event
+    // published straight after is what proves it — the next event to arrive is
+    // the marker, not an unload nobody performed.
+    daemon.unload_post_processor_announced().await;
+    daemon.broadcast_model_loading_status("marker", PipelineStage::Transcription);
+    let (_topic, first) = rx.recv_json().await.expect("marker event");
+    assert_eq!(
+        first["status"], "loading_model",
+        "an idle stage announces nothing"
+    );
+
+    seed_scripted_post_processor(&daemon).await;
+    daemon.unload_post_processor_announced().await;
+    let (_topic, ready) = rx.recv_json().await.expect("ready event");
+    assert_eq!(ready["status"], "ready");
+    assert_eq!(ready["model_loaded"], false);
+    assert_eq!(ready["stage"], 2);
 }
 
 /// A `Transcribe` fake whose `transcribe_audio` returns a fixed text or fails,
@@ -1744,6 +1844,44 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
     *daemon.model.write().await = Some(LoadedModel {
         definition,
         instance: Box::new(ScriptedTranscribe { info, result }),
+    });
+}
+
+/// Seed the daemon's `post_processor` slot with a fake, so an unload has
+/// something to unload. The instance never runs — only the slot's occupancy
+/// matters here.
+async fn seed_scripted_post_processor(daemon: &SuperSTTDaemon) {
+    use crate::daemon::types::LoadedModel;
+    use crate::stt_models::ModelDefinition;
+    use crate::stt_models::transcribe::ModelInfoData;
+    use std::time::Duration;
+
+    let definition = ModelDefinition {
+        name: "scripted-pp".to_string(),
+        source: "github.com/super-stt/test".to_string(),
+        is_multilingual: false,
+        primary_language: "en".to_string(),
+        supported_languages: vec!["en".to_string()],
+        estimated_vram_bytes: 0,
+        processing_interval: Duration::from_secs(1),
+        supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
+        realtime: false,
+        role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+        provider: None,
+    };
+    let info = ModelInfoData::new(
+        "scripted-pp",
+        "github.com/super-stt/test",
+        false,
+        false,
+        Duration::from_secs(1),
+    );
+    *daemon.post_processor.write().await = Some(LoadedModel {
+        definition,
+        instance: Box::new(ScriptedTranscribe {
+            info,
+            result: Ok(String::new()),
+        }),
     });
 }
 

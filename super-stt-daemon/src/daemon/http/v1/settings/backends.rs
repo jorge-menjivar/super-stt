@@ -58,6 +58,15 @@ pub(crate) async fn uninstall_backend(
     if was_active {
         s.daemon.handle_clear_active_backend().await;
     }
+    // Stage 2 fills from the same catalog and was left behind: an uninstalled
+    // backend's post-processor kept its subprocess running against deleted
+    // files, and the config kept naming it. The selection is by `source`,
+    // loaded or not — a stage pointed at a backend that no longer exists is
+    // wrong either way.
+    let was_post_processor = s.daemon.config.read().await.post_processor.source.as_str() == source;
+    if was_post_processor {
+        s.daemon.handle_clear_post_processor_backend().await;
+    }
 
     // Remove from disk.
     if let Err(e) = tokio::fs::remove_dir_all(&dir).await {
@@ -77,6 +86,7 @@ pub(crate) async fn uninstall_backend(
     let resp = UninstallResponse {
         uninstalled: true,
         was_active,
+        was_post_processor,
     };
     (
         StatusCode::OK,

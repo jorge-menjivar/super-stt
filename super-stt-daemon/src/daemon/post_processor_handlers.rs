@@ -84,13 +84,6 @@ impl SuperSTTDaemon {
                 ),
             );
         }
-        if definition.is_online() && !self.config.read().await.online.allow_online_models {
-            return DaemonResponse::error_with_code(
-                ErrorCode::OnlineModelsDisabled,
-                "Online models are disabled. Enable 'Allow Online Models' in settings first.",
-            );
-        }
-
         let persist = self
             .set_config_field(|c| c.enable_post_processor(model.clone(), source.clone()))
             .await;
@@ -123,7 +116,7 @@ impl SuperSTTDaemon {
         if let Some(resp) = self.guard_model_mutation("change the post-processor").await {
             return resp;
         }
-        self.unload_post_processor().await;
+        self.unload_post_processor_announced().await;
         let persist = self
             .set_config_field(crate::config::DaemonConfig::disable_post_processor)
             .await;
@@ -165,7 +158,7 @@ impl SuperSTTDaemon {
         // unload here makes the runtime match.
         let switching = self.config.read().await.post_processor.source != source;
         if switching {
-            self.unload_post_processor().await;
+            self.unload_post_processor_announced().await;
         }
         let persist = self
             .set_config_field(|c| c.select_post_processor_backend(source.clone()))
@@ -188,7 +181,7 @@ impl SuperSTTDaemon {
         if let Some(resp) = self.guard_model_mutation("change the post-processor").await {
             return resp;
         }
-        self.unload_post_processor().await;
+        self.unload_post_processor_announced().await;
         let persist = self
             .set_config_field(crate::config::DaemonConfig::clear_post_processor_backend)
             .await;

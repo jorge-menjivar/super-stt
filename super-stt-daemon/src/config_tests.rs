@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
 
+/// A config carrying only the required sections loads; every optional section
+/// falls back to its default.
 #[test]
-fn default_config_has_online_models_disabled() {
-    let config = DaemonConfig::default();
-    assert!(!config.online.allow_online_models);
-}
-
-#[test]
-fn config_without_online_section_deserializes() {
+fn config_without_optional_sections_deserializes() {
     let toml_str = r#"
 [device]
 preferred_device = "cpu"
@@ -25,28 +21,17 @@ recording_stop_mode = "silence_and_manual"
 write_method = "auto"
 "#;
     let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
-    assert!(!config.online.allow_online_models);
-}
-
-#[test]
-fn config_with_online_section_round_trips() {
-    let mut config = DaemonConfig::default();
-    config.online.allow_online_models = true;
-
-    let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-    let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
-    assert!(parsed.online.allow_online_models);
+    assert_eq!(config.transcription.preferred_model, "whisper-tiny");
+    assert!(!config.post_processor.is_active());
 }
 
 #[test]
 fn config_with_online_model_preferred_round_trips() {
     let mut config = DaemonConfig::default();
-    config.online.allow_online_models = true;
     config.transcription.preferred_model = "whisper-1".to_string();
 
     let toml_str = toml::to_string_pretty(&config).expect("should serialize");
     let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
-    assert!(parsed.online.allow_online_models);
     assert_eq!(parsed.transcription.preferred_model, "whisper-1");
 }
 
@@ -67,12 +52,6 @@ fn config_preserves_all_online_model_variants() {
         let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
         assert_eq!(parsed.transcription.preferred_model, model);
     }
-}
-
-#[test]
-fn online_config_default_is_disabled() {
-    let online = OnlineConfig::default();
-    assert!(!online.allow_online_models);
 }
 
 #[test]
@@ -220,7 +199,6 @@ allow_online_models = true
     assert!(config.transcription.preview_typing_enabled);
     assert_eq!(config.audio.theme, AudioTheme::Silent);
     assert_eq!(config.audio.volume, 75);
-    assert!(config.online.allow_online_models);
 }
 
 #[test]
@@ -420,7 +398,9 @@ fn v0_1_3_full_daemon_config_loads_and_migrates() {
     assert_eq!(cfg.audio.volume, 80);
     assert!(cfg.transcription.write_mode);
     assert!(!cfg.transcription.preview_typing_enabled);
-    assert!(cfg.online.allow_online_models);
+    // v0.1.3 also wrote `[online] allow_online_models`; the gate is gone and
+    // the section is simply ignored, which the clean load above already
+    // proves.
 
     // Settings-enum fields migrate to default: v0.1.3 persisted them in the old
     // PascalCase form (`Gentle`/`ManualOnly`/`Ydotool`), which the snake_case
@@ -715,7 +695,7 @@ fn default_update_config() {
 
 #[test]
 fn config_without_update_section_gets_defaults() {
-    // Mirror the literal-TOML shape of `config_without_online_section_deserializes`
+    // Mirror the literal-TOML shape of `config_without_optional_sections_deserializes`
     // above: a full config WITHOUT an [update] section.
     let toml_str = r#"
 [device]

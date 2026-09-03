@@ -14,6 +14,7 @@
 
 use super_stt_shared::models::protocol::DaemonResponse;
 
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};
 
 /// Wire name for a stage's role, matching `ModelRole` in the manifest.
@@ -68,19 +69,23 @@ impl SuperSTTDaemon {
             "model": model,
             "loaded": loaded.is_some(),
             "device": device,
-            "switch": self.stage_switch(),
+            "switch": self.stage_switch(PipelineStage::Transcription),
         })
     }
 
-    /// In-flight load/download progress for a stage, or `null` when nothing is
-    /// being fetched. Only stage 1 downloads today; the field is on every stage
-    /// because any stage that loads weights can.
-    fn stage_switch(&self) -> serde_json::Value {
-        let progress = self.handle_get_download_status().download_progress;
+    /// In-flight load/download progress for `stage`, or `null` when that stage
+    /// is not fetching anything.
+    ///
+    /// The daemon runs one model operation at a time, but not always for the
+    /// same stage: a post-processor's download would otherwise surface as
+    /// stage 1's, which is exactly what the `stage` the tracker now reports is
+    /// for.
+    fn stage_switch(&self, stage: PipelineStage) -> serde_json::Value {
+        let progress = self.handle_get_download_status(stage).download_progress;
         progress.map_or(serde_json::Value::Null, |p| {
             serde_json::json!({
                 "phase":      p.status,
-                "target":     { "model": p.model_name },
+                "target":     { "model": p.model_name, "source": p.source },
                 "started_at": p.started_at,
                 "download": {
                     "current_file":     p.current_file,
@@ -117,6 +122,7 @@ impl SuperSTTDaemon {
             "model": (!model.is_empty()).then_some(model),
             "loaded": loaded.is_some(),
             "device": device,
+            "switch": self.stage_switch(PipelineStage::PostProcessor),
             // Processor stages carry the user's on/off choice separately from
             // whether the model actually came up: a selection can be enabled
             // while its load failed, and transcripts then pass through.

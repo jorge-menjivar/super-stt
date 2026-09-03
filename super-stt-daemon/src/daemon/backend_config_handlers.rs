@@ -9,7 +9,7 @@ use super_stt_shared::models::protocol::DaemonResponse;
 /// post-write model reload is surfaced to the caller instead of swallowed.
 fn with_reload_warning(base: String, reload_warning: Option<String>) -> String {
     match reload_warning {
-        Some(w) => format!("{base} (but reloading the active model failed: {w})"),
+        Some(w) => format!("{base} (but reloading the running model failed: {w})"),
         None => base,
     }
 }
@@ -118,24 +118,36 @@ impl SuperSTTDaemon {
             .with_message("Backends listed successfully".to_string())
     }
 
-    /// Reload the active model iff it is served by `source`, so a just-changed
+    /// Reload every stage running a model from `source`, so a just-changed
     /// option/secret takes effect immediately. Shared by option and secret
     /// writes. Returns a warning message if a reload was attempted and failed
     /// (so the caller can surface it), or `None` otherwise.
+    ///
+    /// Both stages, because both run backend models: a post-processor holds the
+    /// API key and options of its backend exactly as a transcription model
+    /// does, and reloading only stage 1 left it running with the value the user
+    /// had just replaced, with nothing saying so.
     async fn reload_if_source_active(&self, source: &str) -> Option<String> {
-        let active_source = self
+        let transcription = self
             .model
             .read()
             .await
             .as_ref()
             .map(|l| l.definition.source.clone());
-        if active_source.as_deref() == Some(source) {
+        let mut warnings = Vec::new();
+        if transcription.as_deref() == Some(source) {
             let resp = self.handle_reload_active_model().await;
             if resp.status != "success" {
-                return Some(resp.message.unwrap_or_else(|| "unknown error".to_string()));
+                warnings.push(resp.message.unwrap_or_else(|| "unknown error".to_string()));
             }
         }
-        None
+        if self.post_processor_source().await.as_deref() == Some(source) {
+            let resp = self.handle_reload_post_processor().await;
+            if resp.status != "success" {
+                warnings.push(resp.message.unwrap_or_else(|| "unknown error".to_string()));
+            }
+        }
+        (!warnings.is_empty()).then(|| warnings.join("; "))
     }
 
     /// Handle set backend option command — store/clear a plaintext option

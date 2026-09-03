@@ -30,8 +30,17 @@ impl TryFrom<DaemonRequest> for Command {
             "get_model_device" => cmd_get_model_device(&request),
             "set_post_processor_device" => cmd_set_post_processor_device(&request),
             "get_post_processor_device" => cmd_get_post_processor_device(&request),
+            "list_model_devices" => Ok(Command::ListModelDevices {
+                model: model_device_target(&request, "list_model_devices")?,
+            }),
+            "list_active_backend_devices" => Ok(Command::ListActiveBackendDevices),
+            "list_post_processor_devices" => Ok(Command::ListPostProcessorDevices {
+                model: model_device_target(&request, "list_post_processor_devices")?,
+            }),
+            "list_post_processor_backend_devices" => Ok(Command::ListPostProcessorBackendDevices),
             "get_config" => Ok(Command::GetConfig),
             "cancel_download" => Ok(Command::CancelDownload),
+            "cancel_post_processor_download" => Ok(Command::CancelPostProcessorDownload),
             "get_download_status" => Ok(Command::GetDownloadStatus),
             "list_audio_themes" => Ok(Command::ListAudioThemes),
             "set_preview_typing" => cmd_set_preview_typing(&request),
@@ -39,6 +48,7 @@ impl TryFrom<DaemonRequest> for Command {
             "set_post_processor" => cmd_set_post_processor(&request),
             "get_post_processor" => Ok(Command::GetPostProcessor),
             "clear_post_processor" => Ok(Command::ClearPostProcessor),
+            "reload_post_processor" => Ok(Command::ReloadPostProcessor),
             "set_post_processor_backend" => cmd_set_post_processor_backend(&request),
             "clear_post_processor_backend" => Ok(Command::ClearPostProcessorBackend),
             "get_pipeline" => Ok(Command::GetPipeline),
@@ -61,8 +71,6 @@ impl TryFrom<DaemonRequest> for Command {
             "set_model_language" => cmd_set_model_language(&request),
             "get_model_language" => cmd_get_model_language(&request),
             "clear_model_language" => cmd_clear_model_language(&request),
-            "set_allow_online_models" => cmd_set_allow_online_models(&request),
-            "get_allow_online_models" => Ok(Command::GetAllowOnlineModels),
             "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
             "get_custom_models_dir" => Ok(Command::GetCustomModelsDir),
             "list_backends" => Ok(Command::ListBackends),
@@ -349,13 +357,6 @@ fn cmd_set_notification_method(request: &DaemonRequest) -> Result<Command, Strin
         .to_string();
 
     Ok(Command::SetNotificationMethod { method })
-}
-
-fn cmd_set_allow_online_models(request: &DaemonRequest) -> Result<Command, String> {
-    let enabled = request
-        .enabled
-        .ok_or("Missing enabled field for set_allow_online_models command")?;
-    Ok(Command::SetAllowOnlineModels { enabled })
 }
 
 fn cmd_set_update_check_enabled(request: &DaemonRequest) -> Result<Command, String> {

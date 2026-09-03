@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends;
@@ -213,20 +214,18 @@ impl SuperSTTDaemon {
         };
 
         // Resolve against discovered backends; capture the install dir so the
-        // backend is recorded below. Online-ness is only knowable from the
-        // resolved model, so capture it here too.
+        // backend is recorded below.
         let resolved = {
             let backends = self.backends.read().await;
             backends::find_model(&backends, &model, &source).map(|(b, d)| {
                 (
                     b.source.clone(),
                     backends::dir_name(b),
-                    d.is_online(),
                     d.is_post_processor(),
                 )
             })
         };
-        let Some((backend_source, backend_dir, is_online, is_post_processor)) = resolved else {
+        let Some((backend_source, backend_dir, is_post_processor)) = resolved else {
             return DaemonResponse::error_with_code(
                 ErrorCode::InvalidModel,
                 &format!(
@@ -251,18 +250,6 @@ impl SuperSTTDaemon {
             );
         }
 
-        // Online models must be explicitly enabled — gated after resolution
-        // since online-ness is a property of the resolved model. Emit the
-        // documented `400 online_models_disabled` code so clients can show the
-        // "enable online models" affordance instead of treating an uncoded 500
-        // as a crash (audit 2 Tier 1 #9).
-        if is_online && !self.config.read().await.online.allow_online_models {
-            return DaemonResponse::error_with_code(
-                ErrorCode::OnlineModelsDisabled,
-                "Online models are disabled. Enable 'Allow Online Models' in settings first.",
-            );
-        }
-
         // Selecting a model makes its backend the active one — record this
         // before the load so a load failure leaves the backend selected with no
         // model loaded (rather than silently restoring a previous model).
@@ -276,7 +263,7 @@ impl SuperSTTDaemon {
             }
         }
 
-        self.broadcast_model_loading_status(&model);
+        self.broadcast_model_loading_status(&model, PipelineStage::Transcription);
         self.unload_current_model().await;
         let device_pref = self
             .config
@@ -285,7 +272,12 @@ impl SuperSTTDaemon {
             .effective_device(&backend_source, &model);
 
         match self
-            .instantiate_backend(&model, &backend_source, &device_pref)
+            .instantiate_backend(
+                &model,
+                &backend_source,
+                &device_pref,
+                PipelineStage::Transcription,
+            )
             .await
         {
             Ok((instance, definition)) => {
@@ -315,7 +307,12 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after model switch: {e}");
         }
-        self.broadcast_model_active(&model, &source, &actual_device);
+        self.broadcast_model_active(
+            &model,
+            &source,
+            &actual_device,
+            PipelineStage::Transcription,
+        );
         info!("Switched to model: {model}");
         DaemonResponse::success()
             .with_current_model(model.clone())

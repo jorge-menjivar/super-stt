@@ -71,3 +71,52 @@ pub async fn set_model_device(stage: u32, model: String, device: String) -> Http
     })
     .await
 }
+
+fn device_list_path(stage: u32, model: &str) -> String {
+    format!("/pipeline/{stage}/model/{model}/device/list")
+}
+
+fn stage_device_list_path(stage: u32) -> String {
+    format!("/pipeline/{stage}/device/list")
+}
+
+/// The devices a model can be loaded onto here
+/// (HTTP `GET /pipeline/{stage}/model/{model}/device/list`).
+///
+/// The daemon's answer, not a client derivation: the model's declared devices
+/// narrowed to the accelerators this install has and this host can run. Empty
+/// for an online model (no local compute) and for a local model no installed
+/// asset can run — the picker tells those two apart by the model's own
+/// `supported_devices`, which only the online one marks `none`.
+pub async fn list_model_devices(stage: u32, model: String) -> HttpResult<Vec<String>> {
+    let path = device_list_path(stage, &model);
+    with_settings_token(move |socket, token| {
+        let path = path.clone();
+        async move {
+            let resp = require_success(
+                transport::settings_get(socket, &token, &path).await?,
+                "list_model_devices",
+            )?;
+            Ok(resp.available_devices.unwrap_or_default())
+        }
+    })
+    .await
+}
+
+/// The devices the stage's selected backend can run models on here
+/// (HTTP `GET /pipeline/{stage}/device/list`) — the union of
+/// [`list_model_devices`] over the models it serves in that stage's role.
+pub async fn list_stage_devices(stage: u32) -> HttpResult<Vec<String>> {
+    let path = stage_device_list_path(stage);
+    with_settings_token(move |socket, token| {
+        let path = path.clone();
+        async move {
+            let resp = require_success(
+                transport::settings_get(socket, &token, &path).await?,
+                "list_stage_devices",
+            )?;
+            Ok(resp.available_devices.unwrap_or_default())
+        }
+    })
+    .await
+}

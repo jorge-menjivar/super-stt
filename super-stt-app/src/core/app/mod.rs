@@ -104,6 +104,12 @@ pub struct AppModel {
     pub current_model_epoch: u64,
     /// Model operation state (downloading, loading, or ready)
     pub model_operation_state: ModelOperationState,
+    /// Which pipeline stage [`AppModel::model_operation_state`] belongs to, so
+    /// the progress lands on the card that started it. The daemon's progress
+    /// events carry a model name and nothing else, so the stage is resolved
+    /// from the catalog when the operation starts and kept for the rest of it
+    /// — including a terminal error, which carries no model name at all.
+    pub model_operation_stage: u32,
 
     // Device management state
     /// The accelerator the loaded stage-1 model is on (`cpu`/`cuda`/…), from
@@ -138,6 +144,12 @@ pub struct AppModel {
     /// is local until the Enable button commits it. `None` means "use whatever
     /// the daemon already has selected".
     pub staged_post_processor: Option<(String, String)>,
+    /// The device lists the daemon has answered for, per pipeline stage: what
+    /// its selected backend can run models on, and what each staged model can
+    /// be loaded onto. Read by the pickers instead of deriving availability
+    /// from the catalog, so the app and the daemon cannot disagree about what
+    /// this install can run.
+    pub device_offers: crate::state::device_offers::DeviceOffers,
     /// The device staged for the post-processor pick, the stage-2 twin of
     /// `models_page.staged_device`: seeded from what this install offers the
     /// staged model, replaced by the model's own once the daemon answers, and

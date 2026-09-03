@@ -5,9 +5,10 @@ mod registry;
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::client::{
-    clear_active_backend, get_gpu_info, get_model_device, set_active_backend, set_model,
-    set_model_device, unload_active_model,
+    clear_active_backend, get_gpu_info, get_model_device, list_model_devices, list_stage_devices,
+    set_active_backend, set_model, set_model_device, unload_active_model,
 };
+use crate::state::device_offers::{STT_STAGE, staged_device};
 use crate::state::{ContextPage, DaemonStatus, ModelsTab};
 use crate::ui::messages::{DownloadMessage, Message, ModelMessage, ModelsPageMessage};
 use cosmic::prelude::*;
@@ -24,7 +25,8 @@ impl AppModel {
             ModelsPageMessage::ModelsTabActivated(_)
             | ModelsPageMessage::StageActiveModel(_)
             | ModelsPageMessage::StageActiveDevice(_)
-            | ModelsPageMessage::StagedDeviceLoaded { .. }
+            | ModelsPageMessage::StagedDevicesLoaded { .. }
+            | ModelsPageMessage::BackendDevicesLoaded { .. }
             | ModelsPageMessage::LoadStagedModel
             | ModelsPageMessage::UnloadActiveModel => self.handle_models_tab_selection(message),
 
@@ -99,10 +101,15 @@ impl AppModel {
             ModelsPageMessage::StageActiveModel(model) => {
                 // Stage the pick. The Load button reads `staged_model` /
                 // `staged_device` and only then calls the daemon.
+                //
+                // The device is left unset until the daemon answers what this
+                // model can run on here: an empty answer is what disables Load
+                // and shows the advisory, so staging a device before the
+                // answer would be guessing at exactly the case that must not
+                // guess.
                 let source = self.models_page.active_backend.clone();
-                let device = staged_default_device(&self.backends, source.as_deref(), &model);
                 self.models_page.staged_model = Some(model.clone());
-                self.models_page.staged_device.clone_from(&device);
+                self.models_page.staged_device = None;
                 let Some(src) = source else {
                     return Task::none();
                 };
@@ -110,16 +117,12 @@ impl AppModel {
                     // Fetch the per-model language block at selection time so
                     // the active-backend card can show the language control
                     // before Load. Wire point 2: model staged (StageActiveModel).
-                    self.load_model_language(src, model.clone()),
-                    // And the model's own device, so a model the user once put
-                    // on the GPU is staged there again rather than on the
-                    // first device its manifest lists. Nothing to ask for an
-                    // online model, which stages no device at all.
-                    if device.is_some() {
-                        Self::load_staged_device(model)
-                    } else {
-                        Task::none()
-                    },
+                    self.load_model_language(src.clone(), model.clone()),
+                    // And the devices it can run on, plus the device it
+                    // already has — so a model the user once put on the GPU is
+                    // staged there again rather than on the first device the
+                    // list happens to start with.
+                    Self::load_staged_devices(src, model),
                 ])
             }
 
@@ -128,16 +131,34 @@ impl AppModel {
                 Task::none()
             }
 
-            ModelsPageMessage::StagedDeviceLoaded { model, device } => {
-                // The answer is for the model staged when it was asked; a pick
-                // made since wins, and so does a pick the dropdown cannot show.
-                if self.models_page.staged_model.as_deref() == Some(model.as_str())
-                    && let Some(source) = self.models_page.active_backend.as_deref()
-                    && let Some(backend) = self.backends.iter().find(|b| b.source == source)
-                    && crate::ui::views::models::offered_devices(backend, &model)
-                        .contains(&device.device)
-                {
-                    self.models_page.staged_device = Some(device.device);
+            ModelsPageMessage::StagedDevicesLoaded {
+                source,
+                model,
+                devices,
+                current,
+            } => {
+                // The answer describes the backend that was selected when it
+                // was asked. A switch since then makes it about a backend this
+                // card no longer shows, and recording it would evict the new
+                // selection's own answers.
+                if self.models_page.active_backend.as_deref() != Some(source.as_str()) {
+                    return Task::none();
+                }
+                self.device_offers
+                    .record(STT_STAGE, source, Some(model.clone()), devices.clone());
+                // Likewise for the model: a pick made since the ask wins.
+                if self.models_page.staged_model.as_deref() == Some(model.as_str()) {
+                    // The model's own device when the picker can show it,
+                    // otherwise the first offered — and nothing at all when
+                    // none is offered, which is what keeps Load disabled.
+                    self.models_page.staged_device = staged_device(&devices, current);
+                }
+                Task::none()
+            }
+
+            ModelsPageMessage::BackendDevicesLoaded { source, devices } => {
+                if self.models_page.active_backend.as_deref() == Some(source.as_str()) {
+                    self.device_offers.record(STT_STAGE, source, None, devices);
                 }
                 Task::none()
             }
@@ -199,7 +220,11 @@ impl AppModel {
         // than leaving the UI on a device the daemon never adopted (audit
         // Tier 3 #37).
         let prev_device = self.current_device.clone();
-        self.set_model_loading(model.clone(), "Initiating model switch...".to_string());
+        self.set_model_loading(
+            model.clone(),
+            "Initiating model switch...".to_string(),
+            STT_STAGE,
+        );
         if let Some(dev) = &device_to_set {
             self.current_device.clone_from(dev);
         }
@@ -266,8 +291,10 @@ impl AppModel {
             }
 
             ModelsPageMessage::ActiveBackendLoaded(source) => {
-                self.models_page.active_backend = source;
-                Task::none()
+                self.models_page.active_backend.clone_from(&source);
+                // The card's device chips are the daemon's answer for the
+                // backend now selected, so every selection asks again.
+                source.map_or_else(Task::none, Self::load_backend_devices)
             }
 
             ModelsPageMessage::RefreshGpuInfo => {
@@ -307,8 +334,13 @@ impl AppModel {
                 // Activation comes from the Models page's "Select a backend" sheet;
                 // dismiss it now that a choice was made.
                 self.core.window.show_context = false;
+                let selected = source.clone();
                 Task::perform(set_active_backend(source), move |result| match result {
-                    Ok(()) => cosmic::Action::None,
+                    // Re-announce the selection the daemon just took, which is
+                    // what asks it for the backend's devices.
+                    Ok(()) => cosmic::Action::App(Message::ModelsPage(
+                        ModelsPageMessage::ActiveBackendLoaded(Some(selected.clone())),
+                    )),
                     Err(e) => cosmic::Action::App(Message::ModelsPage(
                         ModelsPageMessage::BackendSelectFailed {
                             prev_active: prev_active.clone(),
@@ -369,54 +401,65 @@ impl AppModel {
     }
 }
 
-/// Transcription is stage 1 of the pipeline — the stage a staged model's
-/// device is addressed through.
-const STT_STAGE: u32 = 1;
-
 impl AppModel {
-    /// Ask the daemon which device `model` has, for [`ModelsPageMessage::StagedDeviceLoaded`].
-    fn load_staged_device(model: String) -> Task<cosmic::Action<Message>> {
+    /// Ask the daemon what `model` can run on here and which device it has,
+    /// for [`ModelsPageMessage::StagedDevicesLoaded`].
+    ///
+    /// One task for both reads so the picker and the device it starts on land
+    /// together: staging the model's own device means nothing until the list
+    /// that has to contain it is known.
+    fn load_staged_devices(source: String, model: String) -> Task<cosmic::Action<Message>> {
+        let asked = model.clone();
         Task::perform(
-            get_model_device(STT_STAGE, model.clone()),
-            move |result| match result {
-                Ok(device) => cosmic::Action::App(Message::ModelsPage(
-                    ModelsPageMessage::StagedDeviceLoaded {
-                        model: model.clone(),
-                        device,
+            async move {
+                let devices = list_model_devices(STT_STAGE, model.clone()).await?;
+                // The recorded device is the nicety, not the requirement: a
+                // model that has never been loaded has none, and a failed read
+                // only costs the restaging.
+                let current = get_model_device(STT_STAGE, model)
+                    .await
+                    .ok()
+                    .map(|d| d.device);
+                Ok((devices, current))
+            },
+            move |result: super_stt_shared::daemon::http_client::HttpResult<_>| match result {
+                Ok((devices, current)) => cosmic::Action::App(Message::ModelsPage(
+                    ModelsPageMessage::StagedDevicesLoaded {
+                        source: source.clone(),
+                        model: asked.clone(),
+                        devices,
+                        current,
                     },
                 )),
-                // The local default is already staged; a failed read only
-                // means the model's own choice is not reflected.
+                // Nothing is staged onto a device the daemon never offered, so
+                // a failed read leaves the picker hidden and Load disabled
+                // rather than guessing at a device.
                 Err(e) => {
-                    log::warn!("Could not read the device for {model}: {e}");
+                    log::warn!("Could not read the devices for {asked}: {e}");
                     cosmic::Action::None
                 }
             },
         )
     }
-}
 
-/// The device a freshly staged model starts on: the first device this install
-/// can actually offer for it, or `None` when it can offer none.
-///
-/// The narrowing is what makes `None` reachable, and `None` is what the Load
-/// button reads: a model declaring `gpu` on a backend whose installed asset is
-/// CPU-only can run on no device here, and staging one from the manifest would
-/// leave Load enabled next to the advisory saying so — sending a device the
-/// user was just told is unusable. Seeding from the offered list also keeps the
-/// staged device inside the set the dropdown renders, so the picker never
-/// shows an unselected value. The model's own recorded device, when it has
-/// one, replaces this once the daemon answers.
-fn staged_default_device(
-    backends: &[crate::daemon::backends::BackendInfo],
-    source: Option<&str>,
-    model: &str,
-) -> Option<String> {
-    let source = source?;
-    let backend = backends.iter().find(|b| b.source == source)?;
-    crate::ui::views::models::offered_devices(backend, model)
-        .first()
-        .cloned()
+    /// Ask the daemon which devices the active backend can run transcription
+    /// models on, for [`ModelsPageMessage::BackendDevicesLoaded`].
+    fn load_backend_devices(source: String) -> Task<cosmic::Action<Message>> {
+        Task::perform(list_stage_devices(STT_STAGE), move |result| match result {
+            Ok(devices) => cosmic::Action::App(Message::ModelsPage(
+                ModelsPageMessage::BackendDevicesLoaded {
+                    source: source.clone(),
+                    devices,
+                },
+            )),
+            // The chips fall back to the catalog's own reading until an
+            // answer lands, so a failed read costs the narrowing, not the row.
+            Err(e) => {
+                log::warn!("Could not read the devices for {source}: {e}");
+                cosmic::Action::None
+            }
+        })
+    }
 }
 
 /// What a Load click resolves to.
@@ -464,7 +507,7 @@ fn staged_load_device(
 
 #[cfg(test)]
 mod tests {
-    use super::{StagedLoad, staged_default_device, staged_load_device};
+    use super::{StagedLoad, staged_load_device};
     use crate::daemon::backends::{BackendInfo, BackendModel};
 
     fn backend(source: &str, model: &str, devices: &[&str]) -> BackendInfo {
@@ -616,95 +659,6 @@ mod tests {
             StagedLoad::Switch {
                 device_to_set: None
             },
-        );
-    }
-
-    fn backend_with_accel(devices: &[&str], installed_accel: &[&str]) -> Vec<BackendInfo> {
-        let mut b = backend("github.com/super-stt/voxtral", "voxtral-mini", devices);
-        b.installed_accel = installed_accel.iter().map(|a| (*a).to_string()).collect();
-        vec![b]
-    }
-
-    /// The reported bug, on the staging path: a GPU-only model on an install
-    /// that resolved to a CPU asset can run on nothing here. Staging must
-    /// leave the device unset, because that is the only thing standing
-    /// between the "needs a device this install doesn't have" advisory and a
-    /// Load button that would happily persist an unusable GPU preference.
-    #[test]
-    fn a_gpu_only_model_on_a_cpu_install_stages_no_device() {
-        let installed = backend_with_accel(&["gpu"], &["cpu"]);
-        assert_eq!(
-            staged_default_device(
-                &installed,
-                Some("github.com/super-stt/voxtral"),
-                "voxtral-mini"
-            ),
-            None,
-        );
-    }
-
-    /// Same root cause, quieter symptom: a model declaring `["gpu", "cpu"]`
-    /// on a CPU-only install can run — on the CPU. Seeding from the manifest
-    /// stages `gpu`, which is not in the offered list, so the dropdown renders
-    /// with nothing selected while Load sends a device the install cannot use.
-    /// The staged device must always be one the picker actually offers.
-    #[test]
-    fn a_gpu_first_model_on_a_cpu_install_stages_the_cpu() {
-        let installed = backend_with_accel(&["gpu", "cpu"], &["cpu"]);
-        let staged = staged_default_device(
-            &installed,
-            Some("github.com/super-stt/voxtral"),
-            "voxtral-mini",
-        );
-        assert_eq!(staged, Some("cpu".to_string()));
-        assert!(
-            crate::ui::views::models::offered_devices(&installed[0], "voxtral-mini")
-                .contains(&staged.expect("staged")),
-            "the staged device must be one the picker offers"
-        );
-    }
-
-    /// With an accelerated asset installed, the model's first device is staged
-    /// as before — the narrowing only removes what this install cannot do.
-    #[test]
-    fn an_accelerated_install_stages_the_models_first_device() {
-        let installed = backend_with_accel(&["gpu", "cpu"], &["cuda"]);
-        assert_eq!(
-            staged_default_device(
-                &installed,
-                Some("github.com/super-stt/voxtral"),
-                "voxtral-mini"
-            ),
-            Some("gpu".to_string()),
-        );
-    }
-
-    /// An online model has no local device, and an unknown backend/model has
-    /// no answer at all — both stage nothing rather than guessing.
-    #[test]
-    fn an_online_or_unknown_model_stages_no_device() {
-        let online = backend_with_accel(&["none"], &[]);
-        assert_eq!(
-            staged_default_device(
-                &online,
-                Some("github.com/super-stt/voxtral"),
-                "voxtral-mini"
-            ),
-            None,
-        );
-        let installed = backend_with_accel(&["cpu"], &["cpu"]);
-        assert_eq!(
-            staged_default_device(&installed, None, "voxtral-mini"),
-            None,
-            "no active backend stages nothing"
-        );
-        assert_eq!(
-            staged_default_device(
-                &installed,
-                Some("github.com/super-stt/gone"),
-                "voxtral-mini"
-            ),
-            None,
         );
     }
 }

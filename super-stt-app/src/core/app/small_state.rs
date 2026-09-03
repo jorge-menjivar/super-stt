@@ -29,26 +29,31 @@ impl AppModel {
         self.current_source.clear();
     }
 
-    /// Set model to downloading state
+    /// Set model to downloading state. `stage` is the pipeline position the
+    /// download is provisioning for, straight off the daemon's report.
     pub(in crate::core::app) fn set_model_downloading(
         &mut self,
         target_model: String,
         progress: super_stt_shared::models::protocol::DownloadProgress,
+        stage: u32,
     ) {
+        self.model_operation_stage = stage;
         self.model_operation_state = ModelOperationState::Downloading {
             target_model,
             progress,
         };
     }
 
-    /// Set model to loading state
+    /// Set model to loading state, for the stage running the model.
     pub(in crate::core::app) fn set_model_loading(
         &mut self,
         target_model: String,
         status_message: String,
+        stage: u32,
     ) {
         // Entering a switch starts the stall watchdog clock (see PingTimeout).
         self.last_switch_progress_at = Some(std::time::Instant::now());
+        self.model_operation_stage = stage;
         self.model_operation_state = ModelOperationState::Loading {
             target_model,
             status_message,
@@ -84,9 +89,17 @@ impl AppModel {
     ) {
         self.last_switch_progress_at = Some(std::time::Instant::now());
         let target_model = progress.model_name.clone();
+        // The daemon says which stage it is provisioning for, so the progress
+        // lands on the card that started it rather than on whichever card
+        // happens to render the operation.
+        let stage = progress.stage;
         match progress.status.as_str() {
             "loading_model" => {
-                self.set_model_loading(target_model, "Loading model into memory...".to_string());
+                self.set_model_loading(
+                    target_model,
+                    "Loading model into memory...".to_string(),
+                    stage,
+                );
             }
             "error" => {
                 // The daemon broadcasts a terminal `error` for any switch
@@ -98,6 +111,7 @@ impl AppModel {
                     .error
                     .clone()
                     .unwrap_or_else(|| "Model switch failed".to_string());
+                self.model_operation_stage = stage;
                 self.model_operation_state = ModelOperationState::Error { message };
                 // A failed switch leaves the daemon idle — clear the selection
                 // so the UI doesn't show a model that isn't loaded (mirrors the
@@ -110,7 +124,7 @@ impl AppModel {
             }
             _ => {
                 // "downloading" and other states default to downloading
-                self.set_model_downloading(target_model, progress.clone());
+                self.set_model_downloading(target_model, progress.clone(), stage);
             }
         }
     }

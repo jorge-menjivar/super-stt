@@ -126,18 +126,30 @@ pub enum ModelsPageMessage {
     /// Activate a Models-page tab (Installed / Download) in the tab bar.
     ModelsTabActivated(segmented_button::Entity),
     /// User picked a model in the active-backend card's model dropdown.
-    /// Stages it for the Load button — does *not* load. Resets the staged
-    /// device to the first this install offers the model, then asks the
-    /// daemon for the model's own.
+    /// Stages it for the Load button — does *not* load. The device staging
+    /// waits on the daemon, which is asked what the model can run on here and
+    /// which device it already has.
     StageActiveModel(String),
     /// User picked a device in the active-backend card's device dropdown.
     /// Stages it for the Load button — does *not* call the daemon.
     StageActiveDevice(String),
-    /// The daemon answered which device `model` has. Restages it when `model`
-    /// is still the staged one and the picker offers that device.
-    StagedDeviceLoaded {
+    /// The daemon answered for the staged `model` of `source`: `devices` is
+    /// what it can be loaded onto here, `current` the device it already has.
+    /// Fills the picker and stages `current` when the picker offers it,
+    /// otherwise the first device offered. `source` is the backend that was
+    /// selected when the question was asked, so an answer that a switch has
+    /// overtaken can be dropped.
+    StagedDevicesLoaded {
+        source: String,
         model: String,
-        device: crate::daemon::client::ModelDevice,
+        devices: Vec<String>,
+        current: Option<String>,
+    },
+    /// The daemon answered which devices the active backend can run
+    /// transcription models on — the union over the models it serves.
+    BackendDevicesLoaded {
+        source: String,
+        devices: Vec<String>,
     },
     /// User clicked the Load button. Sets the staged model's device, then
     /// runs `set_model(staged_model)` for the active backend. No-op when
@@ -289,16 +301,25 @@ pub enum PostProcessorMessage {
     /// User picked a model from the dropdown — staged locally, nothing sent.
     /// The index is into the selected backend's post-processor models, in the
     /// order `crate::ui::views::models::post_processor_models` returns them.
-    /// Resets the staged device the way [`ModelsPageMessage::StageActiveModel`]
-    /// does, then asks the daemon for the model's own.
+    /// Stages the device the way [`ModelsPageMessage::StageActiveModel`] does:
+    /// on what the daemon answers.
     Staged(usize),
     /// User picked a device in the card's device dropdown — staged locally.
     StagedDevice(String),
-    /// The daemon answered which device `model` has; the stage-2 twin of
-    /// [`ModelsPageMessage::StagedDeviceLoaded`].
-    StagedDeviceLoaded {
+    /// The daemon's device answer for the staged model; the stage-2 twin of
+    /// [`ModelsPageMessage::StagedDevicesLoaded`].
+    StagedDevicesLoaded {
+        source: String,
         model: String,
-        device: crate::daemon::client::ModelDevice,
+        devices: Vec<String>,
+        current: Option<String>,
+    },
+    /// The daemon answered which devices the post-processor backend can run
+    /// post-processor models on; the stage-2 twin of
+    /// [`ModelsPageMessage::BackendDevicesLoaded`].
+    BackendDevicesLoaded {
+        source: String,
+        devices: Vec<String>,
     },
     /// Commit the staged (or already-selected) model and turn processing on,
     /// setting its device first when one is staged.

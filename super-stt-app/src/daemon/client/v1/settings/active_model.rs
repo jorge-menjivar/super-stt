@@ -16,7 +16,6 @@ use super_stt_shared::daemon::http_client::transport;
 /// once, and a re-ordering is a one-line change.
 const STT_STAGE: &str = "/pipeline/1";
 const STT_STAGE_MODEL: &str = "/pipeline/1/model";
-const STT_STAGE_CANCEL: &str = "/pipeline/1/model/cancel";
 
 // Only the stage fields the settings app consumes are modeled; serde ignores
 // the rest.
@@ -103,14 +102,20 @@ pub async fn get_download_status()
         let Some(download) = switch.download else {
             return Ok(None);
         };
-        let model_name = switch
-            .target
-            .get("model")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let target_field = |key: &str| {
+            switch
+                .target
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
         let progress = super_stt_shared::models::protocol::DownloadProgress {
-            model_name,
+            model_name: target_field("model"),
+            source: target_field("source"),
+            // This block is stage 1's by construction — it is read from
+            // `GET /pipeline/1`, which reports only its own stage's switch.
+            stage: super_stt_shared::models::protocol::TRANSCRIPTION_STAGE,
             current_file: download.current_file,
             file_index: download.file_index,
             total_files: download.total_files,
@@ -162,14 +167,21 @@ pub async fn list_available_models() -> HttpResult<Vec<(String, String)>> {
     .await
 }
 
-/// Cancel any ongoing model-switch download
-/// (HTTP `POST /pipeline/1/model/cancel`).
-pub async fn cancel_download() -> HttpResult<String> {
-    with_settings_token(|socket, token| async move {
-        let resp =
-            transport::settings_post(socket, &token, STT_STAGE_CANCEL, &serde_json::json!({}))
-                .await?;
-        require_message(resp, "cancel_download")
+/// Abandon the load `stage` has in flight
+/// (HTTP `POST /pipeline/{stage}/model/cancel`).
+///
+/// Addressed to a stage because the stages provision independently: the Cancel
+/// button under a post-processor's progress must not abandon a transcription
+/// model's download.
+pub async fn cancel_download(stage: u32) -> HttpResult<String> {
+    let path = format!("/pipeline/{stage}/model/cancel");
+    with_settings_token(move |socket, token| {
+        let path = path.clone();
+        async move {
+            let resp =
+                transport::settings_post(socket, &token, &path, &serde_json::json!({})).await?;
+            require_message(resp, "cancel_download")
+        }
     })
     .await
 }

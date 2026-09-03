@@ -2,6 +2,7 @@
 use chrono::Utc;
 use log::{info, warn};
 use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
@@ -12,6 +13,12 @@ use crate::daemon::events::EventBus;
 /// Progress tracker for model downloads that implements the hf-hub Progress trait
 pub struct DownloadProgressTracker {
     pub model_name: String,
+    /// The backend serving the model, and the `/pipeline/{stage}` position
+    /// provisioning it. Reported on every tick so a client can put the
+    /// progress on the card that started it: the model name alone does not say
+    /// whose download it is, and both stages download through this tracker.
+    pub source: String,
+    pub stage: u32,
     pub current_file: Arc<RwLock<String>>,
     pub file_index: AtomicUsize,
     pub total_files: AtomicUsize,
@@ -53,9 +60,17 @@ pub struct DownloadProgressTracker {
 }
 
 impl DownloadProgressTracker {
-    pub fn new(model_name: String, total_files: usize, cancelled: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        model_name: String,
+        source: String,
+        stage: u32,
+        total_files: usize,
+        cancelled: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             model_name,
+            source,
+            stage,
             current_file: Arc::new(RwLock::new(String::new())),
             file_index: AtomicUsize::new(0),
             total_files: AtomicUsize::new(total_files),
@@ -129,6 +144,8 @@ impl DownloadProgressTracker {
 
         DownloadProgress {
             model_name: self.model_name.clone(),
+            source: self.source.clone(),
+            stage: self.stage,
             current_file: self.current_file.read().clone(),
             file_index: self.file_index.load(Ordering::Relaxed),
             total_files: self.total_files.load(Ordering::Relaxed),
@@ -261,10 +278,15 @@ impl DownloadProgressTracker {
 
 /// Note: We're not implementing `hf_hub::api::Progress` directly since it's a private trait.
 /// Instead, we use our own progress tracking system that integrates with the notification system.
-/// Global download state manager
+/// The downloads the pipeline has in flight, one slot per stage.
+///
+/// The stages provision independently — a post-processor can be fetched while
+/// a transcription model is — and nothing serializes the two, so a single slot
+/// meant whichever load started second evicted the other: its progress
+/// vanished from the stage reporting it, and its cancel had nothing left to
+/// cancel. Keyed by stage, each answers only for itself.
 pub struct DownloadStateManager {
-    current_download: Arc<RwLock<Option<Arc<DownloadProgressTracker>>>>,
-    cancellation_flag: Arc<AtomicBool>,
+    downloads: Arc<RwLock<HashMap<u32, Arc<DownloadProgressTracker>>>>,
 }
 
 impl Default for DownloadStateManager {
@@ -277,56 +299,75 @@ impl DownloadStateManager {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            current_download: Arc::new(RwLock::new(None)),
-            cancellation_flag: Arc::new(AtomicBool::new(false)),
+            downloads: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Start tracking a download; fails if another download is active
+    /// Start tracking a download for the stage the tracker names.
     ///
     /// # Errors
     ///
-    /// Returns an error if a download is already in progress.
+    /// Returns an error if that stage already has a download in progress.
     pub fn start_download(&self, tracker: Arc<DownloadProgressTracker>) -> Result<(), String> {
-        let mut current = self.current_download.write();
-        if current.is_some() {
-            return Err("A download is already in progress".to_string());
+        let mut downloads = self.downloads.write();
+        let stage = tracker.stage;
+        if downloads.contains_key(&stage) {
+            return Err(format!(
+                "A download is already in progress for stage {stage}"
+            ));
         }
-        *current = Some(tracker);
-        self.cancellation_flag.store(false, Ordering::Relaxed);
+        downloads.insert(stage, tracker);
         Ok(())
     }
 
+    /// The download `stage` has in flight, if any.
     #[must_use]
-    pub fn get_current_download(&self) -> Option<Arc<DownloadProgressTracker>> {
-        self.current_download.read().clone()
+    pub fn get_download(&self, stage: u32) -> Option<Arc<DownloadProgressTracker>> {
+        self.downloads.read().get(&stage).cloned()
     }
 
-    /// Cancel the current download if present
+    /// Cancel the download `stage` has in flight.
     ///
     /// # Errors
     ///
-    /// Returns an error if there is no active download to cancel.
-    pub fn cancel_current_download(&self) -> Result<(), String> {
-        let current = self.current_download.read();
-        if let Some(ref tracker) = *current {
-            tracker.cancel();
-            self.cancellation_flag.store(true, Ordering::Relaxed);
-            Ok(())
-        } else {
-            Err("No download in progress".to_string())
+    /// Returns an error when that stage has nothing to cancel — including when
+    /// another stage is downloading, which is not this stage's to abandon.
+    pub fn cancel_download(&self, stage: u32) -> Result<(), String> {
+        match self.downloads.read().get(&stage) {
+            Some(tracker) => {
+                tracker.cancel();
+                Ok(())
+            }
+            None => Err(format!("No download in progress for stage {stage}")),
         }
     }
 
-    pub fn clear_download(&self) {
-        *self.current_download.write() = None;
-        self.cancellation_flag.store(false, Ordering::Relaxed);
+    /// Forget `stage`'s download, whatever became of it.
+    pub fn clear_download(&self, stage: u32) {
+        self.downloads.write().remove(&stage);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super_stt_shared::models::protocol::TRANSCRIPTION_STAGE;
+
+    /// A tracker for a stage-1 download of `model`, the shape every test here
+    /// but the attribution one uses.
+    fn tracker(
+        model: &str,
+        total_files: usize,
+        cancelled: Arc<AtomicBool>,
+    ) -> DownloadProgressTracker {
+        DownloadProgressTracker::new(
+            model.to_string(),
+            "github.com/super-stt/whisper".to_string(),
+            TRANSCRIPTION_STAGE,
+            total_files,
+            cancelled,
+        )
+    }
 
     /// Regression for the silent UI-stuck bug: when the post-download
     /// `mark_completed()` runs and `broadcast_progress()` is called,
@@ -339,7 +380,7 @@ mod tests {
     #[test]
     fn broadcast_progress_publishes_completed_status_even_without_percentage_increase() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 1, cancelled);
+        let tracker = tracker("test-model", 1, cancelled);
         tracker.total_bytes.store(1000, Ordering::Relaxed);
         tracker.bytes_downloaded.store(900, Ordering::Relaxed);
 
@@ -376,7 +417,7 @@ mod tests {
     #[test]
     fn broadcast_progress_publishes_when_total_bytes_changes() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 1, cancelled);
+        let tracker = tracker("test-model", 1, cancelled);
 
         // Initial broadcast — empty status → "downloading", total_bytes = 0.
         tracker.broadcast_progress();
@@ -406,7 +447,7 @@ mod tests {
     #[test]
     fn start_file_resets_per_file_counters() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 2, cancelled);
+        let tracker = tracker("test-model", 2, cancelled);
 
         // Simulate file 0 finishing.
         tracker.total_bytes.store(3_000_000_000, Ordering::Relaxed);
@@ -433,7 +474,7 @@ mod tests {
     #[test]
     fn broadcast_progress_publishes_when_file_index_advances() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 2, cancelled);
+        let tracker = tracker("test-model", 2, cancelled);
 
         // File 0 fully downloaded: overall = (0 + 1)/2 = 50%.
         tracker.total_bytes.store(1000, Ordering::Relaxed);
@@ -461,7 +502,7 @@ mod tests {
     #[test]
     fn percentage_reaches_100_when_current_file_complete() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("m".to_string(), 3, cancelled);
+        let tracker = tracker("m", 3, cancelled);
         tracker.start_file("f3", 2);
         tracker.total_bytes.store(500, Ordering::Relaxed);
         tracker.bytes_downloaded.store(500, Ordering::Relaxed);
@@ -475,7 +516,7 @@ mod tests {
     #[test]
     fn percentage_is_per_file_not_aggregate() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("m".to_string(), 2, cancelled);
+        let tracker = tracker("m", 2, cancelled);
         // Second file (index 1 of 2), half downloaded.
         tracker.start_file("f2", 1);
         tracker.total_bytes.store(1000, Ordering::Relaxed);
@@ -493,7 +534,7 @@ mod tests {
     #[test]
     fn loading_and_completed_statuses_are_100_percent() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("m".to_string(), 2, cancelled);
+        let tracker = tracker("m", 2, cancelled);
         tracker.start_file("f1", 0);
         tracker.total_bytes.store(500, Ordering::Relaxed);
         tracker.bytes_downloaded.store(100, Ordering::Relaxed);
@@ -512,7 +553,7 @@ mod tests {
     #[test]
     fn broadcast_progress_suppressed_when_neither_percentage_nor_status_changes() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 1, cancelled);
+        let tracker = tracker("test-model", 1, cancelled);
         tracker.total_bytes.store(1000, Ordering::Relaxed);
         tracker.bytes_downloaded.store(500, Ordering::Relaxed);
 
@@ -529,5 +570,121 @@ mod tests {
             5000,
             "second call with identical state must be a no-op"
         );
+    }
+
+    /// The reported bug: a post-processor's download reported progress a
+    /// client could only attribute by looking its model name up in the
+    /// catalog, which put the progress bar on the transcription card. Every
+    /// tick now says which stage and which backend it is for.
+    #[test]
+    fn progress_reports_the_stage_and_backend_it_is_for() {
+        use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new(
+            "s1-mini-q4_k_m".to_string(),
+            "github.com/super-stt/s1-mini".to_string(),
+            POST_PROCESSOR_STAGE,
+            2,
+            cancelled,
+        );
+        let progress = tracker.get_progress();
+        assert_eq!(progress.model_name, "s1-mini-q4_k_m");
+        assert_eq!(progress.source, "github.com/super-stt/s1-mini");
+        assert_eq!(progress.stage, POST_PROCESSOR_STAGE);
+
+        let json = serde_json::to_value(&progress).unwrap();
+        assert_eq!(json["stage"], 2);
+        assert_eq!(json["source"], "github.com/super-stt/s1-mini");
+    }
+
+    /// The stages provision independently, so one slot per stage: a
+    /// post-processor's download must not evict the transcription model's —
+    /// which is what left the evicted one's progress unreportable and its
+    /// cancel with nothing to cancel.
+    #[test]
+    fn each_stage_tracks_its_own_download() {
+        use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
+
+        let manager = DownloadStateManager::new();
+        let stage_one = Arc::new(tracker(
+            "whisper-large-v3",
+            1,
+            Arc::new(AtomicBool::new(false)),
+        ));
+        let stage_two = Arc::new(DownloadProgressTracker::new(
+            "s1-mini-q4_k_m".to_string(),
+            "github.com/super-stt/s1-mini".to_string(),
+            POST_PROCESSOR_STAGE,
+            2,
+            Arc::new(AtomicBool::new(false)),
+        ));
+
+        manager
+            .start_download(Arc::clone(&stage_one))
+            .expect("stage 1");
+        manager
+            .start_download(Arc::clone(&stage_two))
+            .expect("stage 2");
+
+        assert_eq!(
+            manager
+                .get_download(TRANSCRIPTION_STAGE)
+                .expect("stage 1 download")
+                .model_name,
+            "whisper-large-v3"
+        );
+        assert_eq!(
+            manager
+                .get_download(POST_PROCESSOR_STAGE)
+                .expect("stage 2 download")
+                .model_name,
+            "s1-mini-q4_k_m"
+        );
+
+        // Cancelling one leaves the other running.
+        manager
+            .cancel_download(POST_PROCESSOR_STAGE)
+            .expect("cancel stage 2");
+        assert!(stage_two.is_cancelled());
+        assert!(!stage_one.is_cancelled());
+
+        // And clearing one leaves the other tracked.
+        manager.clear_download(POST_PROCESSOR_STAGE);
+        assert!(manager.get_download(POST_PROCESSOR_STAGE).is_none());
+        assert!(manager.get_download(TRANSCRIPTION_STAGE).is_some());
+    }
+
+    /// A stage with nothing of its own in flight has nothing to cancel, even
+    /// while the other stage downloads: one stage's cancel is not a licence to
+    /// abandon the other's load.
+    #[test]
+    fn a_stage_cannot_cancel_another_stages_download() {
+        use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
+
+        let manager = DownloadStateManager::new();
+        let stage_one = Arc::new(tracker("whisper-tiny", 1, Arc::new(AtomicBool::new(false))));
+        manager
+            .start_download(Arc::clone(&stage_one))
+            .expect("stage 1");
+
+        assert!(manager.cancel_download(POST_PROCESSOR_STAGE).is_err());
+        assert!(!stage_one.is_cancelled());
+    }
+
+    /// One stage cannot start two loads at once — the second would leave the
+    /// first untrackable and uncancellable.
+    #[test]
+    fn a_stage_takes_one_download_at_a_time() {
+        let manager = DownloadStateManager::new();
+        let first = Arc::new(tracker("whisper-tiny", 1, Arc::new(AtomicBool::new(false))));
+        let second = Arc::new(tracker(
+            "whisper-large-v3",
+            1,
+            Arc::new(AtomicBool::new(false)),
+        ));
+
+        manager.start_download(first).expect("first");
+        assert!(manager.start_download(second).is_err());
     }
 }

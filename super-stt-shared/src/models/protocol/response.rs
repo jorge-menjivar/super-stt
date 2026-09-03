@@ -159,10 +159,6 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_text: Option<String>,
 
-    // Online models
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_online_models: Option<bool>,
-
     // Custom models directory (None = no override, daemon uses default cache)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_models_dir: Option<Option<String>>,
@@ -177,6 +173,17 @@ pub struct DaemonResponse {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DownloadProgress {
     pub model_name: String,
+    /// The backend serving `model_name` — the same repo id `/backends` reports.
+    /// A model name alone does not say whose it is, and two backends may serve
+    /// the same one.
+    #[serde(default)]
+    pub source: String,
+    /// The `/pipeline/{stage}` position this download is provisioning a model
+    /// for: 1 while a transcription model downloads, 2 while a post-processor
+    /// does. Absent from an older daemon's payload, which reads as stage 1 —
+    /// the only stage that downloaded anything then.
+    #[serde(default = "super::pipeline::default_stage")]
+    pub stage: u32,
     pub current_file: String,
     pub file_index: usize,
     pub total_files: usize,
@@ -479,12 +486,6 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_preview_text(mut self, text: String) -> Self {
         self.preview_text = Some(text);
-        self
-    }
-
-    #[must_use]
-    pub fn with_allow_online_models(mut self, allowed: bool) -> Self {
-        self.allow_online_models = Some(allowed);
         self
     }
 

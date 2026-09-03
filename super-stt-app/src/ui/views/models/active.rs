@@ -7,13 +7,13 @@ use super_stt_shared::models::protocol::DownloadProgress;
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;
+use crate::state::device_offers::STT_STAGE;
 use crate::ui::icons;
 use crate::ui::messages::{DownloadMessage, LanguageMessage, Message, ModelsPageMessage};
 
 use super::chips::{
-    CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips, count_chip, model_is_online, offered_devices,
-    requirement_warning,
+    CloudEgress, backend_has_user_url, backend_is_online, capability_chips, count_chip,
+    model_is_online, requirement_warning, stage_device_support,
 };
 use super::fmt::{no_viable_device_warning, vram_warning};
 use super::status::unmet_requirements;
@@ -194,12 +194,11 @@ pub(super) fn active_backend_card<'a>(
         user_url: backend_has_user_url(backend),
     });
     let mut chip_row = row![].spacing(spacing.space_xxs).align_y(Alignment::Center);
-    if let Some(chips) = capability_chips(
-        backend_supports_gpu(backend),
-        backend_supports_cpu(backend),
-        egress,
-        true,
-    ) {
+    let compute = stage_device_support(
+        app.device_offers.backend(STT_STAGE, &backend.source),
+        backend,
+    );
+    if let Some(chips) = capability_chips(compute.gpu, compute.cpu, egress, true) {
         chip_row = chip_row.push(chips);
     }
     // Count what this stage can run, not everything the backend ships — a
@@ -250,22 +249,9 @@ pub(super) fn active_backend_card<'a>(
         card = card.push(requirement_warning(label));
     }
 
-    // The model operation status for this backend, shown inside the card.
-    match &app.model_operation_state {
-        ModelOperationState::Ready => {}
-        ModelOperationState::Downloading {
-            target_model,
-            progress,
-        } => card = card.push(card_download_progress(target_model, progress)),
-        ModelOperationState::Loading {
-            target_model,
-            status_message,
-        } => {
-            card = card.push(text::body(format!(
-                "Loading {target_model}: {status_message}"
-            )));
-        }
-        ModelOperationState::Error { message } => card = card.push(card_error(message)),
+    // The model operation status, when it is this stage's.
+    if let Some(status) = operation_status(app, STT_STAGE) {
+        card = card.push(status);
     }
 
     card_surface(card, true)
@@ -345,10 +331,10 @@ pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Op
 /// card when no model is loaded for this backend. Picking a model stages it
 /// (and asks the daemon for the model's own device); picking a device stages
 /// it too; the Load button commits both, setting the model's device and then
-/// loading it via `set_model`. The device dropdown lists
-/// [`offered_devices`] — the model's declared devices narrowed by what the
-/// installed build can actually do — and is omitted whenever that list is
-/// empty: an online model, or a model with no viable device on this install.
+/// loading it via `set_model`. The device dropdown lists what the daemon
+/// answered for the staged model (`/pipeline/1/model/{model}/device/list`) and
+/// is omitted whenever that list is empty: an online model, or a model with no
+/// viable device on this install.
 pub(super) fn staged_model_picker<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
@@ -376,15 +362,18 @@ pub(super) fn staged_model_picker<'a>(
         .align_y(Alignment::Center)
         .width(Length::Fill);
 
-    // Device dropdown — only when a model is staged and this install can
-    // offer at least one device for it. `offered_devices` is already the
-    // model's `supported_devices` intersected with what the installed build
-    // can do, so an online model (offering nothing) and a GPU the install
-    // cannot use both fall out of the same check.
-    let staged_devices: Option<Vec<String>> = staged_model.map(|m| offered_devices(backend, m));
-    let show_device_picker = staged_devices.as_ref().is_some_and(|d| !d.is_empty());
+    // Device dropdown — only once the daemon has answered what the staged
+    // model can run on here, and only when that answer offers something. The
+    // answer is already the model's `supported_devices` narrowed to what this
+    // install and host can do, so an online model (offering nothing) and a GPU
+    // the install cannot use both fall out of the same check. No answer yet
+    // renders no picker, which is also why the advisory below asks for an
+    // answered-but-empty list rather than an absent one.
+    let staged_devices: Option<&[String]> =
+        staged_model.and_then(|m| app.device_offers.model(STT_STAGE, &backend.source, m));
+    let show_device_picker = staged_devices.is_some_and(|d| !d.is_empty());
     if show_device_picker {
-        let devices: Vec<String> = staged_devices.clone().unwrap_or_default();
+        let devices: Vec<String> = staged_devices.unwrap_or_default().to_vec();
         let device_index = app
             .models_page
             .staged_device
@@ -411,15 +400,15 @@ pub(super) fn staged_model_picker<'a>(
 
     // Load button — enabled only when a model is staged AND (the staged
     // device is set OR the staged model is the online sentinel, which needs
-    // no device at all). `offered_devices` reports empty for that case too,
-    // but also for a local model this install cannot run on any device (e.g.
-    // a GPU-only model with only a CPU asset installed) — the same defect
-    // class as the reported bug, just with no accelerator to fall back to.
+    // no device at all). The daemon's list is empty for that case too, but
+    // also for a local model this install cannot run on any device (e.g. a
+    // GPU-only model with only a CPU asset installed) — the same defect class
+    // as the reported bug, just with no accelerator to fall back to.
     // `model_is_online` is what tells the two apart; conflating them would
     // enable Load with nothing to stage it onto, and `set_model` would then
     // be sent straight onto whatever device happens to already be current.
     let staged_online = staged_model.is_some_and(|m| model_is_online(backend, m));
-    let no_viable_device = !staged_online && staged_devices.as_ref().is_some_and(Vec::is_empty);
+    let no_viable_device = !staged_online && staged_devices.is_some_and(<[String]>::is_empty);
     let staged_ok = app.models_page.staged_model.is_some()
         && (app.models_page.staged_device.is_some() || staged_online);
     let load_button = button::suggested("Load model")
@@ -449,6 +438,30 @@ pub(super) fn staged_model_picker<'a>(
             .into()
     } else {
         picker_row.into()
+    }
+}
+
+/// The in-flight model operation, on the card that owns it.
+///
+/// One runs at a time — the daemon serializes model mutations — and the
+/// progress events that drive it carry a model name and nothing else, so
+/// `stage` is what keeps a post-processor's download off the transcription
+/// card and a transcription model's off the post-processing one.
+pub(super) fn operation_status(app: &AppModel, stage: u32) -> Option<Element<'_, Message>> {
+    if app.model_operation_stage != stage {
+        return None;
+    }
+    match &app.model_operation_state {
+        ModelOperationState::Ready => None,
+        ModelOperationState::Downloading {
+            target_model,
+            progress,
+        } => Some(card_download_progress(target_model, progress)),
+        ModelOperationState::Loading {
+            target_model,
+            status_message,
+        } => Some(text::body(format!("Loading {target_model}: {status_message}")).into()),
+        ModelOperationState::Error { message } => Some(card_error(message)),
     }
 }
 

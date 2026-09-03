@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::transcribe::Transcribe;
@@ -31,7 +32,7 @@ impl SuperSTTDaemon {
         info!("Loading model {name} with target device: {target_device}");
         self.broadcast_device_model_loading_status(name, target_device);
         let (instance, definition) = self
-            .instantiate_backend(name, source, target_device)
+            .instantiate_backend(name, source, target_device, PipelineStage::Transcription)
             .await?;
         info!(
             "Model {name} loaded on {}",
@@ -59,10 +60,13 @@ impl SuperSTTDaemon {
         };
 
         info!("Reloading active model {name} to apply configuration changes");
-        self.broadcast_model_loading_status(&name);
+        self.broadcast_model_loading_status(&name, PipelineStage::Transcription);
         self.unload_current_model().await;
         let device_pref = self.config.read().await.effective_device(&source, &name);
-        match self.instantiate_backend(&name, &source, &device_pref).await {
+        match self
+            .instantiate_backend(&name, &source, &device_pref, PipelineStage::Transcription)
+            .await
+        {
             Ok((instance, definition)) => {
                 self.finalize_model_switch_success(name, source, definition, instance)
                     .await
@@ -74,19 +78,29 @@ impl SuperSTTDaemon {
         }
     }
 
-    pub fn broadcast_model_loading_status(&self, model: &str) {
+    /// Announce that `stage` has begun loading `model`. Every stage says which
+    /// it is, because a client watching one stage must not read the other's
+    /// load as its own — and these events are how it learns about a load it
+    /// did not start (the daemon's startup load, or another client's).
+    pub fn broadcast_model_loading_status(&self, model: &str, stage: PipelineStage) {
         self.events
             .publish_daemon_status(DaemonStatusEvent::LoadingModel {
                 new_model: model.to_string(),
+                stage: stage.position(),
             });
     }
 
     /// Broadcast model loading status specifically for device switching.
+    ///
+    /// Stage 1's, always: the switch-with-recovery machinery this belongs to is
+    /// the transcription stage's. A post-processor's device change is a plain
+    /// reload, and reports itself as one.
     pub fn broadcast_device_model_loading_status(&self, model: &str, target_device: &str) {
         self.events
             .publish_daemon_status(DaemonStatusEvent::LoadingModelForDevice {
                 model: model.to_string(),
                 target_device: target_device.to_string(),
+                stage: PipelineStage::Transcription.position(),
             });
     }
 
@@ -99,18 +113,26 @@ impl SuperSTTDaemon {
     /// `source` is included on the wire because a client reconnecting after a
     /// daemon restart has no prior `current_source` to fall back to; without it
     /// the model loads but the settings app keeps showing "no model loaded".
-    pub fn broadcast_model_active(&self, name: &str, source: &str, actual_device: &str) {
+    pub fn broadcast_model_active(
+        &self,
+        name: &str,
+        source: &str,
+        actual_device: &str,
+        stage: PipelineStage,
+    ) {
         self.events
             .publish_daemon_status(DaemonStatusEvent::ModelSwitched {
                 model_name: name.to_string(),
                 source: source.to_string(),
                 actual_device: actual_device.to_string(),
+                stage: stage.position(),
             });
         self.events.publish_daemon_status(DaemonStatusEvent::Ready {
             model_loaded: true,
             model_name: Some(name.to_string()),
             actual_device: Some(actual_device.to_string()),
             preferred_device: None,
+            stage: stage.position(),
         });
     }
 
@@ -205,6 +227,7 @@ impl SuperSTTDaemon {
             model_name: None,
             actual_device: None,
             preferred_device: None,
+            stage: PipelineStage::Transcription.position(),
         });
         let msg = dropped.map_or_else(|| "Model unloaded".to_string(), |n| format!("Unloaded {n}"));
         info!("{msg}");

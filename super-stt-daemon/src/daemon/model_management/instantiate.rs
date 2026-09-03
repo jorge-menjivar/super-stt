@@ -23,6 +23,7 @@ impl SuperSTTDaemon {
         name: &str,
         source: &str,
         device_pref: &str,
+        stage: crate::daemon::device_management::PipelineStage,
     ) -> Result<(Box<dyn Transcribe>, ModelDefinition)> {
         let (backend, def) = {
             let backends = self.backends.read().await;
@@ -35,7 +36,7 @@ impl SuperSTTDaemon {
             "wasm" => self.instantiate_wasm(&backend, &def).await?,
             "subprocess" => {
                 let resolved = resolve_device_for_backend(device_pref, &backend.dir).await;
-                self.instantiate_subprocess(&backend, name, &resolved)
+                self.instantiate_subprocess(&backend, name, &resolved, stage)
                     .await?
             }
             other => bail!("backend {} declares unknown kind '{other}'", backend.source),
@@ -105,6 +106,7 @@ impl SuperSTTDaemon {
         backend: &DiscoveredBackend,
         name: &str,
         device_pref: &str,
+        stage: crate::daemon::device_management::PipelineStage,
     ) -> Result<Box<dyn Transcribe>> {
         // The same secret/option headers the WASM transport is handed: a
         // subprocess backend reads its `[[options]]` off the request too.
@@ -131,6 +133,8 @@ impl SuperSTTDaemon {
             let t = std::sync::Arc::new(
                 crate::download_progress::DownloadProgressTracker::new(
                     name.to_string(),
+                    backend.source.clone(),
+                    stage.position(),
                     total_files,
                     cancelled,
                 )
@@ -140,7 +144,7 @@ impl SuperSTTDaemon {
             // settings app's progress card lights up. A previous tracker (from
             // a failed load) is cleared first — the manager rejects parallel
             // downloads, but a leftover entry would block this one.
-            self.download_manager.clear_download();
+            self.download_manager.clear_download(stage.position());
             if let Err(e) = self
                 .download_manager
                 .start_download(std::sync::Arc::clone(&t))
@@ -171,7 +175,7 @@ impl SuperSTTDaemon {
                 Err(e) => t.mark_error(&format!("{e:#}")),
             }
             t.broadcast_progress();
-            self.download_manager.clear_download();
+            self.download_manager.clear_download(stage.position());
         }
 
         Ok(Box::new(result?))
@@ -183,6 +187,7 @@ impl SuperSTTDaemon {
         backend: &DiscoveredBackend,
         _name: &str,
         _device_pref: &str,
+        _stage: crate::daemon::device_management::PipelineStage,
     ) -> Result<Box<dyn Transcribe>> {
         bail!(
             "backend {} is a subprocess backend, unsupported in this build (rebuild with --features subprocess-backends)",

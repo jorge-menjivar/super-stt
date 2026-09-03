@@ -5,6 +5,11 @@ use super_stt_shared::models::protocol::{Command, DaemonRequest, DaemonResponse}
 
 impl SuperSTTDaemon {
     /// Main command handler - routes commands to appropriate handlers
+    // A flat table with one arm per wire command: its length is the
+    // protocol's, and the exhaustive match is what makes a new command a
+    // compile error rather than a silent gap. Splitting it would only hide
+    // the table.
+    #[allow(clippy::too_many_lines)]
     pub async fn handle_command(&self, request: DaemonRequest) -> DaemonResponse {
         let command = match Command::try_from(request) {
             Ok(cmd) => cmd,
@@ -42,10 +47,24 @@ impl SuperSTTDaemon {
             cmd @ (Command::SetModelDevice { .. }
             | Command::GetModelDevice { .. }
             | Command::SetPostProcessorDevice { .. }
-            | Command::GetPostProcessorDevice { .. }) => self.handle_model_device(cmd).await,
+            | Command::GetPostProcessorDevice { .. }
+            | Command::ListModelDevices { .. }
+            | Command::ListActiveBackendDevices
+            | Command::ListPostProcessorDevices { .. }
+            | Command::ListPostProcessorBackendDevices) => self.handle_model_device(cmd).await,
             Command::GetConfig => self.handle_get_config().await,
-            Command::CancelDownload => self.handle_cancel_download(),
-            Command::GetDownloadStatus => self.handle_get_download_status(),
+            Command::CancelDownload => self.handle_cancel_download(
+                crate::daemon::device_management::PipelineStage::Transcription,
+            ),
+            Command::CancelPostProcessorDownload => self.handle_cancel_download(
+                crate::daemon::device_management::PipelineStage::PostProcessor,
+            ),
+            // Routeless: every client reads a stage's in-flight load from
+            // `GET /pipeline/{stage}`, which asks per stage. Kept as the
+            // transcription stage's for the internal callers that predate it.
+            Command::GetDownloadStatus => self.handle_get_download_status(
+                crate::daemon::device_management::PipelineStage::Transcription,
+            ),
             Command::ListAudioThemes => self.handle_list_audio_themes(),
             Command::SetPreviewTyping { enabled } => self.handle_set_preview_typing(enabled).await,
             Command::GetPreviewTyping => self.handle_get_preview_typing(),
@@ -58,6 +77,7 @@ impl SuperSTTDaemon {
                 self.handle_set_post_processor_backend(source).await
             }
             Command::ClearPostProcessorBackend => self.handle_clear_post_processor_backend().await,
+            Command::ReloadPostProcessor => self.handle_reload_post_processor().await,
             Command::GetPipeline => self.handle_get_pipeline().await,
             Command::SetRecordingStopMode { mode } => {
                 self.handle_set_recording_stop_mode(mode).await
@@ -86,10 +106,6 @@ impl SuperSTTDaemon {
             cmd @ (Command::SetModelLanguage { .. }
             | Command::GetModelLanguage { .. }
             | Command::ClearModelLanguage { .. }) => self.handle_model_language(cmd).await,
-            Command::SetAllowOnlineModels { enabled } => {
-                self.handle_set_allow_online_models(enabled).await
-            }
-            Command::GetAllowOnlineModels => self.handle_get_allow_online_models().await,
             Command::SetCustomModelsDir { path } => self.handle_set_custom_models_dir(path).await,
             Command::GetCustomModelsDir => self.handle_get_custom_models_dir().await,
             Command::ListBackends => self.handle_list_backends().await,

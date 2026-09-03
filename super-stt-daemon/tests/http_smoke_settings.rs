@@ -401,32 +401,6 @@ async fn settings_scope_endpoints() {
     )
     .await;
 
-    // --- GET /allow_online_models ---
-    let (s, body) = raw_get_json(&http_socket, "/allow_online_models", &settings_token).await;
-    assert_eq!(s, StatusCode::OK, "GET /allow_online_models: {body}");
-    assert_eq!(body["status"], "success");
-    let initial_allow = body["allow_online_models"].as_bool().unwrap_or(false);
-
-    // --- POST /allow_online_models: round-trip the inverse ---
-    let (s, _) = raw_post_json(
-        &http_socket,
-        "/allow_online_models",
-        &settings_token,
-        serde_json::json!({ "enabled": !initial_allow }),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK, "POST /allow_online_models");
-    let (_, body) = raw_get_json(&http_socket, "/allow_online_models", &settings_token).await;
-    assert_eq!(body["allow_online_models"], !initial_allow);
-    // Restore.
-    let _ = raw_post_json(
-        &http_socket,
-        "/allow_online_models",
-        &settings_token,
-        serde_json::json!({ "enabled": initial_allow }),
-    )
-    .await;
-
     // --- GET /update_check_enabled ---
     let (s, body) = raw_get_json(&http_socket, "/update_check_enabled", &settings_token).await;
     assert_eq!(s, StatusCode::OK, "GET /update_check_enabled: {body}");

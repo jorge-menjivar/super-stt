@@ -69,7 +69,6 @@ macro_rules! settings_toggle {
     };
 }
 
-pub(crate) mod allow_online_models;
 pub(crate) mod audio_theme;
 pub(crate) mod backends;
 pub(crate) mod custom_models_dir;
@@ -136,17 +135,20 @@ pub(crate) fn routes() -> Router<AppState> {
             post(pipeline::reload_stage_model),
         )
         .route(
+            "/pipeline/{stage}/device/list",
+            get(pipeline::list_stage_devices),
+        )
+        .route(
             "/pipeline/{stage}/model/{model}/device",
             get(pipeline::get_model_device).post(pipeline::set_model_device),
         )
         .route(
-            "/preview_typing",
-            get(preview_typing::get_preview_typing).post(preview_typing::set_preview_typing),
+            "/pipeline/{stage}/model/{model}/device/list",
+            get(pipeline::list_model_devices),
         )
         .route(
-            "/allow_online_models",
-            get(allow_online_models::get_allow_online_models)
-                .post(allow_online_models::set_allow_online_models),
+            "/preview_typing",
+            get(preview_typing::get_preview_typing).post(preview_typing::set_preview_typing),
         )
         .route(
             "/custom_models_dir",

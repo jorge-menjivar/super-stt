@@ -18,7 +18,7 @@ Settings UI also shows. Scopes are composable — see [auth.md](../auth.md).
 | Topic                   | Carries                                                                                                                                                                          |
 |-------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `daemon_status_changed` | A discriminated union keyed on `status` (schema per variant [below](#daemon_status_changed-variants)). Every event also carries `timestamp` (RFC 3339).                          |
-| `download_progress`     | Per-file model-download tick — `{ model_name, current_file, file_index, total_files, percentage, status, eta_seconds, timestamp, error?, … }`. `error` carries the failure detail on the terminal `status` = `"error"` tick (omitted otherwise).                                            |
+| `download_progress`     | Per-file model-download tick — `{ model_name, source, stage, current_file, file_index, total_files, percentage, status, eta_seconds, timestamp, error?, … }`. `source` is the backend serving the model and `stage` the pipeline position being provisioned, so a client can tell a post-processor's download from a transcription model's. `error` carries the failure detail on the terminal `status` = `"error"` tick (omitted otherwise). |
 | `registry_install`      | Backend-registry install / refresh progress — a serialized registry event (`install.progress` / `install.completed` / `install.failed` / `refresh.completed` / `refresh.failed`). |
 
 ### `daemon_status_changed` variants
@@ -29,15 +29,22 @@ and read only the fields for that variant; unknown variants should be ignored.
 
 | `status`                   | Fields (besides `status` + `timestamp`)                                                     |
 |----------------------------|---------------------------------------------------------------------------------------------|
-| `loading_model`            | `new_model` (string)                                                                        |
-| `loading_model_for_device` | `model` (string), `target_device` (string)                                                  |
-| `model_switched`           | `model_name` (string), `source` (string), `actual_device` (string)                          |
-| `ready`                    | `model_loaded` (bool); optional `model_name`, `actual_device`, `preferred_device` (strings)  |
-| `switching_device`         | `from_device` (string), `target_device` (string), `model` (string)                          |
-| `device_switch_error`      | `error` (string), `failed_device` (string), `model` (string)                                |
+| `loading_model`            | `new_model` (string), `stage` (int)                                                         |
+| `loading_model_for_device` | `model` (string), `target_device` (string), `stage` (int)                                   |
+| `model_switched`           | `model_name` (string), `source` (string), `actual_device` (string), `stage` (int)            |
+| `ready`                    | `model_loaded` (bool), `stage` (int); optional `model_name`, `actual_device`, `preferred_device` (strings) |
+| `switching_device`         | `from_device` (string), `target_device` (string), `model` (string), `stage` (int)             |
+| `device_switch_error`      | `error` (string), `failed_device` (string), `model` (string), `stage` (int)                  |
 | `active_backend_changed`   | `source` (string, or `null` when the active backend was cleared)                            |
 | `settings_changed`         | `setting` (string — the name of what changed, e.g. `"language"`)                            |
 | `update_available`         | `latest_version` (string — the candidate release's tag, verbatim). Emitted when a check newly finds an available update or the candidate version changes; clients should refetch [`GET /update`](../endpoints/v1/update.md). |
+
+`stage` is the [`/pipeline/{stage}`](../endpoints/v1/pipeline.md) position whose
+model the event is about — 1 for transcription, 2 for post-processing. Every
+stage reports its own lifecycle on this topic, so a client watching one must
+filter on it rather than assume; a payload without the field comes from a daemon
+older than it and is stage 1's. The remaining variants describe the daemon
+rather than one stage's model, and carry no `stage`.
 
 The destination device is named `target_device` on both `loading_model_for_device`
 and `switching_device` (previously `switching_device` used `to_device`). The

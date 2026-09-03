@@ -23,13 +23,14 @@ use cosmic::widget::{self, button, text};
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::state::ContextPage;
+use crate::state::device_offers::PP_STAGE;
 use crate::ui::icons;
 use crate::ui::messages::{Message, ModelsPageMessage, PostProcessorMessage, ShellMessage};
 
 use super::active::backend_glyph_tile;
 use super::chips::{
-    CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
-    backend_supports_gpu, capability_chips, count_chip, offered_devices,
+    CloudEgress, backend_has_user_url, backend_is_online, capability_chips, count_chip,
+    stage_device_support,
 };
 use super::surface::{
     backend_description, card_divider, card_surface, card_title_block, muted_text_color,
@@ -88,11 +89,18 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
         .spacing(spacing.space_s)
         .push(header(backend, app));
 
-    if let Some(chips) = chip_row(backend) {
+    if let Some(chips) = chip_row(backend, app) {
         card = card.push(chips);
     }
 
     card = card.push(card_divider()).push(control_row(app, backend));
+
+    // Downloading, loading, or the failure that ended it — shown here when the
+    // operation is this stage's, so a post-processor's progress is on the card
+    // that started it rather than on the transcription card below the models.
+    if let Some(status) = super::active::operation_status(app, PP_STAGE) {
+        card = card.push(status);
+    }
 
     // Enabled but not running: transcripts are passing through untouched, and
     // nothing else on the card would say so. `enabled` and `loaded` are
@@ -152,18 +160,17 @@ fn header<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Messag
 /// Capability chips for the selected backend, plus a count of the
 /// post-processors it serves. Same row the transcription card carries, so the
 /// two read alike.
-fn chip_row(backend: &BackendInfo) -> Option<Element<'_, Message>> {
+fn chip_row<'a>(backend: &'a BackendInfo, app: &AppModel) -> Option<Element<'a, Message>> {
     let spacing = cosmic::theme::spacing();
     let egress = backend_is_online(backend).then(|| CloudEgress {
         hosts: backend.allowed_hosts.as_slice(),
         user_url: backend_has_user_url(backend),
     });
-    let caps = capability_chips(
-        backend_supports_gpu(backend),
-        backend_supports_cpu(backend),
-        egress,
-        true,
+    let compute = stage_device_support(
+        app.device_offers.backend(PP_STAGE, &backend.source),
+        backend,
     );
+    let caps = capability_chips(compute.gpu, compute.cpu, egress, true);
     let count = post_processor_models(backend).len();
     if caps.is_none() && count == 0 {
         return None;
@@ -248,18 +255,19 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         .align_y(Alignment::Center)
         .width(Length::Fill);
 
-    // Device dropdown — only for a staged pick this install can offer at
-    // least one device for. Offered devices are the model's declared ones
-    // narrowed by what the installed build can do, so an online model
-    // (offering nothing) shows no picker.
+    // Device dropdown — only once the daemon has answered what the staged
+    // pick can run on here, and only when that answer offers something. The
+    // answer is the model's declared devices narrowed to what this install and
+    // host can do, so an online model (offering nothing) shows no picker.
     let staged = app
         .staged_post_processor
         .as_ref()
         .filter(|(_, source)| source == &backend.source)
         .map(|(model, _)| model.as_str());
     let devices: Vec<String> = staged
-        .map(|m| offered_devices(backend, m))
-        .unwrap_or_default();
+        .and_then(|m| app.device_offers.model(PP_STAGE, &backend.source, m))
+        .unwrap_or_default()
+        .to_vec();
     if !devices.is_empty() {
         let device_index = app
             .staged_post_processor_device

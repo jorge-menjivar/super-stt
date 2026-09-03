@@ -194,13 +194,18 @@ The `source` is URL-percent-encoded.
 ### Response
 
 ```json
-{ "uninstalled": true, "was_active": false }
+{ "uninstalled": true, "was_active": false, "was_post_processor": false }
 ```
 
-`was_active` is `true` if this was the active backend. Uninstalling the
-active backend first unloads its loaded model (freeing device memory) and
-clears the active-backend and preferred-model config, so the daemon goes
-fully idle and `GET /status` stays consistent with `GET /pipeline/1`.
+A backend can be filling either pipeline stage, and each is emptied before
+the files go, so nothing keeps running against a directory that no longer
+exists. `was_active` is `true` if this backend was filling stage 1: its loaded
+model is unloaded (freeing device memory) and the active-backend and
+preferred-model config cleared, so `GET /status` stays consistent with
+`GET /pipeline/1`. `was_post_processor` is `true` if it was selected as the
+post-processor backend, loaded or not: the post-processor is unloaded and the
+selection forgotten, as `DELETE /pipeline/2` would. Both can be `true` for a
+backend serving both roles.
 
 ### Failure modes
 

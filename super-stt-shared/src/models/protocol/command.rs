@@ -61,8 +61,27 @@ pub enum Command {
     GetPostProcessorDevice {
         model: String,
     },
+    /// The devices this install can offer a transcription model on this
+    /// host — the `available_devices` half of `GetModelDevice`, on its own.
+    ListModelDevices {
+        model: String,
+    },
+    /// The devices the selected transcription backend can be run on here:
+    /// the union of `ListModelDevices` over the models it serves for that
+    /// stage.
+    ListActiveBackendDevices,
+    /// The stage-2 twins, against the selected post-processor backend.
+    ListPostProcessorDevices {
+        model: String,
+    },
+    ListPostProcessorBackendDevices,
     GetConfig,
+    /// Abandon the transcription stage's in-flight download.
     CancelDownload,
+    /// The stage-2 twin. Each stage cancels only its own: a post-processor
+    /// downloads its weights like any other model, and one stage abandoning
+    /// the other's load would be a surprise, not a courtesy.
+    CancelPostProcessorDownload,
     GetDownloadStatus,
     ListAudioThemes,
     SetPreviewTyping {
@@ -88,6 +107,9 @@ pub enum Command {
     },
     /// Deselect the post-processor backend, forgetting the model with it.
     ClearPostProcessorBackend,
+    /// Re-instantiate the loaded post-processor in place so a changed secret
+    /// or option takes effect — the stage-2 twin of [`Self::ReloadActiveModel`].
+    ReloadPostProcessor,
     /// Report the whole transcription pipeline: every stage in order, with the
     /// backend and model filling it. Stage 1 transcribes; later stages
     /// post-process what it produced.
@@ -146,10 +168,6 @@ pub enum Command {
         source: String,
         model: String,
     },
-    SetAllowOnlineModels {
-        enabled: bool,
-    },
-    GetAllowOnlineModels,
     SetCustomModelsDir {
         path: Option<String>,
     },

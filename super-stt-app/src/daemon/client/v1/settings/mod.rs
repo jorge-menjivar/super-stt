@@ -58,7 +58,6 @@ macro_rules! settings_setter {
 }
 
 pub(crate) mod active_model;
-pub(crate) mod allow_online_models;
 pub(crate) mod audio_theme;
 pub(crate) mod backend_secrets;
 pub(crate) mod backends;

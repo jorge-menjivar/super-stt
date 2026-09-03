@@ -2,6 +2,7 @@
 
 //! Application state and domain models.
 
+pub mod device_offers;
 pub mod language;
 pub mod models;
 pub mod models_page;

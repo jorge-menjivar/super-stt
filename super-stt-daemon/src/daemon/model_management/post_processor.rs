@@ -14,7 +14,9 @@
 use anyhow::{Result, bail};
 use log::{info, warn};
 
-use crate::daemon::types::SuperSTTDaemon;
+use crate::daemon::device_management::PipelineStage;
+use crate::daemon::types::{SuperSTTDaemon, normalize_device};
+use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
 
 impl SuperSTTDaemon {
     /// Load the post-processor named by the config into its slot, replacing
@@ -22,8 +24,8 @@ impl SuperSTTDaemon {
     ///
     /// # Errors
     /// Returns an error if no post-processor is selected, the selection does
-    /// not resolve to an installed `post_processor`-role model, online models
-    /// are disabled and the selection is one, or instantiation fails.
+    /// not resolve to an installed `post_processor`-role model, or
+    /// instantiation fails.
     pub(in crate::daemon) async fn load_configured_post_processor(&self) -> Result<()> {
         let (name, source) = {
             let config = self.config.read().await;
@@ -46,28 +48,81 @@ impl SuperSTTDaemon {
         if !definition.is_post_processor() {
             bail!("model {name} is a transcription model, not a post-processing model");
         }
-        if definition.is_online() && !self.config.read().await.online.allow_online_models {
-            bail!(
-                "post-processor {name} is an online model and online models are disabled; \
-                 enable 'Allow Online Models' in settings first"
-            );
-        }
 
         let device_pref = self.config.read().await.effective_device(&source, &name);
+        // Stage 2 announces its own load the way stage 1 does — this is the
+        // only notice a client that did not start it ever gets, and the daemon
+        // loads the post-processor on startup as well as on request.
+        self.broadcast_model_loading_status(&name, PipelineStage::PostProcessor);
         let (instance, definition) = self
-            .instantiate_backend(&name, &source, &device_pref)
+            .instantiate_backend(&name, &source, &device_pref, PipelineStage::PostProcessor)
             .await?;
 
+        let actual_device = normalize_device(&instance.device());
         // Same take-then-shutdown ordering as the transcription slot: the old
         // instance is released outside the write lock, since a subprocess
-        // shutdown can take seconds.
+        // shutdown can take seconds. Silent, because the slot is about to be
+        // refilled: the `model_switched`/`ready` pair below is the event for
+        // this load, exactly as a stage-1 reload reports itself once.
         self.unload_post_processor().await;
         *self.post_processor.write().await = Some(crate::daemon::types::LoadedModel {
             definition,
             instance,
         });
         info!("Post-processor loaded: {name} (source={source})");
+        self.broadcast_model_active(&name, &source, &actual_device, PipelineStage::PostProcessor);
         Ok(())
+    }
+
+    /// Re-instantiate the loaded post-processor in place so a changed secret or
+    /// option takes effect — the stage-2 twin of
+    /// [`handle_reload_active_model`](SuperSTTDaemon::handle_reload_active_model).
+    /// No-op when stage 2 is idle; rejected during an active recording.
+    pub async fn handle_reload_post_processor(&self) -> DaemonResponse {
+        if let Some(resp) = self.guard_model_mutation("reload the post-processor").await {
+            return resp;
+        }
+        if !self.post_processor_loaded().await {
+            return DaemonResponse::success()
+                .with_message("No post-processor to reload".to_string());
+        }
+        match self.load_configured_post_processor().await {
+            Ok(()) => DaemonResponse::success().with_message("Post-processor reloaded".to_string()),
+            Err(e) => {
+                warn!("Post-processor reload failed: {e}");
+                DaemonResponse::error(&format!("Post-processor reload failed: {e}"))
+            }
+        }
+    }
+
+    /// The backend serving the loaded post-processor, if one is loaded.
+    pub(in crate::daemon) async fn post_processor_source(&self) -> Option<String> {
+        self.post_processor
+            .read()
+            .await
+            .as_ref()
+            .map(|l| l.definition.source.clone())
+    }
+
+    /// Drop the loaded post-processor and announce that stage 2 is idle.
+    ///
+    /// The unload paths answering a user request use this; the reload path
+    /// uses the silent [`unload_post_processor`](Self::unload_post_processor),
+    /// whose slot is refilled in the same breath. Nothing is announced when
+    /// nothing was loaded — an event saying a stage went idle should mean it
+    /// was running.
+    pub(in crate::daemon) async fn unload_post_processor_announced(&self) {
+        if !self.post_processor_loaded().await {
+            return;
+        }
+        self.unload_post_processor().await;
+        self.events.publish_daemon_status(DaemonStatusEvent::Ready {
+            model_loaded: false,
+            model_name: None,
+            actual_device: None,
+            preferred_device: None,
+            stage: PipelineStage::PostProcessor.position(),
+        });
     }
 
     /// Drop the loaded post-processor, if any. Mirrors
