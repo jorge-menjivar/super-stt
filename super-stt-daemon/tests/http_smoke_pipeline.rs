@@ -18,6 +18,7 @@
 //! 10. `/pipeline/{stage}/model/{cancel,reload}` answer for every stage, each
 //!     about its own model.
 //! 11. Uninstalling a backend empties every stage it was filling.
+//!     The answer names each stage it was filling, and only those.
 //!
 //! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
 //! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
@@ -977,4 +978,48 @@ async fn uninstalling_a_backend_empties_every_stage_it_filled() {
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert!(body["stage"]["source"].is_null(), "body: {body}");
     assert!(body["stage"]["model"].is_null(), "body: {body}");
+}
+
+/// The fixture backend serves a model for each stage, so one install can fill
+/// both. Uninstalling it empties both, and the answer names both; a backend
+/// filling neither is uninstalled with neither named. The two flags are read
+/// from different places (stage 1 from the active-backend directory, stage 2
+/// from the selection's source), so each is checked true and false.
+#[tokio::test]
+async fn uninstalling_a_backend_names_every_stage_it_filled() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    for stage in ["/pipeline/1", PP_STAGE] {
+        let (status, body) = post_req(
+            &sock,
+            stage,
+            &token,
+            serde_json::json!({ "source": FIXTURE_SOURCE }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{stage} body: {body}");
+    }
+
+    let encoded = FIXTURE_SOURCE.replace('/', "%2F");
+    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["uninstalled"], true);
+    assert_eq!(body["was_active"], true, "it was stage 1's: {body}");
+    assert_eq!(body["was_post_processor"], true, "and stage 2's: {body}");
+
+    for stage in ["/pipeline/1", PP_STAGE] {
+        let (status, body) = get(&sock, stage, &token).await;
+        assert_eq!(status, StatusCode::OK, "{stage} body: {body}");
+        assert!(body["stage"]["source"].is_null(), "{stage} body: {body}");
+        assert!(body["stage"]["model"].is_null(), "{stage} body: {body}");
+    }
+
+    // The other install was never selected anywhere: gone, and no stage to
+    // report.
+    let encoded = PP_ONLY_SOURCE.replace('/', "%2F");
+    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["uninstalled"], true);
+    assert_eq!(body["was_active"], false, "body: {body}");
+    assert_eq!(body["was_post_processor"], false, "body: {body}");
 }

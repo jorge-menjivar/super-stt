@@ -1575,6 +1575,44 @@ async fn a_post_processor_load_announces_itself_as_stage_two() {
     assert_eq!(ready["stage"], 2);
 }
 
+/// The handler path, not only the helper: selecting a post-processor over the
+/// wire announces `loading_model` for stage 2 before the load is attempted.
+/// That announcement is the only cue a client that did not ask for the load
+/// ever gets, so it must not depend on the load succeeding. The fixture
+/// cannot be instantiated, which is the point: the announcement arrives, the
+/// selection is kept, and the response says the model is not loaded.
+#[tokio::test]
+async fn selecting_a_post_processor_announces_its_load_as_stage_two() {
+    use crate::daemon::events::Topic;
+    use super_stt_registry_types::manifest::ModelRole;
+
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/textclean";
+    let mut backend = fixture_backend_local("textclean", source, "TextClean", "cleanup");
+    backend.models[0].role = ModelRole::PostProcessor;
+    *daemon.backends.write().await = vec![backend];
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    let mut request = make_request("set_post_processor");
+    request.data = Some(serde_json::json!({ "model": "cleanup", "source": source }));
+    let response = daemon.handle_command(request).await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    let message = response.message.unwrap_or_default();
+    assert!(
+        message.contains("not loaded"),
+        "the fixture cannot load, and the answer must say so: {message}"
+    );
+
+    let (_topic, loading) = rx.recv_json().await.expect("loading_model event");
+    assert_eq!(loading["status"], "loading_model");
+    assert_eq!(loading["new_model"], "cleanup");
+    assert_eq!(loading["stage"], 2);
+
+    // The failed load did not undo the selection.
+    let config = daemon.config.read().await;
+    assert_eq!(config.post_processor.selection(), Some(("cleanup", source)));
+}
+
 /// The polled mirror of the same rule: `GET /pipeline` reports an in-flight
 /// download under the stage that started it. The daemon runs one at a time,
 /// and before it said which stage that was, a post-processor's download
