@@ -265,13 +265,28 @@ pub enum DeviceMessage {
 /// Model-download progress lifecycle.
 #[derive(Debug, Clone)]
 pub enum DownloadMessage {
+    /// A progress snapshot, from a `download_progress` event or a poll. The
+    /// stage it belongs to travels inside it.
     DownloadProgressUpdate(super_stt_shared::models::protocol::DownloadProgress),
-    CancelDownload,
+    /// Abandon the download the named stage has in flight. Every variant below
+    /// that settles a stage's card carries its stage for the same reason: the
+    /// two stages download independently, so an outcome that did not say whose
+    /// it was would settle whichever card happened to be showing.
+    CancelDownload(u32),
     DownloadCompleted(String), // model name
-    DownloadCancelled(String), // model name
-    DownloadError { model: String, error: String },
+    DownloadCancelled {
+        model: String,
+        stage: u32,
+    },
+    DownloadError {
+        model: String,
+        error: String,
+        stage: u32,
+    },
+    /// Ask every stage still owed an outcome for its progress.
     CheckDownloadStatus,
-    NoDownloadInProgress,
+    /// The named stage has no download in flight after all.
+    NoDownloadInProgress(u32),
 }
 
 /// Preview-typing setting.

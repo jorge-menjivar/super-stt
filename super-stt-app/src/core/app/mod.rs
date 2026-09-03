@@ -20,24 +20,10 @@ use cosmic::widget::{menu, nav_bar};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Unified model operation state that encompasses downloading, loading, and switching
-#[derive(Debug, Clone)]
-pub enum ModelOperationState {
-    /// Model is ready for use
-    Ready,
-    /// Downloading model files with progress information
-    Downloading {
-        target_model: String,
-        progress: super_stt_shared::models::protocol::DownloadProgress,
-    },
-    /// Loading model into memory (after download completed)
-    Loading {
-        target_model: String,
-        status_message: String,
-    },
-    /// Model operation failed
-    Error { message: String },
-}
+/// The model operation a pipeline stage has in flight. Defined with the
+/// per-stage container that holds it, and re-exported here because every
+/// handler reaches it through the app model.
+pub use crate::state::model_operations::{ModelOperationState, ModelOperations};
 
 /// Device switching state
 #[derive(Debug, Clone, PartialEq)]
@@ -102,14 +88,11 @@ pub struct AppModel {
     /// discarded on arrival if the counter has since advanced — so a slow,
     /// stale reconnect query can never clobber a fresher live event.
     pub current_model_epoch: u64,
-    /// Model operation state (downloading, loading, or ready)
-    pub model_operation_state: ModelOperationState,
-    /// Which pipeline stage [`AppModel::model_operation_state`] belongs to, so
-    /// the progress lands on the card that started it. The daemon's progress
-    /// events carry a model name and nothing else, so the stage is resolved
-    /// from the catalog when the operation starts and kept for the rest of it
-    /// — including a terminal error, which carries no model name at all.
-    pub model_operation_stage: u32,
+    /// What each pipeline stage has in flight: a download, a load, a failure,
+    /// or nothing. Per stage because the stages provision independently, so
+    /// one stage's work must neither render on another's card nor keep its
+    /// Load button disabled.
+    pub model_operations: ModelOperations,
 
     // Device management state
     /// The accelerator the loaded stage-1 model is on (`cpu`/`cuda`/…), from
@@ -121,11 +104,6 @@ pub struct AppModel {
     pub gpu_info: Vec<super_stt_shared::models::protocol::GpuInfo>,
     /// Device switching state
     pub device_state: DeviceState,
-    /// Timestamp of the last model-switch progress signal (switch start or any
-    /// `download_progress` tick). Drives the stall watchdog in the
-    /// `PingTimeout` handler so a switch that stops making progress surfaces an
-    /// error instead of spinning forever. `None` when no switch is in flight.
-    pub last_switch_progress_at: Option<std::time::Instant>,
     /// Last event timestamp for polling daemon events
     pub last_event_timestamp: Option<String>,
 

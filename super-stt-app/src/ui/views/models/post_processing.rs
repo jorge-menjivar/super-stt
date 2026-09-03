@@ -288,8 +288,13 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         .push(
             button::suggested("Load model")
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
+                // Disabled while stage 2 already has an operation in flight,
+                // the way the transcription card's is. Stage 1's work does not
+                // enter into it: the two stages load independently.
                 .on_press_maybe(
-                    selected.map(|_| Message::PostProcessor(PostProcessorMessage::Enable)),
+                    selected
+                        .filter(|_| app.is_model_ready(PP_STAGE))
+                        .map(|_| Message::PostProcessor(PostProcessorMessage::Enable)),
                 ),
         )
         .into()

@@ -4,6 +4,7 @@ use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::client::{
     get_active_backend, get_current_device, get_current_model, get_gpu_info, list_available_models,
 };
+use crate::state::device_offers::STT_STAGE;
 use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage};
 use cosmic::prelude::*;
 use log::info;
@@ -85,7 +86,7 @@ impl AppModel {
                 }
                 self.current_model.clone_from(&model);
                 self.current_source.clone_from(&source);
-                self.model_operation_state = ModelOperationState::Ready;
+                self.model_operations.set_ready(STT_STAGE);
                 // Fetch the per-model language block now that a model is loaded.
                 // Wire point 1: model loaded (CurrentModelLoaded).
                 self.load_model_language(source, model)
@@ -98,7 +99,7 @@ impl AppModel {
                 self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
                 self.current_model.clone_from(&model);
                 self.current_source.clone_from(&source);
-                self.model_operation_state = ModelOperationState::Ready;
+                self.model_operations.set_ready(STT_STAGE);
                 // Fetch the per-model language block now that a model is loaded.
                 // Wire point 1: model loaded (ModelChanged).
                 self.load_model_language(source, model)
@@ -140,8 +141,9 @@ impl AppModel {
         warn!("Model operation failed: {err}");
         let home = std::env::var("HOME").unwrap_or_default();
         let sanitized = sanitize_home(err, &home);
-        self.model_operation_state = ModelOperationState::Error { message: sanitized };
-        // A failed switch leaves the daemon idle (no model) — the backend stays
+        self.model_operations
+            .set(STT_STAGE, ModelOperationState::Error { message: sanitized });
+        // A failed switch leaves stage 1 idle (no model) — the backend stays
         // selected, but no model is loaded.
         self.clear_loaded_model();
     }

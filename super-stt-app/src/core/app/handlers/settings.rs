@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::core::app::{AppModel, ModelOperationState};
+use crate::core::app::AppModel;
 use crate::daemon::client::{
     clear_post_processor, clear_post_processor_backend, get_model_device, list_model_devices,
     list_stage_devices, set_model_device, set_notification_method, set_post_processor,
@@ -249,9 +249,7 @@ impl AppModel {
     /// by the `download_progress` ticks that name its model. The write's own
     /// response is the end of it.
     pub(in crate::core::app) fn finish_post_processor_operation(&mut self) {
-        if self.model_operation_stage == PP_STAGE {
-            self.model_operation_state = ModelOperationState::Ready;
-        }
+        self.model_operations.set_ready(PP_STAGE);
     }
 
     /// Ask the daemon which devices the post-processor backend can run its
@@ -296,6 +294,16 @@ impl AppModel {
             .staged_post_processor
             .as_ref()
             .and_then(|_| self.staged_post_processor_device.clone());
+        // Mark stage 2 busy before the request goes out, as the transcription
+        // card does. This is what the card's own Load button reads, so without
+        // it a second click could fire a second load while the first is still
+        // in flight. Both outcomes below end it: the reload's `Loaded` and the
+        // failure's `Error` each finish the stage-2 operation.
+        self.set_model_loading(
+            model.clone(),
+            "Initiating model switch...".to_string(),
+            PP_STAGE,
+        );
         Task::perform(
             async move {
                 // Set before the load so the load picks it up; for a model

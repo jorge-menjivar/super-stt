@@ -4,6 +4,7 @@
 
 pub mod device_offers;
 pub mod language;
+pub mod model_operations;
 pub mod models;
 pub mod models_page;
 pub mod registry;

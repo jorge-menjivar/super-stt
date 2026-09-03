@@ -3,7 +3,7 @@
 mod install;
 mod registry;
 
-use crate::core::app::{AppModel, ModelOperationState};
+use crate::core::app::AppModel;
 use crate::daemon::client::{
     clear_active_backend, get_gpu_info, get_model_device, list_model_devices, list_stage_devices,
     set_active_backend, set_model, set_model_device, unload_active_model,
@@ -173,7 +173,7 @@ impl AppModel {
                 self.clear_loaded_model();
                 self.models_page.staged_model = None;
                 self.models_page.staged_device = None;
-                self.model_operation_state = ModelOperationState::Ready;
+                self.model_operations.set_ready(STT_STAGE);
                 Task::perform(unload_active_model(), |result| match result {
                     Ok(_) => cosmic::Action::None,
                     Err(e) => {
@@ -195,8 +195,10 @@ impl AppModel {
             log::warn!("LoadStagedModel ignored — no staged model");
             return Task::none();
         };
-        if !self.is_model_ready() {
-            log::warn!("Model operation already in progress — ignoring Load click");
+        // Stage 1's own operation only: the post-processor provisions
+        // independently, and its download must not swallow this click.
+        if !self.is_model_ready(STT_STAGE) {
+            log::warn!("A stage-1 model operation is already in progress — ignoring Load click");
             return Task::none();
         }
 
@@ -330,7 +332,7 @@ impl AppModel {
                 let prev_active = self.models_page.active_backend.take();
                 self.models_page.active_backend = Some(source.clone());
                 self.clear_loaded_model();
-                self.model_operation_state = ModelOperationState::Ready;
+                self.model_operations.set_ready(STT_STAGE);
                 // Activation comes from the Models page's "Select a backend" sheet;
                 // dismiss it now that a choice was made.
                 self.core.window.show_context = false;
@@ -374,7 +376,7 @@ impl AppModel {
                 // that self-heals on the next refresh.)
                 self.models_page.active_backend = None;
                 self.clear_loaded_model();
-                self.model_operation_state = ModelOperationState::Ready;
+                self.model_operations.set_ready(STT_STAGE);
                 self.models_page.configure_backend = None;
                 // Close the configuration sheet if it was open for this backend.
                 self.core.window.show_context = false;
