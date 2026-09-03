@@ -22,9 +22,7 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
         pinned.push((Some("auto".to_string()), friendly_name("auto"))); // "Auto-detect"
         // Supported languages from the resolution block — but only when the
         // block belongs to this exact (source, model) pair (stale-block guard).
-        if app.language.model_language_for.as_ref() == Some(&(src.clone(), mdl.clone()))
-            && let Some(block) = &app.language.model_language
-        {
+        if let Some(block) = app.language.model_languages.get(src, mdl) {
             for tag in &block.supported {
                 if tag.eq_ignore_ascii_case("auto") {
                     continue; // already pinned as "Auto-detect"

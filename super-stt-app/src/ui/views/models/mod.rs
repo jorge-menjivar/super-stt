@@ -6,6 +6,7 @@ mod configure;
 mod download;
 mod fmt;
 mod installed;
+mod language;
 mod post_processing;
 mod roles;
 mod select_sheet;

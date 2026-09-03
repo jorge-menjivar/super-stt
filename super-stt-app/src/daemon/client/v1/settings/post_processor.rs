@@ -98,7 +98,13 @@ pub async fn set_post_processor(model: String, source: Option<String>) -> HttpRe
     with_settings_token(move |socket, token| {
         let body = body.clone();
         async move {
-            let resp = transport::settings_post(socket, &token, PP_STAGE_MODEL, &body).await?;
+            // No header timeout, for the same reason `set_model` skips it on
+            // stage 1: the daemon answers only once the load finishes, and a
+            // first load streams the weights down first. The fixed timeout
+            // would drop the connection mid-download and report a failure the
+            // daemon never had.
+            let resp =
+                transport::settings_post_no_timeout(socket, &token, PP_STAGE_MODEL, &body).await?;
             require_unit(resp, "set_stage_model")
         }
     })

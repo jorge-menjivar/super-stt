@@ -118,6 +118,10 @@ impl SuperSTTDaemon {
     /// Run the final transcription pass over the full recording. Unlike the
     /// best-effort preview path, a backend failure here surfaces to the caller
     /// as an `Err` (it must not look like silence).
+    ///
+    /// The transcript comes back raw. Post-processing is the caller's job so
+    /// that a decoded take and a streamed one, which never reaches this
+    /// function, cannot end up disagreeing about whether it ran.
     pub(super) async fn transcribe_final(
         &self,
         audio_data: &[f32],
@@ -132,15 +136,13 @@ impl SuperSTTDaemon {
         let language = self.resolve_active_language(request_language).await;
         let start_time = std::time::Instant::now();
 
-        match dispatch_transcription(&self.model, processed_audio, 16000, language.clone()).await {
+        match dispatch_transcription(&self.model, processed_audio, 16000, language).await {
             Ok(text) => {
                 info!(
                     "Transcription completed in {:?}: '{text}'",
                     start_time.elapsed()
                 );
-                // Best-effort cleanup of the final transcript before it is
-                // typed; returns the raw text when disabled or on failure.
-                Ok(self.post_process_final(text, language).await)
+                Ok(text)
             }
             // One place decides the origin, so the notice cannot disagree with
             // the variant; the arms below only shape the message and log it.

@@ -163,10 +163,14 @@ impl AppModel {
                 self.finish_post_processor_operation();
                 // The card's device chips are the daemon's answer for the
                 // backend now selected, so every selection asks again.
-                self.post_processor
+                let backend_devices = self
+                    .post_processor
                     .source
                     .clone()
-                    .map_or_else(Task::none, Self::load_post_processor_devices)
+                    .map_or_else(Task::none, Self::load_post_processor_devices);
+                // The model the daemon remembers is the one the card offers to
+                // load, so it is staged here and its device answer fetched.
+                Task::batch([backend_devices, self.stage_selected_post_processor()])
             }
 
             PostProcessorMessage::Error(err) => {
@@ -210,6 +214,53 @@ impl AppModel {
         self.staged_post_processor = Some((model.clone(), source.clone()));
         self.staged_post_processor_device = None;
         self.clear_action_error(crate::state::ErrorScope::PostProcessing);
+        self.load_staged_post_processor(source, model)
+    }
+
+    /// Stage the model the daemon already has selected, when the user has not
+    /// staged one of their own.
+    ///
+    /// The card shows that model in its dropdown and Load commits it, so it is
+    /// a pick like any other and needs its device answer fetched. Without this
+    /// the pickers disagreed after an unload: the model dropdown fell back to
+    /// the daemon's selection while the device dropdown, which reads the
+    /// staged pick, stayed hidden — leaving no way to change the device except
+    /// by selecting the backend again.
+    fn stage_selected_post_processor(&mut self) -> Task<cosmic::Action<Message>> {
+        let Some((model, source)) = selection_to_stage(
+            self.staged_post_processor.as_ref(),
+            self.post_processor.selection(),
+        ) else {
+            return Task::none();
+        };
+        self.staged_post_processor = Some((model.clone(), source.clone()));
+        self.staged_post_processor_device = None;
+        self.load_staged_post_processor(source, model)
+    }
+
+    /// What a freshly staged stage-2 pick needs from the daemon: the devices it
+    /// can run on, and its language resolution block.
+    ///
+    /// The same two fetches `StageActiveModel` makes for stage 1 — the card
+    /// shows a device picker and a language control, so both answers have to be
+    /// asked for or the controls render neutral.
+    fn load_staged_post_processor(
+        &self,
+        source: String,
+        model: String,
+    ) -> Task<cosmic::Action<Message>> {
+        Task::batch([
+            Self::load_staged_post_processor_devices(source.clone(), model.clone()),
+            self.load_model_language(source, model),
+        ])
+    }
+
+    /// Ask the daemon what `model` can run on in stage 2 and which device it
+    /// is already recorded on, for [`PostProcessorMessage::StagedDevicesLoaded`].
+    fn load_staged_post_processor_devices(
+        source: String,
+        model: String,
+    ) -> Task<cosmic::Action<Message>> {
         let asked = model.clone();
         Task::perform(
             async move {
@@ -288,8 +339,10 @@ impl AppModel {
             );
             return Task::none();
         };
-        // A staged device belongs to the staged model; re-enabling the
-        // daemon's own selection keeps whatever device it has.
+        // The staged device belongs to the staged model above — including the
+        // daemon's own selection, which is staged as soon as its state lands.
+        // Re-enabling therefore sends the device the picker is showing, which
+        // is the model's recorded one until the user picks another.
         let device = self
             .staged_post_processor
             .as_ref()
@@ -586,9 +639,61 @@ fn countdown_tick_task() -> Task<cosmic::Action<Message>> {
     )
 }
 
+/// The selection that needs staging, if any: nothing while the user has a pick
+/// of their own, otherwise whatever the daemon remembers.
+///
+/// The daemon's selection is what the card's dropdown shows and what Load
+/// commits, so it has to be staged for the device picker — which reads the
+/// staged pick — to have a model to ask about. Leaving it unstaged is what
+/// hid the device picker after an unload.
+fn selection_to_stage(
+    staged: Option<&(String, String)>,
+    selection: Option<(String, String)>,
+) -> Option<(String, String)> {
+    if staged.is_some() {
+        return None;
+    }
+    selection
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{TEST_COUNTDOWN_SECS, Tick, advance_countdown};
+    use super::{TEST_COUNTDOWN_SECS, Tick, advance_countdown, selection_to_stage};
+
+    fn pick(model: &str, source: &str) -> (String, String) {
+        (model.to_string(), source.to_string())
+    }
+
+    /// The regression: after an unload the daemon still remembers the model,
+    /// nothing is staged, and the device picker has nothing to key on until
+    /// that selection is staged.
+    #[test]
+    fn the_daemons_selection_is_staged_when_the_user_has_no_pick() {
+        assert_eq!(
+            selection_to_stage(None, Some(pick("s1-mini-q4_k_m", "github.com/x/s1"))),
+            Some(pick("s1-mini-q4_k_m", "github.com/x/s1")),
+        );
+    }
+
+    /// A pick the user made outranks the daemon's memory, or every reload
+    /// would throw their choice away.
+    #[test]
+    fn a_users_own_pick_is_left_alone() {
+        let staged = pick("s1-mini-q8_0", "github.com/x/s1");
+        assert_eq!(
+            selection_to_stage(
+                Some(&staged),
+                Some(pick("s1-mini-q4_k_m", "github.com/x/s1"))
+            ),
+            None,
+        );
+    }
+
+    /// A backend chosen with no model yet has nothing to stage.
+    #[test]
+    fn nothing_is_staged_without_a_selection() {
+        assert_eq!(selection_to_stage(None, None), None);
+    }
 
     /// The full run from button press to typing: one tick per second, firing
     /// on the last. Getting this wrong types either a second early or never.

@@ -9,13 +9,14 @@ use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;
 use crate::state::device_offers::STT_STAGE;
 use crate::ui::icons;
-use crate::ui::messages::{DownloadMessage, LanguageMessage, Message, ModelsPageMessage};
+use crate::ui::messages::{DownloadMessage, Message, ModelsPageMessage};
 
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, capability_chips, count_chip,
     model_is_online, requirement_warning, stage_device_support,
 };
 use super::fmt::{no_viable_device_warning, vram_warning};
+use super::language::language_button;
 use super::status::unmet_requirements;
 use super::surface::{card_divider, card_surface};
 
@@ -82,66 +83,6 @@ pub(super) fn backend_header(
         .spacing(spacing.space_s)
         .align_y(Alignment::Center)
         .into()
-}
-
-/// Per-model language trigger button for the active-backend card.
-///
-/// Rendered inline next to the model/device controls (not on its own row), for
-/// the given `selected_model` when the catalog marks it multilingual. Returns
-/// `None` for a mono-lingual model so the caller can skip the push entirely.
-///
-/// The button label reflects the current per-model resolution block when
-/// `app.language.model_language_for` matches `(backend.source, selected_model)`;
-/// otherwise it falls back to a neutral `"Language"` label (block not yet
-/// fetched — stale-block guard). It opens the language picker for this model.
-fn language_button<'a>(
-    backend: &'a BackendInfo,
-    selected_model: &str,
-    app: &'a AppModel,
-) -> Option<Element<'a, Message>> {
-    // Gate: only render for multilingual models (per catalog).
-    let catalog_model = backend.models.iter().find(|m| m.name == selected_model)?;
-    if !catalog_model.multilingual {
-        return None;
-    }
-
-    let source = &backend.source;
-
-    // Build the trigger label from the resolution block — but only when the
-    // block belongs to this exact (source, model) pair (stale-block guard).
-    let label = if app.language.model_language_for.as_ref()
-        == Some(&(source.clone(), selected_model.to_string()))
-    {
-        if let Some(block) = &app.language.model_language {
-            let source_str = if block.source.is_empty() {
-                "default"
-            } else {
-                block.source.as_str()
-            };
-            match (block.effective.as_deref(), source_str) {
-                (Some(tag), "override") => crate::ui::languages::friendly_name(tag),
-                (Some(tag), "global") => {
-                    format!("{} · global", crate::ui::languages::friendly_name(tag))
-                }
-                _ => format!(
-                    "{} · default",
-                    crate::ui::languages::friendly_name(&block.primary)
-                ),
-            }
-        } else {
-            "Language".to_string()
-        }
-    } else {
-        "Language".to_string()
-    };
-
-    Some(
-        widget::button::standard(label)
-            .on_press(Message::Language(LanguageMessage::OpenLanguagePicker {
-                model: Some((source.clone(), selected_model.to_string())),
-            }))
-            .into(),
-    )
 }
 
 /// The selected backend, shown above the tabs: its model picker + Select, an

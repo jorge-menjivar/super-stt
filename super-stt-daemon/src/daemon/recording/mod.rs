@@ -237,39 +237,44 @@ impl SuperSTTDaemon {
         // contract sees a `transcribing_started` for every
         // `transcribing_stopped` `finalize_recording_session` sends.
         self.emit_transcribing_started();
-        if let Some(text) = streamed {
-            if write_mode {
-                info!("Writing transcription via {}", typer.write_method_name());
-                typer.process_final_text(&text).await;
-            }
-            self.finalize_recording_session(&text, true, None).await;
-            return Ok(Ok(text));
-        }
-        let transcription_result = match self
-            .transcribe_final(&full_audio_data, request_language)
-            .await
-        {
-            Ok(text) => text,
-            Err(e) => {
-                // A transcription failure is not typed into the user's focused
-                // window (the old code typed "[STT error: …]"): finalize reports
-                // it via `transcribing_stopped`, and it surfaces as an inner
-                // `Err` so the HTTP layer emits the contract's `error` event.
-                warn!("Final transcription failed: {e}");
-                self.finalize_recording_session("", false, Some(e.to_string()))
+        let raw_transcript = match streamed {
+            Some(text) => text,
+            None => match self
+                .transcribe_final(&full_audio_data, request_language)
+                .await
+            {
+                Ok(text) => text,
+                Err(e) => {
+                    // A transcription failure is not typed into the user's
+                    // focused window (the old code typed "[STT error: …]"):
+                    // finalize reports it via `transcribing_stopped`, and it
+                    // surfaces as an inner `Err` so the HTTP layer emits the
+                    // contract's `error` event.
+                    warn!("Final transcription failed: {e}");
+                    self.finalize_recording_session("", false, Some(e.to_string()))
+                        .await;
+                    // `e.origin` is why the notice can say whether the daemon or
+                    // the backend is the one refusing; the chain form is the
+                    // reason it shows.
+                    self.surface_failure(
+                        typer,
+                        &notice::Failure::transcription_failed(e.origin, &e.detail()),
+                        write_mode,
+                    )
                     .await;
-                // `e.origin` is why the notice can say whether the daemon or the
-                // backend is the one refusing; the chain form is the reason it
-                // shows.
-                self.surface_failure(
-                    typer,
-                    &notice::Failure::transcription_failed(e.origin, &e.detail()),
-                    write_mode,
-                )
-                .await;
-                return Ok(Err(format!("STT error: {e}")));
-            }
+                    return Ok(Err(format!("STT error: {e}")));
+                }
+            },
         };
+
+        // Best-effort cleanup of the transcript before it is typed. Both
+        // producers converge here on purpose: a streamed take never calls
+        // `transcribe_final`, so keeping this inside that call made a realtime
+        // model the one model that typed raw text while post-processing was
+        // enabled. Previews stay raw by design — only the final transcript
+        // is rewritten.
+        let language = self.resolve_active_language(request_language).await;
+        let transcription_result = self.post_process_final(raw_transcript, language).await;
 
         // Phase 5: type the final transcript.
         if write_mode {

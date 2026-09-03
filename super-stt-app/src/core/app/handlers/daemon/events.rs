@@ -156,10 +156,17 @@ impl AppModel {
                         // Re-fetch the language state so a per-model button that
                         // follows the global value, and the global card, reflect
                         // the new value.
+                        // Every pair answered for, not just one: both stages
+                        // show a language control, and a block that follows the
+                        // global value goes stale on either card.
+                        let pairs: Vec<(String, String)> =
+                            self.language.model_languages.pairs().collect();
                         let mut tasks = vec![self.load_primary_language()];
-                        if let Some((source, model)) = self.language.model_language_for.clone() {
-                            tasks.push(self.load_model_language(source, model));
-                        }
+                        tasks.extend(
+                            pairs
+                                .into_iter()
+                                .map(|(source, model)| self.load_model_language(source, model)),
+                        );
                         Some(Task::batch(tasks))
                     }
                     // Another client (or this one) changed the post-processor.
