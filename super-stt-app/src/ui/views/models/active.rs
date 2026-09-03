@@ -414,7 +414,7 @@ pub(super) fn staged_model_picker<'a>(
     let load_button = button::suggested("Load model")
         .leading_icon(icons::phosphor_handle(icons::PLAY))
         .on_press_maybe(
-            (staged_ok && app.is_model_ready())
+            (staged_ok && app.is_model_ready(STT_STAGE))
                 .then_some(Message::ModelsPage(ModelsPageMessage::LoadStagedModel)),
         );
     picker_row = picker_row.push(load_button);
@@ -443,15 +443,11 @@ pub(super) fn staged_model_picker<'a>(
 
 /// The in-flight model operation, on the card that owns it.
 ///
-/// One runs at a time — the daemon serializes model mutations — and the
-/// progress events that drive it carry a model name and nothing else, so
-/// `stage` is what keeps a post-processor's download off the transcription
-/// card and a transcription model's off the post-processing one.
+/// The stages provision independently, so each card reads its own stage: a
+/// post-processor's download belongs off the transcription card, and a
+/// transcription model's off the post-processing one, even while both run.
 pub(super) fn operation_status(app: &AppModel, stage: u32) -> Option<Element<'_, Message>> {
-    if app.model_operation_stage != stage {
-        return None;
-    }
-    match &app.model_operation_state {
+    match app.model_operations.get(stage)? {
         ModelOperationState::Ready => None,
         ModelOperationState::Downloading {
             target_model,
@@ -498,7 +494,11 @@ pub(super) fn card_download_progress<'a>(
         row![
             text::caption(bytes).width(Length::Fill),
             widget::button::destructive("Cancel")
-                .on_press(Message::Download(DownloadMessage::CancelDownload)),
+                // The stage the daemon reported this download under, so the
+                // cancel reaches the stage whose card the button is on.
+                .on_press(Message::Download(DownloadMessage::CancelDownload(
+                    progress.stage,
+                ))),
         ]
         .align_y(Alignment::Center),
     ]

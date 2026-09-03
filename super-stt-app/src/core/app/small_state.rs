@@ -4,6 +4,7 @@ use crate::ui::messages::Message;
 use cosmic::prelude::*;
 
 use super::{AppModel, DeviceState, ModelOperationState};
+use crate::state::device_offers::STT_STAGE;
 
 /// Stall threshold for the model-switch watchdog. If a switch makes no
 /// progress for this long, the UI flips to an error instead of spinning
@@ -14,9 +15,11 @@ use super::{AppModel, DeviceState, ModelOperationState};
 const SWITCH_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(5);
 
 impl AppModel {
-    /// Check if model is ready
-    pub fn is_model_ready(&self) -> bool {
-        matches!(self.model_operation_state, ModelOperationState::Ready)
+    /// Whether `stage` is free to start a model operation. Asked per stage:
+    /// the daemon runs the stages independently, so a post-processor download
+    /// must leave the transcription card's Load button live.
+    pub fn is_model_ready(&self, stage: u32) -> bool {
+        self.model_operations.is_ready(stage)
     }
 
     /// Clear the locally-tracked loaded model — its name and source.
@@ -37,11 +40,14 @@ impl AppModel {
         progress: super_stt_shared::models::protocol::DownloadProgress,
         stage: u32,
     ) {
-        self.model_operation_stage = stage;
-        self.model_operation_state = ModelOperationState::Downloading {
-            target_model,
-            progress,
-        };
+        // A tick is progress, so it restarts that stage's stall clock.
+        self.model_operations.start(
+            stage,
+            ModelOperationState::Downloading {
+                target_model,
+                progress,
+            },
+        );
     }
 
     /// Set model to loading state, for the stage running the model.
@@ -51,13 +57,14 @@ impl AppModel {
         status_message: String,
         stage: u32,
     ) {
-        // Entering a switch starts the stall watchdog clock (see PingTimeout).
-        self.last_switch_progress_at = Some(std::time::Instant::now());
-        self.model_operation_stage = stage;
-        self.model_operation_state = ModelOperationState::Loading {
-            target_model,
-            status_message,
-        };
+        // Entering a switch starts that stage's stall clock (see PingTimeout).
+        self.model_operations.start(
+            stage,
+            ModelOperationState::Loading {
+                target_model,
+                status_message,
+            },
+        );
     }
 
     /// Set device to switching state
@@ -87,7 +94,6 @@ impl AppModel {
         &mut self,
         progress: &super_stt_shared::models::protocol::DownloadProgress,
     ) {
-        self.last_switch_progress_at = Some(std::time::Instant::now());
         let target_model = progress.model_name.clone();
         // The daemon says which stage it is provisioning for, so the progress
         // lands on the card that started it rather than on whichever card
@@ -111,12 +117,15 @@ impl AppModel {
                     .error
                     .clone()
                     .unwrap_or_else(|| "Model switch failed".to_string());
-                self.model_operation_stage = stage;
-                self.model_operation_state = ModelOperationState::Error { message };
-                // A failed switch leaves the daemon idle — clear the selection
+                self.model_operations
+                    .set(stage, ModelOperationState::Error { message });
+                // A failed switch leaves that stage idle — clear the selection
                 // so the UI doesn't show a model that isn't loaded (mirrors the
-                // `ModelError` handler).
-                self.clear_loaded_model();
+                // `ModelError` handler). Only stage 1's identity is kept here,
+                // so a post-processor's failure must not clear it.
+                if stage == STT_STAGE {
+                    self.clear_loaded_model();
+                }
             }
             "completed" | "cancelled" => {
                 // State will be updated by subsequent daemon events
@@ -131,28 +140,20 @@ impl AppModel {
 
     /// Model-switch stall watchdog, called on each `PingTimeout` tick. While a
     /// switch is in flight, a progress event (download tick, `loading_model`,
-    /// or the initial `set_model_loading`) resets the clock; if none arrives
-    /// within [`SWITCH_STALL_TIMEOUT`], flip to an error so the UI doesn't
-    /// spin forever. No-op outside a switch.
+    /// or the initial `set_model_loading`) resets that stage's clock; if none
+    /// arrives within [`SWITCH_STALL_TIMEOUT`], flip that stage to an error so
+    /// the UI doesn't spin forever. Each stage is timed on its own, so a busy
+    /// one cannot keep a stalled one alive. No-op outside a switch.
     pub(in crate::core::app) fn check_switch_stall(&mut self) {
-        if !matches!(
-            self.model_operation_state,
-            ModelOperationState::Loading { .. } | ModelOperationState::Downloading { .. }
-        ) {
-            return;
-        }
-        if let Some(since) = self.last_switch_progress_at
-            && since.elapsed() > SWITCH_STALL_TIMEOUT
-        {
+        let stalled = self.model_operations.fail_stalled(
+            SWITCH_STALL_TIMEOUT,
+            "Model switch stalled — the daemon stopped reporting progress.",
+        );
+        for stage in stalled {
             log::warn!(
-                "Model switch stalled: no progress for {}s",
+                "Model switch on stage {stage} stalled: no progress for {}s",
                 SWITCH_STALL_TIMEOUT.as_secs()
             );
-            self.model_operation_state = ModelOperationState::Error {
-                message: "Model switch stalled — the daemon stopped reporting progress."
-                    .to_string(),
-            };
-            self.last_switch_progress_at = None;
         }
     }
 

@@ -5,7 +5,7 @@ mod events;
 use crate::core::app::events::classify_daemon_error;
 use crate::core::app::handlers::tasks::{build_load_settings_tasks, ping_task};
 use crate::core::app::subscription::SETTINGS_APP_ID;
-use crate::core::app::{AppModel, DeviceState, ModelOperationState};
+use crate::core::app::{AppModel, DeviceState};
 use crate::daemon::client::test_daemon_connection;
 use crate::state::{AudioTheme, DaemonStatus};
 use crate::ui::messages::{DaemonMessage, Message, ModelMessage};
@@ -100,7 +100,9 @@ impl AppModel {
         // Only clear potentially stuck switching states on actual reconnect, not periodic pings
         if was_disconnected {
             self.device_state = DeviceState::Ready;
-            self.model_operation_state = ModelOperationState::Ready;
+            // Every stage: an operation the app was tracking belongs to a
+            // session that is gone.
+            self.model_operations.reset();
             self.transcription_text.clear();
         }
 

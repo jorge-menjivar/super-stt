@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::core::app::{AppModel, DeviceState, ModelOperationState};
-use crate::state::device_offers::PP_STAGE;
+use crate::core::app::{AppModel, DeviceState};
+use crate::state::device_offers::{PP_STAGE, STT_STAGE};
 use crate::ui::messages::{DaemonMessage, DeviceMessage, DownloadMessage, Message, UpdateMessage};
 use cosmic::prelude::*;
 use log::{debug, info, warn};
@@ -238,15 +238,13 @@ impl AppModel {
         // Handle model readiness - clear switching state
         if model_loaded {
             info!("Received ready event: model loading completed");
+            // Stage 2's `ready` is intercepted before this, so this one is
+            // stage 1's.
             info!(
-                "Model state before ready event: {:?}",
-                self.model_operation_state
+                "Stage 1 model state before ready event: {:?}",
+                self.model_operations.get(STT_STAGE)
             );
-            self.model_operation_state = ModelOperationState::Ready;
-            info!(
-                "Model state after ready event: {:?}",
-                self.model_operation_state
-            );
+            self.model_operations.set_ready(STT_STAGE);
         }
     }
 
@@ -283,8 +281,8 @@ impl AppModel {
         self.current_model_epoch = self.current_model_epoch.wrapping_add(1);
         self.current_model.clone_from(&model);
         self.current_source.clone_from(&source);
-        self.model_operation_state = ModelOperationState::Ready;
-        info!("Model state updated to Ready after model_switched event");
+        self.model_operations.set_ready(STT_STAGE);
+        info!("Stage 1 model state updated to Ready after model_switched event");
         // Mirror CurrentModelLoaded/ModelChanged: fetch the per-model language
         // block so the active-backend card's language button shows the model's
         // resolved language instead of the neutral "Language" label. A client that
@@ -323,9 +321,16 @@ impl AppModel {
                 cosmic::Action::App(Message::Download(DownloadMessage::DownloadCompleted(model)))
             }));
         } else if progress.status == "cancelled" {
-            return Some(Task::perform(async move { progress.model_name }, |model| {
-                cosmic::Action::App(Message::Download(DownloadMessage::DownloadCancelled(model)))
-            }));
+            let (model, stage) = (progress.model_name, progress.stage);
+            return Some(Task::perform(
+                async move { (model, stage) },
+                |(model, stage)| {
+                    cosmic::Action::App(Message::Download(DownloadMessage::DownloadCancelled {
+                        model,
+                        stage,
+                    }))
+                },
+            ));
         }
         None
     }

@@ -63,6 +63,16 @@ async fn fetch_stage(socket: std::path::PathBuf, token: &str) -> HttpResult<Stag
     transport::get_json::<StageStatus>(socket, token, STT_STAGE).await
 }
 
+/// The same read for any stage, addressed by position. Each stage reports only
+/// its own switch, so a caller asking about one stage never sees another's.
+async fn fetch_stage_at(
+    socket: std::path::PathBuf,
+    token: &str,
+    stage: u32,
+) -> HttpResult<StageStatus> {
+    transport::get_json::<StageStatus>(socket, token, &format!("/pipeline/{stage}")).await
+}
+
 /// Get current loaded model from daemon as `(name source)`
 /// (HTTP `GET /pipeline/1`).
 pub async fn get_current_model() -> HttpResult<(String, String)> {
@@ -90,12 +100,14 @@ pub async fn get_current_device() -> HttpResult<Option<String>> {
     .await
 }
 
-/// Get current download status. Composed from the stage's `switch.download`
-/// sub-object.
-pub async fn get_download_status()
--> HttpResult<Option<super_stt_shared::models::protocol::DownloadProgress>> {
-    with_settings_token(|socket, token| async move {
-        let status = fetch_stage(socket, &token).await?;
+/// The download `stage` has in flight, composed from that stage's
+/// `switch.download` sub-object. The polled counterpart of the
+/// `download_progress` event, for the ticks a client may have missed.
+pub async fn get_download_status(
+    stage: u32,
+) -> HttpResult<Option<super_stt_shared::models::protocol::DownloadProgress>> {
+    with_settings_token(move |socket, token| async move {
+        let status = fetch_stage_at(socket, &token, stage).await?;
         let Some(switch) = status.stage.switch else {
             return Ok(None);
         };
@@ -113,9 +125,9 @@ pub async fn get_download_status()
         let progress = super_stt_shared::models::protocol::DownloadProgress {
             model_name: target_field("model"),
             source: target_field("source"),
-            // This block is stage 1's by construction — it is read from
-            // `GET /pipeline/1`, which reports only its own stage's switch.
-            stage: super_stt_shared::models::protocol::TRANSCRIPTION_STAGE,
+            // The stage that was asked: `GET /pipeline/{stage}` reports only
+            // its own switch, so the answer belongs to the stage in the path.
+            stage,
             current_file: download.current_file,
             file_index: download.file_index,
             total_files: download.total_files,

@@ -8,7 +8,7 @@ use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
 use std::collections::HashMap;
 
-use super::{AppModel, DeviceState, ModelOperationState};
+use super::{AppModel, DeviceState};
 
 /// Builds the navigation bar with all Super STT pages inserted in order.
 fn build_nav() -> nav_bar::Model {
@@ -114,17 +114,14 @@ impl AppModel {
             current_model: String::new(),
             current_source: String::new(),
             current_model_epoch: 0,
-            model_operation_state: ModelOperationState::Loading {
-                target_model: String::new(),
-                status_message: "Loading initial model state...".to_string(),
-            },
-            model_operation_stage: crate::state::device_offers::STT_STAGE,
+            model_operations: crate::state::model_operations::ModelOperations::opening(
+                "Loading initial model state...".to_string(),
+            ),
 
             // Initialize device state
             current_device: String::new(), // Empty until loaded from daemon
             gpu_info: Vec::new(),
             device_state: DeviceState::Ready,
-            last_switch_progress_at: None,
             last_event_timestamp: None,
 
             // Initialize preview typing state (disabled by default as beta feature)
