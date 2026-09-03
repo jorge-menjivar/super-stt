@@ -1,73 +1,152 @@
 // SPDX-License-Identifier: GPL-3.0-only
+//! The `settings` scope: everything a client configures.
+//!
+//! Most endpoints here are one line apiece, because they are the same endpoint
+//! with a different value in it: read a setting, write a setting, acknowledge.
+//! The three macros below generate that endpoint — handler, request body, and
+//! the `#[utoipa::path]` the `OpenAPI` document is built from — so a new setting
+//! is one macro call rather than four things to keep in agreement.
+//!
+//! The path lives in the macro call and nowhere else: [`routes`] registers each
+//! handler through `routes!`, which reads the path back off the attribute. A
+//! setting cannot be served at one path and documented at another.
 
-// The settings handlers are thin wrappers over `dispatch_command`: build a
-// `DaemonRequest`, hand it to the daemon, shape the `DaemonResponse` into an
-// HTTP response. These three macros collapse that boilerplate. They are defined
-// here — before the `mod` declarations below — so textual macro scope makes
-// them visible inside every child module without an import.
-
-/// A no-payload settings handler: dispatch `$cmd` with no request body. Used by
-/// `GET` readers and verb-free actions (`test_audio_theme`, `clear_language`).
+/// A no-body handler: dispatch `$cmd` and acknowledge.
+///
+/// Used for reads whose value rides in `message`, and for the `test` endpoints
+/// that fire a cue and report what they did.
 macro_rules! settings_dispatch {
-    ($fn:ident, $cmd:literal) => {
+    (
+        $fn:ident, $cmd:literal, $method:ident $path:literal, $resp:ty,
+        $summary:literal, $description:literal $(,)?
+    ) => {
+        #[utoipa::path(
+            $method,
+            path = $path,
+            tag = "settings",
+            summary = $summary,
+            description = $description,
+            security(("session_token" = ["settings"])),
+            responses(
+                (status = 200, description = "Done.", body = $resp),
+                (status = 401, description = "Token unknown, expired, or its binary changed.",
+                 body = $crate::daemon::http::wire::ReasonEnvelope),
+                (status = 403, description = "The token lacks the `settings` scope.",
+                 body = $crate::daemon::http::wire::ErrorEnvelope),
+                (status = 429, description = "Per-client rate limit hit; back off and retry.",
+                 body = $crate::daemon::http::wire::ErrorEnvelope),
+            ),
+        )]
         pub(crate) async fn $fn(
             ::axum::extract::State(s): ::axum::extract::State<
                 $crate::daemon::http::state::AppState,
             >,
-        ) -> impl ::axum::response::IntoResponse {
-            $crate::daemon::http::internal::helpers::dispatch::dispatch_command(
-                &s.daemon, $cmd, None,
-            )
-            .await
+        ) -> ::axum::response::Response {
+            use $crate::daemon::http::internal::helpers::dispatch;
+            use $crate::daemon::http::v1::settings::wire::FromDaemon;
+            let resp = dispatch::dispatch(&s.daemon, dispatch::build_request($cmd, None)).await;
+            dispatch::narrowed(resp, <$resp>::from_daemon)
         }
     };
 }
 
-/// A single-field `POST` handler: deserialize `$body { $field: $ty }` and
-/// dispatch `$cmd` with `{ $key: field }` in the request `data`.
+/// A single-field `POST`: deserialize `$body { $field: $ty }` and dispatch
+/// `$cmd` with `{ $key: field }` in the request `data`.
 macro_rules! settings_setter {
-    ($fn:ident, $body:ident { $field:ident : $ty:ty }, $cmd:literal, $key:literal) => {
-        #[derive(::serde::Deserialize)]
+    (
+        $fn:ident, $body:ident { $field:ident : $ty:ty }, $cmd:literal, $key:literal,
+        $path:literal, $resp:ty, $summary:literal, $description:literal, $fielddoc:literal $(,)?
+    ) => {
+        #[doc = $summary]
+        #[derive(::serde::Deserialize, ::utoipa::ToSchema)]
         pub(crate) struct $body {
+            #[doc = $fielddoc]
             pub(crate) $field: $ty,
         }
+
+        #[utoipa::path(
+            post,
+            path = $path,
+            tag = "settings",
+            summary = $summary,
+            description = $description,
+            request_body = $body,
+            security(("session_token" = ["settings"])),
+            responses(
+                (status = 200, description = "Applied.", body = $resp),
+                (status = 400, description = "The value was rejected — out of range, or not one of the accepted tokens.",
+                 body = $crate::daemon::http::wire::ErrorEnvelope),
+                (status = 401, description = "Token unknown, expired, or its binary changed.",
+                 body = $crate::daemon::http::wire::ReasonEnvelope),
+                (status = 403, description = "The token lacks the `settings` scope.",
+                 body = $crate::daemon::http::wire::ErrorEnvelope),
+                (status = 429, description = "Per-client rate limit hit; back off and retry.",
+                 body = $crate::daemon::http::wire::ErrorEnvelope),
+            ),
+        )]
         pub(crate) async fn $fn(
             ::axum::extract::State(s): ::axum::extract::State<$crate::daemon::http::state::AppState>,
             ::axum::Json(body): ::axum::Json<$body>,
-        ) -> impl ::axum::response::IntoResponse {
-            $crate::daemon::http::internal::helpers::dispatch::dispatch_command(
-                &s.daemon,
-                $cmd,
-                Some(::serde_json::json!({ $key: body.$field })),
-            )
-            .await
+        ) -> ::axum::response::Response {
+            use $crate::daemon::http::internal::helpers::dispatch;
+            use $crate::daemon::http::v1::settings::wire::FromDaemon;
+            let req = dispatch::build_request($cmd, Some(::serde_json::json!({ $key: body.$field })));
+            let resp = dispatch::dispatch(&s.daemon, req).await;
+            dispatch::narrowed(resp, <$resp>::from_daemon)
         }
     };
 }
 
-/// A boolean-toggle `POST` handler. These legacy commands read `enabled` from
-/// the top level of `DaemonRequest` (not from `data`), so they build the
-/// request directly rather than via `dispatch_command`.
+/// A boolean-toggle `POST`. These commands read `enabled` from the top level of
+/// `DaemonRequest` rather than from `data`, so they build the request directly
+/// instead of going through `ack`.
 macro_rules! settings_toggle {
-    ($fn:ident, $body:ident, $cmd:literal) => {
-        #[derive(::serde::Deserialize)]
+    (
+        $fn:ident, $body:ident, $cmd:literal,
+        $path:literal, $resp:ty, $summary:literal, $description:literal $(,)?
+    ) => {
+        #[doc = $summary]
+        #[derive(::serde::Deserialize, ::utoipa::ToSchema)]
         pub(crate) struct $body {
+            /// Whether the feature is on.
             pub(crate) enabled: bool,
         }
+
+        #[utoipa::path(
+            post,
+            path = $path,
+            tag = "settings",
+            summary = $summary,
+            description = $description,
+            request_body = $body,
+            security(("session_token" = ["settings"])),
+            responses(
+                (status = 200, description = "Applied.", body = $resp),
+                (status = 401, description = "Token unknown, expired, or its binary changed.",
+                 body = $crate::daemon::http::wire::ReasonEnvelope),
+                (status = 403, description = "The token lacks the `settings` scope.",
+                 body = $crate::daemon::http::wire::ErrorEnvelope),
+                (status = 429, description = "Per-client rate limit hit; back off and retry.",
+                 body = $crate::daemon::http::wire::ErrorEnvelope),
+            ),
+        )]
         pub(crate) async fn $fn(
             ::axum::extract::State(s): ::axum::extract::State<
                 $crate::daemon::http::state::AppState,
             >,
             ::axum::Json(body): ::axum::Json<$body>,
-        ) -> impl ::axum::response::IntoResponse {
+        ) -> ::axum::response::Response {
             use $crate::daemon::http::internal::helpers::dispatch;
+            use $crate::daemon::http::v1::settings::wire::FromDaemon;
             let mut req = dispatch::build_request($cmd, None);
             req.enabled = Some(body.enabled);
             let resp = dispatch::dispatch(&s.daemon, req).await;
-            dispatch::json_response(&resp)
+            dispatch::narrowed(resp, <$resp>::from_daemon)
         }
     };
 }
+
+pub(crate) mod wire;
 
 pub(crate) mod audio_theme;
 pub(crate) mod backends;
@@ -85,97 +164,83 @@ pub(crate) mod volume;
 pub(crate) mod write_method;
 
 use crate::daemon::http::state::AppState;
-use axum::Router;
-use axum::routing::{delete, get, post};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
-/// All settings-scope routes. The registry sub-routes share the settings
-/// scope, so they are merged in here.
-pub(crate) fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/models", get(models::list_models))
-        .route(
-            "/audio_theme",
-            get(audio_theme::get_audio_theme).post(audio_theme::set_audio_theme),
-        )
-        .route("/audio_theme/test", post(audio_theme::test_audio_theme))
-        .route("/audio_themes", get(audio_theme::list_audio_themes))
-        .route("/volume", get(volume::get_volume).post(volume::set_volume))
-        .route(
-            "/recording_stop_mode",
-            get(recording_stop_mode::get_recording_stop_mode)
-                .post(recording_stop_mode::set_recording_stop_mode),
-        )
-        .route(
-            "/write_method",
-            get(write_method::get_write_method).post(write_method::set_write_method),
-        )
-        .route("/write_method/test", post(write_method::test_write_method))
-        .route(
-            "/notification_method",
-            get(notification_method::get_notification_method)
-                .post(notification_method::set_notification_method),
-        )
-        .route("/pipeline", get(pipeline::get_pipeline))
-        .route(
-            "/pipeline/{stage}",
-            get(pipeline::get_stage)
-                .post(pipeline::set_stage_backend)
-                .delete(pipeline::clear_stage_backend),
-        )
-        .route(
-            "/pipeline/{stage}/model",
-            post(pipeline::set_stage_model).delete(pipeline::clear_stage_model),
-        )
-        .route(
-            "/pipeline/{stage}/model/cancel",
-            post(pipeline::cancel_stage_model),
-        )
-        .route(
-            "/pipeline/{stage}/model/reload",
-            post(pipeline::reload_stage_model),
-        )
-        .route(
-            "/pipeline/{stage}/device/list",
-            get(pipeline::list_stage_devices),
-        )
-        .route(
-            "/pipeline/{stage}/model/{model}/device",
-            get(pipeline::get_model_device).post(pipeline::set_model_device),
-        )
-        .route(
-            "/pipeline/{stage}/model/{model}/device/list",
-            get(pipeline::list_model_devices),
-        )
-        .route(
-            "/preview_typing",
-            get(preview_typing::get_preview_typing).post(preview_typing::set_preview_typing),
-        )
-        .route(
-            "/custom_models_dir",
-            get(custom_models_dir::get_custom_models_dir)
-                .post(custom_models_dir::set_custom_models_dir),
-        )
-        .route(
-            "/update_check_enabled",
-            get(update_check_enabled::get_update_check_enabled)
-                .post(update_check_enabled::set_update_check_enabled),
-        )
-        .route(
-            "/update_beta_optin",
-            get(update_beta_optin::get_update_beta_optin)
-                .post(update_beta_optin::set_update_beta_optin),
-        )
-        .route("/update", get(self_update::get_update))
-        .route("/update/check", post(self_update::post_check))
-        .route("/backends", get(backends::list_backends))
-        .route("/backends/{source}", delete(backends::uninstall_backend))
-        .route("/gpu_info", get(backends::get_gpu_info))
-        .route(
-            "/language",
-            get(language::get_language)
-                .post(language::set_language)
-                .delete(language::clear_language),
-        )
+/// All settings-scope routes. Registry and backend-option routes share the
+/// settings scope, so they are merged in here.
+///
+/// No path appears in this function: `routes!` reads each one off the handler's
+/// `#[utoipa::path]`, which is also what the `OpenAPI` document is generated from.
+/// Handlers sharing a path are registered together, which is what makes them one
+/// path item with several methods.
+pub(crate) fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(models::list_models))
+        .routes(routes!(
+            audio_theme::get_audio_theme,
+            audio_theme::set_audio_theme
+        ))
+        .routes(routes!(audio_theme::test_audio_theme))
+        .routes(routes!(audio_theme::list_audio_themes))
+        .routes(routes!(volume::get_volume, volume::set_volume))
+        .routes(routes!(
+            recording_stop_mode::get_recording_stop_mode,
+            recording_stop_mode::set_recording_stop_mode
+        ))
+        .routes(routes!(
+            write_method::get_write_method,
+            write_method::set_write_method
+        ))
+        .routes(routes!(write_method::test_write_method))
+        .routes(routes!(
+            notification_method::get_notification_method,
+            notification_method::set_notification_method
+        ))
+        .routes(routes!(pipeline::get_pipeline))
+        .routes(routes!(
+            pipeline::get_stage,
+            pipeline::set_stage_backend,
+            pipeline::clear_stage_backend
+        ))
+        .routes(routes!(
+            pipeline::set_stage_model,
+            pipeline::clear_stage_model
+        ))
+        .routes(routes!(pipeline::cancel_stage_model))
+        .routes(routes!(pipeline::reload_stage_model))
+        .routes(routes!(pipeline::list_stage_devices))
+        .routes(routes!(
+            pipeline::get_model_device,
+            pipeline::set_model_device
+        ))
+        .routes(routes!(pipeline::list_model_devices))
+        .routes(routes!(
+            preview_typing::get_preview_typing,
+            preview_typing::set_preview_typing
+        ))
+        .routes(routes!(
+            custom_models_dir::get_custom_models_dir,
+            custom_models_dir::set_custom_models_dir
+        ))
+        .routes(routes!(
+            update_check_enabled::get_update_check_enabled,
+            update_check_enabled::set_update_check_enabled
+        ))
+        .routes(routes!(
+            update_beta_optin::get_update_beta_optin,
+            update_beta_optin::set_update_beta_optin
+        ))
+        .routes(routes!(self_update::get_update))
+        .routes(routes!(self_update::post_check))
+        .routes(routes!(backends::list_backends))
+        .routes(routes!(backends::uninstall_backend))
+        .routes(routes!(backends::get_gpu_info))
+        .routes(routes!(
+            language::get_language,
+            language::set_language,
+            language::clear_language
+        ))
         .merge(super::registry::routes())
         .merge(super::backends::options::routes())
         .merge(super::backends::model_language::routes())

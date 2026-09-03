@@ -21,12 +21,19 @@
     spdx = { version = "0.13.4", default-features = false }
     thiserror.workspace = true
     toml.workspace = true
+    utoipa = { workspace = true, optional = true }
 
 [dev-dependencies]
     jsonschema = { version = "0.46.5", default-features = false }
 
 [features]
     schema = ["dep:schemars"]
+    # Derive `utoipa::ToSchema` on the index leaves the daemon re-exports as its
+    # `/registry/backends` response shapes (see `super_stt_shared::registry`), so
+    # they carry their own definition into the generated OpenAPI document rather
+    # than being re-described there. Separate from `schema`, which is schemars
+    # for the backend.toml / registry.toml JSON Schemas.
+    openapi = ["dep:utoipa"]
 
 [lints]
     workspace = true

@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/models` — the models the active backend serves.
+//! `/models` \u{2014} the models the backend filling stage 1 serves.
 //!
-//! Selecting and loading a model happens through `/pipeline/{stage}/model`
-//! (see `super::pipeline`); this module is only the flat catalog read that a
-//! picker fills itself from.
-//!
-//! The `current.provider` compatibility shim that `GET /active_model` carried
-//! for clients through v0.2.0 went with that endpoint — those clients need the
-//! pipeline paths now, so there is nothing left for the shim to protect.
+//! Selecting and loading one happens through `/pipeline/{stage}/model` (see
+//! `super::pipeline`); this is only the flat catalog read that a picker fills
+//! itself from.
 
-use crate::daemon::http::internal::helpers::dispatch::dispatch_command;
-use crate::daemon::http::state::AppState;
-use axum::extract::State;
-use axum::response::IntoResponse;
+use super::wire::ModelList;
 
-pub(crate) async fn list_models(State(s): State<AppState>) -> impl IntoResponse {
-    dispatch_command(&s.daemon, "list_models", None).await
-}
+settings_dispatch!(
+    list_models,
+    "list_models",
+    get "/models",
+    ModelList,
+    "List the models the active backend can transcribe with",
+    "Scoped to the backend currently filling stage 1 \u{2014} only its models are \
+switchable. Post-processor models are excluded, since selecting one as a \
+transcription model would fail every recording; the full catalog with roles is at \
+`GET /backends`."
+);

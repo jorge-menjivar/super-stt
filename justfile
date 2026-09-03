@@ -226,8 +226,8 @@ coverage-badge:
     cat coverage-html/coverage.json
 
 # Full local CI gate: format, lint, feature-combo compile, tests, install.sh
-# tests, doctests, schemas
-ci: fmt-check check check-features test test-install doctest schema-check
+# tests, doctests, schemas, protocol spec
+ci: fmt-check check check-features test test-install doctest schema-check openapi-check
 
 # Run the app for testing purposes
 run-app *args:
@@ -444,6 +444,104 @@ check-wit-sync:
 # committed schemas are stale, so run this after changing those types.
 gen-schemas:
     cargo run -p super-stt-registry-types --features schema --bin gen_schemas
+
+# Regenerate docs/protocol/openapi.json from the daemon's live /v1 router.
+# Run it after changing anything under super-stt-daemon/src/daemon/http/v1/;
+# `just openapi-check` (part of `just ci`) fails when the committed file is
+# stale. Starts no daemon and touches no keyring — the document is built from
+# the route registrations themselves.
+openapi:
+    cargo run -q -p super-stt-daemon --bin gen_openapi
+
+# CI check: the committed OpenAPI document must match what the router produces.
+# Regenerates into a temp file and diffs, so a failing check never leaves the
+# working tree modified — the fix is `just openapi`.
+openapi-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    spec=docs/protocol/openapi.json
+    before=$(mktemp)
+    cp "$spec" "$before"
+    trap 'cp "$before" "$spec"; rm -f "$before"' EXIT
+    cargo run -q -p super-stt-daemon --bin gen_openapi >/dev/null
+    if ! diff -u "$before" "$spec"; then
+        echo >&2
+        echo "openapi.json is stale — the router and the published spec disagree." >&2
+        echo "Run 'just openapi' and commit the result." >&2
+        exit 1
+    fi
+    echo "openapi.json is current"
+
+# Browse the protocol spec locally. Regenerates it first so what you read is
+# what the router currently serves, then serves docs/protocol/ over HTTP —
+# the pages fetch openapi.json, which a file:// origin would block.
+#
+# Two renderings of the same document, so neither taste has to win:
+#   --swagger  (default) the familiar Swagger UI, richer per-response examples
+#   --scalar   prose beside examples, reads better with long descriptions
+# Either page links to the other, so the choice is not final.
+# Neither offers "Try it out": the daemon is on a Unix socket, which a browser
+# cannot dial, so an interactive request form could only ever fail.
+#
+# The port is chosen by the OS unless you name one, so this never collides with
+# whatever else is already listening. The server binds before announcing, so the
+# URL it prints is always the one actually being served.
+#
+# Usage: just openapi-serve [--scalar|--swagger] [port]
+openapi-serve *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    page=openapi.html
+    port=0  # 0 asks the OS for any free port
+    # Flag and port in either order, both optional.
+    argv=({{ args }})
+    for arg in ${argv[@]+"${argv[@]}"}; do
+        case "$arg" in
+            --swagger)   page=openapi.html ;;
+            --scalar)    page=scalar.html ;;
+            *[!0-9]*|'') echo "openapi-serve: unrecognized argument '$arg'" >&2
+                         echo "usage: just openapi-serve [--scalar|--swagger] [port]" >&2
+                         exit 2 ;;
+            *)           port="$arg" ;;
+        esac
+    done
+    just openapi
+    exec python3 - "$port" "$page" <<'PYEOF'
+    import functools
+    import http.server
+    import socketserver
+    import sys
+    import threading
+    import webbrowser
+
+    port, page = int(sys.argv[1]), sys.argv[2]
+
+    class Server(socketserver.TCPServer):
+        # Rebind straight after a previous run rather than waiting out TIME_WAIT.
+        allow_reuse_address = True
+
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory="docs/protocol"
+    )
+    try:
+        httpd = Server(("127.0.0.1", port), handler)
+    except OSError as e:
+        # Only reachable for a port named on the command line; port 0 cannot
+        # collide.
+        sys.exit(f"openapi-serve: cannot bind port {port}: {e}\n"
+                 f"Omit the port and one will be chosen for you.")
+
+    with httpd:
+        url = f"http://localhost:{httpd.server_address[1]}/{page}"
+        print(f"Serving the daemon protocol at {url}  (ctrl-c to stop)", flush=True)
+        # Open once the socket is listening, so the first request cannot race
+        # the bind. Silent when there is no browser to open (headless, SSH).
+        threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print()
+    PYEOF
 
 # Install the app (system installation under /usr/local)
 install-app:

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::http::state::AppState;
+use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope, RegistryError};
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -10,12 +11,17 @@ use super_stt_shared::registry::{
 };
 
 /// Query parameters for `GET /registry/backends`.
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::IntoParams)]
 pub(crate) struct RegistryBackendsQuery {
+    /// Include entries this machine cannot run. Off by default, so the catalog
+    /// shows what is actually installable here.
     #[serde(default)]
     pub(crate) include_incompatible: bool,
+    /// Filter by backend kind.
     pub(crate) kind: Option<String>,
+    /// Filter by whether the backend calls out to a network service.
     pub(crate) online: Option<bool>,
+    /// Case-insensitive substring match over name and description.
     pub(crate) q: Option<String>,
 }
 
@@ -170,6 +176,32 @@ fn map_entry(
 }
 
 /// `GET /registry/backends` — list installable backends from the registry.
+#[utoipa::path(
+    get,
+    path = "/registry/backends",
+    tag = "registry",
+    summary = "Browse the published backend catalog",
+    description = "\
+Every backend published to the registry, with the models each serves and whether \
+this machine can run it. `compatible` is decided against the host's actual \
+accelerators and this Super STT's version, so the list reflects what is installable \
+here rather than what exists in general.
+
+`needs_client_update` separates the two ways a backend can be blocked: a host that \
+lacks the right GPU will never run it, but a Super STT one version behind is \
+something the user can fix in a minute. Surface those differently.
+
+This is what is *available*; `GET /backends` is what is installed.",
+    params(RegistryBackendsQuery),
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "The catalog.", body = RegistryListResponse),
+        (status = 503, description = "The catalog could not be fetched and nothing is cached (`registry_unavailable`). Retry, or force a fetch with `POST /registry/backends/refresh`.", body = RegistryError),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 pub(crate) async fn list_registry_backends(
     State(s): State<AppState>,
     Query(q): Query<RegistryBackendsQuery>,

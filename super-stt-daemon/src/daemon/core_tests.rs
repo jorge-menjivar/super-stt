@@ -1637,21 +1637,18 @@ async fn a_stage_reports_only_its_own_download() {
         .start_download(tracker)
         .expect("register download");
 
-    let pipeline = daemon
+    let stages = daemon
         .handle_get_pipeline()
         .await
         .pipeline
         .expect("pipeline");
-    let stages = pipeline.as_array().expect("stages");
     assert!(
-        stages[0]["switch"].is_null(),
+        stages[0].switch.is_none(),
         "stage 1 must not report the post-processor's download"
     );
-    assert_eq!(stages[1]["switch"]["target"]["model"], "s1-mini-q4_k_m");
-    assert_eq!(
-        stages[1]["switch"]["target"]["source"],
-        "github.com/super-stt/s1-mini"
-    );
+    let switch = stages[1].switch.as_ref().expect("stage 2 switch");
+    assert_eq!(switch.target.model, "s1-mini-q4_k_m");
+    assert_eq!(switch.target.source, "github.com/super-stt/s1-mini");
 }
 
 /// Cancel is addressed to a stage, so a stage with nothing of its own in

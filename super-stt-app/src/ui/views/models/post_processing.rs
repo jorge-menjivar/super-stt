@@ -318,8 +318,8 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     let staged_online = shown
         .as_deref()
         .is_some_and(|m| model_is_online(backend, m));
-    let staged_ok = selected.is_some()
-        && (app.staged_picks.device(PP_STAGE).is_some() || staged_online);
+    let staged_ok =
+        selected.is_some() && (app.staged_picks.device(PP_STAGE).is_some() || staged_online);
     picker_row
         .push(
             button::suggested("Load model")

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::pipeline::{InflightMarker, spawn_install_pipeline};
 use crate::daemon::http::state::AppState;
+use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope, RegistryError};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
 use std::sync::Arc;
+use super_stt_shared::registry::{UpdateRequest, UpdateResponse};
 
 /// Request body for `POST /registry/backends/update`.
 #[derive(Deserialize)]
@@ -124,12 +126,33 @@ fn select_update_compat(
 // ---------------------------------------------------------------------------
 
 /// `POST /registry/backends/update` — re-run install if registry has a newer version.
+#[utoipa::path(
+    post,
+    path = "/registry/backends/update",
+    tag = "registry",
+    summary = "Update an installed backend",
+    description = "\
+Upgrades an installed backend to the newest version the catalog offers for this \
+host. Answers with the versions moved between; `noop` is `true` when the installed \
+version was already current, which is a success rather than an error.
+
+Like install, the download runs in the background \u{2014} follow `install_id` on the \
+`registry_install` topic when one is returned.",
+    request_body = UpdateRequest,
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "Up to date already, or the upgrade was accepted.", body = UpdateResponse),
+        (status = 404, description = "No installed backend has that `source` (`not_found`).", body = RegistryError),
+        (status = 409, description = "An install is already in flight, or a recording is running (`backend_busy`).", body = RegistryError),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 pub(crate) async fn update_registry_backend(
     State(s): State<AppState>,
     body: Option<axum::Json<UpdateBody>>,
 ) -> impl IntoResponse {
-    use super_stt_shared::registry::UpdateResponse;
-
     // Phase 1: parse body.
     let body = match parse_update_body(body) {
         Ok(b) => b,

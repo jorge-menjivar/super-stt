@@ -37,12 +37,17 @@
             "time",
         ]
     }
+    utoipa = { workspace = true, optional = true }
     uuid.workspace = true
 
 [features]
     default = []
     analysis = ["spectrum-analyzer"]
     audio = ["rubato"]
+    # Derive `utoipa::ToSchema` on the protocol types the daemon publishes in its
+    # OpenAPI document. Off by default: only the daemon (and the spec generator)
+    # needs it, so the app, applet and CLI don't pay to compile utoipa's derive.
+    openapi = ["dep:utoipa", "super-stt-registry-types/openapi"]
 
 [lints]
     workspace = true

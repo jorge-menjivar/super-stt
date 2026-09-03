@@ -12,6 +12,12 @@
     path = "src/bin/mock_backend.rs"
     required-features = ["test-fixtures"]
 
+# Writes docs/protocol/openapi.json from the live `/v1` router. Run via
+# `just openapi`; `just openapi-check` fails when the committed file is stale.
+[[bin]]
+    name = "gen_openapi"
+    path = "src/bin/gen_openapi.rs"
+
 [dependencies]
     # Core dependencies
     anyhow.workspace = true
@@ -66,6 +72,10 @@
         features = [
             "analysis",
             "audio",
+            # The protocol types the daemon publishes in its OpenAPI document
+            # carry their own `ToSchema`, so the spec describes each one where it
+            # is defined instead of restating its fields at the router.
+            "openapi",
         ]
     }
     tar = "0.4.46"
@@ -92,6 +102,8 @@
     toml.workspace = true
     ulid = "1.2.1"
     urlencoding = "2.1.3"
+    utoipa.workspace = true
+    utoipa-axum.workspace = true
     uuid.workspace = true
     wasmtime = { version = "45.0.0", features = ["async"], optional = true }
     wasmtime-wasi = { version = "45.0.0", optional = true }

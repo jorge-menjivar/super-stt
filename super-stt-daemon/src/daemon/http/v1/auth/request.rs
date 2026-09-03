@@ -5,6 +5,7 @@ use crate::daemon::http::internal::auth::consent::{
 };
 use crate::daemon::http::internal::helpers::responses::{auth_err, is_known_scope, reason};
 use crate::daemon::http::state::{AppState, PeerInfo};
+use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -12,20 +13,38 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub(crate) struct AuthRequestBody {
+    /// The name shown to the user in the consent popup. Self-reported and
+    /// therefore untrusted: the daemon identifies you by your binary, and a
+    /// previous denial sticks to that binary whatever name you send next.
+    #[schema(example = "My App")]
     pub(crate) app_name: String,
+    /// The scopes to request, at least one. Every entry must be known or the
+    /// whole request is refused; ask only for what you need, since the user
+    /// sees the list.
+    #[schema(example = json!(["transcribe", "status"]))]
     pub(crate) scopes: Vec<String>,
+    /// Your app's version. Accepted for forwards compatibility; unused today.
     #[serde(default)]
     #[allow(dead_code)] // accepted for forwards compat; not yet used
+    #[schema(example = "0.1")]
     pub(crate) version: Option<String>,
 }
 
-#[derive(Serialize)]
+/// A freshly minted session token.
+#[derive(Serialize, utoipa::ToSchema)]
 pub(crate) struct AuthOk {
+    /// Always `success`.
+    #[schema(example = "success")]
     pub(crate) status: &'static str,
+    /// Send this as `Authorization: Bearer <token>` on every other endpoint.
+    /// Bound to the approved binary — it stops working if that binary changes
+    /// on disk.
     pub(crate) session_token: String,
+    /// The scopes actually granted, sorted and deduplicated.
     pub(crate) scopes: Vec<String>,
+    /// RFC 3339 expiry, 30 days out.
     pub(crate) expires_at: String,
 }
 
@@ -85,6 +104,37 @@ fn official_client_response(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/request",
+    tag = "auth",
+    summary = "Ask the user for a session token",
+    description = "\
+The consent handshake, and the only endpoint reachable without a token.
+
+The daemon reads `SO_PEERCRED` on your connection, resolves `/proc/<pid>/exe`, and \
+shows the user a popup naming that binary and the scopes you asked for. On Allow it \
+mints a 32-byte token bound to that binary and valid for 30 days.
+
+A denial is remembered for the `(binary, scopes)` pair for the rest of the daemon's \
+lifetime and answers `403` immediately without re-prompting — renaming your app does \
+not clear it, since the key is the binary. Restarting the daemon does.
+
+Setting `SUPER_STT_AUTO_APPROVE=1` in the daemon's environment skips the popup \
+entirely; it is for tests and CI, not for production.",
+    request_body = AuthRequestBody,
+    responses(
+        (status = 200, description = "The user approved. Store the token.", body = AuthOk),
+        (status = 400, description = "Body was missing or malformed (`invalid_body`), or `scopes` was empty or named an unknown scope (`invalid_scope`).", body = ReasonEnvelope),
+        (status = 403, description = "\
+The user denied or dismissed the popup (`user_denied`, `user_dismissed`), a previous \
+denial for this binary and scope set still stands (`user_denied_cached`), the \
+connecting user is not the daemon's own (`uid_mismatch`), the daemon could not \
+resolve your binary and so refused to identify you (`peer_unverifiable`), or the \
+popup could not be shown (`popup_failed`).", body = ReasonEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 pub(crate) async fn auth_request(
     State(state): State<AppState>,
     peer: Option<axum::Extension<PeerInfo>>,
