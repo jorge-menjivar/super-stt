@@ -138,6 +138,12 @@ pub struct AppModel {
     /// is local until the Enable button commits it. `None` means "use whatever
     /// the daemon already has selected".
     pub staged_post_processor: Option<(String, String)>,
+    /// The device lists the daemon has answered for, per pipeline stage: what
+    /// its selected backend can run models on, and what each staged model can
+    /// be loaded onto. Read by the pickers instead of deriving availability
+    /// from the catalog, so the app and the daemon cannot disagree about what
+    /// this install can run.
+    pub device_offers: crate::state::device_offers::DeviceOffers,
     /// The device staged for the post-processor pick, the stage-2 twin of
     /// `models_page.staged_device`: seeded from what this install offers the
     /// staged model, replaced by the model's own once the daemon answers, and

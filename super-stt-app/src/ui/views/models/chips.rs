@@ -142,58 +142,46 @@ pub(super) fn backend_supports_gpu(backend: &crate::daemon::backends::BackendInf
     })
 }
 
-/// The devices a model may actually be loaded onto on this machine.
+/// What a stage's backend can run its models on, as the capability chips read
+/// it.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct StageCompute {
+    pub gpu: bool,
+    pub cpu: bool,
+}
+
+/// What a stage's backend can run its models on.
 ///
-/// A model's `supported_devices` says what the *model* can do; the backend's
-/// `installed_accel` says what the *installed build* can do. Only the
-/// intersection is offerable — a CUDA-only backend on a host with no NVIDIA
-/// GPU installs its CPU asset, and offering a GPU there is the defect this
-/// closes.
-///
-/// An empty `installed_accel` means the daemon has no record — a
-/// local-directory import, or an install predating the record — and the
-/// manifest is then the only available answer. Online models
-/// (`supported_devices == ["none"]`) offer nothing: there is no local compute.
-pub(crate) fn offered_devices(
+/// `offered` is the daemon's own answer for the stage's selected backend —
+/// `/pipeline/{stage}/device/list`, already scoped to the models this stage
+/// would run and narrowed to what the install and host can do. Every other
+/// card (the Library's, the picker sheet's) is for a backend no stage has
+/// selected, which the daemon has no verb for, so those read the catalog.
+pub(super) fn stage_device_support(
+    offered: Option<&[String]>,
     backend: &crate::daemon::backends::BackendInfo,
-    model: &str,
-) -> Vec<String> {
-    let Some(model) = backend.models.iter().find(|m| m.name == model) else {
-        return Vec::new();
-    };
-    if model.supported_devices.iter().any(|d| d == "none") {
-        return Vec::new();
+) -> StageCompute {
+    match offered {
+        Some(devices) => StageCompute {
+            gpu: devices.iter().any(|d| d == "gpu"),
+            cpu: devices.iter().any(|d| d == "cpu"),
+        },
+        None => StageCompute {
+            gpu: backend_supports_gpu(backend),
+            cpu: backend_supports_cpu(backend),
+        },
     }
-    // `cuda`/`metal` are deprecated manifest spellings of `gpu`; a daemon
-    // normalizes them, but an older one may not have.
-    let declared: Vec<String> = model
-        .supported_devices
-        .iter()
-        .map(|d| match d.as_str() {
-            "cuda" | "metal" => "gpu".to_string(),
-            other => other.to_string(),
-        })
-        .collect();
-    if backend.installed_accel.is_empty() {
-        return declared;
-    }
-    let accelerated = backend.installed_accel.iter().any(|a| a != "cpu");
-    declared
-        .into_iter()
-        .filter(|d| d == "cpu" || accelerated)
-        .collect()
 }
 
 /// Whether `model` is the online sentinel (`supported_devices == ["none"]`)
 /// — genuinely no local device to pick, ever.
 ///
-/// Sibling to [`offered_devices`], which also reports an empty list for this
-/// case — but an empty list means two different things: this one (nothing to
-/// pick because there is nothing local to run), or a local model this
-/// specific install cannot run on *any* device (e.g. a GPU-only model with
-/// only a CPU asset installed). A caller deciding whether to enable a "Load"
-/// action must not conflate the two: only this one needs no device at all.
-/// Returns `false` for an unknown model, same as `offered_devices`.
+/// The daemon's device list is empty for this case — but an empty list means
+/// two different things: this one (nothing to pick because there is nothing
+/// local to run), or a local model this specific install cannot run on *any*
+/// device (e.g. a GPU-only model with only a CPU asset installed). A caller
+/// deciding whether to enable a "Load" action must not conflate the two: only
+/// this one needs no device at all. Returns `false` for an unknown model.
 pub(super) fn model_is_online(backend: &crate::daemon::backends::BackendInfo, model: &str) -> bool {
     backend
         .models
@@ -762,85 +750,69 @@ mod capability_tests {
         backend
     }
 
-    /// The reported defect: a CUDA-only backend on a host without an NVIDIA
-    /// GPU installs its CPU asset, and the picker must then offer the CPU
-    /// alone. Reading `supported_devices` on its own offers a GPU that cannot
-    /// be used.
-    #[test]
-    fn a_cpu_install_offers_only_the_cpu() {
-        let backend = backend_with_install(&["cpu", "gpu"], &["cpu"]);
-        assert_eq!(offered_devices(&backend, "m"), vec!["cpu".to_string()]);
-    }
-
-    #[test]
-    fn an_accelerated_install_offers_both() {
-        for accel in [["cuda"], ["rocm"], ["vulkan"]] {
-            let backend = backend_with_install(&["cpu", "gpu"], &accel);
-            assert_eq!(
-                offered_devices(&backend, "m"),
-                vec!["cpu".to_string(), "gpu".to_string()],
-                "install {accel:?} must offer both"
-            );
-        }
-    }
-
-    /// A model that declares no GPU path stays CPU-only even on an
-    /// accelerated install — one asset serves several models.
-    #[test]
-    fn a_cpu_only_model_stays_cpu_on_an_accelerated_install() {
-        let backend = backend_with_install(&["cpu"], &["cuda"]);
-        assert_eq!(offered_devices(&backend, "m"), vec!["cpu".to_string()]);
-    }
-
-    /// No record — a local-directory import, or an install predating it.
-    /// Falling back to the manifest is the only answer available.
-    #[test]
-    fn an_unrecorded_install_falls_back_to_the_manifest() {
-        let backend = backend_with_install(&["cpu", "gpu"], &[]);
-        assert_eq!(
-            offered_devices(&backend, "m"),
-            vec!["cpu".to_string(), "gpu".to_string()]
-        );
-    }
-
-    /// A daemon older than the `gpu` vocabulary still says `cuda`; the app
-    /// normalizes rather than showing a device the picker cannot stage.
-    #[test]
-    fn a_legacy_manifest_spelling_is_normalized() {
-        let backend = backend_with_install(&["cpu", "cuda"], &["cuda"]);
-        assert_eq!(
-            offered_devices(&backend, "m"),
-            vec!["cpu".to_string(), "gpu".to_string()]
-        );
-    }
-
-    #[test]
-    fn an_online_model_offers_nothing_to_pick() {
-        let backend = backend_with_install(&["none"], &[]);
-        assert!(offered_devices(&backend, "m").is_empty());
-    }
-
-    #[test]
-    fn an_unknown_model_offers_nothing() {
-        let backend = backend_with_install(&["cpu", "gpu"], &["cuda"]);
-        assert!(offered_devices(&backend, "absent").is_empty());
-    }
-
-    /// `offered_devices` returns empty for two different reasons, and a
+    /// The daemon offers an empty list for two different reasons, and a
     /// caller deciding whether to enable a "Load" action must tell them
     /// apart: the online sentinel needs no device at all, while a GPU-only
     /// model on an install that resolved to CPU-only can be loaded nowhere.
-    /// Pinning both against the same empty-list outcome is what keeps them
-    /// from silently collapsing back into one case.
+    /// Only the model's own `supported_devices` separates them, which is why
+    /// this stayed a local read after the lists moved to the daemon.
     #[test]
-    fn online_and_unrunnable_both_offer_nothing_but_differ_on_is_online() {
+    fn only_the_online_sentinel_reads_as_online() {
         let online = backend_with_install(&["none"], &[]);
-        assert!(offered_devices(&online, "m").is_empty());
         assert!(model_is_online(&online, "m"));
 
         let gpu_only_on_a_cpu_install = backend_with_install(&["gpu"], &["cpu"]);
-        assert!(offered_devices(&gpu_only_on_a_cpu_install, "m").is_empty());
         assert!(!model_is_online(&gpu_only_on_a_cpu_install, "m"));
+    }
+
+    /// The daemon's answer wins over the catalog: it is scoped to the stage's
+    /// role and narrowed to this host, so a backend whose manifest claims a
+    /// GPU shows no GPU chip once the daemon says it cannot offer one.
+    #[test]
+    fn the_daemons_list_drives_the_chips_when_it_has_answered() {
+        let backend = backend_with_install(&["cpu", "gpu"], &["cuda"]);
+        assert_eq!(
+            stage_device_support(Some(&["cpu".to_string()]), &backend),
+            StageCompute {
+                gpu: false,
+                cpu: true
+            }
+        );
+        assert_eq!(
+            stage_device_support(Some(&["cpu".to_string(), "gpu".to_string()]), &backend),
+            StageCompute {
+                gpu: true,
+                cpu: true
+            }
+        );
+        // An answered-but-empty list is an answer: nothing local to run.
+        assert_eq!(
+            stage_device_support(Some(&[]), &backend),
+            StageCompute {
+                gpu: false,
+                cpu: false
+            }
+        );
+    }
+
+    /// No answer — a backend no stage has selected, or one whose answer has
+    /// not landed — falls back to the catalog rather than blanking the chips.
+    #[test]
+    fn an_unanswered_backend_falls_back_to_the_catalog() {
+        assert_eq!(
+            stage_device_support(None, &backend_with_install(&["cpu", "gpu"], &["cuda"])),
+            StageCompute {
+                gpu: true,
+                cpu: true
+            }
+        );
+        assert_eq!(
+            stage_device_support(None, &backend_with_install(&["cpu", "gpu"], &["cpu"])),
+            StageCompute {
+                gpu: false,
+                cpu: true
+            }
+        );
     }
 
     #[test]
@@ -850,10 +822,9 @@ mod capability_tests {
         assert!(!model_is_online(&backend, "absent"));
     }
 
-    /// The install record is authoritative over the manifest: a CUDA-labeled
-    /// model on a CPU-only install shows no GPU chip — the same defect
-    /// `offered_devices` closes, but for the capability chip rather than the
-    /// device picker.
+    /// The install record is authoritative over the manifest, on the fallback
+    /// path the daemon does not answer for: a CUDA-labeled model on a
+    /// CPU-only install shows no GPU chip.
     #[test]
     fn a_cpu_only_install_hides_the_gpu_chip_even_if_the_manifest_claims_cuda() {
         let backend = backend_with_install(&["cpu", "cuda"], &["cpu"]);

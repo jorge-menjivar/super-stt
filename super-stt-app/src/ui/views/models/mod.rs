@@ -42,11 +42,6 @@ pub use add_sheet::add_backend_sheet;
 pub use configure::configure_sheet;
 pub use select_sheet::select_backend_sheet;
 
-/// The device list the card's picker offers. Re-exported because staging a
-/// model has to seed the same list the dropdown will render — seeding from the
-/// raw manifest instead stages a device this install cannot use.
-pub(crate) use chips::offered_devices;
-
 /// Re-exported so the Updates page's header badge (`ui/views/updates.rs`) can
 /// give its tooltip the same small corner radius as the GPU/status pills'
 /// instead of cosmic's default near-semicircular one.

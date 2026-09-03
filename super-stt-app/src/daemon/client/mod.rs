@@ -28,7 +28,9 @@ pub use v1::settings::backends::{
     set_active_backend, set_backend_option,
 };
 pub use v1::settings::custom_models_dir::get_custom_models_dir;
-pub use v1::settings::model_device::{ModelDevice, get_model_device, set_model_device};
+pub use v1::settings::model_device::{
+    get_model_device, list_model_devices, list_stage_devices, set_model_device,
+};
 pub use v1::settings::notification_method::{get_notification_method, set_notification_method};
 pub use v1::settings::post_processor::{
     PostProcessorState, clear_post_processor, clear_post_processor_backend, get_post_processor,
