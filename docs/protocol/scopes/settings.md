@@ -53,6 +53,8 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/pipeline/{stage}/model/cancel`](../endpoints/v1/pipeline.md) | POST   | Abort an in-flight load for one stage                                                             |
 | [`/pipeline/{stage}/model/reload`](../endpoints/v1/pipeline.md) | POST   | Re-instantiate a stage in place, applying changed secrets/options                                 |
 | [`/pipeline/{stage}/model/{model}/device`](../endpoints/v1/pipeline.md#get-pipelinestagemodelmodeldevice) | GET, POST | Read / set the device one of a stage's models runs on (cpu / gpu)                    |
+| [`/pipeline/{stage}/model/{model}/device/list`](../endpoints/v1/pipeline.md#get-pipelinestagemodelmodeldevicelist) | GET | The devices this install can run one of a stage's models on                     |
+| [`/pipeline/{stage}/device/list`](../endpoints/v1/pipeline.md#get-pipelinestagedevicelist) | GET | The devices this install can run a stage's backend on                                 |
 | [`/write_method`](../endpoints/v1/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg_desktop_portal / ydotool / wayland_protocol)                   |
 | [`/write_method/test`](../endpoints/v1/write_method/test.md) | POST      | Type a test string with the configured method; reports the backend it resolved to                     |
 | [`/notification_method`](../endpoints/v1/notification_method.md) | POST, GET  | How recording failures are surfaced (auto / dbus / typed / off)                                       |

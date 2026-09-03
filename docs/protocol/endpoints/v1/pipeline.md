@@ -18,6 +18,8 @@ so a client learns one shape and applies it anywhere in the pipeline:
 | Stop it          | `DELETE /pipeline/{stage}/model` | Unload, keeping the backend selected      |
 | Read a model's device | `GET /pipeline/{stage}/model/{model}/device`  | Where one of that backend's models runs |
 | Set it           | `POST /pipeline/{stage}/model/{model}/device` | Run it on the CPU or the GPU, reloading if it is loaded |
+| List a model's devices | `GET /pipeline/{stage}/model/{model}/device/list` | What this install can run that model on |
+| List the backend's devices | `GET /pipeline/{stage}/device/list` | What this install can run that backend on, for this stage |
 
 That split is the same one `/pipeline/1` and `/pipeline/1/model` draw for
 transcription, and for the same reason: choosing a backend is cheap and cannot
@@ -377,6 +379,47 @@ Requesting `"gpu"` for a model whose install or host cannot provide one is
 the CPU, surfaced as `resolved_accel: "cpu"` and the `ready` event's
 `actual_device`. A client that wants to offer only what will work narrows its
 picker to `available_devices`.
+
+## `GET /pipeline/{stage}/model/{model}/device/list`
+
+The devices this install can offer `model` on this host — the
+`available_devices` of the model's [device](#get-pipelinestagemodelmodeldevice),
+on its own, for a client that only wants to fill a picker. `model` resolves
+the same way, and the same errors apply.
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "status":            "success",
+  "available_devices": ["cpu", "gpu"]
+}
+```
+
+Empty for an online model, and for a local model this install cannot run on
+any device (a GPU-only model whose installed asset is CPU-only).
+
+## `GET /pipeline/{stage}/device/list`
+
+The devices the backend selected for this stage can be run on here: the union
+of the list above over the models it serves **for this stage's role**. A
+backend serving both a transcription model and a post-processor answers stage
+1 for the former and stage 2 for the latter, since that is what "this backend"
+means from a stage. Always in `cpu`, `gpu` order.
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "status":            "success",
+  "available_devices": ["cpu", "gpu"]
+}
+```
+
+**Errors:** `404 unknown_stage`; `400 invalid_backend` when no backend is
+selected for the stage; plus the auth errors above.
 
 ## Post-processing behavior
 

@@ -1542,6 +1542,72 @@ async fn set_model_device_on_the_device_in_use_reloads_nothing() {
     );
 }
 
+/// The list verbs answer from the same narrowing the device verb reports as
+/// `available_devices`: per model, its own list; per stage, the union over
+/// the models the stage can run — so a backend's online model contributes
+/// nothing and its post-processor is stage 2's business, not stage 1's.
+#[tokio::test]
+async fn device_lists_answer_per_model_and_per_stage() {
+    use crate::daemon::device_management::PipelineStage;
+    use super_stt_registry_types::manifest::{Device, ModelRole};
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/mixed";
+    let mut backend = fixture_backend_devices("mixed", source, "Mixed", "local", vec![Device::Cpu]);
+    let mut online = backend.models[0].clone();
+    online.name = "online".to_string();
+    online.supported_devices = vec![Device::None];
+    let mut cleanup = backend.models[0].clone();
+    cleanup.name = "cleanup".to_string();
+    cleanup.role = ModelRole::PostProcessor;
+    cleanup.supported_devices = vec![Device::Cpu, Device::Gpu];
+    backend.models.extend([online, cleanup]);
+    *daemon.backends.write().await = vec![backend];
+
+    // Nothing selected: nothing to list against.
+    let response = daemon
+        .handle_list_stage_devices(PipelineStage::Transcription)
+        .await;
+    assert_eq!(response.error_code, Some(ErrorCode::InvalidBackend));
+
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    daemon.config.write().await.post_processor.source = source.to_string();
+
+    let response = daemon
+        .handle_list_model_devices(PipelineStage::Transcription, "local".to_string())
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    assert_eq!(response.available_devices, Some(vec!["cpu".to_string()]));
+    let response = daemon
+        .handle_list_model_devices(PipelineStage::Transcription, "online".to_string())
+        .await;
+    assert_eq!(response.available_devices, Some(Vec::new()));
+    let response = daemon
+        .handle_list_model_devices(PipelineStage::Transcription, "cleanup".to_string())
+        .await;
+    assert_eq!(
+        response.error_code,
+        Some(ErrorCode::InvalidModel),
+        "a post-processor is not a stage-1 model"
+    );
+
+    // Stage 1 sees only the transcription models: the CPU-only one.
+    let response = daemon
+        .handle_list_stage_devices(PipelineStage::Transcription)
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    assert_eq!(response.available_devices, Some(vec!["cpu".to_string()]));
+
+    // Stage 2 sees the post-processor, which declares the GPU too — offered
+    // only where the host has one, and the CPU everywhere.
+    let response = daemon
+        .handle_list_stage_devices(PipelineStage::PostProcessor)
+        .await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+    let devices = response.available_devices.expect("a list");
+    assert_eq!(devices.first().map(String::as_str), Some("cpu"));
+    assert!(devices.iter().all(|d| d == "cpu" || d == "gpu"));
+}
+
 /// Stage 2 stores the same way: a post-processor that is not loaded gets
 /// its device recorded against its own `(source, model)`, leaving stage 1's
 /// models alone.

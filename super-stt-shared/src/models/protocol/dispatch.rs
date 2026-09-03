@@ -30,6 +30,14 @@ impl TryFrom<DaemonRequest> for Command {
             "get_model_device" => cmd_get_model_device(&request),
             "set_post_processor_device" => cmd_set_post_processor_device(&request),
             "get_post_processor_device" => cmd_get_post_processor_device(&request),
+            "list_model_devices" => Ok(Command::ListModelDevices {
+                model: model_device_target(&request, "list_model_devices")?,
+            }),
+            "list_active_backend_devices" => Ok(Command::ListActiveBackendDevices),
+            "list_post_processor_devices" => Ok(Command::ListPostProcessorDevices {
+                model: model_device_target(&request, "list_post_processor_devices")?,
+            }),
+            "list_post_processor_backend_devices" => Ok(Command::ListPostProcessorBackendDevices),
             "get_config" => Ok(Command::GetConfig),
             "cancel_download" => Ok(Command::CancelDownload),
             "get_download_status" => Ok(Command::GetDownloadStatus),

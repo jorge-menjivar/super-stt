@@ -52,14 +52,32 @@ struct DeviceTarget {
     backend_dir: std::path::PathBuf,
 }
 
+/// The two facts that narrow a model's declared devices to what it can run
+/// on here. See [`model_available_devices`].
+struct InstallContext {
+    host_devices: Vec<String>,
+    installed_accel: Vec<String>,
+}
+
+impl InstallContext {
+    /// The devices this install can offer `model` on this host.
+    fn offer(&self, model: &ModelDefinition) -> Vec<String> {
+        model_available_devices(
+            &self.host_devices,
+            &model.supported_devices,
+            &self.installed_accel,
+        )
+    }
+}
+
 impl SuperSTTDaemon {
     /// Route the per-model device commands to their handlers, each naming the
     /// stage its wire command addresses. Keeps the destructuring out of the
     /// giant `handle_command` match.
     ///
     /// # Panics
-    /// Panics if `cmd` is not one of the four per-model device variants; the
-    /// caller (`handle_command`) only ever passes those.
+    /// Panics if `cmd` is not one of the per-model device variants; the caller
+    /// (`handle_command`) only ever passes those.
     pub async fn handle_model_device(&self, cmd: Command) -> DaemonResponse {
         use PipelineStage::{PostProcessor, Transcription};
         match cmd {
@@ -76,6 +94,18 @@ impl SuperSTTDaemon {
             }
             Command::GetPostProcessorDevice { model } => {
                 self.handle_get_model_device(PostProcessor, model).await
+            }
+            Command::ListModelDevices { model } => {
+                self.handle_list_model_devices(Transcription, model).await
+            }
+            Command::ListActiveBackendDevices => {
+                self.handle_list_stage_devices(Transcription).await
+            }
+            Command::ListPostProcessorDevices { model } => {
+                self.handle_list_model_devices(PostProcessor, model).await
+            }
+            Command::ListPostProcessorBackendDevices => {
+                self.handle_list_stage_devices(PostProcessor).await
             }
             _ => unreachable!("handle_model_device received a non-device command"),
         }
@@ -95,6 +125,70 @@ impl SuperSTTDaemon {
         let device = self.effective_device(&target).await;
         let message = format!("Device for {model}: {device}");
         self.model_device_response(stage, &target, message).await
+    }
+
+    /// `GET /pipeline/{stage}/model/{model}/device/list` — the devices this
+    /// install can offer `model` on this host, on their own.
+    pub(crate) async fn handle_list_model_devices(
+        &self,
+        stage: PipelineStage,
+        model: String,
+    ) -> DaemonResponse {
+        let target = match self.resolve_device_target(stage, &model).await {
+            Ok(target) => target,
+            Err(early_return) => return early_return,
+        };
+        let install = self.install_context(&target.backend_dir).await;
+        let devices = install.offer(&target.definition);
+        DaemonResponse::success()
+            .with_available_devices(devices)
+            .with_message(format!("Devices available to {model} listed"))
+    }
+
+    /// `GET /pipeline/{stage}/device/list` — the devices the backend selected
+    /// for `stage` can be run on here: the union over the models it serves
+    /// for that stage of what this install can offer each.
+    ///
+    /// Scoped to the stage's role, because that is what "this backend" means
+    /// from a stage: a backend serving both a transcription model and a
+    /// post-processor answers stage 1 for the former and stage 2 for the
+    /// latter.
+    pub(crate) async fn handle_list_stage_devices(&self, stage: PipelineStage) -> DaemonResponse {
+        let position = stage.position();
+        let Some(source) = self.stage_source(stage).await else {
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidBackend,
+                &format!(
+                    "No backend is selected for stage {position}, so there is no backend \
+                     to list devices for. Select one with POST /pipeline/{position}."
+                ),
+            );
+        };
+        let found = {
+            let backends = self.backends.read().await;
+            backends
+                .iter()
+                .find(|b| b.source == source)
+                .map(|b| (b.dir.clone(), b.models.clone()))
+        };
+        let Some((backend_dir, models)) = found else {
+            return DaemonResponse::error_with_code(
+                ErrorCode::InvalidBackend,
+                &format!("Backend {source} (stage {position}) is no longer installed."),
+            );
+        };
+        let install = self.install_context(&backend_dir).await;
+        let devices = backend_available_devices(
+            models
+                .iter()
+                .filter(|m| m.is_post_processor() == stage.is_post_processor())
+                .map(|m| install.offer(m)),
+        );
+        DaemonResponse::success()
+            .with_available_devices(devices)
+            .with_message(format!(
+                "Devices available to {source} (stage {position}) listed"
+            ))
     }
 
     /// `POST /pipeline/{stage}/model/{model}/device` — run `model` on
@@ -324,7 +418,10 @@ impl SuperSTTDaemon {
                 None => (device == "cpu").then(|| device.clone()),
             }
         };
-        let available_devices = self.model_available_devices(target).await;
+        let available_devices = self
+            .install_context(&target.backend_dir)
+            .await
+            .offer(&target.definition);
         DaemonResponse::success()
             .with_device(device)
             .with_resolved_accel(resolved_accel)
@@ -332,10 +429,11 @@ impl SuperSTTDaemon {
             .with_message(message)
     }
 
-    /// The devices this install can offer the target on this host — probed
-    /// fresh, off the async runtime, so an AMD host is never offered a GPU it
-    /// cannot use.
-    async fn model_available_devices(&self, target: &DeviceTarget) -> Vec<String> {
+    /// What this host and one backend's installed asset can offer, read once
+    /// per request: the host is probed fresh, off the async runtime, so an AMD
+    /// host is never offered a GPU it cannot use, and the install record says
+    /// which accelerators the build actually has.
+    async fn install_context(&self, backend_dir: &std::path::Path) -> InstallContext {
         let host = tokio::task::spawn_blocking(crate::registry::host_detect::detect)
             .await
             .unwrap_or_else(|_| crate::registry::host_detect::Host {
@@ -344,14 +442,12 @@ impl SuperSTTDaemon {
                 rocm: None,
                 vulkan: None,
             });
-        let installed_accel = crate::registry::installed::read(&target.backend_dir)
-            .map(|r| r.selected.accel)
-            .unwrap_or_default();
-        model_available_devices(
-            &host_available_devices(&host),
-            &target.definition.supported_devices,
-            &installed_accel,
-        )
+        InstallContext {
+            host_devices: host_available_devices(&host),
+            installed_accel: crate::registry::installed::read(backend_dir)
+                .map(|r| r.selected.accel)
+                .unwrap_or_default(),
+        }
     }
 
     /// Reload the stage-1 model onto `device`: unload, load, and on failure
@@ -598,6 +694,17 @@ pub(crate) fn model_available_devices(
         .collect();
     offered.dedup();
     offered
+}
+
+/// The devices a backend can be run on here: the union of what its models
+/// are offered, in the `cpu`, `gpu` order every device list uses.
+pub(crate) fn backend_available_devices(
+    per_model: impl IntoIterator<Item = Vec<String>>,
+) -> Vec<String> {
+    let mut devices: Vec<String> = per_model.into_iter().flatten().collect();
+    devices.sort();
+    devices.dedup();
+    devices
 }
 
 /// Collapse a device label onto the `cpu`/`gpu` axis the preference is
@@ -932,6 +1039,28 @@ mod tests {
             model_available_devices(&both(), &[Device::None], &[]),
             Vec::<String>::new()
         );
+    }
+
+    /// A backend's list is the union of its models' lists: a CPU-only model
+    /// beside a GPU-capable one gives both, an online model contributes
+    /// nothing, and the order is always `cpu` then `gpu`.
+    #[test]
+    fn a_backends_devices_are_the_union_of_its_models() {
+        assert_eq!(
+            backend_available_devices([
+                vec!["gpu".to_string()],
+                vec!["cpu".to_string()],
+                Vec::new(),
+                both(),
+            ]),
+            both()
+        );
+        assert_eq!(
+            backend_available_devices([Vec::new(), Vec::new()]),
+            Vec::<String>::new(),
+            "a backend of online models runs on nothing local"
+        );
+        assert_eq!(backend_available_devices([]), Vec::<String>::new());
     }
 
     fn definition(devices: Vec<Device>) -> ModelDefinition {

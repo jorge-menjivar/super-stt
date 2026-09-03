@@ -5,6 +5,11 @@ use super_stt_shared::models::protocol::{Command, DaemonRequest, DaemonResponse}
 
 impl SuperSTTDaemon {
     /// Main command handler - routes commands to appropriate handlers
+    // A flat table with one arm per wire command: its length is the
+    // protocol's, and the exhaustive match is what makes a new command a
+    // compile error rather than a silent gap. Splitting it would only hide
+    // the table.
+    #[allow(clippy::too_many_lines)]
     pub async fn handle_command(&self, request: DaemonRequest) -> DaemonResponse {
         let command = match Command::try_from(request) {
             Ok(cmd) => cmd,
@@ -42,7 +47,11 @@ impl SuperSTTDaemon {
             cmd @ (Command::SetModelDevice { .. }
             | Command::GetModelDevice { .. }
             | Command::SetPostProcessorDevice { .. }
-            | Command::GetPostProcessorDevice { .. }) => self.handle_model_device(cmd).await,
+            | Command::GetPostProcessorDevice { .. }
+            | Command::ListModelDevices { .. }
+            | Command::ListActiveBackendDevices
+            | Command::ListPostProcessorDevices { .. }
+            | Command::ListPostProcessorBackendDevices) => self.handle_model_device(cmd).await,
             Command::GetConfig => self.handle_get_config().await,
             Command::CancelDownload => self.handle_cancel_download(),
             Command::GetDownloadStatus => self.handle_get_download_status(),

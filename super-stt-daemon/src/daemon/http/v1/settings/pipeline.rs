@@ -43,6 +43,10 @@ struct Stage {
     get_model_device: &'static str,
     /// Set it.
     set_model_device: &'static str,
+    /// The devices one of this stage's models can be run on here.
+    list_model_devices: &'static str,
+    /// The devices this stage's backend can be run on here.
+    list_backend_devices: &'static str,
 }
 
 impl Stage {
@@ -58,6 +62,8 @@ impl Stage {
                 reload_model: Some("reload_active_model"),
                 get_model_device: "get_model_device",
                 set_model_device: "set_model_device",
+                list_model_devices: "list_model_devices",
+                list_backend_devices: "list_active_backend_devices",
             }),
             2 => Some(Self {
                 set_backend: "set_post_processor_backend",
@@ -71,6 +77,8 @@ impl Stage {
                 reload_model: None,
                 get_model_device: "get_post_processor_device",
                 set_model_device: "set_post_processor_device",
+                list_model_devices: "list_post_processor_devices",
+                list_backend_devices: "list_post_processor_backend_devices",
             }),
             _ => None,
         }
@@ -275,4 +283,36 @@ pub(crate) async fn set_model_device(
     )
     .await
     .into_response()
+}
+
+/// `GET /pipeline/{stage}/model/{model}/device/list` — the devices this
+/// install can offer `model` on this host.
+pub(crate) async fn list_model_devices(
+    State(s): State<AppState>,
+    Path((stage, model)): Path<(u32, String)>,
+) -> Response {
+    let Some(cmds) = Stage::resolve(stage) else {
+        return unknown_stage(stage);
+    };
+    dispatch_command(
+        &s.daemon,
+        cmds.list_model_devices,
+        Some(serde_json::json!({ "model": model })),
+    )
+    .await
+    .into_response()
+}
+
+/// `GET /pipeline/{stage}/device/list` — the devices the backend selected for
+/// this stage can be run on here.
+pub(crate) async fn list_stage_devices(
+    State(s): State<AppState>,
+    Path(stage): Path<u32>,
+) -> Response {
+    let Some(cmds) = Stage::resolve(stage) else {
+        return unknown_stage(stage);
+    };
+    dispatch_command(&s.daemon, cmds.list_backend_devices, None)
+        .await
+        .into_response()
 }

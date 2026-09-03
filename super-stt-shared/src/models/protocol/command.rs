@@ -61,6 +61,20 @@ pub enum Command {
     GetPostProcessorDevice {
         model: String,
     },
+    /// The devices this install can offer a transcription model on this
+    /// host — the `available_devices` half of `GetModelDevice`, on its own.
+    ListModelDevices {
+        model: String,
+    },
+    /// The devices the selected transcription backend can be run on here:
+    /// the union of `ListModelDevices` over the models it serves for that
+    /// stage.
+    ListActiveBackendDevices,
+    /// The stage-2 twins, against the selected post-processor backend.
+    ListPostProcessorDevices {
+        model: String,
+    },
+    ListPostProcessorBackendDevices,
     GetConfig,
     CancelDownload,
     GetDownloadStatus,

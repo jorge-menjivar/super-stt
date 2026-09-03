@@ -136,8 +136,16 @@ pub(crate) fn routes() -> Router<AppState> {
             post(pipeline::reload_stage_model),
         )
         .route(
+            "/pipeline/{stage}/device/list",
+            get(pipeline::list_stage_devices),
+        )
+        .route(
             "/pipeline/{stage}/model/{model}/device",
             get(pipeline::get_model_device).post(pipeline::set_model_device),
+        )
+        .route(
+            "/pipeline/{stage}/model/{model}/device/list",
+            get(pipeline::list_model_devices),
         )
         .route(
             "/preview_typing",

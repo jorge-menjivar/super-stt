@@ -13,6 +13,8 @@
 //! 7. `GET /pipeline` lists both stages, and an out-of-range stage 404s.
 //! 8. `/pipeline/{stage}/model/{model}/device` reads and records a model's
 //!    device through its stage, per model, with the same validation.
+//! 9. `/pipeline/{stage}/device/list` and `.../model/{model}/device/list`
+//!    say what a stage's backend, and one of its models, can be run on here.
 //!
 //! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
 //! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
@@ -839,4 +841,64 @@ async fn the_device_verb_validates_the_model_and_the_device() {
     let (status, body) = get(&sock, "/pipeline/3/model/whisper-local/device", &token).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
     assert_eq!(body["error_code"], "unknown_stage");
+}
+
+/// The two device lists: a model's is what this install offers it, a stage's
+/// is the union over the models that stage can run from its backend. The
+/// fixture backend serves an online transcription model (offering nothing),
+/// a local one declaring both devices, and a CPU-only post-processor.
+#[tokio::test]
+async fn device_lists_for_a_model_and_for_a_stage() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    // Nothing selected: nothing to list against, and the stage itself still
+    // has to exist.
+    let (status, body) = get(&sock, "/pipeline/1/device/list", &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_backend");
+    let (status, body) = get(&sock, "/pipeline/3/device/list", &token).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
+    assert_eq!(body["error_code"], "unknown_stage");
+
+    for stage in ["/pipeline/1", PP_STAGE] {
+        let (status, _) = post_req(
+            &sock,
+            stage,
+            &token,
+            serde_json::json!({ "source": FIXTURE_SOURCE }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let offered = body["available_devices"].as_array().expect("a list");
+    assert_eq!(offered.first(), Some(&serde_json::json!("cpu")));
+    let (status, body) = get(&sock, "/pipeline/1/model/whisper-1/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["available_devices"], serde_json::json!([]));
+    let (status, body) = get(&sock, "/pipeline/1/model/cleanup-1/device/list", &token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+    assert_eq!(body["error_code"], "invalid_model");
+
+    // The stage-1 list is the union: the online model adds nothing, the local
+    // one brings the CPU and, where the host has one, the GPU.
+    let (status, body) = get(&sock, "/pipeline/1/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let stage_devices = body["available_devices"].as_array().expect("a list");
+    assert_eq!(stage_devices.first(), Some(&serde_json::json!("cpu")));
+    assert_eq!(
+        stage_devices, offered,
+        "with one local model, the stage's list is that model's"
+    );
+
+    // Stage 2's backend is the same install, but only its post-processor
+    // counts there, and that one is CPU-only.
+    let (status, body) = get(&sock, "/pipeline/2/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["available_devices"], serde_json::json!(["cpu"]));
+    let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/device/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["available_devices"], serde_json::json!(["cpu"]));
 }
