@@ -346,7 +346,7 @@ pub enum PostProcessorMessage {
     /// the write's arguments took effect verbatim.
     ReloadRequested,
     /// The daemon's current state, from the initial load or after a change.
-    Loaded(crate::daemon::client::PostProcessorState),
+    Loaded(crate::daemon::client::StageState),
     /// A get/set failed; the message is shown inline.
     Error(String),
 }

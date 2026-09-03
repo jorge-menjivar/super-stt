@@ -4,11 +4,12 @@
 //! result-to-`Message` mapping isn't re-rolled at each call site.
 
 use crate::daemon::client::{
-    get_current_audio_theme, get_custom_models_dir, get_notification_method, get_post_processor,
-    get_preview_typing, get_recording_stop_mode, get_update_check_enabled, get_update_status,
-    get_volume, get_write_method, list_backends, ping_daemon,
+    get_current_audio_theme, get_custom_models_dir, get_notification_method, get_preview_typing,
+    get_recording_stop_mode, get_stage, get_update_check_enabled, get_update_status, get_volume,
+    get_write_method, list_backends, ping_daemon,
 };
 use crate::state::AudioTheme;
+use crate::state::device_offers::PP_STAGE;
 use crate::ui::messages::{
     BackendMessage, DaemonMessage, Message, ModelsPageMessage, NotificationMethodMessage,
     PostProcessorMessage, PreviewTypingMessage, RecordingStopModeMessage, UpdateMessage,
@@ -184,14 +185,14 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
 /// section at its default (off, nothing selected) rather than failing the whole
 /// settings load, like every other getter in the batch.
 pub(in crate::core::app) fn load_post_processor() -> Task<cosmic::Action<Message>> {
-    Task::perform(get_post_processor(), |result| match result {
+    Task::perform(get_stage(PP_STAGE), |result| match result {
         Ok(state) => {
             cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(state)))
         }
         Err(e) => {
             log::warn!("Failed to load the post-processor setting: {e}");
             cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(
-                crate::daemon::client::PostProcessorState::default(),
+                crate::daemon::client::StageState::default(),
             )))
         }
     })

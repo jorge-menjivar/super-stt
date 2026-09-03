@@ -121,7 +121,7 @@ pub struct AppModel {
     /// daemon's `/post_processor` block; the daemon stays authoritative, so
     /// this is replaced wholesale by every `Loaded` message rather than being
     /// edited field-by-field.
-    pub post_processor: crate::daemon::client::PostProcessorState,
+    pub post_processor: crate::daemon::client::StageState,
     /// The post-processor the user picked but has not enabled yet, as
     /// `(model, source)`. Mirrors `models_page.staged_model`: a dropdown pick
     /// is local until the Enable button commits it. `None` means "use whatever

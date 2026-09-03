@@ -129,7 +129,7 @@ impl AppModel {
             preview_typing_enabled: false,
             // Replaced by the daemon's own state as soon as the settings load
             // completes; the default is the daemon's default too (off).
-            post_processor: crate::daemon::client::PostProcessorState::default(),
+            post_processor: crate::daemon::client::StageState::default(),
             staged_post_processor: None,
             staged_post_processor_device: None,
             device_offers: crate::state::device_offers::DeviceOffers::default(),

@@ -5,8 +5,8 @@ mod registry;
 
 use crate::core::app::AppModel;
 use crate::daemon::client::{
-    clear_active_backend, get_gpu_info, get_model_device, list_model_devices, list_stage_devices,
-    set_active_backend, set_model, set_model_device, unload_active_model,
+    clear_stage_backend, get_gpu_info, get_model_device, list_model_devices, list_stage_devices,
+    set_model_device, set_stage_backend, set_stage_model, unload_stage_model,
 };
 use crate::state::device_offers::{STT_STAGE, staged_device};
 use crate::state::{ContextPage, DaemonStatus, ModelsTab};
@@ -174,8 +174,8 @@ impl AppModel {
                 self.models_page.staged_model = None;
                 self.models_page.staged_device = None;
                 self.model_operations.set_ready(STT_STAGE);
-                Task::perform(unload_active_model(), |result| match result {
-                    Ok(_) => cosmic::Action::None,
+                Task::perform(unload_stage_model(STT_STAGE), |result| match result {
+                    Ok(()) => cosmic::Action::None,
                     Err(e) => {
                         cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string())))
                     }
@@ -243,7 +243,7 @@ impl AppModel {
                     if let Some(dev) = device_to_set {
                         set_model_device(STT_STAGE, model.clone(), dev).await?;
                     }
-                    set_model(model, source).await.map(|_| ())
+                    set_stage_model(STT_STAGE, model, Some(source)).await
                 },
                 move |result| match result {
                     Ok(()) => cosmic::Action::App(Message::Model(ModelMessage::ModelChanged {
@@ -337,19 +337,22 @@ impl AppModel {
                 // dismiss it now that a choice was made.
                 self.core.window.show_context = false;
                 let selected = source.clone();
-                Task::perform(set_active_backend(source), move |result| match result {
-                    // Re-announce the selection the daemon just took, which is
-                    // what asks it for the backend's devices.
-                    Ok(()) => cosmic::Action::App(Message::ModelsPage(
-                        ModelsPageMessage::ActiveBackendLoaded(Some(selected.clone())),
-                    )),
-                    Err(e) => cosmic::Action::App(Message::ModelsPage(
-                        ModelsPageMessage::BackendSelectFailed {
-                            prev_active: prev_active.clone(),
-                            message: e.to_string(),
-                        },
-                    )),
-                })
+                Task::perform(
+                    set_stage_backend(STT_STAGE, source),
+                    move |result| match result {
+                        // Re-announce the selection the daemon just took, which is
+                        // what asks it for the backend's devices.
+                        Ok(()) => cosmic::Action::App(Message::ModelsPage(
+                            ModelsPageMessage::ActiveBackendLoaded(Some(selected.clone())),
+                        )),
+                        Err(e) => cosmic::Action::App(Message::ModelsPage(
+                            ModelsPageMessage::BackendSelectFailed {
+                                prev_active: prev_active.clone(),
+                                message: e.to_string(),
+                            },
+                        )),
+                    },
+                )
             }
 
             ModelsPageMessage::BackendSelectFailed {
@@ -380,7 +383,7 @@ impl AppModel {
                 self.models_page.configure_backend = None;
                 // Close the configuration sheet if it was open for this backend.
                 self.core.window.show_context = false;
-                Task::perform(clear_active_backend(), |_| cosmic::Action::None)
+                Task::perform(clear_stage_backend(STT_STAGE), |_| cosmic::Action::None)
             }
 
             ModelsPageMessage::ToggleInstalledMenu(source) => {

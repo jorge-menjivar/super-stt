@@ -2,10 +2,9 @@
 
 use crate::core::app::AppModel;
 use crate::daemon::client::{
-    clear_post_processor, clear_post_processor_backend, get_model_device, list_model_devices,
-    list_stage_devices, set_model_device, set_notification_method, set_post_processor,
-    set_post_processor_backend, set_preview_typing, set_recording_stop_mode, set_write_method,
-    test_write_method,
+    clear_stage_backend, get_model_device, list_model_devices, list_stage_devices,
+    set_model_device, set_notification_method, set_preview_typing, set_recording_stop_mode,
+    set_stage_backend, set_stage_model, set_write_method, test_write_method, unload_stage_model,
 };
 use crate::state::device_offers::{PP_STAGE, staged_device};
 use crate::ui::messages::{
@@ -78,7 +77,7 @@ impl AppModel {
                 // has been made, exactly as `SelectBackend` does.
                 self.core.window.show_context = false;
                 Task::perform(
-                    set_post_processor_backend(source),
+                    set_stage_backend(PP_STAGE, source),
                     Self::reload_post_processor,
                 )
             }
@@ -86,7 +85,7 @@ impl AppModel {
             PostProcessorMessage::Deselect => {
                 self.staged_post_processor = None;
                 self.staged_post_processor_device = None;
-                Task::perform(clear_post_processor_backend(), Self::reload_post_processor)
+                Task::perform(clear_stage_backend(PP_STAGE), Self::reload_post_processor)
             }
 
             // Local only, exactly like staging a transcription model: picking
@@ -137,11 +136,11 @@ impl AppModel {
             // `DELETE /post_processor` means, so the call carries no state to
             // echo back and cannot accidentally clear the backend.
             PostProcessorMessage::Disable => {
-                Task::perform(clear_post_processor(), Self::reload_post_processor)
+                Task::perform(unload_stage_model(PP_STAGE), Self::reload_post_processor)
             }
 
             PostProcessorMessage::ReloadRequested => Task::perform(
-                crate::daemon::client::get_post_processor(),
+                crate::daemon::client::get_stage(PP_STAGE),
                 Self::reloaded_post_processor,
             ),
 
@@ -364,7 +363,7 @@ impl AppModel {
                 if let Some(device) = device {
                     set_model_device(PP_STAGE, model.clone(), device).await?;
                 }
-                set_post_processor(model, Some(source)).await
+                set_stage_model(PP_STAGE, model, Some(source)).await
             },
             Self::reload_post_processor,
         )
@@ -390,7 +389,7 @@ impl AppModel {
     /// Map a `GET /post_processor` result into its message.
     fn reloaded_post_processor(
         result: super_stt_shared::daemon::http_client::HttpResult<
-            crate::daemon::client::PostProcessorState,
+            crate::daemon::client::StageState,
         >,
     ) -> cosmic::Action<Message> {
         match result {

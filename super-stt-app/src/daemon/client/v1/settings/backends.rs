@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/backends`, `/active_backend`, `/gpu_info` — backend catalog and selection.
+//! `/backends`, `/models`, `/gpu_info` — the backend and model catalog.
+//!
+//! Filling a *stage* with one of these backends is `settings::stage`'s job.
 
 use crate::daemon::backends::BackendInfo;
 use crate::daemon::client::internal::response::{require_success, require_unit};
 use crate::daemon::client::internal::session::with_settings_token;
 use super_stt_shared::daemon::http_client::transport;
 
-/// Transcription is stage 1 of the pipeline.
-const STT_STAGE: &str = "/pipeline/1";
 use super_stt_shared::daemon::http_client::{HttpError, HttpResult};
 
 /// List installed backends with the models, secrets, and options they
@@ -68,49 +68,17 @@ pub async fn clear_backend_option(source: String, name: String) -> HttpResult<()
     .await
 }
 
-/// Get the backend filling stage 1 (HTTP `GET /pipeline/1`). `None` when the
-/// stage is empty (no backend selected).
-pub async fn get_active_backend() -> HttpResult<Option<String>> {
+/// List all available models from daemon (HTTP `GET /models`).
+///
+/// The flat catalog, with no stage in it: which models a *stage* can run is
+/// decided by role, through `roles::models_for`.
+pub async fn list_available_models() -> HttpResult<Vec<(String, String)>> {
     with_settings_token(|socket, token| async move {
         let resp = require_success(
-            transport::settings_get(socket, &token, STT_STAGE).await?,
-            "get_pipeline_stage",
+            transport::settings_get(socket, &token, "/models").await?,
+            "list_models",
         )?;
-        Ok(resp
-            .stage
-            .as_ref()
-            .and_then(|v| v.get("source"))
-            .and_then(serde_json::Value::as_str)
-            .map(String::from))
-    })
-    .await
-}
-
-/// Select the backend filling stage 1 (HTTP `POST /pipeline/1`). Records which
-/// backend transcribes and unloads a foreign model — does NOT load one. Pair
-/// with `set_model` to also load a model.
-pub async fn set_active_backend(source: String) -> HttpResult<()> {
-    with_settings_token(move |socket, token| {
-        let source = source.clone();
-        async move {
-            let resp = transport::settings_post(
-                socket,
-                &token,
-                STT_STAGE,
-                &serde_json::json!({ "source": source }),
-            )
-            .await?;
-            require_unit(resp, "set_stage_backend")
-        }
-    })
-    .await
-}
-
-/// Empty stage 1 (HTTP `DELETE /pipeline/1`) → daemon idle.
-pub async fn clear_active_backend() -> HttpResult<()> {
-    with_settings_token(|socket, token| async move {
-        let resp = transport::settings_delete(socket, &token, STT_STAGE).await?;
-        require_unit(resp, "clear_stage_backend")
+        Ok(resp.available_models.unwrap_or_default())
     })
     .await
 }

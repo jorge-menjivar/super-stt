@@ -106,7 +106,7 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
     // Enabled but not running: transcripts are passing through untouched, and
     // nothing else on the card would say so. `enabled` and `loaded` are
     // separate fields for exactly this case.
-    if app.post_processor.enabled && !app.post_processor.loaded {
+    if app.post_processor.is_enabled() && !app.post_processor.loaded {
         card = card.push(notice(
             "The selected model isn't loaded — transcripts are used as they are.",
         ));
@@ -120,7 +120,7 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
 
     card_surface(
         card,
-        app.post_processor.enabled && app.post_processor.loaded,
+        app.post_processor.is_enabled() && app.post_processor.loaded,
     )
 }
 
@@ -221,7 +221,7 @@ pub(super) fn shown_model(
 fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
-    if app.post_processor.enabled {
+    if app.post_processor.is_enabled() {
         let model = app
             .post_processor
             .model
