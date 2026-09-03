@@ -184,6 +184,7 @@ impl AppModel {
                 self.notification_method,
                 &self.recording_status,
                 &self.transcription_text,
+                &self.preview_text,
                 self.audio_level,
                 self.is_speech_detected,
                 self.action_error_for(crate::state::ErrorScope::Recording),

@@ -50,7 +50,14 @@ impl WsServerGuest for Component {
     /// `start`), emit a `preview` then a `done` frame, and close. Never opens an
     /// upstream WebSocket, so no egress occurs.
     fn handle(_headers: Vec<(String, Vec<u8>)>, consumer: ConsumerStream) -> Result<(), WsError> {
-        // Block for the consumer's start frame (the daemon's host recv awaits it).
+        // Wait for readiness through `wasi:io/poll` before reading, which is
+        // how a real full-duplex guest waits on its consumer and its upstream at
+        // once. Exercises the host's `subscribe` + `Pollable`: while those were
+        // stubbed this trapped, taking the session down with it.
+        let readable = consumer.subscribe();
+        let ready = wasi::io::poll::poll(&[&readable]);
+        assert_eq!(ready.as_slice(), &[0], "the consumer must be the ready one");
+        // Readiness must not consume: the frame `poll` saw is still here.
         match consumer.recv() {
             Ok(WsFrame::Text(_) | WsFrame::Binary(_)) => {}
             Ok(WsFrame::Close(_)) | Err(_) => return Ok(()),

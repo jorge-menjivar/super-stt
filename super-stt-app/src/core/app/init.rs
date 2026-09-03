@@ -101,6 +101,7 @@ impl AppModel {
             ),
             recording_status: RecordingStatus::Idle,
             transcription_text: String::new(),
+            preview_text: String::new(),
             audio_level: 0.0,
             is_speech_detected: false,
             audio_themes: Vec::new(),

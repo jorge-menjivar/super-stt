@@ -74,6 +74,11 @@ pub struct AppModel {
     pub recording_status: RecordingStatus,
     /// Latest transcription text
     pub transcription_text: String,
+    /// Latest incremental preview, shown on its own line above the final text.
+    /// Previews and finals used to share `transcription_text`, so a preview was
+    /// indistinguishable from a result; keeping them apart is what makes a
+    /// realtime model's incremental output visible as such.
+    pub preview_text: String,
     /// Current audio level (0.0 to 1.0)
     pub audio_level: f32,
     /// Whether speech is currently detected

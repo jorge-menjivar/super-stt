@@ -102,6 +102,7 @@ impl AppModel {
             self.device_state = DeviceState::Ready;
             self.model_operation_state = ModelOperationState::Ready;
             self.transcription_text.clear();
+            self.preview_text.clear();
         }
 
         // The /events subscription is self-healing

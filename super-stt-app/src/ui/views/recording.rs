@@ -83,10 +83,28 @@ fn notifications_section(notification_method: NotificationMethod) -> Element<'st
         .into()
 }
 
-/// Test recording section: record button, audio level, transcription output
+/// How much of the live preview to keep on screen. Sized to fill the row
+/// without wrapping at the default window width.
+const LIVE_LINE_CHARS: usize = 90;
+
+/// The last `max_chars` characters of `text`, prefixed with an ellipsis when
+/// something was dropped. Counts chars, not bytes — a multibyte transcript must
+/// not be sliced mid-character.
+fn live_tail(text: &str, max_chars: usize) -> String {
+    let total = text.chars().count();
+    if total <= max_chars {
+        return text.to_string();
+    }
+    let tail: String = text.chars().skip(total - max_chars).collect();
+    format!("\u{2026}{tail}")
+}
+
+/// Test recording section: record button, audio level, live preview line,
+/// transcription output
 fn test_section<'a>(
     recording_status: &'a RecordingStatus,
     transcription_text: &'a str,
+    preview_text: &'a str,
     audio_level: f32,
     is_speech_detected: bool,
 ) -> Element<'a, Message> {
@@ -116,6 +134,24 @@ fn test_section<'a>(
     .align_y(Alignment::Center)
     .spacing(10);
 
+    // One line that keeps changing: the newest incremental text, held to a
+    // single row so the section doesn't reflow on every update. Previews grow
+    // word by word, so the tail is the part worth showing.
+    let live_widget = {
+        let content = if preview_text.is_empty() {
+            "\u{2014}".to_string()
+        } else {
+            live_tail(preview_text, LIVE_LINE_CHARS)
+        };
+        widget::container(
+            text::body(content)
+                .wrapping(cosmic::iced::widget::text::Wrapping::None)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .clip(true)
+    };
+
     let transcription_widget = {
         let content = if transcription_text.is_empty() {
             "Transcriptions will appear here after test recordings...".to_string()
@@ -136,6 +172,7 @@ fn test_section<'a>(
         .title("Test")
         .add(settings::item("Status", text::body(recording_text)))
         .add(settings::flex_item("Audio Level", audio_widget))
+        .add(settings::flex_item("Live", live_widget))
         .add(settings::flex_item("", transcription_widget))
         .into()
 }
@@ -149,6 +186,7 @@ pub fn page<'a>(
     notification_method: NotificationMethod,
     recording_status: &'a RecordingStatus,
     transcription_text: &'a str,
+    preview_text: &'a str,
     audio_level: f32,
     is_speech_detected: bool,
     action_error: Option<&'a str>,
@@ -165,6 +203,7 @@ pub fn page<'a>(
     blocks.push(test_section(
         recording_status,
         transcription_text,
+        preview_text,
         audio_level,
         is_speech_detected,
     ));
