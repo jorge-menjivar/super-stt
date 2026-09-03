@@ -218,8 +218,17 @@ pub async fn start_http_server(
                 tokio::spawn(async move {
                     let io = hyper_util::rt::TokioIo::new(stream);
                     let svc = hyper_util::service::TowerToHyperService::new(app_for_conn);
+                    // `.with_upgrades()` is what makes an HTTP/1.1 protocol
+                    // upgrade actually happen. Without it hyper writes the
+                    // `101 Switching Protocols` response and then drops the
+                    // connection instead of handing the IO to
+                    // `hyper::upgrade::on`, so `GET /v1/transcribe/realtime`
+                    // completed its handshake and died before the first
+                    // WebSocket frame — the guest's opening `recv` saw a closed
+                    // consumer stream and returned without a word.
                     if let Err(e) = hyper::server::conn::http1::Builder::new()
                         .serve_connection(io, svc)
+                        .with_upgrades()
                         .await
                     {
                         log::debug!("http connection finished: {e}");

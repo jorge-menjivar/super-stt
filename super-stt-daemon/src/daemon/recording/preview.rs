@@ -280,57 +280,77 @@ impl SuperSTTDaemon {
         if let Ok(text) = self
             .transcribe_audio_chunk(&resampled_audio, request_language)
             .await
-            && !text.trim().is_empty()
         {
-            let processed = crate::output::preview::preprocess_text(&text, true);
-
-            info!(
-                "Preview: '{}'",
-                processed.chars().take(30).collect::<String>()
-            );
-
-            // Live preview to widgets holding `global_transcriptions`.
-            self.events.publish_partial_stt(processed.clone(), 1.0);
-
-            // Stream to the waiting client (the id is only used to gate slot
-            // claim/clear in the HTTP handler).
-            if let Some((_, ref tx)) = *self.preview_text.read().await {
-                let _ = tx.send(processed);
-            }
-
-            // Type on screen if in write mode. The typing is now async, and the
-            // `actually_typed` guard is a `!Send` `std::Mutex` guard that cannot
-            // be held across an `.await`. Take the mirror string out in a scope
-            // that drops the guard before typing, then write it back — safe
-            // because `update_preview` and `clear_preview` both run under
-            // `&mut Typer` and never overlap (audit Tier 3 #35). Skip on a
-            // poisoned lock, as before.
-            // Type on screen only when write-mode AND preview-typing are both
-            // active. The loop may be running purely to stream preview frames to
-            // a client (`stream_realtime`) with preview-typing off, in which case
-            // it must not type.
-            let type_on_screen = write_mode
-                && self
-                    .preview_typing_enabled
-                    .load(std::sync::atomic::Ordering::Relaxed);
-            let taken = if type_on_screen {
-                session
-                    .actually_typed
-                    .lock()
-                    .ok()
-                    .map(|mut g| std::mem::take(&mut *g))
-            } else {
-                None
-            };
-            if let Some(mut actually_typed) = taken {
-                typer.update_preview(&text, &mut actually_typed).await;
-                if let Ok(mut g) = session.actually_typed.lock() {
-                    *g = actually_typed;
-                }
-            }
+            self.emit_preview(&text, session, typer, write_mode).await;
         }
 
         false // Normal completion — do not skip the timeout check
+    }
+
+    /// Publish one preview transcript everywhere a preview goes: `/events`
+    /// subscribers holding `global_transcriptions`, the waiting `/transcribe`
+    /// SSE client, and — when write-mode and preview-typing are both on — the
+    /// focused window.
+    ///
+    /// Shared by both producers of incremental text: the sliding-window loop
+    /// that simulates streaming for batch models, and the live session a
+    /// realtime model streams through. Empty text is not a preview.
+    pub(super) async fn emit_preview(
+        &self,
+        text: &str,
+        session: &RecordingSession,
+        typer: &mut Typer,
+        write_mode: bool,
+    ) {
+        if text.trim().is_empty() {
+            return;
+        }
+        let processed = crate::output::preview::preprocess_text(text, true);
+
+        info!(
+            "Preview: '{}'",
+            processed.chars().take(30).collect::<String>()
+        );
+
+        // Live preview to widgets holding `global_transcriptions`.
+        self.events.publish_partial_stt(processed.clone(), 1.0);
+
+        // Stream to the waiting client (the id is only used to gate slot
+        // claim/clear in the HTTP handler).
+        if let Some((_, ref tx)) = *self.preview_text.read().await {
+            let _ = tx.send(processed);
+        }
+
+        // Type on screen if in write mode. The typing is now async, and the
+        // `actually_typed` guard is a `!Send` `std::Mutex` guard that cannot
+        // be held across an `.await`. Take the mirror string out in a scope
+        // that drops the guard before typing, then write it back — safe
+        // because `update_preview` and `clear_preview` both run under
+        // `&mut Typer` and never overlap (audit Tier 3 #35). Skip on a
+        // poisoned lock, as before.
+        // Type on screen only when write-mode AND preview-typing are both
+        // active. The loop may be running purely to stream preview frames to
+        // a client (`stream_realtime`) with preview-typing off, in which case
+        // it must not type.
+        let type_on_screen = write_mode
+            && self
+                .preview_typing_enabled
+                .load(std::sync::atomic::Ordering::Relaxed);
+        let taken = if type_on_screen {
+            session
+                .actually_typed
+                .lock()
+                .ok()
+                .map(|mut g| std::mem::take(&mut *g))
+        } else {
+            None
+        };
+        if let Some(mut actually_typed) = taken {
+            typer.update_preview(text, &mut actually_typed).await;
+            if let Ok(mut g) = session.actually_typed.lock() {
+                *g = actually_typed;
+            }
+        }
     }
 
     /// Erase preview text typed during Phase 2. Split out of

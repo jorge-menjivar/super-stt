@@ -172,13 +172,16 @@ Language bindings:
 | Python | `componentize-py -d wit/realtime.wit -w realtime-backend` |
 | Go (TinyGo) | `wit-bindgen-go generate` |
 
-### Known limitation: `subscribe` not implemented
+### Readiness: `subscribe`
 
 The `subscribe` method on both `ws-stream` and `consumer-stream` returns a
-`wasi:io/poll` pollable, but the host-side implementation is not yet
-complete. A guest must poll `recv` sequentially rather than multiplexing
-via `wasi:io/poll`. Do not rely on `subscribe` to detect readability without
-also calling `recv`.
+`wasi:io/poll` pollable. Passing both to `wasi:io/poll`'s `poll` is how a
+guest waits on its consumer and its upstream at once — full duplex, so a
+transcript reaches the consumer while audio is still going up.
+
+Readiness is backed by a one-frame lookahead and is **non-destructive**: the
+frame that made a pollable ready is still returned by the next `recv` on that
+resource. A guest must still call `recv` to take it.
 
 ## Implementation checklist
 
@@ -199,4 +202,5 @@ also calling `recv`.
 - For a realtime backend: declare `[capabilities] websocket = true` and
   `realtime = true` on each realtime model; implement the `realtime-backend`
   world (import `super-stt:realtime/ws`, export `super-stt:realtime/ws-server`);
-  poll `recv` sequentially rather than relying on `subscribe`.
+  and multiplex the consumer and the upstream with `subscribe` +
+  `wasi:io/poll` rather than reading them in sequence.

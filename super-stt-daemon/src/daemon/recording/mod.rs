@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 mod preview;
+#[cfg(feature = "wasm-backends")]
+mod realtime;
 mod transcribe;
 
 use crate::daemon::types::SuperSTTDaemon;
@@ -164,9 +166,22 @@ impl SuperSTTDaemon {
         // Capture is starting — announce it now that the recorder exists.
         self.emit_recording_started(write_mode).await;
 
-        // Phase 2: stream preview transcriptions while capturing.
-        self.run_preview_loop(&session, typer, write_mode, request_language)
+        // Phase 2: stream incremental transcripts while capturing.
+        //
+        // A realtime model streams through one live session for the whole take,
+        // which also produces the final transcript — so Phase 4 is skipped when
+        // it succeeds. Every other model has no incremental output, so previews
+        // are simulated by re-transcribing a sliding window.
+        #[cfg(feature = "wasm-backends")]
+        let streamed = self
+            .run_realtime_stream_loop(&session, typer, write_mode, request_language)
             .await;
+        #[cfg(not(feature = "wasm-backends"))]
+        let streamed: Option<String> = None;
+        if streamed.is_none() {
+            self.run_preview_loop(&session, typer, write_mode, request_language)
+                .await;
+        }
 
         // Cloned out before `collect_and_clear_preview` consumes the session.
         let speech_state = Arc::clone(&session.speech_state);
@@ -217,8 +232,19 @@ impl SuperSTTDaemon {
             return Ok(Ok(String::new()));
         }
 
-        // Phase 4: final transcription.
+        // Phase 4: final transcription. A realtime session already produced it
+        // while capturing; the event pair is still emitted so the events
+        // contract sees a `transcribing_started` for every
+        // `transcribing_stopped` `finalize_recording_session` sends.
         self.emit_transcribing_started();
+        if let Some(text) = streamed {
+            if write_mode {
+                info!("Writing transcription via {}", typer.write_method_name());
+                typer.process_final_text(&text).await;
+            }
+            self.finalize_recording_session(&text, true, None).await;
+            return Ok(Ok(text));
+        }
         let transcription_result = match self
             .transcribe_final(&full_audio_data, request_language)
             .await

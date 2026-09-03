@@ -104,6 +104,7 @@ impl AppModel {
             // session that is gone.
             self.model_operations.reset();
             self.transcription_text.clear();
+            self.preview_text.clear();
         }
 
         // The /events subscription is self-healing

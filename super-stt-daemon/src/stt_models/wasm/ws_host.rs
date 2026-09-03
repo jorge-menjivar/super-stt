@@ -58,12 +58,76 @@ pub use self::super_stt::realtime::ws::{CloseFrame, WsError, WsFrame};
 /// [`WsError::Closed`].
 pub struct WsStreamResource {
     stream: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    /// One-frame lookahead. `wasi:io/poll` asks "is this readable?" without
+    /// taking anything, but a `WebSocketStream` only answers by consuming, so
+    /// [`Pollable::ready`] reads one frame and parks it here for the `recv`
+    /// that follows. Readiness therefore stays non-destructive from the guest's
+    /// side: every frame `ready` observes is still delivered by `recv`.
+    pending: Option<std::result::Result<WsFrame, WsError>>,
 }
 
 impl WsStreamResource {
     fn new(stream: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
         Self {
             stream: Some(stream),
+            pending: None,
+        }
+    }
+
+    /// The next frame the protocol exposes, skipping tungstenite's ping/pong.
+    ///
+    /// Cancel-safe, which `poll` requires: it races several `ready` futures and
+    /// drops the losers. Dropping this future at its only await point cannot
+    /// lose a frame — `StreamExt::next` leaves partially-read bytes in
+    /// tungstenite's own buffer, and a frame that *has* been decoded is stored
+    /// by the caller with no await in between.
+    async fn next_frame(&mut self) -> std::result::Result<WsFrame, WsError> {
+        let Some(stream) = self.stream.as_mut() else {
+            return Err(WsError::Closed);
+        };
+        loop {
+            match stream.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    return Ok(WsFrame::Text(text.as_str().to_string()));
+                }
+                Some(Ok(Message::Binary(data))) => return Ok(WsFrame::Binary(data.into())),
+                Some(Ok(Message::Close(frame))) => {
+                    // Emit the close once, then mark the stream closed so the
+                    // next recv returns `WsError::Closed`.
+                    self.stream = None;
+                    let close = frame.map_or(
+                        CloseFrame {
+                            code: 1005,
+                            reason: String::new(),
+                        },
+                        |f| CloseFrame {
+                            code: f.code.into(),
+                            reason: f.reason.as_str().to_string(),
+                        },
+                    );
+                    return Ok(WsFrame::Close(close));
+                }
+                // Ping/pong are handled by tungstenite's auto-pong; skip them
+                // and read the next data frame.
+                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => {}
+                Some(Err(e)) => {
+                    self.stream = None;
+                    return Err(WsError::RecvFailed(format!("recv failed: {e}")));
+                }
+                None => {
+                    self.stream = None;
+                    return Err(WsError::Closed);
+                }
+            }
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl wasmtime_wasi::p2::Pollable for WsStreamResource {
+    async fn ready(&mut self) {
+        if self.pending.is_none() {
+            self.pending = Some(self.next_frame().await);
         }
     }
 }
@@ -92,13 +156,50 @@ pub struct ConsumerStreamTransport {
 /// with [`WsError::Closed`].
 pub struct ConsumerStreamResource {
     transport: Option<ConsumerStreamTransport>,
+    /// One-frame lookahead, for the same reason as
+    /// [`WsStreamResource::pending`]: readiness must not consume.
+    pending: Option<std::result::Result<WsFrame, WsError>>,
+}
+
+impl ConsumerStreamResource {
+    /// The next frame from the consumer, or [`WsError::Closed`] once the axum
+    /// side has hung up.
+    ///
+    /// Cancel-safe: `tokio::sync::mpsc::Receiver::recv` is documented not to
+    /// lose a message when its future is dropped, which is what lets `poll`
+    /// race this against the upstream's readiness.
+    async fn next_frame(&mut self) -> std::result::Result<WsFrame, WsError> {
+        let Some(transport) = self.transport.as_mut() else {
+            return Err(WsError::Closed);
+        };
+        if let Some(frame) = transport.incoming.recv().await {
+            Ok(frame)
+        } else {
+            // The consumer (axum) hung up: mark the session closed so the next
+            // recv also returns `WsError::Closed`.
+            self.transport = None;
+            Err(WsError::Closed)
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl wasmtime_wasi::p2::Pollable for ConsumerStreamResource {
+    async fn ready(&mut self) {
+        if self.pending.is_none() {
+            self.pending = Some(self.next_frame().await);
+        }
+    }
 }
 
 impl ConsumerStreamResource {
     /// Wrap a live transport for handoff to the guest.
     #[must_use]
     pub fn new(t: ConsumerStreamTransport) -> Self {
-        Self { transport: Some(t) }
+        Self {
+            transport: Some(t),
+            pending: None,
+        }
     }
 }
 
@@ -236,57 +337,23 @@ impl self::super_stt::realtime::ws::HostWsStream for Host {
         self_: Resource<WsStreamResource>,
     ) -> Result<Result<WsFrame, WsError>> {
         let res = self.table.get_mut(&self_)?;
-        let Some(stream) = res.stream.as_mut() else {
-            return Ok(Err(WsError::Closed));
-        };
-        loop {
-            match stream.next().await {
-                Some(Ok(Message::Text(text))) => {
-                    return Ok(Ok(WsFrame::Text(text.as_str().to_string())));
-                }
-                Some(Ok(Message::Binary(data))) => {
-                    return Ok(Ok(WsFrame::Binary(data.into())));
-                }
-                Some(Ok(Message::Close(frame))) => {
-                    // Emit the close once, then mark the stream closed so the
-                    // next recv returns `WsError::Closed`.
-                    res.stream = None;
-                    let close = frame.map_or(
-                        CloseFrame {
-                            code: 1005,
-                            reason: String::new(),
-                        },
-                        |f| CloseFrame {
-                            code: f.code.into(),
-                            reason: f.reason.as_str().to_string(),
-                        },
-                    );
-                    return Ok(Ok(WsFrame::Close(close)));
-                }
-                // Ping/pong are handled by tungstenite's auto-pong; skip them
-                // and read the next data frame.
-                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => {}
-                Some(Err(e)) => {
-                    res.stream = None;
-                    return Ok(Err(WsError::RecvFailed(format!("recv failed: {e}"))));
-                }
-                None => {
-                    res.stream = None;
-                    return Ok(Err(WsError::Closed));
-                }
-            }
+        // A frame `subscribe`/`ready` already pulled off the socket is handed
+        // over before touching the stream again.
+        if let Some(frame) = res.pending.take() {
+            return Ok(frame);
         }
+        Ok(res.next_frame().await)
     }
 
     async fn subscribe(
         &mut self,
-        _self_: Resource<WsStreamResource>,
+        self_: Resource<WsStreamResource>,
     ) -> Result<Resource<wasmtime_wasi::p2::bindings::io::poll::Pollable>> {
-        // Wiring a real wasi:io/poll Pollable into the tungstenite stream is
-        // non-trivial (it needs a host-side waker the poll loop can await).
-        // The first realtime backend polls `recv` sequentially instead, so
-        // this stays unimplemented for now.
-        wasmtime::bail!("ws-stream::subscribe is not yet implemented")
+        // Readiness is backed by the one-frame lookahead: the pollable resolves
+        // when a frame has been pulled off the socket, and `recv` then hands
+        // that same frame over. Lets a guest wait on its consumer and its
+        // upstream at once instead of running half-duplex.
+        wasmtime_wasi::p2::subscribe(&mut self.table, self_)
     }
 
     async fn close(&mut self, self_: Resource<WsStreamResource>) -> Result<Result<(), WsError>> {
@@ -341,27 +408,20 @@ impl self::super_stt::realtime::ws::HostConsumerStream for Host {
         self_: Resource<ConsumerStreamResource>,
     ) -> Result<Result<WsFrame, WsError>> {
         let res = self.table.get_mut(&self_)?;
-        let Some(transport) = res.transport.as_mut() else {
-            return Ok(Err(WsError::Closed));
-        };
-        if let Some(frame) = transport.incoming.recv().await {
-            Ok(Ok(frame))
-        } else {
-            // The consumer (axum) hung up: mark the session closed so the next
-            // recv also returns `WsError::Closed`.
-            res.transport = None;
-            Ok(Err(WsError::Closed))
+        // A frame `subscribe`/`ready` already took off the channel is handed
+        // over before awaiting another.
+        if let Some(frame) = res.pending.take() {
+            return Ok(frame);
         }
+        Ok(res.next_frame().await)
     }
 
     async fn subscribe(
         &mut self,
-        _self_: Resource<ConsumerStreamResource>,
+        self_: Resource<ConsumerStreamResource>,
     ) -> Result<Resource<wasmtime_wasi::p2::bindings::io::poll::Pollable>> {
-        // Same documented limitation as `ws-stream::subscribe`: a real
-        // wasi:io/poll Pollable needs a host-side waker; the first realtime
-        // backend polls `recv` sequentially instead.
-        wasmtime::bail!("consumer-stream::subscribe is not yet implemented")
+        // Backed by the same one-frame lookahead as `ws-stream::subscribe`.
+        wasmtime_wasi::p2::subscribe(&mut self.table, self_)
     }
 
     async fn close(

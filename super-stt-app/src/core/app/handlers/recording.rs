@@ -62,6 +62,7 @@ impl AppModel {
 
                 self.recording_status = RecordingStatus::Recording;
                 self.transcription_text.clear();
+                self.preview_text.clear();
 
                 let stream = record_command_stream();
                 cosmic::task::stream(stream.map(|event| match event {
@@ -85,7 +86,9 @@ impl AppModel {
             }),
 
             RecordingMessage::PreviewTextReceived(text) => {
-                self.transcription_text = text;
+                // Previews land on their own line; the final result below is
+                // left alone until it actually arrives.
+                self.preview_text = text;
                 Task::none()
             }
 
@@ -95,6 +98,8 @@ impl AppModel {
                     text.chars().take(50).collect::<String>()
                 );
                 self.transcription_text = text;
+                // The live line has been superseded by the final transcript.
+                self.preview_text.clear();
                 self.recording_status = RecordingStatus::Idle;
                 self.audio_level = 0.0;
                 Task::none()
