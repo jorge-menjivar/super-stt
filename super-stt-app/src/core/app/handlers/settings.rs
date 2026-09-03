@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::core::app::AppModel;
+use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::client::{
     clear_post_processor, clear_post_processor_backend, get_model_device, list_model_devices,
     list_stage_devices, set_model_device, set_notification_method, set_post_processor,
@@ -155,6 +155,12 @@ impl AppModel {
                 }
                 self.post_processor = state;
                 self.clear_action_error(crate::state::ErrorScope::PostProcessing);
+                // This write is also the end of stage 2's model operation: the
+                // daemon's `ready` event reports stage 1's load, and nothing
+                // reports this one, so the progress and loading lines would
+                // otherwise sit on the card until the stall watchdog turned
+                // them into an error.
+                self.finish_post_processor_operation();
                 // The card's device chips are the daemon's answer for the
                 // backend now selected, so every selection asks again.
                 self.post_processor
@@ -169,6 +175,9 @@ impl AppModel {
                     crate::state::ErrorScope::PostProcessing,
                     format!("Couldn't save the post-processor: {err}"),
                 );
+                // The failure ends the operation too, and the banner above is
+                // where it is reported.
+                self.finish_post_processor_operation();
                 Task::none()
             }
         }
@@ -231,6 +240,18 @@ impl AppModel {
                 }
             },
         )
+    }
+
+    /// End a stage-2 model operation, leaving a stage-1 one alone.
+    ///
+    /// Stage 2 has no completion event of its own: the daemon's `ready` is
+    /// stage 1's, and a post-processor's download and load are reported only
+    /// by the `download_progress` ticks that name its model. The write's own
+    /// response is the end of it.
+    fn finish_post_processor_operation(&mut self) {
+        if self.model_operation_stage == PP_STAGE {
+            self.model_operation_state = ModelOperationState::Ready;
+        }
     }
 
     /// Ask the daemon which devices the post-processor backend can run its

@@ -45,10 +45,43 @@ pub(crate) fn models_for(backend: &BackendInfo, post_processor: bool) -> Vec<Str
         .collect()
 }
 
+/// Which stage a model operation belongs to, given only the model's name.
+///
+/// The daemon's `download_progress` events name a model and nothing else, so
+/// this is what decides whose card the progress, the loading line, and the
+/// failure that ends it belong on. The transcription stage is asked first: a
+/// name both stages' backends serve is the one the transcription card just
+/// started a load for. A name nothing installed serves is stage 1's too —
+/// including a load this app did not start.
+pub(crate) fn stage_for_model(
+    backends: &[BackendInfo],
+    active_backend: Option<&str>,
+    post_processor_source: Option<&str>,
+    model: &str,
+) -> u32 {
+    let serves = |source: Option<&str>, post_processor: bool| {
+        source
+            .and_then(|source| backends.iter().find(|b| b.source == source))
+            .is_some_and(|b| {
+                b.models
+                    .iter()
+                    .any(|m| m.name == model && is_post_processor(&m.role) == post_processor)
+            })
+    };
+    if serves(active_backend, false) {
+        return crate::state::device_offers::STT_STAGE;
+    }
+    if serves(post_processor_source, true) {
+        return crate::state::device_offers::PP_STAGE;
+    }
+    crate::state::device_offers::STT_STAGE
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::daemon::backends::BackendModel;
+    use crate::state::device_offers::{PP_STAGE, STT_STAGE};
 
     fn model(name: &str, role: &str) -> BackendModel {
         BackendModel {
@@ -144,5 +177,64 @@ mod tests {
         let b = backend("github.com/x/new", "New", vec![model("weird", "quantum")]);
         assert_eq!(models_for(&b, false), vec!["weird"]);
         assert!(models_for(&b, true).is_empty());
+    }
+
+    /// The reported bug: a post-processor's download reported its progress on
+    /// the transcription card, because the only card rendering the operation
+    /// was the one that had not started it.
+    #[test]
+    fn a_post_processors_download_belongs_to_stage_two() {
+        let catalog = catalog();
+        assert_eq!(
+            stage_for_model(
+                &catalog,
+                Some("github.com/x/stt-only"),
+                Some("github.com/x/clean-only"),
+                "textclean",
+            ),
+            PP_STAGE,
+        );
+    }
+
+    /// And the mirror: the transcription model's own load stays on its card
+    /// while a post-processor backend is selected.
+    #[test]
+    fn a_transcription_models_load_belongs_to_stage_one() {
+        let catalog = catalog();
+        assert_eq!(
+            stage_for_model(
+                &catalog,
+                Some("github.com/x/stt-only"),
+                Some("github.com/x/clean-only"),
+                "whisper",
+            ),
+            STT_STAGE,
+        );
+    }
+
+    /// A name neither selection serves — a load this app did not start, or a
+    /// backend uninstalled mid-download — stays on the transcription card
+    /// rather than vanishing from both.
+    #[test]
+    fn an_unknown_model_belongs_to_stage_one() {
+        let catalog = catalog();
+        assert_eq!(
+            stage_for_model(&catalog, Some("github.com/x/stt-only"), None, "nothing"),
+            STT_STAGE,
+        );
+        assert_eq!(stage_for_model(&[], None, None, "whisper"), STT_STAGE);
+    }
+
+    /// A model a backend serves only as a post-processor is stage 2's even
+    /// when the same backend fills both stages.
+    #[test]
+    fn a_dual_role_backend_splits_by_the_models_own_role() {
+        let catalog = catalog();
+        let combo = Some("github.com/x/combo");
+        assert_eq!(stage_for_model(&catalog, combo, combo, "tidy"), PP_STAGE);
+        assert_eq!(
+            stage_for_model(&catalog, combo, combo, "whisper"),
+            STT_STAGE
+        );
     }
 }

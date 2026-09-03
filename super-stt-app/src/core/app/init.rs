@@ -118,6 +118,7 @@ impl AppModel {
                 target_model: String::new(),
                 status_message: "Loading initial model state...".to_string(),
             },
+            model_operation_stage: crate::state::device_offers::STT_STAGE,
 
             // Initialize device state
             current_device: String::new(), // Empty until loaded from daemon

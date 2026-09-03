@@ -35,10 +35,32 @@ impl AppModel {
         target_model: String,
         progress: super_stt_shared::models::protocol::DownloadProgress,
     ) {
+        self.model_operation_stage = self.stage_for_model(&target_model);
         self.model_operation_state = ModelOperationState::Downloading {
             target_model,
             progress,
         };
+    }
+
+    /// Which stage a model operation belongs to — the card its progress,
+    /// loading line, and failure belong on.
+    ///
+    /// A `download_progress` event names a model and nothing else, so the
+    /// answer comes from the catalog: the post-processing card owns the name
+    /// its own backend serves as a post-processor, and the transcription card
+    /// owns everything else — including a name nothing installed matches,
+    /// which is where a load this app did not start lands.
+    ///
+    /// The transcription side is checked first: a backend serving the same
+    /// name in both roles is running it here as a transcription model, which
+    /// is the card that started the load.
+    fn stage_for_model(&self, model: &str) -> u32 {
+        crate::ui::views::models::stage_for_model(
+            &self.backends,
+            self.models_page.active_backend.as_deref(),
+            self.post_processor.source.as_deref(),
+            model,
+        )
     }
 
     /// Set model to loading state
@@ -49,6 +71,7 @@ impl AppModel {
     ) {
         // Entering a switch starts the stall watchdog clock (see PingTimeout).
         self.last_switch_progress_at = Some(std::time::Instant::now());
+        self.model_operation_stage = self.stage_for_model(&target_model);
         self.model_operation_state = ModelOperationState::Loading {
             target_model,
             status_message,

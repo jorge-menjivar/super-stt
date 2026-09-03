@@ -249,22 +249,9 @@ pub(super) fn active_backend_card<'a>(
         card = card.push(requirement_warning(label));
     }
 
-    // The model operation status for this backend, shown inside the card.
-    match &app.model_operation_state {
-        ModelOperationState::Ready => {}
-        ModelOperationState::Downloading {
-            target_model,
-            progress,
-        } => card = card.push(card_download_progress(target_model, progress)),
-        ModelOperationState::Loading {
-            target_model,
-            status_message,
-        } => {
-            card = card.push(text::body(format!(
-                "Loading {target_model}: {status_message}"
-            )));
-        }
-        ModelOperationState::Error { message } => card = card.push(card_error(message)),
+    // The model operation status, when it is this stage's.
+    if let Some(status) = operation_status(app, STT_STAGE) {
+        card = card.push(status);
     }
 
     card_surface(card, true)
@@ -451,6 +438,30 @@ pub(super) fn staged_model_picker<'a>(
             .into()
     } else {
         picker_row.into()
+    }
+}
+
+/// The in-flight model operation, on the card that owns it.
+///
+/// One runs at a time — the daemon serializes model mutations — and the
+/// progress events that drive it carry a model name and nothing else, so
+/// `stage` is what keeps a post-processor's download off the transcription
+/// card and a transcription model's off the post-processing one.
+pub(super) fn operation_status(app: &AppModel, stage: u32) -> Option<Element<'_, Message>> {
+    if app.model_operation_stage != stage {
+        return None;
+    }
+    match &app.model_operation_state {
+        ModelOperationState::Ready => None,
+        ModelOperationState::Downloading {
+            target_model,
+            progress,
+        } => Some(card_download_progress(target_model, progress)),
+        ModelOperationState::Loading {
+            target_model,
+            status_message,
+        } => Some(text::body(format!("Loading {target_model}: {status_message}")).into()),
+        ModelOperationState::Error { message } => Some(card_error(message)),
     }
 }
 

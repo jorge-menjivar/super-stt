@@ -104,6 +104,12 @@ pub struct AppModel {
     pub current_model_epoch: u64,
     /// Model operation state (downloading, loading, or ready)
     pub model_operation_state: ModelOperationState,
+    /// Which pipeline stage [`AppModel::model_operation_state`] belongs to, so
+    /// the progress lands on the card that started it. The daemon's progress
+    /// events carry a model name and nothing else, so the stage is resolved
+    /// from the catalog when the operation starts and kept for the rest of it
+    /// — including a terminal error, which carries no model name at all.
+    pub model_operation_stage: u32,
 
     // Device management state
     /// The accelerator the loaded stage-1 model is on (`cpu`/`cuda`/…), from

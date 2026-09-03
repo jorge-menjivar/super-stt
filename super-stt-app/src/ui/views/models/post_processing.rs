@@ -95,6 +95,13 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
 
     card = card.push(card_divider()).push(control_row(app, backend));
 
+    // Downloading, loading, or the failure that ended it — shown here when the
+    // operation is this stage's, so a post-processor's progress is on the card
+    // that started it rather than on the transcription card below the models.
+    if let Some(status) = super::active::operation_status(app, PP_STAGE) {
+        card = card.push(status);
+    }
+
     // Enabled but not running: transcripts are passing through untouched, and
     // nothing else on the card would say so. `enabled` and `loaded` are
     // separate fields for exactly this case.
