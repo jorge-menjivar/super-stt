@@ -55,8 +55,7 @@ impl AppModel {
                 model,
                 block,
             } => {
-                self.language.model_language = Some(block);
-                self.language.model_language_for = Some((source, model));
+                self.language.model_languages.record(source, model, block);
                 Task::none()
             }
             LanguageMessage::ModelLanguageSelected {

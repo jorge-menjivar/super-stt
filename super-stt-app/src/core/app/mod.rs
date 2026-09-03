@@ -121,24 +121,17 @@ pub struct AppModel {
     /// daemon's `/post_processor` block; the daemon stays authoritative, so
     /// this is replaced wholesale by every `Loaded` message rather than being
     /// edited field-by-field.
-    pub post_processor: crate::daemon::client::PostProcessorState,
-    /// The post-processor the user picked but has not enabled yet, as
-    /// `(model, source)`. Mirrors `models_page.staged_model`: a dropdown pick
-    /// is local until the Enable button commits it. `None` means "use whatever
-    /// the daemon already has selected".
-    pub staged_post_processor: Option<(String, String)>,
+    pub post_processor: crate::daemon::client::StageState,
+    /// What each stage's card has picked but not yet loaded. One store for
+    /// every stage: a pick is local until Load commits it, which is true of
+    /// every stage's card, so there is no per-stage copy of the rule.
+    pub staged_picks: crate::state::staged_picks::StagedPicks,
     /// The device lists the daemon has answered for, per pipeline stage: what
     /// its selected backend can run models on, and what each staged model can
     /// be loaded onto. Read by the pickers instead of deriving availability
     /// from the catalog, so the app and the daemon cannot disagree about what
     /// this install can run.
     pub device_offers: crate::state::device_offers::DeviceOffers,
-    /// The device staged for the post-processor pick, the stage-2 twin of
-    /// `models_page.staged_device`: seeded from what this install offers the
-    /// staged model, replaced by the model's own once the daemon answers, and
-    /// sent as the model's device when Enable commits it. `None` when the
-    /// staged model has no device to pick (an online one).
-    pub staged_post_processor_device: Option<String>,
 
     // Recording stop mode
     pub recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,

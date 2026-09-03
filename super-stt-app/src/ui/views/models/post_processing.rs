@@ -20,17 +20,18 @@ use cosmic::iced::widget::row;
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, text};
 
+use super::language::language_button;
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::state::ContextPage;
 use crate::state::device_offers::PP_STAGE;
 use crate::ui::icons;
-use crate::ui::messages::{Message, ModelsPageMessage, PostProcessorMessage, ShellMessage};
+use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage, StageMessage};
 
 use super::active::backend_glyph_tile;
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, capability_chips, count_chip,
-    stage_device_support,
+    model_is_online, stage_device_support,
 };
 use super::surface::{
     backend_description, card_divider, card_surface, card_title_block, muted_text_color,
@@ -47,12 +48,8 @@ pub(crate) fn post_processor_backends(backends: &[BackendInfo]) -> Vec<&BackendI
 }
 
 /// The post-processor model names one backend serves, in manifest order.
-///
-/// The index into this list is what [`PostProcessorMessage::Staged`] carries,
-/// so the view and the handler must build it the same way — hence one function,
-/// called by both.
-pub(crate) fn post_processor_models(backend: &BackendInfo) -> Vec<String> {
-    super::roles::models_for(backend, true)
+fn post_processor_models(backend: &BackendInfo) -> Vec<String> {
+    super::models_for_stage(backend, true)
 }
 
 /// The backend the card is about: the one the daemon has selected.
@@ -105,7 +102,7 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
     // Enabled but not running: transcripts are passing through untouched, and
     // nothing else on the card would say so. `enabled` and `loaded` are
     // separate fields for exactly this case.
-    if app.post_processor.enabled && !app.post_processor.loaded {
+    if app.post_processor.is_enabled() && !app.post_processor.loaded {
         card = card.push(notice(
             "The selected model isn't loaded — transcripts are used as they are.",
         ));
@@ -119,7 +116,7 @@ pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
 
     card_surface(
         card,
-        app.post_processor.enabled && app.post_processor.loaded,
+        app.post_processor.is_enabled() && app.post_processor.loaded,
     )
 }
 
@@ -137,7 +134,7 @@ fn header<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Messag
         )),
         super::surface::deselect_button(
             "Deselect this backend",
-            Message::PostProcessor(PostProcessorMessage::Deselect),
+            Message::Stage(StageMessage::DeselectBackend { stage: PP_STAGE }),
         ),
     ]
     .spacing(spacing.space_xs)
@@ -190,6 +187,23 @@ fn chip_row<'a>(backend: &'a BackendInfo, app: &AppModel) -> Option<Element<'a, 
     Some(chips.into())
 }
 
+/// The model the card's pickers act on: the staged pick when it belongs to this
+/// backend, otherwise the selection the daemon remembers.
+///
+/// Both dropdowns read this one value. They used to derive it separately — the
+/// model dropdown falling back to the daemon's selection and the device
+/// dropdown not — so after an unload the card showed a model with no device
+/// picker beside it, and the device could only be changed by selecting the
+/// backend again.
+pub(super) fn shown_model(
+    staged: Option<&crate::state::staged_picks::StagedPick>,
+    selected_model: Option<&str>,
+) -> Option<String> {
+    staged
+        .map(|pick| pick.model.clone())
+        .or_else(|| selected_model.map(ToString::to_string))
+}
+
 /// The control row: running state and a Disable button, or the model and
 /// device pickers and an Enable button.
 ///
@@ -201,7 +215,7 @@ fn chip_row<'a>(backend: &'a BackendInfo, app: &AppModel) -> Option<Element<'a, 
 fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
-    if app.post_processor.enabled {
+    if app.post_processor.is_enabled() {
         let model = app
             .post_processor
             .model
@@ -219,33 +233,39 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         let label = text::body(format!("Active: {model}{device_suffix}"))
             .class(cosmic::theme::Text::Accent)
             .width(Length::Fill);
-        return row![
-            label,
-            button::standard("Unload")
-                .leading_icon(icons::phosphor_handle(icons::STOP))
-                .on_press(Message::PostProcessor(PostProcessorMessage::Disable)),
-        ]
-        .spacing(spacing.space_xs)
-        .align_y(Alignment::Center)
-        .into();
+        let mut summary = row![label]
+            .spacing(spacing.space_xs)
+            .align_y(Alignment::Center);
+        // The same control the transcription card shows beside its active
+        // model, from the same function.
+        if let Some(lang_button) = language_button(backend, &model, app) {
+            summary = summary.push(lang_button);
+        }
+        return summary
+            .push(
+                button::standard("Unload")
+                    .leading_icon(icons::phosphor_handle(icons::STOP))
+                    .on_press(Message::Stage(StageMessage::Unload { stage: PP_STAGE })),
+            )
+            .into();
     }
 
-    // The staged pick wins, else whatever the daemon already has selected —
-    // both scoped to this backend, since the dropdown only offers its models.
     let models = post_processor_models(backend);
-    let shown = app
-        .staged_post_processor
-        .as_ref()
-        .filter(|(_, source)| source == &backend.source)
-        .map(|(model, _)| model.clone())
-        .or_else(|| app.post_processor.model.clone());
+    let shown = shown_model(
+        app.staged_picks.for_backend(PP_STAGE, &backend.source),
+        app.post_processor.model.as_deref(),
+    );
     let selected = shown
         .as_deref()
         .and_then(|m| models.iter().position(|n| n == m));
     // Model select takes twice the width of the device select, as on the
     // transcription card.
-    let dropdown = widget::dropdown(models, selected, |index| {
-        Message::PostProcessor(PostProcessorMessage::Staged(index))
+    let models_pick = models.clone();
+    let dropdown = widget::dropdown(models, selected, move |index| {
+        Message::Stage(StageMessage::StageModel {
+            stage: PP_STAGE,
+            model: models_pick[index].clone(),
+        })
     })
     .placeholder("Select model")
     .width(Length::FillPortion(2));
@@ -255,46 +275,58 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
         .align_y(Alignment::Center)
         .width(Length::Fill);
 
-    // Device dropdown — only once the daemon has answered what the staged
-    // pick can run on here, and only when that answer offers something. The
-    // answer is the model's declared devices narrowed to what this install and
-    // host can do, so an online model (offering nothing) shows no picker.
-    let staged = app
-        .staged_post_processor
-        .as_ref()
-        .filter(|(_, source)| source == &backend.source)
-        .map(|(model, _)| model.as_str());
-    let devices: Vec<String> = staged
+    // Device dropdown — keyed on the same model the dropdown above shows, so
+    // the two pickers cannot disagree about which model the card is acting on.
+    // It renders only once the daemon has answered what that model can run on
+    // here, and only when the answer offers something: the answer is the
+    // model's declared devices narrowed to what this install and host can do,
+    // so an online model (offering nothing) shows no picker.
+    let devices: Vec<String> = shown
+        .as_deref()
         .and_then(|m| app.device_offers.model(PP_STAGE, &backend.source, m))
         .unwrap_or_default()
         .to_vec();
     if !devices.is_empty() {
         let device_index = app
-            .staged_post_processor_device
-            .as_deref()
+            .staged_picks
+            .device(PP_STAGE)
             .and_then(|d| devices.iter().position(|x| x == d));
         let devices_pick = devices.clone();
         let device_dropdown = widget::dropdown(devices, device_index, move |index| {
-            Message::PostProcessor(PostProcessorMessage::StagedDevice(
-                devices_pick[index].clone(),
-            ))
+            Message::Stage(StageMessage::StageDevice {
+                stage: PP_STAGE,
+                device: devices_pick[index].clone(),
+            })
         })
         .placeholder("Device")
         .width(Length::FillPortion(1));
         picker_row = picker_row.push(device_dropdown);
     }
 
+    // Per-model language, inline after the device dropdown — the same position
+    // and the same function as the transcription card's staged picker.
+    if let Some(model) = shown.as_deref()
+        && let Some(lang_button) = language_button(backend, model, app)
+    {
+        picker_row = picker_row.push(lang_button);
+    }
+
+    // Load — enabled only when a model is staged AND (a device is staged OR the
+    // model is online and has none to stage), and only while this stage is
+    // free. The device check is the transcription card's; without it a Load
+    // whose device answer was empty or still in flight sent no device at all.
+    let staged_online = shown
+        .as_deref()
+        .is_some_and(|m| model_is_online(backend, m));
+    let staged_ok = selected.is_some()
+        && (app.staged_picks.device(PP_STAGE).is_some() || staged_online);
     picker_row
         .push(
             button::suggested("Load model")
                 .leading_icon(icons::phosphor_handle(icons::PLAY))
-                // Disabled while stage 2 already has an operation in flight,
-                // the way the transcription card's is. Stage 1's work does not
-                // enter into it: the two stages load independently.
                 .on_press_maybe(
-                    selected
-                        .filter(|_| app.is_model_ready(PP_STAGE))
-                        .map(|_| Message::PostProcessor(PostProcessorMessage::Enable)),
+                    (staged_ok && app.is_model_ready(PP_STAGE))
+                        .then_some(Message::Stage(StageMessage::Load { stage: PP_STAGE })),
                 ),
         )
         .into()
@@ -415,9 +447,10 @@ fn sheet_row(backend: &BackendInfo, is_selected: bool) -> Element<'static, Messa
             .into()
     } else {
         button::suggested("Select")
-            .on_press(Message::PostProcessor(PostProcessorMessage::SelectBackend(
-                backend.source.clone(),
-            )))
+            .on_press(Message::Stage(StageMessage::SelectBackend {
+                stage: PP_STAGE,
+                source: backend.source.clone(),
+            }))
             .into()
     };
 
@@ -502,6 +535,43 @@ mod tests {
         let offered = post_processor_backends(&backends);
         let names: Vec<&str> = offered.iter().map(|b| b.name.as_str()).collect();
         assert_eq!(names, vec!["Combo"]);
+    }
+
+    fn pick(model: &str) -> crate::state::staged_picks::StagedPick {
+        crate::state::staged_picks::StagedPick {
+            model: model.to_string(),
+            source: "github.com/x/s1".to_string(),
+            device: None,
+        }
+    }
+
+    /// The regression: after an unload nothing is staged but the daemon still
+    /// remembers the model, and the card shows it. The device dropdown keys off
+    /// this same value, so returning `None` here is what left the card showing
+    /// a model with no device picker beside it.
+    #[test]
+    fn the_daemons_selection_is_shown_when_nothing_is_staged() {
+        assert_eq!(
+            shown_model(None, Some("s1-mini-q4_k_m")),
+            Some("s1-mini-q4_k_m".to_string()),
+        );
+    }
+
+    /// A staged pick wins over the daemon's selection. (That the pick belongs
+    /// to this backend is `StagedPicks::for_backend`'s job, tested there.)
+    #[test]
+    fn a_staged_pick_wins() {
+        assert_eq!(
+            shown_model(Some(&pick("s1-mini-q8_0")), Some("s1-mini-q4_k_m")),
+            Some("s1-mini-q8_0".to_string()),
+        );
+    }
+
+    /// A backend chosen with no model picked yet shows nothing, and the device
+    /// picker stays hidden with it.
+    #[test]
+    fn nothing_is_shown_without_a_pick_or_a_selection() {
+        assert_eq!(shown_model(None, None), None);
     }
 
     /// A catalog with no post-processor anywhere offers nothing, and the card

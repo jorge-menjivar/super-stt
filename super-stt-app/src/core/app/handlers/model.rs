@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, ModelOperationState};
-use crate::daemon::client::{
-    get_active_backend, get_current_device, get_current_model, get_gpu_info, list_available_models,
-};
+use crate::daemon::client::{get_gpu_info, get_stage, list_available_models};
 use crate::state::device_offers::STT_STAGE;
-use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage};
+use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage, StageMessage};
 use cosmic::prelude::*;
 use log::info;
 use log::warn;
@@ -41,8 +39,9 @@ impl AppModel {
                 }
             }),
             self.fetch_current_model(),
-            Task::perform(get_current_device(), |result| match result {
-                Ok(device) => {
+            Task::perform(get_stage(STT_STAGE), |result| match result {
+                Ok(stage) => {
+                    let device = stage.device;
                     info!("Initial device load successful: device={device:?}");
                     cosmic::Action::App(Message::Device(DeviceMessage::DeviceInfoLoaded(device)))
                 }
@@ -52,10 +51,11 @@ impl AppModel {
                 }
             }),
             crate::core::app::handlers::tasks::reload_backends(),
-            Task::perform(get_active_backend(), |result| {
-                cosmic::Action::App(Message::ModelsPage(ModelsPageMessage::ActiveBackendLoaded(
-                    result.unwrap_or(None),
-                )))
+            Task::perform(get_stage(STT_STAGE), |result| {
+                cosmic::Action::App(Message::Stage(StageMessage::BackendSelected {
+                    stage: STT_STAGE,
+                    source: result.ok().and_then(|stage| stage.source),
+                }))
             }),
             Task::perform(get_gpu_info(), |result| {
                 cosmic::Action::App(Message::ModelsPage(ModelsPageMessage::GpuInfoLoaded(
@@ -156,8 +156,15 @@ impl AppModel {
     /// (re)subscribe to resync robustly against reconnect/restart ordering.
     pub(in crate::core::app) fn fetch_current_model(&self) -> Task<cosmic::Action<Message>> {
         let epoch = self.current_model_epoch;
-        Task::perform(get_current_model(), move |result| match result {
-            Ok((model, source)) => {
+        Task::perform(get_stage(STT_STAGE), move |result| match result {
+            Ok(stage) => {
+                // An idle daemon is a valid state, not an error: report an
+                // empty selection rather than a backend with no model, which is
+                // what the identity handler reads as "nothing loaded".
+                let (model, source) = match stage.model {
+                    Some(model) => (model, stage.source.unwrap_or_default()),
+                    None => (String::new(), String::new()),
+                };
                 cosmic::Action::App(Message::Model(ModelMessage::CurrentModelLoaded {
                     model,
                     source,
@@ -176,7 +183,7 @@ impl AppModel {
 /// cap it at 200 chars for display. Skips the substitution when `home` is empty
 /// — an empty `from` makes `str::replace` insert the replacement at every char
 /// boundary, shredding the message (Tier 1 #16).
-fn sanitize_home(err: &str, home: &str) -> String {
+pub(in crate::core::app) fn sanitize_home(err: &str, home: &str) -> String {
     if home.is_empty() {
         err.chars().take(200).collect()
     } else {

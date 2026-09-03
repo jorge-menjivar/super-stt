@@ -9,13 +9,14 @@ use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;
 use crate::state::device_offers::STT_STAGE;
 use crate::ui::icons;
-use crate::ui::messages::{DownloadMessage, LanguageMessage, Message, ModelsPageMessage};
+use crate::ui::messages::{DownloadMessage, Message, ModelsPageMessage, StageMessage};
 
 use super::chips::{
     CloudEgress, backend_has_user_url, backend_is_online, capability_chips, count_chip,
     model_is_online, requirement_warning, stage_device_support,
 };
 use super::fmt::{no_viable_device_warning, vram_warning};
+use super::language::language_button;
 use super::status::unmet_requirements;
 use super::surface::{card_divider, card_surface};
 
@@ -84,66 +85,6 @@ pub(super) fn backend_header(
         .into()
 }
 
-/// Per-model language trigger button for the active-backend card.
-///
-/// Rendered inline next to the model/device controls (not on its own row), for
-/// the given `selected_model` when the catalog marks it multilingual. Returns
-/// `None` for a mono-lingual model so the caller can skip the push entirely.
-///
-/// The button label reflects the current per-model resolution block when
-/// `app.language.model_language_for` matches `(backend.source, selected_model)`;
-/// otherwise it falls back to a neutral `"Language"` label (block not yet
-/// fetched — stale-block guard). It opens the language picker for this model.
-fn language_button<'a>(
-    backend: &'a BackendInfo,
-    selected_model: &str,
-    app: &'a AppModel,
-) -> Option<Element<'a, Message>> {
-    // Gate: only render for multilingual models (per catalog).
-    let catalog_model = backend.models.iter().find(|m| m.name == selected_model)?;
-    if !catalog_model.multilingual {
-        return None;
-    }
-
-    let source = &backend.source;
-
-    // Build the trigger label from the resolution block — but only when the
-    // block belongs to this exact (source, model) pair (stale-block guard).
-    let label = if app.language.model_language_for.as_ref()
-        == Some(&(source.clone(), selected_model.to_string()))
-    {
-        if let Some(block) = &app.language.model_language {
-            let source_str = if block.source.is_empty() {
-                "default"
-            } else {
-                block.source.as_str()
-            };
-            match (block.effective.as_deref(), source_str) {
-                (Some(tag), "override") => crate::ui::languages::friendly_name(tag),
-                (Some(tag), "global") => {
-                    format!("{} · global", crate::ui::languages::friendly_name(tag))
-                }
-                _ => format!(
-                    "{} · default",
-                    crate::ui::languages::friendly_name(&block.primary)
-                ),
-            }
-        } else {
-            "Language".to_string()
-        }
-    } else {
-        "Language".to_string()
-    };
-
-    Some(
-        widget::button::standard(label)
-            .on_press(Message::Language(LanguageMessage::OpenLanguagePicker {
-                model: Some((source.clone(), selected_model.to_string())),
-            }))
-            .into(),
-    )
-}
-
 /// The selected backend, shown above the tabs: its model picker + Select, an
 /// in-card status line (loading / download progress / error), Configure, and
 /// Deselect.
@@ -169,7 +110,7 @@ pub(super) fn active_backend_card<'a>(
         )),
         super::surface::deselect_button(
             "Deselect this backend",
-            Message::ModelsPage(ModelsPageMessage::DeselectBackend),
+            Message::Stage(StageMessage::DeselectBackend { stage: STT_STAGE }),
         ),
     ]
     .spacing(spacing.space_xs)
@@ -287,7 +228,7 @@ pub(super) fn loaded_model_summary<'a>(
         .push(
             button::standard("Unload")
                 .leading_icon(icons::phosphor_handle(icons::STOP))
-                .on_press(Message::ModelsPage(ModelsPageMessage::UnloadActiveModel)),
+                .on_press(Message::Stage(StageMessage::Unload { stage: STT_STAGE })),
         )
         .into()
 }
@@ -314,14 +255,14 @@ pub(super) fn vram_shortfall(
 /// model's VRAM estimate vs. the primary GPU's free memory (falling back to
 /// its total when the daemon didn't report free).
 pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Option<(u64, u64)> {
-    let model_name = app.models_page.staged_model.as_deref()?;
+    let model_name = app.staged_picks.get(STT_STAGE).map(|p| p.model.as_str())?;
     let model = backend.models.iter().find(|m| m.name == model_name)?;
     let gpu_available = app
         .gpu_info
         .first()
         .map(|g| g.free_bytes.unwrap_or(g.total_bytes));
     vram_shortfall(
-        app.models_page.staged_device.as_deref(),
+        app.staged_picks.device(STT_STAGE),
         model.estimated_vram_bytes,
         gpu_available,
     )
@@ -345,14 +286,19 @@ pub(super) fn staged_model_picker<'a>(
     // loaded. Scoped to this stage's role: a post-processor here would be a
     // pick the daemon then refuses.
     let model_names: Vec<String> = super::roles::models_for(backend, false);
-    let staged_model = app.models_page.staged_model.as_deref();
+    let staged_model = app
+        .models_page
+        .active_backend
+        .as_deref()
+        .and_then(|source| app.staged_picks.model(STT_STAGE, source));
     let model_index = staged_model.and_then(|m| model_names.iter().position(|n| n == m));
     let model_names_pick = model_names.clone();
     // Model select takes twice the width of the device select (2:1 flex ratio).
     let model_dropdown = widget::dropdown(model_names, model_index, move |index| {
-        Message::ModelsPage(ModelsPageMessage::StageActiveModel(
-            model_names_pick[index].clone(),
-        ))
+        Message::Stage(StageMessage::StageModel {
+            stage: STT_STAGE,
+            model: model_names_pick[index].clone(),
+        })
     })
     .placeholder("Select model")
     .width(Length::FillPortion(2));
@@ -375,15 +321,15 @@ pub(super) fn staged_model_picker<'a>(
     if show_device_picker {
         let devices: Vec<String> = staged_devices.unwrap_or_default().to_vec();
         let device_index = app
-            .models_page
-            .staged_device
-            .as_deref()
+            .staged_picks
+            .device(STT_STAGE)
             .and_then(|d| devices.iter().position(|x| x == d));
         let devices_pick = devices.clone();
         let device_dropdown = widget::dropdown(devices, device_index, move |index| {
-            Message::ModelsPage(ModelsPageMessage::StageActiveDevice(
-                devices_pick[index].clone(),
-            ))
+            Message::Stage(StageMessage::StageDevice {
+                stage: STT_STAGE,
+                device: devices_pick[index].clone(),
+            })
         })
         .placeholder("Device")
         .width(Length::FillPortion(1));
@@ -409,13 +355,13 @@ pub(super) fn staged_model_picker<'a>(
     // be sent straight onto whatever device happens to already be current.
     let staged_online = staged_model.is_some_and(|m| model_is_online(backend, m));
     let no_viable_device = !staged_online && staged_devices.is_some_and(<[String]>::is_empty);
-    let staged_ok = app.models_page.staged_model.is_some()
-        && (app.models_page.staged_device.is_some() || staged_online);
+    let staged_ok =
+        staged_model.is_some() && (app.staged_picks.device(STT_STAGE).is_some() || staged_online);
     let load_button = button::suggested("Load model")
         .leading_icon(icons::phosphor_handle(icons::PLAY))
         .on_press_maybe(
             (staged_ok && app.is_model_ready(STT_STAGE))
-                .then_some(Message::ModelsPage(ModelsPageMessage::LoadStagedModel)),
+                .then_some(Message::Stage(StageMessage::Load { stage: STT_STAGE })),
         );
     picker_row = picker_row.push(load_button);
 

@@ -4,7 +4,7 @@
 //! Most settings are a plain `GET`/`POST` pair over the settings token, so the
 //! two macros below generate the boilerplate: `settings_getter!` reads a value
 //! out of the response, `settings_setter!` posts `{ key: value }`. Endpoints
-//! with richer shapes (e.g. `active_model`, `backends`, `language`) stay
+//! with richer shapes (e.g. `stage`, `backends`, `language`) stay
 //! hand-written.
 
 /// Generate a settings **getter**: `GET <path>`, require success, then run
@@ -57,7 +57,6 @@ macro_rules! settings_setter {
     };
 }
 
-pub(crate) mod active_model;
 pub(crate) mod audio_theme;
 pub(crate) mod backend_secrets;
 pub(crate) mod backends;
@@ -65,9 +64,9 @@ pub(crate) mod custom_models_dir;
 pub(crate) mod language;
 pub(crate) mod model_device;
 pub(crate) mod notification_method;
-pub(crate) mod post_processor;
 pub(crate) mod preview_typing;
 pub(crate) mod recording_stop_mode;
+pub(crate) mod stage;
 pub(crate) mod update_beta_optin;
 pub(crate) mod update_check_enabled;
 pub(crate) mod volume;

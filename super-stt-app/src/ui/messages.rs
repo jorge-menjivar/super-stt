@@ -24,6 +24,8 @@ pub enum Message {
     Daemon(DaemonMessage),
     Model(ModelMessage),
     ModelsPage(ModelsPageMessage),
+    /// Filling a pipeline stage, for every stage.
+    Stage(StageMessage),
     Device(DeviceMessage),
     Download(DownloadMessage),
     PreviewTyping(PreviewTypingMessage),
@@ -125,62 +127,10 @@ pub enum ModelMessage {
 pub enum ModelsPageMessage {
     /// Activate a Models-page tab (Installed / Download) in the tab bar.
     ModelsTabActivated(segmented_button::Entity),
-    /// User picked a model in the active-backend card's model dropdown.
-    /// Stages it for the Load button — does *not* load. The device staging
-    /// waits on the daemon, which is asked what the model can run on here and
-    /// which device it already has.
-    StageActiveModel(String),
-    /// User picked a device in the active-backend card's device dropdown.
-    /// Stages it for the Load button — does *not* call the daemon.
-    StageActiveDevice(String),
-    /// The daemon answered for the staged `model` of `source`: `devices` is
-    /// what it can be loaded onto here, `current` the device it already has.
-    /// Fills the picker and stages `current` when the picker offers it,
-    /// otherwise the first device offered. `source` is the backend that was
-    /// selected when the question was asked, so an answer that a switch has
-    /// overtaken can be dropped.
-    StagedDevicesLoaded {
-        source: String,
-        model: String,
-        devices: Vec<String>,
-        current: Option<String>,
-    },
-    /// The daemon answered which devices the active backend can run
-    /// transcription models on — the union over the models it serves.
-    BackendDevicesLoaded {
-        source: String,
-        devices: Vec<String>,
-    },
-    /// User clicked the Load button. Sets the staged model's device, then
-    /// runs `set_model(staged_model)` for the active backend. No-op when
-    /// nothing is staged or a load is already in progress.
-    LoadStagedModel,
-    /// User clicked the Unload button. `DELETE /active_model` drops the
-    /// model but keeps the active backend selected.
-    UnloadActiveModel,
     /// Open the per-backend configuration sub-view for `source`.
     OpenBackendConfig(String),
     /// Leave the configuration sub-view and return to the backend list.
     CloseBackendConfig,
-    /// Select a backend as active without loading a model — the card moves to
-    /// the top, any model from a different backend is unloaded.
-    SelectBackend(String),
-    /// A `SelectBackend` activation POST failed: restore the previously-active
-    /// backend and surface the model-card error (audit Tier 3 #37).
-    BackendSelectFailed {
-        prev_active: Option<String>,
-        message: String,
-    },
-    /// A `LoadStagedModel` switch failed: restore the previously-current device
-    /// and surface the model-card error (audit Tier 3 #37).
-    StagedModelLoadFailed {
-        prev_device: String,
-        message: String,
-    },
-    /// Deselect the active backend (unload its model → daemon idle).
-    DeselectBackend,
-    /// Active backend `source` loaded from the daemon (None = idle).
-    ActiveBackendLoaded(Option<String>),
     /// Periodic tick that re-fetches GPU inventory + memory so the header
     /// readout stays live. No-op when disconnected; on success it emits
     /// [`ModelsPageMessage::GpuInfoLoaded`].
@@ -297,56 +247,84 @@ pub enum PreviewTypingMessage {
     Error(String),       // Error setting or getting preview typing
 }
 
-/// Post-processor setting: the model that rewrites final transcripts.
+/// Filling a pipeline stage: select a backend, stage a model and a device,
+/// load, unload.
 ///
-/// Mirrors the transcription model's stage-then-load flow
-/// ([`ModelsPageMessage::StageActiveModel`] / `LoadStagedModel` /
-/// `UnloadActiveModel`): picking a model is local, and a separate Enable
-/// commits it. Choosing from a dropdown should not start running a model.
+/// Every variant carries the `stage` it is about, so one handler serves them
+/// all. The stages were two hand-maintained copies of this flow before, and the
+/// copies drifted — the newer one lost the re-entrancy guard, the stale-catalog
+/// check, the device rollback, and the check that a device was staged at all.
+///
+/// `stage` values come from `state::device_offers::{STT_STAGE, PP_STAGE}`,
+/// which are the daemon's own pipeline positions.
 #[derive(Debug, Clone)]
-pub enum PostProcessorMessage {
-    /// User chose which backend provides the post-processor, from the
-    /// "Select a post-processor" sheet. Mirrors
-    /// [`ModelsPageMessage::SelectBackend`]: the backend is selected without
-    /// anything running yet.
-    SelectBackend(String),
-    /// Clear the backend selection entirely and stop processing. Mirrors
-    /// [`ModelsPageMessage::DeselectBackend`].
-    Deselect,
-    /// User picked a model from the dropdown — staged locally, nothing sent.
-    /// The index is into the selected backend's post-processor models, in the
-    /// order `crate::ui::views::models::post_processor_models` returns them.
-    /// Stages the device the way [`ModelsPageMessage::StageActiveModel`] does:
-    /// on what the daemon answers.
-    Staged(usize),
+pub enum StageMessage {
+    /// Select the backend filling this stage, without loading a model. Any
+    /// model from a different backend is unloaded.
+    SelectBackend { stage: u32, source: String },
+    /// Empty the stage, forgetting its model with it.
+    DeselectBackend { stage: u32 },
+    /// The daemon took the selection (`None` = the stage is empty). Re-announced
+    /// after a successful select, which is what asks for the backend's devices.
+    BackendSelected { stage: u32, source: Option<String> },
+    /// A select or deselect was refused: restore `prev` and report it on the
+    /// stage's card.
+    BackendSelectFailed {
+        stage: u32,
+        prev: Option<String>,
+        message: String,
+    },
+    /// User picked a model in the card's dropdown. Staged for the Load button —
+    /// does *not* load. The device waits on the daemon, which is asked what the
+    /// model can run on here and which device it already has.
+    StageModel { stage: u32, model: String },
     /// User picked a device in the card's device dropdown — staged locally.
-    StagedDevice(String),
-    /// The daemon's device answer for the staged model; the stage-2 twin of
-    /// [`ModelsPageMessage::StagedDevicesLoaded`].
+    StageDevice { stage: u32, device: String },
+    /// The daemon answered for the staged `model` of `source`: `devices` is what
+    /// it can be loaded onto here, `current` the device it already has. `source`
+    /// is the backend selected when the question was asked, so an answer a
+    /// switch has overtaken can be dropped.
     StagedDevicesLoaded {
+        stage: u32,
         source: String,
         model: String,
         devices: Vec<String>,
         current: Option<String>,
     },
-    /// The daemon answered which devices the post-processor backend can run
-    /// post-processor models on; the stage-2 twin of
-    /// [`ModelsPageMessage::BackendDevicesLoaded`].
+    /// The daemon answered which devices this stage's backend can run its
+    /// models on — the union over the models it serves in this stage's role.
     BackendDevicesLoaded {
+        stage: u32,
         source: String,
         devices: Vec<String>,
     },
-    /// Commit the staged (or already-selected) model and turn processing on,
-    /// setting its device first when one is staged.
-    Enable,
-    /// Turn processing off. The selection is kept, so re-enabling needs no
-    /// second pick.
-    Disable,
+    /// User clicked Load. Sets the staged model's device, then runs it. A no-op
+    /// when nothing is staged or this stage already has an operation in flight.
+    Load { stage: u32 },
+    /// A load or unload failed: restore `prev_device` and report it on the
+    /// stage's card.
+    LoadFailed {
+        stage: u32,
+        prev_device: String,
+        message: String,
+    },
+    /// User clicked Unload. Drops the model but keeps the backend selected.
+    Unload { stage: u32 },
+}
+
+/// Post-processor state, read back from the daemon.
+///
+/// Selecting, staging and loading go through [`StageMessage`] like every other
+/// stage's; what is left here is stage 2's own block arriving from the daemon,
+/// which has no stage-1 counterpart because stage 1 announces its identity
+/// through `ModelMessage` events instead.
+#[derive(Debug, Clone)]
+pub enum PostProcessorMessage {
     /// A write succeeded; re-read the daemon's own state rather than assuming
     /// the write's arguments took effect verbatim.
     ReloadRequested,
     /// The daemon's current state, from the initial load or after a change.
-    Loaded(crate::daemon::client::PostProcessorState),
+    Loaded(crate::daemon::client::StageState),
     /// A get/set failed; the message is shown inline.
     Error(String),
 }

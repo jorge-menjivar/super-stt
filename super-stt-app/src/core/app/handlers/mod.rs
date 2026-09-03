@@ -9,5 +9,6 @@ mod models_page;
 mod recording;
 mod settings;
 mod shell;
+mod stage;
 pub(in crate::core::app) mod tasks;
 mod update;

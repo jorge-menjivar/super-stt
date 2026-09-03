@@ -43,7 +43,7 @@ impl AppModel {
                 // The stage of the card the Cancel button sits on, taken from
                 // the progress it is showing.
                 Task::perform(cancel_download(stage), move |result| match result {
-                    Ok(_) => {
+                    Ok(()) => {
                         cosmic::Action::App(Message::Download(DownloadMessage::DownloadCancelled {
                             model: String::new(),
                             stage,

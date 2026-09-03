@@ -129,9 +129,8 @@ impl AppModel {
             preview_typing_enabled: false,
             // Replaced by the daemon's own state as soon as the settings load
             // completes; the default is the daemon's default too (off).
-            post_processor: crate::daemon::client::PostProcessorState::default(),
-            staged_post_processor: None,
-            staged_post_processor_device: None,
+            post_processor: crate::daemon::client::StageState::default(),
+            staged_picks: crate::state::staged_picks::StagedPicks::default(),
             device_offers: crate::state::device_offers::DeviceOffers::default(),
             recording_stop_mode:
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),

@@ -87,6 +87,10 @@ fn notifications_section(notification_method: NotificationMethod) -> Element<'st
 /// without wrapping at the default window width.
 const LIVE_LINE_CHARS: usize = 90;
 
+/// Height of the transcript box. Three lines of body text, so a short test
+/// transcript reads without scrolling and a long one still has a fixed size.
+const TRANSCRIPT_HEIGHT: f32 = 66.0;
+
 /// The last `max_chars` characters of `text`, prefixed with an ellipsis when
 /// something was dropped. Counts chars, not bytes — a multibyte transcript must
 /// not be sliced mid-character.
@@ -152,6 +156,10 @@ fn test_section<'a>(
         .clip(true)
     };
 
+    // The transcript has no label, so it goes into the section as a plain list
+    // item. Routing it through `flex_item("", ...)` instead gave the empty
+    // label a flex slot of its own, which grew the row and left the text
+    // sitting against the bottom of it with a gap above.
     let transcription_widget = {
         let content = if transcription_text.is_empty() {
             "Transcriptions will appear here after test recordings...".to_string()
@@ -159,13 +167,9 @@ fn test_section<'a>(
             transcription_text.to_string()
         };
 
-        widget::scrollable(
-            widget::container(text::body(content))
-                .padding(15)
-                .width(Length::Fill),
-        )
-        .height(Length::Fixed(60.0))
-        .width(Length::Fill)
+        widget::scrollable(text::body(content).width(Length::Fill))
+            .height(Length::Fixed(TRANSCRIPT_HEIGHT))
+            .width(Length::Fill)
     };
 
     settings::section()
@@ -173,7 +177,7 @@ fn test_section<'a>(
         .add(settings::item("Status", text::body(recording_text)))
         .add(settings::flex_item("Audio Level", audio_widget))
         .add(settings::flex_item("Live", live_widget))
-        .add(settings::flex_item("", transcription_widget))
+        .add(transcription_widget)
         .into()
 }
 

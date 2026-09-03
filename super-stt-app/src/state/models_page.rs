@@ -15,12 +15,6 @@ pub struct ModelsPageState {
     /// Source of the currently-selected (active) backend, shown in the card
     /// above the tabs. `None` when the daemon is idle.
     pub active_backend: Option<String>,
-    /// Model the user has picked in the active-backend card's dropdown but
-    /// hasn't yet committed via the Load button.
-    pub staged_model: Option<String>,
-    /// Device the user has picked for the staged model (`"none"` for an online
-    /// model that needs no device choice).
-    pub staged_device: Option<String>,
     /// The backend whose configuration sub-view is open, if any (`source`).
     pub configure_backend: Option<String>,
     /// `source` of the installed-backend card whose overflow ("⋯") menu is
@@ -45,8 +39,6 @@ impl Default for ModelsPageState {
         Self {
             models_tabs,
             active_backend: None,
-            staged_model: None,
-            staged_device: None,
             configure_backend: None,
             installed_menu_open: None,
             installed_filters: crate::state::registry::InstalledFilters::default(),
