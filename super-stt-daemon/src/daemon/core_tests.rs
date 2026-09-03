@@ -286,33 +286,6 @@ async fn busy_reset_after_error_cleanup() {
     assert!(daemon.manual_stop_tx.read().await.is_none());
 }
 
-#[tokio::test]
-async fn set_allow_online_models_updates_config() {
-    let daemon = test_daemon().await;
-
-    let request = DaemonRequest {
-        command: "set_allow_online_models".to_string(),
-        audio_data: None,
-        sample_rate: None,
-        client_id: None,
-        event_types: None,
-        client_info: None,
-        since_timestamp: None,
-        limit: None,
-        event_type: None,
-        data: None,
-        language: None,
-        enabled: Some(true),
-    };
-
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "success");
-    assert_eq!(response.allow_online_models, Some(true));
-
-    let config = daemon.config.read().await;
-    assert!(config.online.allow_online_models);
-}
-
 /// An unknown theme name is a client error: `docs/protocol/endpoints/v1/audio_theme.md`
 /// documents `400 invalid_audio_theme`. The daemon must reject it (not silently
 /// apply the default theme and report success).
@@ -451,86 +424,6 @@ async fn set_update_beta_optin_rejects_unknown_value() {
     assert_eq!(daemon.config.read().await.update.beta_optin, before);
 }
 
-#[tokio::test]
-async fn get_allow_online_models_returns_config_value() {
-    let daemon = test_daemon().await;
-
-    // Set it to true first
-    {
-        let mut config = daemon.config.write().await;
-        config.online.allow_online_models = true;
-    }
-
-    let request = DaemonRequest {
-        command: "get_allow_online_models".to_string(),
-        audio_data: None,
-        sample_rate: None,
-        client_id: None,
-        event_types: None,
-        client_info: None,
-        since_timestamp: None,
-        limit: None,
-        event_type: None,
-        data: None,
-        language: None,
-        enabled: None,
-    };
-
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "success");
-    assert_eq!(response.allow_online_models, Some(true));
-}
-
-#[tokio::test]
-async fn set_model_online_rejected_when_disabled() {
-    let daemon = test_daemon().await;
-
-    // Ensure online models are disabled (default)
-    {
-        let config = daemon.config.read().await;
-        assert!(!config.online.allow_online_models);
-    }
-
-    // Online-ness is now resolved from the model's `supported_devices` (`none`),
-    // so the online gate only fires once the model resolves. Register an online
-    // backend serving `whisper-1` so resolution succeeds and the gate engages.
-    *daemon.backends.write().await = vec![fixture_backend(
-        "openai",
-        "github.com/super-stt/openai",
-        "OpenAI",
-        "whisper-1",
-    )];
-
-    // No `source` on the request: it resolves to the selected backend, so
-    // select the one just registered.
-    *daemon.active_backend.write().await = Some("openai".to_string());
-
-    let request = DaemonRequest {
-        command: "set_model".to_string(),
-        audio_data: None,
-        sample_rate: None,
-        client_id: None,
-        event_types: None,
-        client_info: None,
-        since_timestamp: None,
-        limit: None,
-        event_type: None,
-        data: Some(serde_json::json!({ "model": "whisper-1"})),
-        language: None,
-        enabled: None,
-    };
-
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "error");
-    assert_eq!(
-        response.error_code,
-        Some(ErrorCode::OnlineModelsDisabled),
-        "expected the online gate to reject whisper-1, got: {:?} / {:?}",
-        response.error_code,
-        response.message
-    );
-}
-
 /// An omitted `source` resolves to the active backend — not to whichever
 /// installed backend happens to serve the name. Two backends serve
 /// `whisper-tiny` here; the selected one must win regardless of their order in
@@ -589,80 +482,6 @@ async fn an_omitted_source_with_no_active_backend_is_an_error() {
     );
 }
 
-/// The online gate is what these cover, so the model has to *resolve* first —
-/// online-ness is a property of the resolved model (`supported_devices` =
-/// `["none"]`), and the gate is checked after resolution. Without a registered
-/// backend the response is `invalid_model` and a bare `status == "error"`
-/// assertion passes with the gate deleted entirely.
-async fn assert_online_model_rejected(source: &str, dir: &str, model: &str) {
-    let daemon = test_daemon().await;
-    assert!(
-        !daemon.config.read().await.online.allow_online_models,
-        "online models must be disabled for this test to mean anything"
-    );
-    *daemon.backends.write().await = vec![fixture_backend(dir, source, dir, model)];
-
-    let mut request = make_request("set_model");
-    request.data = Some(serde_json::json!({ "model": model, "source": source }));
-
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "error");
-    assert_eq!(
-        response.error_code,
-        Some(ErrorCode::OnlineModelsDisabled),
-        "expected the online gate to reject {model}, got: {:?} / {:?}",
-        response.error_code,
-        response.message
-    );
-}
-
-#[tokio::test]
-async fn set_model_mistral_rejected_when_disabled() {
-    assert_online_model_rejected(
-        "github.com/super-stt/mistral",
-        "mistral",
-        "voxtral-mini-transcribe-v2",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn set_model_deepgram_rejected_when_disabled() {
-    assert_online_model_rejected("github.com/super-stt/deepgram", "deepgram", "nova-3").await;
-}
-
-#[tokio::test]
-async fn toggle_online_models_off_defaults_to_false() {
-    let daemon = test_daemon().await;
-    let config = daemon.config.read().await;
-    assert!(
-        !config.online.allow_online_models,
-        "online models should be disabled by default"
-    );
-}
-
-#[tokio::test]
-async fn toggle_online_models_on_then_off() {
-    let daemon = test_daemon().await;
-
-    // Enable
-    let mut request = make_request("set_allow_online_models");
-    request.enabled = Some(true);
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "success");
-    assert_eq!(response.allow_online_models, Some(true));
-
-    // Disable
-    let mut request = make_request("set_allow_online_models");
-    request.enabled = Some(false);
-    let response = daemon.handle_command(request).await;
-    assert_eq!(response.status, "success");
-    assert_eq!(response.allow_online_models, Some(false));
-
-    let config = daemon.config.read().await;
-    assert!(!config.online.allow_online_models);
-}
-
 #[tokio::test]
 async fn list_models_reflects_discovered_backends() {
     // With no backends installed, the list is empty but well-formed.
@@ -681,38 +500,35 @@ async fn list_models_reflects_discovered_backends() {
     );
 }
 
-/// The online gate must not fire for a local model. This only means anything
-/// once the model resolves — with no backend registered the switch stops at
-/// `invalid_model` and the gate is never reached, so the assertion would hold
-/// with the gate deleted.
+/// Online and local models load alike: there is no runtime gate on online
+/// providers. The choice to send audio to a third party is made once, when
+/// an online backend is installed, and a model's own `supported_devices`
+/// (`none`) is what marks it online for the UI. The load itself fails here —
+/// the fixture has no component on disk — but it must get *past* resolution.
 #[tokio::test]
-async fn set_model_local_works_without_online_toggle() {
+async fn an_online_model_loads_without_a_gate() {
     let daemon = test_daemon().await;
-    let source = "github.com/super-stt/whisper";
-    *daemon.backends.write().await = vec![fixture_backend_local(
-        "whisper",
-        source,
-        "Whisper",
-        "whisper-tiny",
-    )];
-    assert!(!daemon.config.read().await.online.allow_online_models);
+    let source = "github.com/super-stt/openai";
+    *daemon.backends.write().await = vec![fixture_backend("openai", source, "OpenAI", "whisper-1")];
 
     let mut request = make_request("set_model");
-    request.data = Some(serde_json::json!({ "model": "whisper-tiny", "source": source }));
+    request.data = Some(serde_json::json!({ "model": "whisper-1", "source": source }));
 
     let response = daemon.handle_command(request).await;
-    // The load itself fails (the fixture has no files on disk), but it must get
-    // *past* the gate: a local model is never blocked by the online toggle.
-    assert_ne!(
-        response.error_code,
-        Some(ErrorCode::OnlineModelsDisabled),
-        "a local model was blocked by the online toggle: {:?}",
-        response.message
-    );
     assert_ne!(
         response.error_code,
         Some(ErrorCode::InvalidModel),
-        "the model did not resolve, so the gate was never exercised: {:?}",
+        "the model did not resolve: {:?}",
+        response.message
+    );
+    assert!(
+        !response
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains("online models are disabled"),
+        "an online model was blocked: {:?}",
         response.message
     );
 }
@@ -1185,33 +1001,6 @@ async fn set_backend_option_surfaces_reload_failure() {
     assert!(
         msg.to_lowercase().contains("reload"),
         "reload failure should be surfaced, got: {msg}"
-    );
-}
-
-/// Disabling online models while an online model is loaded reverts to a local
-/// model. With no local backend installed, the daemon unloads the online model —
-/// the response must say so rather than claim "all transcription is local".
-#[tokio::test]
-async fn disabling_online_without_local_fallback_surfaces_warning() {
-    let daemon = test_daemon().await;
-    // supported_devices = ["none"] → an online model.
-    seed_loaded_model(&daemon, "m", "github.com/x/online").await;
-    {
-        let mut config = daemon.config.write().await;
-        config.online.allow_online_models = true;
-    }
-
-    let resp = daemon.handle_set_allow_online_models(false).await;
-
-    assert_eq!(resp.status, "success");
-    assert!(
-        daemon.model.read().await.is_none(),
-        "online model should be unloaded"
-    );
-    let msg = resp.message.unwrap_or_default();
-    assert!(
-        msg.to_lowercase().contains("no local"),
-        "no-local-fallback should be surfaced, got: {msg}"
     );
 }
 

@@ -16,8 +16,6 @@ pub struct DaemonConfig {
     pub audio: AudioConfig,
     pub transcription: TranscriptionConfig,
     #[serde(default)]
-    pub online: OnlineConfig,
-    #[serde(default)]
     pub backends: BackendsConfig,
     #[serde(default)]
     pub update: UpdateConfig,
@@ -152,14 +150,6 @@ impl PostProcessorConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct OnlineConfig {
-    /// Whether online models (that send audio to external APIs) are allowed.
-    /// Defaults to false for privacy.
-    #[serde(default)]
-    pub allow_online_models: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionConfig {
     #[serde(default)]
@@ -247,7 +237,6 @@ impl Default for DaemonConfig {
                 active_backend: None,
                 primary_language: None,
             },
-            online: OnlineConfig::default(),
             backends: BackendsConfig::default(),
             update: UpdateConfig::default(),
             post_processor: PostProcessorConfig::default(),

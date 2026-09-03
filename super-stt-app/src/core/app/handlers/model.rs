@@ -3,7 +3,6 @@
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::client::{
     get_active_backend, get_current_device, get_current_model, get_gpu_info, list_available_models,
-    set_allow_online_models,
 };
 use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage};
 use cosmic::prelude::*;
@@ -51,10 +50,6 @@ impl AppModel {
                     cosmic::Action::App(Message::Device(DeviceMessage::DeviceError(e.to_string())))
                 }
             }),
-            // Online backends are gated by the install-time choice to
-            // add an online-capable backend, not a runtime toggle, so
-            // ensure the daemon permits them. Fire-and-forget.
-            Task::perform(set_allow_online_models(true), |_| cosmic::Action::None),
             crate::core::app::handlers::tasks::reload_backends(),
             Task::perform(get_active_backend(), |result| {
                 cosmic::Action::App(Message::ModelsPage(ModelsPageMessage::ActiveBackendLoaded(

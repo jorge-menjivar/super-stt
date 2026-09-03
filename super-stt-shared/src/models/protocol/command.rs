@@ -168,10 +168,6 @@ pub enum Command {
         source: String,
         model: String,
     },
-    SetAllowOnlineModels {
-        enabled: bool,
-    },
-    GetAllowOnlineModels,
     SetCustomModelsDir {
         path: Option<String>,
     },

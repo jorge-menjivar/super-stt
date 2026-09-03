@@ -16,7 +16,6 @@ pub use v1::settings::active_model::{
     cancel_download, get_current_device, get_current_model, get_download_status,
     list_available_models, set_model, unload_active_model,
 };
-pub use v1::settings::allow_online_models::set_allow_online_models;
 pub use v1::settings::audio_theme::{
     get_current_audio_theme, load_audio_themes, set_and_test_audio_theme, set_audio_theme,
 };

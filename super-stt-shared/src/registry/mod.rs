@@ -156,7 +156,14 @@ pub struct RefreshResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UninstallResponse {
     pub uninstalled: bool,
+    /// The backend was filling stage 1, which was emptied before the files
+    /// went.
     pub was_active: bool,
+    /// The backend was filling stage 2 — selected as the post-processor
+    /// backend, loaded or not — which was emptied before the files went.
+    /// Absent from an older daemon's answer, which reads as `false`.
+    #[serde(default)]
+    pub was_post_processor: bool,
 }
 
 pub use super_stt_registry_types::{is_safe_component, is_safe_relative_path};

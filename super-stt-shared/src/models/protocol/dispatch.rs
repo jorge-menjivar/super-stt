@@ -71,8 +71,6 @@ impl TryFrom<DaemonRequest> for Command {
             "set_model_language" => cmd_set_model_language(&request),
             "get_model_language" => cmd_get_model_language(&request),
             "clear_model_language" => cmd_clear_model_language(&request),
-            "set_allow_online_models" => cmd_set_allow_online_models(&request),
-            "get_allow_online_models" => Ok(Command::GetAllowOnlineModels),
             "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
             "get_custom_models_dir" => Ok(Command::GetCustomModelsDir),
             "list_backends" => Ok(Command::ListBackends),
@@ -359,13 +357,6 @@ fn cmd_set_notification_method(request: &DaemonRequest) -> Result<Command, Strin
         .to_string();
 
     Ok(Command::SetNotificationMethod { method })
-}
-
-fn cmd_set_allow_online_models(request: &DaemonRequest) -> Result<Command, String> {
-    let enabled = request
-        .enabled
-        .ok_or("Missing enabled field for set_allow_online_models command")?;
-    Ok(Command::SetAllowOnlineModels { enabled })
 }
 
 fn cmd_set_update_check_enabled(request: &DaemonRequest) -> Result<Command, String> {

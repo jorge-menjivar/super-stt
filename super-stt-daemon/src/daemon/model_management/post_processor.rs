@@ -24,8 +24,8 @@ impl SuperSTTDaemon {
     ///
     /// # Errors
     /// Returns an error if no post-processor is selected, the selection does
-    /// not resolve to an installed `post_processor`-role model, online models
-    /// are disabled and the selection is one, or instantiation fails.
+    /// not resolve to an installed `post_processor`-role model, or
+    /// instantiation fails.
     pub(in crate::daemon) async fn load_configured_post_processor(&self) -> Result<()> {
         let (name, source) = {
             let config = self.config.read().await;
@@ -47,12 +47,6 @@ impl SuperSTTDaemon {
         // best-effort warning after each recording.
         if !definition.is_post_processor() {
             bail!("model {name} is a transcription model, not a post-processing model");
-        }
-        if definition.is_online() && !self.config.read().await.online.allow_online_models {
-            bail!(
-                "post-processor {name} is an online model and online models are disabled; \
-                 enable 'Allow Online Models' in settings first"
-            );
         }
 
         let device_pref = self.config.read().await.effective_device(&source, &name);

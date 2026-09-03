@@ -159,10 +159,6 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_text: Option<String>,
 
-    // Online models
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_online_models: Option<bool>,
-
     // Custom models directory (None = no override, daemon uses default cache)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_models_dir: Option<Option<String>>,
@@ -490,12 +486,6 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_preview_text(mut self, text: String) -> Self {
         self.preview_text = Some(text);
-        self
-    }
-
-    #[must_use]
-    pub fn with_allow_online_models(mut self, allowed: bool) -> Self {
-        self.allow_online_models = Some(allowed);
         self
     }
 

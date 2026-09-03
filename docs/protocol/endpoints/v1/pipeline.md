@@ -264,7 +264,6 @@ passing text through rather than costing the user their words.
 | 400  | `invalid_value`          | `model` missing or empty. To stop a stage, use `DELETE`.             |
 | 400  | `invalid_model`          | No installed backend serves `(model, source)`, or its role does not match this stage |
 | 400  | `invalid_backend`        | `source` omitted and no backend is selected for this stage           |
-| 400  | `online_models_disabled` | The model is online and online models are disabled                   |
 | 409  | `recording_in_progress`  | A recording is in flight                                             |
 | 401  | `invalid_session`        | Token unknown / expired / `exe_changed`                              |
 | 403  | `scope_denied`           | Token lacks the `settings` scope                                     |

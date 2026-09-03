@@ -55,7 +55,7 @@ Content-Type: application/json
 `enabled` is required and must be a bool. A malformed body (missing or wrong
 type) fails JSON parsing before the request reaches the handler and gets a
 generic `400` rejection, not a classified `error_code` — the same behavior as
-[`/allow_online_models`](./allow_online_models.md), the other boolean toggle.
+[`/preview_typing`](./preview_typing.md), the other boolean toggle.
 
 ## `GET /update_check_enabled`
 

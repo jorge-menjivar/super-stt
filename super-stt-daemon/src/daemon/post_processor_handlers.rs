@@ -84,13 +84,6 @@ impl SuperSTTDaemon {
                 ),
             );
         }
-        if definition.is_online() && !self.config.read().await.online.allow_online_models {
-            return DaemonResponse::error_with_code(
-                ErrorCode::OnlineModelsDisabled,
-                "Online models are disabled. Enable 'Allow Online Models' in settings first.",
-            );
-        }
-
         let persist = self
             .set_config_field(|c| c.enable_post_processor(model.clone(), source.clone()))
             .await;

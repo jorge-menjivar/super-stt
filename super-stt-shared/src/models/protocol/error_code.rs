@@ -39,8 +39,6 @@ pub enum ErrorCode {
     CudaUnavailable,
     /// The requested `device` wasn't one the daemon accepts (`cpu`/`cuda`).
     InvalidDevice,
-    /// An online model was requested while online models are disabled.
-    OnlineModelsDisabled,
     /// An unrecognized audio-theme name.
     InvalidAudioTheme,
     /// A language tag the model does not support (or the model isn't
@@ -74,7 +72,6 @@ impl ErrorCode {
             | Self::InvalidBackend
             | Self::CudaUnavailable
             | Self::InvalidDevice
-            | Self::OnlineModelsDisabled
             | Self::InvalidAudioTheme
             | Self::UnsupportedLanguage
             | Self::InvalidValue => 400,

@@ -106,10 +106,6 @@ impl SuperSTTDaemon {
             cmd @ (Command::SetModelLanguage { .. }
             | Command::GetModelLanguage { .. }
             | Command::ClearModelLanguage { .. }) => self.handle_model_language(cmd).await,
-            Command::SetAllowOnlineModels { enabled } => {
-                self.handle_set_allow_online_models(enabled).await
-            }
-            Command::GetAllowOnlineModels => self.handle_get_allow_online_models().await,
             Command::SetCustomModelsDir { path } => self.handle_set_custom_models_dir(path).await,
             Command::GetCustomModelsDir => self.handle_get_custom_models_dir().await,
             Command::ListBackends => self.handle_list_backends().await,

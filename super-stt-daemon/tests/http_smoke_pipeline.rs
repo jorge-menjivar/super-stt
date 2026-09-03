@@ -17,6 +17,7 @@
 //!    say what a stage's backend, and one of its models, can be run on here.
 //! 10. `/pipeline/{stage}/model/{cancel,reload}` answer for every stage, each
 //!     about its own model.
+//! 11. Uninstalling a backend empties every stage it was filling.
 //!
 //! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
 //! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
@@ -943,4 +944,37 @@ async fn every_stage_answers_cancel_and_reload() {
         assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
         assert_eq!(body["error_code"], "unknown_stage");
     }
+}
+
+/// The reported gap: uninstalling a backend emptied stage 1 and nothing
+/// else, so a backend selected as the post-processor kept its selection —
+/// and, when loaded, its subprocess — pointed at a directory that no longer
+/// existed. Both stages are emptied now, and the answer says which were.
+#[tokio::test]
+async fn uninstalling_a_backend_empties_every_stage_it_filled() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    let (status, _) = post_req(
+        &sock,
+        PP_STAGE,
+        &token,
+        serde_json::json!({ "source": PP_ONLY_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = get(&sock, PP_STAGE, &token).await;
+    assert_eq!(body["stage"]["source"], PP_ONLY_SOURCE);
+
+    let encoded = PP_ONLY_SOURCE.replace('/', "%2F");
+    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["uninstalled"], true);
+    assert_eq!(body["was_active"], false, "it was never stage 1's");
+    assert_eq!(body["was_post_processor"], true);
+
+    // The selection went with the files.
+    let (status, body) = get(&sock, PP_STAGE, &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert!(body["stage"]["source"].is_null(), "body: {body}");
+    assert!(body["stage"]["model"].is_null(), "body: {body}");
 }

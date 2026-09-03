@@ -128,69 +128,6 @@ fn record_command_valid_stop_mode_parses() {
 }
 
 #[test]
-fn set_allow_online_models_parses() {
-    let mut request = make_request("set_allow_online_models", None);
-    request.enabled = Some(true);
-    let command = Command::try_from(request).expect("command should parse");
-    match command {
-        Command::SetAllowOnlineModels { enabled } => assert!(enabled),
-        _ => panic!("expected Command::SetAllowOnlineModels"),
-    }
-}
-
-#[test]
-fn set_allow_online_models_missing_enabled_fails() {
-    let request = make_request("set_allow_online_models", None);
-    let result = Command::try_from(request);
-    assert!(result.is_err());
-}
-
-#[test]
-fn get_allow_online_models_parses() {
-    let request = make_request("get_allow_online_models", None);
-    let command = Command::try_from(request).expect("command should parse");
-    assert!(matches!(command, Command::GetAllowOnlineModels));
-}
-
-#[test]
-fn response_with_allow_online_models() {
-    let response = DaemonResponse::success().with_allow_online_models(true);
-    assert_eq!(response.allow_online_models, Some(true));
-
-    let json = serde_json::to_value(&response).unwrap();
-    assert_eq!(json["allow_online_models"], true);
-}
-
-#[test]
-fn set_allow_online_models_false() {
-    let mut request = make_request("set_allow_online_models", None);
-    request.enabled = Some(false);
-    let command = Command::try_from(request).expect("command should parse");
-    match command {
-        Command::SetAllowOnlineModels { enabled } => assert!(!enabled),
-        _ => panic!("expected Command::SetAllowOnlineModels"),
-    }
-}
-
-#[test]
-fn response_allow_online_models_false_serializes() {
-    let response = DaemonResponse::success().with_allow_online_models(false);
-    assert_eq!(response.allow_online_models, Some(false));
-
-    let json = serde_json::to_value(&response).unwrap();
-    assert_eq!(json["allow_online_models"], false);
-}
-
-#[test]
-fn response_allow_online_models_skipped_when_none() {
-    let response = DaemonResponse::success();
-    assert_eq!(response.allow_online_models, None);
-
-    let json = serde_json::to_value(&response).unwrap();
-    assert!(json.get("allow_online_models").is_none());
-}
-
-#[test]
 fn set_model_parses_online_models() {
     let cases: &[&str] = &[
         "whisper-1",

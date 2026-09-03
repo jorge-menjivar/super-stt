@@ -69,7 +69,6 @@ macro_rules! settings_toggle {
     };
 }
 
-pub(crate) mod allow_online_models;
 pub(crate) mod audio_theme;
 pub(crate) mod backends;
 pub(crate) mod custom_models_dir;
@@ -150,11 +149,6 @@ pub(crate) fn routes() -> Router<AppState> {
         .route(
             "/preview_typing",
             get(preview_typing::get_preview_typing).post(preview_typing::set_preview_typing),
-        )
-        .route(
-            "/allow_online_models",
-            get(allow_online_models::get_allow_online_models)
-                .post(allow_online_models::set_allow_online_models),
         )
         .route(
             "/custom_models_dir",
