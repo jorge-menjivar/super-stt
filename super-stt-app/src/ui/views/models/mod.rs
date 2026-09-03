@@ -35,7 +35,12 @@ use crate::ui::messages::Message;
 /// The post-processor models one backend serves, in the same order the
 /// Post-processing dropdown renders them — the settings handler resolves a
 /// picked index through this, so both sides must agree.
-pub(crate) use post_processing::post_processor_models;
+/// The models `backend` serves that a stage can run.
+///
+/// The one place a stage's eligibility is decided: a dropdown selection is an
+/// index into this list, so the view and the handler must build it the same
+/// way.
+pub(crate) use roles::models_for as models_for_stage;
 
 pub use post_processing::post_processor_sheet;
 

@@ -19,6 +19,7 @@ impl AppModel {
             Message::Daemon(m) => self.handle_daemon_messages(m),
             Message::Model(m) => self.handle_model_messages(m),
             Message::ModelsPage(m) => self.handle_models_page_messages(m),
+            Message::Stage(m) => self.handle_stage_messages(m),
             Message::Device(m) => self.handle_device_messages(m),
             Message::Download(m) => self.handle_download_messages(m),
             Message::PreviewTyping(m) => self.handle_preview_typing_messages(m),

@@ -3,7 +3,7 @@
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::client::{get_gpu_info, get_stage, list_available_models};
 use crate::state::device_offers::STT_STAGE;
-use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage};
+use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage, StageMessage};
 use cosmic::prelude::*;
 use log::info;
 use log::warn;
@@ -52,9 +52,10 @@ impl AppModel {
             }),
             crate::core::app::handlers::tasks::reload_backends(),
             Task::perform(get_stage(STT_STAGE), |result| {
-                cosmic::Action::App(Message::ModelsPage(ModelsPageMessage::ActiveBackendLoaded(
-                    result.ok().and_then(|stage| stage.source),
-                )))
+                cosmic::Action::App(Message::Stage(StageMessage::BackendSelected {
+                    stage: STT_STAGE,
+                    source: result.ok().and_then(|stage| stage.source),
+                }))
             }),
             Task::perform(get_gpu_info(), |result| {
                 cosmic::Action::App(Message::ModelsPage(ModelsPageMessage::GpuInfoLoaded(
@@ -182,7 +183,7 @@ impl AppModel {
 /// cap it at 200 chars for display. Skips the substitution when `home` is empty
 /// — an empty `from` makes `str::replace` insert the replacement at every char
 /// boundary, shredding the message (Tier 1 #16).
-fn sanitize_home(err: &str, home: &str) -> String {
+pub(in crate::core::app) fn sanitize_home(err: &str, home: &str) -> String {
     if home.is_empty() {
         err.chars().take(200).collect()
     } else {

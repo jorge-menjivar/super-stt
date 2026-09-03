@@ -8,7 +8,8 @@ use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::state::ContextPage;
 use crate::ui::icons;
-use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
+use crate::state::device_offers::STT_STAGE;
+use crate::ui::messages::{Message, ShellMessage, StageMessage};
 
 use super::active::backend_glyph_tile;
 use super::chips::{
@@ -122,9 +123,10 @@ fn select_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static
     } else {
         button::suggested("Select")
             .leading_icon(icons::phosphor_handle(icons::PLAY))
-            .on_press(Message::ModelsPage(ModelsPageMessage::SelectBackend(
-                backend.source.clone(),
-            )))
+            .on_press(Message::Stage(StageMessage::SelectBackend {
+                stage: STT_STAGE,
+                source: backend.source.clone(),
+            }))
             .into()
     };
 

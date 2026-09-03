@@ -2,11 +2,10 @@
 
 use crate::core::app::AppModel;
 use crate::daemon::client::{
-    clear_stage_backend, get_model_device, list_model_devices, list_stage_devices,
-    set_model_device, set_notification_method, set_preview_typing, set_recording_stop_mode,
-    set_stage_backend, set_stage_model, set_write_method, test_write_method, unload_stage_model,
+    set_notification_method, set_preview_typing, set_recording_stop_mode, set_write_method,
+    test_write_method,
 };
-use crate::state::device_offers::{PP_STAGE, staged_device};
+use crate::state::device_offers::PP_STAGE;
 use crate::ui::messages::{
     Message, NotificationMethodMessage, PostProcessorMessage, PreviewTypingMessage,
     RecordingStopModeMessage, WriteMethodMessage,
@@ -56,120 +55,46 @@ impl AppModel {
         }
     }
 
-    /// Handle post-processor messages.
+    /// Handle post-processor messages: stage 2's own block arriving from the
+    /// daemon.
     ///
-    /// Confirm-then-apply throughout, like every other setting here: the local
-    /// state is replaced only by what the daemon reports back, so a refused or
-    /// failed save leaves the card showing the truth rather than an optimistic
-    /// value that never took.
+    /// Selecting a backend, staging a model or a device, loading and unloading
+    /// all go through [`StageMessage`] — the same handler every stage uses.
+    /// What is left here is the state read-back, which stage 1 does not have a
+    /// counterpart for: it announces its identity through `ModelMessage`
+    /// events instead.
     pub(in crate::core::app) fn handle_post_processor_messages(
         &mut self,
         message: PostProcessorMessage,
     ) -> Task<cosmic::Action<Message>> {
         match message {
-            // Selecting a backend is the "chosen, not running" state, the same
-            // one `SelectBackend` gives transcription — and it goes to the same
-            // shape of endpoint, so nothing loads until a model is enabled.
-            PostProcessorMessage::SelectBackend(source) => {
-                self.staged_post_processor = None;
-                self.staged_post_processor_device = None;
-                // The choice came from the picker sheet; dismiss it now that it
-                // has been made, exactly as `SelectBackend` does.
-                self.core.window.show_context = false;
-                Task::perform(
-                    set_stage_backend(PP_STAGE, source),
-                    Self::reload_post_processor,
-                )
-            }
-
-            PostProcessorMessage::Deselect => {
-                self.staged_post_processor = None;
-                self.staged_post_processor_device = None;
-                Task::perform(clear_stage_backend(PP_STAGE), Self::reload_post_processor)
-            }
-
-            // Local only, exactly like staging a transcription model: picking
-            // from the dropdown must not start running a model.
-            PostProcessorMessage::Staged(index) => self.stage_post_processor(index),
-
-            PostProcessorMessage::StagedDevice(device) => {
-                self.staged_post_processor_device = Some(device);
-                Task::none()
-            }
-
-            PostProcessorMessage::StagedDevicesLoaded {
-                source,
-                model,
-                devices,
-                current,
-            } => {
-                // The answer describes the backend selected when it was asked;
-                // a switch since then makes it about one this card no longer
-                // shows.
-                if self.post_processor.source.as_deref() != Some(source.as_str()) {
-                    return Task::none();
-                }
-                self.device_offers
-                    .record(PP_STAGE, source, Some(model.clone()), devices.clone());
-                // Likewise for the model: a pick made since the ask wins.
-                if self
-                    .staged_post_processor
-                    .as_ref()
-                    .is_some_and(|(staged, _)| *staged == model)
-                {
-                    self.staged_post_processor_device = staged_device(&devices, current);
-                }
-                Task::none()
-            }
-
-            PostProcessorMessage::BackendDevicesLoaded { source, devices } => {
-                if self.post_processor.source.as_deref() == Some(source.as_str()) {
-                    self.device_offers.record(PP_STAGE, source, None, devices);
-                }
-                Task::none()
-            }
-
-            PostProcessorMessage::Enable => self.enable_post_processor(),
-
-            // Off, but the selection is kept: the user is turning the feature
-            // off, not forgetting which model they picked. That is exactly what
-            // `DELETE /post_processor` means, so the call carries no state to
-            // echo back and cannot accidentally clear the backend.
-            PostProcessorMessage::Disable => {
-                Task::perform(unload_stage_model(PP_STAGE), Self::reload_post_processor)
-            }
-
             PostProcessorMessage::ReloadRequested => Task::perform(
                 crate::daemon::client::get_stage(PP_STAGE),
                 Self::reloaded_post_processor,
             ),
 
             PostProcessorMessage::Loaded(state) => {
-                // The daemon is authoritative, so a staged pick that has landed
-                // is no longer pending. Clearing it also keeps the dropdown
-                // showing the daemon's selection after a refused save.
-                if self.staged_post_processor == state.selection() {
-                    self.staged_post_processor = None;
-                    self.staged_post_processor_device = None;
-                }
                 self.post_processor = state;
                 self.clear_action_error(crate::state::ErrorScope::PostProcessing);
-                // This write is also the end of stage 2's model operation: the
-                // daemon's `ready` event reports stage 1's load, and nothing
-                // reports this one, so the progress and loading lines would
-                // otherwise sit on the card until the stall watchdog turned
-                // them into an error.
+                // Stage 2 has no completion event of its own: the daemon's
+                // `ready` reports stage 1's load, and nothing reports this one,
+                // so the progress and loading lines would otherwise sit on the
+                // card until the stall watchdog turned them into an error.
                 self.finish_post_processor_operation();
-                // The card's device chips are the daemon's answer for the
-                // backend now selected, so every selection asks again.
-                let backend_devices = self
-                    .post_processor
-                    .source
-                    .clone()
-                    .map_or_else(Task::none, Self::load_post_processor_devices);
-                // The model the daemon remembers is the one the card offers to
-                // load, so it is staged here and its device answer fetched.
-                Task::batch([backend_devices, self.stage_selected_post_processor()])
+                let selection = self.post_processor.selection();
+                let source = self.post_processor.source.clone();
+                Task::batch([
+                    // The card's device chips are the daemon's answer for the
+                    // backend now selected, so every selection asks again.
+                    source.map_or_else(Task::none, |source| {
+                        Self::load_backend_devices(PP_STAGE, source)
+                    }),
+                    // The model the daemon remembers is the one the card offers
+                    // to load, so it is staged like any other pick.
+                    selection.map_or_else(Task::none, |(model, source)| {
+                        self.stage_selection_if_unstaged(PP_STAGE, &model, &source)
+                    }),
+                ])
             }
 
             PostProcessorMessage::Error(err) => {
@@ -186,207 +111,17 @@ impl AppModel {
         }
     }
 
-    /// Stage the post-processor at `index` in the selected backend's list,
-    /// then ask the daemon what it can run on and which device it has — the
-    /// same two steps staging a transcription model takes.
-    ///
-    /// The device stays unset until that answer lands: an empty answer is the
-    /// blocking "this install can run it on nothing" case, so staging a device
-    /// before the answer would be guessing at exactly the case that must not
-    /// guess.
-    fn stage_post_processor(&mut self, index: usize) -> Task<cosmic::Action<Message>> {
-        let Some(backend) = self
-            .post_processor
-            .source
-            .as_deref()
-            .and_then(|source| self.backends.iter().find(|b| b.source == source))
-        else {
-            return Task::none();
-        };
-        let Some(model) = crate::ui::views::models::post_processor_models(backend)
-            .into_iter()
-            .nth(index)
-        else {
-            return Task::none();
-        };
-        let source = backend.source.clone();
-        self.staged_post_processor = Some((model.clone(), source.clone()));
-        self.staged_post_processor_device = None;
-        self.clear_action_error(crate::state::ErrorScope::PostProcessing);
-        self.load_staged_post_processor(source, model)
-    }
-
-    /// Stage the model the daemon already has selected, when the user has not
-    /// staged one of their own.
-    ///
-    /// The card shows that model in its dropdown and Load commits it, so it is
-    /// a pick like any other and needs its device answer fetched. Without this
-    /// the pickers disagreed after an unload: the model dropdown fell back to
-    /// the daemon's selection while the device dropdown, which reads the
-    /// staged pick, stayed hidden — leaving no way to change the device except
-    /// by selecting the backend again.
-    fn stage_selected_post_processor(&mut self) -> Task<cosmic::Action<Message>> {
-        let Some((model, source)) = selection_to_stage(
-            self.staged_post_processor.as_ref(),
-            self.post_processor.selection(),
-        ) else {
-            return Task::none();
-        };
-        self.staged_post_processor = Some((model.clone(), source.clone()));
-        self.staged_post_processor_device = None;
-        self.load_staged_post_processor(source, model)
-    }
-
-    /// What a freshly staged stage-2 pick needs from the daemon: the devices it
-    /// can run on, and its language resolution block.
-    ///
-    /// The same two fetches `StageActiveModel` makes for stage 1 — the card
-    /// shows a device picker and a language control, so both answers have to be
-    /// asked for or the controls render neutral.
-    fn load_staged_post_processor(
-        &self,
-        source: String,
-        model: String,
-    ) -> Task<cosmic::Action<Message>> {
-        Task::batch([
-            Self::load_staged_post_processor_devices(source.clone(), model.clone()),
-            self.load_model_language(source, model),
-        ])
-    }
-
-    /// Ask the daemon what `model` can run on in stage 2 and which device it
-    /// is already recorded on, for [`PostProcessorMessage::StagedDevicesLoaded`].
-    fn load_staged_post_processor_devices(
-        source: String,
-        model: String,
-    ) -> Task<cosmic::Action<Message>> {
-        let asked = model.clone();
-        Task::perform(
-            async move {
-                let devices = list_model_devices(PP_STAGE, model.clone()).await?;
-                // The recorded device is the nicety, not the requirement: a
-                // model that has never been loaded has none, and a failed read
-                // only costs the restaging.
-                let current = get_model_device(PP_STAGE, model)
-                    .await
-                    .ok()
-                    .map(|d| d.device);
-                Ok((devices, current))
-            },
-            move |result: super_stt_shared::daemon::http_client::HttpResult<_>| match result {
-                Ok((devices, current)) => cosmic::Action::App(Message::PostProcessor(
-                    PostProcessorMessage::StagedDevicesLoaded {
-                        source: source.clone(),
-                        model: asked.clone(),
-                        devices,
-                        current,
-                    },
-                )),
-                // Nothing is staged onto a device the daemon never offered, so
-                // a failed read leaves the picker hidden rather than guessing.
-                Err(e) => {
-                    log::warn!("Could not read the devices for {asked}: {e}");
-                    cosmic::Action::None
-                }
-            },
-        )
-    }
-
     /// End a stage-2 model operation, leaving a stage-1 one alone.
     ///
     /// Stage 2 has no completion event of its own: the daemon's `ready` is
-    /// stage 1's, and a post-processor's download and load are reported only
-    /// by the `download_progress` ticks that name its model. The write's own
+    /// stage 1's, and a post-processor's download and load are reported only by
+    /// the `download_progress` ticks that name its model. The write's own
     /// response is the end of it.
     pub(in crate::core::app) fn finish_post_processor_operation(&mut self) {
         self.model_operations.set_ready(PP_STAGE);
     }
 
-    /// Ask the daemon which devices the post-processor backend can run its
-    /// models on, for [`PostProcessorMessage::BackendDevicesLoaded`].
-    fn load_post_processor_devices(source: String) -> Task<cosmic::Action<Message>> {
-        Task::perform(list_stage_devices(PP_STAGE), move |result| match result {
-            Ok(devices) => cosmic::Action::App(Message::PostProcessor(
-                PostProcessorMessage::BackendDevicesLoaded {
-                    source: source.clone(),
-                    devices,
-                },
-            )),
-            // The chips fall back to the catalog's own reading until an
-            // answer lands, so a failed read costs the narrowing, not the row.
-            Err(e) => {
-                log::warn!("Could not read the devices for {source}: {e}");
-                cosmic::Action::None
-            }
-        })
-    }
-
-    /// Commit the staged pick — or re-enable the daemon's own selection —
-    /// setting the staged model's device first when one is staged.
-    fn enable_post_processor(&mut self) -> Task<cosmic::Action<Message>> {
-        // The staged pick wins; otherwise re-enable whatever model is already
-        // selected. With neither — a backend chosen but no model picked —
-        // there is nothing to run.
-        let Some((model, source)) = self
-            .staged_post_processor
-            .clone()
-            .or_else(|| self.post_processor.selection())
-        else {
-            self.set_action_error(
-                crate::state::ErrorScope::PostProcessing,
-                "Choose a model first.".to_string(),
-            );
-            return Task::none();
-        };
-        // The staged device belongs to the staged model above — including the
-        // daemon's own selection, which is staged as soon as its state lands.
-        // Re-enabling therefore sends the device the picker is showing, which
-        // is the model's recorded one until the user picks another.
-        let device = self
-            .staged_post_processor
-            .as_ref()
-            .and_then(|_| self.staged_post_processor_device.clone());
-        // Mark stage 2 busy before the request goes out, as the transcription
-        // card does. This is what the card's own Load button reads, so without
-        // it a second click could fire a second load while the first is still
-        // in flight. Both outcomes below end it: the reload's `Loaded` and the
-        // failure's `Error` each finish the stage-2 operation.
-        self.set_model_loading(
-            model.clone(),
-            "Initiating model switch...".to_string(),
-            PP_STAGE,
-        );
-        Task::perform(
-            async move {
-                // Set before the load so the load picks it up; for a model
-                // that is not loaded the daemon only records it.
-                if let Some(device) = device {
-                    set_model_device(PP_STAGE, model.clone(), device).await?;
-                }
-                set_stage_model(PP_STAGE, model, Some(source)).await
-            },
-            Self::reload_post_processor,
-        )
-    }
-
-    /// Map a set result into the follow-up that re-reads the daemon's own
-    /// state. The write's response carries no payload, and the daemon may have
-    /// adjusted things (a selection that would not load, say), so the card
-    /// renders what the daemon reports rather than what was sent.
-    fn reload_post_processor(
-        result: super_stt_shared::daemon::http_client::HttpResult<()>,
-    ) -> cosmic::Action<Message> {
-        match result {
-            Ok(()) => cosmic::Action::App(Message::PostProcessor(
-                PostProcessorMessage::ReloadRequested,
-            )),
-            Err(e) => cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Error(
-                e.to_string(),
-            ))),
-        }
-    }
-
-    /// Map a `GET /post_processor` result into its message.
+    /// Map a `GET /pipeline/2` result into its message.
     fn reloaded_post_processor(
         result: super_stt_shared::daemon::http_client::HttpResult<
             crate::daemon::client::StageState,
@@ -638,61 +373,9 @@ fn countdown_tick_task() -> Task<cosmic::Action<Message>> {
     )
 }
 
-/// The selection that needs staging, if any: nothing while the user has a pick
-/// of their own, otherwise whatever the daemon remembers.
-///
-/// The daemon's selection is what the card's dropdown shows and what Load
-/// commits, so it has to be staged for the device picker — which reads the
-/// staged pick — to have a model to ask about. Leaving it unstaged is what
-/// hid the device picker after an unload.
-fn selection_to_stage(
-    staged: Option<&(String, String)>,
-    selection: Option<(String, String)>,
-) -> Option<(String, String)> {
-    if staged.is_some() {
-        return None;
-    }
-    selection
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{TEST_COUNTDOWN_SECS, Tick, advance_countdown, selection_to_stage};
-
-    fn pick(model: &str, source: &str) -> (String, String) {
-        (model.to_string(), source.to_string())
-    }
-
-    /// The regression: after an unload the daemon still remembers the model,
-    /// nothing is staged, and the device picker has nothing to key on until
-    /// that selection is staged.
-    #[test]
-    fn the_daemons_selection_is_staged_when_the_user_has_no_pick() {
-        assert_eq!(
-            selection_to_stage(None, Some(pick("s1-mini-q4_k_m", "github.com/x/s1"))),
-            Some(pick("s1-mini-q4_k_m", "github.com/x/s1")),
-        );
-    }
-
-    /// A pick the user made outranks the daemon's memory, or every reload
-    /// would throw their choice away.
-    #[test]
-    fn a_users_own_pick_is_left_alone() {
-        let staged = pick("s1-mini-q8_0", "github.com/x/s1");
-        assert_eq!(
-            selection_to_stage(
-                Some(&staged),
-                Some(pick("s1-mini-q4_k_m", "github.com/x/s1"))
-            ),
-            None,
-        );
-    }
-
-    /// A backend chosen with no model yet has nothing to stage.
-    #[test]
-    fn nothing_is_staged_without_a_selection() {
-        assert_eq!(selection_to_stage(None, None), None);
-    }
+    use super::{TEST_COUNTDOWN_SECS, Tick, advance_countdown};
 
     /// The full run from button press to typing: one tick per second, firing
     /// on the last. Getting this wrong types either a second early or never.
