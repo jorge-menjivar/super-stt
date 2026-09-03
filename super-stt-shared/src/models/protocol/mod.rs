@@ -13,7 +13,10 @@ mod tests;
 pub use command::Command;
 pub use daemon_status::DaemonStatusEvent;
 pub use error_code::ErrorCode;
-pub use pipeline::{POST_PROCESSOR_STAGE, TRANSCRIPTION_STAGE};
+pub use pipeline::{
+    POST_PROCESSOR_STAGE, StageReport, StageRole, StageSwitch, SwitchDownload, SwitchTarget,
+    TRANSCRIPTION_STAGE,
+};
 pub use request::DaemonRequest;
 pub use response::{
     CudaHostInfo, DaemonResponse, DownloadProgress, GpuHostInfo, GpuInfo, NotificationEvent,

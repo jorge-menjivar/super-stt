@@ -7,8 +7,8 @@ use cosmic::widget::{self, button, text};
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::state::ContextPage;
-use crate::ui::icons;
 use crate::state::device_offers::STT_STAGE;
+use crate::ui::icons;
 use crate::ui::messages::{Message, ShellMessage, StageMessage};
 
 use super::active::backend_glyph_tile;

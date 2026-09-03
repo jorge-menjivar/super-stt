@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use super::pipeline::StageReport;
 use crate::models::theme::AudioTheme;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -94,16 +95,15 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_processor: Option<Value>,
 
-    // The transcription pipeline (GET /pipeline): the ordered stages, each
-    // `{ stage, role, source, name, model, loaded }`. See
+    // The transcription pipeline (GET /pipeline): the ordered stages. See
     // docs/protocol/endpoints/v1/pipeline.md.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub pipeline: Option<Value>,
+    pub pipeline: Option<Vec<StageReport>>,
 
     // One stage of it (GET /pipeline/{stage}): the same object the array
     // carries, for a client that only cares about one position.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub stage: Option<Value>,
+    pub stage: Option<StageReport>,
 
     // GPU inventory (GET /gpu_info): array of `GpuInfo` objects.
     // See docs/protocol/endpoints/v1/gpu_info.md.
@@ -170,6 +170,7 @@ pub struct DaemonResponse {
     pub language: Option<Value>,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DownloadProgress {
     pub model_name: String,
@@ -200,6 +201,7 @@ pub struct DownloadProgress {
     pub error: Option<String>,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NotificationEvent {
     #[serde(rename = "type")]
@@ -394,13 +396,13 @@ impl DaemonResponse {
     }
 
     #[must_use]
-    pub fn with_pipeline(mut self, pipeline: Value) -> Self {
+    pub fn with_pipeline(mut self, pipeline: Vec<StageReport>) -> Self {
         self.pipeline = Some(pipeline);
         self
     }
 
     #[must_use]
-    pub fn with_stage(mut self, stage: Value) -> Self {
+    pub fn with_stage(mut self, stage: StageReport) -> Self {
         self.stage = Some(stage);
         self
     }
@@ -496,6 +498,7 @@ impl DaemonResponse {
     }
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 /// One GPU as reported by [`GET /gpu_info`](../../../docs/protocol/endpoints/v1/gpu_info.md).
 /// `vendor` is a lowercase `snake_case` tag (`nvidia` / `amd` / `intel` /
 /// `apple` / `unknown`). `total_bytes` is dedicated VRAM for discrete GPUs and
@@ -518,6 +521,7 @@ pub struct GpuInfo {
     pub arch_target: Option<String>,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 /// Host-wide GPU toolchain/driver versions reported on
 /// [`GET /gpu_info`](../../../docs/protocol/endpoints/v1/gpu_info.md), independent
 /// of any one GPU. Each field is `null` when that accelerator's runtime isn't
@@ -533,12 +537,14 @@ pub struct GpuHostInfo {
     pub vulkan: Option<VulkanHostInfo>,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 /// The installed NVIDIA driver's CUDA version, e.g. `"13.3"`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CudaHostInfo {
     pub driver_version: String,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 /// The installed `ROCm` userspace release, e.g. `"6.2.4"`. Advisory only — see
 /// `docs/protocol/endpoints/v1/gpu_info.md`; `arch_target` is what a build must
 /// actually match.
@@ -547,6 +553,7 @@ pub struct RocmHostInfo {
     pub version: String,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 /// The highest Vulkan API version any installed driver advertises, e.g.
 /// `"1.3.280"`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::http::internal::helpers::dispatch::{
-    build_request, build_transcribe_request, dispatch, json_response,
+    build_request, build_transcribe_request, dispatch, json_response, narrowed,
 };
 use crate::daemon::http::internal::helpers::responses::{
     model_not_loaded_response, recording_in_progress_response,
 };
 use crate::daemon::http::state::AppState;
+use crate::daemon::http::wire::{Ack, ErrorEnvelope, ReasonEnvelope};
 // Only the wasm-backends realtime handler references the daemon type / bare
 // `Response`; gated so the subprocess-only and no-backend builds stay warning-clean.
 #[cfg(feature = "wasm-backends")]
@@ -13,7 +14,6 @@ use crate::daemon::types::SuperSTTDaemon;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-#[cfg(feature = "wasm-backends")]
 use axum::response::Response;
 use std::sync::Arc;
 use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
@@ -38,9 +38,33 @@ const MAX_REALTIME_SESSIONS: usize = 4;
 static REALTIME_SESSIONS: tokio::sync::Semaphore =
     tokio::sync::Semaphore::const_new(MAX_REALTIME_SESSIONS);
 
+#[cfg(feature = "wasm-backends")]
+#[utoipa::path(
+    get,
+    path = "/transcribe/realtime",
+    tag = "transcribe",
+    summary = "Open a realtime transcription session (WebSocket)",
+    description = "\
+An HTTP/1.1 upgrade to a WebSocket, bridged to the loaded model's realtime \
+session. Send audio frames, receive transcript frames as they form.
+
+Only realtime-capable models serve this. The daemon caps concurrent sessions and \
+answers `503` rather than queueing beyond it; a session with no incoming frame for \
+a minute is treated as dead and dropped.
+
+Being a WebSocket, the frame protocol is not describable in OpenAPI — see \
+`docs/protocol/wit/realtime.wit` for the message shapes.",
+    security(("session_token" = ["transcribe"])),
+    responses(
+        (status = 101, description = "Upgraded; the realtime session is open."),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `transcribe` scope.", body = ErrorEnvelope),
+        (status = 409, description = "No model is loaded, or the loaded model has no realtime session.", body = ErrorEnvelope),
+        (status = 503, description = "Too many concurrent realtime sessions.", body = ErrorEnvelope),
+    ),
+)]
 /// `GET /v1/transcribe/realtime` — upgrade the connection and bridge it to the
 /// active model's realtime session.
-#[cfg(feature = "wasm-backends")]
 pub(crate) async fn realtime_ws_handler(
     ws: axum::extract::ws::WebSocketUpgrade,
     State(state): State<AppState>,
@@ -247,6 +271,54 @@ fn body_flag(body: &serde_json::Value, key: &str, default: bool) -> bool {
 /// touching the microphone and return a single JSON `{ transcription }` (or a
 /// coded error). Rejects `stream_realtime` combined with `audio_data` per the
 /// contract.
+/// The body of `POST /transcribe`. Every field is optional; which combination
+/// you send selects one of the four behaviours the endpoint documents.
+///
+/// Declared, not deserialized. The handler reads the body as raw JSON so it can
+/// *move* a large `audio_data` buffer out of it rather than copying it into a
+/// second owned `Vec`; this type is what that body's shape is, published in the
+/// `OpenAPI` document and kept beside the handler that parses it.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+#[allow(dead_code)]
+pub(crate) struct TranscribeBody {
+    /// Mono PCM samples in `-1.0..=1.0`. Present means "transcribe this buffer"
+    /// — the daemon does not touch the microphone, and answers with one JSON
+    /// result rather than a stream.
+    #[serde(default)]
+    pub(crate) audio_data: Option<Vec<f32>>,
+    /// Sample rate of `audio_data`, in Hz. Ignored on the microphone paths.
+    #[serde(default)]
+    #[schema(example = 16000)]
+    pub(crate) sample_rate: Option<u32>,
+    /// BCP-47 tag, or `auto`, overriding the configured language for this
+    /// request only.
+    #[serde(default)]
+    #[schema(example = "es")]
+    pub(crate) language: Option<String>,
+    /// Microphone paths only. `false` (the default) starts the recording and
+    /// returns immediately; `true` holds the connection open and streams the
+    /// result.
+    #[serde(default)]
+    pub(crate) wait: Option<bool>,
+    /// Microphone paths only, and only with `wait: true`: also emit incremental
+    /// `preview` frames as the transcript forms. Rejected with `400` alongside
+    /// `audio_data`, which has nothing to stream.
+    #[serde(default)]
+    pub(crate) stream_realtime: Option<bool>,
+}
+
+/// A one-shot transcription result, for the pre-captured path.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub(crate) struct Transcription {
+    /// Always `success`.
+    #[schema(example = "success")]
+    status: &'static str,
+    /// The recognized text. Empty when the audio held no speech — which is a
+    /// successful transcription, not a failure.
+    #[schema(example = "hello world")]
+    transcription: String,
+}
+
 async fn transcribe_precaptured(s: &AppState, body: serde_json::Value) -> axum::response::Response {
     if body_flag(&body, "stream_realtime", false) {
         return json_response(&DaemonResponse::error_with_code(
@@ -260,7 +332,10 @@ async fn transcribe_precaptured(s: &AppState, body: serde_json::Value) -> axum::
         Err(resp) => return json_response(&resp).into_response(),
     };
     let resp = dispatch(&s.daemon, req).await;
-    json_response(&resp).into_response()
+    narrowed(resp, |r| Transcription {
+        status: "success",
+        transcription: r.transcription.unwrap_or_default(),
+    })
 }
 
 /// `POST /transcribe`. One endpoint, four use cases dispatched on the body
@@ -275,6 +350,46 @@ async fn transcribe_precaptured(s: &AppState, body: serde_json::Value) -> axum::
 /// returns `409 recording_in_progress`; a start with no model loaded returns
 /// `409 model_not_loaded` (both mic sub-paths, before the `202`/SSE envelope
 /// commits).
+#[utoipa::path(
+    post,
+    path = "/transcribe",
+    tag = "transcribe",
+    summary = "Transcribe supplied audio, or start a microphone recording",
+    description = "\
+One endpoint with four behaviours, selected by the body:
+
+| Body | Behaviour | Response |
+|---|---|---|
+| `audio_data` present | Transcribe the supplied buffer; the microphone is never opened | `200` JSON with `transcription` |
+| no `audio_data`, `wait: false` (default) | Start recording and detach; stop it with `POST /transcribe/stop` | `202` with `message: \"Recording started\"` |
+| `wait: true` | Record, then stream the result | `200 text/event-stream`, one `done` frame |
+| `wait: true`, `stream_realtime: true` | As above, plus incremental previews | `200 text/event-stream`, `preview` frames then `done` |
+
+On the streaming paths a daemon-side failure arrives as a single `error` frame, and \
+closing the connection stops the recording. Frames are:
+
+| `event:` | `data:` |
+|---|---|
+| `preview` | `{ \"text\": \"hello wor…\" }` |
+| `done` | `{ \"transcription\": \"hello world\" }` |
+| `error` | `{ \"message\": \"…\" }` |
+
+Starting while a recording is already in flight is `409 recording_in_progress` — \
+this endpoint only ever *starts* one. Read `busy` from `GET /status` and call \
+`POST /transcribe/stop` to end the running capture.",
+    request_body(content = TranscribeBody, description = "All fields optional; the combination selects the behaviour."),
+    security(("session_token" = ["transcribe"])),
+    responses(
+        (status = 200, description = "Pre-captured audio: the finished transcription.", body = Transcription),
+        (status = 202, description = "Microphone recording started and detached.", body = Ack,
+         example = json!({ "status": "success", "message": "Recording started" })),
+        (status = 400, description = "`audio_data` was not an array of numbers, or `stream_realtime` was sent with it.", body = ErrorEnvelope),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `transcribe` scope.", body = ErrorEnvelope),
+        (status = 409, description = "A recording is already in flight (`recording_in_progress`), or no model is loaded (`model_not_loaded`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 pub(crate) async fn transcribe(
     State(s): State<AppState>,
     body: Option<axum::Json<serde_json::Value>>,
@@ -559,13 +674,40 @@ fn transcribe_mic_sse(
         .into_response()
 }
 
-pub(crate) async fn transcribe_stop(State(s): State<AppState>) -> impl IntoResponse {
+#[utoipa::path(
+    post,
+    path = "/transcribe/stop",
+    tag = "transcribe",
+    summary = "Stop the in-flight microphone recording",
+    description = "\
+Ends a recording started by `POST /transcribe`. Idempotent: stopping when nothing \
+is recording succeeds with `No recording in progress`.
+
+`message` says what happened — `Recording stop signal sent`, `Manual stop not \
+enabled in current mode`, or `Transcription in progress, please wait`. The \
+transcript itself does not come back here; it arrives on the `final_stt` event \
+topic, or on the stream if the recording was started with `wait: true`.",
+    security(("session_token" = ["transcribe"])),
+    responses(
+        (status = 200, description = "Stop signal sent, or nothing was recording.", body = Ack,
+         example = json!({ "status": "success", "message": "Recording stop signal sent" })),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `transcribe` scope.", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+pub(crate) async fn transcribe_stop(State(s): State<AppState>) -> Response {
     // Idempotent: nothing to stop. Direct response — going through
     // `handle_record_command` here would start a fresh recording
     // because that path is shared with `record`'s start case.
     if !*s.daemon.busy.read().await {
-        let resp = DaemonResponse::success().with_message("No recording in progress".to_string());
-        return json_response(&resp);
+        return narrowed(
+            DaemonResponse::success().with_message("No recording in progress".to_string()),
+            |r| Ack {
+                status: "success",
+                message: r.message,
+            },
+        );
     }
 
     // Recording active — dispatch through `handle_record_command`'s
@@ -577,19 +719,19 @@ pub(crate) async fn transcribe_stop(State(s): State<AppState>) -> impl IntoRespo
     // (See `docs/protocol/endpoints/v1/transcribe/stop.md`.)
     let req = build_request("record", None);
     let resp = dispatch(&s.daemon, req).await;
-    json_response(&resp)
+    narrowed(resp, |r| Ack {
+        status: "success",
+        message: r.message,
+    })
 }
 
 /// Client-scope transcription routes. The realtime WebSocket route is
 /// registered only under the `wasm-backends` feature.
-pub(crate) fn routes() -> axum::Router<crate::daemon::http::state::AppState> {
-    let router = axum::Router::new()
-        .route("/transcribe", axum::routing::post(transcribe))
-        .route("/transcribe/stop", axum::routing::post(transcribe_stop));
+pub(crate) fn routes() -> utoipa_axum::router::OpenApiRouter<AppState> {
+    let router = utoipa_axum::router::OpenApiRouter::new()
+        .routes(utoipa_axum::routes!(transcribe))
+        .routes(utoipa_axum::routes!(transcribe_stop));
     #[cfg(feature = "wasm-backends")]
-    let router = router.route(
-        "/transcribe/realtime",
-        axum::routing::get(realtime_ws_handler),
-    );
+    let router = router.routes(utoipa_axum::routes!(realtime_ws_handler));
     router
 }

@@ -266,6 +266,7 @@ impl IndexBackend {
 /// before download. The authoritative manifest (languages, files, …) ships as
 /// the pinned `manifest` asset and is installed verbatim — it is not re-encoded
 /// here. Also the leaf type for `/registry/backends` (`RegistryModel`).
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexModel {
     pub name: String,
@@ -296,6 +297,7 @@ fn default_role() -> String {
     crate::manifest::ModelRole::default().to_string()
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexSecret {
     pub name: String,
@@ -303,6 +305,7 @@ pub struct IndexSecret {
     pub required: bool,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexOption {
     pub name: String,
@@ -367,6 +370,7 @@ pub struct IndexSubprocessAsset {
     pub parts: Vec<IndexAsset>,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexStale {
     pub latest_attempted: String,

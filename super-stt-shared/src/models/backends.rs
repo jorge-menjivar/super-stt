@@ -14,6 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 /// A single installed backend and everything the settings UI needs to render
 /// its section.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -74,6 +75,7 @@ pub struct BackendInfo {
     pub options: Vec<BackendOption>,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 /// One model served by a backend.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BackendModel {
@@ -138,6 +140,7 @@ fn default_role() -> String {
     "transcription".to_string()
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 /// A sensitive value the backend requires, stored in the system keyring.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BackendSecret {
@@ -153,6 +156,7 @@ pub struct BackendSecret {
     pub required: bool,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 /// A non-sensitive option the backend accepts, stored in the daemon config.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BackendOption {

@@ -12,22 +12,21 @@
 //! its own endpoint always used, so there is one implementation of "select a
 //! backend" per stage, not two.
 
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{
+    DaemonResponse, POST_PROCESSOR_STAGE, StageReport, StageRole, StageSwitch, SwitchDownload,
+    SwitchTarget, TRANSCRIPTION_STAGE,
+};
 
 use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};
 
-/// Wire name for a stage's role, matching `ModelRole` in the manifest.
-const ROLE_TRANSCRIPTION: &str = "transcription";
-const ROLE_POST_PROCESSOR: &str = "post_processor";
-
 impl SuperSTTDaemon {
     /// Report every stage in order.
     pub async fn handle_get_pipeline(&self) -> DaemonResponse {
-        let stages = serde_json::Value::Array(vec![
+        let stages = vec![
             self.transcription_stage().await,
             self.post_processor_stage().await,
-        ]);
+        ];
         DaemonResponse::success()
             .with_pipeline(stages)
             .with_message("Pipeline retrieved successfully".to_string())
@@ -37,7 +36,7 @@ impl SuperSTTDaemon {
     ///
     /// Read from the same state `/active_backend` and `/active_model` report,
     /// so the two views cannot disagree.
-    async fn transcription_stage(&self) -> serde_json::Value {
+    async fn transcription_stage(&self) -> StageReport {
         let loaded = self.model.read().await;
         let definition = loaded.as_ref().map(|m| &m.definition);
         let (source, model) = match definition {
@@ -61,16 +60,19 @@ impl SuperSTTDaemon {
         };
         let name = self.backend_name(source.as_deref()).await;
 
-        serde_json::json!({
-            "stage": 1,
-            "role": ROLE_TRANSCRIPTION,
-            "source": source,
-            "name": name,
-            "model": model,
-            "loaded": loaded.is_some(),
-            "device": device,
-            "switch": self.stage_switch(PipelineStage::Transcription),
-        })
+        StageReport {
+            stage: TRANSCRIPTION_STAGE,
+            role: StageRole::Transcription,
+            source,
+            name,
+            model,
+            loaded: loaded.is_some(),
+            device,
+            switch: self.stage_switch(PipelineStage::Transcription),
+            // Stage 1 has no on/off choice of its own: it is on exactly when a
+            // model is up.
+            enabled: None,
+        }
     }
 
     /// In-flight load/download progress for `stage`, or `null` when that stage
@@ -80,28 +82,29 @@ impl SuperSTTDaemon {
     /// same stage: a post-processor's download would otherwise surface as
     /// stage 1's, which is exactly what the `stage` the tracker now reports is
     /// for.
-    fn stage_switch(&self, stage: PipelineStage) -> serde_json::Value {
-        let progress = self.handle_get_download_status(stage).download_progress;
-        progress.map_or(serde_json::Value::Null, |p| {
-            serde_json::json!({
-                "phase":      p.status,
-                "target":     { "model": p.model_name, "source": p.source },
-                "started_at": p.started_at,
-                "download": {
-                    "current_file":     p.current_file,
-                    "file_index":       p.file_index,
-                    "total_files":      p.total_files,
-                    "bytes_downloaded": p.bytes_downloaded,
-                    "total_bytes":      p.total_bytes,
-                    "percentage":       p.percentage,
-                    "eta_seconds":      p.eta_seconds,
-                },
-            })
+    fn stage_switch(&self, stage: PipelineStage) -> Option<StageSwitch> {
+        let p = self.handle_get_download_status(stage).download_progress?;
+        Some(StageSwitch {
+            phase: p.status,
+            target: SwitchTarget {
+                model: p.model_name,
+                source: p.source,
+            },
+            started_at: p.started_at,
+            download: SwitchDownload {
+                current_file: p.current_file,
+                file_index: p.file_index,
+                total_files: p.total_files,
+                bytes_downloaded: p.bytes_downloaded,
+                total_bytes: p.total_bytes,
+                percentage: p.percentage,
+                eta_seconds: p.eta_seconds,
+            },
         })
     }
 
     /// Stage 2: the post-processor that rewrites each final transcript.
-    async fn post_processor_stage(&self) -> serde_json::Value {
+    async fn post_processor_stage(&self) -> StageReport {
         let (enabled, model, source) = {
             let config = self.config.read().await;
             let pp = &config.post_processor;
@@ -114,20 +117,20 @@ impl SuperSTTDaemon {
             .as_ref()
             .map(|m| normalize_device(&m.instance.device()));
 
-        serde_json::json!({
-            "stage": 2,
-            "role": ROLE_POST_PROCESSOR,
-            "source": source,
-            "name": name,
-            "model": (!model.is_empty()).then_some(model),
-            "loaded": loaded.is_some(),
-            "device": device,
-            "switch": self.stage_switch(PipelineStage::PostProcessor),
+        StageReport {
+            stage: POST_PROCESSOR_STAGE,
+            role: StageRole::PostProcessor,
+            source,
+            name,
+            model: (!model.is_empty()).then_some(model),
+            loaded: loaded.is_some(),
+            device,
+            switch: self.stage_switch(PipelineStage::PostProcessor),
             // Processor stages carry the user's on/off choice separately from
             // whether the model actually came up: a selection can be enabled
             // while its load failed, and transcripts then pass through.
-            "enabled": enabled,
-        })
+            enabled: Some(enabled),
+        }
     }
 
     /// Whether an installed backend serves at least one model a given stage

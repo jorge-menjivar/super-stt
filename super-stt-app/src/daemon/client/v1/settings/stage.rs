@@ -121,9 +121,18 @@ pub async fn get_stage(stage: u32) -> HttpResult<StageState> {
         )?;
         // A daemon that predates the pipeline omits the stage; read that as
         // "empty, nothing selected" rather than failing the settings load.
+        //
+        // The stage is a typed `StageReport` on the wire now, so this reads the
+        // fields the card needs straight off it rather than re-parsing JSON.
         Ok(resp
             .stage
-            .and_then(|v| serde_json::from_value(v).ok())
+            .map(|st| StageState {
+                source: st.source,
+                model: st.model,
+                loaded: st.loaded,
+                device: st.device,
+                enabled: st.enabled,
+            })
             .unwrap_or_default())
     })
     .await

@@ -1,29 +1,89 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::{decode_source, find_backend, json_error, json_error_msg, ok};
 use crate::daemon::http::state::AppState;
-use axum::Router;
+use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
-use axum::routing::get;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
-pub(crate) fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/backends/{source}/secrets/list", get(list))
-        .route(
-            "/backends/{source}/secrets/{name}",
-            get(get_one).post(set).delete(delete_secret),
-        )
+pub(crate) fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(list))
+        .routes(routes!(get_one, set, delete_secret))
 }
 
-#[derive(Deserialize)]
+/// The secret to store.
+#[derive(Deserialize, ToSchema)]
 struct SecretBody {
+    /// The credential itself. Written to the system keyring, never returned by
+    /// any endpoint. Empty is refused — clear a secret with `DELETE`.
     #[serde(default)]
     value: String,
 }
 
-/// `GET /backends/{source}/secrets/list` — declared secrets + configured flags, no values.
+/// One secret a backend declares, and whether it is set.
+#[derive(Serialize, ToSchema)]
+struct SecretState {
+    /// The secret's identifier, as the backend's manifest declares it.
+    name: String,
+    /// Human-readable label for a settings UI; falls back to `name`.
+    label: String,
+    /// Whether the backend refuses to load without it.
+    required: bool,
+    /// Whether a value is stored. The value itself is never returned.
+    configured: bool,
+}
+
+/// Every secret a backend declares.
+#[derive(Serialize, ToSchema)]
+struct SecretList {
+    #[schema(example = "success")]
+    status: &'static str,
+    secrets: Vec<SecretState>,
+}
+
+/// Whether one secret is set.
+#[derive(Serialize, ToSchema)]
+struct SecretConfigured {
+    #[schema(example = "success")]
+    status: &'static str,
+    /// Absent on write and clear, which answer about the secret just addressed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    /// Whether a value is stored.
+    configured: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/backends/{source}/secrets/list",
+    tag = "backends",
+    summary = "List a backend's secrets",
+    description = "\
+Every credential this backend declares, with whether each is currently set. \
+**Values are never returned** — not here, not anywhere. They live in the system \
+keyring, and the only operations are write and clear.
+
+This is a separate scope from `settings` precisely because it is the credential \
+surface: a token granted `settings` cannot reach it.",
+    params(
+        ("source" = String, Path,
+         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+         example = "github.com%2Facme%2Fopenai"),
+    ),
+    security(("session_token" = ["secrets"])),
+    responses(
+        (status = 200, description = "The declared secrets and whether each is set.", body = SecretList),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `secrets` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such backend (`unknown_backend`) or no such secret (`unknown_secret`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response {
     let source = decode_source(&source);
     let Some(backend) = find_backend(&s, &source).await else {
@@ -34,17 +94,41 @@ async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response
         let configured = crate::keyring::has_backend_secret_async(source.clone(), sec.name.clone())
             .await
             .unwrap_or(false);
-        out.push(serde_json::json!({
-            "name": sec.name,
-            "label": sec.label.clone().unwrap_or_else(|| sec.name.clone()),
-            "required": sec.required,
-            "configured": configured,
-        }));
+        out.push(SecretState {
+            name: sec.name.clone(),
+            label: sec.label.clone().unwrap_or_else(|| sec.name.clone()),
+            required: sec.required,
+            configured,
+        });
     }
-    ok(&serde_json::json!({ "status": "success", "secrets": out }))
+    ok(&SecretList {
+        status: "success",
+        secrets: out,
+    })
 }
 
-/// `GET /backends/{source}/secrets/{name}` — existence only.
+#[utoipa::path(
+    get,
+    path = "/backends/{source}/secrets/{name}",
+    tag = "backends",
+    summary = "Check whether one secret is set",
+    description = "\
+Reports existence only. There is no endpoint that returns a stored credential.",
+    params(
+        ("source" = String, Path,
+         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+         example = "github.com%2Facme%2Fopenai"),
+        ("name" = String, Path, description = "The secret's name, as the backend's manifest declares it."),
+    ),
+    security(("session_token" = ["secrets"])),
+    responses(
+        (status = 200, description = "Whether a value is stored.", body = SecretConfigured),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `secrets` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such backend (`unknown_backend`) or no such secret (`unknown_secret`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 async fn get_one(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
@@ -57,12 +141,44 @@ async fn get_one(
             let configured = crate::keyring::has_backend_secret_async(source.clone(), name.clone())
                 .await
                 .unwrap_or(false);
-            ok(&serde_json::json!({ "status": "success", "name": name, "configured": configured }))
+            ok(&SecretConfigured {
+                status: "success",
+                name: Some(name),
+                configured,
+            })
         }
     }
 }
 
-/// `POST /backends/{source}/secrets/{name}` — store a value (non-empty).
+#[utoipa::path(
+    post,
+    path = "/backends/{source}/secrets/{name}",
+    tag = "backends",
+    summary = "Store a secret",
+    description = "\
+Writes the credential to the system keyring. It cannot be read back afterwards; \
+only replaced or cleared.
+
+A loaded model does not pick up a new credential on its own — reload the stage with \
+`POST /pipeline/{stage}/model/reload`.",
+    params(
+        ("source" = String, Path,
+         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+         example = "github.com%2Facme%2Fopenai"),
+        ("name" = String, Path, description = "The secret's name, as the backend's manifest declares it."),
+    ),
+    request_body = SecretBody,
+    security(("session_token" = ["secrets"])),
+    responses(
+        (status = 200, description = "Stored.", body = SecretConfigured),
+        (status = 400, description = "The value was empty (`invalid_request`). Use `DELETE` to clear a secret.", body = ErrorEnvelope),
+        (status = 503, description = "The keyring could not be written (`keyring_unavailable`).", body = ErrorEnvelope),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `secrets` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such backend (`unknown_backend`) or no such secret (`unknown_secret`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 async fn set(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
@@ -85,7 +201,30 @@ async fn set(
     }
 }
 
-/// `DELETE /backends/{source}/secrets/{name}` — clear (reset to unset).
+#[utoipa::path(
+    delete,
+    path = "/backends/{source}/secrets/{name}",
+    tag = "backends",
+    summary = "Clear a secret",
+    description = "\
+Removes the stored credential from the keyring, returning the secret to unset. A \
+backend that requires it will refuse to load until one is stored again.",
+    params(
+        ("source" = String, Path,
+         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+         example = "github.com%2Facme%2Fopenai"),
+        ("name" = String, Path, description = "The secret's name, as the backend's manifest declares it."),
+    ),
+    security(("session_token" = ["secrets"])),
+    responses(
+        (status = 200, description = "Cleared.", body = SecretConfigured),
+        (status = 503, description = "The keyring could not be written (`keyring_unavailable`).", body = ErrorEnvelope),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `secrets` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such backend (`unknown_backend`) or no such secret (`unknown_secret`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 async fn delete_secret(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
@@ -125,7 +264,11 @@ fn secret_result(
     configured: bool,
 ) -> Response {
     if resp.status == "success" {
-        ok(&serde_json::json!({ "status": "success", "configured": configured }))
+        ok(&SecretConfigured {
+            status: "success",
+            name: None,
+            configured,
+        })
     } else {
         json_error_msg(
             StatusCode::SERVICE_UNAVAILABLE,

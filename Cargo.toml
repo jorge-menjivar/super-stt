@@ -131,6 +131,16 @@
         tokio-util = "0.7"
         # Filesystem utilities
         toml = "1.0.6"
+        # OpenAPI: the daemon protocol spec is generated from the router and the
+        # wire types, not hand-maintained (see `just openapi`). `axum_extras`
+        # teaches the `#[utoipa::path]` macro to read axum's own extractors, so
+        # path/query parameters come from the handler signature instead of a
+        # second declaration that could disagree with it.
+        utoipa = { version = "5.5.0", features = ["axum_extras", "chrono"] }
+        # Binds utoipa to axum: `OpenApiRouter` collects each route's spec as the
+        # route itself is registered, so a route and its documentation are one
+        # declaration and cannot drift apart.
+        utoipa-axum = "0.2.0"
         uuid = { version = "1.23.0", features = ["v4"] }
         # Build dependencies
         vergen = { version = "8.3.1", features = ["git", "gitcl"] }

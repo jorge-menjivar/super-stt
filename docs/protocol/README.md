@@ -53,12 +53,30 @@ What the protocol gives you:
 
 Reference:
 
+- **[Browse the API reference](https://jorge-menjivar.github.io/super-stt/protocol/)**
+  — every endpoint, parameter and response shape, rendered from
+  [openapi.json](./openapi.json). Point a client generator at that file to get
+  a typed client in your language.
+
+  Two renderings of the same document, each linking to the other:
+  [Swagger UI](https://jorge-menjivar.github.io/super-stt/protocol/) and
+  [Scalar](https://jorge-menjivar.github.io/super-stt/protocol/scalar.html).
+  Locally, `just openapi-serve` opens the first and `just openapi-serve
+  --scalar` the second. Neither offers "Try it out": the daemon listens on a
+  Unix socket, which a browser cannot dial.
 - [transport.md](./transport.md) — the wire shape: HTTP framing, SSE, error
   envelopes, connection lifecycle, and a minimal non-Rust client recipe.
 - [auth.md](./auth.md) — the consent handshake, tokens, and the full scope
   catalog.
 - [endpoints/](./endpoints/) — every endpoint, request/response by request.
 - [scopes/](./scopes/) — what each scope unlocks.
+
+The OpenAPI document is generated from the daemon's router, not maintained
+alongside it: every route is registered through the same declaration that
+carries its documentation, and CI fails when the committed file and the router
+disagree. Regenerate it with `just openapi`. The prose above is not replaced by
+it — that explains *when* to call an endpoint and how the pieces fit, where the
+spec states the shapes exactly, for tooling.
 
 ## Add your own model
 

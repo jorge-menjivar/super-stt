@@ -1,20 +1,73 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::daemon::http::internal::helpers::dispatch::dispatch_command;
+use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, narrowed};
 use crate::daemon::http::state::AppState;
+use crate::daemon::http::v1::settings::wire::{BackendCatalog, FromDaemon, GpuInventory};
+use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope, RegistryError};
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use log::{info, warn};
+use super_stt_shared::registry::UninstallResponse;
 
-pub(crate) async fn list_backends(State(s): State<AppState>) -> impl IntoResponse {
-    dispatch_command(&s.daemon, "list_backends", None).await
+#[utoipa::path(
+    get,
+    path = "/backends",
+    tag = "backends",
+    summary = "List installed backends",
+    description = "\
+Every backend installed on this machine, each with the models it serves, the options \
+it exposes, and which of its secrets are configured. Secret *values* are never \
+returned — only whether each is set.
+
+This is the full catalog, roles included. `GET /models` is the narrower read a \
+transcription-model picker wants; browsing what is *available to install* is \
+`GET /registry/backends`.",
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "The installed catalog.", body = BackendCatalog),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+pub(crate) async fn list_backends(State(s): State<AppState>) -> Response {
+    let resp = dispatch(&s.daemon, build_request("list_backends", None)).await;
+    narrowed(resp, BackendCatalog::from_daemon)
 }
 
+#[utoipa::path(
+    delete,
+    path = "/backends/{source}",
+    tag = "backends",
+    summary = "Uninstall a backend",
+    description = "\
+Removes an installed backend and its files from disk.
+
+If the backend was filling a pipeline stage, that stage is emptied first: any loaded \
+model is unloaded and the selection cleared, so the daemon does not end up pointing \
+at files that no longer exist. The response says which stages were affected.
+
+Refused with `409 backend_busy` while a recording or realtime session is in flight \
+— removing files out from under one would strand state it still depends on.",
+    params(
+        ("source" = String, Path,
+         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+         example = "github.com%2Facme%2Fwhisper"),
+    ),
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "Removed.", body = UninstallResponse),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No installed backend claims that `source`.", body = RegistryError),
+        (status = 409, description = "A recording or realtime session is in flight (`backend_busy`).", body = RegistryError),
+        (status = 500, description = "The files could not be removed (`remove_failed`).", body = RegistryError),
+    ),
+)]
 pub(crate) async fn uninstall_backend(
     State(s): State<AppState>,
     AxumPath(source_encoded): AxumPath<String>,
-) -> impl IntoResponse {
-    use super_stt_shared::registry::UninstallResponse;
+) -> Response {
     // Uninstall is the inverse of install, so it shares the registry error
     // envelope (`{ "error": <code> }`) rather than hand-rolling its own shape.
     use crate::daemon::http::v1::registry::{registry_error, registry_error_msg};
@@ -96,6 +149,27 @@ pub(crate) async fn uninstall_backend(
         .into_response()
 }
 
-pub(crate) async fn get_gpu_info(State(s): State<AppState>) -> impl IntoResponse {
-    dispatch_command(&s.daemon, "get_gpu_info", None).await
+#[utoipa::path(
+    get,
+    path = "/gpu_info",
+    tag = "settings",
+    summary = "Inventory the host's GPUs",
+    description = "\
+What the daemon can see of this machine's accelerators: one entry per detected GPU \
+with its memory, plus the host-wide driver and runtime versions that decide which \
+backend builds will actually run here.
+
+Detection is a live probe, so this reflects the machine now rather than a cached \
+answer. A host with no GPU answers `200` with an empty list.",
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "The detected GPUs and host toolchain versions.", body = GpuInventory),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+pub(crate) async fn get_gpu_info(State(s): State<AppState>) -> Response {
+    let resp = dispatch(&s.daemon, build_request("get_gpu_info", None)).await;
+    narrowed(resp, GpuInventory::from_daemon)
 }

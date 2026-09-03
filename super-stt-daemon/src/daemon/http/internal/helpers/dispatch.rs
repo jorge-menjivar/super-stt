@@ -125,6 +125,45 @@ pub(crate) async fn dispatch_command(
     json_response(&resp)
 }
 
+/// Answer a dispatched command with a *narrow* success body.
+///
+/// The command bus speaks one [`DaemonResponse`] carrying every field any
+/// command might set. An endpoint answers with the handful it actually fills,
+/// and `success` names exactly those — so the type an endpoint publishes in the
+/// `OpenAPI` document is the type its handler builds. A schema cannot claim a
+/// field the handler never sets, or omit one it does, because there is no
+/// second description to disagree with.
+///
+/// Failures keep the envelope the daemon built, status code and all: error
+/// identity is `error_code`, and mapping it is [`json_response`]'s job.
+pub(crate) fn narrowed<T: serde::Serialize>(
+    resp: DaemonResponse,
+    success: impl FnOnce(DaemonResponse) -> T,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    if resp.status != "success" {
+        return json_response(&resp).into_response();
+    }
+    let body = serde_json::to_string(&success(resp))
+        .unwrap_or_else(|_| String::from(r#"{"status":"error"}"#));
+    (StatusCode::OK, [("content-type", "application/json")], body).into_response()
+}
+
+/// [`narrowed`] for the commonest shape of all: an acknowledgement carrying the
+/// daemon's sentence and nothing else.
+pub(crate) async fn ack(
+    daemon: &SuperSTTDaemon,
+    command: &str,
+    data: Option<Value>,
+) -> axum::response::Response {
+    let resp = dispatch(daemon, build_request(command, data)).await;
+    narrowed(resp, |r| crate::daemon::http::wire::Ack {
+        status: "success",
+        message: r.message,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::status_code_for_response;

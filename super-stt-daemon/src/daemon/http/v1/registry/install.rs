@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::http::state::AppState;
+use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope, RegistryError};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use super_stt_shared::registry::{InstallAccepted, InstallRequest};
 
 use super::pipeline::{InflightMarker, spawn_install_pipeline};
 
@@ -250,6 +252,35 @@ fn select_install_compat(
 // ---------------------------------------------------------------------------
 
 /// `POST /registry/backends/install` — kick off a background install.
+#[utoipa::path(
+    post,
+    path = "/registry/backends/install",
+    tag = "registry",
+    summary = "Install a backend",
+    description = "\
+Installs a backend from the registry, from a git repo, or from a local path \u{2014} send \
+exactly one of `source`, `repo_url`, or `local_path`.
+
+The daemon picks the release asset matching this host's architecture and \
+accelerators, and answers `202` as soon as that choice is made: the download itself \
+continues in the background. Follow it on the `registry_install` event topic, keyed \
+by the returned `install_id`. A `warning` means the install proceeded with a caveat \
+worth showing the user.
+
+Installing neither selects the backend nor loads a model \u{2014} do that through \
+`/pipeline/{stage}`.",
+    request_body = InstallRequest,
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 202, description = "Accepted; the download runs in the background.", body = InstallAccepted),
+        (status = 400, description = "Not exactly one of `source`, `repo_url`, `local_path` (`bad_request`), or no asset matches this host.", body = RegistryError),
+        (status = 404, description = "No catalog entry for that `source` (`not_found`).", body = RegistryError),
+        (status = 409, description = "An install for this backend is already in flight, or a recording is running (`backend_busy`).", body = RegistryError),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 pub(crate) async fn install_registry_backend(
     State(s): State<AppState>,
     body: Option<axum::Json<InstallBody>>,

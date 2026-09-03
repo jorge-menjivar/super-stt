@@ -27,8 +27,8 @@ use cosmic::prelude::*;
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::daemon::client::{
-    clear_stage_backend, get_model_device, list_model_devices, list_stage_devices, set_model_device,
-    set_stage_backend, set_stage_model, unload_stage_model,
+    clear_stage_backend, get_model_device, list_model_devices, list_stage_devices,
+    set_model_device, set_stage_backend, set_stage_model, unload_stage_model,
 };
 use crate::state::device_offers::{STT_STAGE, staged_device};
 use crate::ui::messages::{Message, ModelMessage, PostProcessorMessage, StageMessage};
@@ -48,7 +48,9 @@ impl AppModel {
                 self.set_selected_backend(stage, source.clone());
                 // The card's device chips are the daemon's answer for the
                 // backend now selected, so every selection asks again.
-                source.map_or_else(Task::none, |source| Self::load_backend_devices(stage, source))
+                source.map_or_else(Task::none, |source| {
+                    Self::load_backend_devices(stage, source)
+                })
             }
             StageMessage::BackendSelectFailed {
                 stage,
@@ -78,8 +80,12 @@ impl AppModel {
                 if self.selected_backend(stage).as_deref() != Some(source.as_str()) {
                     return Task::none();
                 }
-                self.device_offers
-                    .record(stage, source.clone(), Some(model.clone()), devices.clone());
+                self.device_offers.record(
+                    stage,
+                    source.clone(),
+                    Some(model.clone()),
+                    devices.clone(),
+                );
                 // Likewise for the pick: one made since the ask wins. Matched
                 // on the backend as well as the name, or a same-named model on
                 // another backend would claim this answer.
@@ -192,7 +198,11 @@ impl AppModel {
     /// Optimistic with rollback: the card moves at once and
     /// [`StageMessage::BackendSelectFailed`] puts it back, so a refused
     /// selection never leaves the card showing a backend the daemon rejected.
-    fn select_stage_backend(&mut self, stage: u32, source: String) -> Task<cosmic::Action<Message>> {
+    fn select_stage_backend(
+        &mut self,
+        stage: u32,
+        source: String,
+    ) -> Task<cosmic::Action<Message>> {
         // Re-selecting what is already selected is not a change; round-tripping
         // it would unload the running model for nothing.
         if self.selected_backend(stage).as_deref() == Some(source.as_str()) {
@@ -210,19 +220,22 @@ impl AppModel {
         self.core.window.show_context = false;
 
         let selected = source.clone();
-        Task::perform(set_stage_backend(stage, source), move |result| match result {
-            // Re-announce the selection the daemon just took, which is what
-            // asks it for the backend's devices.
-            Ok(()) => cosmic::Action::App(Message::Stage(StageMessage::BackendSelected {
-                stage,
-                source: Some(selected.clone()),
-            })),
-            Err(e) => cosmic::Action::App(Message::Stage(StageMessage::BackendSelectFailed {
-                stage,
-                prev: prev.clone(),
-                message: e.to_string(),
-            })),
-        })
+        Task::perform(
+            set_stage_backend(stage, source),
+            move |result| match result {
+                // Re-announce the selection the daemon just took, which is what
+                // asks it for the backend's devices.
+                Ok(()) => cosmic::Action::App(Message::Stage(StageMessage::BackendSelected {
+                    stage,
+                    source: Some(selected.clone()),
+                })),
+                Err(e) => cosmic::Action::App(Message::Stage(StageMessage::BackendSelectFailed {
+                    stage,
+                    prev: prev.clone(),
+                    message: e.to_string(),
+                })),
+            },
+        )
     }
 
     /// Empty `stage`, forgetting its model with it.
@@ -324,8 +337,14 @@ impl AppModel {
         // Captured so a failed switch rolls the device back rather than leaving
         // the card on one the daemon never adopted.
         let prev_device = self.current_device.clone();
-        self.set_model_loading(model.clone(), "Initiating model switch...".to_string(), stage);
-        if stage == STT_STAGE && let Some(dev) = &device_to_set {
+        self.set_model_loading(
+            model.clone(),
+            "Initiating model switch...".to_string(),
+            stage,
+        );
+        if stage == STT_STAGE
+            && let Some(dev) = &device_to_set
+        {
             self.current_device.clone_from(dev);
         }
 
@@ -444,11 +463,13 @@ impl AppModel {
         source: String,
     ) -> Task<cosmic::Action<Message>> {
         Task::perform(list_stage_devices(stage), move |result| match result {
-            Ok(devices) => cosmic::Action::App(Message::Stage(StageMessage::BackendDevicesLoaded {
-                stage,
-                source: source.clone(),
-                devices,
-            })),
+            Ok(devices) => {
+                cosmic::Action::App(Message::Stage(StageMessage::BackendDevicesLoaded {
+                    stage,
+                    source: source.clone(),
+                    devices,
+                }))
+            }
             // The chips fall back to the catalog's own reading until an answer
             // lands, so a failed read costs the narrowing, not the row.
             Err(e) => {
@@ -537,7 +558,12 @@ mod tests {
         let installed = vec![backend("github.com/x/whisper", "whisper-tiny", &["cuda"])];
 
         assert_eq!(
-            staged_load_device(&installed, "github.com/x/gone", "whisper-tiny", Some("cuda")),
+            staged_load_device(
+                &installed,
+                "github.com/x/gone",
+                "whisper-tiny",
+                Some("cuda")
+            ),
             StagedLoad::NotInCatalog,
         );
         assert_eq!(
@@ -559,7 +585,11 @@ mod tests {
     /// sent as one.
     #[test]
     fn an_online_model_sets_no_device() {
-        let installed = vec![backend("github.com/x/openai", "gpt-4o-transcribe", &["none"])];
+        let installed = vec![backend(
+            "github.com/x/openai",
+            "gpt-4o-transcribe",
+            &["none"],
+        )];
         assert_eq!(
             staged_load_device(
                 &installed,
@@ -567,16 +597,27 @@ mod tests {
                 "gpt-4o-transcribe",
                 Some("none"),
             ),
-            StagedLoad::Load { device_to_set: None },
+            StagedLoad::Load {
+                device_to_set: None
+            },
         );
     }
 
     /// A local model sends the staged device as its own.
     #[test]
     fn a_local_model_sets_the_staged_device() {
-        let installed = vec![backend("github.com/x/whisper", "whisper-tiny", &["cpu", "gpu"])];
+        let installed = vec![backend(
+            "github.com/x/whisper",
+            "whisper-tiny",
+            &["cpu", "gpu"],
+        )];
         assert_eq!(
-            staged_load_device(&installed, "github.com/x/whisper", "whisper-tiny", Some("gpu")),
+            staged_load_device(
+                &installed,
+                "github.com/x/whisper",
+                "whisper-tiny",
+                Some("gpu")
+            ),
             StagedLoad::Load {
                 device_to_set: Some("gpu".to_string())
             },

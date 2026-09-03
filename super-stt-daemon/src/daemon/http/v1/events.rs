@@ -4,6 +4,7 @@ use crate::daemon::http::internal::auth::tokens::TokenStore;
 use crate::daemon::http::internal::helpers::responses::{invalid_session, reason, scope_denied};
 use crate::daemon::http::state::{AppState, PeerInfo};
 use crate::daemon::http::v1::transcribe::format_sse_frame_str;
+use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -60,6 +61,49 @@ fn invalid_topic(reason: &str) -> Response {
         .into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = "/events",
+    tag = "events",
+    summary = "Subscribe to the event stream",
+    description = "\
+A Server-Sent Events stream of everything the daemon publishes. The response is \
+`text/event-stream` and stays open until the client disconnects, the daemon shuts \
+down, or the calling binary changes on disk (which emits a final `revoked` frame \
+and invalidates the token).
+
+The first frame is always `subscribed`, carrying a `client_id` and the topic list \
+that was accepted. A `: keepalive` comment is sent periodically so idle connections \
+are not reaped by intermediaries.
+
+**Scopes are per topic, not per endpoint.** Any valid token reaches this route; the \
+subscription is then refused whole if the token lacks the scope for *any* requested \
+topic, so ask only for what you hold.
+
+| Topic | Scope |
+|---|---|
+| `recording_started`, `recording_stopped`, `recording_state`, `transcribing_started`, `transcribing_stopped` | `recording_events` |
+| `frequency_bands` | `audio_visualization` |
+| `partial_stt`, `final_stt` | `global_transcriptions` |
+| `daemon_status_changed`, `download_progress`, `registry_install` | `daemon_status` |
+
+Under backpressure the daemon drops frames rather than buffering them without \
+bound; visualization frames are what shed in practice.",
+    params(
+        ("topics" = String, Query,
+         description = "Comma-separated topic names, at least one. Unknown or empty → `400 invalid_topic`.",
+         example = "recording_state,final_stt"),
+    ),
+    security(("session_token" = [])),
+    responses(
+        (status = 200, description = "The stream is open. Frames follow as `event:`/`data:` pairs.",
+         content_type = "text/event-stream"),
+        (status = 400, description = "`topics` was missing, empty, or named a topic that does not exist.", body = ReasonEnvelope),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the scope for one of the requested topics.", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
 /// `GET /events?topics=...` — widget SSE subscription.
 ///
 /// The handler runs forever (until the client disconnects, the daemon
@@ -288,6 +332,6 @@ fn spawn_events_keepalive_and_exe_watch(
 }
 
 /// Server-Sent Events subscription route.
-pub(crate) fn routes() -> axum::Router<crate::daemon::http::state::AppState> {
-    axum::Router::new().route("/events", axum::routing::get(events))
+pub(crate) fn routes() -> utoipa_axum::router::OpenApiRouter<AppState> {
+    utoipa_axum::router::OpenApiRouter::new().routes(utoipa_axum::routes!(events))
 }

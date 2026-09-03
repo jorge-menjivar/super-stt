@@ -45,11 +45,14 @@ pub(crate) fn json_error_msg(code: StatusCode, error_code: &str, message: &str) 
 }
 
 /// House-style JSON success response with status 200.
-pub(crate) fn ok(v: &serde_json::Value) -> Response {
+///
+/// Generic over the body so each endpoint hands it the narrow type it publishes
+/// in the `OpenAPI` document, rather than a `Value` that has forgotten its shape.
+pub(crate) fn ok<T: serde::Serialize>(v: &T) -> Response {
     (
         StatusCode::OK,
         [("content-type", "application/json")],
-        v.to_string(),
+        serde_json::to_string(v).unwrap_or_else(|_| String::from(r#"{"status":"error"}"#)),
     )
         .into_response()
 }
