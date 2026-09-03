@@ -35,10 +35,10 @@ struct Stage {
     set_model: &'static str,
     /// Stop it.
     clear_model: &'static str,
-    /// Abandon an in-flight load, when the stage can be interrupted.
-    cancel_model: Option<&'static str>,
+    /// Abandon the load this stage has in flight.
+    cancel_model: &'static str,
     /// Re-instantiate in place to pick up changed secrets/options.
-    reload_model: Option<&'static str>,
+    reload_model: &'static str,
     /// Read the device one of this stage's models runs on.
     get_model_device: &'static str,
     /// Set it.
@@ -58,8 +58,8 @@ impl Stage {
                 clear_backend: "clear_active_backend",
                 set_model: "set_model",
                 clear_model: "unload_active_model",
-                cancel_model: Some("cancel_download"),
-                reload_model: Some("reload_active_model"),
+                cancel_model: "cancel_download",
+                reload_model: "reload_active_model",
                 get_model_device: "get_model_device",
                 set_model_device: "set_model_device",
                 list_model_devices: "list_model_devices",
@@ -70,11 +70,8 @@ impl Stage {
                 clear_backend: "clear_post_processor_backend",
                 set_model: "set_post_processor",
                 clear_model: "clear_post_processor",
-                // A post-processor loads no weights it could be interrupted
-                // mid-download for, and has no in-place reload yet: re-running
-                // `POST .../model` does the same job.
-                cancel_model: None,
-                reload_model: None,
+                cancel_model: "cancel_post_processor_download",
+                reload_model: "reload_post_processor",
                 get_model_device: "get_post_processor_device",
                 set_model_device: "set_post_processor_device",
                 list_model_devices: "list_post_processor_devices",
@@ -202,12 +199,19 @@ pub(crate) async fn clear_stage_model(
         .into_response()
 }
 
-/// `POST /pipeline/{stage}/model/cancel` — abandon an in-flight load.
+/// `POST /pipeline/{stage}/model/cancel` — abandon the load this stage has in
+/// flight. Scoped to the stage: the stages provision independently, so one
+/// stage's cancel is not a licence to abandon another's download.
 pub(crate) async fn cancel_stage_model(
     State(s): State<AppState>,
     Path(stage): Path<u32>,
 ) -> Response {
-    stage_action(&s, stage, |c| c.cancel_model, "cancel").await
+    let Some(cmds) = Stage::resolve(stage) else {
+        return unknown_stage(stage);
+    };
+    dispatch_command(&s.daemon, cmds.cancel_model, None)
+        .await
+        .into_response()
 }
 
 /// `POST /pipeline/{stage}/model/reload` — re-instantiate in place, picking up
@@ -216,29 +220,10 @@ pub(crate) async fn reload_stage_model(
     State(s): State<AppState>,
     Path(stage): Path<u32>,
 ) -> Response {
-    stage_action(&s, stage, |c| c.reload_model, "reload").await
-}
-
-/// Dispatch an optional per-stage action, distinguishing "no such stage" from
-/// "this stage does not do that" — a client asking stage 2 to cancel a download
-/// has a wrong model of the pipeline, not a typo in the path.
-async fn stage_action(
-    state: &AppState,
-    position: u32,
-    pick: fn(&Stage) -> Option<&'static str>,
-    action: &str,
-) -> Response {
-    let Some(cmds) = Stage::resolve(position) else {
-        return unknown_stage(position);
+    let Some(cmds) = Stage::resolve(stage) else {
+        return unknown_stage(stage);
     };
-    let Some(command) = pick(&cmds) else {
-        return json_error_msg(
-            StatusCode::NOT_FOUND,
-            "unsupported_action",
-            &format!("Stage {position} does not support {action}."),
-        );
-    };
-    dispatch_command(&state.daemon, command, None)
+    dispatch_command(&s.daemon, cmds.reload_model, None)
         .await
         .into_response()
 }

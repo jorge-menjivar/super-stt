@@ -39,17 +39,22 @@ impl AppModel {
             }
 
             DownloadMessage::CancelDownload => {
-                Task::perform(cancel_download(), |result| match result {
-                    Ok(_) => cosmic::Action::App(Message::Download(
-                        DownloadMessage::DownloadCancelled(String::new()),
-                    )),
-                    Err(e) => {
-                        cosmic::Action::App(Message::Download(DownloadMessage::DownloadError {
-                            model: String::new(),
-                            error: e.to_string(),
-                        }))
-                    }
-                })
+                // The stage the card showing this progress is for — the same
+                // one the daemon reported it under.
+                Task::perform(
+                    cancel_download(self.model_operation_stage),
+                    |result| match result {
+                        Ok(_) => cosmic::Action::App(Message::Download(
+                            DownloadMessage::DownloadCancelled(String::new()),
+                        )),
+                        Err(e) => {
+                            cosmic::Action::App(Message::Download(DownloadMessage::DownloadError {
+                                model: String::new(),
+                                error: e.to_string(),
+                            }))
+                        }
+                    },
+                )
             }
 
             DownloadMessage::CheckDownloadStatus => {

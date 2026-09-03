@@ -677,6 +677,30 @@ fn device_list_commands_parse() {
     ));
 }
 
+/// Stage 2 owns the same in-flight verbs stage 1 does. Each cancels and
+/// reloads only its own model: the stages provision independently, so a cancel
+/// addressed to one must not abandon the other's load.
+#[test]
+fn the_post_processor_stage_has_its_own_cancel_and_reload() {
+    assert!(matches!(
+        Command::try_from(make_request("cancel_post_processor_download", None)),
+        Ok(Command::CancelPostProcessorDownload)
+    ));
+    assert!(matches!(
+        Command::try_from(make_request("reload_post_processor", None)),
+        Ok(Command::ReloadPostProcessor)
+    ));
+    // And stage 1's keep their own names.
+    assert!(matches!(
+        Command::try_from(make_request("cancel_download", None)),
+        Ok(Command::CancelDownload)
+    ));
+    assert!(matches!(
+        Command::try_from(make_request("reload_active_model", None)),
+        Ok(Command::ReloadActiveModel)
+    ));
+}
+
 /// Neither half may be omitted: a setter without a device has nothing to set,
 /// and either verb without a model has nothing to address.
 #[test]

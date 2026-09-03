@@ -53,8 +53,18 @@ impl SuperSTTDaemon {
             | Command::ListPostProcessorDevices { .. }
             | Command::ListPostProcessorBackendDevices) => self.handle_model_device(cmd).await,
             Command::GetConfig => self.handle_get_config().await,
-            Command::CancelDownload => self.handle_cancel_download(),
-            Command::GetDownloadStatus => self.handle_get_download_status(),
+            Command::CancelDownload => self.handle_cancel_download(
+                crate::daemon::device_management::PipelineStage::Transcription,
+            ),
+            Command::CancelPostProcessorDownload => self.handle_cancel_download(
+                crate::daemon::device_management::PipelineStage::PostProcessor,
+            ),
+            // Routeless: every client reads a stage's in-flight load from
+            // `GET /pipeline/{stage}`, which asks per stage. Kept as the
+            // transcription stage's for the internal callers that predate it.
+            Command::GetDownloadStatus => self.handle_get_download_status(
+                crate::daemon::device_management::PipelineStage::Transcription,
+            ),
             Command::ListAudioThemes => self.handle_list_audio_themes(),
             Command::SetPreviewTyping { enabled } => self.handle_set_preview_typing(enabled).await,
             Command::GetPreviewTyping => self.handle_get_preview_typing(),
@@ -67,6 +77,7 @@ impl SuperSTTDaemon {
                 self.handle_set_post_processor_backend(source).await
             }
             Command::ClearPostProcessorBackend => self.handle_clear_post_processor_backend().await,
+            Command::ReloadPostProcessor => self.handle_reload_post_processor().await,
             Command::GetPipeline => self.handle_get_pipeline().await,
             Command::SetRecordingStopMode { mode } => {
                 self.handle_set_recording_stop_mode(mode).await

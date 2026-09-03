@@ -144,7 +144,7 @@ impl SuperSTTDaemon {
             // settings app's progress card lights up. A previous tracker (from
             // a failed load) is cleared first — the manager rejects parallel
             // downloads, but a leftover entry would block this one.
-            self.download_manager.clear_download();
+            self.download_manager.clear_download(stage.position());
             if let Err(e) = self
                 .download_manager
                 .start_download(std::sync::Arc::clone(&t))
@@ -175,7 +175,7 @@ impl SuperSTTDaemon {
                 Err(e) => t.mark_error(&format!("{e:#}")),
             }
             t.broadcast_progress();
-            self.download_manager.clear_download();
+            self.download_manager.clear_download(stage.position());
         }
 
         Ok(Box::new(result?))

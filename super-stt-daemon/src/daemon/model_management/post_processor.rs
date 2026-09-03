@@ -16,7 +16,7 @@ use log::{info, warn};
 
 use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::{SuperSTTDaemon, normalize_device};
-use super_stt_shared::models::protocol::DaemonStatusEvent;
+use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent};
 
 impl SuperSTTDaemon {
     /// Load the post-processor named by the config into its slot, replacing
@@ -78,6 +78,36 @@ impl SuperSTTDaemon {
         info!("Post-processor loaded: {name} (source={source})");
         self.broadcast_model_active(&name, &source, &actual_device, PipelineStage::PostProcessor);
         Ok(())
+    }
+
+    /// Re-instantiate the loaded post-processor in place so a changed secret or
+    /// option takes effect — the stage-2 twin of
+    /// [`handle_reload_active_model`](SuperSTTDaemon::handle_reload_active_model).
+    /// No-op when stage 2 is idle; rejected during an active recording.
+    pub async fn handle_reload_post_processor(&self) -> DaemonResponse {
+        if let Some(resp) = self.guard_model_mutation("reload the post-processor").await {
+            return resp;
+        }
+        if !self.post_processor_loaded().await {
+            return DaemonResponse::success()
+                .with_message("No post-processor to reload".to_string());
+        }
+        match self.load_configured_post_processor().await {
+            Ok(()) => DaemonResponse::success().with_message("Post-processor reloaded".to_string()),
+            Err(e) => {
+                warn!("Post-processor reload failed: {e}");
+                DaemonResponse::error(&format!("Post-processor reload failed: {e}"))
+            }
+        }
+    }
+
+    /// The backend serving the loaded post-processor, if one is loaded.
+    pub(in crate::daemon) async fn post_processor_source(&self) -> Option<String> {
+        self.post_processor
+            .read()
+            .await
+            .as_ref()
+            .map(|l| l.definition.source.clone())
     }
 
     /// Drop the loaded post-processor and announce that stage 2 is idle.

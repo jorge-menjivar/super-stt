@@ -76,7 +76,12 @@ pub enum Command {
     },
     ListPostProcessorBackendDevices,
     GetConfig,
+    /// Abandon the transcription stage's in-flight download.
     CancelDownload,
+    /// The stage-2 twin. Each stage cancels only its own: a post-processor
+    /// downloads its weights like any other model, and one stage abandoning
+    /// the other's load would be a surprise, not a courtesy.
+    CancelPostProcessorDownload,
     GetDownloadStatus,
     ListAudioThemes,
     SetPreviewTyping {
@@ -102,6 +107,9 @@ pub enum Command {
     },
     /// Deselect the post-processor backend, forgetting the model with it.
     ClearPostProcessorBackend,
+    /// Re-instantiate the loaded post-processor in place so a changed secret
+    /// or option takes effect — the stage-2 twin of [`Self::ReloadActiveModel`].
+    ReloadPostProcessor,
     /// Report the whole transcription pipeline: every stage in order, with the
     /// backend and model filling it. Stage 1 transcribes; later stages
     /// post-process what it produced.

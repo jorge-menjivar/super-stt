@@ -1827,6 +1827,87 @@ async fn a_stage_reports_only_its_own_download() {
     );
 }
 
+/// Cancel is addressed to a stage, so a stage with nothing of its own in
+/// flight has nothing to cancel — even while the other stage downloads. Before
+/// stage 2 had a cancel at all, its card's Cancel button reached stage 1's.
+#[tokio::test]
+async fn cancel_abandons_only_the_addressed_stages_download() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::download_progress::DownloadProgressTracker;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use super_stt_shared::models::protocol::{ErrorCode, POST_PROCESSOR_STAGE};
+
+    let daemon = test_daemon().await;
+    let stage_two = Arc::new(DownloadProgressTracker::new(
+        "s1-mini-q4_k_m".to_string(),
+        "github.com/super-stt/s1-mini".to_string(),
+        POST_PROCESSOR_STAGE,
+        2,
+        Arc::new(AtomicBool::new(false)),
+    ));
+    daemon
+        .download_manager
+        .start_download(Arc::clone(&stage_two))
+        .expect("register download");
+
+    // Stage 1 has nothing in flight, and the post-processor's download is not
+    // its to abandon.
+    let resp = daemon.handle_cancel_download(PipelineStage::Transcription);
+    assert_eq!(resp.status, "error");
+    assert_eq!(resp.error_code, Some(ErrorCode::NoSwitchInProgress));
+    assert!(!stage_two.is_cancelled());
+
+    let resp = daemon.handle_cancel_download(PipelineStage::PostProcessor);
+    assert_eq!(resp.status, "success");
+    assert!(stage_two.is_cancelled());
+}
+
+/// Reloading an idle stage is a no-op, not an error: the caller asked for the
+/// running model to pick up a change, and there is no running model.
+#[tokio::test]
+async fn reloading_an_idle_post_processor_is_a_no_op() {
+    let daemon = test_daemon().await;
+    let resp = daemon.handle_reload_post_processor().await;
+    assert_eq!(resp.status, "success");
+    assert_eq!(resp.message.as_deref(), Some("No post-processor to reload"));
+}
+
+/// The reported gap: an option or secret written for a backend reloaded only
+/// the transcription model, so a post-processor kept running with the value
+/// the user had just replaced — an API key change that silently did nothing.
+/// Both stages are reloaded now; the fake's source resolves to no installed
+/// backend, so the attempt fails and says so, which is what proves it ran.
+#[tokio::test]
+async fn changing_an_option_reloads_the_post_processor_too() {
+    let daemon = test_daemon().await;
+    seed_scripted_post_processor(&daemon).await;
+
+    let resp = daemon
+        .handle_set_backend_option(
+            "github.com/super-stt/test".to_string(),
+            "style".to_string(),
+            "terse".to_string(),
+        )
+        .await;
+    assert_eq!(resp.status, "success");
+    let message = resp.message.unwrap_or_default();
+    assert!(
+        message.contains("reloading the running model failed"),
+        "the post-processor's stage must be reloaded: {message}"
+    );
+
+    // A backend neither stage is running is not reloaded at all.
+    let resp = daemon
+        .handle_set_backend_option(
+            "github.com/super-stt/other".to_string(),
+            "style".to_string(),
+            "terse".to_string(),
+        )
+        .await;
+    assert_eq!(resp.message.as_deref(), Some("Option style updated"));
+}
+
 /// Stage 1's events keep saying stage 1, so a client filtering on the field
 /// sees the transcription lifecycle exactly where it always was.
 #[tokio::test]

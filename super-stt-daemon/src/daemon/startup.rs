@@ -5,6 +5,7 @@
 //! just the daemon struct, its type aliases, and runtime accessors.
 
 use crate::config::DaemonConfig;
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::events::EventBus;
 use crate::daemon::types::{LoadedModel, SharedLoadedModel, SuperSTTDaemon, normalize_device};
 use crate::download_progress::DownloadStateManager;
@@ -145,7 +146,8 @@ impl SuperSTTDaemon {
                     Self::load_initial_model_and_broadcast(&bg, name.clone(), source).await
                 {
                     warn!("Failed to load startup model {name}: {e}; daemon is idle");
-                    bg.download_manager.clear_download();
+                    bg.download_manager
+                        .clear_download(PipelineStage::Transcription.position());
                 }
             });
         } else {
@@ -163,6 +165,8 @@ impl SuperSTTDaemon {
             tokio::spawn(async move {
                 if let Err(e) = bg.load_configured_post_processor().await {
                     warn!("Failed to load the post-processor: {e}; transcripts are not processed");
+                    bg.download_manager
+                        .clear_download(PipelineStage::PostProcessor.position());
                 }
             });
         }
@@ -236,19 +240,11 @@ impl SuperSTTDaemon {
         name: String,
         source: String,
     ) -> Result<()> {
-        daemon.broadcast_model_loading_status(
-            &name,
-            crate::daemon::device_management::PipelineStage::Transcription,
-        );
+        daemon.broadcast_model_loading_status(&name, PipelineStage::Transcription);
 
         let device_pref = daemon.config.read().await.effective_device(&source, &name);
         let (instance, definition) = daemon
-            .instantiate_backend(
-                &name,
-                &source,
-                &device_pref,
-                crate::daemon::device_management::PipelineStage::Transcription,
-            )
+            .instantiate_backend(&name, &source, &device_pref, PipelineStage::Transcription)
             .await?;
 
         info!("model {name} loaded successfully");
@@ -272,12 +268,7 @@ impl SuperSTTDaemon {
         // (`model_switched` + `ready`). The startup load formerly emitted only
         // `ready`, so a settings app reconnecting after a daemon restart never
         // learned which model became active and kept showing "no model loaded".
-        daemon.broadcast_model_active(
-            &name,
-            &source,
-            &actual_device,
-            crate::daemon::device_management::PipelineStage::Transcription,
-        );
+        daemon.broadcast_model_active(&name, &source, &actual_device, PipelineStage::Transcription);
         Ok(())
     }
 }

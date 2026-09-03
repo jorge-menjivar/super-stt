@@ -16,7 +16,6 @@ use super_stt_shared::daemon::http_client::transport;
 /// once, and a re-ordering is a one-line change.
 const STT_STAGE: &str = "/pipeline/1";
 const STT_STAGE_MODEL: &str = "/pipeline/1/model";
-const STT_STAGE_CANCEL: &str = "/pipeline/1/model/cancel";
 
 // Only the stage fields the settings app consumes are modeled; serde ignores
 // the rest.
@@ -168,14 +167,21 @@ pub async fn list_available_models() -> HttpResult<Vec<(String, String)>> {
     .await
 }
 
-/// Cancel any ongoing model-switch download
-/// (HTTP `POST /pipeline/1/model/cancel`).
-pub async fn cancel_download() -> HttpResult<String> {
-    with_settings_token(|socket, token| async move {
-        let resp =
-            transport::settings_post(socket, &token, STT_STAGE_CANCEL, &serde_json::json!({}))
-                .await?;
-        require_message(resp, "cancel_download")
+/// Abandon the load `stage` has in flight
+/// (HTTP `POST /pipeline/{stage}/model/cancel`).
+///
+/// Addressed to a stage because the stages provision independently: the Cancel
+/// button under a post-processor's progress must not abandon a transcription
+/// model's download.
+pub async fn cancel_download(stage: u32) -> HttpResult<String> {
+    let path = format!("/pipeline/{stage}/model/cancel");
+    with_settings_token(move |socket, token| {
+        let path = path.clone();
+        async move {
+            let resp =
+                transport::settings_post(socket, &token, &path, &serde_json::json!({})).await?;
+            require_message(resp, "cancel_download")
+        }
     })
     .await
 }

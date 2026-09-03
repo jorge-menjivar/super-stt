@@ -20,6 +20,8 @@ so a client learns one shape and applies it anywhere in the pipeline:
 | Set it           | `POST /pipeline/{stage}/model/{model}/device` | Run it on the CPU or the GPU, reloading if it is loaded |
 | List a model's devices | `GET /pipeline/{stage}/model/{model}/device/list` | What this install can run that model on |
 | List the backend's devices | `GET /pipeline/{stage}/device/list` | What this install can run that backend on, for this stage |
+| Abandon a load   | `POST /pipeline/{stage}/model/cancel` | Stop the load this stage has in flight, download included |
+| Reload in place  | `POST /pipeline/{stage}/model/reload` | Re-instantiate it to pick up changed secrets or options |
 
 That split is the same one `/pipeline/1` and `/pipeline/1/model` draw for
 transcription, and for the same reason: choosing a backend is cheap and cannot
@@ -281,25 +283,29 @@ errors above.
 
 ## `POST /pipeline/{stage}/model/cancel`
 
-Abandon a load that is still in flight, including the download feeding it.
+Abandon the load **this stage** has in flight, including the download feeding
+it. Every stage implements it: a post-processor downloads its weights like any
+other model.
 
-Only stages that can be interrupted implement it: stage 1 does, and stage 2
-answers `404 unsupported_action` because a post-processor load is not something
-there is a partial download to abandon.
+Scoped to the stage that asked. A stage with nothing of its own in flight
+answers `409` even while another stage is downloading — that load is not this
+one's to abandon.
 
-**Errors:** `409` when no load is in progress (`No download in progress`),
-`404 unknown_stage`, `404 unsupported_action`, plus the auth errors above.
+**Errors:** `409 no_switch_in_progress` when this stage has no load in progress,
+`404 unknown_stage`, plus the auth errors above.
 
 ## `POST /pipeline/{stage}/model/reload`
 
 Re-instantiate this stage's model in place, picking up changed
-[secrets and options](./backends.md) without a manual stop/start.
+[secrets and options](./backends.md) without a manual stop/start. A stage with
+nothing loaded answers `200` and does nothing.
 
-Stage 1 implements it; stage 2 answers `404 unsupported_action` — re-running
-`POST /pipeline/2/model` does the same job for a post-processor today.
+Rarely needed by hand: writing a
+[backend option or secret](./backends/options.md) already reloads every stage
+running a model from that backend, so the new value takes effect immediately.
 
-**Errors:** `404 unknown_stage`, `404 unsupported_action`,
-`409 recording_in_progress`, plus the auth errors above.
+**Errors:** `404 unknown_stage`, `409 recording_in_progress`, plus the auth
+errors above.
 
 ## `GET /pipeline/{stage}/model/{model}/device`
 

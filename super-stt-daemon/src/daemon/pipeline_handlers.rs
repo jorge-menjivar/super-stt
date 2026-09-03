@@ -81,8 +81,7 @@ impl SuperSTTDaemon {
     /// stage 1's, which is exactly what the `stage` the tracker now reports is
     /// for.
     fn stage_switch(&self, stage: PipelineStage) -> serde_json::Value {
-        let progress = self.handle_get_download_status().download_progress;
-        let progress = progress.filter(|p| p.stage == stage.position());
+        let progress = self.handle_get_download_status(stage).download_progress;
         progress.map_or(serde_json::Value::Null, |p| {
             serde_json::json!({
                 "phase":      p.status,

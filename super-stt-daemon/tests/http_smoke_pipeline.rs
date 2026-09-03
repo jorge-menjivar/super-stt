@@ -15,6 +15,8 @@
 //!    device through its stage, per model, with the same validation.
 //! 9. `/pipeline/{stage}/device/list` and `.../model/{model}/device/list`
 //!    say what a stage's backend, and one of its models, can be run on here.
+//! 10. `/pipeline/{stage}/model/{cancel,reload}` answer for every stage, each
+//!     about its own model.
 //!
 //! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
 //! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
@@ -901,4 +903,44 @@ async fn device_lists_for_a_model_and_for_a_stage() {
     let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/device/list", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["available_devices"], serde_json::json!(["cpu"]));
+}
+
+/// Both in-flight verbs answer for every stage. Stage 2 used to answer
+/// `404 unsupported_action` on the grounds that a post-processor had no
+/// download to abandon — it does, and its Cancel button was reaching stage 1's
+/// route instead. Cancel is scoped to the stage that asks: with nothing in
+/// flight anywhere, each stage says so about itself.
+#[tokio::test]
+async fn every_stage_answers_cancel_and_reload() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    for stage in [1, 2] {
+        let (status, body) = post_req(
+            &sock,
+            &format!("/pipeline/{stage}/model/cancel"),
+            &token,
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "stage {stage} body: {body}");
+        assert_eq!(body["error_code"], "no_switch_in_progress");
+
+        // Nothing loaded in either stage, so a reload is a no-op success.
+        let (status, body) = post_req(
+            &sock,
+            &format!("/pipeline/{stage}/model/reload"),
+            &token,
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "stage {stage} body: {body}");
+        assert_eq!(body["status"], "success");
+    }
+
+    // And the stage still has to exist.
+    for path in ["/pipeline/3/model/cancel", "/pipeline/3/model/reload"] {
+        let (status, body) = post_req(&sock, path, &token, serde_json::json!({})).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
+        assert_eq!(body["error_code"], "unknown_stage");
+    }
 }
