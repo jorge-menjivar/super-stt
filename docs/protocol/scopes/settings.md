@@ -30,7 +30,8 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 
 | Mutation                                                                                                                          | Mirrored as an SSE event?                                                                            |
 |-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| `/pipeline/1/model`, `/pipeline/1`, `/pipeline/1/model/{model}/device` (when it reloads), `/allow_online_models` (when it triggers a fallback) | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled)                 |
+| `/pipeline/{stage}/model`, `/pipeline/{stage}/model/{model}/device` (when it reloads), `/allow_online_models` (when it triggers a fallback) | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled). Both carry the `stage` they are about: every stage reports its own model lifecycle. |
+| `/pipeline/1` (backend selection)                                                                                               | Yes — `daemon_status_changed` (`active_backend_changed` variant)                                      |
 | `/update_check_enabled`, `/update_beta_optin`, `/pipeline/{stage}` (post-processing stages)                                     | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
 | `/audio_theme`, `/volume`, `/write_method`, `/notification_method`, `/recording_stop_mode`, `/preview_typing`, `/allow_online_models` (no fallback), `/custom_models_dir` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
 

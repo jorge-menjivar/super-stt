@@ -177,6 +177,17 @@ pub struct DaemonResponse {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DownloadProgress {
     pub model_name: String,
+    /// The backend serving `model_name` — the same repo id `/backends` reports.
+    /// A model name alone does not say whose it is, and two backends may serve
+    /// the same one.
+    #[serde(default)]
+    pub source: String,
+    /// The `/pipeline/{stage}` position this download is provisioning a model
+    /// for: 1 while a transcription model downloads, 2 while a post-processor
+    /// does. Absent from an older daemon's payload, which reads as stage 1 —
+    /// the only stage that downloaded anything then.
+    #[serde(default = "super::pipeline::default_stage")]
+    pub stage: u32,
     pub current_file: String,
     pub file_index: usize,
     pub total_files: usize,

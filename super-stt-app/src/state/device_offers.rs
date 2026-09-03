@@ -14,12 +14,13 @@
 //! in the key is what makes a stale answer harmless: after a backend switch a
 //! lookup for the new one simply misses until its own answer lands.
 
-/// Transcription is stage 1 of the pipeline — the stage a transcription
-/// model's device is addressed through.
-pub const STT_STAGE: u32 = 1;
-/// Post-processing is stage 2, the stage a post-processor's device is
-/// addressed through.
-pub const PP_STAGE: u32 = 2;
+/// The pipeline positions, under the names the app addresses them by:
+/// transcription is stage 1, post-processing stage 2. The numbers are the
+/// daemon's — the same ones `/pipeline/{stage}` takes and the `stage` field of
+/// its events carries — so they are re-exported rather than restated.
+pub use super_stt_shared::models::protocol::{
+    POST_PROCESSOR_STAGE as PP_STAGE, TRANSCRIPTION_STAGE as STT_STAGE,
+};
 
 /// One answer from the daemon: the devices available for a stage's backend, or
 /// for one model of it.

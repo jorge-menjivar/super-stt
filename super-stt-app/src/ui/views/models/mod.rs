@@ -35,9 +35,6 @@ use crate::ui::messages::Message;
 /// Post-processing dropdown renders them — the settings handler resolves a
 /// picked index through this, so both sides must agree.
 pub(crate) use post_processing::post_processor_models;
-/// Re-exported so the operation state can tell whose model a progress event
-/// names — the same role rule every picker filters through.
-pub(crate) use roles::stage_for_model;
 
 pub use post_processing::post_processor_sheet;
 

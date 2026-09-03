@@ -220,7 +220,11 @@ impl AppModel {
         // than leaving the UI on a device the daemon never adopted (audit
         // Tier 3 #37).
         let prev_device = self.current_device.clone();
-        self.set_model_loading(model.clone(), "Initiating model switch...".to_string());
+        self.set_model_loading(
+            model.clone(),
+            "Initiating model switch...".to_string(),
+            STT_STAGE,
+        );
         if let Some(dev) = &device_to_set {
             self.current_device.clone_from(dev);
         }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::types::SuperSTTDaemon;
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends;
@@ -276,7 +277,7 @@ impl SuperSTTDaemon {
             }
         }
 
-        self.broadcast_model_loading_status(&model);
+        self.broadcast_model_loading_status(&model, PipelineStage::Transcription);
         self.unload_current_model().await;
         let device_pref = self
             .config
@@ -285,7 +286,12 @@ impl SuperSTTDaemon {
             .effective_device(&backend_source, &model);
 
         match self
-            .instantiate_backend(&model, &backend_source, &device_pref)
+            .instantiate_backend(
+                &model,
+                &backend_source,
+                &device_pref,
+                PipelineStage::Transcription,
+            )
             .await
         {
             Ok((instance, definition)) => {
@@ -315,7 +321,12 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after model switch: {e}");
         }
-        self.broadcast_model_active(&model, &source, &actual_device);
+        self.broadcast_model_active(
+            &model,
+            &source,
+            &actual_device,
+            PipelineStage::Transcription,
+        );
         info!("Switched to model: {model}");
         DaemonResponse::success()
             .with_current_model(model.clone())

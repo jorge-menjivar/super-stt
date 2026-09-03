@@ -23,7 +23,7 @@ use super_stt_shared::models::protocol::{Command, DaemonResponse, DaemonStatusEv
 /// — resolving the model, validating the device, shaping the answer — is
 /// shared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PipelineStage {
+pub enum PipelineStage {
     /// Stage 1: audio to text.
     Transcription,
     /// Stage 2: the transcript rewriter.
@@ -31,11 +31,13 @@ pub(crate) enum PipelineStage {
 }
 
 impl PipelineStage {
-    /// The stage's 1-based position, as `/pipeline/{stage}` spells it.
-    fn position(self) -> u32 {
+    /// The stage's 1-based position, as `/pipeline/{stage}` spells it — and
+    /// as the `stage` field of the events and download reports it emits.
+    #[must_use]
+    pub fn position(self) -> u32 {
         match self {
-            Self::Transcription => 1,
-            Self::PostProcessor => 2,
+            Self::Transcription => super_stt_shared::models::protocol::TRANSCRIPTION_STAGE,
+            Self::PostProcessor => super_stt_shared::models::protocol::POST_PROCESSOR_STAGE,
         }
     }
 
@@ -469,6 +471,7 @@ impl SuperSTTDaemon {
                 from_device: previous.to_string(),
                 target_device: device.to_string(),
                 model: name.clone(),
+                stage: PipelineStage::Transcription.position(),
             });
         // Route through the shared graceful path so the backend is
         // `shutdown()` outside the write lock rather than dropped under it — a
@@ -497,6 +500,7 @@ impl SuperSTTDaemon {
                     model_name: Some(name),
                     actual_device: Some(actual_device.clone()),
                     preferred_device: Some(device.to_string()),
+                    stage: PipelineStage::Transcription.position(),
                 });
                 self.model_device_response(
                     PipelineStage::Transcription,
@@ -529,6 +533,7 @@ impl SuperSTTDaemon {
                 error: error.to_string(),
                 failed_device: device.to_string(),
                 model: name.clone(),
+                stage: PipelineStage::Transcription.position(),
             });
 
         let mut shutdown_rx = self.shutdown_tx.subscribe();
@@ -554,6 +559,7 @@ impl SuperSTTDaemon {
                     model_name: Some(name.clone()),
                     actual_device: Some(actual_device.clone()),
                     preferred_device: Some(previous.to_string()),
+                    stage: PipelineStage::Transcription.position(),
                 });
                 DaemonResponse::error(&format!(
                     "Failed to switch to device '{device}': {error}. Reverted to previous device '{actual_device}'."

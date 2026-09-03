@@ -236,11 +236,19 @@ impl SuperSTTDaemon {
         name: String,
         source: String,
     ) -> Result<()> {
-        daemon.broadcast_model_loading_status(&name);
+        daemon.broadcast_model_loading_status(
+            &name,
+            crate::daemon::device_management::PipelineStage::Transcription,
+        );
 
         let device_pref = daemon.config.read().await.effective_device(&source, &name);
         let (instance, definition) = daemon
-            .instantiate_backend(&name, &source, &device_pref)
+            .instantiate_backend(
+                &name,
+                &source,
+                &device_pref,
+                crate::daemon::device_management::PipelineStage::Transcription,
+            )
             .await?;
 
         info!("model {name} loaded successfully");
@@ -264,7 +272,12 @@ impl SuperSTTDaemon {
         // (`model_switched` + `ready`). The startup load formerly emitted only
         // `ready`, so a settings app reconnecting after a daemon restart never
         // learned which model became active and kept showing "no model loaded".
-        daemon.broadcast_model_active(&name, &source, &actual_device);
+        daemon.broadcast_model_active(
+            &name,
+            &source,
+            &actual_device,
+            crate::daemon::device_management::PipelineStage::Transcription,
+        );
         Ok(())
     }
 }

@@ -12,6 +12,12 @@ use crate::daemon::events::EventBus;
 /// Progress tracker for model downloads that implements the hf-hub Progress trait
 pub struct DownloadProgressTracker {
     pub model_name: String,
+    /// The backend serving the model, and the `/pipeline/{stage}` position
+    /// provisioning it. Reported on every tick so a client can put the
+    /// progress on the card that started it: the model name alone does not say
+    /// whose download it is, and both stages download through this tracker.
+    pub source: String,
+    pub stage: u32,
     pub current_file: Arc<RwLock<String>>,
     pub file_index: AtomicUsize,
     pub total_files: AtomicUsize,
@@ -53,9 +59,17 @@ pub struct DownloadProgressTracker {
 }
 
 impl DownloadProgressTracker {
-    pub fn new(model_name: String, total_files: usize, cancelled: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        model_name: String,
+        source: String,
+        stage: u32,
+        total_files: usize,
+        cancelled: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             model_name,
+            source,
+            stage,
             current_file: Arc::new(RwLock::new(String::new())),
             file_index: AtomicUsize::new(0),
             total_files: AtomicUsize::new(total_files),
@@ -129,6 +143,8 @@ impl DownloadProgressTracker {
 
         DownloadProgress {
             model_name: self.model_name.clone(),
+            source: self.source.clone(),
+            stage: self.stage,
             current_file: self.current_file.read().clone(),
             file_index: self.file_index.load(Ordering::Relaxed),
             total_files: self.total_files.load(Ordering::Relaxed),
@@ -327,6 +343,23 @@ impl DownloadStateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super_stt_shared::models::protocol::TRANSCRIPTION_STAGE;
+
+    /// A tracker for a stage-1 download of `model`, the shape every test here
+    /// but the attribution one uses.
+    fn tracker(
+        model: &str,
+        total_files: usize,
+        cancelled: Arc<AtomicBool>,
+    ) -> DownloadProgressTracker {
+        DownloadProgressTracker::new(
+            model.to_string(),
+            "github.com/super-stt/whisper".to_string(),
+            TRANSCRIPTION_STAGE,
+            total_files,
+            cancelled,
+        )
+    }
 
     /// Regression for the silent UI-stuck bug: when the post-download
     /// `mark_completed()` runs and `broadcast_progress()` is called,
@@ -339,7 +372,7 @@ mod tests {
     #[test]
     fn broadcast_progress_publishes_completed_status_even_without_percentage_increase() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 1, cancelled);
+        let tracker = tracker("test-model", 1, cancelled);
         tracker.total_bytes.store(1000, Ordering::Relaxed);
         tracker.bytes_downloaded.store(900, Ordering::Relaxed);
 
@@ -376,7 +409,7 @@ mod tests {
     #[test]
     fn broadcast_progress_publishes_when_total_bytes_changes() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 1, cancelled);
+        let tracker = tracker("test-model", 1, cancelled);
 
         // Initial broadcast — empty status → "downloading", total_bytes = 0.
         tracker.broadcast_progress();
@@ -406,7 +439,7 @@ mod tests {
     #[test]
     fn start_file_resets_per_file_counters() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 2, cancelled);
+        let tracker = tracker("test-model", 2, cancelled);
 
         // Simulate file 0 finishing.
         tracker.total_bytes.store(3_000_000_000, Ordering::Relaxed);
@@ -433,7 +466,7 @@ mod tests {
     #[test]
     fn broadcast_progress_publishes_when_file_index_advances() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 2, cancelled);
+        let tracker = tracker("test-model", 2, cancelled);
 
         // File 0 fully downloaded: overall = (0 + 1)/2 = 50%.
         tracker.total_bytes.store(1000, Ordering::Relaxed);
@@ -461,7 +494,7 @@ mod tests {
     #[test]
     fn percentage_reaches_100_when_current_file_complete() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("m".to_string(), 3, cancelled);
+        let tracker = tracker("m", 3, cancelled);
         tracker.start_file("f3", 2);
         tracker.total_bytes.store(500, Ordering::Relaxed);
         tracker.bytes_downloaded.store(500, Ordering::Relaxed);
@@ -475,7 +508,7 @@ mod tests {
     #[test]
     fn percentage_is_per_file_not_aggregate() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("m".to_string(), 2, cancelled);
+        let tracker = tracker("m", 2, cancelled);
         // Second file (index 1 of 2), half downloaded.
         tracker.start_file("f2", 1);
         tracker.total_bytes.store(1000, Ordering::Relaxed);
@@ -493,7 +526,7 @@ mod tests {
     #[test]
     fn loading_and_completed_statuses_are_100_percent() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("m".to_string(), 2, cancelled);
+        let tracker = tracker("m", 2, cancelled);
         tracker.start_file("f1", 0);
         tracker.total_bytes.store(500, Ordering::Relaxed);
         tracker.bytes_downloaded.store(100, Ordering::Relaxed);
@@ -512,7 +545,7 @@ mod tests {
     #[test]
     fn broadcast_progress_suppressed_when_neither_percentage_nor_status_changes() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = DownloadProgressTracker::new("test-model".to_string(), 1, cancelled);
+        let tracker = tracker("test-model", 1, cancelled);
         tracker.total_bytes.store(1000, Ordering::Relaxed);
         tracker.bytes_downloaded.store(500, Ordering::Relaxed);
 
@@ -529,5 +562,31 @@ mod tests {
             5000,
             "second call with identical state must be a no-op"
         );
+    }
+
+    /// The reported bug: a post-processor's download reported progress a
+    /// client could only attribute by looking its model name up in the
+    /// catalog, which put the progress bar on the transcription card. Every
+    /// tick now says which stage and which backend it is for.
+    #[test]
+    fn progress_reports_the_stage_and_backend_it_is_for() {
+        use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = DownloadProgressTracker::new(
+            "s1-mini-q4_k_m".to_string(),
+            "github.com/super-stt/s1-mini".to_string(),
+            POST_PROCESSOR_STAGE,
+            2,
+            cancelled,
+        );
+        let progress = tracker.get_progress();
+        assert_eq!(progress.model_name, "s1-mini-q4_k_m");
+        assert_eq!(progress.source, "github.com/super-stt/s1-mini");
+        assert_eq!(progress.stage, POST_PROCESSOR_STAGE);
+
+        let json = serde_json::to_value(&progress).unwrap();
+        assert_eq!(json["stage"], 2);
+        assert_eq!(json["source"], "github.com/super-stt/s1-mini");
     }
 }

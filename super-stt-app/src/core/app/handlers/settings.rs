@@ -248,7 +248,7 @@ impl AppModel {
     /// stage 1's, and a post-processor's download and load are reported only
     /// by the `download_progress` ticks that name its model. The write's own
     /// response is the end of it.
-    fn finish_post_processor_operation(&mut self) {
+    pub(in crate::core::app) fn finish_post_processor_operation(&mut self) {
         if self.model_operation_stage == PP_STAGE {
             self.model_operation_state = ModelOperationState::Ready;
         }

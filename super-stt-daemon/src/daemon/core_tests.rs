@@ -1733,7 +1733,12 @@ async fn broadcast_model_active_carries_full_identity() {
     let daemon = test_daemon().await;
     let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
 
-    daemon.broadcast_model_active("voxtral-mini", "github.com/super-stt/mistral", "cuda");
+    daemon.broadcast_model_active(
+        "voxtral-mini",
+        "github.com/super-stt/mistral",
+        "cuda",
+        crate::daemon::device_management::PipelineStage::Transcription,
+    );
 
     let (_topic, switched) = rx.recv_json().await.expect("model_switched event");
     assert_eq!(switched["status"], "model_switched");
@@ -1744,6 +1749,127 @@ async fn broadcast_model_active_carries_full_identity() {
     assert_eq!(ready["status"], "ready");
     assert_eq!(ready["model_loaded"], true);
     assert_eq!(ready["model_name"], "voxtral-mini");
+}
+
+/// Stage 2 reports its own model lifecycle. Without that, the only notice a
+/// client got of a post-processor load was the download ticks, which named a
+/// model and left the client to guess whose it was — and a load with nothing
+/// to download, or an unload, was announced not at all.
+#[tokio::test]
+async fn a_post_processor_load_announces_itself_as_stage_two() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::daemon::events::Topic;
+
+    let daemon = test_daemon().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    daemon.broadcast_model_loading_status("s1-mini", PipelineStage::PostProcessor);
+    daemon.broadcast_model_active(
+        "s1-mini",
+        "github.com/super-stt/s1-mini",
+        "cpu",
+        PipelineStage::PostProcessor,
+    );
+
+    let (_topic, loading) = rx.recv_json().await.expect("loading_model event");
+    assert_eq!(loading["status"], "loading_model");
+    assert_eq!(loading["stage"], 2);
+
+    let (_topic, switched) = rx.recv_json().await.expect("model_switched event");
+    assert_eq!(switched["status"], "model_switched");
+    assert_eq!(switched["model_name"], "s1-mini");
+    assert_eq!(switched["stage"], 2);
+
+    let (_topic, ready) = rx.recv_json().await.expect("ready event");
+    assert_eq!(ready["status"], "ready");
+    assert_eq!(ready["model_loaded"], true);
+    assert_eq!(ready["stage"], 2);
+}
+
+/// The polled mirror of the same rule: `GET /pipeline` reports an in-flight
+/// download under the stage that started it. The daemon runs one at a time,
+/// and before it said which stage that was, a post-processor's download
+/// surfaced as stage 1's — the progress bar under the transcription card.
+#[tokio::test]
+async fn a_stage_reports_only_its_own_download() {
+    use crate::download_progress::DownloadProgressTracker;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
+
+    let daemon = test_daemon().await;
+    let tracker = Arc::new(DownloadProgressTracker::new(
+        "s1-mini-q4_k_m".to_string(),
+        "github.com/super-stt/s1-mini".to_string(),
+        POST_PROCESSOR_STAGE,
+        2,
+        Arc::new(AtomicBool::new(false)),
+    ));
+    daemon
+        .download_manager
+        .start_download(tracker)
+        .expect("register download");
+
+    let pipeline = daemon
+        .handle_get_pipeline()
+        .await
+        .pipeline
+        .expect("pipeline");
+    let stages = pipeline.as_array().expect("stages");
+    assert!(
+        stages[0]["switch"].is_null(),
+        "stage 1 must not report the post-processor's download"
+    );
+    assert_eq!(stages[1]["switch"]["target"]["model"], "s1-mini-q4_k_m");
+    assert_eq!(
+        stages[1]["switch"]["target"]["source"],
+        "github.com/super-stt/s1-mini"
+    );
+}
+
+/// Stage 1's events keep saying stage 1, so a client filtering on the field
+/// sees the transcription lifecycle exactly where it always was.
+#[tokio::test]
+async fn a_transcription_load_still_announces_itself_as_stage_one() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::daemon::events::Topic;
+
+    let daemon = test_daemon().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    daemon.broadcast_model_loading_status("whisper-tiny", PipelineStage::Transcription);
+    let (_topic, loading) = rx.recv_json().await.expect("loading_model event");
+    assert_eq!(loading["stage"], 1);
+}
+
+/// An unload that answers a user request says stage 2 went idle; an unload of
+/// a stage that was already idle says nothing, since an event reporting a stop
+/// should mean something was running.
+#[tokio::test]
+async fn unloading_the_post_processor_announces_only_when_one_was_loaded() {
+    use crate::daemon::device_management::PipelineStage;
+    use crate::daemon::events::Topic;
+
+    let daemon = test_daemon().await;
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+
+    // Nothing loaded: the unload must announce nothing. A marker event
+    // published straight after is what proves it — the next event to arrive is
+    // the marker, not an unload nobody performed.
+    daemon.unload_post_processor_announced().await;
+    daemon.broadcast_model_loading_status("marker", PipelineStage::Transcription);
+    let (_topic, first) = rx.recv_json().await.expect("marker event");
+    assert_eq!(
+        first["status"], "loading_model",
+        "an idle stage announces nothing"
+    );
+
+    seed_scripted_post_processor(&daemon).await;
+    daemon.unload_post_processor_announced().await;
+    let (_topic, ready) = rx.recv_json().await.expect("ready event");
+    assert_eq!(ready["status"], "ready");
+    assert_eq!(ready["model_loaded"], false);
+    assert_eq!(ready["stage"], 2);
 }
 
 /// A `Transcribe` fake whose `transcribe_audio` returns a fixed text or fails,
@@ -1810,6 +1936,44 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
     *daemon.model.write().await = Some(LoadedModel {
         definition,
         instance: Box::new(ScriptedTranscribe { info, result }),
+    });
+}
+
+/// Seed the daemon's `post_processor` slot with a fake, so an unload has
+/// something to unload. The instance never runs — only the slot's occupancy
+/// matters here.
+async fn seed_scripted_post_processor(daemon: &SuperSTTDaemon) {
+    use crate::daemon::types::LoadedModel;
+    use crate::stt_models::ModelDefinition;
+    use crate::stt_models::transcribe::ModelInfoData;
+    use std::time::Duration;
+
+    let definition = ModelDefinition {
+        name: "scripted-pp".to_string(),
+        source: "github.com/super-stt/test".to_string(),
+        is_multilingual: false,
+        primary_language: "en".to_string(),
+        supported_languages: vec!["en".to_string()],
+        estimated_vram_bytes: 0,
+        processing_interval: Duration::from_secs(1),
+        supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
+        realtime: false,
+        role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+        provider: None,
+    };
+    let info = ModelInfoData::new(
+        "scripted-pp",
+        "github.com/super-stt/test",
+        false,
+        false,
+        Duration::from_secs(1),
+    );
+    *daemon.post_processor.write().await = Some(LoadedModel {
+        definition,
+        instance: Box::new(ScriptedTranscribe {
+            info,
+            result: Ok(String::new()),
+        }),
     });
 }
 

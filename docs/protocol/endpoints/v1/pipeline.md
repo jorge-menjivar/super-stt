@@ -93,6 +93,22 @@ become insertable, renumbering is the thing to design — a client holding
 | `loaded` | bool    | Whether the model is loaded and running right now.                       |
 | `device` | string? | The accelerator the loaded model is actually on: `cpu`, `cuda`, `rocm`, `metal`, `vulkan`, or `remote` for an online model. `null` when nothing is loaded. This is where the work runs, not the user's preference — for that, and for what a `gpu` choice resolved to, read the model's [device](#get-pipelinestagemodelmodeldevice). |
 | `enabled`| bool    | *Processor stages only.* Whether it should run. Distinct from `loaded`: a stage can be enabled while its model failed to load, and transcripts then pass through unchanged. |
+| `switch` | object? | The load this stage has in flight, or `null` when it has none. Scoped to the stage: a post-processor's download never appears under stage 1. |
+
+### The `switch` object
+
+Present while a stage is provisioning a model — downloading its files, then
+loading the weights.
+
+| Field        | Type    | Notes                                                          |
+|--------------|---------|-----------------------------------------------------------------|
+| `phase`      | string  | `downloading`, `loading_model`, `completed`, `cancelled`, or `error` — the same vocabulary the `download_progress` event's `status` uses. |
+| `target`     | object  | `{ model, source }` — what is being loaded, and the backend serving it. |
+| `started_at` | string  | RFC 3339 timestamp of when the load began.                      |
+| `download`   | object  | `{ current_file, file_index, total_files, bytes_downloaded, total_bytes, percentage, eta_seconds }`, per file — see [`download_progress`](./events.md#daemon-status) for what the counters mean. |
+
+The polled mirror of the [events](#events) below: a client that wants live
+progress subscribes, and one that reconnects mid-load reads it here.
 
 ## `GET /pipeline`
 
@@ -122,7 +138,8 @@ Content-Type: application/json
       "name":   "Whisper (local)",
       "model":  "whisper-large-v3",
       "loaded": true,
-      "device": "cuda"
+      "device": "cuda",
+      "switch": null
     },
     {
       "stage":   2,
@@ -132,6 +149,7 @@ Content-Type: application/json
       "model":   "textclean",
       "loaded":  true,
       "device":  "cpu",
+      "switch":  null,
       "enabled": true
     }
   ]
@@ -156,6 +174,7 @@ Content-Type: application/json
     "model":   "textclean",
     "loaded":  true,
     "device":  "cpu",
+    "switch":  null,
     "enabled": true
   }
 }
@@ -439,9 +458,22 @@ its [options and secrets](./backends.md) like any other model.
 
 ## Events
 
-A change to any stage publishes `daemon_status_changed` on
-[`/events`](./events.md): stage 1 through the existing `active_backend_changed` /
-`model_switched` variants, stage 2 as `settings_changed` with
+Every stage reports its own model lifecycle on
+[`daemon_status_changed`](./events.md#daemon-status), and each of those events
+carries the `stage` it is about — a client watching one stage must not read the
+other's load as its own. Loading a model publishes `loading_model`, then
+`model_switched` and `ready` once it is running; unloading publishes `ready`
+with `model_loaded: false`. A load that downloads also publishes
+[`download_progress`](./events.md#daemon-status) ticks, which carry the same
+`stage` (and the `source` serving the model), so progress lands on the stage
+that asked for it.
+
+An event without a `stage` field comes from a daemon older than the field, and
+is stage 1's: transcription was the only stage that emitted these.
+
+Backend *selection* is separate from the model lifecycle: stage 1's publishes
+`active_backend_changed`, stage 2's publishes `settings_changed` with
 `setting: "post_processor"`. A device change that reloads stage 1's model
 publishes `switching_device`, `loading_model_for_device` and then `ready` (or
-`device_switch_error`); one that only records a choice publishes nothing.
+`device_switch_error`); stage 2's device change is a plain reload and reports
+itself as one. A device change that only records a choice publishes nothing.

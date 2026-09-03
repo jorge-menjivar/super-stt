@@ -3,6 +3,7 @@ mod command;
 mod daemon_status;
 mod dispatch;
 mod error_code;
+mod pipeline;
 mod request;
 mod response;
 
@@ -12,6 +13,7 @@ mod tests;
 pub use command::Command;
 pub use daemon_status::DaemonStatusEvent;
 pub use error_code::ErrorCode;
+pub use pipeline::{POST_PROCESSOR_STAGE, TRANSCRIPTION_STAGE};
 pub use request::DaemonRequest;
 pub use response::{
     CudaHostInfo, DaemonResponse, DownloadProgress, GpuHostInfo, GpuInfo, NotificationEvent,

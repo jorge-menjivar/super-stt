@@ -103,14 +103,20 @@ pub async fn get_download_status()
         let Some(download) = switch.download else {
             return Ok(None);
         };
-        let model_name = switch
-            .target
-            .get("model")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let target_field = |key: &str| {
+            switch
+                .target
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
         let progress = super_stt_shared::models::protocol::DownloadProgress {
-            model_name,
+            model_name: target_field("model"),
+            source: target_field("source"),
+            // This block is stage 1's by construction — it is read from
+            // `GET /pipeline/1`, which reports only its own stage's switch.
+            stage: super_stt_shared::models::protocol::TRANSCRIPTION_STAGE,
             current_file: download.current_file,
             file_index: download.file_index,
             total_files: download.total_files,
