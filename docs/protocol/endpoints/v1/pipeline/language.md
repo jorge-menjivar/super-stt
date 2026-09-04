@@ -25,12 +25,14 @@ Every stage answers it. A post-processor is monolingual and says so in
 `multilingual` — a real answer rather than an error, since the point of
 addressing stages by position is that they answer the same verbs.
 
-> **Moved from `/backends/{backend_id}/models/{model}/language`.** One consequence:
-> the model's backend must now be *selected into a stage*. A model belonging to
-> an installed but unselected backend has no path to it, where the
-> `{source}`-addressed spelling could reach any installed model. That is the
-> same precondition [device](./device.md) has always had, and `400
-> invalid_backend` is the answer when the stage is empty.
+> **Moved from `/backends/{backend_id}/models/{model}/language`.** The model's
+> backend has to be filling a stage now, where the old spelling could reach any
+> installed model. That costs nothing real: a language control is only ever
+> shown on a stage's card, so the backend is selected by the time anyone asks.
+> A model that is *selected but not yet loaded* still resolves — that is how a
+> card shows its language before Load. An empty stage answers
+> `400 invalid_backend`, the same precondition [device](./device.md) has always
+> had.
 
 ## Auth
 
