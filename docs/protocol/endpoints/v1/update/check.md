@@ -5,7 +5,7 @@ schedule. The response is the same status shape as
 [`GET /update`](../update.md), refreshed by the check that just ran.
 
 The check runs synchronously even when
-[`update_check_enabled`](../update_check_enabled.md) is `false` —
+[`update_check_enabled`](../settings/update_check_enabled.md) is `false` —
 this endpoint is the explicit, on-demand path and is never gated by
 that setting. Concurrent calls serialize: a caller that arrives
 while a check is already in flight waits for it to finish and

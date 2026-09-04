@@ -20,260 +20,6 @@
     }
   ],
   "paths": {
-    "/v1/audio_theme": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read the selected audio cue theme",
-        "description": "Answers with the selected theme's token.",
-        "operationId": "get_audio_theme",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AudioThemeState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Select the audio cue theme",
-        "description": "Chooses which set of sounds marks the start and end of a recording. List the accepted values with `GET /audio_themes`; set the loudness at `/volume`.",
-        "operationId": "set_audio_theme",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetAudioThemeBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AudioThemeState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/audio_theme/test": {
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Play the selected theme's cues",
-        "description": "Plays the start and stop cues once, at the configured volume, so a settings UI can preview a theme without starting a recording. Changes nothing.",
-        "operationId": "test_audio_theme",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Ack"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/audio_themes": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "List the available audio cue themes",
-        "description": "Every theme `POST /audio_theme` accepts. The set is fixed in the daemon build, not user-extensible.",
-        "operationId": "list_audio_themes",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AudioThemeList"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
     "/v1/auth/request": {
       "post": {
         "tags": [
@@ -1573,142 +1319,6 @@
         ]
       }
     },
-    "/v1/custom_models_dir": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read the custom models directory",
-        "description": "Answers with the configured path, or `null` when no override is set.",
-        "operationId": "get_custom_models_dir",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CustomModelsDirState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Point the daemon at a models directory of your own",
-        "description": "Overrides where the daemon looks for model files. Send `null` to clear the override and fall back to the default location. Backends installed from the registry are unaffected — this is for models supplied out of band.",
-        "operationId": "set_custom_models_dir",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CustomModelsDirBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CustomModelsDirState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
     "/v1/events": {
       "get": {
         "tags": [
@@ -1787,7 +1397,7 @@
     "/v1/gpu_info": {
       "get": {
         "tags": [
-          "settings"
+          "hardware"
         ],
         "summary": "Inventory the host's GPUs",
         "description": "What the daemon can see of this machine's accelerators: one entry per detected GPU with its memory, plus the host-wide driver and runtime versions that decide which backend builds will actually run here.\n\nDetection is a live probe, so this reflects the machine now rather than a cached answer. A host with no GPU answers `200` with an empty list.",
@@ -1843,203 +1453,10 @@
         ]
       }
     },
-    "/v1/language": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read the default transcription language",
-        "description": "A BCP-47 tag, `auto`, or `null` when nothing is configured.",
-        "operationId": "get_language",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LanguageState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Set the default transcription language",
-        "description": "Sets the language every model transcribes in unless something more specific overrides it: a per-model setting, or a `language` field in a single `POST /transcribe` body.",
-        "operationId": "set_language",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetLanguageBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LanguageState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Clear the default transcription language",
-        "description": "Removes the global setting, returning every model to detecting the language itself. Per-model overrides are untouched.",
-        "operationId": "clear_language",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LanguageState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
     "/v1/models": {
       "get": {
         "tags": [
-          "settings"
+          "models"
         ],
         "summary": "List the models the active backend can transcribe with",
         "description": "Scoped to the backend currently filling stage 1 — only its models are switchable. Post-processor models are excluded, since selecting one as a transcription model would fail every recording; the full catalog with roles is at `GET /backends`.",
@@ -2051,142 +1468,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ModelList"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/notification_method": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read how failures are announced",
-        "description": "Answers with the configured method. This governs only failures the user would otherwise never learn about — a transcript that could not be written to the focused window, say — not routine status, which rides on the event stream.",
-        "operationId": "get_notification_method",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotificationMethodState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Choose how failures are announced",
-        "description": "Selects how the daemon tells the user when something goes wrong — a desktop notification, or nothing at all. This is about failures the user would otherwise never see, such as a transcript that could not be written to the focused window.",
-        "operationId": "set_notification_method",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetNotificationMethodBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotificationMethodState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -3363,268 +2644,6 @@
         ]
       }
     },
-    "/v1/preview_typing": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read whether live preview typing is on",
-        "description": "Answers with the current state. On means a realtime-capable model's partial transcript is typed into the focused window as it forms; off means nothing is written until the transcript is final. A model without a realtime session ignores the setting either way.",
-        "operationId": "get_preview_typing",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreviewTypingState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Turn live preview typing on or off",
-        "description": "When on, a realtime-capable model's incremental transcript is typed into the focused window as it forms, and corrected in place as later audio revises it. When off, nothing is written until the transcript is final.",
-        "operationId": "set_preview_typing",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PreviewTypingBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreviewTypingState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/recording_stop_mode": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read what currently ends a recording",
-        "description": "Answers with the configured mode. It governs daemon-mic captures started through `POST /transcribe`; the pre-captured path has no capture to end, and a `wait: true` caller can always end one by closing the connection.",
-        "operationId": "get_recording_stop_mode",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecordingStopModeState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Choose what ends a recording",
-        "description": "Sets whether a recording stops on an explicit signal, on a period of silence, or on either. This governs daemon-mic captures started through `POST /transcribe`; it has no bearing on the pre-captured path, which has no capture to end.",
-        "operationId": "set_recording_stop_mode",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetRecordingStopModeBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecordingStopModeState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
     "/v1/registry/backends": {
       "get": {
         "tags": [
@@ -3998,6 +3017,1580 @@
         ]
       }
     },
+    "/v1/settings/audio_theme": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read the selected audio cue theme",
+        "description": "Answers with the selected theme's token.",
+        "operationId": "get_audio_theme",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioThemeState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Select the audio cue theme",
+        "description": "Chooses which set of sounds marks the start and end of a recording. List the accepted values with `GET /settings/audio_theme/list`; set the loudness at `/settings/volume`.",
+        "operationId": "set_audio_theme",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetAudioThemeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioThemeState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/audio_theme/list": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "List the available audio cue themes",
+        "description": "Every theme `POST /settings/audio_theme` accepts. The set is fixed in the daemon build, not user-extensible.",
+        "operationId": "list_audio_themes",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioThemeList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/audio_theme/test": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Play the selected theme's cues",
+        "description": "Plays the start and stop cues once, at the configured volume, so a settings UI can preview a theme without starting a recording. Changes nothing.",
+        "operationId": "test_audio_theme",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/custom_models_dir": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read the custom models directory",
+        "description": "Answers with the configured path, or `null` when no override is set.",
+        "operationId": "get_custom_models_dir",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelsDirState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Point the daemon at a models directory of your own",
+        "description": "Overrides where the daemon looks for model files. Send `null` to clear the override and fall back to the default location. Backends installed from the registry are unaffected — this is for models supplied out of band.",
+        "operationId": "set_custom_models_dir",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomModelsDirBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelsDirState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/language": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read the default transcription language",
+        "description": "A BCP-47 tag, `auto`, or `null` when nothing is configured.",
+        "operationId": "get_language",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Set the default transcription language",
+        "description": "Sets the language every model transcribes in unless something more specific overrides it: a per-model setting, or a `language` field in a single `POST /transcribe` body.",
+        "operationId": "set_language",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLanguageBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Clear the default transcription language",
+        "description": "Removes the global setting, returning every model to detecting the language itself. Per-model overrides are untouched.",
+        "operationId": "clear_language",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/notification_method": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read how failures are announced",
+        "description": "Answers with the configured method. This governs only failures the user would otherwise never learn about — a transcript that could not be written to the focused window, say — not routine status, which rides on the event stream.",
+        "operationId": "get_notification_method",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationMethodState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Choose how failures are announced",
+        "description": "Selects how the daemon tells the user when something goes wrong — a desktop notification, or nothing at all. This is about failures the user would otherwise never see, such as a transcript that could not be written to the focused window.",
+        "operationId": "set_notification_method",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetNotificationMethodBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationMethodState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/preview_typing": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read whether live preview typing is on",
+        "description": "Answers with the current state. On means a realtime-capable model's partial transcript is typed into the focused window as it forms; off means nothing is written until the transcript is final. A model without a realtime session ignores the setting either way.",
+        "operationId": "get_preview_typing",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewTypingState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Turn live preview typing on or off",
+        "description": "When on, a realtime-capable model's incremental transcript is typed into the focused window as it forms, and corrected in place as later audio revises it. When off, nothing is written until the transcript is final.",
+        "operationId": "set_preview_typing",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewTypingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewTypingState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/recording_stop_mode": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read what currently ends a recording",
+        "description": "Answers with the configured mode. It governs daemon-mic captures started through `POST /transcribe`; the pre-captured path has no capture to end, and a `wait: true` caller can always end one by closing the connection.",
+        "operationId": "get_recording_stop_mode",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingStopModeState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Choose what ends a recording",
+        "description": "Sets whether a recording stops on an explicit signal, on a period of silence, or on either. This governs daemon-mic captures started through `POST /transcribe`; it has no bearing on the pre-captured path, which has no capture to end.",
+        "operationId": "set_recording_stop_mode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRecordingStopModeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingStopModeState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/update_beta_optin": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read the update channel opt-in",
+        "description": "Answers with the configured opt-in — whether the update check considers beta builds or stable releases only. This is about Super STT itself, not about the backends under `/registry`, which are versioned separately.",
+        "operationId": "get_update_beta_optin",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateBetaOptinState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Choose whether updates include prereleases",
+        "description": "Selects which release channel the update check considers. Opting in offers beta builds as they are published; opting out considers stable releases only.",
+        "operationId": "set_update_beta_optin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetUpdateBetaOptinBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateBetaOptinState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/update_check_enabled": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read whether periodic update checks are on",
+        "description": "Answers with the current state. Off stops the daemon checking on its own schedule; it does not disable updating, since `POST /update/check` still runs a check on demand.",
+        "operationId": "get_update_check_enabled",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCheckEnabledState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Turn the periodic update check on or off",
+        "description": "Controls whether the daemon checks for new Super STT releases on its own schedule. Turning it off does not disable updating — `POST /update/check` still works on demand.",
+        "operationId": "set_update_check_enabled",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCheckEnabledBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCheckEnabledState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/volume": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read the audio cue volume",
+        "description": "The level rides in `message` as a bare number — `\"75\"` — not as a field of its own, so parse it back out.",
+        "operationId": "get_volume",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Set the audio cue volume",
+        "description": "Sets the loudness of the recording cues on a 0–100 scale. `0` silences them without changing which theme is selected; the theme itself is read and written at `/settings/audio_theme`.",
+        "operationId": "set_volume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVolumeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/write_method": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Read how transcripts are delivered",
+        "description": "Answers with the configured preference. What it actually resolves to in this session can differ — `POST /settings/write_method/test` reports both.",
+        "operationId": "get_write_method",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteMethodState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Choose how transcripts reach the focused window",
+        "description": "Selects the mechanism the daemon uses to deliver a finished transcript — simulated typing, the clipboard, and so on. Which mechanisms work depends on the session: some need a compositor that permits synthetic input. Try one with `POST /settings/write_method/test` before committing a user to it.",
+        "operationId": "set_write_method",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWriteMethodBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteMethodState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/write_method/test": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Write sample text using the configured method",
+        "description": "Delivers a short sample to the focused window exactly as a real transcript would be, so a user can confirm the method works before relying on it. Focus the window that should receive it first.\n\nThe response reports both the configured preference and what it resolved to, which is how a UI shows that a preferred mechanism silently fell back to another. Refused with `409` while a recording is in flight.",
+        "operationId": "test_write_method",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteMethodTest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/status": {
       "get": {
         "tags": [
@@ -4289,10 +4882,10 @@
     "/v1/update": {
       "get": {
         "tags": [
-          "settings"
+          "update"
         ],
         "summary": "Read the last self-update check",
-        "description": "Reports what the most recent check found, without performing one. `checked_at` is `null` until a check has run, and `last_check_error` says why the last attempt failed if it did.\n\nWhich channel is consulted follows `/update_beta_optin`; `beta_optin_effective` reports the setting even before a check has resolved a channel of its own. To force a check now, use `POST /update/check`.",
+        "description": "Reports what the most recent check found, without performing one. `checked_at` is `null` until a check has run, and `last_check_error` says why the last attempt failed if it did.\n\nWhich channel is consulted follows `/settings/update_beta_optin`; `beta_optin_effective` reports the setting even before a check has resolved a channel of its own. To force a check now, use `POST /update/check`.",
         "operationId": "get_update",
         "responses": {
           "200": {
@@ -4348,7 +4941,7 @@
     "/v1/update/check": {
       "post": {
         "tags": [
-          "settings"
+          "update"
         ],
         "summary": "Check for a Super STT update now",
         "description": "Runs the check immediately rather than waiting for the daemon's own schedule, and answers with the result — the same shape `GET /update` reports. Works whether or not the periodic check is enabled.\n\nThis only *looks*. Nothing is downloaded or installed as a result.",
@@ -4360,599 +4953,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SelfUpdateStatus"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/update_beta_optin": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read the update channel opt-in",
-        "description": "Answers with the configured opt-in — whether the update check considers beta builds or stable releases only. This is about Super STT itself, not about the backends under `/registry`, which are versioned separately.",
-        "operationId": "get_update_beta_optin",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateBetaOptinState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Choose whether updates include prereleases",
-        "description": "Selects which release channel the update check considers. Opting in offers beta builds as they are published; opting out considers stable releases only.",
-        "operationId": "set_update_beta_optin",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetUpdateBetaOptinBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateBetaOptinState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/update_check_enabled": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read whether periodic update checks are on",
-        "description": "Answers with the current state. Off stops the daemon checking on its own schedule; it does not disable updating, since `POST /update/check` still runs a check on demand.",
-        "operationId": "get_update_check_enabled",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateCheckEnabledState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Turn the periodic update check on or off",
-        "description": "Controls whether the daemon checks for new Super STT releases on its own schedule. Turning it off does not disable updating — `POST /update/check` still works on demand.",
-        "operationId": "set_update_check_enabled",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateCheckEnabledBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateCheckEnabledState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/volume": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read the audio cue volume",
-        "description": "The level rides in `message` as a bare number — `\"75\"` — not as a field of its own, so parse it back out.",
-        "operationId": "get_volume",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Ack"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Set the audio cue volume",
-        "description": "Sets the loudness of the recording cues on a 0–100 scale. `0` silences them without changing which theme is selected; the theme itself is read and written at `/audio_theme`.",
-        "operationId": "set_volume",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetVolumeBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Ack"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/write_method": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read how transcripts are delivered",
-        "description": "Answers with the configured preference. What it actually resolves to in this session can differ — `POST /write_method/test` reports both.",
-        "operationId": "get_write_method",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WriteMethodState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Choose how transcripts reach the focused window",
-        "description": "Selects the mechanism the daemon uses to deliver a finished transcript — simulated typing, the clipboard, and so on. Which mechanisms work depends on the session: some need a compositor that permits synthetic input. Try one with `POST /write_method/test` before committing a user to it.",
-        "operationId": "set_write_method",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetWriteMethodBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WriteMethodState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/write_method/test": {
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Write sample text using the configured method",
-        "description": "Delivers a short sample to the focused window exactly as a real transcript would be, so a user can confirm the method works before relying on it. Focus the window that should receive it first.\n\nThe response reports both the configured preference and what it resolved to, which is how a UI shows that a preferred mechanism silently fell back to another. Refused with `409` while a recording is in flight.",
-        "operationId": "test_write_method",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WriteMethodTest"
                 }
               }
             }
@@ -6730,7 +6730,7 @@
         "properties": {
           "theme": {
             "type": "string",
-            "description": "A theme token from `GET /audio_themes`, e.g. `classic`. An unknown token is a `400`."
+            "description": "A theme token from `GET /settings/audio_theme/list`, e.g. `classic`. An unknown token is a `400`."
           }
         }
       },
@@ -7358,7 +7358,19 @@
     },
     {
       "name": "settings",
-      "description": "Daemon configuration: audio cues, write and notification methods, language, self-update."
+      "description": "Stored daemon preferences, one value apiece, all under `/v1/settings`: audio cues, write and notification methods, language, update policy. Sharing the `settings` scope is not the same as being a setting — `backends`, `pipeline` and `registry` are guarded by it too."
+    },
+    {
+      "name": "models",
+      "description": "The flat model catalog the backend filling stage 1 serves."
+    },
+    {
+      "name": "hardware",
+      "description": "What the daemon can see of this machine: GPUs, drivers, runtimes."
+    },
+    {
+      "name": "update",
+      "description": "Whether a newer daemon exists, and asking it to look now."
     },
     {
       "name": "backends",

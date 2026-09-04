@@ -210,7 +210,7 @@ async fn global_language_round_trips() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
     // GET → null initially
-    let (st, body) = get(&sock, "/language", &token).await;
+    let (st, body) = get(&sock, "/settings/language", &token).await;
     assert_eq!(st, StatusCode::OK, "initial GET: {body}");
     assert_eq!(
         body["language"],
@@ -221,7 +221,7 @@ async fn global_language_round_trips() {
     // POST es-MX
     let (st, body) = post_req(
         &sock,
-        "/language",
+        "/settings/language",
         &token,
         serde_json::json!({ "language": "es-MX" }),
     )
@@ -233,7 +233,7 @@ async fn global_language_round_trips() {
     );
 
     // GET → es-MX persisted
-    let (st, body) = get(&sock, "/language", &token).await;
+    let (st, body) = get(&sock, "/settings/language", &token).await;
     assert_eq!(st, StatusCode::OK, "GET after POST: {body}");
     assert_eq!(
         body["language"], "es-MX",
@@ -241,7 +241,7 @@ async fn global_language_round_trips() {
     );
 
     // DELETE → null
-    let (st, body) = delete_req(&sock, "/language", &token).await;
+    let (st, body) = delete_req(&sock, "/settings/language", &token).await;
     assert_eq!(st, StatusCode::OK, "DELETE language: {body}");
     assert_eq!(
         body["language"],
@@ -407,8 +407,8 @@ async fn language_endpoints_require_settings_scope() {
     let per_model = fixture_model_lang_path();
 
     for (method, path) in [
-        (Method::GET, "/language".to_string()),
-        (Method::POST, "/language".to_string()),
+        (Method::GET, "/settings/language".to_string()),
+        (Method::POST, "/settings/language".to_string()),
         (Method::GET, per_model.clone()),
         (Method::POST, per_model.clone()),
         (Method::DELETE, per_model),

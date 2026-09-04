@@ -14,14 +14,14 @@ use super_stt_shared::models::self_update::SelfUpdateStatus;
 #[utoipa::path(
     get,
     path = "/update",
-    tag = "settings",
+    tag = "update",
     summary = "Read the last self-update check",
     description = "\
 Reports what the most recent check found, without performing one. `checked_at` is \
 `null` until a check has run, and `last_check_error` says why the last attempt \
 failed if it did.
 
-Which channel is consulted follows `/update_beta_optin`; `beta_optin_effective` \
+Which channel is consulted follows `/settings/update_beta_optin`; `beta_optin_effective` \
 reports the setting even before a check has resolved a channel of its own. To force \
 a check now, use `POST /update/check`.",
     security(("session_token" = ["settings"])),
@@ -42,7 +42,7 @@ pub(crate) async fn get_update(State(s): State<AppState>) -> impl IntoResponse {
 #[utoipa::path(
     post,
     path = "/update/check",
-    tag = "settings",
+    tag = "update",
     summary = "Check for a Super STT update now",
     description = "\
 Runs the check immediately rather than waiting for the daemon's own schedule, and \

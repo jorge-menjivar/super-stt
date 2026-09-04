@@ -4,7 +4,7 @@
 //! A per-model override, and the resolution that answers which language is
 //! actually in effect: the override, the global `/language` setting, or the
 //! model's own default. The global setting these resolve against is
-//! [`crate::daemon::client::v1::language`].
+//! [`crate::daemon::client::v1::settings::language`].
 
 use crate::daemon::client::internal::response::require_success;
 use crate::daemon::client::internal::session::with_settings_token;

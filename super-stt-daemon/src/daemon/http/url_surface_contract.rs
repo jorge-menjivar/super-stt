@@ -51,19 +51,19 @@ const URL_SURFACE: &[(&str, &str)] = &[
     ("/v1/registry/backends/install", "post"),
     ("/v1/registry/backends/refresh", "post"),
     ("/v1/registry/backends/update", "post"),
-    ("/v1/audio_theme", "get,post"),
-    ("/v1/audio_theme/test", "post"),
-    ("/v1/audio_themes", "get"),
-    ("/v1/custom_models_dir", "get,post"),
-    ("/v1/language", "delete,get,post"),
-    ("/v1/notification_method", "get,post"),
-    ("/v1/preview_typing", "get,post"),
-    ("/v1/recording_stop_mode", "get,post"),
-    ("/v1/update_beta_optin", "get,post"),
-    ("/v1/update_check_enabled", "get,post"),
-    ("/v1/volume", "get,post"),
-    ("/v1/write_method", "get,post"),
-    ("/v1/write_method/test", "post"),
+    ("/v1/settings/audio_theme", "get,post"),
+    ("/v1/settings/audio_theme/list", "get"),
+    ("/v1/settings/audio_theme/test", "post"),
+    ("/v1/settings/custom_models_dir", "get,post"),
+    ("/v1/settings/language", "delete,get,post"),
+    ("/v1/settings/notification_method", "get,post"),
+    ("/v1/settings/preview_typing", "get,post"),
+    ("/v1/settings/recording_stop_mode", "get,post"),
+    ("/v1/settings/update_beta_optin", "get,post"),
+    ("/v1/settings/update_check_enabled", "get,post"),
+    ("/v1/settings/volume", "get,post"),
+    ("/v1/settings/write_method", "get,post"),
+    ("/v1/settings/write_method/test", "post"),
     ("/v1/status", "get"),
     ("/v1/transcribe", "post"),
     ("/v1/transcribe/realtime", "get"),
@@ -140,6 +140,55 @@ fn the_url_surface_is_exactly_this() {
         changed.is_empty(),
         "methods changed:\n  {}",
         changed.join("\n  ")
+    );
+}
+
+/// Everything under `/v1/settings/` is a setting, and every setting is there.
+///
+/// This is the invariant the namespace exists to carry. It is easy to lose in
+/// the obvious way: `settings` is also a *scope*, and the scope guards far more
+/// than the settings — `/backends`, `/pipeline` and `/registry` all sit behind
+/// it. Tagging by scope rather than by subject is what once filed a live GPU
+/// probe and a model catalog as "settings", which is how a reader ends up
+/// looking for `/v1/settings/gpu_info`.
+///
+/// So: the namespace and the tag have to agree, in both directions.
+#[test]
+fn the_settings_namespace_and_the_settings_tag_agree() {
+    let doc = document();
+    const METHODS: [&str; 7] = ["get", "put", "post", "delete", "options", "head", "patch"];
+
+    let mut namespaced_but_untagged = Vec::new();
+    let mut tagged_but_not_namespaced = Vec::new();
+
+    for (path, item) in doc["paths"].as_object().expect("paths is an object") {
+        for (method, op) in item.as_object().expect("a path item is an object") {
+            if !METHODS.contains(&method.as_str()) {
+                continue;
+            }
+            let tagged = op["tags"]
+                .as_array()
+                .expect("every operation carries tags")
+                .iter()
+                .any(|t| t == "settings");
+            let namespaced = path.starts_with("/v1/settings/");
+            match (namespaced, tagged) {
+                (true, false) => namespaced_but_untagged.push(format!("{method} {path}")),
+                (false, true) => tagged_but_not_namespaced.push(format!("{method} {path}")),
+                _ => {}
+            }
+        }
+    }
+
+    assert!(
+        namespaced_but_untagged.is_empty(),
+        "under /v1/settings/ but not tagged `settings`: {namespaced_but_untagged:?}"
+    );
+    assert!(
+        tagged_but_not_namespaced.is_empty(),
+        "tagged `settings` but not under /v1/settings/: {tagged_but_not_namespaced:?}\n\
+         Either move it into the namespace, or give it the tag its subject deserves — \
+         sharing the `settings` scope is not the same as being a setting."
     );
 }
 

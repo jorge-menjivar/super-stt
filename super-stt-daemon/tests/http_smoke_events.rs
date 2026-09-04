@@ -181,7 +181,7 @@ async fn events_subscribe(
     (status, content_type, text)
 }
 
-/// POST `/v1/language` with `{ "language": <tag> }` on a fresh connection and
+/// POST `/v1/settings/language` with `{ "language": <tag> }` on a fresh connection and
 /// return the status. Used to trigger the daemon's `settings_changed` broadcast.
 async fn post_language(sock: &PathBuf, token: &str, tag: &str) -> StatusCode {
     let stream = UnixStream::connect(sock).await.expect("connect");
@@ -192,7 +192,7 @@ async fn post_language(sock: &PathBuf, token: &str, tag: &str) -> StatusCode {
     });
     let req = Request::builder()
         .method(Method::POST)
-        .uri("http://stt.local/v1/language")
+        .uri("http://stt.local/v1/settings/language")
         .header("host", "stt.local")
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
@@ -259,7 +259,11 @@ async fn language_change_broadcasts_settings_changed() {
     assert!(ack.contains("event: subscribed"), "missing ack: {ack:?}");
 
     let st = post_language(&sock, &token, "es-MX").await;
-    assert_eq!(st, StatusCode::OK, "POST /v1/language should succeed");
+    assert_eq!(
+        st,
+        StatusCode::OK,
+        "POST /v1/settings/language should succeed"
+    );
 
     let text = read_until(&mut body, "settings_changed").await;
     assert!(
