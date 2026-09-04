@@ -425,12 +425,22 @@ async fn a_rejected_write_leaves_the_setting_alone() {
     );
 }
 
-/// `POST /settings/write_method/test` reports what it did.
+/// `POST /settings/write_method/test` reports what it did, either way.
 ///
-/// The one settings endpoint with a side effect and no stored value, and the
-/// other one that had no coverage. It runs headless in CI, where there is no
-/// focused window to type into, so the contract under test is that it answers
-/// and says which method it used — not that any text was written.
+/// The one settings endpoint with a side effect and no stored value, and one of
+/// the two that had no coverage at all.
+///
+/// Whether a write method exists is a property of the host, not of the daemon:
+/// on a desktop the probe types into the focused window and answers `200`; on a
+/// headless CI runner there is nothing to type into and it answers
+/// `500 write_method_unavailable`. Both are correct, and asserting either one
+/// alone makes the test a report on where it happened to run — this went red on
+/// CI for exactly that reason, having passed on a machine with a display.
+///
+/// What the endpoint actually promises is narrower and true everywhere: it is
+/// routed, it is behind the settings scope, and it names its outcome rather
+/// than failing blank. A `404` here means the rename missed it; a `500` with no
+/// `error_code` means a client is told the probe failed and never why.
 #[tokio::test]
 async fn the_write_method_probe_reports_what_it_did() {
     let (_guard, sock) = start_daemon().await;
@@ -443,6 +453,32 @@ async fn the_write_method_probe_reports_what_it_did() {
         serde_json::json!({}),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "POST write_method/test: {body}");
-    assert_eq!(body["status"], "success", "write_method/test: {body}");
+
+    match status {
+        StatusCode::OK => {
+            assert_eq!(
+                body["status"], "success",
+                "a 200 that is not a success: {body}"
+            );
+        }
+        StatusCode::INTERNAL_SERVER_ERROR => {
+            // The headless case: no window to type into. It still has to say so.
+            assert_eq!(
+                body["status"], "error",
+                "a 500 that is not an error: {body}"
+            );
+            assert!(
+                body["error_code"].as_str().is_some(),
+                "the probe failed without an error_code: {body}"
+            );
+            assert!(
+                body["message"].as_str().is_some_and(|m| !m.is_empty()),
+                "the probe failed without saying why: {body}"
+            );
+        }
+        other => panic!(
+            "POST /settings/write_method/test answered {other}: {body}\n\
+             404 means the rename missed it; 401/403 means it left the settings scope"
+        ),
+    }
 }
