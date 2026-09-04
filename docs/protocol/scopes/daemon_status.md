@@ -39,7 +39,7 @@ and read only the fields for that variant; unknown variants should be ignored.
 | `settings_changed`         | `setting` (string — the name of what changed, e.g. `"language"`)                            |
 | `update_available`         | `latest_version` (string — the candidate release's tag, verbatim). Emitted when a check newly finds an available update or the candidate version changes; clients should refetch [`GET /update`](../endpoints/v1/update.md). |
 
-`stage` is the [`/pipeline/{stage}`](../endpoints/v1/pipeline.md) position whose
+`stage` is the [`/pipeline/{stage}`](../endpoints/v1/pipeline/stage.md) position whose
 model the event is about — 1 for transcription, 2 for post-processing. Every
 stage reports its own lifecycle on this topic, so a client watching one must
 filter on it rather than assume; a payload without the field comes from a daemon

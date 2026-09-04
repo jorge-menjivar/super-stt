@@ -161,6 +161,16 @@ jobs:
   protocol:
     name: Protocol docs
     runs-on: ubuntu-latest
+    # The repository's default workflow token is read-only, so the gh-pages push
+    # below needs this granted explicitly — the same block, for the same reason,
+    # as the `coverage` job. Job-level rather than workflow-level so the jobs
+    # that only read stay read-only.
+    #
+    # Its absence does not show up on a pull request: the publish step is gated
+    # on a push to main, so a PR runs this job green without ever exercising the
+    # push. Only main can catch it, which is how it got merged missing.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
 

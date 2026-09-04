@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::core::app::AppModel;
-use crate::daemon::client::v1::settings::language as client;
+use crate::daemon::client::v1::backends::model_language as model_lang;
+use crate::daemon::client::v1::language as client;
 use crate::state::models::ContextPage;
 use crate::ui::messages::{DaemonMessage, LanguageMessage, Message};
 use cosmic::prelude::*;
@@ -69,8 +70,8 @@ impl AppModel {
                 Task::perform(
                     async move {
                         match choice {
-                            Some(tag) => client::set_model_language(source, model, tag).await,
-                            None => client::clear_model_language(source, model).await,
+                            Some(tag) => model_lang::set_model_language(source, model, tag).await,
+                            None => model_lang::clear_model_language(source, model).await,
                         }
                     },
                     move |res| match res {
@@ -126,7 +127,7 @@ impl AppModel {
         let src = source.clone();
         let mdl = model.clone();
         Task::perform(
-            client::get_model_language(source, model),
+            model_lang::get_model_language(source, model),
             move |res| match res {
                 Ok(block) => {
                     cosmic::Action::App(Message::Language(LanguageMessage::ModelLanguageLoaded {

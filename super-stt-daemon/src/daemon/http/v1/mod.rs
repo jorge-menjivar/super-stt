@@ -1,11 +1,41 @@
 // SPDX-License-Identifier: GPL-3.0-only
+//! `/v1` — one module per path, named for the path it answers on.
+//!
+//! A directory where a path has sub-resources worth separating ([`auth`],
+//! [`backends`], [`pipeline`], [`registry`]); a file otherwise, holding that
+//! path and any sub-path small enough to read beside it. Two modules are named
+//! for something other than a path because they are not endpoints: [`macros`],
+//! which generates the one-value settings handlers, and [`wire`], the narrow
+//! response bodies they answer with.
+
+// Must come first: `#[macro_use]` puts the settings-endpoint macros in scope for
+// every module declared after it.
+#[macro_use]
+mod macros;
+
+pub(crate) mod audio_theme;
+pub(crate) mod audio_themes;
 pub(crate) mod auth;
 pub(crate) mod backends;
+pub(crate) mod custom_models_dir;
 pub(crate) mod events;
-pub(crate) mod health;
+pub(crate) mod gpu_info;
+pub(crate) mod language;
+pub(crate) mod models;
+pub(crate) mod notification_method;
+pub(crate) mod ping;
+pub(crate) mod pipeline;
+pub(crate) mod preview_typing;
+pub(crate) mod recording_stop_mode;
 pub(crate) mod registry;
-pub(crate) mod settings;
+pub(crate) mod status;
 pub(crate) mod transcribe;
+pub(crate) mod update;
+pub(crate) mod update_beta_optin;
+pub(crate) mod update_check_enabled;
+pub(crate) mod volume;
+pub(crate) mod wire;
+pub(crate) mod write_method;
 
 use crate::daemon::http::internal::auth::middleware::{
     require_any_authenticated, require_rate_limit, require_secrets_scope, require_settings_scope,
@@ -38,8 +68,8 @@ struct ScopeGroups {
     any: OpenApiRouter<AppState>,
     status: OpenApiRouter<AppState>,
     transcribe: OpenApiRouter<AppState>,
-    /// The configuration surface, which the registry and backend-option routes
-    /// share.
+    /// The configuration surface: every module whose paths the `settings`
+    /// scope guards, gathered by [`settings_routes`].
     settings: OpenApiRouter<AppState>,
     secrets: OpenApiRouter<AppState>,
     /// Reachable without a token — it is how a caller gets one.
@@ -51,15 +81,76 @@ struct ScopeGroups {
 fn scope_groups() -> ScopeGroups {
     ScopeGroups {
         any: OpenApiRouter::new()
-            .routes(routes!(health::ping))
+            .routes(routes!(ping::ping))
             .routes(routes!(auth::status::auth_status))
             .merge(events::routes()),
-        status: OpenApiRouter::new().routes(routes!(health::status)),
+        status: OpenApiRouter::new().routes(routes!(status::status)),
         transcribe: transcribe::routes(),
-        settings: settings::routes(),
+        settings: settings_routes(),
         secrets: backends::secrets::routes(),
         unauthenticated: OpenApiRouter::new().routes(routes!(auth::request::auth_request)),
     }
+}
+
+/// Every route the `settings` scope guards, gathered from the modules that hold
+/// them. This is the one place the scope's membership is written down; the
+/// paths themselves live in each module's `#[utoipa::path]`, which is what
+/// `routes!` reads them back off.
+///
+/// The families with their own trees ([`backends`], [`pipeline`], [`registry`])
+/// contribute their own `routes()`. [`backends::secrets`] is deliberately not
+/// among them — those paths carry the `secrets` scope and are guarded
+/// separately in [`scope_groups`].
+fn settings_routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(models::list_models))
+        .routes(routes!(
+            audio_theme::get_audio_theme,
+            audio_theme::set_audio_theme
+        ))
+        .routes(routes!(audio_theme::test_audio_theme))
+        .routes(routes!(audio_themes::list_audio_themes))
+        .routes(routes!(volume::get_volume, volume::set_volume))
+        .routes(routes!(
+            recording_stop_mode::get_recording_stop_mode,
+            recording_stop_mode::set_recording_stop_mode
+        ))
+        .routes(routes!(
+            write_method::get_write_method,
+            write_method::set_write_method
+        ))
+        .routes(routes!(write_method::test_write_method))
+        .routes(routes!(
+            notification_method::get_notification_method,
+            notification_method::set_notification_method
+        ))
+        .routes(routes!(
+            preview_typing::get_preview_typing,
+            preview_typing::set_preview_typing
+        ))
+        .routes(routes!(
+            custom_models_dir::get_custom_models_dir,
+            custom_models_dir::set_custom_models_dir
+        ))
+        .routes(routes!(
+            update_check_enabled::get_update_check_enabled,
+            update_check_enabled::set_update_check_enabled
+        ))
+        .routes(routes!(
+            update_beta_optin::get_update_beta_optin,
+            update_beta_optin::set_update_beta_optin
+        ))
+        .routes(routes!(update::get_update))
+        .routes(routes!(update::post_check))
+        .routes(routes!(gpu_info::get_gpu_info))
+        .routes(routes!(
+            language::get_language,
+            language::set_language,
+            language::clear_language
+        ))
+        .merge(backends::routes())
+        .merge(pipeline::routes())
+        .merge(registry::routes())
 }
 
 /// Apply each group's guard. Rate limiting is layered under the scope check on
