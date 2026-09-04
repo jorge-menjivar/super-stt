@@ -4,8 +4,8 @@
 //! Contract: `docs/protocol/endpoints/v1/pipeline.md`.
 //!
 //! The modules mirror the paths: [`stage`] serves `/pipeline/{stage}`, [`model`]
-//! serves `/pipeline/{stage}/model` and its verbs, [`device`] serves the two
-//! device lists and the per-model device preference. `GET /pipeline`, the whole
+//! serves `/pipeline/{stage}/model` and its verbs, [`device`] and [`language`]
+//! serve the two per-model preferences. `GET /pipeline`, the whole
 //! report, is here at the root because that is where the path is.
 //!
 //! Every stage answers the same verbs — select a backend, deselect it, run a
@@ -16,6 +16,7 @@
 //! there is a single implementation of each operation.
 
 pub(crate) mod device;
+pub(crate) mod language;
 pub(crate) mod model;
 pub(crate) mod stage;
 
@@ -156,4 +157,5 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(device::list_stage_devices))
         .routes(routes!(device::get_model_device, device::set_model_device))
         .routes(routes!(device::list_model_devices))
+        .merge(language::routes())
 }

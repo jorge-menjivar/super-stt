@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::core::app::AppModel;
-use crate::daemon::client::v1::backends::model_language as model_lang;
+use crate::daemon::client::v1::pipeline::language as model_lang;
 use crate::daemon::client::v1::settings::language as client;
 use crate::state::models::ContextPage;
 use crate::ui::messages::{DaemonMessage, LanguageMessage, Message};
@@ -52,14 +52,18 @@ impl AppModel {
                 )
             }
             LanguageMessage::ModelLanguageLoaded {
+                stage,
                 source,
                 model,
                 block,
             } => {
-                self.language.model_languages.record(source, model, block);
+                self.language
+                    .model_languages
+                    .record(stage, source, model, block);
                 Task::none()
             }
             LanguageMessage::ModelLanguageSelected {
+                stage,
                 source,
                 model,
                 choice,
@@ -70,13 +74,14 @@ impl AppModel {
                 Task::perform(
                     async move {
                         match choice {
-                            Some(tag) => model_lang::set_model_language(source, model, tag).await,
-                            None => model_lang::clear_model_language(source, model).await,
+                            Some(tag) => model_lang::set_model_language(stage, model, tag).await,
+                            None => model_lang::clear_model_language(stage, model).await,
                         }
                     },
                     move |res| match res {
                         Ok(block) => cosmic::Action::App(Message::Language(
                             LanguageMessage::ModelLanguageLoaded {
+                                stage,
                                 source: src.clone(),
                                 model: mdl.clone(),
                                 block,
@@ -121,16 +126,18 @@ impl AppModel {
     #[allow(clippy::unused_self)]
     pub(in crate::core::app) fn load_model_language(
         &self,
-        source: String,
+        stage: u32,
+        source: &str,
         model: String,
     ) -> Task<cosmic::Action<Message>> {
-        let src = source.clone();
+        let src = source.to_string();
         let mdl = model.clone();
         Task::perform(
-            model_lang::get_model_language(source, model),
+            model_lang::get_model_language(stage, model),
             move |res| match res {
                 Ok(block) => {
                     cosmic::Action::App(Message::Language(LanguageMessage::ModelLanguageLoaded {
+                        stage,
                         source: src.clone(),
                         model: mdl.clone(),
                         block,

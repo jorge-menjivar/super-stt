@@ -2,7 +2,7 @@
 //! `/language` \u{2014} the transcription language every model uses by default.
 //!
 //! The per-model override lives at
-//! `/backends/{source}/models/{model}/language` (see
+//! `/pipeline/{stage}/model/{model}/language` (see
 //! `crate::daemon::http::v1::backends::model_language`), and a single request
 //! can override both by sending `language` in the `POST /transcribe` body.
 

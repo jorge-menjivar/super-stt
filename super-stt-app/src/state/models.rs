@@ -109,7 +109,7 @@ pub struct ActionError {
 }
 
 /// The per-model language resolution block returned by
-/// `GET /backends/{source}/models/{model}/language`, deserialized once at the
+/// `GET /pipeline/{stage}/model/{model}/language`, deserialized once at the
 /// client boundary instead of being poked field-by-field as a
 /// `serde_json::Value` in the views. Unknown/absent fields default so a partial
 /// or null block yields an empty, harmless resolution.

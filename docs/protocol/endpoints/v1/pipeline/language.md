@@ -1,23 +1,36 @@
-# `/backends/{source}/models/{model}/settings/language`
+# `/pipeline/{stage}/model/{model}/language`
 
-Read and set the **per-model language override** for any backend model (loaded
-or not), and read the daemon's resolved effective language. The override is one
-of the model's `supported_languages`, the reserved `auto`, or absent (Automatic
-— inherits the global [`/settings/language`](../settings/language.md), else the model's
-`primary_language`). It is stored per model and survives model switches. Only
-multilingual models accept an override.
+Read and set a model's **language override**, and read the daemon's resolved
+effective language. The override is one of the model's `supported_languages`,
+the reserved `auto`, or absent (Automatic — inherits the global
+[`/settings/language`](../settings/language.md), else the model's
+`primary_language`). It is stored per `(source, model)` and survives model
+switches. Only multilingual models accept an override.
 
-`{source}` is the backend's repo id (e.g. `github.com/super-stt/whisper`),
-**URL-percent-encoded** in the path — the same identifier used by
-[`DELETE /backends/{source}`](../backends.md#delete-backendssource):
+Addressed through the stage that runs the model, exactly like its
+[device](./device.md), and for the same reason: both are per-model preferences,
+and the stage is what resolves a bare model name against the backend filling
+it. Two preferences of the same shape addressed two different ways is something
+a client author has to memorise rather than infer.
+
+`{model}` is the model name as
+[`GET /pipeline/{stage}/model/list`](./model-list.md) spells it; names contain
+only alphanumerics and hyphens, so the segment is used as-is.
 
 ```
-/backends/github.com%2Fsuper-stt%2Fwhisper/models/whisper-large-v3/language
+/pipeline/1/model/whisper-large-v3/language
 ```
 
-`{model}` is the model name as it appears in the backend's `models` array (see
-[`GET /backends`](../backends.md)); model names contain only alphanumerics
-and hyphens, so the segment is used as-is (no encoding needed).
+Every stage answers it. A post-processor is monolingual and says so in
+`multilingual` — a real answer rather than an error, since the point of
+addressing stages by position is that they answer the same verbs.
+
+> **Moved from `/backends/{source}/models/{model}/language`.** One consequence:
+> the model's backend must now be *selected into a stage*. A model belonging to
+> an installed but unselected backend has no path to it, where the
+> `{source}`-addressed spelling could reach any installed model. That is the
+> same precondition [device](./device.md) has always had, and `400
+> invalid_backend` is the answer when the stage is empty.
 
 ## Auth
 
@@ -25,14 +38,14 @@ and hyphens, so the segment is used as-is (no encoding needed).
 - `Authorization: Bearer <session_token>` is required on every request.
 - A token without the `settings` scope gets `403 scope_denied`.
 
-## `GET /backends/{source}/models/{model}/settings/language`
+## `GET /pipeline/{stage}/model/{model}/language`
 
 Returns the daemon's full resolution for the named model.
 
 **Request:**
 
 ```http
-GET /backends/github.com%2Fsuper-stt%2Fwhisper/models/whisper-large-v3/language HTTP/1.1
+GET /pipeline/1/model/whisper-large-v3/language HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```
@@ -56,12 +69,12 @@ Authorization: Bearer stt_…64hex…
 For a non-multilingual model: `"multilingual": false`, `"supported": ["en"]`,
 `"effective": null`, `"override": null`, `"primary": "en"`, `"source": "default"`.
 
-## `POST /backends/{source}/models/{model}/settings/language`
+## `POST /pipeline/{stage}/model/{model}/language`
 
 **Request:**
 
 ```http
-POST /backends/github.com%2Fsuper-stt%2Fwhisper/models/whisper-large-v3/language HTTP/1.1
+POST /pipeline/1/model/whisper-large-v3/language HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
@@ -75,14 +88,14 @@ Content-Type: application/json
 
 **Response (200):** the resolution block (as `GET`).
 
-## `DELETE /backends/{source}/models/{model}/settings/language`
+## `DELETE /pipeline/{stage}/model/{model}/language`
 
 Clear the override (back to Automatic).
 
 **Request:**
 
 ```http
-DELETE /backends/github.com%2Fsuper-stt%2Fwhisper/models/whisper-large-v3/language HTTP/1.1
+DELETE /pipeline/1/model/whisper-large-v3/language HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```

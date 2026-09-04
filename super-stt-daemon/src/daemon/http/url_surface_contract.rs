@@ -27,10 +27,6 @@ const URL_SURFACE: &[(&str, &str)] = &[
     ("/v1/auth/status", "get"),
     ("/v1/backends", "get"),
     ("/v1/backends/{source}", "delete"),
-    (
-        "/v1/backends/{source}/models/{model}/language",
-        "delete,get,post",
-    ),
     ("/v1/backends/{source}/options/list", "get"),
     ("/v1/backends/{source}/options/{name}", "delete,get,post"),
     ("/v1/backends/{source}/secrets/list", "get"),
@@ -47,6 +43,10 @@ const URL_SURFACE: &[(&str, &str)] = &[
     ("/v1/pipeline/{stage}/model/reload", "post"),
     ("/v1/pipeline/{stage}/model/{model}/device", "get,post"),
     ("/v1/pipeline/{stage}/model/{model}/device/list", "get"),
+    (
+        "/v1/pipeline/{stage}/model/{model}/language",
+        "delete,get,post",
+    ),
     ("/v1/registry/backends", "get"),
     ("/v1/registry/backends/install", "post"),
     ("/v1/registry/backends/refresh", "post"),

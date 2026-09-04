@@ -238,7 +238,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
             .align_y(Alignment::Center);
         // The same control the transcription card shows beside its active
         // model, from the same function.
-        if let Some(lang_button) = language_button(backend, &model, app) {
+        if let Some(lang_button) = language_button(PP_STAGE, backend, &model, app) {
             summary = summary.push(lang_button);
         }
         return summary
@@ -306,7 +306,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     // Per-model language, inline after the device dropdown — the same position
     // and the same function as the transcription card's staged picker.
     if let Some(model) = shown.as_deref()
-        && let Some(lang_button) = language_button(backend, model, app)
+        && let Some(lang_button) = language_button(PP_STAGE, backend, model, app)
     {
         picker_row = picker_row.push(lang_button);
     }

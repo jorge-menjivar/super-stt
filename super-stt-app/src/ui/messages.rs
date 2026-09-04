@@ -432,7 +432,9 @@ pub enum LanguageMessage {
     /// `model = None` → global Primary Language sheet.
     /// `model = Some((source, model))` → per-model sheet for that specific model.
     OpenLanguagePicker {
-        model: Option<(String, String)>,
+        /// `(stage, source, model)` for a per-model override, `None` for the
+        /// global setting. The stage is what resolves the bare model name.
+        model: Option<(u32, String, String)>,
     },
     CloseLanguagePicker,
     LanguagePickerQueryChanged(String),
@@ -440,9 +442,11 @@ pub enum LanguageMessage {
     PrimaryLanguageLoaded(Option<String>),
     /// User picked a global language (None = clear → DELETE).
     PrimaryLanguageSelected(Option<String>),
-    /// Per-model resolution block (`/backends/{source}/models/{model}/language`)
+    /// Per-model resolution block (`/pipeline/{stage}/model/{model}/language`)
     /// loaded from the daemon for `(source, model)`.
     ModelLanguageLoaded {
+        /// The stage the block was read through.
+        stage: u32,
         source: String,
         model: String,
         block: crate::state::LanguageResolution,
@@ -452,6 +456,9 @@ pub enum LanguageMessage {
     /// `choice = Some("auto")` → Auto-detect;
     /// `choice = Some(tag)` → explicit BCP-47 tag.
     ModelLanguageSelected {
+        /// The stage the model is addressed through: it resolves the bare
+        /// model name against the backend filling it.
+        stage: u32,
         source: String,
         model: String,
         choice: Option<String>,

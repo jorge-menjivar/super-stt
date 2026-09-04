@@ -5,8 +5,12 @@
 //!
 //! The catalog and one backend's removal are here, at the paths they answer on;
 //! the sub-resources each get their own module — [`options`] for
-//! `/backends/{source}/options`, [`secrets`] for `/backends/{source}/secrets`,
-//! [`model_language`] for `/backends/{source}/models/{model}/language`.
+//! `/backends/{source}/options` and [`secrets`] for
+//! `/backends/{source}/secrets`.
+//!
+//! A model's language override is not here. It is a per-`(source, model)`
+//! preference like its device, and both are addressed through the stage that
+//! runs the model — see [`super::pipeline::language`].
 //!
 //! Installing is not here: that is the registry's job, at
 //! [`/registry/backends/install`](super::registry::install). This module is
@@ -15,7 +19,6 @@
 //! One split runs through the whole family: every path but the secrets ones is
 //! `settings`-scoped, and secrets are `secrets`-scoped. [`routes`] gathers the
 //! former; [`secrets::routes`] is wired to its own guard in [`super`].
-pub(crate) mod model_language;
 pub(crate) mod options;
 pub(crate) mod secrets;
 
@@ -230,5 +233,4 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(list_backends))
         .routes(routes!(uninstall_backend))
         .merge(options::routes())
-        .merge(model_language::routes())
 }
