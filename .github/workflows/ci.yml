@@ -164,27 +164,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: taiki-e/install-action@v2.87.0
-        with:
-          tool: just
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev libasound2-dev pkg-config
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
-
-      # Build from the router rather than trusting the committed file, so what
-      # is published is what this commit's daemon actually serves. The `test`
-      # job's openapi-check is what keeps the committed copy honest.
-      - name: Generate the OpenAPI document
-        run: just openapi
-
+      # No Rust, and no build: this job copies files the repo already contains.
+      #
+      # It used to run `just openapi` so that what it published came from the
+      # router rather than the committed file. That bought nothing —
+      # `openapi-check` in the `test` job already proves those are the same
+      # thing on this commit — and it cost a way to fail, which it promptly
+      # did: building the daemon needs its full system dependency set (it links
+      # xkbcommon through enigo), and a trimmed list broke this job while every
+      # other check stayed green.
+      #
+      # Deliberately not `needs: test`. On a push to main that matrix is beta
+      # and nightly, so gating on it would let an unrelated nightly regression
+      # stop the docs publishing. Nothing here can publish an internally
+      # inconsistent site: it ships the committed document as-is, and a stale
+      # one means `openapi-check` is already failing loudly on the same run.
       - name: Assemble the site
         run: |
           set -euo pipefail
