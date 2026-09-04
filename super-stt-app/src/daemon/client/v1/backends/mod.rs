@@ -3,12 +3,9 @@
 //!
 //! Mirrors the daemon's `v1/backends/` tree: the catalog and one backend's
 //! removal are here, [`options`] and [`secrets`] wrap a backend's configuration,
-//! [`model_language`] its per-model language override.
-//!
-//! Installing is the registry's job, in [`super::registry`]; filling a *stage*
+//! //! Installing is the registry's job, in [`super::registry`]; filling a *stage*
 //! with one of these backends is [`super::pipeline::stage`]'s.
 
-pub(crate) mod model_language;
 pub(crate) mod options;
 pub(crate) mod secrets;
 

@@ -219,7 +219,7 @@ pub(super) fn loaded_model_summary<'a>(
         .spacing(spacing.space_xs)
         .align_y(Alignment::Center);
     // Per-model language trigger, inline before Unload, for a multilingual model.
-    if let Some(lang_button) = language_button(backend, &app.current_model, app) {
+    if let Some(lang_button) = language_button(STT_STAGE, backend, &app.current_model, app) {
         summary = summary.push(lang_button);
     }
     // A leading stop glyph fronts the Unload label, mirroring the Load button's
@@ -339,7 +339,7 @@ pub(super) fn staged_model_picker<'a>(
     // Per-model language trigger, inline after the device dropdown — shown only
     // for a staged multilingual model.
     if let Some(model) = staged_model
-        && let Some(lang_button) = language_button(backend, model, app)
+        && let Some(lang_button) = language_button(STT_STAGE, backend, model, app)
     {
         picker_row = picker_row.push(lang_button);
     }

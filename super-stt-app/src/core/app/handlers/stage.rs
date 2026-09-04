@@ -277,7 +277,7 @@ impl AppModel {
         Task::batch([
             Self::load_staged_devices(stage, source.clone(), model.clone()),
             // So the card can show the language control before Load.
-            self.load_model_language(source, model),
+            self.load_model_language(stage, &source, model),
         ])
     }
 
@@ -303,7 +303,7 @@ impl AppModel {
             .stage_model(stage, source.to_string(), model.to_string());
         Task::batch([
             Self::load_staged_devices(stage, source.to_string(), model.to_string()),
-            self.load_model_language(source.to_string(), model.to_string()),
+            self.load_model_language(stage, source, model.to_string()),
         ])
     }
 

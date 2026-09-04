@@ -4,7 +4,7 @@
 //! The per-model handlers are keyed by `(source, model)` and resolve against
 //! the **discovered backends** (not the loaded model), so they work for any
 //! installed model whether or not it is currently loaded. See
-//! `docs/protocol/endpoints/v1/backends/model-language.md`.
+//! `docs/protocol/endpoints/v1/pipeline/language.md`.
 
 use crate::daemon::language::resolve_language;
 use crate::daemon::types::SuperSTTDaemon;

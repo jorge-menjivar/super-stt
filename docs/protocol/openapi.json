@@ -279,292 +279,6 @@
         ]
       }
     },
-    "/v1/backends/{source}/models/{model}/language": {
-      "get": {
-        "tags": [
-          "backends"
-        ],
-        "summary": "Read a model's language override",
-        "description": "The language this specific model transcribes in, which overrides the global `/language` setting. Addressed by `(source, model)` rather than \"the active model\", so it can be read whether or not the model is loaded.\n\n`null` means no override: the model follows the global setting.",
-        "operationId": "get_one",
-        "parameters": [
-          {
-            "name": "source",
-            "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "example": "github.com%2Facme%2Fwhisper"
-          },
-          {
-            "name": "model",
-            "in": "path",
-            "description": "The model's name, as `GET /backends` spells it.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "How this model's language resolves.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelLanguageState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No such backend (`unknown_backend`) or no such model (`unknown_model`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "backends"
-        ],
-        "summary": "Set a model's language override",
-        "description": "Pins this model to a language regardless of the global `/language` setting. A tag the model does not serve is refused rather than silently ignored.\n\nOverridden in turn by a `language` field in a single `POST /transcribe` body.",
-        "operationId": "set",
-        "parameters": [
-          {
-            "name": "source",
-            "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "example": "github.com%2Facme%2Fwhisper"
-          },
-          {
-            "name": "model",
-            "in": "path",
-            "description": "The model's name, as `GET /backends` spells it.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LanguageBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Override set.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelLanguageState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The body was empty (`invalid_request`), or this model does not serve that language (`unsupported_language`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No such backend (`unknown_backend`) or no such model (`unknown_model`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "backends"
-        ],
-        "summary": "Clear a model's language override",
-        "description": "Removes the per-model pin, returning this model to the global `/language` setting.",
-        "operationId": "clear",
-        "parameters": [
-          {
-            "name": "source",
-            "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "example": "github.com%2Facme%2Fwhisper"
-          },
-          {
-            "name": "model",
-            "in": "path",
-            "description": "The model's name, as `GET /backends` spells it.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Override cleared.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelLanguageState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No such backend (`unknown_backend`) or no such model (`unknown_model`).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
     "/v1/backends/{source}/options/list": {
       "get": {
         "tags": [
@@ -2640,6 +2354,318 @@
           },
           "404": {
             "description": "No such stage (`unknown_stage`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/pipeline/{stage}/model/{model}/language": {
+      "get": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "Read a model's language override",
+        "description": "The language this specific model transcribes in, which overrides the global `/language` setting. Addressed by `(source, model)` rather than \"the active model\", so it can be read whether or not the model is loaded.\n\n`null` means no override: the model follows the global setting.",
+        "operationId": "get_one",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "description": "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "example": 1
+          },
+          {
+            "name": "model",
+            "in": "path",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How this model's language resolves.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelLanguageState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The stage has no backend selected, so there is nothing to resolve `model` against (`invalid_backend`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such stage (`unknown_stage`), or this stage's backend serves no such model (`unknown_model`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "Set a model's language override",
+        "description": "Pins this model to a language regardless of the global `/settings/language` setting. A tag the model does not serve is refused rather than silently ignored.\n\nOverridden in turn by a `language` field in a single `POST /transcribe` body.",
+        "operationId": "set",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "description": "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "example": 1
+          },
+          {
+            "name": "model",
+            "in": "path",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LanguageBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Override set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelLanguageState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body was empty (`invalid_request`), this model does not serve that language (`unsupported_language`), or the stage has no backend selected (`invalid_backend`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such stage (`unknown_stage`), or this stage's backend serves no such model (`unknown_model`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "Clear a model's language override",
+        "description": "Removes the per-model pin, returning this model to the global `/settings/language` setting.",
+        "operationId": "clear",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "description": "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "example": 1
+          },
+          {
+            "name": "model",
+            "in": "path",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Override cleared.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelLanguageState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The stage has no backend selected (`invalid_backend`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such stage (`unknown_stage`), or this stage's backend serves no such model (`unknown_model`).",
             "content": {
               "application/json": {
                 "schema": {

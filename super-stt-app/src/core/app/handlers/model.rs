@@ -73,7 +73,7 @@ impl AppModel {
                 self.model_operations.set_ready(STT_STAGE);
                 // Fetch the per-model language block now that a model is loaded.
                 // Wire point 1: model loaded (CurrentModelLoaded).
-                self.load_model_language(source, model)
+                self.load_model_language(STT_STAGE, &source, model)
             }
 
             ModelMessage::ModelChanged { model, source } => {
@@ -86,7 +86,7 @@ impl AppModel {
                 self.model_operations.set_ready(STT_STAGE);
                 // Fetch the per-model language block now that a model is loaded.
                 // Wire point 1: model loaded (ModelChanged).
-                self.load_model_language(source, model)
+                self.load_model_language(STT_STAGE, &source, model)
             }
 
             ModelMessage::CurrentModelFetchFailed { epoch, error } => {

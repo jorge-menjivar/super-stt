@@ -16,13 +16,13 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
     // alphabetically by display name.
     let mut pinned: Vec<(Option<String>, String)> = Vec::new();
     let mut langs: Vec<(Option<String>, String)> = Vec::new();
-    if let Some((ref src, ref mdl)) = app.language.language_picker_target {
+    if let Some((stage, ref src, ref mdl)) = app.language.language_picker_target {
         // Per-model sheet.
         pinned.push((None, "Follow global".to_string())); // clear → DELETE
         pinned.push((Some("auto".to_string()), friendly_name("auto"))); // "Auto-detect"
         // Supported languages from the resolution block — but only when the
         // block belongs to this exact (source, model) pair (stale-block guard).
-        if let Some(block) = app.language.model_languages.get(src, mdl) {
+        if let Some(block) = app.language.model_languages.get(stage, src, mdl) {
             for tag in &block.supported {
                 if tag.eq_ignore_ascii_case("auto") {
                     continue; // already pinned as "Auto-detect"
@@ -60,8 +60,9 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
 
     let mut list = column::with_capacity(rows.len()).spacing(spacing.space_xxs);
     for (tag, label) in rows {
-        let msg = if let Some((ref src, ref mdl)) = app.language.language_picker_target {
+        let msg = if let Some((stage, ref src, ref mdl)) = app.language.language_picker_target {
             Message::Language(LanguageMessage::ModelLanguageSelected {
+                stage,
                 source: src.clone(),
                 model: mdl.clone(),
                 choice: tag,

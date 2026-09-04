@@ -159,14 +159,12 @@ impl AppModel {
                         // Every pair answered for, not just one: both stages
                         // show a language control, and a block that follows the
                         // global value goes stale on either card.
-                        let pairs: Vec<(String, String)> =
+                        let pairs: Vec<(u32, String, String)> =
                             self.language.model_languages.pairs().collect();
                         let mut tasks = vec![self.load_primary_language()];
-                        tasks.extend(
-                            pairs
-                                .into_iter()
-                                .map(|(source, model)| self.load_model_language(source, model)),
-                        );
+                        tasks.extend(pairs.into_iter().map(|(stage, source, model)| {
+                            self.load_model_language(stage, &source, model)
+                        }));
                         Some(Task::batch(tasks))
                     }
                     // Another client (or this one) changed the post-processor.
@@ -296,7 +294,7 @@ impl AppModel {
         // learns the active model only via this broadcast — e.g. the settings app
         // reconnecting after a daemon restart, where the startup load now emits
         // model_switched — would otherwise leave model_language_for unset.
-        self.load_model_language(source, model)
+        self.load_model_language(STT_STAGE, &source, model)
     }
 
     pub(in crate::core::app) fn process_download_progress_event(
