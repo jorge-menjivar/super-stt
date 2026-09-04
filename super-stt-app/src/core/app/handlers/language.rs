@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::core::app::AppModel;
 use crate::daemon::client::v1::backends::model_language as model_lang;
-use crate::daemon::client::v1::language as client;
+use crate::daemon::client::v1::settings::language as client;
 use crate::state::models::ContextPage;
 use crate::ui::messages::{DaemonMessage, LanguageMessage, Message};
 use cosmic::prelude::*;

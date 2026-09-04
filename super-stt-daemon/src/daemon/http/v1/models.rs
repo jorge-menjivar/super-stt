@@ -19,7 +19,7 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 #[utoipa::path(
     get,
     path = "/models",
-    tag = "settings",
+    tag = "models",
     summary = "List the models the active backend can transcribe with",
     description = "Scoped to the backend currently filling stage 1 — only its models are \
 switchable. Post-processor models are excluded, since selecting one as a \

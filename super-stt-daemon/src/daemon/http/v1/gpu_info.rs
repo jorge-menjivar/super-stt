@@ -19,7 +19,7 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 #[utoipa::path(
     get,
     path = "/gpu_info",
-    tag = "settings",
+    tag = "hardware",
     summary = "Inventory the host's GPUs",
     description = "\
 What the daemon can see of this machine's accelerators: one entry per detected GPU \

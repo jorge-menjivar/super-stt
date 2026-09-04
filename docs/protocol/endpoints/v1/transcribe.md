@@ -38,7 +38,7 @@ To stop an in-flight daemon-mic capture, see
 
   // BCP-47 tag or "auto". When omitted, the daemon supplies the configured
   // language for the active model (see /v1/language and
-  // /v1/backends/{source}/models/{model}/language); a model that doesn't support the resolved
+  // /v1/backends/{source}/models/{model}/settings/language); a model that doesn't support the resolved
   // value falls back to its primary_language.
   "language":    "en",
 
@@ -126,7 +126,7 @@ when a capture is already in progress.
 | 503  | `connection_rejected`              | Server refused the connection                                           |
 
 A failure is also surfaced to the user according to the
-[`/notification_method`](./notification_method.md) setting. With the default,
+[`/settings/notification_method`](./settings/notification_method.md) setting. With the default,
 `auto`, the daemon sends a desktop notification; typing a short fixed notice
 into the focused window — for example `[Super STT: no model loaded]` — happens
 only as a fallback when notification delivery fails, and only for a request

@@ -1,9 +1,9 @@
-# `/backends/{source}/models/{model}/language`
+# `/backends/{source}/models/{model}/settings/language`
 
 Read and set the **per-model language override** for any backend model (loaded
 or not), and read the daemon's resolved effective language. The override is one
 of the model's `supported_languages`, the reserved `auto`, or absent (Automatic
-— inherits the global [`/language`](../language.md), else the model's
+— inherits the global [`/settings/language`](../settings/language.md), else the model's
 `primary_language`). It is stored per model and survives model switches. Only
 multilingual models accept an override.
 
@@ -25,7 +25,7 @@ and hyphens, so the segment is used as-is (no encoding needed).
 - `Authorization: Bearer <session_token>` is required on every request.
 - A token without the `settings` scope gets `403 scope_denied`.
 
-## `GET /backends/{source}/models/{model}/language`
+## `GET /backends/{source}/models/{model}/settings/language`
 
 Returns the daemon's full resolution for the named model.
 
@@ -56,7 +56,7 @@ Authorization: Bearer stt_…64hex…
 For a non-multilingual model: `"multilingual": false`, `"supported": ["en"]`,
 `"effective": null`, `"override": null`, `"primary": "en"`, `"source": "default"`.
 
-## `POST /backends/{source}/models/{model}/language`
+## `POST /backends/{source}/models/{model}/settings/language`
 
 **Request:**
 
@@ -75,7 +75,7 @@ Content-Type: application/json
 
 **Response (200):** the resolution block (as `GET`).
 
-## `DELETE /backends/{source}/models/{model}/language`
+## `DELETE /backends/{source}/models/{model}/settings/language`
 
 Clear the override (back to Automatic).
 

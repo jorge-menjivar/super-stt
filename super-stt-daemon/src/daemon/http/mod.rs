@@ -10,6 +10,8 @@ mod openapi;
 mod openapi_contract;
 mod server;
 mod state;
+#[cfg(test)]
+mod url_surface_contract;
 mod v1;
 mod wire;
 

@@ -13,29 +13,19 @@
 #[macro_use]
 mod macros;
 
-pub(crate) mod audio_theme;
-pub(crate) mod audio_themes;
 pub(crate) mod auth;
 pub(crate) mod backends;
-pub(crate) mod custom_models_dir;
 pub(crate) mod events;
 pub(crate) mod gpu_info;
-pub(crate) mod language;
 pub(crate) mod models;
-pub(crate) mod notification_method;
 pub(crate) mod ping;
 pub(crate) mod pipeline;
-pub(crate) mod preview_typing;
-pub(crate) mod recording_stop_mode;
 pub(crate) mod registry;
+pub(crate) mod settings;
 pub(crate) mod status;
 pub(crate) mod transcribe;
 pub(crate) mod update;
-pub(crate) mod update_beta_optin;
-pub(crate) mod update_check_enabled;
-pub(crate) mod volume;
 pub(crate) mod wire;
-pub(crate) mod write_method;
 
 use crate::daemon::http::internal::auth::middleware::{
     require_any_authenticated, require_rate_limit, require_secrets_scope, require_settings_scope,
@@ -104,50 +94,10 @@ fn scope_groups() -> ScopeGroups {
 fn settings_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(models::list_models))
-        .routes(routes!(
-            audio_theme::get_audio_theme,
-            audio_theme::set_audio_theme
-        ))
-        .routes(routes!(audio_theme::test_audio_theme))
-        .routes(routes!(audio_themes::list_audio_themes))
-        .routes(routes!(volume::get_volume, volume::set_volume))
-        .routes(routes!(
-            recording_stop_mode::get_recording_stop_mode,
-            recording_stop_mode::set_recording_stop_mode
-        ))
-        .routes(routes!(
-            write_method::get_write_method,
-            write_method::set_write_method
-        ))
-        .routes(routes!(write_method::test_write_method))
-        .routes(routes!(
-            notification_method::get_notification_method,
-            notification_method::set_notification_method
-        ))
-        .routes(routes!(
-            preview_typing::get_preview_typing,
-            preview_typing::set_preview_typing
-        ))
-        .routes(routes!(
-            custom_models_dir::get_custom_models_dir,
-            custom_models_dir::set_custom_models_dir
-        ))
-        .routes(routes!(
-            update_check_enabled::get_update_check_enabled,
-            update_check_enabled::set_update_check_enabled
-        ))
-        .routes(routes!(
-            update_beta_optin::get_update_beta_optin,
-            update_beta_optin::set_update_beta_optin
-        ))
+        .routes(routes!(gpu_info::get_gpu_info))
         .routes(routes!(update::get_update))
         .routes(routes!(update::post_check))
-        .routes(routes!(gpu_info::get_gpu_info))
-        .routes(routes!(
-            language::get_language,
-            language::set_language,
-            language::clear_language
-        ))
+        .merge(settings::routes())
         .merge(backends::routes())
         .merge(pipeline::routes())
         .merge(registry::routes())

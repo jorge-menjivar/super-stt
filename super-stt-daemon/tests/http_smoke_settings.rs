@@ -201,7 +201,7 @@ async fn settings_scope_endpoints() {
     let client_token = client_auth.session_token;
 
     // --- GET /audio_theme ---
-    let (s, body) = raw_get_json(&http_socket, "/audio_theme", &settings_token).await;
+    let (s, body) = raw_get_json(&http_socket, "/settings/audio_theme", &settings_token).await;
     assert_eq!(s, StatusCode::OK, "GET /audio_theme: {body}");
     assert_eq!(body["status"], "success");
     let initial_theme = body["audio_theme"]
@@ -217,7 +217,7 @@ async fn settings_scope_endpoints() {
     };
     let (s, body) = raw_post_json(
         &http_socket,
-        "/audio_theme",
+        "/settings/audio_theme",
         &settings_token,
         serde_json::json!({ "theme": target_theme }),
     )
@@ -226,28 +226,28 @@ async fn settings_scope_endpoints() {
     assert_eq!(body["status"], "success");
 
     // Read it back.
-    let (s, body) = raw_get_json(&http_socket, "/audio_theme", &settings_token).await;
+    let (s, body) = raw_get_json(&http_socket, "/settings/audio_theme", &settings_token).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body["audio_theme"], target_theme);
 
     // Restore so other tests don't see persistent side-effects.
     let _ = raw_post_json(
         &http_socket,
-        "/audio_theme",
+        "/settings/audio_theme",
         &settings_token,
         serde_json::json!({ "theme": initial_theme }),
     )
     .await;
 
     // --- GET /volume ---
-    let (s, body) = raw_get_json(&http_socket, "/volume", &settings_token).await;
+    let (s, body) = raw_get_json(&http_socket, "/settings/volume", &settings_token).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body["status"], "success");
 
     // --- POST /volume / GET /volume round-trip ---
     let (s, _) = raw_post_json(
         &http_socket,
-        "/volume",
+        "/settings/volume",
         &settings_token,
         serde_json::json!({ "volume": 75 }),
     )
@@ -281,7 +281,7 @@ async fn settings_scope_endpoints() {
     // Pin the wire values, not just the shape: they must be the documented
     // snake_case tokens (docs/protocol/endpoints/v1/audio_themes.md), e.g.
     // `scifi` — not the PascalCase variant names.
-    let (s, body) = raw_get_json(&http_socket, "/audio_themes", &settings_token).await;
+    let (s, body) = raw_get_json(&http_socket, "/settings/audio_theme/list", &settings_token).await;
     assert_eq!(s, StatusCode::OK);
     let themes = body["available_audio_themes"]
         .as_array()
@@ -296,14 +296,14 @@ async fn settings_scope_endpoints() {
     );
 
     // --- GET /preview_typing ---
-    let (s, body) = raw_get_json(&http_socket, "/preview_typing", &settings_token).await;
+    let (s, body) = raw_get_json(&http_socket, "/settings/preview_typing", &settings_token).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body["status"], "success");
 
     // --- POST /preview_typing ---
     let (s, _) = raw_post_json(
         &http_socket,
-        "/preview_typing",
+        "/settings/preview_typing",
         &settings_token,
         serde_json::json!({ "enabled": true }),
     )
@@ -311,7 +311,8 @@ async fn settings_scope_endpoints() {
     assert_eq!(s, StatusCode::OK);
 
     // --- GET /custom_models_dir (new endpoint) ---
-    let (s, body) = raw_get_json(&http_socket, "/custom_models_dir", &settings_token).await;
+    let (s, body) =
+        raw_get_json(&http_socket, "/settings/custom_models_dir", &settings_token).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body["status"], "success");
     // The field is Option<Option<String>>; present, possibly null.
@@ -320,13 +321,14 @@ async fn settings_scope_endpoints() {
     // --- POST /custom_models_dir: null clears the override, then read-back ---
     let (s, _) = raw_post_json(
         &http_socket,
-        "/custom_models_dir",
+        "/settings/custom_models_dir",
         &settings_token,
         serde_json::json!({ "path": null }),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "POST /custom_models_dir null");
-    let (s, body) = raw_get_json(&http_socket, "/custom_models_dir", &settings_token).await;
+    let (s, body) =
+        raw_get_json(&http_socket, "/settings/custom_models_dir", &settings_token).await;
     assert_eq!(s, StatusCode::OK);
     assert!(body["custom_models_dir"].is_null());
 
@@ -337,7 +339,12 @@ async fn settings_scope_endpoints() {
     assert_eq!(s, StatusCode::NOT_FOUND, "GET /active_device must be gone");
 
     // --- GET /recording_stop_mode ---
-    let (s, body) = raw_get_json(&http_socket, "/recording_stop_mode", &settings_token).await;
+    let (s, body) = raw_get_json(
+        &http_socket,
+        "/settings/recording_stop_mode",
+        &settings_token,
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "GET /recording_stop_mode: {body}");
     assert_eq!(body["status"], "success");
     let initial_stop_mode = body["recording_stop_mode"]
@@ -353,25 +360,30 @@ async fn settings_scope_endpoints() {
     };
     let (s, _) = raw_post_json(
         &http_socket,
-        "/recording_stop_mode",
+        "/settings/recording_stop_mode",
         &settings_token,
         serde_json::json!({ "mode": target_stop_mode }),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "POST /recording_stop_mode");
-    let (_, body) = raw_get_json(&http_socket, "/recording_stop_mode", &settings_token).await;
+    let (_, body) = raw_get_json(
+        &http_socket,
+        "/settings/recording_stop_mode",
+        &settings_token,
+    )
+    .await;
     assert_eq!(body["recording_stop_mode"], target_stop_mode);
     // Restore.
     let _ = raw_post_json(
         &http_socket,
-        "/recording_stop_mode",
+        "/settings/recording_stop_mode",
         &settings_token,
         serde_json::json!({ "mode": initial_stop_mode }),
     )
     .await;
 
     // --- GET /write_method ---
-    let (s, body) = raw_get_json(&http_socket, "/write_method", &settings_token).await;
+    let (s, body) = raw_get_json(&http_socket, "/settings/write_method", &settings_token).await;
     assert_eq!(s, StatusCode::OK, "GET /write_method: {body}");
     assert_eq!(body["status"], "success");
     let initial_write_method = body["write_method"].as_str().unwrap_or("auto").to_string();
@@ -384,25 +396,30 @@ async fn settings_scope_endpoints() {
     };
     let (s, _) = raw_post_json(
         &http_socket,
-        "/write_method",
+        "/settings/write_method",
         &settings_token,
         serde_json::json!({ "method": target_write_method }),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "POST /write_method");
-    let (_, body) = raw_get_json(&http_socket, "/write_method", &settings_token).await;
+    let (_, body) = raw_get_json(&http_socket, "/settings/write_method", &settings_token).await;
     assert_eq!(body["write_method"], target_write_method);
     // Restore.
     let _ = raw_post_json(
         &http_socket,
-        "/write_method",
+        "/settings/write_method",
         &settings_token,
         serde_json::json!({ "method": initial_write_method }),
     )
     .await;
 
     // --- GET /update_check_enabled ---
-    let (s, body) = raw_get_json(&http_socket, "/update_check_enabled", &settings_token).await;
+    let (s, body) = raw_get_json(
+        &http_socket,
+        "/settings/update_check_enabled",
+        &settings_token,
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "GET /update_check_enabled: {body}");
     assert_eq!(body["status"], "success");
     let initial_update_check_enabled = body["update_check_enabled"].as_bool().unwrap_or(true);
@@ -410,25 +427,31 @@ async fn settings_scope_endpoints() {
     // --- POST /update_check_enabled: round-trip the inverse ---
     let (s, _) = raw_post_json(
         &http_socket,
-        "/update_check_enabled",
+        "/settings/update_check_enabled",
         &settings_token,
         serde_json::json!({ "enabled": !initial_update_check_enabled }),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "POST /update_check_enabled");
-    let (_, body) = raw_get_json(&http_socket, "/update_check_enabled", &settings_token).await;
+    let (_, body) = raw_get_json(
+        &http_socket,
+        "/settings/update_check_enabled",
+        &settings_token,
+    )
+    .await;
     assert_eq!(body["update_check_enabled"], !initial_update_check_enabled);
     // Restore.
     let _ = raw_post_json(
         &http_socket,
-        "/update_check_enabled",
+        "/settings/update_check_enabled",
         &settings_token,
         serde_json::json!({ "enabled": initial_update_check_enabled }),
     )
     .await;
 
     // --- GET /update_beta_optin ---
-    let (s, body) = raw_get_json(&http_socket, "/update_beta_optin", &settings_token).await;
+    let (s, body) =
+        raw_get_json(&http_socket, "/settings/update_beta_optin", &settings_token).await;
     assert_eq!(s, StatusCode::OK, "GET /update_beta_optin: {body}");
     assert_eq!(body["status"], "success");
     let initial_beta_optin = body["update_beta_optin"]
@@ -444,18 +467,19 @@ async fn settings_scope_endpoints() {
     };
     let (s, _) = raw_post_json(
         &http_socket,
-        "/update_beta_optin",
+        "/settings/update_beta_optin",
         &settings_token,
         serde_json::json!({ "value": target_beta_optin }),
     )
     .await;
     assert_eq!(s, StatusCode::OK, "POST /update_beta_optin");
-    let (_, body) = raw_get_json(&http_socket, "/update_beta_optin", &settings_token).await;
+    let (_, body) =
+        raw_get_json(&http_socket, "/settings/update_beta_optin", &settings_token).await;
     assert_eq!(body["update_beta_optin"], target_beta_optin);
     // Restore.
     let _ = raw_post_json(
         &http_socket,
-        "/update_beta_optin",
+        "/settings/update_beta_optin",
         &settings_token,
         serde_json::json!({ "value": initial_beta_optin }),
     )
@@ -505,7 +529,7 @@ async fn settings_scope_endpoints() {
     // CI (no PulseAudio) but the handler always returns 200 with status:"success".
     let (s, body) = raw_post_json(
         &http_socket,
-        "/audio_theme/test",
+        "/settings/audio_theme/test",
         &settings_token,
         serde_json::json!({}),
     )
@@ -561,7 +585,7 @@ async fn settings_scope_endpoints() {
     );
 
     // --- Scope enforcement: client-scope token MUST be rejected ---
-    let (s, body) = raw_get_json(&http_socket, "/audio_theme", &client_token).await;
+    let (s, body) = raw_get_json(&http_socket, "/settings/audio_theme", &client_token).await;
     assert_eq!(
         s,
         StatusCode::FORBIDDEN,
@@ -571,7 +595,7 @@ async fn settings_scope_endpoints() {
 
     let (s, body) = raw_post_json(
         &http_socket,
-        "/volume",
+        "/settings/volume",
         &client_token,
         serde_json::json!({ "volume": 50 }),
     )
