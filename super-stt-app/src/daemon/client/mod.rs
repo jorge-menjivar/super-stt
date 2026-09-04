@@ -6,6 +6,9 @@
 //! (`super_stt_shared::daemon::http_client::transport`) and the cached
 //! `settings`-scope token ([`internal::session`]).
 
+#[cfg(test)]
+mod path_contract;
+
 pub(crate) mod internal;
 pub(crate) mod v1;
 
