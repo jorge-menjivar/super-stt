@@ -188,7 +188,7 @@
         ]
       }
     },
-    "/v1/backends/{source}": {
+    "/v1/backends/{backend_id}": {
       "delete": {
         "tags": [
           "backends"
@@ -198,9 +198,9 @@
         "operationId": "uninstall_backend",
         "parameters": [
           {
-            "name": "source",
+            "name": "backend_id",
             "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -279,19 +279,19 @@
         ]
       }
     },
-    "/v1/backends/{source}/options/list": {
+    "/v1/backends/{backend_id}/options/list": {
       "get": {
         "tags": [
           "backends"
         ],
         "summary": "List a backend's options",
-        "description": "Every option this backend declares, each with its label, type, default, and the value actually in effect. This is what a settings UI renders a form from.\n\nOptions are the backend's own configuration — an endpoint URL, a model parameter — declared in its manifest. Credentials are not options; those are secrets, at `/backends/{source}/secrets/list`.",
+        "description": "Every option this backend declares, each with its label, type, default, and the value actually in effect. This is what a settings UI renders a form from.\n\nOptions are the backend's own configuration — an endpoint URL, a model parameter — declared in its manifest. Credentials are not options; those are secrets, at `/backends/{backend_id}/secrets/list`.",
         "operationId": "list",
         "parameters": [
           {
-            "name": "source",
+            "name": "backend_id",
             "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -360,7 +360,7 @@
         ]
       }
     },
-    "/v1/backends/{source}/options/{name}": {
+    "/v1/backends/{backend_id}/options/{name}": {
       "get": {
         "tags": [
           "backends"
@@ -370,9 +370,9 @@
         "operationId": "get_one",
         "parameters": [
           {
-            "name": "source",
+            "name": "backend_id",
             "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -458,9 +458,9 @@
         "operationId": "set",
         "parameters": [
           {
-            "name": "source",
+            "name": "backend_id",
             "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -566,9 +566,9 @@
         "operationId": "delete_option",
         "parameters": [
           {
-            "name": "source",
+            "name": "backend_id",
             "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -646,7 +646,7 @@
         ]
       }
     },
-    "/v1/backends/{source}/secrets/list": {
+    "/v1/backends/{backend_id}/secrets/list": {
       "get": {
         "tags": [
           "backends"
@@ -664,6 +664,14 @@
               "type": "string"
             },
             "example": "github.com%2Facme%2Fopenai"
+          },
+          {
+            "name": "backend_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -727,7 +735,7 @@
         ]
       }
     },
-    "/v1/backends/{source}/secrets/{name}": {
+    "/v1/backends/{backend_id}/secrets/{name}": {
       "get": {
         "tags": [
           "backends"
@@ -750,6 +758,14 @@
             "name": "name",
             "in": "path",
             "description": "The secret's name, as the backend's manifest declares it.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "backend_id",
+            "in": "path",
             "required": true,
             "schema": {
               "type": "string"
@@ -838,6 +854,14 @@
             "name": "name",
             "in": "path",
             "description": "The secret's name, as the backend's manifest declares it.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "backend_id",
+            "in": "path",
             "required": true,
             "schema": {
               "type": "string"
@@ -956,6 +980,14 @@
             "name": "name",
             "in": "path",
             "description": "The secret's name, as the backend's manifest declares it.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "backend_id",
+            "in": "path",
             "required": true,
             "schema": {
               "type": "string"
@@ -2011,7 +2043,7 @@
           "pipeline"
         ],
         "summary": "Re-instantiate a stage's model in place",
-        "description": "Tears the model down and brings it back up so it picks up changed secrets and options — an API key set through `/backends/{source}/secrets`, say — without the client having to unload and reload by hand.\n\nNothing is re-downloaded; the files on disk are unchanged.",
+        "description": "Tears the model down and brings it back up so it picks up changed secrets and options — an API key set through `/backends/{backend_id}/secrets`, say — without the client having to unload and reload by hand.\n\nNothing is re-downloaded; the files on disk are unchanged.",
         "operationId": "reload_stage_model",
         "parameters": [
           {

@@ -285,7 +285,7 @@ working from the same value the daemon authorized, and spares each one its own
 URL parser.
 
 The same rewrite is applied when the value is **set**, so what
-[`POST /backends/{source}/options/{name}`](../endpoints/v1/backends/options.md)
+[`POST /backends/{backend_id}/options/{name}`](../endpoints/v1/backends/options.md)
 stores is already canonical and the settings field reads back the endpoint that
 will be dialed. The scheme is why this is worth doing at the write boundary
 rather than only at load: whether a request is encrypted should not be

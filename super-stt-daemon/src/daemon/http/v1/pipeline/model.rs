@@ -156,7 +156,7 @@ pub(crate) async fn cancel_stage_model(
     summary = "Re-instantiate a stage's model in place",
     description = "\
 Tears the model down and brings it back up so it picks up changed secrets and \
-options — an API key set through `/backends/{source}/secrets`, say — without the \
+options — an API key set through `/backends/{backend_id}/secrets`, say — without the \
 client having to unload and reload by hand.
 
 Nothing is re-downloaded; the files on disk are unchanged.",

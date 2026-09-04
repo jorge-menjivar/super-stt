@@ -1,4 +1,4 @@
-# `/backends/{source}/options`
+# `/backends/{backend_id}/options`
 
 Read, set, and reset a backend's **options** — the non-sensitive
 configuration values (a base-URL override, a timeout, and so on) a backend
@@ -8,9 +8,9 @@ overrides as plaintext in its config and injects each as an
 `x-stt-option-<name>` request header at model-load time (see
 [contract.md](../../../backend/contract.md#request-headers)).
 
-`{source}` is the backend's repo id (e.g. `github.com/super-stt/openai`),
+`{backend_id}` is the backend's id — its `source` as `GET /backends` reports it (e.g. `github.com/super-stt/openai`),
 **URL-percent-encoded** in the path — the same identifier used by
-[`DELETE /backends/{source}`](../backends.md#delete-backendssource):
+[`DELETE /backends/{backend_id}`](../backends.md#delete-backendsbackend_id):
 
 ```
 /backends/github.com%2Fsuper-stt%2Fopenai/options/base_url
@@ -40,7 +40,7 @@ Each option has a manifest **default** and an optional user **override**. The
 the override; `DELETE` removes it, resetting the effective value back to the
 default.
 
-## `GET /backends/{source}/options/list`
+## `GET /backends/{backend_id}/options/list`
 
 List the backend's declared options with their effective values.
 
@@ -80,7 +80,7 @@ Authorization: Bearer stt_…64hex…
 | `…[].required` | boolean          | Whether the backend needs it to operate.                      |
 | `…[].value`    | any              | Effective value: the override if set, else `default`.          |
 
-## `GET /backends/{source}/options/{name}`
+## `GET /backends/{backend_id}/options/{name}`
 
 Read one option's effective value.
 
@@ -103,7 +103,7 @@ Authorization: Bearer stt_…64hex…
 }
 ```
 
-## `POST /backends/{source}/options/{name}`
+## `POST /backends/{backend_id}/options/{name}`
 
 Set the option override. Every stage currently running a model from that
 backend is reloaded so the new value takes effect at once — a transcription
@@ -142,7 +142,7 @@ posting `192.168.0.179:8080/v1` stores and returns
 [config.md](../../../backend/config.md#base_url-and-egress) for the full rule.
 Every other option is stored exactly as posted.
 
-## `DELETE /backends/{source}/options/{name}`
+## `DELETE /backends/{backend_id}/options/{name}`
 
 Remove the override, resetting the option to its manifest **default**.
 Idempotent: resetting an option that has no override succeeds. The returned
