@@ -1,0 +1,90 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Super STT daemon protocol — Swagger UI</title>
+    <!--
+      The default view of openapi.json, which is generated from the daemon's
+      router (`just openapi`) rather than maintained by hand. scalar.html is the
+      same document rendered with Scalar; `just openapi-serve --scalar` opens
+      that one.
+
+      Serve it, don't open it as a file:// URL — the page fetches openapi.json,
+      which the file: origin blocks. `just openapi-serve` does the right thing.
+
+      Swagger UI 5 is required, not 4: the document is OpenAPI 3.1, which 4.x
+      does not read.
+    -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.14/swagger-ui.css"
+    />
+    <style>
+      body { margin: 0; }
+      /* Swagger UI renders its own topbar only in the standalone preset; this
+         is the one bit of chrome we add, so the two views can be swapped
+         without going back to the terminal. */
+      .viewswitch {
+        background: #1b1b1b;
+        color: #d8d8d8;
+        font: 13px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
+        padding: 0.75rem 1.25rem;
+      }
+      .viewswitch a { color: #8ec7ff; }
+      #fallback {
+        display: none;
+        margin: 4rem auto;
+        max-width: 34rem;
+        padding: 0 1.5rem;
+        font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      #fallback code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="viewswitch">
+      Swagger UI · <a href="./scalar.html">switch to the Scalar view</a>
+    </div>
+    <div id="swagger-ui"></div>
+
+    <div id="fallback">
+      <h1>Viewer unavailable</h1>
+      <p>
+        Swagger UI could not be loaded, which usually means this machine is
+        offline. The specification itself is local and unaffected —
+        <a href="./openapi.json">openapi.json</a> is right here.
+      </p>
+      <p>Regenerate it from the daemon's router with <code>just openapi</code>.</p>
+    </div>
+
+    <script
+      src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.14/swagger-ui-bundle.js"
+      onerror="document.getElementById('fallback').style.display='block'"
+    ></script>
+    <script>
+      window.addEventListener("load", function () {
+        if (typeof SwaggerUIBundle === "undefined") return;
+        window.ui = SwaggerUIBundle({
+          url: "./openapi.json",
+          dom_id: "#swagger-ui",
+          deepLinking: true,
+          // No "Try it out". The daemon listens on a Unix domain socket, which
+          // a browser cannot dial, so an interactive request form could only
+          // ever produce failures.
+          supportedSubmitMethods: [],
+          tryItOutEnabled: false,
+          docExpansion: "list",
+          defaultModelsExpandDepth: 1,
+          defaultModelExpandDepth: 3,
+          displayRequestDuration: false,
+          filter: true,
+        });
+      });
+    </script>
+  </body>
+</html>

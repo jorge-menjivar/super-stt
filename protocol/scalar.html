@@ -1,0 +1,90 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Super STT daemon protocol</title>
+    <!--
+      The Scalar view of openapi.json. openapi.html is the same document
+      rendered with Swagger UI and is what `just openapi-serve` opens by
+      default; this one is `just openapi-serve --scalar`.
+
+      Serve it, don't open it as a file:// URL — the page fetches openapi.json,
+      which the file: origin blocks. `just openapi-serve` does the right thing.
+
+      The renderer is loaded from a CDN, so this page needs network access the
+      first time it is opened. The spec itself is local; only the viewer is
+      remote.
+    -->
+    <style>
+      :root { color-scheme: light dark; }
+      html, body { margin: 0; height: 100%; }
+      /* The one bit of chrome we add, so the two renderings can be swapped
+         without going back to the terminal. */
+      .viewswitch {
+        background: #1b1b1b;
+        color: #d8d8d8;
+        font: 13px/1 ui-sans-serif, system-ui, -apple-system, sans-serif;
+        padding: 0.75rem 1.25rem;
+      }
+      .viewswitch a { color: #8ec7ff; }
+      #fallback {
+        display: none;
+        margin: 4rem auto;
+        max-width: 34rem;
+        padding: 0 1.5rem;
+        font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      #fallback code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9em;
+      }
+      #fallback pre {
+        background: color-mix(in srgb, currentColor 8%, transparent);
+        border-radius: 6px;
+        overflow-x: auto;
+        padding: 0.75rem 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="viewswitch">
+      Scalar · <a href="./openapi.html">switch to the Swagger UI view</a>
+    </div>
+    <script id="api-reference" data-url="./openapi.json"></script>
+    <script>
+      // Scalar reads its options off the script tag above.
+      var configuration = {
+        theme: "default",
+        layout: "modern",
+        hideDownloadButton: false,
+        // A Unix-socket API cannot be called from a browser, so the request
+        // sender would only ever produce failures.
+        hiddenClients: true,
+        isEditable: false,
+      };
+      document.getElementById("api-reference").dataset.configuration =
+        JSON.stringify(configuration);
+    </script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.25.90/dist/browser/standalone.min.js"
+      onerror="document.getElementById('fallback').style.display='block'"
+    ></script>
+
+    <div id="fallback">
+      <h1>Viewer unavailable</h1>
+      <p>
+        The renderer could not be loaded, which usually means this machine is
+        offline. The specification itself is local and unaffected —
+        <a href="./openapi.json">openapi.json</a> is right here.
+      </p>
+      <p>To read it without a network, point any OpenAPI tool at the file:</p>
+      <pre><code>npx @redocly/cli preview-docs docs/protocol/openapi.json</code></pre>
+      <p>
+        Regenerate it from the daemon's router with
+        <code>just openapi</code>.
+      </p>
+    </div>
+  </body>
+</html>
