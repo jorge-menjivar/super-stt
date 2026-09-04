@@ -15,6 +15,7 @@ so a client learns one shape and applies it anywhere in the pipeline:
 | Select backend   | [`POST /pipeline/{stage}`](./pipeline/stage.md#post-pipelinestage)         | Which installed backend fills this stage |
 | Deselect backend | [`DELETE /pipeline/{stage}`](./pipeline/stage.md#delete-pipelinestage)       | Empty the stage, forgetting its model     |
 | Run a model      | [`POST /pipeline/{stage}/model`](./pipeline/model.md#post-pipelinestagemodel)   | Load and run one of that backend's models |
+| List its models  | [`GET /pipeline/{stage}/model/list`](./pipeline/model-list.md) | The models that backend serves in this stage's role |
 | Stop it          | [`DELETE /pipeline/{stage}/model`](./pipeline/model.md#delete-pipelinestagemodel) | Unload, keeping the backend selected      |
 | Read a model's device | [`GET /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice)  | Where one of that backend's models runs |
 | Set it           | [`POST /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#post-pipelinestagemodelmodeldevice) | Run it on the CPU or the GPU, reloading if it is loaded |
@@ -118,6 +119,7 @@ Each verb's reference lives with its path:
 |---|---|
 | [`pipeline/stage.md`](./pipeline/stage.md)   | `GET`, `POST`, `DELETE /pipeline/{stage}` |
 | [`pipeline/model.md`](./pipeline/model.md)   | `POST`, `DELETE /pipeline/{stage}/model`, and its `cancel` / `reload` |
+| [`pipeline/model-list.md`](./pipeline/model-list.md) | `GET /pipeline/{stage}/model/list` |
 | [`pipeline/device.md`](./pipeline/device.md) | `/pipeline/{stage}/model/{model}/device`, both device lists |
 
 This page keeps what they share: the stages, the stage object, auth, the

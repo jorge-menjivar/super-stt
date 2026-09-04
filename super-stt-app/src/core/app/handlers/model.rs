@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, ModelOperationState};
-use crate::daemon::client::{get_gpu_info, get_stage, list_available_models};
+use crate::daemon::client::{get_gpu_info, get_stage};
 use crate::state::device_offers::STT_STAGE;
 use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage, StageMessage};
 use cosmic::prelude::*;
@@ -16,11 +16,8 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         match message {
             ModelMessage::LoadInitialData => self.handle_model_load_commands(),
-
-            ModelMessage::AvailableModelsLoaded(_)
-            | ModelMessage::CurrentModelLoaded { .. }
+            ModelMessage::CurrentModelLoaded { .. }
             | ModelMessage::ModelChanged { .. }
-            | ModelMessage::ModelError(_)
             | ModelMessage::CurrentModelFetchFailed { .. } => self.handle_model_results(message),
         }
     }
@@ -30,14 +27,6 @@ impl AppModel {
         info!("LoadInitialData: Loading models and device info at startup");
         // One-time startup load: models + device info
         Task::batch([
-            Task::perform(list_available_models(), |result| match result {
-                Ok(models) => {
-                    cosmic::Action::App(Message::Model(ModelMessage::AvailableModelsLoaded(models)))
-                }
-                Err(e) => {
-                    cosmic::Action::App(Message::Model(ModelMessage::ModelError(e.to_string())))
-                }
-            }),
             self.fetch_current_model(),
             Task::perform(get_stage(STT_STAGE), |result| match result {
                 Ok(stage) => {
@@ -68,11 +57,6 @@ impl AppModel {
     /// Handle model result messages: loads, changes, and errors.
     fn handle_model_results(&mut self, message: ModelMessage) -> Task<cosmic::Action<Message>> {
         match message {
-            ModelMessage::AvailableModelsLoaded(models) => {
-                self.available_models = models;
-                Task::none()
-            }
-
             ModelMessage::CurrentModelLoaded {
                 model,
                 source,
@@ -105,11 +89,6 @@ impl AppModel {
                 self.load_model_language(source, model)
             }
 
-            ModelMessage::ModelError(err) => {
-                self.set_model_error(&err);
-                Task::none()
-            }
-
             ModelMessage::CurrentModelFetchFailed { epoch, error } => {
                 // A stale snapshot fetch that failed must not clobber live state:
                 // if a `model_switched` advanced the epoch after this fetch was
@@ -136,7 +115,7 @@ impl AppModel {
 
     /// Surface a failed model operation on the Models card and drop the loaded
     /// model, sanitizing any `$HOME` path out of the message. Shared by the
-    /// `ModelError` sink and the optimistic-rollback handlers (audit Tier 3 #37).
+    /// optimistic-rollback handlers (audit Tier 3 #37).
     pub(in crate::core::app) fn set_model_error(&mut self, err: &str) {
         warn!("Model operation failed: {err}");
         let home = std::env::var("HOME").unwrap_or_default();

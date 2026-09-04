@@ -7,7 +7,7 @@ discovered from a `backend.toml` on disk (see
 models it serves plus the **secrets** and **options** it accepts.
 
 This endpoint drives the settings UI's per-backend configuration section. The
-flat model picker lives at [`GET /models`](./models.md); switching the active
+flat model picker lives at [`GET /pipeline/{stage}/model/list`](./pipeline/model-list.md); switching the active
 model is [`POST /pipeline/1/model`](./pipeline/model.md).
 
 ## Secrets vs. options

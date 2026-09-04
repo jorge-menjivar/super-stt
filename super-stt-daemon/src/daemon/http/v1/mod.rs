@@ -17,7 +17,6 @@ pub(crate) mod auth;
 pub(crate) mod backends;
 pub(crate) mod events;
 pub(crate) mod gpu_info;
-pub(crate) mod models;
 pub(crate) mod ping;
 pub(crate) mod pipeline;
 pub(crate) mod registry;
@@ -93,7 +92,6 @@ fn scope_groups() -> ScopeGroups {
 /// separately in [`scope_groups`].
 fn settings_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(models::list_models))
         .routes(routes!(gpu_info::get_gpu_info))
         .routes(routes!(update::get_update))
         .routes(routes!(update::post_check))

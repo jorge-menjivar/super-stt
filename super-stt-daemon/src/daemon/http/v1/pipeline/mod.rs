@@ -56,6 +56,8 @@ struct Stage {
     list_model_devices: &'static str,
     /// The devices this stage's backend can be run on here.
     list_backend_devices: &'static str,
+    /// The models this stage can run: its backend's, carrying its role.
+    list_models: &'static str,
 }
 
 impl Stage {
@@ -73,6 +75,7 @@ impl Stage {
                 set_model_device: "set_model_device",
                 list_model_devices: "list_model_devices",
                 list_backend_devices: "list_active_backend_devices",
+                list_models: "list_models",
             }),
             2 => Some(Self {
                 set_backend: "set_post_processor_backend",
@@ -85,6 +88,7 @@ impl Stage {
                 set_model_device: "set_post_processor_device",
                 list_model_devices: "list_post_processor_devices",
                 list_backend_devices: "list_post_processor_backend_devices",
+                list_models: "list_post_processor_models",
             }),
             _ => None,
         }
@@ -146,6 +150,7 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
             stage::clear_stage_backend
         ))
         .routes(routes!(model::set_stage_model, model::clear_stage_model))
+        .routes(routes!(model::list_stage_models))
         .routes(routes!(model::cancel_stage_model))
         .routes(routes!(model::reload_stage_model))
         .routes(routes!(device::list_stage_devices))

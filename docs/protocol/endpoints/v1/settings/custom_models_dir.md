@@ -3,7 +3,7 @@
 Read and set the filesystem path that gets scanned for
 user-supplied STT models. After a successful `POST`, the new
 directory is scanned immediately and any discovered models become
-selectable via [`GET /models`](../models.md) (with `source:
+selectable via [`GET /pipeline/{stage}/model/list`](../pipeline/model-list.md) (with `source:
 "custom"`) and switchable via
 [`POST /pipeline/1/model`](../pipeline/model.md).
 
@@ -46,7 +46,7 @@ Content-Type: application/json
 }
 ```
 
-After the response, calling [`GET /models`](../models.md) reflects
+After the response, calling [`GET /pipeline/{stage}/model/list`](../pipeline/model-list.md) reflects
 any models newly discovered under the path; entries from the path
 carry `source: "custom"`.
 

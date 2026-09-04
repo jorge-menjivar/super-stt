@@ -111,7 +111,6 @@ impl AppModel {
             last_udp_data: std::time::Instant::now(),
 
             // Initialize model state
-            available_models: Vec::new(),
             current_model: String::new(),
             current_source: String::new(),
             current_model_epoch: 0,

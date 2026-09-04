@@ -149,8 +149,8 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
         "/backends/{}/secrets/{}",
         "/pipeline/{}",
         "/pipeline/{}/model",
-        "/models",
         "/gpu_info",
+        "/settings/volume",
     ] {
         assert!(
             found.contains(required),
