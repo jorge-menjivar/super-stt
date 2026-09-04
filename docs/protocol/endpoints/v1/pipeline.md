@@ -12,16 +12,16 @@ so a client learns one shape and applies it anywhere in the pipeline:
 
 | Verb | Path | Meaning |
 |---|---|---|
-| Select backend   | `POST /pipeline/{stage}`         | Which installed backend fills this stage |
-| Deselect backend | `DELETE /pipeline/{stage}`       | Empty the stage, forgetting its model     |
-| Run a model      | `POST /pipeline/{stage}/model`   | Load and run one of that backend's models |
-| Stop it          | `DELETE /pipeline/{stage}/model` | Unload, keeping the backend selected      |
-| Read a model's device | `GET /pipeline/{stage}/model/{model}/device`  | Where one of that backend's models runs |
-| Set it           | `POST /pipeline/{stage}/model/{model}/device` | Run it on the CPU or the GPU, reloading if it is loaded |
-| List a model's devices | `GET /pipeline/{stage}/model/{model}/device/list` | What this install can run that model on |
-| List the backend's devices | `GET /pipeline/{stage}/device/list` | What this install can run that backend on, for this stage |
-| Abandon a load   | `POST /pipeline/{stage}/model/cancel` | Stop the load this stage has in flight, download included |
-| Reload in place  | `POST /pipeline/{stage}/model/reload` | Re-instantiate it to pick up changed secrets or options |
+| Select backend   | [`POST /pipeline/{stage}`](./pipeline/stage.md#post-pipelinestage)         | Which installed backend fills this stage |
+| Deselect backend | [`DELETE /pipeline/{stage}`](./pipeline/stage.md#delete-pipelinestage)       | Empty the stage, forgetting its model     |
+| Run a model      | [`POST /pipeline/{stage}/model`](./pipeline/model.md#post-pipelinestagemodel)   | Load and run one of that backend's models |
+| Stop it          | [`DELETE /pipeline/{stage}/model`](./pipeline/model.md#delete-pipelinestagemodel) | Unload, keeping the backend selected      |
+| Read a model's device | [`GET /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice)  | Where one of that backend's models runs |
+| Set it           | [`POST /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#post-pipelinestagemodelmodeldevice) | Run it on the CPU or the GPU, reloading if it is loaded |
+| List a model's devices | [`GET /pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-pipelinestagemodelmodeldevicelist) | What this install can run that model on |
+| List the backend's devices | [`GET /pipeline/{stage}/device/list`](./pipeline/device.md#get-pipelinestagedevicelist) | What this install can run that backend on, for this stage |
+| Abandon a load   | [`POST /pipeline/{stage}/model/cancel`](./pipeline/model.md#post-pipelinestagemodelcancel) | Stop the load this stage has in flight, download included |
+| Reload in place  | [`POST /pipeline/{stage}/model/reload`](./pipeline/model.md#post-pipelinestagemodelreload) | Re-instantiate it to pick up changed secrets or options |
 
 That split is the same one `/pipeline/1` and `/pipeline/1/model` draw for
 transcription, and for the same reason: choosing a backend is cheap and cannot
@@ -63,7 +63,7 @@ compatibility shim that was always an empty string — is gone.
 device is a property of a model — a small one runs fine on the CPU while the
 large one beside it needs the GPU, and a post-processor sharing the pipeline
 with either has its own answer again — so it is now read and set per model, at
-[`/pipeline/{stage}/model/{model}/device`](#get-pipelinestagemodelmodeldevice).
+[`/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice).
 A daemon upgraded from the global preference keeps loading models where it
 always did: a model with no device of its own falls back to the old global
 value in `daemon.toml`, and takes its own the first time one is set.
@@ -93,7 +93,7 @@ become insertable, renumbering is the thing to design — a client holding
 | `name`   | string? | That backend's display name; `null` when the stage is empty.            |
 | `model`  | string? | Wire name of the selected model; `null` when none is selected.          |
 | `loaded` | bool    | Whether the model is loaded and running right now.                       |
-| `device` | string? | The accelerator the loaded model is actually on: `cpu`, `cuda`, `rocm`, `metal`, `vulkan`, or `remote` for an online model. `null` when nothing is loaded. This is where the work runs, not the user's preference — for that, and for what a `gpu` choice resolved to, read the model's [device](#get-pipelinestagemodelmodeldevice). |
+| `device` | string? | The accelerator the loaded model is actually on: `cpu`, `cuda`, `rocm`, `metal`, `vulkan`, or `remote` for an online model. `null` when nothing is loaded. This is where the work runs, not the user's preference — for that, and for what a `gpu` choice resolved to, read the model's [device](./pipeline/device.md#get-pipelinestagemodelmodeldevice). |
 | `enabled`| bool    | *Processor stages only.* Whether it should run. Distinct from `loaded`: a stage can be enabled while its model failed to load, and transcripts then pass through unchanged. |
 | `switch` | object? | The load this stage has in flight, or `null` when it has none. Scoped to the stage: a post-processor's download never appears under stage 1. |
 
@@ -111,6 +111,17 @@ loading the weights.
 
 The polled mirror of the [events](#events) below: a client that wants live
 progress subscribes, and one that reconnects mid-load reads it here.
+
+Each verb's reference lives with its path:
+
+| Page | Covers |
+|---|---|
+| [`pipeline/stage.md`](./pipeline/stage.md)   | `GET`, `POST`, `DELETE /pipeline/{stage}` |
+| [`pipeline/model.md`](./pipeline/model.md)   | `POST`, `DELETE /pipeline/{stage}/model`, and its `cancel` / `reload` |
+| [`pipeline/device.md`](./pipeline/device.md) | `/pipeline/{stage}/model/{model}/device`, both device lists |
+
+This page keeps what they share: the stages, the stage object, auth, the
+post-processing contract, and the events every stage emits.
 
 ## `GET /pipeline`
 
@@ -157,293 +168,6 @@ Content-Type: application/json
   ]
 }
 ```
-
-## `GET /pipeline/{stage}`
-
-One stage, as `stage` — the same object the array carries.
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{
-  "status": "success",
-  "stage": {
-    "stage":   2,
-    "role":    "post_processor",
-    "source":  "github.com/jorge-menjivar/super-stt-textclean",
-    "name":    "Text Cleanup",
-    "model":   "textclean",
-    "loaded":  true,
-    "device":  "cpu",
-    "switch":  null,
-    "enabled": true
-  }
-}
-```
-
-## `POST /pipeline/{stage}`
-
-Select the backend that fills this stage. Validates that it is installed and
-serves this stage's role; does **not** load anything.
-
-**Request:**
-
-```http
-POST /pipeline/2 HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
-Content-Type: application/json
-
-{ "source": "github.com/jorge-menjivar/super-stt-textclean" }
-```
-
-| Field    | Type   | Required | Notes                                              |
-|----------|--------|----------|----------------------------------------------------|
-| `source` | string | yes      | Repo id of an installed backend serving this role  |
-
-Selecting a **different** backend drops the model with it — the name belonged to
-the old backend — and stops that stage until a model is chosen. Re-selecting the
-backend already there changes nothing.
-
-**Errors:**
-
-| HTTP | `error_code`            | Meaning                                                          |
-|------|-------------------------|------------------------------------------------------------------|
-| 404  | `unknown_stage`         | No such position in the pipeline                                 |
-| 400  | `invalid_value`         | `source` missing                                                 |
-| 400  | `invalid_backend`       | No installed backend with that `source` serves this stage's role |
-| 409  | `recording_in_progress` | A recording is in flight                                         |
-| 401  | `invalid_session`       | Token unknown / expired / `exe_changed`                          |
-| 403  | `scope_denied`          | Token lacks the `settings` scope                                 |
-
-## `DELETE /pipeline/{stage}`
-
-Empty the stage: unload, and forget the model with the backend.
-
-Stage 1 returns the daemon to idle. Stage 2 turns post-processing off entirely.
-
-**Errors:** `404 unknown_stage`, `409 recording_in_progress`, plus the auth
-errors above.
-
-## `POST /pipeline/{stage}/model`
-
-Run a model in this stage.
-
-**Request:**
-
-```http
-POST /pipeline/2/model HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
-Content-Type: application/json
-
-{ "model": "textclean" }
-```
-
-| Field    | Type   | Required | Notes                                                                    |
-|----------|--------|----------|--------------------------------------------------------------------------|
-| `model`  | string | yes      | A model its backend declares with this stage's `role`                    |
-| `source` | string | no       | Repo id of the serving backend. Omitted resolves to the backend selected for this stage. |
-
-The model loads on its own [device](#get-pipelinestagemodelmodeldevice), which
-is not part of this request: set it first, and it is remembered for every
-later load of that model.
-
-Stage 1 answers `202 Accepted` and switches asynchronously (see
-[`/pipeline/1/model`](./pipeline.md)); stage 2 answers `200` once the load has
-been attempted. A stage-2 load failure still succeeds — the setting is saved and
-the reason is appended to `message` — because post-processing degrades to
-passing text through rather than costing the user their words.
-
-**Errors:**
-
-| HTTP | `error_code`             | Meaning                                                              |
-|------|--------------------------|----------------------------------------------------------------------|
-| 404  | `unknown_stage`          | No such position in the pipeline                                     |
-| 400  | `invalid_value`          | `model` missing or empty. To stop a stage, use `DELETE`.             |
-| 400  | `invalid_model`          | No installed backend serves `(model, source)`, or its role does not match this stage |
-| 400  | `invalid_backend`        | `source` omitted and no backend is selected for this stage           |
-| 409  | `recording_in_progress`  | A recording is in flight                                             |
-| 401  | `invalid_session`        | Token unknown / expired / `exe_changed`                              |
-| 403  | `scope_denied`           | Token lacks the `settings` scope                                     |
-
-## `DELETE /pipeline/{stage}/model`
-
-Stop this stage, **keeping its backend selected** so restarting it is one
-`POST`. No-op when the stage is not running.
-
-For stage 1 this is [`DELETE /pipeline/1/model`](./pipeline.md) — the model
-unloads, the backend stays active. For stage 2 it turns post-processing off
-while remembering the chosen model.
-
-**Errors:** `404 unknown_stage`, `409 recording_in_progress`, plus the auth
-errors above.
-
-## `POST /pipeline/{stage}/model/cancel`
-
-Abandon the load **this stage** has in flight, including the download feeding
-it. Every stage implements it: a post-processor downloads its weights like any
-other model.
-
-Scoped to the stage that asked. A stage with nothing of its own in flight
-answers `409` even while another stage is downloading — that load is not this
-one's to abandon.
-
-**Errors:** `409 no_switch_in_progress` when this stage has no load in progress,
-`404 unknown_stage`, plus the auth errors above.
-
-## `POST /pipeline/{stage}/model/reload`
-
-Re-instantiate this stage's model in place, picking up changed
-[secrets and options](./backends.md) without a manual stop/start. A stage with
-nothing loaded answers `200` and does nothing.
-
-Rarely needed by hand: writing a
-[backend option or secret](./backends/options.md) already reloads every stage
-running a model from that backend, so the new value takes effect immediately.
-
-**Errors:** `404 unknown_stage`, `409 recording_in_progress`, plus the auth
-errors above.
-
-## `GET /pipeline/{stage}/model/{model}/device`
-
-The device `model` runs on. `model` is resolved against the backend selected
-for this stage — the same resolution an omitted `source` gets on
-`POST /pipeline/{stage}/model` — and must carry this stage's `role`.
-
-**Request:**
-
-```http
-GET /pipeline/1/model/whisper-large-v3/device HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
-```
-
-**Response (200):**
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{
-  "status":            "success",
-  "device":            "gpu",
-  "resolved_accel":    "cuda",
-  "available_devices": ["cpu", "gpu"]
-}
-```
-
-| Field               | Type     | Notes                                                                                   |
-|---------------------|----------|-----------------------------------------------------------------------------------------|
-| `device`            | string   | The device the model loads on, `"cpu"` or `"gpu"` — its own, or the daemon's default when it has none of its own. `"none"` for an online model, which runs remotely and has no local device. |
-| `resolved_accel`    | string?  | What that preference resolved to: `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"` or `"cpu"` while the model is loaded in this stage — always what actually loaded, so a `"gpu"` choice that fell back reads `"cpu"` here. When the model is not loaded: `"cpu"` for a `"cpu"` preference (nothing to resolve), `null` for `"gpu"` (nothing has resolved yet). `null` for an online model. |
-| `available_devices` | string[] | The devices this install can offer the model on this host: the model's `supported_devices`, narrowed to the accelerators its installed asset actually provides (`installed_accel` on [`GET /backends`](./backends.md)) and to what the host has. A CUDA-only backend on a host without an NVIDIA GPU installed its CPU asset, and is not offered a GPU here. Empty for an online model. |
-
-**Errors:**
-
-| HTTP | `error_code`      | Meaning                                                                    |
-|------|-------------------|----------------------------------------------------------------------------|
-| 404  | `unknown_stage`   | No such position in the pipeline                                           |
-| 400  | `invalid_backend` | No backend is selected for this stage, so there is nothing to resolve `model` against |
-| 400  | `invalid_model`   | The selected backend serves no `model`, or `model` carries the other stage's role — the message names the stage that runs it |
-| 401  | `invalid_session` | Token unknown / expired / `exe_changed`                                    |
-| 403  | `scope_denied`    | Token lacks the `settings` scope                                           |
-
-## `POST /pipeline/{stage}/model/{model}/device`
-
-Run `model` on `device`. For the model loaded in this stage this is a reload
-onto the new device; for any other it only records the choice, which the
-model's next load picks up. Either way the choice is the model's own from
-then on: it is remembered per `(source, model)`, so two models on one backend
-can live on different devices.
-
-**Request:**
-
-```http
-POST /pipeline/1/model/whisper-large-v3/device HTTP/1.1
-Host: stt.local
-Authorization: Bearer stt_…64hex…
-Content-Type: application/json
-
-{ "device": "gpu" }
-```
-
-| Field    | Type   | Required | Notes                                                                                                    |
-|----------|--------|----------|--------------------------------------------------------------------------------------------------------|
-| `device` | string | yes      | `"cpu"` or `"gpu"`. `"cuda"` and `"metal"` are accepted input spellings, normalized to `"gpu"`. Any other value is rejected. |
-
-**Response (200):** the same body `GET` answers with, reflecting the new
-state. `message` says which of the three things happened: recorded for the
-next load, reloaded, or already on that device.
-
-The reload, when there is one, completes before the response: stage 1 unloads
-the model, publishes `switching_device` / `loading_model_for_device` on
-[`/events`](./events.md), reloads, and publishes `ready` with the resolved
-`actual_device`. If the reload fails the model is put back on its previous
-device, its setting is left as it was, and the call fails with the reason.
-Stage 2 follows the post-processor's best-effort policy instead: the setting
-is saved, the reload is attempted, and a failure is appended to `message`
-while the previous instance keeps running.
-
-Asking for the device a loaded model is already on reloads nothing — a `gpu`
-preference already resolved to `cuda` is the same choice spelled twice — but a
-`gpu` preference that fell back to the CPU is retried, which is what tracking
-the preference and the resolved accelerator separately is for.
-
-**Errors:** those of `GET` above, plus:
-
-| HTTP | `error_code`            | Meaning                                                                    |
-|------|-------------------------|----------------------------------------------------------------------------|
-| 400  | `invalid_device`        | `device` is not `"cpu"`, `"gpu"` or an accepted alias; or the model's manifest does not declare it (a CPU-only model cannot be sent to the GPU); or the model is online and has no local device. Nothing is recorded. |
-| 409  | `recording_in_progress` | A reload is needed and a recording is in flight                            |
-
-Requesting `"gpu"` for a model whose install or host cannot provide one is
-**not** an error — only the manifest is consulted — and the load falls back to
-the CPU, surfaced as `resolved_accel: "cpu"` and the `ready` event's
-`actual_device`. A client that wants to offer only what will work narrows its
-picker to `available_devices`.
-
-## `GET /pipeline/{stage}/model/{model}/device/list`
-
-The devices this install can offer `model` on this host — the
-`available_devices` of the model's [device](#get-pipelinestagemodelmodeldevice),
-on its own, for a client that only wants to fill a picker. `model` resolves
-the same way, and the same errors apply.
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{
-  "status":            "success",
-  "available_devices": ["cpu", "gpu"]
-}
-```
-
-Empty for an online model, and for a local model this install cannot run on
-any device (a GPU-only model whose installed asset is CPU-only).
-
-## `GET /pipeline/{stage}/device/list`
-
-The devices the backend selected for this stage can be run on here: the union
-of the list above over the models it serves **for this stage's role**. A
-backend serving both a transcription model and a post-processor answers stage
-1 for the former and stage 2 for the latter, since that is what "this backend"
-means from a stage. Always in `cpu`, `gpu` order.
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-
-{
-  "status":            "success",
-  "available_devices": ["cpu", "gpu"]
-}
-```
-
-**Errors:** `404 unknown_stage`; `400 invalid_backend` when no backend is
-selected for the stage; plus the auth errors above.
 
 ## Post-processing behavior
 

@@ -3,20 +3,20 @@
 Read and set the **per-model language override** for any backend model (loaded
 or not), and read the daemon's resolved effective language. The override is one
 of the model's `supported_languages`, the reserved `auto`, or absent (Automatic
-— inherits the global [`/language`](../../language.md), else the model's
+— inherits the global [`/language`](../language.md), else the model's
 `primary_language`). It is stored per model and survives model switches. Only
 multilingual models accept an override.
 
 `{source}` is the backend's repo id (e.g. `github.com/super-stt/whisper`),
 **URL-percent-encoded** in the path — the same identifier used by
-[`DELETE /backends/{source}`](../../backends.md#delete-backendssource):
+[`DELETE /backends/{source}`](../backends.md#delete-backendssource):
 
 ```
 /backends/github.com%2Fsuper-stt%2Fwhisper/models/whisper-large-v3/language
 ```
 
 `{model}` is the model name as it appears in the backend's `models` array (see
-[`GET /backends`](../../backends.md)); model names contain only alphanumerics
+[`GET /backends`](../backends.md)); model names contain only alphanumerics
 and hyphens, so the segment is used as-is (no encoding needed).
 
 ## Auth

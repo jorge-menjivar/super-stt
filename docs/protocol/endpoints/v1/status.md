@@ -3,8 +3,8 @@
 Snapshot of the daemon's current operational state — which model is
 loaded and which device it's running on. Subscriber introspection
 and other operator info are not exposed here; for those, the
-`settings` scope's [`GET /pipeline/1`](./pipeline.md) and
-[`GET /pipeline/{stage}/model/{model}/device`](./pipeline.md#get-pipelinestagemodelmodeldevice)
+`settings` scope's [`GET /pipeline/1`](./pipeline/stage.md) and
+[`GET /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice)
 endpoints apply.
 
 ## Auth

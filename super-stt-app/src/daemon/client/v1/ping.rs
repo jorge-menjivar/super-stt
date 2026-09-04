@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! `/ping` — daemon connectivity checks.
+//!
+//! The daemon also serves `/status`, which this client does not wrap: the
+//! settings app reads per-stage detail from [`super::pipeline`] instead.
 
 use crate::daemon::client::internal::session::with_settings_token;
 use super_stt_shared::daemon::http_client;

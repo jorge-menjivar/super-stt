@@ -8,7 +8,7 @@ models it serves plus the **secrets** and **options** it accepts.
 
 This endpoint drives the settings UI's per-backend configuration section. The
 flat model picker lives at [`GET /models`](./models.md); switching the active
-model is [`POST /pipeline/1/model`](./pipeline.md).
+model is [`POST /pipeline/1/model`](./pipeline/model.md).
 
 ## Secrets vs. options
 

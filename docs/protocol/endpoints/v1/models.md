@@ -13,11 +13,11 @@ their models is available from [`GET /backends`](./backends.md).
 Only **transcription** models are listed. A backend's
 [post-processor](./pipeline.md) models are excluded, since they cannot be
 switched to here — they are selected through
-[`/pipeline/2`](./pipeline.md) instead. `GET /backends` lists every
+[`/pipeline/2`](./pipeline/stage.md) instead. `GET /backends` lists every
 model with its `role`.
 
 Selecting one is done via
-[`POST /pipeline/1/model`](./pipeline.md#post-pipelinestagemodel).
+[`POST /pipeline/1/model`](./pipeline/model.md#post-pipelinestagemodel).
 
 ## Auth
 

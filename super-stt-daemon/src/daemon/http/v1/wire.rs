@@ -11,7 +11,7 @@
 //! field of its own is marked as such, because a client has to parse it back
 //! out.
 
-use super::super::super::wire::Ack;
+use crate::daemon::http::wire::Ack;
 use serde::Serialize;
 use super_stt_shared::models::backends::BackendInfo;
 use super_stt_shared::models::protocol::{DaemonResponse, GpuHostInfo, GpuInfo, StageReport};

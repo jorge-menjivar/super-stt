@@ -5,7 +5,7 @@ user-supplied STT models. After a successful `POST`, the new
 directory is scanned immediately and any discovered models become
 selectable via [`GET /models`](./models.md) (with `source:
 "custom"`) and switchable via
-[`POST /pipeline/1/model`](./pipeline.md).
+[`POST /pipeline/1/model`](./pipeline/model.md).
 
 Pass `path: null` (or omit it) to clear the override.
 

@@ -6,7 +6,7 @@ macOS `system_profiler`/`sysctl`) — no CUDA toolkit or vendor SDK is involved,
 and the call never mutates daemon state.
 
 This is hardware discovery, distinct from a model's
-[device](./pipeline.md#get-pipelinestagemodelmodeldevice), which selects the
+[device](./pipeline/device.md#get-pipelinestagemodelmodeldevice), which selects the
 *compute device* (`cpu`/`gpu`) that model loads on. The result
 is a point-in-time snapshot: `total_bytes` is effectively static, but
 `free_bytes`/`used_bytes` reflect the moment of the call. The daemon re-probes
@@ -83,7 +83,7 @@ compute: it reports whether a Vulkan *loader* is installed, and Mesa's
 lavapipe — a software rasterizer shipped by default on many distributions —
 is a loader like any other, so a machine with no GPU at all can still report
 a `host.vulkan` version here. `available_devices` on a model's
-[device](./pipeline.md#get-pipelinestagemodelmodeldevice) is the
+[device](./pipeline/device.md#get-pipelinestagemodelmodeldevice) is the
 authoritative capability answer; `host.vulkan` is advisory only, the same as
 `host.rocm` above.
 

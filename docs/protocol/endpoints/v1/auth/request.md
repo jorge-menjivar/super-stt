@@ -4,7 +4,7 @@ Mint a fresh session token, normally by triggering the consent
 popup. This is the only endpoint a new client can call before it
 has a token.
 
-See [auth.md](../../auth.md) for the broader handshake design and
+See [auth.md](../../../auth.md) for the broader handshake design and
 the full list of `auth_denied` reasons.
 
 ## Auth
@@ -40,7 +40,7 @@ Content-Type: application/json
 | Field      | Type     | Required | Notes                                                                       |
 |------------|----------|----------|-----------------------------------------------------------------------------|
 | `app_name` | string   | yes      | Declared (untrusted) name displayed to the user in the popup                |
-| `scopes`   | string[] | yes      | Non-empty array of known scope names (see [auth.md](../../auth.md))         |
+| `scopes`   | string[] | yes      | Non-empty array of known scope names (see [auth.md](../../../auth.md))         |
 | `version`  | string   | no       | Free-form version string for the consent popup; shown for UX context only   |
 
 **Response (200, on Allow):**
