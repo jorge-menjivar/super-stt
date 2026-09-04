@@ -38,8 +38,8 @@ caller is weaker than a peer-verified local binary (see
 
 | Endpoint                                                                              | Methods           | Notes                                                                 |
 |---------------------------------------------------------------------------------------|-------------------|-----------------------------------------------------------------------|
-| [`/backends/{source}/secrets/list`](../endpoints/v1/backends/secrets.md#get-backendssourcesecretslist) | GET | List declared secrets and whether each is configured — no values. |
-| [`/backends/{source}/secrets/{name}`](../endpoints/v1/backends/secrets.md)            | GET, POST, DELETE | Check (`configured` only), set, or clear one secret.                  |
+| [`/backends/{backend_id}/secrets/list`](../endpoints/v1/backends/secrets.md#get-backendsbackend_idsecretslist) | GET | List declared secrets and whether each is configured — no values. |
+| [`/backends/{backend_id}/secrets/{name}`](../endpoints/v1/backends/secrets.md)            | GET, POST, DELETE | Check (`configured` only), set, or clear one secret.                  |
 
 A secret value is supplied only in a `POST` request body and is never returned
 by any method. See [secrets.md](../endpoints/v1/backends/secrets.md) for the

@@ -60,7 +60,7 @@ struct SecretConfigured {
 
 #[utoipa::path(
     get,
-    path = "/backends/{source}/secrets/list",
+    path = "/backends/{backend_id}/secrets/list",
     tag = "backends",
     summary = "List a backend's secrets",
     description = "\
@@ -109,7 +109,7 @@ async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response
 
 #[utoipa::path(
     get,
-    path = "/backends/{source}/secrets/{name}",
+    path = "/backends/{backend_id}/secrets/{name}",
     tag = "backends",
     summary = "Check whether one secret is set",
     description = "\
@@ -152,7 +152,7 @@ async fn get_one(
 
 #[utoipa::path(
     post,
-    path = "/backends/{source}/secrets/{name}",
+    path = "/backends/{backend_id}/secrets/{name}",
     tag = "backends",
     summary = "Store a secret",
     description = "\
@@ -203,7 +203,7 @@ async fn set(
 
 #[utoipa::path(
     delete,
-    path = "/backends/{source}/secrets/{name}",
+    path = "/backends/{backend_id}/secrets/{name}",
     tag = "backends",
     summary = "Clear a secret",
     description = "\

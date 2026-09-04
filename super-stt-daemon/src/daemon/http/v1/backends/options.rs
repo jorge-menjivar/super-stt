@@ -90,7 +90,7 @@ fn effective(
 
 #[utoipa::path(
     get,
-    path = "/backends/{source}/options/list",
+    path = "/backends/{backend_id}/options/list",
     tag = "backends",
     summary = "List a backend's options",
     description = "\
@@ -99,10 +99,10 @@ value actually in effect. This is what a settings UI renders a form from.
 
 Options are the backend's own configuration — an endpoint URL, a model parameter — \
 declared in its manifest. Credentials are not options; those are secrets, at \
-`/backends/{source}/secrets/list`.",
+`/backends/{backend_id}/secrets/list`.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
     ),
     security(("session_token" = ["settings"])),
@@ -133,15 +133,15 @@ async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response
 
 #[utoipa::path(
     get,
-    path = "/backends/{source}/options/{name}",
+    path = "/backends/{backend_id}/options/{name}",
     tag = "backends",
     summary = "Read one option's effective value",
     description = "\
 The value in effect for a single option, alongside the manifest default so a UI can \
 show what clearing it would revert to.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
         ("name" = String, Path, description = "The option's name, as the backend's manifest declares it."),
     ),
@@ -179,7 +179,7 @@ async fn get_one_inner(s: AppState, source: String, name: String) -> Response {
 
 #[utoipa::path(
     post,
-    path = "/backends/{source}/options/{name}",
+    path = "/backends/{backend_id}/options/{name}",
     tag = "backends",
     summary = "Override an option",
     description = "\
@@ -196,8 +196,8 @@ because it may carry meaning the daemon does not interpret.
 A loaded model does not pick this up on its own — reload the stage with \
 `POST /pipeline/{stage}/model/reload`.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
         ("name" = String, Path, description = "The option's name, as the backend's manifest declares it."),
     ),
@@ -257,7 +257,7 @@ async fn set(
 
 #[utoipa::path(
     delete,
-    path = "/backends/{source}/options/{name}",
+    path = "/backends/{backend_id}/options/{name}",
     tag = "backends",
     summary = "Clear an option override",
     description = "\
@@ -265,8 +265,8 @@ Removes the stored value, reverting the option to the manifest default. Answers 
 the effective value that results, which is the default when one is declared and \
 `null` when none is.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
         ("name" = String, Path, description = "The option's name, as the backend's manifest declares it."),
     ),

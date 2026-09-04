@@ -25,7 +25,7 @@ Every stage answers it. A post-processor is monolingual and says so in
 `multilingual` — a real answer rather than an error, since the point of
 addressing stages by position is that they answer the same verbs.
 
-> **Moved from `/backends/{source}/models/{model}/language`.** One consequence:
+> **Moved from `/backends/{backend_id}/models/{model}/language`.** One consequence:
 > the model's backend must now be *selected into a stage*. A model belonging to
 > an installed but unselected backend has no path to it, where the
 > `{source}`-addressed spelling could reach any installed model. That is the

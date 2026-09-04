@@ -5,8 +5,8 @@
 //!
 //! The catalog and one backend's removal are here, at the paths they answer on;
 //! the sub-resources each get their own module — [`options`] for
-//! `/backends/{source}/options` and [`secrets`] for
-//! `/backends/{source}/secrets`.
+//! `/backends/{backend_id}/options` and [`secrets`] for
+//! `/backends/{backend_id}/secrets`.
 //!
 //! A model's language override is not here. It is a per-`(source, model)`
 //! preference like its device, and both are addressed through the stage that
@@ -35,7 +35,7 @@ use super_stt_shared::registry::UninstallResponse;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-/// Percent-decode a `{source}` path segment (e.g. `github.com%2Facme%2Fx`).
+/// Percent-decode a `{backend_id}` path segment (e.g. `github.com%2Facme%2Fx`).
 pub(crate) fn decode_source(raw: &str) -> String {
     urlencoding::decode(raw).map_or_else(|_| raw.to_string(), std::borrow::Cow::into_owned)
 }
@@ -112,7 +112,7 @@ pub(crate) async fn list_backends(State(s): State<AppState>) -> Response {
 
 #[utoipa::path(
     delete,
-    path = "/backends/{source}",
+    path = "/backends/{backend_id}",
     tag = "backends",
     summary = "Uninstall a backend",
     description = "\
@@ -125,8 +125,8 @@ at files that no longer exist. The response says which stages were affected.
 Refused with `409 backend_busy` while a recording or realtime session is in flight \
 — removing files out from under one would strand state it still depends on.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
     ),
     security(("session_token" = ["settings"])),

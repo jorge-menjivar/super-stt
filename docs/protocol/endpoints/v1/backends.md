@@ -18,14 +18,14 @@ configure them only through these endpoints, never by touching storage
 directly.
 
 - **Secrets** (`[[secrets]]`) — sensitive values such as API keys, managed
-  under [`/backends/{source}/secrets`](./backends/secrets.md) (the `secrets`
+  under [`/backends/{backend_id}/secrets`](./backends/secrets.md) (the `secrets`
   scope). The daemon stores them in the **system keyring** and reads them only
   at model-load time, injecting each as an `x-stt-secret-<name>` request header
   (see [contract.md](../../backend/contract.md#request-headers)). Values are
   **write-only**: a client sets or clears a secret and can check whether one is
   configured, but no endpoint ever returns a value.
 - **Options** (`[[options]]`) — non-sensitive configuration such as a base URL,
-  managed under [`/backends/{source}/options`](./backends/options.md) (the
+  managed under [`/backends/{backend_id}/options`](./backends/options.md) (the
   `settings` scope). The daemon stores them as plaintext in its config, and
   their values *are* returned.
 
@@ -111,7 +111,7 @@ Authorization: Bearer stt_…64hex…
 | `…[].kind`        | string           | `wasm` or `subprocess`.                                              |
 | `…[].allowed_hosts` | array of strings | Hosts the backend **declared** in its `backend.toml` (`[network].allowed_hosts`). Empty for `subprocess` backends (which run with no network) and for backends that declare none. Surfaced in the settings UI's "Online model" badge so the user sees where a cloud backend's audio would go. It is the manifest's declaration alone: a user-set [`base_url`](../../backend/config.md#base_url-and-egress) authorizes a further endpoint, which clients read from that option's `value` rather than from this list. |
 | `…[].installed_accel` | array of strings | The accel list of the asset variant actually installed on this host, e.g. `["cuda"]` or `["cpu"]` — see [`accel`](../../backend/config.md#assets). Empty for a `wasm` backend (no asset selection applies) and for a `subprocess` backend imported from a local directory, where the binary's accel is not knowable. See below for how a client derives the offered device list from it. |
-| `…[].models`      | array            | Models served, as `{ name, multilingual, primary_language, supported_languages, supported_devices, estimated_vram_bytes }`. `multilingual` is `true` when the model accepts a language tag. `primary_language` is the model's default BCP-47 tag (the fallback when no override or global setting applies). `supported_languages` is the non-empty array of BCP-47 tags the model accepts; these feed the per-model language picker and the [`/backends/{source}/models/{model}/settings/language`](./pipeline/language.md) resolution. `supported_devices` is a non-empty array drawn from `["cpu", "gpu", "none"]`; `"none"` marks a remote/online model with no local compute. `estimated_vram_bytes` is a conservative GPU memory estimate (weights + KV cache + overhead); `0` when unknown or not GPU-resident. See [`GET /gpu_info`](./gpu_info.md) for the detected GPU memory it's weighed against. |
+| `…[].models`      | array            | Models served, as `{ name, multilingual, primary_language, supported_languages, supported_devices, estimated_vram_bytes }`. `multilingual` is `true` when the model accepts a language tag. `primary_language` is the model's default BCP-47 tag (the fallback when no override or global setting applies). `supported_languages` is the non-empty array of BCP-47 tags the model accepts; these feed the per-model language picker and the [`/backends/{backend_id}/models/{model}/settings/language`](./pipeline/language.md) resolution. `supported_devices` is a non-empty array drawn from `["cpu", "gpu", "none"]`; `"none"` marks a remote/online model with no local compute. `estimated_vram_bytes` is a conservative GPU memory estimate (weights + KV cache + overhead); `0` when unknown or not GPU-resident. See [`GET /gpu_info`](./gpu_info.md) for the detected GPU memory it's weighed against. |
 | `…[].secrets`     | array            | Declared secrets: `{ name, label, description, required }`. `label` falls back to `name` when absent. Secret **values** are never returned. |
 | `…[].options`     | array            | Declared options: `{ name, label, description, type, default, required, value }`. `label` falls back to `name` when absent; `value` is the effective value (config override if set, else `default`). |
 
@@ -157,10 +157,10 @@ pre-upgrade install — so a client falls back to the model's declared
 Setting a secret or option is done per item under the backend's sub-resources,
 not on `/backends` itself:
 
-- **Secrets** — [`/backends/{source}/secrets`](./backends/secrets.md):
+- **Secrets** — [`/backends/{backend_id}/secrets`](./backends/secrets.md):
   `GET …/secrets/list` and `GET`/`POST`/`DELETE …/secrets/{name}`. Requires the
   `secrets` scope; values are write-only.
-- **Options** — [`/backends/{source}/options`](./backends/options.md):
+- **Options** — [`/backends/{backend_id}/options`](./backends/options.md):
   `GET …/options/list` and `GET`/`POST`/`DELETE …/options/{name}`. Requires the
   `settings` scope.
 
@@ -176,7 +176,7 @@ declares for that option never takes effect — see
 This is how a cloud backend is pointed at an alternate endpoint (a gateway,
 proxy, or local OpenAI-compatible server) without re-installing it.
 
-## DELETE /backends/{source}
+## DELETE /backends/{backend_id}
 
 Uninstalls a backend. Works for any installed backend — registry-installed,
 sideloaded, or imported-from-dir. Removes the backend's directory under
