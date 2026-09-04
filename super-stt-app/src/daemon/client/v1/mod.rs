@@ -16,7 +16,6 @@ mod macros;
 
 pub(crate) mod backends;
 pub(crate) mod gpu_info;
-pub(crate) mod models;
 pub(crate) mod ping;
 pub(crate) mod pipeline;
 pub(crate) mod registry;

@@ -38,7 +38,14 @@ pub enum Command {
         source: String,
     },
     GetModel,
+    /// The transcription models stage 1's backend serves.
     ListModels,
+    /// The post-processors stage 2's backend serves.
+    ///
+    /// A separate variant rather than a `stage` parameter because that is how
+    /// every other stage verb is spelled here — the HTTP layer's `Stage`
+    /// resolver maps a position to the command that implements it.
+    ListPostProcessorModels,
     /// Set the device a transcription (stage 1) model runs on: `cpu` or
     /// `gpu`. `model` is resolved against the selected transcription backend.
     /// Reloads the model when it is the loaded one; otherwise only records

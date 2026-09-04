@@ -12,7 +12,7 @@ use axum::response::Response;
 use serde::Deserialize;
 
 use super::{Stage, unknown_stage};
-use crate::daemon::http::v1::wire::{FromDaemon, StageMutation};
+use crate::daemon::http::v1::wire::{FromDaemon, ModelList, StageMutation};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 
 /// Which model to run in the stage.
@@ -183,4 +183,48 @@ pub(crate) async fn reload_stage_model(
     };
     let resp = dispatch(&s.daemon, build_request(cmds.reload_model, None)).await;
     narrowed(resp, crate::daemon::http::wire::Ack::from_daemon)
+}
+
+/// `GET /pipeline/{stage}/model/list` — the models this stage can run.
+#[utoipa::path(
+    get,
+    path = "/pipeline/{stage}/model/list",
+    tag = "pipeline",
+    summary = "List the models a stage can run",
+    description = "\
+The models the backend filling this stage serves *in this stage's role* — \
+transcription models for stage 1, post-processors for stage 2. Fill a model picker \
+from this.
+
+Scoped twice over, and both halves matter. A model from another backend cannot load \
+here; a model with the wrong role loads and then fails on every use, which for a \
+post-processor picked as a transcription model means each recording fails after the \
+user has already spoken.
+
+The full catalog, every installed backend and every role, is `GET /backends`. This is \
+the narrow read a stage's picker wants, and it is answered per stage precisely so a \
+client does not have to re-derive roles for itself.",
+    params(
+        ("stage" = u32, Path,
+         description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+         example = 1),
+    ),
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "The models on offer, `(name, source)` pairs. Empty when the stage has no backend.", body = ModelList),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such stage (`unknown_stage`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+pub(crate) async fn list_stage_models(
+    State(s): State<AppState>,
+    Path(stage): Path<u32>,
+) -> Response {
+    let Some(cmds) = Stage::resolve(stage) else {
+        return unknown_stage(stage);
+    };
+    let resp = dispatch(&s.daemon, build_request(cmds.list_models, None)).await;
+    narrowed(resp, ModelList::from_daemon)
 }

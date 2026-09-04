@@ -26,6 +26,7 @@ impl TryFrom<DaemonRequest> for Command {
             "set_model" => cmd_set_model(&request),
             "get_model" => Ok(Command::GetModel),
             "list_models" => Ok(Command::ListModels),
+            "list_post_processor_models" => Ok(Command::ListPostProcessorModels),
             "set_model_device" => cmd_set_model_device(&request),
             "get_model_device" => cmd_get_model_device(&request),
             "set_post_processor_device" => cmd_set_post_processor_device(&request),

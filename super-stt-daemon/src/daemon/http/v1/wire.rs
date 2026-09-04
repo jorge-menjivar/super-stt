@@ -255,7 +255,7 @@ impl FromDaemon for LanguageState {
     }
 }
 
-/// The models the backend filling stage 1 can transcribe with.
+/// The models a pipeline stage can run: its backend's, carrying its role.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct ModelList {
     #[schema(example = "success")]

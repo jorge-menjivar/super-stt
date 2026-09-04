@@ -91,11 +91,10 @@ pub enum DaemonMessage {
     DaemonEventsReceived(Vec<super_stt_shared::models::protocol::NotificationEvent>),
 }
 
-/// Model identity: startup load, catalog, and the current/loaded model.
+/// Model identity: startup load, and the current/loaded model.
 #[derive(Debug, Clone)]
 pub enum ModelMessage {
-    LoadInitialData, // Load models + device info at startup
-    AvailableModelsLoaded(Vec<(String, String)>),
+    LoadInitialData, // Load device info at startup
     CurrentModelLoaded {
         model: String,
         source: String,
@@ -108,7 +107,6 @@ pub enum ModelMessage {
         model: String,
         source: String,
     },
-    ModelError(String),
     /// A `fetch_current_model` snapshot query failed. Carries the
     /// `current_model_epoch` captured when the fetch was issued: the handler
     /// clears the loaded model only if the epoch is unchanged. If a live

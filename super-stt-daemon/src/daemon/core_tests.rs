@@ -883,9 +883,9 @@ async fn clear_active_backend_returns_to_idle() {
     assert_eq!(resp.active_backend, Some(serde_json::Value::Null));
 }
 
-/// `handle_list_models` is scoped to the active backend's models. With no
-/// active backend, the list is empty even when backends are installed.
-/// With one selected, only its models appear.
+/// Stage 1's model list is scoped to the backend filling it. With no backend
+/// selected the list is empty even when backends are installed; with one
+/// selected, only its models appear.
 #[tokio::test]
 async fn list_models_is_scoped_to_active_backend() {
     let daemon = test_daemon().await;
@@ -897,7 +897,7 @@ async fn list_models_is_scoped_to_active_backend() {
     ];
 
     // Idle → empty list (even though two backends are installed).
-    let response = daemon.handle_list_models().await;
+    let response = daemon.handle_list_stage_models(false).await;
     let models = response.available_models.expect("available_models");
     assert!(
         models.is_empty(),
@@ -906,7 +906,7 @@ async fn list_models_is_scoped_to_active_backend() {
 
     // Select OpenAI → only its model.
     let _ = daemon.handle_set_active_backend(openai.to_string()).await;
-    let response = daemon.handle_list_models().await;
+    let response = daemon.handle_list_stage_models(false).await;
     let models = response.available_models.expect("available_models");
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].0, "whisper-1");
@@ -914,11 +914,60 @@ async fn list_models_is_scoped_to_active_backend() {
 
     // Switch to Mistral → only its model.
     let _ = daemon.handle_set_active_backend(mistral.to_string()).await;
-    let response = daemon.handle_list_models().await;
+    let response = daemon.handle_list_stage_models(false).await;
     let models = response.available_models.expect("available_models");
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].0, "voxtral-mini-latest");
     assert_eq!(models[0].1, mistral);
+}
+
+/// Each stage lists only the models carrying its own role.
+///
+/// The half `GET /models` could not express: it read stage 1's backend and
+/// filtered post-processors out, so stage 2's picker had to be derived by the
+/// client. A backend serving both roles is the case that separates them — and
+/// the one where offering the wrong list hands the user a model that loads and
+/// then fails on every use.
+#[tokio::test]
+async fn each_stage_lists_only_the_models_carrying_its_role() {
+    let daemon = test_daemon().await;
+    let combo = "github.com/super-stt/combo";
+
+    let mut backend = fixture_backend("combo", combo, "Combo", "whisper-1");
+    backend
+        .models
+        .push(crate::stt_models::model_definition::ModelDefinition {
+            name: "tidy".to_string(),
+            role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+            ..backend.models[0].clone()
+        });
+    *daemon.backends.write().await = vec![backend];
+
+    // Both stages point at the same backend.
+    let _ = daemon.handle_set_active_backend(combo.to_string()).await;
+    daemon.config.write().await.post_processor.source = combo.to_string();
+
+    let stage1 = daemon
+        .handle_list_stage_models(false)
+        .await
+        .available_models
+        .expect("available_models");
+    assert_eq!(
+        stage1.iter().map(|m| m.0.as_str()).collect::<Vec<_>>(),
+        vec!["whisper-1"],
+        "stage 1 must offer only transcription models"
+    );
+
+    let stage2 = daemon
+        .handle_list_stage_models(true)
+        .await
+        .available_models
+        .expect("available_models");
+    assert_eq!(
+        stage2.iter().map(|m| m.0.as_str()).collect::<Vec<_>>(),
+        vec!["tidy"],
+        "stage 2 must offer only post-processors"
+    );
 }
 
 /// Trivial in-process `Transcribe` impl used to seed the `model` lock so

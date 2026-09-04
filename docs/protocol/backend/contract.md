@@ -41,7 +41,7 @@ disambiguated by `source`. The daemon derives a model's `source` from the
 
 > `source` supersedes the older `builtin | custom | online` discriminator.
 > [pipeline.md](../endpoints/v1/pipeline.md) and
-> [models.md](../endpoints/v1/models.md) are reconciled with this definition.
+> [pipeline/model-list.md](../endpoints/v1/pipeline/model-list.md) are reconciled with this definition.
 
 > `[backend].id` is a separate identifier that names a backend's install
 > directory. It is not part of model identity.

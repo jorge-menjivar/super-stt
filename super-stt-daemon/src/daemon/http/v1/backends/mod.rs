@@ -91,9 +91,9 @@ Every backend installed on this machine, each with the models it serves, the opt
 it exposes, and which of its secrets are configured. Secret *values* are never \
 returned — only whether each is set.
 
-This is the full catalog, roles included. `GET /models` is the narrower read a \
-transcription-model picker wants; browsing what is *available to install* is \
-`GET /registry/backends`.",
+This is the full catalog, roles included. `GET /pipeline/{stage}/model/list` is the \
+narrower read a stage's model picker wants; browsing what is *available to install* \
+is `GET /registry/backends`.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "The installed catalog.", body = BackendCatalog),

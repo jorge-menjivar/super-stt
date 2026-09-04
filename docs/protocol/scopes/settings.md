@@ -40,7 +40,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | Endpoint                                                    | Methods    | Notes                                                                                                |
 |-------------------------------------------------------------|------------|------------------------------------------------------------------------------------------------------|
 | [`/backends/{source}/models/{model}/settings/language`](../endpoints/v1/backends/model-language.md) | GET, POST, DELETE | Per-model language override + resolved effective language |
-| [`/models`](../endpoints/v1/models.md)                      | GET        | List built-in + custom models                                                                         |
+| [`/pipeline/{stage}/model/list`](../endpoints/v1/pipeline/model-list.md) | GET | The models a stage can run: its backend's, carrying its role |
 | [`/settings/language`](../endpoints/v1/settings/language.md)                  | GET, POST, DELETE | Global Primary Language (BCP-47 tag / `auto` / unset)                          |
 | [`/settings/audio_theme`](../endpoints/v1/settings/audio_theme.md)            | POST, GET  | Set / read the audio cue theme                                                                        |
 | [`/settings/audio_theme/test`](../endpoints/v1/settings/audio_theme/test.md)  | POST       | Audition the current theme's start + stop cues                                                        |
@@ -91,7 +91,7 @@ sequenceDiagram
     D-->>App: 200 { session_token, scopes }
 
     Note over App,D: 2. Load current state — one round-trip per panel
-    App->>D: GET /models, GET /pipeline,<br/>      GET /settings/audio_theme/list, GET /settings/audio_theme, GET /settings/volume, …
+    App->>D: GET /pipeline,<br/>      GET /settings/audio_theme/list, GET /settings/audio_theme, GET /settings/volume, …
     D-->>App: …
 
     Note over App,D: 3. Subscribe to status + progress events (separate connection)

@@ -81,8 +81,6 @@ pub struct AppModel {
     pub last_udp_data: std::time::Instant,
 
     // Model management state
-    /// Available models from daemon as `(name, source)` tuples.
-    pub available_models: Vec<(String, String)>,
     /// Currently loaded model
     pub current_model: String,
     /// Source (serving backend repo id) of the currently loaded model

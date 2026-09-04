@@ -43,7 +43,8 @@ impl SuperSTTDaemon {
             Command::TestAudioTheme => self.handle_test_audio_theme().await,
             Command::SetModel { model, source } => self.handle_set_model(model, source).await,
             Command::GetModel => self.handle_get_model().await,
-            Command::ListModels => self.handle_list_models().await,
+            Command::ListModels => self.handle_list_stage_models(false).await,
+            Command::ListPostProcessorModels => self.handle_list_stage_models(true).await,
             cmd @ (Command::SetModelDevice { .. }
             | Command::GetModelDevice { .. }
             | Command::SetPostProcessorDevice { .. }

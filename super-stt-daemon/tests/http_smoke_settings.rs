@@ -271,11 +271,17 @@ async fn settings_scope_endpoints() {
     // No switch in flight at startup
     assert!(stage["switch"].is_null());
 
-    // --- GET /models ---
-    let (s, body) = raw_get_json(&http_socket, "/models", &settings_token).await;
-    assert_eq!(s, StatusCode::OK);
-    assert_eq!(body["status"], "success");
-    assert!(body["available_models"].is_array());
+    // --- GET /pipeline/{stage}/model/list (was the stage-1-only GET /models) ---
+    for stage in [1, 2] {
+        let path = format!("/pipeline/{stage}/model/list");
+        let (s, body) = raw_get_json(&http_socket, &path, &settings_token).await;
+        assert_eq!(s, StatusCode::OK, "GET {path}: {body}");
+        assert_eq!(body["status"], "success", "GET {path}: {body}");
+        assert!(
+            body["available_models"].is_array(),
+            "GET {path} did not answer with a list: {body}"
+        );
+    }
 
     // --- GET /audio_themes ---
     // Pin the wire values, not just the shape: they must be the documented
