@@ -52,15 +52,16 @@ impl SuperSTTDaemon {
                 c.transcription.preferred_source.clone(),
             )
         };
+        if pref_model.is_empty() {
+            return None;
+        }
         // The stage remembers its model across an unload now, so the selection
         // alone no longer means "load this". The flag is what says so — the
         // same gate `post_processor.is_active()` puts on stage 2's startup
-        // load.
+        // load. Checked after the empty case, so an idle daemon does not log a
+        // line naming no model.
         if !enabled {
             info!("Stage 1 is switched off; staying idle with {pref_model} still selected");
-            return None;
-        }
-        if pref_model.is_empty() {
             return None;
         }
         // A config predating `preferred_source` names a model but not the

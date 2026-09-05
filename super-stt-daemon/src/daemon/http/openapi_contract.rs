@@ -12,6 +12,7 @@
 //! - the scope an endpoint advertises is the scope the router enforces on it;
 //! - every operation carries prose, not a placeholder;
 //! - every success body names a real shape, not "some JSON";
+//! - every operation is addressable by an id no other operation shares;
 //! - every guarded endpoint documents the failures a client will actually hit.
 //!
 //! They iterate the whole document, so adding an endpoint adds nothing here —
@@ -136,6 +137,49 @@ fn the_document_and_the_router_cover_the_same_paths() {
     assert_eq!(
         documented, served,
         "the document and the router disagree about which paths exist"
+    );
+}
+
+/// No two operations may share an `operationId`.
+///
+/// utoipa derives the id from the handler's function name alone, and nothing in
+/// the language objects to two modules each having a `set`. The result is a
+/// document that looks fine by every other measure — the paths are distinct,
+/// `openapi-check` is green — while the ids collide silently.
+///
+/// The id is what tooling keys on downstream, so the damage lands there. Swagger
+/// UI builds its per-operation DOM ids from it: two operations sharing one merge
+/// into a single section, and expanding one endpoint opens another. Generated
+/// clients fare worse and emit two methods under one name.
+///
+/// The fix is always to name the handler for what it does — `set_option` rather
+/// than `set` — since the id follows the function.
+#[test]
+fn no_two_operations_share_an_operation_id() {
+    use std::collections::BTreeMap;
+
+    let doc = document();
+    let mut by_id: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for (path, method, op) in operations(&doc) {
+        let id = op["operationId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{} {path} publishes no operationId", method.to_uppercase()));
+        by_id
+            .entry(id)
+            .or_default()
+            .push(format!("{} {path}", method.to_uppercase()));
+    }
+
+    let collisions: Vec<String> = by_id
+        .iter()
+        .filter(|(_, ops)| ops.len() > 1)
+        .map(|(id, ops)| format!("  `{id}` is claimed by {}", ops.join(", ")))
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "operations share an id, so tooling keyed on it cannot tell them apart \
+         (rename the handler functions):\n{}",
+        collisions.join("\n")
     );
 }
 

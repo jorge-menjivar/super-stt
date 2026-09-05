@@ -26,7 +26,11 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(get_one, set, clear))
+    OpenApiRouter::new().routes(routes!(
+        get_model_language,
+        set_model_language,
+        clear_model_language
+    ))
 }
 
 /// The language this model should transcribe in.
@@ -92,7 +96,10 @@ model\", so it can be read whether or not the model is loaded.
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn get_one(State(s): State<AppState>, Path((stage, model)): Path<(u32, String)>) -> Response {
+async fn get_model_language(
+    State(s): State<AppState>,
+    Path((stage, model)): Path<(u32, String)>,
+) -> Response {
     let source = match resolve_source(&s, stage, &model).await {
         Ok(source) => source,
         Err(r) => return *r,
@@ -132,7 +139,7 @@ Overridden in turn by a `language` field in a single `POST /transcribe` body.",
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn set(
+async fn set_model_language(
     State(s): State<AppState>,
     Path((stage, model)): Path<(u32, String)>,
     axum::Json(body): axum::Json<LanguageBody>,
@@ -175,7 +182,10 @@ Removes the per-model pin, returning this model to the global `/settings/languag
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn clear(State(s): State<AppState>, Path((stage, model)): Path<(u32, String)>) -> Response {
+async fn clear_model_language(
+    State(s): State<AppState>,
+    Path((stage, model)): Path<(u32, String)>,
+) -> Response {
     let source = match resolve_source(&s, stage, &model).await {
         Ok(source) => source,
         Err(r) => return *r,

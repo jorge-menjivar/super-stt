@@ -11,7 +11,7 @@
 
 use serde::Deserialize;
 
-use crate::daemon::client::internal::response::{require_success, require_unit};
+use crate::daemon::client::internal::response::require_unit;
 use crate::daemon::client::internal::session::with_settings_token;
 use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
@@ -67,16 +67,29 @@ impl StageModel {
 }
 
 /// Wire envelope for `GET /pipeline/{stage}/model`.
+///
+/// Parsed here rather than off the shared `DaemonResponse`, whose fields happen
+/// to match most envelope keys by name. That coupling is invisible and fails
+/// soft: this endpoint's key is `model` where the shared field is
+/// `stage_model`, so reading it that way yielded `None` on every call — no
+/// error, just a card that came up with nothing selected.
 #[derive(Debug, Clone, Deserialize)]
 struct ModelEnvelope {
-    model: SwitchPayload,
+    #[serde(default)]
+    status: String,
+    model: SlotPayload,
 }
 
-/// The switch sub-object, which only the download poller reads. The slot's own
-/// fields are deserialized into [`StageModel`] by [`get_stage_model`]; serde
-/// ignores them here.
-#[derive(Debug, Clone, Deserialize)]
-struct SwitchPayload {
+/// The slot as it arrives. `switch` is the download poller's; the rest is
+/// [`StageModel`]'s.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct SlotPayload {
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    loaded: bool,
+    #[serde(default)]
+    device: Option<StageDevice>,
     #[serde(default)]
     switch: Option<StageSwitch>,
 }
@@ -107,23 +120,18 @@ fn model_path(stage: u32) -> String {
 /// Read `stage`'s model slot (HTTP `GET /pipeline/{stage}/model`).
 pub async fn get_stage_model(stage: u32) -> HttpResult<StageModel> {
     with_settings_token(move |socket, token| async move {
-        let resp = require_success(
-            transport::settings_get(socket, &token, &model_path(stage)).await?,
-            "get_stage_model",
-        )?;
-        // A daemon predating the endpoint answers without a slot; read that as
-        // "nothing selected" rather than failing the whole settings load.
-        Ok(resp
-            .stage_model
-            .map(|m| StageModel {
-                model: m.model,
-                loaded: m.loaded,
-                device: m.device.map(|d| StageDevice {
-                    preference: d.preference,
-                    resolved_accel: d.resolved_accel,
-                }),
-            })
-            .unwrap_or_default())
+        let envelope =
+            transport::get_json::<ModelEnvelope>(socket, &token, &model_path(stage)).await?;
+        if envelope.status != "success" {
+            return Err(super_stt_shared::daemon::http_client::HttpError::Other(
+                format!("get_stage_model: daemon answered {}", envelope.status),
+            ));
+        }
+        Ok(StageModel {
+            model: envelope.model.model,
+            loaded: envelope.model.loaded,
+            device: envelope.model.device,
+        })
     })
     .await
 }

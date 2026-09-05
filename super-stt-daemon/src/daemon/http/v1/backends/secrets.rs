@@ -12,8 +12,8 @@ use utoipa_axum::routes;
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list))
-        .routes(routes!(get_one, set, delete_secret))
+        .routes(routes!(list_secrets))
+        .routes(routes!(get_secret, set_secret, delete_secret))
 }
 
 /// The secret to store.
@@ -84,7 +84,7 @@ surface: a token granted `settings` cannot reach it.",
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response {
+async fn list_secrets(State(s): State<AppState>, Path(source): Path<String>) -> Response {
     let source = decode_source(&source);
     let Some(backend) = find_backend(&s, &source).await else {
         return json_error(StatusCode::NOT_FOUND, "unknown_backend");
@@ -129,7 +129,7 @@ Reports existence only. There is no endpoint that returns a stored credential.",
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn get_one(
+async fn get_secret(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
 ) -> Response {
@@ -179,7 +179,7 @@ A loaded model does not pick up a new credential on its own — reload the stage
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn set(
+async fn set_secret(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
     axum::Json(body): axum::Json<SecretBody>,

@@ -130,6 +130,14 @@ impl AppModel {
         source: &str,
         model: String,
     ) -> Task<cosmic::Action<Message>> {
+        // An idle stage has no model to ask about. Callers report "nothing
+        // loaded" as an empty pair rather than an absent one, so without this a
+        // daemon that comes up idle answers `400 invalid_backend` and the
+        // Customization page shows "Couldn't update language" for a language
+        // nobody touched.
+        if model.is_empty() || source.is_empty() {
+            return Task::none();
+        }
         let src = source.to_string();
         let mdl = model.clone();
         Task::perform(

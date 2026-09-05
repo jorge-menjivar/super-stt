@@ -15,8 +15,8 @@ use utoipa_axum::routes;
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list))
-        .routes(routes!(get_one, set, delete_option))
+        .routes(routes!(list_options))
+        .routes(routes!(get_option, set_option, delete_option))
 }
 
 /// The value to store for an option.
@@ -114,7 +114,7 @@ declared in its manifest. Credentials are not options; those are secrets, at \
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response {
+async fn list_options(State(s): State<AppState>, Path(source): Path<String>) -> Response {
     let source = decode_source(&source);
     let Some(b) = find_backend(&s, &source).await else {
         return json_error(StatusCode::NOT_FOUND, "unknown_backend");
@@ -154,14 +154,14 @@ show what clearing it would revert to.",
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn get_one(
+async fn get_option(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
 ) -> Response {
-    get_one_inner(s, decode_source(&source), name).await
+    get_option_inner(s, decode_source(&source), name).await
 }
 
-async fn get_one_inner(s: AppState, source: String, name: String) -> Response {
+async fn get_option_inner(s: AppState, source: String, name: String) -> Response {
     let Some(b) = find_backend(&s, &source).await else {
         return json_error(StatusCode::NOT_FOUND, "unknown_backend");
     };
@@ -212,7 +212,7 @@ A loaded model does not pick this up on its own — reload the stage with \
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn set(
+async fn set_option(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
     axum::Json(body): axum::Json<OptionBody>,
@@ -252,7 +252,7 @@ async fn set(
     if code != StatusCode::OK {
         return (code, [("content-type", "application/json")], body_str).into_response();
     }
-    get_one_inner(s, source, name).await
+    get_option_inner(s, source, name).await
 }
 
 #[utoipa::path(
@@ -298,7 +298,7 @@ async fn delete_option(
     if code != StatusCode::OK {
         return (code, [("content-type", "application/json")], body_str).into_response();
     }
-    get_one_inner(s, source, name).await
+    get_option_inner(s, source, name).await
 }
 
 /// The `base_url` form to store: canonical when the value can be read as a

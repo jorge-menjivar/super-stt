@@ -286,7 +286,7 @@
         ],
         "summary": "List a backend's options",
         "description": "Every option this backend declares, each with its label, type, default, and the value actually in effect. This is what a settings UI renders a form from.\n\nOptions are the backend's own configuration — an endpoint URL, a model parameter — declared in its manifest. Credentials are not options; those are secrets, at `/backends/{backend_id}/secrets/list`.",
-        "operationId": "list",
+        "operationId": "list_options",
         "parameters": [
           {
             "name": "backend_id",
@@ -367,7 +367,7 @@
         ],
         "summary": "Read one option's effective value",
         "description": "The value in effect for a single option, alongside the manifest default so a UI can show what clearing it would revert to.",
-        "operationId": "get_one",
+        "operationId": "get_option",
         "parameters": [
           {
             "name": "backend_id",
@@ -455,7 +455,7 @@
         ],
         "summary": "Override an option",
         "description": "Stores a value for this option, overriding the manifest default. Answers with the option's new effective value, so a UI can render the result without a second read.\n\nA `base_url` value is canonicalized before storage, so the field reads back the endpoint that will actually be dialed — the scheme in particular, since whether a request is encrypted should not be invisible in the field the user is looking at. A value that yields no host is stored as typed rather than refused; model load rejects it by name. Every other option is stored verbatim, whitespace included, because it may carry meaning the daemon does not interpret.\n\nA loaded model does not pick this up on its own — reload the stage with `POST /pipeline/{stage}/model/reload`.",
-        "operationId": "set",
+        "operationId": "set_option",
         "parameters": [
           {
             "name": "backend_id",
@@ -653,7 +653,7 @@
         ],
         "summary": "List a backend's secrets",
         "description": "Every credential this backend declares, with whether each is currently set. **Values are never returned** — not here, not anywhere. They live in the system keyring, and the only operations are write and clear.\n\nThis is a separate scope from `settings` precisely because it is the credential surface: a token granted `settings` cannot reach it.",
-        "operationId": "list",
+        "operationId": "list_secrets",
         "parameters": [
           {
             "name": "source",
@@ -742,7 +742,7 @@
         ],
         "summary": "Check whether one secret is set",
         "description": "Reports existence only. There is no endpoint that returns a stored credential.",
-        "operationId": "get_one",
+        "operationId": "get_secret",
         "parameters": [
           {
             "name": "source",
@@ -838,7 +838,7 @@
         ],
         "summary": "Store a secret",
         "description": "Writes the credential to the system keyring. It cannot be read back afterwards; only replaced or cleared.\n\nA loaded model does not pick up a new credential on its own — reload the stage with `POST /pipeline/{stage}/model/reload`.",
-        "operationId": "set",
+        "operationId": "set_secret",
         "parameters": [
           {
             "name": "source",
@@ -2502,7 +2502,7 @@
         ],
         "summary": "Read a model's language override",
         "description": "The language this specific model transcribes in, which overrides the global `/language` setting. Addressed by `(source, model)` rather than \"the active model\", so it can be read whether or not the model is loaded.\n\n`null` means no override: the model follows the global setting.",
-        "operationId": "get_one",
+        "operationId": "get_model_language",
         "parameters": [
           {
             "name": "stage",
@@ -2602,7 +2602,7 @@
         ],
         "summary": "Set a model's language override",
         "description": "Pins this model to a language regardless of the global `/settings/language` setting. A tag the model does not serve is refused rather than silently ignored.\n\nOverridden in turn by a `language` field in a single `POST /transcribe` body.",
-        "operationId": "set",
+        "operationId": "set_model_language",
         "parameters": [
           {
             "name": "stage",
@@ -2712,7 +2712,7 @@
         ],
         "summary": "Clear a model's language override",
         "description": "Removes the per-model pin, returning this model to the global `/settings/language` setting.",
-        "operationId": "clear",
+        "operationId": "clear_model_language",
         "parameters": [
           {
             "name": "stage",

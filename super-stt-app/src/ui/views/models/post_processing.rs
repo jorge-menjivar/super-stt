@@ -221,19 +221,26 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
             .model
             .clone()
             .unwrap_or_else(|| "post-processor".to_string());
-        // The accelerator it is actually on, the way the transcription card
-        // suffixes its active model — absent while it is not loaded.
-        let device_suffix = app
-            .post_processor
-            .running_device()
-            .map(|d| format!(" \u{00b7} {d}"))
-            .unwrap_or_default();
+        // What it is actually running on, the way the transcription card
+        // suffixes its active model — and only when that differs from the
+        // device the picker beside it already shows.
+        let device_suffix = super::active::resolved_suffix(
+            app.post_processor.running_device().unwrap_or_default(),
+            app.staged_picks.device(PP_STAGE),
+        );
         let label = text::body(format!("Active: {model}{device_suffix}"))
             .class(cosmic::theme::Text::Accent)
             .width(Length::Fill);
         let mut summary = row![label]
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center);
+        // The same picker the disabled card shows, in the same place: a running
+        // post-processor's device can be changed in place too.
+        if let Some(devices) =
+            super::active::device_dropdown(PP_STAGE, &backend.source, &model, app)
+        {
+            summary = summary.push(devices);
+        }
         // The same control the transcription card shows beside its active
         // model, from the same function.
         if let Some(lang_button) = language_button(PP_STAGE, backend, &model, app) {
@@ -279,26 +286,10 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
     // here, and only when the answer offers something: the answer is the
     // model's declared devices narrowed to what this install and host can do,
     // so an online model (offering nothing) shows no picker.
-    let devices: Vec<String> = shown
-        .as_deref()
-        .and_then(|m| app.device_offers.model(PP_STAGE, &backend.source, m))
-        .unwrap_or_default()
-        .to_vec();
-    if !devices.is_empty() {
-        let device_index = app
-            .staged_picks
-            .device(PP_STAGE)
-            .and_then(|d| devices.iter().position(|x| x == d));
-        let devices_pick = devices.clone();
-        let device_dropdown = widget::dropdown(devices, device_index, move |index| {
-            Message::Stage(StageMessage::StageDevice {
-                stage: PP_STAGE,
-                device: devices_pick[index].clone(),
-            })
-        })
-        .placeholder("Device")
-        .width(Length::FillPortion(1));
-        picker_row = picker_row.push(device_dropdown);
+    if let Some(model) = shown.as_deref()
+        && let Some(devices) = super::active::device_dropdown(PP_STAGE, &backend.source, model, app)
+    {
+        picker_row = picker_row.push(devices);
     }
 
     // Per-model language, inline after the device dropdown — the same position

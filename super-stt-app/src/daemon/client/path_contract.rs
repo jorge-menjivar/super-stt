@@ -159,3 +159,105 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
         );
     }
 }
+
+/// Contract: the response keys this client destructures are keys the daemon
+/// actually sends.
+///
+/// The paths above are only half the agreement. A response body is the other
+/// half, and it fails *softer*: the client deserializes into a type whose
+/// fields are all `Option`, so a key the daemon does not send reads as "absent"
+/// rather than as an error. Nothing logs, nothing 404s — a card simply comes up
+/// with nothing in it.
+///
+/// That is not hypothetical. `GET /pipeline/{stage}/model` answers with its
+/// slot under `model`, and the client read it off the shared `DaemonResponse`'s
+/// `stage_model` field, which the envelope never carries. Every call returned
+/// `None`, so the stage came back from a restart having forgotten a selection
+/// the daemon had faithfully persisted — and every test passed, because both
+/// sides were internally consistent.
+///
+/// One row per response the app takes apart by name. Only the keys the client
+/// actually reads: this is a check on the agreement, not an inventory of the
+/// schema.
+const RESPONSE_KEYS: &[(&str, &str, &[&str])] = &[
+    ("/v1/pipeline/{stage}", "get", &["stage"]),
+    ("/v1/pipeline/{stage}/model", "get", &["model"]),
+    (
+        "/v1/pipeline/{stage}/model/{model}/device",
+        "get",
+        &["device", "available_devices"],
+    ),
+    (
+        "/v1/pipeline/{stage}/model/{model}/device/list",
+        "get",
+        &["available_devices"],
+    ),
+    (
+        "/v1/pipeline/{stage}/model/{model}/language",
+        "get",
+        &["language"],
+    ),
+    (
+        "/v1/pipeline/{stage}/model/list",
+        "get",
+        &["available_models"],
+    ),
+    ("/v1/pipeline", "get", &["pipeline"]),
+    ("/v1/backends", "get", &["backends"]),
+    ("/v1/gpu_info", "get", &["gpu_info"]),
+];
+
+/// The property names of an operation's `200` body, resolved through `$ref`.
+fn success_body_keys(doc: &serde_json::Value, path: &str, method: &str) -> BTreeSet<String> {
+    let schema =
+        &doc["paths"][path][method]["responses"]["200"]["content"]["application/json"]["schema"];
+    let resolved = match schema["$ref"].as_str() {
+        Some(reference) => {
+            let name = reference
+                .rsplit('/')
+                .next()
+                .unwrap_or_else(|| panic!("{method} {path}: malformed $ref {reference}"));
+            &doc["components"]["schemas"][name]
+        }
+        None => schema,
+    };
+    resolved["properties"]
+        .as_object()
+        .unwrap_or_else(|| {
+            panic!("{method} {path}: the 200 body has no properties in openapi.json")
+        })
+        .keys()
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn every_response_key_the_client_reads_is_one_the_daemon_sends() {
+    let spec =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/protocol/openapi.json");
+    let doc: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&spec).unwrap_or_else(|e| panic!("read {}: {e}", spec.display())),
+    )
+    .expect("openapi.json is valid JSON");
+
+    let mut missing = Vec::new();
+    for (path, method, keys) in RESPONSE_KEYS {
+        let sent = success_body_keys(&doc, path, method);
+        for key in *keys {
+            if !sent.contains(*key) {
+                missing.push(format!(
+                    "{} {}: client reads `{key}`, daemon sends {:?}",
+                    method.to_uppercase(),
+                    path,
+                    sent
+                ));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "a response key the client destructures is not one the daemon sends. \
+         This reads as an empty card at runtime, not an error:\n  {}",
+        missing.join("\n  ")
+    );
+}
