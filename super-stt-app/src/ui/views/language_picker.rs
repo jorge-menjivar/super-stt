@@ -4,7 +4,7 @@ use cosmic::iced::Length;
 use cosmic::widget::{self, button, column, scrollable, text_input};
 
 use crate::core::app::AppModel;
-use crate::ui::languages::{GLOBAL_LANGUAGES, friendly_name};
+use crate::ui::languages::friendly_name;
 use crate::ui::messages::{LanguageMessage, Message};
 
 pub fn sheet(app: &AppModel) -> Element<'_, Message> {
@@ -33,11 +33,11 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
             langs.push((Some(tag.clone()), friendly_name(tag)));
         }
     } else {
-        // Global sheet — "Auto-detect" only; the unset state is reached by not
-        // choosing anything, so there is no explicit "No preference" entry.
-        pinned.push((Some("auto".to_string()), friendly_name("auto"))); // "Auto-detect"
-        for tag in GLOBAL_LANGUAGES {
-            langs.push((Some((*tag).to_string()), friendly_name(tag)));
+        // Global sheet — the daemon's own vocabulary, `auto` included, from
+        // `/settings/language/list`. The unset state is reached by not choosing
+        // anything, so there is no explicit "No preference" entry.
+        for tag in &app.language.global_offers {
+            langs.push((Some(tag.clone()), friendly_name(tag)));
         }
     }
     langs.sort_by(|a, b| a.1.cmp(&b.1));

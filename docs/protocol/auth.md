@@ -311,7 +311,7 @@ docs — those are the source of truth, not duplicated here:
 - `transcribe` — `/transcribe`, `/transcribe/stop`, `/transcribe/realtime`; see [transcribe.md](./scopes/transcribe.md).
 - `status` — `GET /status`; see [status.md](./scopes/status.md).
 - `settings` — the configuration + registry surface, including backend options; see [settings.md](./scopes/settings.md).
-- `secrets` — backend credential management: `GET/POST/DELETE /backends/{backend_id}/secrets/*` (write-only; values never returned); see [secrets.md](./scopes/secrets.md).
+- `secrets` — backend credential management: `GET/POST/DELETE /backend/{backend_id}/secret/list/*` (write-only; values never returned); see [secrets.md](./scopes/secrets.md).
 - `recording_events`, `audio_visualization`, `global_transcriptions`, `daemon_status` — topic sets on `GET /events`; see each scope doc and [`/events`](./endpoints/v1/events.md).
 
 Rules to remember:

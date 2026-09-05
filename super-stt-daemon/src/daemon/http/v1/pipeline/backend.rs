@@ -10,7 +10,7 @@
 //!
 //! It exists because the daemon already decides this. `POST /pipeline/{stage}`
 //! refuses a backend that serves nothing the stage can run, and a client that
-//! builds its own list from `GET /backends` is reimplementing that rule — with
+//! builds its own list from `GET /backend/list` is reimplementing that rule — with
 //! a picker that offers a backend the daemon then rejects as the failure mode.
 
 use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, narrowed};
@@ -31,9 +31,9 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
     summary = "List the backends that can fill a stage",
     description = "\
 The installed backends serving at least one model this stage can run, in the shape \
-`GET /backends` returns them.
+`GET /backend/list` returns them.
 
-Fill a stage's backend picker from this rather than from `GET /backends`: a backend \
+Fill a stage's backend picker from this rather than from `GET /backend/list`: a backend \
 serving nothing this stage can run is refused by `POST /pipeline/{stage}`, and offering \
 one hands the user an error to discover by choosing it. A backend serving both roles \
 appears in both stages' lists.

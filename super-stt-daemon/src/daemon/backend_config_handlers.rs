@@ -18,7 +18,7 @@ fn with_reload_warning(base: String, reload_warning: Option<String>) -> String {
 impl SuperSTTDaemon {
     /// Handle list backends command — the installed-backend catalog with each
     /// backend's models, declared secrets, and options (with effective values).
-    /// Drives the settings UI; see `docs/protocol/endpoints/v1/backends.md`.
+    /// Drives the settings UI; see `docs/protocol/endpoints/v1/backend/list.md`.
     pub async fn handle_list_backends(&self) -> DaemonResponse {
         let catalog = self.backend_catalog().await;
         info!("Backends catalog requested: {} backend(s)", catalog.len());
@@ -31,7 +31,7 @@ impl SuperSTTDaemon {
     /// `GET /pipeline/{stage}/backend/list` — the installed backends that can
     /// fill this stage: those serving at least one model carrying its role.
     ///
-    /// The same catalog `GET /backends` returns, narrowed. Narrowed *here*
+    /// The same catalog `GET /backend/list` returns, narrowed. Narrowed *here*
     /// rather than by each client, because the daemon already decides this when
     /// it accepts or refuses `POST /pipeline/{stage}` — and a client filtering
     /// on its own can offer a backend the daemon then refuses, which is a

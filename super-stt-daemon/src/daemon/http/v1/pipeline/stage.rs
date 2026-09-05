@@ -67,7 +67,7 @@ pub(crate) async fn get_stage(State(s): State<AppState>, Path(stage): Path<u32>)
 /// Which backend should fill the stage.
 #[derive(Deserialize, utoipa::ToSchema)]
 pub(crate) struct SetBackendBody {
-    /// The backend's repo id, as `GET /backends` reports it.
+    /// The backend's repo id, as `GET /backend/list` reports it.
     #[schema(example = "github.com/acme/whisper")]
     pub(crate) source: String,
 }

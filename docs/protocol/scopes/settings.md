@@ -39,7 +39,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 
 | Endpoint                                                    | Methods    | Notes                                                                                                |
 |-------------------------------------------------------------|------------|------------------------------------------------------------------------------------------------------|
-| [`/backends/{backend_id}/models/{model}/settings/language`](../endpoints/v1/pipeline/language.md) | GET, POST, DELETE | Per-model language override + resolved effective language |
+| [`/backend/{backend_id}/models/{model}/settings/language`](../endpoints/v1/pipeline/language.md) | GET, POST, DELETE | Per-model language override + resolved effective language |
 | [`/pipeline/{stage}/model/list`](../endpoints/v1/pipeline/model-list.md) | GET | The models a stage can run: its backend's, carrying its role |
 | [`/settings/language`](../endpoints/v1/settings/language.md)                  | GET, POST, DELETE | Global Primary Language (BCP-47 tag / `auto` / unset)                          |
 | [`/settings/audio_theme`](../endpoints/v1/settings/audio_theme.md)            | POST, GET  | Set / read the audio cue theme                                                                        |
@@ -60,13 +60,13 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/settings/write_method/test`](../endpoints/v1/settings/write_method/test.md) | POST      | Type a test string with the configured method; reports the backend it resolved to                     |
 | [`/settings/notification_method`](../endpoints/v1/settings/notification_method.md) | POST, GET  | How recording failures are surfaced (auto / dbus / typed / off)                                       |
 | [`/settings/custom_models_dir`](../endpoints/v1/settings/custom_models_dir.md) | POST, GET | Where to scan for user-supplied models                                                                |
-| [`/backends`](../endpoints/v1/backends.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |
-| [`/backends/{backend_id}/options`](../endpoints/v1/backends/options.md) | GET, POST, DELETE | List / read / set / reset a backend's non-sensitive options                          |
+| [`/backend/list`](../endpoints/v1/backend/list.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |
+| [`/backend/{backend_id}/option/list`](../endpoints/v1/backends/options.md) | GET, POST, DELETE | List / read / set / reset a backend's non-sensitive options                          |
 | [`/gpu_info`](../endpoints/v1/gpu_info.md)                  | GET        | GPU / VRAM information                                                                                 |
-| [`/registry/backends`](../endpoints/v1/registry/backends.md) | GET      | List backends available in the registry                                                               |
-| [`/registry/backends/refresh`](../endpoints/v1/registry/refresh.md) | POST | Refresh the registry index                                                                            |
-| [`/registry/backends/install`](../endpoints/v1/registry/install.md) | POST | Install a backend from the registry                                                                   |
-| [`/registry/backends/update`](../endpoints/v1/registry/update.md) | POST | Update an installed registry backend                                                                  |
+| [`/registry/backend/list`](../endpoints/v1/registry/backend/list.md) | GET      | List backends available in the registry                                                               |
+| [`/registry/backend/refresh`](../endpoints/v1/registry/refresh.md) | POST | Refresh the registry index                                                                            |
+| [`/registry/backend/install`](../endpoints/v1/registry/install.md) | POST | Install a backend from the registry                                                                   |
+| [`/registry/backend/update`](../endpoints/v1/registry/update.md) | POST | Update an installed registry backend                                                                  |
 | [`/update`](../endpoints/v1/update.md) | GET | Self-update availability (daemon version vs latest release) |
 | [`/update/check`](../endpoints/v1/update/check.md) | POST | Force an immediate self-update check |
 | [`/settings/update_check_enabled`](../endpoints/v1/settings/update_check_enabled.md) | POST, GET | Toggle / read the daemon's periodic self-update check |

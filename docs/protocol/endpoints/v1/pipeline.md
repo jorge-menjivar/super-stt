@@ -226,7 +226,7 @@ latency paths, and a preview is rewritten again on the next pass anyway.
 A post-processor is driven over
 [`POST /v1/process`](../../backend/contract.md#post-v1process); what it does with
 the text, and how it is tuned, is the backend's own business, configured through
-its [options and secrets](./backends.md) like any other model.
+its [options and secrets](./backend/list.md) like any other model.
 
 ## Events
 

@@ -177,6 +177,12 @@ pub enum Command {
     },
     GetPrimaryLanguage,
     ClearPrimaryLanguage,
+    /// The tags `SetPrimaryLanguage` accepts.
+    ///
+    /// A client cannot infer them: not the vocabulary, and not whether to send
+    /// `en` or `en-US` for a model that declares one of them. The daemon knows,
+    /// because it is the thing that adapts one to the other.
+    ListPrimaryLanguages,
     /// Set the per-model language override for a specific `(source, model)`.
     SetModelLanguage {
         source: String,

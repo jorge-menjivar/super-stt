@@ -212,7 +212,7 @@ pub(crate) async fn cancel_stage_model(
     summary = "Re-instantiate a stage's model in place",
     description = "\
 Tears the model down and brings it back up so it picks up changed secrets and \
-options — an API key set through `/backends/{backend_id}/secrets`, say — without the \
+options — an API key set through `/backend/{backend_id}/secret/list`, say — without the \
 client having to unload and reload by hand.
 
 Nothing is re-downloaded; the files on disk are unchanged.",
@@ -257,7 +257,7 @@ here; a model with the wrong role loads and then fails on every use, which for a
 post-processor picked as a transcription model means each recording fails after the \
 user has already spoken.
 
-The full catalog, every installed backend and every role, is `GET /backends`. This is \
+The full catalog, every installed backend and every role, is `GET /backend/list`. This is \
 the narrow read a stage's picker wants, and it is answered per stage precisely so a \
 client does not have to re-derive roles for itself.",
     params(

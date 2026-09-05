@@ -69,6 +69,7 @@ impl TryFrom<DaemonRequest> for Command {
             "set_primary_language" => cmd_set_primary_language(&request),
             "get_primary_language" => Ok(Command::GetPrimaryLanguage),
             "clear_primary_language" => Ok(Command::ClearPrimaryLanguage),
+            "list_primary_languages" => Ok(Command::ListPrimaryLanguages),
             "set_model_language" => cmd_set_model_language(&request),
             "get_model_language" => cmd_get_model_language(&request),
             "clear_model_language" => cmd_clear_model_language(&request),

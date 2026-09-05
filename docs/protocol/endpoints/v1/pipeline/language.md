@@ -33,7 +33,7 @@ Every stage answers it. A post-processor is monolingual and says so in
 `multilingual` — a real answer rather than an error, since the point of
 addressing stages by position is that they answer the same verbs.
 
-> **Moved from `/backends/{backend_id}/models/{model}/language`.** The model's
+> **Moved from `/backend/{backend_id}/models/{model}/language`.** The model's
 > backend has to be filling a stage now, where the old spelling could reach any
 > installed model. That costs nothing real: a language control is only ever
 > shown on a stage's card, so the backend is selected by the time anyone asks.

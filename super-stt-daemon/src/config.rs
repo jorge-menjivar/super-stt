@@ -217,7 +217,7 @@ pub struct TranscriptionConfig {
     #[serde(default)]
     pub custom_models_dir: Option<String>,
     /// Directory scanned for installed backends. `None` uses the default
-    /// (`<data_dir>/super-stt/backends`).
+    /// (`<data_dir>/super-stt/backend/list`).
     #[serde(default)]
     pub backends_dir: Option<String>,
     /// Relative install dir (subdir of [`backends_dir`]) of the selected active

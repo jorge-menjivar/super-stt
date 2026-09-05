@@ -90,6 +90,14 @@ impl ModelLanguages {
 pub struct LanguageState {
     /// Global Primary Language from the daemon (`None` = unset). Display-only cache.
     pub primary_language: Option<String>,
+    /// The tags the global setting accepts, from
+    /// `GET /settings/language/list`.
+    ///
+    /// The daemon's vocabulary rather than one this client curates: which of
+    /// `en` and `en-US` a model wants is a rule only the daemon's resolver
+    /// knows, so a list of our own would offer tags the setter now refuses.
+    /// Empty until the answer lands, which renders as a picker still loading.
+    pub global_offers: Vec<String>,
     /// Per-model resolution blocks, one per `(source, model)` asked about.
     pub model_languages: ModelLanguages,
     /// The `(source, model)` pair the open per-model language sheet configures.

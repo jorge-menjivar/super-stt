@@ -138,7 +138,7 @@ one's to abandon.
 ## `POST /pipeline/{stage}/model/reload`
 
 Re-instantiate this stage's model in place, picking up changed
-[secrets and options](../backends.md) without a manual stop/start. A stage with
+[secrets and options](../backend/list.md) without a manual stop/start. A stage with
 nothing loaded answers `200` and does nothing.
 
 Rarely needed by hand: writing a

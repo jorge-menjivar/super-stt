@@ -39,6 +39,41 @@ fn base(tag: &str) -> &str {
     tag.split('-').next().unwrap_or(tag)
 }
 
+/// The tags `POST /settings/language` accepts, and what
+/// `GET /settings/language/list` publishes.
+///
+/// Region-qualified, with one exception: Chinese uses the ISO 15924 script
+/// subtags `zh-Hans` / `zh-Hant`, since script — not region — is what
+/// distinguishes Simplified from Traditional. A region is a country code, or UN
+/// M.49 for a multi-country region (`es-419`).
+///
+/// Region-qualified is deliberate and is what makes one global setting work
+/// across backends that disagree about granularity. A model may declare `en` or
+/// `en-US` — that is the backend's choice — and [`adapt`] narrows a qualified
+/// global to whichever the model actually serves. Publishing base codes instead
+/// would throw away a distinction some models can use; publishing both would
+/// offer the user two spellings of one answer.
+///
+/// It lived in the settings app until the daemon grew an endpoint for it. A
+/// client cannot infer this list — not the vocabulary, and not which of `en` and
+/// `en-US` to send — so every client that hardcoded its own was guessing at a
+/// rule only the resolver here knows.
+pub const GLOBAL_LANGUAGES: &[&str] = &[
+    "af-ZA", "ar-EG", "ar-SA", "bn-BD", "bg-BG", "ca-ES", "zh-Hans", "zh-Hant", "hr-HR", "cs-CZ",
+    "da-DK", "nl-NL", "en-AU", "en-CA", "en-IN", "en-GB", "en-US", "et-EE", "fi-FI", "fr-BE",
+    "fr-CA", "fr-FR", "de-AT", "de-DE", "de-CH", "el-GR", "he-IL", "hi-IN", "hu-HU", "id-ID",
+    "it-IT", "ja-JP", "ko-KR", "ms-MY", "no-NO", "fa-IR", "pl-PL", "pt-BR", "pt-PT", "ro-RO",
+    "ru-RU", "sk-SK", "es-419", "es-MX", "es-ES", "es-US", "sw-KE", "sv-SE", "tl-PH", "ta-IN",
+    "te-IN", "th-TH", "tr-TR", "uk-UA", "ur-PK", "vi-VN", "cy-GB",
+];
+
+/// Whether `tag` is one the global setting accepts: a published tag, or the
+/// reserved `auto`.
+#[must_use]
+pub fn is_offered_globally(tag: &str) -> bool {
+    tag == "auto" || GLOBAL_LANGUAGES.contains(&tag)
+}
+
 /// Match a chosen tag against a model's `supported_languages` with region rules.
 /// Returns the value to send, or `None` to omit.
 fn adapt(tag: &str, supported: &[String]) -> Option<String> {

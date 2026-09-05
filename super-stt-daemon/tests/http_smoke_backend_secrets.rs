@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Secrets-scope HTTP smoke test: `/backends/{source}/secrets/...`
+//! Secrets-scope HTTP smoke test: `/backend/{source}/secret/...`
 //!
 //! Three test cases:
 //! 1. Round-trip: set → listed-configured → delete → unset.
@@ -211,8 +211,8 @@ async fn delete_req(p: &PathBuf, path: &str, token: &str) -> (StatusCode, serde_
 async fn secret_set_then_listed_configured_then_cleared() {
     let (_guard, sock, token) = start_daemon(&["secrets"]).await;
 
-    let sec_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/openai_api_key");
-    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets");
+    let sec_path = format!("/backend/{FIXTURE_SOURCE_ENC}/secret/openai_api_key");
+    let list_path = format!("/backend/{FIXTURE_SOURCE_ENC}/secret/list");
 
     // Initially not configured.
     let (s, body) = get(&sock, &sec_path, &token).await;
@@ -261,8 +261,8 @@ async fn secret_endpoints_require_the_secrets_scope() {
     // Only `settings` scope — no `secrets`.
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
-    let secret_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/openai_api_key");
-    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets");
+    let secret_path = format!("/backend/{FIXTURE_SOURCE_ENC}/secret/openai_api_key");
+    let list_path = format!("/backend/{FIXTURE_SOURCE_ENC}/secret/list");
 
     let (s, body) = post(
         &sock,
@@ -309,7 +309,7 @@ async fn secret_endpoints_require_the_secrets_scope() {
 async fn undeclared_secret_is_404() {
     let (_guard, sock, token) = start_daemon(&["secrets"]).await;
 
-    let path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/not_a_real_secret");
+    let path = format!("/backend/{FIXTURE_SOURCE_ENC}/secret/not_a_real_secret");
 
     let (s, body) = post(&sock, &path, &token, serde_json::json!({ "value": "x" })).await;
     assert_eq!(

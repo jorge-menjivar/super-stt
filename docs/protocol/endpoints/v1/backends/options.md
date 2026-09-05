@@ -1,4 +1,4 @@
-# `/backends/{backend_id}/options`
+# `/backend/{backend_id}/option/list`
 
 Read, set, and reset a backend's **options** — the non-sensitive
 configuration values (a base-URL override, a timeout, and so on) a backend
@@ -8,12 +8,12 @@ overrides as plaintext in its config and injects each as an
 `x-stt-option-<name>` request header at model-load time (see
 [contract.md](../../../backend/contract.md#request-headers)).
 
-`{backend_id}` is the backend's id — its `source` as `GET /backends` reports it (e.g. `github.com/super-stt/openai`),
+`{backend_id}` is the backend's id — its `source` as `GET /backend/list` reports it (e.g. `github.com/super-stt/openai`),
 **URL-percent-encoded** in the path — the same identifier used by
-[`DELETE /backends/{backend_id}`](../backends.md#delete-backendsbackend_id):
+[`DELETE /backend/{backend_id}`](../backend/list.md#delete-backendsbackend_id):
 
 ```
-/backends/github.com%2Fsuper-stt%2Fopenai/options/base_url
+/backend/github.com%2Fsuper-stt%2Fopenai/option/base_url
 ```
 
 These endpoints mirror the [secrets](./secrets.md) endpoints exactly, with two
@@ -40,14 +40,14 @@ Each option has a manifest **default** and an optional user **override**. The
 the override; `DELETE` removes it, resetting the effective value back to the
 default.
 
-## `GET /backends/{backend_id}/options`
+## `GET /backend/{backend_id}/option/list`
 
 List the backend's declared options with their effective values.
 
 **Request:**
 
 ```http
-GET /backends/github.com%2Fsuper-stt%2Fopenai/options HTTP/1.1
+GET /backend/github.com%2Fsuper-stt%2Fopenai/option HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```
@@ -80,14 +80,14 @@ Authorization: Bearer stt_…64hex…
 | `…[].required` | boolean          | Whether the backend needs it to operate.                      |
 | `…[].value`    | any              | Effective value: the override if set, else `default`.          |
 
-## `GET /backends/{backend_id}/options/{name}`
+## `GET /backend/{backend_id}/option/list/{name}`
 
 Read one option's effective value.
 
 **Request:**
 
 ```http
-GET /backends/github.com%2Fsuper-stt%2Fopenai/options/base_url HTTP/1.1
+GET /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```
@@ -103,7 +103,7 @@ Authorization: Bearer stt_…64hex…
 }
 ```
 
-## `POST /backends/{backend_id}/options/{name}`
+## `POST /backend/{backend_id}/option/list/{name}`
 
 Set the option override. Every stage currently running a model from that
 backend is reloaded so the new value takes effect at once — a transcription
@@ -114,7 +114,7 @@ running the old instance.
 **Request:**
 
 ```http
-POST /backends/github.com%2Fsuper-stt%2Fopenai/options/base_url HTTP/1.1
+POST /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
@@ -142,7 +142,7 @@ posting `192.168.0.179:8080/v1` stores and returns
 [config.md](../../../backend/config.md#base_url-and-egress) for the full rule.
 Every other option is stored exactly as posted.
 
-## `DELETE /backends/{backend_id}/options/{name}`
+## `DELETE /backend/{backend_id}/option/list/{name}`
 
 Remove the override, resetting the option to its manifest **default**.
 Idempotent: resetting an option that has no override succeeds. The returned
@@ -151,7 +151,7 @@ Idempotent: resetting an option that has no override succeeds. The returned
 **Request:**
 
 ```http
-DELETE /backends/github.com%2Fsuper-stt%2Fopenai/options/base_url HTTP/1.1
+DELETE /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```

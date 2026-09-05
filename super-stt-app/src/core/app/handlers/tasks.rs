@@ -32,8 +32,8 @@ pub(in crate::core::app) fn ping_task() -> Task<cosmic::Action<Message>> {
 
 /// Reload both backend catalogs: the installed list and the annotated registry.
 ///
-/// They carry different halves of one picture — `/backends` names what is
-/// installed (and its version), `/registry/backends` annotates each entry with
+/// They carry different halves of one picture — `/backend/list` names what is
+/// installed (and its version), `/registry/backend/list` annotates each entry with
 /// the `installed_version` it reads off disk per request — and every question a
 /// card asks needs both. Refreshed apart, a card can report a version from one
 /// and an update from the other and have them disagree.

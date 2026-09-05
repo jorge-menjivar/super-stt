@@ -170,9 +170,9 @@ pub enum ModelsPageMessage {
     UninstallFailed { source: String, error: String },
     /// User clicked Retry on the Download-tab empty state, or any other refresh trigger.
     RefreshRegistry,
-    /// Initial fetch of /registry/backends succeeded.
+    /// Initial fetch of /registry/backend/list succeeded.
     RegistryListLoaded(super_stt_shared::registry::RegistryListResponse),
-    /// Initial fetch of /registry/backends failed.
+    /// Initial fetch of /registry/backend/list failed.
     RegistryListFailed(String),
     /// User typed in the search box.
     RegistrySearchChanged(String),
@@ -465,6 +465,8 @@ pub enum LanguageMessage {
     LanguagePickerQueryChanged(String),
     /// Global Primary Language loaded from the daemon (None = unset).
     PrimaryLanguageLoaded(Option<String>),
+    /// The tags the global setting accepts, from `GET /settings/language/list`.
+    PrimaryLanguagesLoaded(Vec<String>),
     /// User picked a global language (None = clear → DELETE).
     PrimaryLanguageSelected(Option<String>),
     /// Per-model resolution block (`/pipeline/{stage}/model/{model}/language`)

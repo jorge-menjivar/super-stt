@@ -129,13 +129,13 @@
         ]
       }
     },
-    "/v1/backends": {
+    "/v1/backend/list": {
       "get": {
         "tags": [
           "backends"
         ],
         "summary": "List installed backends",
-        "description": "Every backend installed on this machine, each with the models it serves, the options it exposes, and which of its secrets are configured. Secret *values* are never returned — only whether each is set.\n\nThis is the full catalog, roles included. `GET /pipeline/{stage}/model/list` is the narrower read a stage's model picker wants; browsing what is *available to install* is `GET /registry/backends`.",
+        "description": "Every backend installed on this machine, each with the models it serves, the options it exposes, and which of its secrets are configured. Secret *values* are never returned — only whether each is set.\n\nThis is the full catalog, roles included. `GET /pipeline/{stage}/model/list` is the narrower read a stage's model picker wants; browsing what is *available to install* is `GET /registry/backend/list`.",
         "operationId": "list_backends",
         "responses": {
           "200": {
@@ -188,7 +188,7 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}": {
+    "/v1/backend/{backend_id}": {
       "delete": {
         "tags": [
           "backends"
@@ -200,7 +200,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -279,19 +279,19 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}/options": {
+    "/v1/backend/{backend_id}/option/list": {
       "get": {
         "tags": [
           "backends"
         ],
         "summary": "List a backend's options",
-        "description": "Every option this backend declares, each with its label, type, default, and the value actually in effect. This is what a settings UI renders a form from.\n\nOptions are the backend's own configuration — an endpoint URL, a model parameter — declared in its manifest. Credentials are not options; those are secrets, at `/backends/{backend_id}/secrets`.",
+        "description": "Every option this backend declares, each with its label, type, default, and the value actually in effect. This is what a settings UI renders a form from.\n\nOptions are the backend's own configuration — an endpoint URL, a model parameter — declared in its manifest. Credentials are not options; those are secrets, at `/backend/{backend_id}/secret/list`.",
         "operationId": "list_options",
         "parameters": [
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -360,7 +360,7 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}/options/{name}": {
+    "/v1/backend/{backend_id}/option/{name}": {
       "get": {
         "tags": [
           "backends"
@@ -372,7 +372,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -460,7 +460,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -568,7 +568,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -646,7 +646,7 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}/secrets": {
+    "/v1/backend/{backend_id}/secret/list": {
       "get": {
         "tags": [
           "backends"
@@ -658,7 +658,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -727,7 +727,7 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}/secrets/{name}": {
+    "/v1/backend/{backend_id}/secret/{name}": {
       "get": {
         "tags": [
           "backends"
@@ -739,7 +739,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -827,7 +827,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -945,7 +945,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -1558,7 +1558,7 @@
           "pipeline"
         ],
         "summary": "List the backends that can fill a stage",
-        "description": "The installed backends serving at least one model this stage can run, in the shape `GET /backends` returns them.\n\nFill a stage's backend picker from this rather than from `GET /backends`: a backend serving nothing this stage can run is refused by `POST /pipeline/{stage}`, and offering one hands the user an error to discover by choosing it. A backend serving both roles appears in both stages' lists.\n\nEmpty when nothing installed serves this stage — the state that should read as \"install one\" rather than as an empty dropdown.",
+        "description": "The installed backends serving at least one model this stage can run, in the shape `GET /backend/list` returns them.\n\nFill a stage's backend picker from this rather than from `GET /backend/list`: a backend serving nothing this stage can run is refused by `POST /pipeline/{stage}`, and offering one hands the user an error to discover by choosing it. A backend serving both roles appears in both stages' lists.\n\nEmpty when nothing installed serves this stage — the state that should read as \"install one\" rather than as an empty dropdown.",
         "operationId": "list_stage_backends",
         "parameters": [
           {
@@ -2092,7 +2092,7 @@
           "pipeline"
         ],
         "summary": "List the models a stage can run",
-        "description": "The models the backend filling this stage serves *in this stage's role* — transcription models for stage 1, post-processors for stage 2. Fill a model picker from this.\n\nScoped twice over, and both halves matter. A model from another backend cannot load here; a model with the wrong role loads and then fails on every use, which for a post-processor picked as a transcription model means each recording fails after the user has already spoken.\n\nThe full catalog, every installed backend and every role, is `GET /backends`. This is the narrow read a stage's picker wants, and it is answered per stage precisely so a client does not have to re-derive roles for itself.",
+        "description": "The models the backend filling this stage serves *in this stage's role* — transcription models for stage 1, post-processors for stage 2. Fill a model picker from this.\n\nScoped twice over, and both halves matter. A model from another backend cannot load here; a model with the wrong role loads and then fails on every use, which for a post-processor picked as a transcription model means each recording fails after the user has already spoken.\n\nThe full catalog, every installed backend and every role, is `GET /backend/list`. This is the narrow read a stage's picker wants, and it is answered per stage precisely so a client does not have to re-derive roles for itself.",
         "operationId": "list_stage_models",
         "parameters": [
           {
@@ -2175,7 +2175,7 @@
           "pipeline"
         ],
         "summary": "Re-instantiate a stage's model in place",
-        "description": "Tears the model down and brings it back up so it picks up changed secrets and options — an API key set through `/backends/{backend_id}/secrets`, say — without the client having to unload and reload by hand.\n\nNothing is re-downloaded; the files on disk are unchanged.",
+        "description": "Tears the model down and brings it back up so it picks up changed secrets and options — an API key set through `/backend/{backend_id}/secret/list`, say — without the client having to unload and reload by hand.\n\nNothing is re-downloaded; the files on disk are unchanged.",
         "operationId": "reload_stage_model",
         "parameters": [
           {
@@ -2276,7 +2276,7 @@
           {
             "name": "model",
             "in": "path",
-            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backends` spells it.",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it.",
             "required": true,
             "schema": {
               "type": "string"
@@ -2366,7 +2366,7 @@
           {
             "name": "model",
             "in": "path",
-            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backends` spells it.",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it.",
             "required": true,
             "schema": {
               "type": "string"
@@ -2478,7 +2478,7 @@
           {
             "name": "model",
             "in": "path",
-            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backends` spells it.",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it.",
             "required": true,
             "schema": {
               "type": "string"
@@ -2960,123 +2960,7 @@
         ]
       }
     },
-    "/v1/registry/backends": {
-      "get": {
-        "tags": [
-          "registry"
-        ],
-        "summary": "Browse the published backend catalog",
-        "description": "Every backend published to the registry, with the models each serves and whether this machine can run it. `compatible` is decided against the host's actual accelerators and this Super STT's version, so the list reflects what is installable here rather than what exists in general.\n\n`needs_client_update` separates the two ways a backend can be blocked: a host that lacks the right GPU will never run it, but a Super STT one version behind is something the user can fix in a minute. Surface those differently.\n\nThis is what is *available*; `GET /backends` is what is installed.",
-        "operationId": "list_registry_backends",
-        "parameters": [
-          {
-            "name": "include_incompatible",
-            "in": "query",
-            "description": "Include entries this machine cannot run. Off by default, so the catalog\nshows what is actually installable here.",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "kind",
-            "in": "query",
-            "description": "Filter by backend kind.",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "online",
-            "in": "query",
-            "description": "Filter by whether the backend calls out to a network service.",
-            "required": false,
-            "schema": {
-              "type": [
-                "boolean",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "q",
-            "in": "query",
-            "description": "Case-insensitive substring match over name and description.",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The catalog.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RegistryListResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The catalog could not be fetched and nothing is cached (`registry_unavailable`). Retry, or force a fetch with `POST /registry/backends/refresh`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RegistryError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/registry/backends/install": {
+    "/v1/registry/backend/install": {
       "post": {
         "tags": [
           "registry"
@@ -3175,13 +3059,129 @@
         ]
       }
     },
-    "/v1/registry/backends/refresh": {
+    "/v1/registry/backend/list": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "summary": "Browse the published backend catalog",
+        "description": "Every backend published to the registry, with the models each serves and whether this machine can run it. `compatible` is decided against the host's actual accelerators and this Super STT's version, so the list reflects what is installable here rather than what exists in general.\n\n`needs_client_update` separates the two ways a backend can be blocked: a host that lacks the right GPU will never run it, but a Super STT one version behind is something the user can fix in a minute. Surface those differently.\n\nThis is what is *available*; `GET /backend/list` is what is installed.",
+        "operationId": "list_registry_backends",
+        "parameters": [
+          {
+            "name": "include_incompatible",
+            "in": "query",
+            "description": "Include entries this machine cannot run. Off by default, so the catalog\nshows what is actually installable here.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Filter by backend kind.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "online",
+            "in": "query",
+            "description": "Filter by whether the backend calls out to a network service.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive substring match over name and description.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The catalog could not be fetched and nothing is cached (`registry_unavailable`). Retry, or force a fetch with `POST /registry/backend/refresh`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/registry/backend/refresh": {
       "post": {
         "tags": [
           "registry"
         ],
         "summary": "Re-fetch the backend catalog",
-        "description": "Pulls the published index again rather than serving what is cached, and reports how many backends it now holds. Use it after a backend is published, or to clear an `index_stale` flag.\n\n`GET /registry/backends` refreshes on its own schedule; this forces it now.",
+        "description": "Pulls the published index again rather than serving what is cached, and reports how many backends it now holds. Use it after a backend is published, or to clear an `index_stale` flag.\n\n`GET /registry/backend/list` refreshes on its own schedule; this forces it now.",
         "operationId": "refresh_registry",
         "responses": {
           "200": {
@@ -3244,7 +3244,7 @@
         ]
       }
     },
-    "/v1/registry/backends/update": {
+    "/v1/registry/backend/update": {
       "post": {
         "tags": [
           "registry"
@@ -3872,6 +3872,65 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LanguageState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/language/list": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "List the languages the global setting accepts",
+        "description": "The tags `POST /settings/language` will take, plus the reserved `auto`.\n\nFill the global language picker from this rather than from a BCP-47 list of your own: the tags are region-qualified on purpose, and a backend is free to declare either `en` or `en-US` for its models — the daemon narrows a qualified global to whichever a model actually serves, which is a rule no client can infer.\n\nA tag for one particular model belongs on that model, at `POST /pipeline/{stage}/model/{model}/language`, whose own list may be narrower.",
+        "operationId": "list_languages",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageList"
                 }
               }
             }
@@ -6457,7 +6516,7 @@
                 }
               ]
             },
-            "description": "`[name, source]` pairs. Post-processor models are excluded — they are not\nswitchable transcription models, and offering one would fail every\nrecording. The full catalog, roles included, is at `GET /backends`.",
+            "description": "`[name, source]` pairs. Post-processor models are excluded — they are not\nswitchable transcription models, and offering one would fail every\nrecording. The full catalog, roles included, is at `GET /backend/list`.",
             "example": [
               [
                 "whisper-tiny",
@@ -7083,7 +7142,7 @@
         "properties": {
           "source": {
             "type": "string",
-            "description": "The backend's repo id, as `GET /backends` reports it.",
+            "description": "The backend's repo id, as `GET /backend/list` reports it.",
             "example": "github.com/acme/whisper"
           }
         }

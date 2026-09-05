@@ -60,7 +60,7 @@ struct SecretConfigured {
 
 #[utoipa::path(
     get,
-    path = "/backends/{backend_id}/secrets",
+    path = "/backend/{backend_id}/secret/list",
     tag = "backends",
     summary = "List a backend's secrets",
     description = "\
@@ -72,7 +72,7 @@ This is a separate scope from `settings` precisely because it is the credential 
 surface: a token granted `settings` cannot reach it.",
     params(
         ("backend_id" = String, Path,
-         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
          example = "github.com%2Facme%2Fopenai"),
     ),
     security(("session_token" = ["secrets"])),
@@ -109,14 +109,14 @@ async fn list_secrets(State(s): State<AppState>, Path(source): Path<String>) -> 
 
 #[utoipa::path(
     get,
-    path = "/backends/{backend_id}/secrets/{name}",
+    path = "/backend/{backend_id}/secret/{name}",
     tag = "backends",
     summary = "Check whether one secret is set",
     description = "\
 Reports existence only. There is no endpoint that returns a stored credential.",
     params(
         ("backend_id" = String, Path,
-         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
          example = "github.com%2Facme%2Fopenai"),
         ("name" = String, Path, description = "The secret's name, as the backend's manifest declares it."),
     ),
@@ -152,7 +152,7 @@ async fn get_secret(
 
 #[utoipa::path(
     post,
-    path = "/backends/{backend_id}/secrets/{name}",
+    path = "/backend/{backend_id}/secret/{name}",
     tag = "backends",
     summary = "Store a secret",
     description = "\
@@ -163,7 +163,7 @@ A loaded model does not pick up a new credential on its own — reload the stage
 `POST /pipeline/{stage}/model/reload`.",
     params(
         ("backend_id" = String, Path,
-         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
          example = "github.com%2Facme%2Fopenai"),
         ("name" = String, Path, description = "The secret's name, as the backend's manifest declares it."),
     ),
@@ -203,7 +203,7 @@ async fn set_secret(
 
 #[utoipa::path(
     delete,
-    path = "/backends/{backend_id}/secrets/{name}",
+    path = "/backend/{backend_id}/secret/{name}",
     tag = "backends",
     summary = "Clear a secret",
     description = "\
@@ -211,7 +211,7 @@ Removes the stored credential from the keyring, returning the secret to unset. A
 backend that requires it will refuse to load until one is stored again.",
     params(
         ("backend_id" = String, Path,
-         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
          example = "github.com%2Facme%2Fopenai"),
         ("name" = String, Path, description = "The secret's name, as the backend's manifest declares it."),
     ),

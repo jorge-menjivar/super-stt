@@ -9,7 +9,7 @@
 //! 4. A model that is not installed is refused.
 //! 5. A transcription model is refused for this stage, and a post-processor is
 //!    refused for `/active_model` — the two roles do not cross.
-//! 6. `GET /backends` reports each model's `role`.
+//! 6. `GET /backend/list` reports each model's `role`.
 //! 7. `GET /pipeline` lists both stages, and an out-of-range stage 404s.
 //! 8. `/pipeline/{stage}/model/{model}/device` reads and records a model's
 //!    device through its stage, per model, with the same validation.
@@ -449,13 +449,13 @@ async fn the_two_roles_do_not_cross() {
     );
 }
 
-/// `GET /backends` carries each model's role, which is what lets a settings UI
+/// `GET /backend/list` carries each model's role, which is what lets a settings UI
 /// offer the right models in each picker.
 #[tokio::test]
 async fn the_backends_catalog_reports_each_models_role() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
-    let (status, body) = get(&sock, "/backends", &token).await;
+    let (status, body) = get(&sock, "/backend/list", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     let models = body["backends"][0]["models"]
         .as_array()
@@ -795,7 +795,7 @@ async fn a_models_device_is_its_own() {
 /// The fixture makes the case that matters: one backend serves both roles, one
 /// serves only a post-processor. Stage 1 must not offer the second — selecting
 /// it leaves the model picker empty, and `POST /pipeline/1` refuses it anyway,
-/// so a picker built from `GET /backends` hands the user an error to discover
+/// so a picker built from `GET /backend/list` hands the user an error to discover
 /// by choosing it.
 #[tokio::test]
 async fn each_stage_lists_only_the_backends_that_can_fill_it() {
@@ -812,7 +812,7 @@ async fn each_stage_lists_only_the_backends_that_can_fill_it() {
             .collect()
     };
 
-    let installed = sources("/backends").await;
+    let installed = sources("/backend/list").await;
     assert!(installed.contains(&FIXTURE_SOURCE.to_string()));
     assert!(
         installed.contains(&PP_ONLY_SOURCE.to_string()),
@@ -1171,7 +1171,7 @@ async fn uninstalling_a_backend_empties_every_stage_it_filled() {
     assert_eq!(body["stage"]["source"], PP_ONLY_SOURCE);
 
     let encoded = PP_ONLY_SOURCE.replace('/', "%2F");
-    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    let (status, body) = delete_req(&sock, &format!("/backend/{encoded}"), &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["uninstalled"], true);
     assert_eq!(body["was_active"], false, "it was never stage 1's");
@@ -1205,7 +1205,7 @@ async fn uninstalling_a_backend_names_every_stage_it_filled() {
     }
 
     let encoded = FIXTURE_SOURCE.replace('/', "%2F");
-    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    let (status, body) = delete_req(&sock, &format!("/backend/{encoded}"), &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["uninstalled"], true);
     assert_eq!(body["was_active"], true, "it was stage 1's: {body}");
@@ -1221,7 +1221,7 @@ async fn uninstalling_a_backend_names_every_stage_it_filled() {
     // The other install was never selected anywhere: gone, and no stage to
     // report.
     let encoded = PP_ONLY_SOURCE.replace('/', "%2F");
-    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    let (status, body) = delete_req(&sock, &format!("/backend/{encoded}"), &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["uninstalled"], true);
     assert_eq!(body["was_active"], false, "body: {body}");

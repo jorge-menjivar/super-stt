@@ -122,7 +122,7 @@ impl SubprocessBackend {
         let socket =
             super_stt_shared::validation::secure_runtime_path(&format!("backends/{instance}.sock"));
         let socket_dir = socket.parent().map_or_else(
-            || PathBuf::from("/tmp/stt/backends"),
+            || PathBuf::from("/tmp/stt/backend/list"),
             std::path::Path::to_path_buf,
         );
         std::fs::create_dir_all(&socket_dir)?;

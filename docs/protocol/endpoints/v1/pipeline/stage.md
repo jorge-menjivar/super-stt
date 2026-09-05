@@ -45,7 +45,7 @@ serves this stage's role; does **not** load anything.
 
 The backends it will accept are
 [`GET /pipeline/{stage}/backend/list`](./backend-list.md) — fill a picker from
-that rather than from `GET /backends`, or it offers backends this refuses.
+that rather than from `GET /backend/list`, or it offers backends this refuses.
 
 **Request:**
 

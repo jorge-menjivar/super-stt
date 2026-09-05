@@ -78,14 +78,14 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub daemon_config: Option<Value>,
 
-    // Installed-backends catalog (GET /backends): array of backend objects
-    // with their models, secrets, and options. See docs/protocol/endpoints/v1/backends.md.
+    // Installed-backends catalog (GET /backend/list): array of backend objects
+    // with their models, secrets, and options. See docs/protocol/endpoints/v1/backend/list.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backends: Option<Value>,
 
-    // Per-backend secret list (GET /backends/{source}/secrets): array of
+    // Per-backend secret list (GET /backend/{source}/secret): array of
     // `{name, label, required, configured}` objects.
-    // See docs/protocol/endpoints/v1/backends.md.
+    // See docs/protocol/endpoints/v1/backend/list.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secrets: Option<Value>,
 
@@ -175,7 +175,7 @@ pub struct DaemonResponse {
     pub custom_models_dir: Option<Option<String>>,
 
     // Transcription language: for GET /language a string|null; for
-    // GET /backends/{source}/models/{model}/language the resolution block. See
+    // GET /backend/{source}/models/{model}/language the resolution block. See
     // docs/protocol/endpoints/v1/{language,backends/model-language}.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<Value>,
@@ -185,7 +185,7 @@ pub struct DaemonResponse {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DownloadProgress {
     pub model_name: String,
-    /// The backend serving `model_name` — the same repo id `/backends` reports.
+    /// The backend serving `model_name` — the same repo id `/backend/list` reports.
     /// A model name alone does not say whose it is, and two backends may serve
     /// the same one.
     #[serde(default)]

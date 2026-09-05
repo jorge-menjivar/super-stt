@@ -264,7 +264,7 @@ pub(crate) struct ModelList {
     status: &'static str,
     /// `[name, source]` pairs. Post-processor models are excluded — they are not
     /// switchable transcription models, and offering one would fail every
-    /// recording. The full catalog, roles included, is at `GET /backends`.
+    /// recording. The full catalog, roles included, is at `GET /backend/list`.
     #[schema(example = json!([["whisper-tiny", "github.com/super-stt/whisper"]]))]
     available_models: Vec<(String, String)>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -1,4 +1,4 @@
-# POST /registry/backends/update
+# POST /registry/backend/update
 
 Re-runs the install pipeline if the registry's version is newer than the
 installed version. No-op if already current.
@@ -28,7 +28,7 @@ installed version. No-op if already current.
 
 When `noop = true`, `install_id` is absent and `from_version == to_version`.
 
-Progress events follow the same shape as `/registry/backends/install`.
+Progress events follow the same shape as `/registry/backend/install`.
 
 ## Failure modes
 

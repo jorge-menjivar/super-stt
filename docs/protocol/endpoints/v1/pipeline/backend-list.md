@@ -11,7 +11,7 @@ with [`/model`](./model.md) and
 [`/device`](./device.md#get-pipelinestagemodelmodeldevice).
 
 **Fill a stage's backend picker from this, not from
-[`GET /backends`](../backends.md).** A backend serving nothing this stage can
+[`GET /backend/list`](../backend/list.md).** A backend serving nothing this stage can
 run is refused by `POST /pipeline/{stage}`, so offering one hands the user an
 error to discover by choosing it. The daemon already applies this rule when it
 accepts or rejects a selection; a client filtering on its own is reimplementing
@@ -36,7 +36,7 @@ Authorization: Bearer stt_…64hex…
 
 ## Response (200)
 
-The same objects [`GET /backends`](../backends.md) returns, narrowed to this
+The same objects [`GET /backend/list`](../backend/list.md) returns, narrowed to this
 stage:
 
 ```jsonc
@@ -58,7 +58,7 @@ stage:
 
 **Empty when nothing installed serves this stage.** That is a real state, not an
 error: it should read as "install one" rather than as an empty dropdown. The
-Library — [`GET /registry/backends`](../registry.md) — is where one comes from.
+Library — [`GET /registry/backend/list`](../registry.md) — is where one comes from.
 
 ## Errors
 

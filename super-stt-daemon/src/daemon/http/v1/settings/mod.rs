@@ -81,4 +81,5 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
             language::set_language,
             language::clear_language
         ))
+        .routes(routes!(language::list_languages))
 }

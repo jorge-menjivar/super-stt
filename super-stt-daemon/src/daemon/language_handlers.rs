@@ -22,7 +22,36 @@ impl SuperSTTDaemon {
         DaemonResponse::success().with_language(value)
     }
 
+    /// `GET /settings/language/list` — the tags the global setting accepts.
+    #[must_use]
+    pub fn handle_list_primary_languages(&self) -> DaemonResponse {
+        let languages = std::iter::once("auto".to_string())
+            .chain(
+                crate::daemon::language::GLOBAL_LANGUAGES
+                    .iter()
+                    .map(|t| (*t).to_string()),
+            )
+            .collect();
+        DaemonResponse::success()
+            .with_available_languages(languages)
+            .with_message("Global languages listed".to_string())
+    }
+
     pub async fn handle_set_primary_language(&self, language: String) -> DaemonResponse {
+        // The list is the promise, so the setter has to keep it. Before this,
+        // `/settings/language` took any string at all — which is why the app
+        // shipped its own curated list and no other client could know what to
+        // send.
+        if !crate::daemon::language::is_offered_globally(&language) {
+            return DaemonResponse::error_with_code(
+                ErrorCode::UnsupportedLanguage,
+                &format!(
+                    "Language `{language}` is not one GET /settings/language/list offers. \
+                     A model-specific tag belongs on that model, at \
+                     POST /pipeline/{{stage}}/model/{{model}}/language."
+                ),
+            );
+        }
         {
             let mut config = self.config.write().await;
             config.update_primary_language(Some(language.clone()));

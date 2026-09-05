@@ -611,7 +611,7 @@ async fn list_backends_catalog_and_option_override() {
 /// deriving an offered device list from a non-empty `installed_accel` would
 /// otherwise conclude a WebAssembly backend has real GPU compute and offer a
 /// device picker it has no business showing. The companion `"cuda"` case pins
-/// the actual headline behaviour of `GET /backends`: a real accel written to
+/// the actual headline behaviour of `GET /backend/list`: a real accel written to
 /// `installed.json` must reach the wire catalog verbatim — stubbing the
 /// `installed_accel` expression in `backend_config_handlers.rs` to
 /// `Vec::new()` keeps the `"wasm"` case green but fails this one.

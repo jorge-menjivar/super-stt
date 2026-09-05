@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/backends` — the backends installed on this machine.
+//! `/backend/list` — the backends installed on this machine.
 //!
-//! Contract: `docs/protocol/endpoints/v1/backends.md`.
+//! Contract: `docs/protocol/endpoints/v1/backend/list.md`.
 //!
 //! The catalog and one backend's removal are here, at the paths they answer on;
 //! the sub-resources each get their own module — [`options`] for
-//! `/backends/{backend_id}/options` and [`secrets`] for
-//! `/backends/{backend_id}/secrets`.
+//! `/backend/{backend_id}/option/list` and [`secrets`] for
+//! `/backend/{backend_id}/secret/list`.
 //!
 //! A model's language override is not here. It is a per-`(source, model)`
 //! preference like its device, and both are addressed through the stage that
 //! runs the model — see [`super::pipeline::language`].
 //!
 //! Installing is not here: that is the registry's job, at
-//! [`/registry/backends/install`](super::registry::install). This module is
+//! [`/registry/backend/install`](super::registry::install). This module is
 //! about what is already on disk.
 //!
 //! One split runs through the whole family: every path but the secrets ones is
@@ -86,7 +86,7 @@ pub(crate) fn ok<T: serde::Serialize>(v: &T) -> Response {
 
 #[utoipa::path(
     get,
-    path = "/backends",
+    path = "/backend/list",
     tag = "backends",
     summary = "List installed backends",
     description = "\
@@ -96,7 +96,7 @@ returned — only whether each is set.
 
 This is the full catalog, roles included. `GET /pipeline/{stage}/model/list` is the \
 narrower read a stage's model picker wants; browsing what is *available to install* \
-is `GET /registry/backends`.",
+is `GET /registry/backend/list`.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "The installed catalog.", body = BackendCatalog),
@@ -112,7 +112,7 @@ pub(crate) async fn list_backends(State(s): State<AppState>) -> Response {
 
 #[utoipa::path(
     delete,
-    path = "/backends/{backend_id}",
+    path = "/backend/{backend_id}",
     tag = "backends",
     summary = "Uninstall a backend",
     description = "\
@@ -126,7 +126,7 @@ Refused with `409 backend_busy` while a recording or realtime session is in flig
 — removing files out from under one would strand state it still depends on.",
     params(
         ("backend_id" = String, Path,
-         description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
     ),
     security(("session_token" = ["settings"])),
@@ -224,7 +224,7 @@ pub(crate) async fn uninstall_backend(
         .into_response()
 }
 
-/// The `settings`-scoped `/backends` routes, gathered for the settings group.
+/// The `settings`-scoped `/backend/list` routes, gathered for the settings group.
 ///
 /// [`secrets`] is deliberately absent: those paths carry their own scope and are
 /// registered against their own guard in [`super`].

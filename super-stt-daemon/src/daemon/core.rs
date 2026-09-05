@@ -114,6 +114,7 @@ impl SuperSTTDaemon {
             }
             Command::GetPrimaryLanguage => self.handle_get_primary_language().await,
             Command::ClearPrimaryLanguage => self.handle_clear_primary_language().await,
+            Command::ListPrimaryLanguages => self.handle_list_primary_languages(),
             cmd @ (Command::SetModelLanguage { .. }
             | Command::GetModelLanguage { .. }
             | Command::ClearModelLanguage { .. }

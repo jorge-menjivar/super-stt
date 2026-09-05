@@ -70,7 +70,7 @@ async fn rate_limited_uninstall_surfaces_rate_limited() {
         r#"{"status":"error","message":"rate_limited"}"#,
     );
 
-    let err = transport::delete_json::<UninstallResponse>(socket.clone(), "token", "/backends/x")
+    let err = transport::delete_json::<UninstallResponse>(socket.clone(), "token", "/backend/x")
         .await
         .expect_err("a 429 is not a successful uninstall");
 
@@ -94,7 +94,7 @@ async fn registry_failures_surface_their_error_code() {
         r#"{"status":"error","error_code":"not_found","error":"not_found"}"#,
     );
 
-    let err = transport::delete_json::<UninstallResponse>(socket.clone(), "token", "/backends/x")
+    let err = transport::delete_json::<UninstallResponse>(socket.clone(), "token", "/backend/x")
         .await
         .expect_err("a 404 is not a successful uninstall");
 
@@ -113,7 +113,7 @@ async fn unauthorized_still_maps_to_invalid_session() {
         r#"{"status":"error","message":"invalid_session","data":{"reason":"expired"}}"#,
     );
 
-    let err = transport::delete_json::<UninstallResponse>(socket.clone(), "token", "/backends/x")
+    let err = transport::delete_json::<UninstallResponse>(socket.clone(), "token", "/backend/x")
         .await
         .expect_err("a 401 is not a successful uninstall");
 
@@ -172,7 +172,7 @@ async fn successful_uninstall_still_parses() {
         r#"{"uninstalled":true,"was_active":false}"#,
     );
 
-    let resp = transport::delete_json::<UninstallResponse>(socket.clone(), "token", "/backends/x")
+    let resp = transport::delete_json::<UninstallResponse>(socket.clone(), "token", "/backend/x")
         .await
         .expect("a 200 with a well-formed body is a successful uninstall");
 

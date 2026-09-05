@@ -4,7 +4,7 @@
 //! for call sites that use `crate::daemon::registry::*`.
 //!
 //! `uninstall` is re-exported alongside them for the same reason, though it is
-//! served at `DELETE /backends/{source}` and so lives with the other backend
+//! served at `DELETE /backend/{source}` and so lives with the other backend
 //! endpoints in [`crate::daemon::client::v1::backends`]. Installing comes from
 //! the registry; removing is a property of what is already installed.
 pub use crate::daemon::client::v1::backends::uninstall;

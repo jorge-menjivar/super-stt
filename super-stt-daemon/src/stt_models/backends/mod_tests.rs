@@ -688,7 +688,7 @@ fn the_catalog_reports_the_installed_accel() {
     assert_eq!(accel, vec!["cpu".to_string()]);
 }
 
-/// A minimal `DiscoveredBackend` at `/backends/<dir>`, for the
+/// A minimal `DiscoveredBackend` at `backends/<dir>`, for the
 /// `dedup_sources` selection tests below. No `discovered_fixture`/
 /// `tests_support` helper exists in this crate, so the literal is built
 /// inline here, matching the pattern `write_backend` and `fake` already use
@@ -697,7 +697,7 @@ fn at(dir: &str, source: &str, version: &str, id: Option<&str>) -> DiscoveredBac
     use crate::stt_models::ModelDefinition;
     DiscoveredBackend {
         description: String::new(),
-        dir: PathBuf::from("/backends").join(dir),
+        dir: PathBuf::from("/backend/list").join(dir),
         source: source.to_string(),
         name: dir.to_string(),
         version: version.to_string(),

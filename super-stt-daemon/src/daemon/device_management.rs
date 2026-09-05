@@ -629,7 +629,7 @@ impl SuperSTTDaemon {
 ///
 /// Answers for the host, not for any one model: a client narrowing to a
 /// specific model intersects this with that model's `supported_devices` and
-/// the backend's `installed_accel` from `GET /backends`.
+/// the backend's `installed_accel` from `GET /backend/list`.
 pub(crate) fn host_available_devices(host: &crate::registry::host_detect::Host) -> Vec<String> {
     let mut devices = vec!["cpu".to_string()];
     if host.cuda.is_some() || host.rocm.is_some() || host.vulkan.is_some() {

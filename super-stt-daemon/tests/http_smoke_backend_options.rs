@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Options-scope HTTP smoke test: `/backends/{source}/options/...`
+//! Options-scope HTTP smoke test: `/backend/{source}/option/...`
 //!
 //! Three test cases:
 //! 1. Round-trip: read default → set override → reset to default.
@@ -225,7 +225,7 @@ async fn delete_req(p: &PathBuf, path: &str, token: &str) -> (StatusCode, serde_
 #[tokio::test]
 async fn option_set_get_and_reset_to_default() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
-    let opt_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/region");
+    let opt_path = format!("/backend/{FIXTURE_SOURCE_ENC}/option/region");
 
     // Default before any override.
     let (s, body) = get(&sock, &opt_path, &token).await;
@@ -264,7 +264,7 @@ async fn option_set_get_and_reset_to_default() {
 #[tokio::test]
 async fn base_url_round_trips_through_unset() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
-    let opt_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/base_url");
+    let opt_path = format!("/backend/{FIXTURE_SOURCE_ENC}/option/base_url");
 
     let (s, body) = get(&sock, &opt_path, &token).await;
     assert_eq!(s, StatusCode::OK, "GET base_url before set: {body}");
@@ -301,7 +301,7 @@ async fn base_url_round_trips_through_unset() {
 #[tokio::test]
 async fn base_url_is_stored_canonical() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
-    let opt_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/base_url");
+    let opt_path = format!("/backend/{FIXTURE_SOURCE_ENC}/option/base_url");
 
     for (posted, want) in [
         // A private gateway named without a scheme is plaintext.
@@ -347,7 +347,7 @@ async fn base_url_is_stored_canonical() {
 #[tokio::test]
 async fn option_list_returns_declared_options() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
-    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options");
+    let list_path = format!("/backend/{FIXTURE_SOURCE_ENC}/option/list");
 
     let (s, body) = get(&sock, &list_path, &token).await;
     assert_eq!(s, StatusCode::OK, "GET options: {body}");
@@ -369,7 +369,7 @@ async fn option_list_returns_declared_options() {
 #[tokio::test]
 async fn undeclared_option_is_404() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
-    let path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/not_a_real_option");
+    let path = format!("/backend/{FIXTURE_SOURCE_ENC}/option/not_a_real_option");
 
     let (s, body) = get(&sock, &path, &token).await;
     assert_eq!(
@@ -387,7 +387,7 @@ async fn undeclared_option_is_404() {
 #[tokio::test]
 async fn set_empty_value_is_400() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
-    let opt_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/base_url");
+    let opt_path = format!("/backend/{FIXTURE_SOURCE_ENC}/option/base_url");
 
     let (s, body) = post_req(&sock, &opt_path, &token, serde_json::json!({ "value": "" })).await;
     assert_eq!(
@@ -405,7 +405,7 @@ async fn set_empty_value_is_400() {
 #[tokio::test]
 async fn unknown_backend_is_404() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
-    let path = "/backends/github.com%2Fnot%2Finstalled/options/base_url";
+    let path = "/backend/github.com%2Fnot%2Finstalled/option/base_url";
 
     let (s, body) = get(&sock, path, &token).await;
     assert_eq!(
@@ -419,7 +419,7 @@ async fn unknown_backend_is_404() {
     );
 }
 
-/// `GET /backends` reports the version on disk now, not the one the daemon
+/// `GET /backend/list` reports the version on disk now, not the one the daemon
 /// scanned at startup.
 ///
 /// A client shows this beside an update badge judged from `installed_version`
@@ -436,8 +436,8 @@ async fn backend_version_is_read_from_disk_per_request() {
         .join("fixture-openai")
         .join("backend.toml");
 
-    let (s, body) = get(&sock, "/backends", &token).await;
-    assert_eq!(s, StatusCode::OK, "GET /backends: {body}");
+    let (s, body) = get(&sock, "/backend/list", &token).await;
+    assert_eq!(s, StatusCode::OK, "GET /backend/list: {body}");
     assert_eq!(body["backends"][0]["version"], "1.0.0", "seeded: {body}");
 
     // Change it underneath the running daemon; nothing rescans.
@@ -446,8 +446,8 @@ async fn backend_version_is_read_from_disk_per_request() {
         .replace("version = \"1.0.0\"", "version = \"2.5.0\"");
     std::fs::write(&manifest, edited).expect("write fixture manifest");
 
-    let (s, body) = get(&sock, "/backends", &token).await;
-    assert_eq!(s, StatusCode::OK, "GET /backends after edit: {body}");
+    let (s, body) = get(&sock, "/backend/list", &token).await;
+    assert_eq!(s, StatusCode::OK, "GET /backend/list after edit: {body}");
     assert_eq!(
         body["backends"][0]["version"], "2.5.0",
         "version follows the manifest without a rescan: {body}"
@@ -472,8 +472,8 @@ async fn backend_version_falls_back_to_the_scan_when_the_manifest_is_gone() {
 
     std::fs::remove_file(&manifest).expect("remove fixture manifest");
 
-    let (s, body) = get(&sock, "/backends", &token).await;
-    assert_eq!(s, StatusCode::OK, "GET /backends: {body}");
+    let (s, body) = get(&sock, "/backend/list", &token).await;
+    assert_eq!(s, StatusCode::OK, "GET /backend/list: {body}");
     assert_eq!(
         body["backends"][0]["version"], "1.0.0",
         "the scanned version stands in when the manifest cannot be read: {body}"

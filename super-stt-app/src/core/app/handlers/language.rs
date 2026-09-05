@@ -31,6 +31,10 @@ impl AppModel {
                 self.language.primary_language = lang;
                 Task::none()
             }
+            LanguageMessage::PrimaryLanguagesLoaded(tags) => {
+                self.language.global_offers = tags;
+                Task::none()
+            }
             LanguageMessage::PrimaryLanguageSelected(choice) => {
                 self.language.primary_language.clone_from(&choice);
                 self.core.window.show_context = false;
@@ -136,17 +140,34 @@ impl AppModel {
         }
     }
 
-    /// Fetch the global Primary Language from the daemon (call on connect).
+    /// Fetch the global Primary Language from the daemon, and the tags it will
+    /// accept (call on connect).
+    ///
+    /// Both, because the picker needs both and neither is inferable here: the
+    /// value to show as chosen, and the vocabulary to choose from.
     #[allow(clippy::unused_self)]
     pub(in crate::core::app) fn load_primary_language(&self) -> Task<cosmic::Action<Message>> {
-        Task::perform(client::get_primary_language(), |res| match res {
-            Ok(lang) => cosmic::Action::App(Message::Language(
-                LanguageMessage::PrimaryLanguageLoaded(lang),
-            )),
-            Err(e) => cosmic::Action::App(Message::Language(LanguageMessage::LanguageError(
-                e.to_string(),
-            ))),
-        })
+        Task::batch([
+            Task::perform(client::get_primary_language(), |res| match res {
+                Ok(lang) => cosmic::Action::App(Message::Language(
+                    LanguageMessage::PrimaryLanguageLoaded(lang),
+                )),
+                Err(e) => cosmic::Action::App(Message::Language(LanguageMessage::LanguageError(
+                    e.to_string(),
+                ))),
+            }),
+            Task::perform(client::list_primary_languages(), |res| match res {
+                Ok(tags) => cosmic::Action::App(Message::Language(
+                    LanguageMessage::PrimaryLanguagesLoaded(tags),
+                )),
+                // A failed read leaves the picker empty rather than falling back
+                // to a list of our own, which is the thing this replaced.
+                Err(e) => {
+                    log::warn!("Could not read the global languages: {e}");
+                    cosmic::Action::None
+                }
+            }),
+        ])
     }
 
     /// Fetch a specific model's language resolution block from the daemon.

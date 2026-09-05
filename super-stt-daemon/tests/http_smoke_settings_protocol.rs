@@ -73,7 +73,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     let config_home = tmp.join(format!("{unique}-config"));
     std::fs::create_dir_all(&config_home).expect("create test config dir");
     // Isolate XDG_DATA_HOME too: the daemon discovers backends under
-    // `<data_dir>/super-stt/backends`. An empty isolated dir keeps the smoke
+    // `<data_dir>/super-stt/backend/list`. An empty isolated dir keeps the smoke
     // test hermetic and fast — no real backend is spawned at startup, so the
     // daemon comes up idle (which the assertions below tolerate).
     let data_home = tmp.join(format!("{unique}-data"));

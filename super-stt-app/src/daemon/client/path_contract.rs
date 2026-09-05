@@ -144,9 +144,9 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
         .map(|(lit, _)| normalize(&lit))
         .collect();
     for required in [
-        "/backends",
-        "/backends/{}/options/{}",
-        "/backends/{}/secrets/{}",
+        "/backend/list",
+        "/backend/{}/option/{}",
+        "/backend/{}/secret/{}",
         "/pipeline/{}",
         "/pipeline/{}/model",
         "/gpu_info",
@@ -203,12 +203,17 @@ const RESPONSE_KEYS: &[(&str, &str, &[&str])] = &[
         &["available_languages"],
     ),
     (
+        "/v1/settings/language/list",
+        "get",
+        &["available_languages"],
+    ),
+    (
         "/v1/pipeline/{stage}/model/list",
         "get",
         &["available_models"],
     ),
     ("/v1/pipeline", "get", &["pipeline"]),
-    ("/v1/backends", "get", &["backends"]),
+    ("/v1/backend/list", "get", &["backends"]),
     ("/v1/gpu_info", "get", &["gpu_info"]),
 ];
 
