@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model` — the model running in a stage.
+//! `/pipeline/{stage}/model` — the model a stage is pointed at.
 //!
-//! Run one, stop it, abandon a load still in flight, or re-instantiate it in
-//! place. All four are scoped to the stage in the path: the stages provision
-//! independently, so one stage's cancel must not abandon another's download.
+//! Read it, run it, stop it, abandon a load still in flight, or re-instantiate
+//! it in place. All of them are scoped to the stage in the path: the stages
+//! provision independently, so one stage's cancel must not abandon another's
+//! download.
+//!
+//! The read is where the selection lives. `GET /pipeline/{stage}` reports the
+//! *backend* filling the position and nothing else; what that backend is
+//! running — and whether it is running at all — is here.
 
 use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, narrowed};
 use crate::daemon::http::state::AppState;
@@ -12,8 +17,59 @@ use axum::response::Response;
 use serde::Deserialize;
 
 use super::{Stage, unknown_stage};
-use crate::daemon::http::v1::wire::{FromDaemon, ModelList, StageMutation};
+use crate::daemon::http::v1::wire::{FromDaemon, ModelList, StageModelEnvelope, StageMutation};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
+
+/// `GET /pipeline/{stage}/model` — the model this stage is pointed at.
+#[utoipa::path(
+    get,
+    path = "/pipeline/{stage}/model",
+    tag = "pipeline",
+    summary = "Report a stage's model",
+    description = "\
+What the stage is pointed at, whether it is loaded, which accelerator it runs on, \
+and the load still in flight.
+
+`model` is the *selection*, not the running instance: it survives an unload, so a \
+card can offer to load the same model again — onto another device, say — without the \
+user picking it a second time. `loaded` is what says whether it is up. The two are \
+separate at every stage; stage 1 collapsed them into one until the stages were made \
+to behave alike.
+
+`device` carries the stored preference and what it resolved to, which is all a \
+picker needs to render its current value. What the model *could* run on is \
+`GET /pipeline/{stage}/model/{model}/device/list`, kept separate because that answer \
+costs a fresh probe of the host's accelerators.",
+    params(
+        ("stage" = u32, Path,
+         description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+         example = 1),
+    ),
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "The stage's model slot. `model` is `null` when nothing is selected.", body = StageModelEnvelope),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such stage (`unknown_stage`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+pub(crate) async fn get_stage_model(State(s): State<AppState>, Path(stage): Path<u32>) -> Response {
+    let Some(cmds) = Stage::resolve(stage) else {
+        return unknown_stage(stage);
+    };
+    let resp = dispatch(&s.daemon, build_request(cmds.get_model, None)).await;
+    let slot = resp.stage_model.clone();
+    match slot {
+        Some(model) => narrowed(resp, |_| StageModelEnvelope {
+            status: "success",
+            model,
+        }),
+        // A daemon that answered without a slot is a daemon that does not know
+        // this stage, which is the same thing the resolver would have said.
+        None => unknown_stage(stage),
+    }
+}
 
 /// Which model to run in the stage.
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -36,7 +92,7 @@ pub(crate) struct SetModelBody {
     description = "\
 Loads `model` into the stage, downloading it first if this machine does not have it \
 yet. That download can be long: watch the `download_progress` event topic, or poll \
-`GET /pipeline/{stage}` and read `switch`. Abandon it with \
+`GET /pipeline/{stage}/model` and read `switch`. Abandon it with \
 `POST /pipeline/{stage}/model/cancel`.
 
 Omitting `source` uses the backend already selected for the stage.",
@@ -156,7 +212,7 @@ pub(crate) async fn cancel_stage_model(
     summary = "Re-instantiate a stage's model in place",
     description = "\
 Tears the model down and brings it back up so it picks up changed secrets and \
-options — an API key set through `/backends/{backend_id}/secrets`, say — without the \
+options — an API key set through `/backend/{backend_id}/secret/list`, say — without the \
 client having to unload and reload by hand.
 
 Nothing is re-downloaded; the files on disk are unchanged.",
@@ -201,7 +257,7 @@ here; a model with the wrong role loads and then fails on every use, which for a
 post-processor picked as a transcription model means each recording fails after the \
 user has already spoken.
 
-The full catalog, every installed backend and every role, is `GET /backends`. This is \
+The full catalog, every installed backend and every role, is `GET /backend/list`. This is \
 the narrow read a stage's picker wants, and it is answered per stage precisely so a \
 client does not have to re-derive roles for itself.",
     params(

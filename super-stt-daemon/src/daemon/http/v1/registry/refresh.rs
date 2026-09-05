@@ -7,10 +7,10 @@ use axum::response::IntoResponse;
 use super_stt_shared::registry::RefreshResponse;
 use super_stt_shared::registry::events::RegistryEvent;
 
-/// `POST /registry/backends/refresh` — force-refetch the registry index.
+/// `POST /registry/backend/refresh` — force-refetch the registry index.
 #[utoipa::path(
     post,
-    path = "/registry/backends/refresh",
+    path = "/registry/backend/refresh",
     tag = "registry",
     summary = "Re-fetch the backend catalog",
     description = "\
@@ -18,7 +18,7 @@ Pulls the published index again rather than serving what is cached, and reports 
 many backends it now holds. Use it after a backend is published, or to clear an \
 `index_stale` flag.
 
-`GET /registry/backends` refreshes on its own schedule; this forces it now.",
+`GET /registry/backend/list` refreshes on its own schedule; this forces it now.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "Refreshed.", body = RefreshResponse),

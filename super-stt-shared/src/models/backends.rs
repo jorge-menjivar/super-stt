@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! The `GET /backends` installed-backend catalog response.
+//! The `GET /backend/list` installed-backend catalog response.
 //!
 //! A backend is an installed model provider discovered on disk. Each one
 //! declares the models it serves, the secrets it needs (stored in the system
@@ -86,7 +86,7 @@ pub struct BackendModel {
     /// It cannot simply be dropped: clients through v0.2.0 declare it a
     /// required `String` with no `#[serde(default)]`, so a payload without the
     /// key fails to deserialize *in full* on every installed one of them — the
-    /// whole `GET /backends` catalog, not just this field. The settings UI then
+    /// whole `GET /backend/list` catalog, not just this field. The settings UI then
     /// lists no installed backends at all.
     ///
     /// `skip_deserializing` keeps it write-only: it is emitted for those
@@ -231,7 +231,7 @@ fn parse_bool(raw: &str) -> bool {
 mod tests {
     use super::{BackendInfo, BackendModel, BackendOption};
 
-    /// `GET /backends` must keep carrying `provider` on every model. Clients
+    /// `GET /backend/list` must keep carrying `provider` on every model. Clients
     /// through v0.2.0 declare it a required `String`, so a payload without it
     /// fails to deserialize *in full* on every installed one of them: the
     /// settings UI lists no backends, and no secret, option, or model switch
@@ -255,7 +255,7 @@ mod tests {
         let v = serde_json::to_value(&m).expect("serializes");
         assert!(
             v.get("provider").is_some(),
-            "GET /backends dropped `provider`; clients <= v0.2.0 cannot parse this: {v}"
+            "GET /backend/list dropped `provider`; clients <= v0.2.0 cannot parse this: {v}"
         );
     }
 
@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(m.role, "post_processor");
     }
 
-    /// `GET /backends` reports each backend's `[network].allowed_hosts`; the
+    /// `GET /backend/list` reports each backend's `[network].allowed_hosts`; the
     /// "Online model" badge reads them straight off `BackendInfo`.
     #[test]
     fn parses_allowed_hosts() {
@@ -327,7 +327,7 @@ mod tests {
 
     /// A daemon that predates `version` still deserializes here, reporting an
     /// empty one rather than failing the whole catalog. The field was added to
-    /// `GET /backends`; a client that hard-required it would black out the
+    /// `GET /backend/list`; a client that hard-required it would black out the
     /// settings UI against any daemon not yet upgraded.
     #[test]
     fn a_backends_payload_without_a_version_still_parses() {

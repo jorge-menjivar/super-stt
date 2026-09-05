@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Daemon-side registry-index policy. The `index.json` schema itself is the
 //! canonical `super-stt-registry-types::index` (shared with the indexer
-//! producer and the `/registry/backends` leaf types); this module re-exports
+//! producer and the `/registry/backend/list` leaf types); this module re-exports
 //! those types and adds the two daemon-only extensions over [`Index`] — the
 //! `min_client` soft-floor check and the unsafe-path backend filter — as free
 //! functions, the same pattern `validate_runtime` uses for `Manifest`.

@@ -69,12 +69,16 @@ impl TryFrom<DaemonRequest> for Command {
             "set_primary_language" => cmd_set_primary_language(&request),
             "get_primary_language" => Ok(Command::GetPrimaryLanguage),
             "clear_primary_language" => Ok(Command::ClearPrimaryLanguage),
+            "list_primary_languages" => Ok(Command::ListPrimaryLanguages),
             "set_model_language" => cmd_set_model_language(&request),
             "get_model_language" => cmd_get_model_language(&request),
             "clear_model_language" => cmd_clear_model_language(&request),
+            "list_model_languages" => cmd_list_model_languages(&request),
             "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
             "get_custom_models_dir" => Ok(Command::GetCustomModelsDir),
             "list_backends" => Ok(Command::ListBackends),
+            "list_transcription_backends" => Ok(Command::ListTranscriptionBackends),
+            "list_post_processor_backends" => Ok(Command::ListPostProcessorBackends),
             "reload_active_model" => Ok(Command::ReloadActiveModel),
             "unload_active_model" => Ok(Command::UnloadActiveModel),
             "set_backend_option" => cmd_set_backend_option(&request),
@@ -495,4 +499,9 @@ fn cmd_get_model_language(request: &DaemonRequest) -> Result<Command, String> {
 fn cmd_clear_model_language(request: &DaemonRequest) -> Result<Command, String> {
     let (source, model) = model_language_target(request, "clear_model_language")?;
     Ok(Command::ClearModelLanguage { source, model })
+}
+
+fn cmd_list_model_languages(request: &DaemonRequest) -> Result<Command, String> {
+    let (source, model) = model_language_target(request, "list_model_languages")?;
+    Ok(Command::ListModelLanguages { source, model })
 }

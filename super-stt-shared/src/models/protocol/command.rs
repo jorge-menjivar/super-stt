@@ -37,9 +37,24 @@ pub enum Command {
         /// serving `model`.
         source: String,
     },
+    /// Stage 1's model slot: what is selected there, whether it is up, the
+    /// device it runs on, and the load still in flight.
+    ///
+    /// Reports the *selection*, which survives an unload — not the loaded
+    /// instance, which is what `loaded` is for.
     GetModel,
     /// The transcription models stage 1's backend serves.
     ListModels,
+    /// The installed backends that can fill stage 1: those serving at least one
+    /// transcription model.
+    ///
+    /// The role filter lives in the daemon rather than in each client, because
+    /// the daemon already applies it when it accepts or refuses a stage's
+    /// backend — a client filtering on its own can offer one the daemon then
+    /// refuses.
+    ListTranscriptionBackends,
+    /// The stage-2 twin: backends serving at least one post-processor.
+    ListPostProcessorBackends,
     /// The post-processors stage 2's backend serves.
     ///
     /// A separate variant rather than a `stage` parameter because that is how
@@ -103,6 +118,9 @@ pub enum Command {
         model: String,
         source: String,
     },
+    /// Stage 2's model slot — the twin of `GetModel`, answering the identical
+    /// shape. A separate variant rather than a `stage` parameter because that
+    /// is how every other stage verb is spelled here.
     GetPostProcessor,
     /// Stop running the post-processor, keeping the selection.
     ClearPostProcessor,
@@ -159,6 +177,12 @@ pub enum Command {
     },
     GetPrimaryLanguage,
     ClearPrimaryLanguage,
+    /// The tags `SetPrimaryLanguage` accepts.
+    ///
+    /// A client cannot infer them: not the vocabulary, and not whether to send
+    /// `en` or `en-US` for a model that declares one of them. The daemon knows,
+    /// because it is the thing that adapts one to the other.
+    ListPrimaryLanguages,
     /// Set the per-model language override for a specific `(source, model)`.
     SetModelLanguage {
         source: String,
@@ -172,6 +196,16 @@ pub enum Command {
     },
     /// Clear the per-model language override for a specific `(source, model)`.
     ClearModelLanguage {
+        source: String,
+        model: String,
+    },
+    /// The languages a specific `(source, model)` can be pinned to.
+    ///
+    /// The set `SetModelLanguage` accepts, not merely what the manifest
+    /// declares: `auto` is choosable and monolingual models accept nothing, so
+    /// a list built from `supported_languages` alone would offer a value the
+    /// setter refuses and omit one it takes.
+    ListModelLanguages {
         source: String,
         model: String,
     },

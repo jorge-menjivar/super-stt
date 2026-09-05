@@ -9,6 +9,9 @@
 //! Addressed through the stage, like [`super::device`]: the stage resolves a
 //! bare model name against the backend filling it, so the caller does not have
 //! to carry a `source` it already told the daemon about.
+//!
+//! And split like it, too: the override is one endpoint, the languages on offer
+//! another. One answers what is set, the other what can be set.
 
 use crate::daemon::client::internal::response::require_success;
 use crate::daemon::client::internal::session::with_settings_token;
@@ -98,6 +101,27 @@ pub async fn clear_model_language(
                 .language
                 .and_then(|v| serde_json::from_value(v).ok())
                 .unwrap_or_default())
+        }
+    })
+    .await
+}
+
+/// The languages `model` can be pinned to
+/// (HTTP `GET /pipeline/{stage}/model/{model}/language/list`).
+///
+/// What the setter accepts — the model's own tags plus the reserved `auto` —
+/// not a general BCP-47 list. Empty for a monolingual model, which is what
+/// tells a picker there is nothing to choose.
+pub async fn list_model_languages(stage: u32, model: String) -> HttpResult<Vec<String>> {
+    with_settings_token(move |socket, token| {
+        let model = model.clone();
+        async move {
+            let path = format!("/pipeline/{stage}/model/{}/language/list", enc(&model));
+            let resp = require_success(
+                transport::settings_get(socket, &token, &path).await?,
+                "list_model_languages",
+            )?;
+            Ok(resp.available_languages.unwrap_or_default())
         }
     })
     .await

@@ -23,7 +23,7 @@ const WHISPER_SOURCE: &str = "github.com/jorge-menjivar/super-stt-whisper";
 fn discovered(dir: &str, source: &str) -> DiscoveredBackend {
     DiscoveredBackend {
         description: String::new(),
-        dir: PathBuf::from("/var/lib/super-stt/backends").join(dir),
+        dir: PathBuf::from("/var/lib/super-stt/backend/list").join(dir),
         source: source.to_string(),
         id: None,
         name: "Whisper (local)".to_string(),

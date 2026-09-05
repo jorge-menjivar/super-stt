@@ -1,4 +1,4 @@
-# POST /registry/backends/refresh
+# POST /registry/backend/refresh
 
 Forces an immediate re-fetch of the registry index, bypassing the TTL.
 Idempotent — concurrent requests coalesce into a single in-flight fetch.
@@ -12,7 +12,7 @@ Idempotent — concurrent requests coalesce into a single in-flight fetch.
 ## Request
 
 ```
-POST /registry/backends/refresh
+POST /registry/backend/refresh
 ```
 
 No body.

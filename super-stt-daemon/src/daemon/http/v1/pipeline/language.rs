@@ -12,11 +12,16 @@
 //! Every stage answers it. A post-processor is monolingual and says so in
 //! `multilingual`, which is a real answer rather than an error — the point of
 //! addressing stages by position is that they answer the same verbs.
+//!
+//! The symmetry with [`super::device`] goes one level further: the override and
+//! the languages on offer are separate endpoints, exactly as the device
+//! preference and the device list are. One answers what is set, the other what
+//! can be set.
 use super::{Stage, unknown_stage};
 use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, narrowed};
 use crate::daemon::http::state::AppState;
 use crate::daemon::http::v1::backends::json_error;
-use crate::daemon::http::v1::wire::{FromDaemon, ModelLanguageState};
+use crate::daemon::http::v1::wire::{FromDaemon, LanguageList, ModelLanguageState};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -26,7 +31,13 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(get_one, set, clear))
+    OpenApiRouter::new()
+        .routes(routes!(
+            get_model_language,
+            set_model_language,
+            clear_model_language
+        ))
+        .routes(routes!(list_model_languages))
 }
 
 /// The language this model should transcribe in.
@@ -71,11 +82,14 @@ async fn resolve_source(s: &AppState, stage: u32, model: &str) -> Result<String,
     tag = "pipeline",
     summary = "Read a model's language override",
     description = "\
-The language this specific model transcribes in, which overrides the global \
-`/language` setting. Addressed by `(source, model)` rather than \"the active \
-model\", so it can be read whether or not the model is loaded.
+The language this specific model transcribes in, and what decided it: the per-model \
+override, the global `/settings/language` setting, or the model's own default. \
+Addressed by `(source, model)` rather than \"the active model\", so it can be read \
+whether or not the model is loaded.
 
-`null` means no override: the model follows the global setting.",
+`override` is `null` when none is set, which is what \"follows the global setting\" \
+looks like. What the override *may* be set to is \
+`GET /pipeline/{stage}/model/{model}/language/list`.",
     params(
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
@@ -92,7 +106,10 @@ model\", so it can be read whether or not the model is loaded.
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn get_one(State(s): State<AppState>, Path((stage, model)): Path<(u32, String)>) -> Response {
+async fn get_model_language(
+    State(s): State<AppState>,
+    Path((stage, model)): Path<(u32, String)>,
+) -> Response {
     let source = match resolve_source(&s, stage, &model).await {
         Ok(source) => source,
         Err(r) => return *r,
@@ -132,7 +149,7 @@ Overridden in turn by a `language` field in a single `POST /transcribe` body.",
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn set(
+async fn set_model_language(
     State(s): State<AppState>,
     Path((stage, model)): Path<(u32, String)>,
     axum::Json(body): axum::Json<LanguageBody>,
@@ -175,7 +192,10 @@ Removes the per-model pin, returning this model to the global `/settings/languag
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn clear(State(s): State<AppState>, Path((stage, model)): Path<(u32, String)>) -> Response {
+async fn clear_model_language(
+    State(s): State<AppState>,
+    Path((stage, model)): Path<(u32, String)>,
+) -> Response {
     let source = match resolve_source(&s, stage, &model).await {
         Ok(source) => source,
         Err(r) => return *r,
@@ -186,4 +206,53 @@ async fn clear(State(s): State<AppState>, Path((stage, model)): Path<(u32, Strin
     );
     let resp = dispatch(&s.daemon, req).await;
     narrowed(resp, ModelLanguageState::from_daemon)
+}
+
+#[utoipa::path(
+    get,
+    path = "/pipeline/{stage}/model/{model}/language/list",
+    tag = "pipeline",
+    summary = "List the languages a model can be pinned to",
+    description = "\
+What `POST /pipeline/{stage}/model/{model}/language` will accept for this model: the \
+tags it serves, plus the reserved `auto` for letting it detect the language itself.
+
+Fill a language picker from this rather than from a general BCP-47 list — a tag the \
+model does not serve is refused, and offering one is an error the user only discovers \
+by choosing it.
+
+Empty for a monolingual model, which has nothing to choose however many tags its \
+manifest lists. That is the same shape `GET /pipeline/{stage}/model/{model}/device/list` \
+answers with for a model that runs remotely, and a client hides the control on an empty \
+list rather than special-casing a status.",
+    params(
+        ("stage" = u32, Path,
+         description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+         example = 1),
+        ("model" = String, Path, description = "The model\'s name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage."),
+    ),
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "The languages on offer.", body = LanguageList),
+        (status = 400, description = "The stage has no backend selected, so there is nothing to resolve `model` against (`invalid_backend`).", body = ErrorEnvelope),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such stage (`unknown_stage`), or this stage\'s backend serves no such model (`unknown_model`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+async fn list_model_languages(
+    State(s): State<AppState>,
+    Path((stage, model)): Path<(u32, String)>,
+) -> Response {
+    let source = match resolve_source(&s, stage, &model).await {
+        Ok(source) => source,
+        Err(r) => return *r,
+    };
+    let req = build_request(
+        "list_model_languages",
+        Some(serde_json::json!({ "source": source, "model": model })),
+    );
+    let resp = dispatch(&s.daemon, req).await;
+    narrowed(resp, LanguageList::from_daemon)
 }

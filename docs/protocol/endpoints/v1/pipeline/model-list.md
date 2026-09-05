@@ -22,13 +22,13 @@ successfully and then fails on every recording — after the user has already
 spoken.
 
 The full catalog, every installed backend and every role, is
-[`GET /backends`](../backends.md). This endpoint is the narrow per-stage read,
+[`GET /backend/list`](../backend/list.md). This endpoint is the narrow per-stage read,
 answered by the daemon precisely so a client does not have to re-derive roles
 for itself.
 
 > **Replaces `GET /models`,** which read stage 1's backend and filtered
 > post-processors out. It could not express stage 2 at all, so clients derived
-> that list themselves from `GET /backends`. Addressing the list by position
+> that list themselves from `GET /backend/list`. Addressing the list by position
 > means a third stage needs no third endpoint.
 
 ## Auth

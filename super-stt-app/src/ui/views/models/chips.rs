@@ -840,7 +840,7 @@ mod capability_tests {
     }
 
     /// Build a backend declaring a `base_url` option with the given effective
-    /// value — what `GET /backends` reports once the user has (or hasn't) set
+    /// value — what `GET /backend/list` reports once the user has (or hasn't) set
     /// one.
     fn backend_with_base_url(value: Option<&str>) -> BackendInfo {
         use crate::daemon::backends::BackendOption;

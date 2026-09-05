@@ -69,7 +69,7 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         match message {
             PostProcessorMessage::ReloadRequested => Task::perform(
-                crate::daemon::client::get_stage(PP_STAGE),
+                crate::daemon::client::get_stage_view(PP_STAGE),
                 Self::reloaded_post_processor,
             ),
 

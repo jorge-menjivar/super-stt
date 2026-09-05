@@ -12,7 +12,7 @@ is a point-in-time snapshot: `total_bytes` is effectively static, but
 `free_bytes`/`used_bytes` reflect the moment of the call. The daemon re-probes
 on every request, so a client may poll this endpoint for a live memory view —
 for example, weighing a model's `estimated_vram_bytes` from
-[`/backends`](./backends.md) against `free_bytes` before a GPU load.
+[`/backend/list`](./backend/list.md) against `free_bytes` before a GPU load.
 
 ## Auth
 

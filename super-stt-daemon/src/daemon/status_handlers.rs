@@ -68,7 +68,7 @@ impl SuperSTTDaemon {
     /// recording, silently, at the point the user has already spoken.
     ///
     /// This is the per-stage read. The full catalog with roles, across every
-    /// installed backend, is `GET /backends`.
+    /// installed backend, is `GET /backend/list`.
     pub async fn handle_list_stage_models(&self, post_processor: bool) -> DaemonResponse {
         let backends = self.backends.read().await;
 

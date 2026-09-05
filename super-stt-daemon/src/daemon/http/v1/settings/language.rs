@@ -6,7 +6,7 @@
 //! `crate::daemon::http::v1::backends::model_language`), and a single request
 //! can override both by sending `language` in the `POST /transcribe` body.
 
-use super::super::wire::LanguageState;
+use super::super::wire::{LanguageList, LanguageState};
 
 settings_dispatch!(
     get_language,
@@ -37,4 +37,21 @@ settings_dispatch!(
     "Clear the default transcription language",
     "Removes the global setting, returning every model to detecting the language \
 itself. Per-model overrides are untouched."
+);
+
+settings_dispatch!(
+    list_languages,
+    "list_primary_languages",
+    get "/settings/language/list",
+    LanguageList,
+    "List the languages the global setting accepts",
+    "The tags `POST /settings/language` will take, plus the reserved `auto`.
+
+Fill the global language picker from this rather than from a BCP-47 list of your own: \
+the tags are region-qualified on purpose, and a backend is free to declare either `en` \
+or `en-US` for its models — the daemon narrows a qualified global to whichever a model \
+actually serves, which is a rule no client can infer.
+
+A tag for one particular model belongs on that model, at \
+`POST /pipeline/{stage}/model/{model}/language`, whose own list may be narrower."
 );

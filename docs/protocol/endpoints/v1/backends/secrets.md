@@ -1,4 +1,4 @@
-# `/backends/{backend_id}/secrets`
+# `/backend/{backend_id}/secret/list`
 
 Store, check, and clear a backend's **secrets** — the sensitive values
 (API keys and the like) a backend declares as `[[secrets]]` in its
@@ -8,12 +8,12 @@ keyring, and the daemon reads it back **only** at model-load time to inject it
 as an `x-stt-secret-<name>` request header (see
 [contract.md](../../../backend/contract.md#request-headers)).
 
-`{backend_id}` is the backend's id — its `source` as `GET /backends` reports it (e.g. `github.com/super-stt/openai`),
+`{backend_id}` is the backend's id — its `source` as `GET /backend/list` reports it (e.g. `github.com/super-stt/openai`),
 **URL-percent-encoded** in the path — the same identifier used by
-[`DELETE /backends/{backend_id}`](../backends.md#delete-backendsbackend_id):
+[`DELETE /backend/{backend_id}`](../backend/list.md#delete-backendsbackend_id):
 
 ```
-/backends/github.com%2Fsuper-stt%2Fopenai/secrets/openai_api_key
+/backend/github.com%2Fsuper-stt%2Fopenai/secret/openai_api_key
 ```
 
 ## Write-only by contract
@@ -49,7 +49,7 @@ general-purpose keyring. A `{name}` that the backend does not declare returns
 `list` is reserved for the collection endpoint below, so a backend cannot
 declare a secret named `list`.
 
-## `GET /backends/{backend_id}/secrets/list`
+## `GET /backend/{backend_id}/secret/list`
 
 List the backend's declared secrets and whether each is configured. **No
 values.**
@@ -57,7 +57,7 @@ values.**
 **Request:**
 
 ```http
-GET /backends/github.com%2Fsuper-stt%2Fopenai/secrets/list HTTP/1.1
+GET /backend/github.com%2Fsuper-stt%2Fopenai/secret HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```
@@ -86,14 +86,14 @@ Authorization: Bearer stt_…64hex…
 | `…[].required`   | boolean          | Whether the backend needs it to operate.                         |
 | `…[].configured` | boolean          | `true` when a value is stored. The value itself is never returned. |
 
-## `GET /backends/{backend_id}/secrets/{name}`
+## `GET /backend/{backend_id}/secret/list/{name}`
 
 Report whether one secret is configured. **No value.**
 
 **Request:**
 
 ```http
-GET /backends/github.com%2Fsuper-stt%2Fopenai/secrets/openai_api_key HTTP/1.1
+GET /backend/github.com%2Fsuper-stt%2Fopenai/secret/openai_api_key HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```
@@ -107,7 +107,7 @@ Authorization: Bearer stt_…64hex…
 `configured` is `false` for a declared-but-unset secret (still `200`, not an
 error).
 
-## `POST /backends/{backend_id}/secrets/{name}`
+## `POST /backend/{backend_id}/secret/list/{name}`
 
 Store (or replace) the secret's value. The value travels **only** in the
 request body — never in the URL or query — so it does not land in logs or
@@ -120,7 +120,7 @@ instance.
 **Request:**
 
 ```http
-POST /backends/github.com%2Fsuper-stt%2Fopenai/secrets/openai_api_key HTTP/1.1
+POST /backend/github.com%2Fsuper-stt%2Fopenai/secret/openai_api_key HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
@@ -138,7 +138,7 @@ Content-Type: application/json
 { "status": "success", "configured": true }
 ```
 
-## `DELETE /backends/{backend_id}/secrets/{name}`
+## `DELETE /backend/{backend_id}/secret/list/{name}`
 
 Clear the stored secret, resetting it to its default state — **unset**. A
 secret has no default value, so clearing it simply removes the credential; the
@@ -149,7 +149,7 @@ succeeds.
 **Request:**
 
 ```http
-DELETE /backends/github.com%2Fsuper-stt%2Fopenai/secrets/openai_api_key HTTP/1.1
+DELETE /backend/github.com%2Fsuper-stt%2Fopenai/secret/openai_api_key HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```

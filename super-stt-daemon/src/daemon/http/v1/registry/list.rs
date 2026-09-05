@@ -10,7 +10,7 @@ use super_stt_shared::registry::{
     RegistrySecret,
 };
 
-/// Query parameters for `GET /registry/backends`.
+/// Query parameters for `GET /registry/backend/list`.
 #[derive(Deserialize, utoipa::IntoParams)]
 pub(crate) struct RegistryBackendsQuery {
     /// Include entries this machine cannot run. Off by default, so the catalog
@@ -175,10 +175,10 @@ fn map_entry(
     }
 }
 
-/// `GET /registry/backends` — list installable backends from the registry.
+/// `GET /registry/backend/list` — list installable backends from the registry.
 #[utoipa::path(
     get,
-    path = "/registry/backends",
+    path = "/registry/backend/list",
     tag = "registry",
     summary = "Browse the published backend catalog",
     description = "\
@@ -191,12 +191,12 @@ here rather than what exists in general.
 lacks the right GPU will never run it, but a Super STT one version behind is \
 something the user can fix in a minute. Surface those differently.
 
-This is what is *available*; `GET /backends` is what is installed.",
+This is what is *available*; `GET /backend/list` is what is installed.",
     params(RegistryBackendsQuery),
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "The catalog.", body = RegistryListResponse),
-        (status = 503, description = "The catalog could not be fetched and nothing is cached (`registry_unavailable`). Retry, or force a fetch with `POST /registry/backends/refresh`.", body = RegistryError),
+        (status = 503, description = "The catalog could not be fetched and nothing is cached (`registry_unavailable`). Retry, or force a fetch with `POST /registry/backend/refresh`.", body = RegistryError),
         (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
         (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
@@ -300,7 +300,7 @@ mod tests {
     fn discovered(dir: &str, source: &str, version: &str) -> DiscoveredBackend {
         DiscoveredBackend {
             description: String::new(),
-            dir: PathBuf::from("/backends").join(dir),
+            dir: PathBuf::from("/backend/list").join(dir),
             source: source.to_string(),
             id: None,
             name: "Voxtral".to_string(),

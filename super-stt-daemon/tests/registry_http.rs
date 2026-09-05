@@ -5,9 +5,9 @@
 //! mockito HTTP server in place of the live registry, and exercise the
 //! two core paths:
 //!
-//! - `GET  /v1/registry/backends`  — index fetched, compat evaluated, list
+//! - `GET  /v1/registry/backend/list`  — index fetched, compat evaluated, list
 //!   returned.
-//! - `POST /v1/registry/backends/install` + `GET /v1/events` — hash mismatch
+//! - `POST /v1/registry/backend/install` + `GET /v1/events` — hash mismatch
 //!   in the install pipeline surfaces as a `registry.install.failed` SSE
 //!   event.
 //!
@@ -317,7 +317,7 @@ fn fixture_index_correct_hash(asset_url: &str) -> String {
 
 // ---------- tests -------------------------------------------------------------
 
-/// `GET /v1/registry/backends` returns the list from the mockito index, with
+/// `GET /v1/registry/backend/list` returns the list from the mockito index, with
 /// `compatibility.compatible == true` for a wasm backend (wasm is always
 /// compatible on any host) and `id == "openai"`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -346,8 +346,8 @@ async fn list_registry_backends_returns_compat() {
         .expect("auth_request should succeed under SUPER_STT_AUTO_APPROVE=1");
     let token = auth.session_token;
 
-    let (status, body) = raw_get_json(&http_socket, "/registry/backends", &token).await;
-    assert_eq!(status, StatusCode::OK, "GET /registry/backends: {body}");
+    let (status, body) = raw_get_json(&http_socket, "/registry/backend/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "GET /registry/backend/list: {body}");
 
     let list: RegistryListResponse =
         serde_json::from_value(body.clone()).expect("body should decode as RegistryListResponse");
@@ -366,7 +366,7 @@ async fn list_registry_backends_returns_compat() {
     );
 }
 
-/// `POST /v1/registry/backends/install` with a backend whose index entry
+/// `POST /v1/registry/backend/install` with a backend whose index entry
 /// advertises a wrong sha256 surfaces a `registry.install.failed` SSE event
 /// with `error == "asset_hash_mismatch"`.
 ///
@@ -431,7 +431,7 @@ async fn install_pipeline_rejects_hash_mismatch() {
     // POST install.
     let (status, body) = raw_post_json(
         &http_socket,
-        "/registry/backends/install",
+        "/registry/backend/install",
         &token,
         serde_json::json!({ "source": "github.com/x/y" }),
     )

@@ -11,7 +11,7 @@ use super_stt_shared::registry::{InstallAccepted, InstallRequest};
 
 use super::pipeline::{InflightMarker, spawn_install_pipeline};
 
-/// Request body for `POST /registry/backends/install`.
+/// Request body for `POST /registry/backend/install`.
 #[derive(Deserialize)]
 pub(crate) struct InstallBody {
     pub(crate) source: Option<String>,
@@ -251,10 +251,10 @@ fn select_install_compat(
 // Handler
 // ---------------------------------------------------------------------------
 
-/// `POST /registry/backends/install` — kick off a background install.
+/// `POST /registry/backend/install` — kick off a background install.
 #[utoipa::path(
     post,
-    path = "/registry/backends/install",
+    path = "/registry/backend/install",
     tag = "registry",
     summary = "Install a backend",
     description = "\

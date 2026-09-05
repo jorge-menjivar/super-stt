@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Settings-scope HTTP smoke test for the **backend-management** surface:
-//! `/backends`, `/active_backend`, and `/gpu_info`. These endpoints drive
+//! `/backend/list`, `/active_backend`, and `/gpu_info`. These endpoints drive
 //! the settings app's per-backend configuration section and were the
 //! largest untested slice of the settings scope (`http_smoke_settings.rs`
 //! covers the model/device/theme settings but not backend selection).
@@ -10,12 +10,12 @@
 //! assertions pin — empty catalog, null active backend, and the documented
 //! error paths for selecting / uninstalling something that isn't there:
 //!
-//! - `GET    /backends`           → `{ status: success, backends: [] }`
+//! - `GET    /backend/list`           → `{ status: success, backends: [] }`
 //! - `GET    /active_backend`     → `{ status: success, active_backend: null }`
 //! - `POST   /active_backend`     → `400 invalid_backend` for an unknown source
 //! - `DELETE /active_backend`     → `{ status: success }` (idempotent when idle)
 //! - `GET    /gpu_info`           → `{ status: success, gpu_info: [...] }`
-//! - `DELETE /backends/{source}`  → `404 not_found` for an unknown backend
+//! - `DELETE /backend/{source}`  → `404 not_found` for an unknown backend
 //! - scope enforcement            → a `client`-scope token gets `403 scope_denied`
 //!
 //! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) and `SUPER_STT_KEYRING_MOCK=1`
@@ -173,9 +173,9 @@ async fn backend_management_endpoints() {
         .expect("auth_request settings")
         .session_token;
 
-    // --- GET /backends: hermetic daemon → empty catalog ---
-    let (s, body) = get(&sock, "/backends", &settings_token).await;
-    assert_eq!(s, StatusCode::OK, "GET /backends: {body}");
+    // --- GET /backend/list: hermetic daemon → empty catalog ---
+    let (s, body) = get(&sock, "/backend/list", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /backend/list: {body}");
     assert_eq!(body["status"], "success");
     let backends = body["backends"]
         .as_array()
@@ -240,11 +240,11 @@ async fn backend_management_endpoints() {
         "gpu_info must be an array (possibly empty): {body}"
     );
 
-    // --- DELETE /backends/{source}: unknown backend → 404 not_found ---
+    // --- DELETE /backend/{source}: unknown backend → 404 not_found ---
     // The source is a single path segment, so its slashes are percent-encoded.
     let (s, body) = delete(
         &sock,
-        "/backends/github.com%2Fdoes-not%2Fexist",
+        "/backend/github.com%2Fdoes-not%2Fexist",
         &settings_token,
     )
     .await;
@@ -273,7 +273,7 @@ async fn backend_endpoints_reject_client_scope() {
     .session_token;
 
     for (method, path) in [
-        (Method::GET, "/backends"),
+        (Method::GET, "/backend/list"),
         (Method::GET, "/pipeline/1"),
         (Method::GET, "/gpu_info"),
     ] {

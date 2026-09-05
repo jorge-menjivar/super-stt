@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use super_stt_shared::registry::{UpdateRequest, UpdateResponse};
 
-/// Request body for `POST /registry/backends/update`.
+/// Request body for `POST /registry/backend/update`.
 #[derive(Deserialize)]
 pub(crate) struct UpdateBody {
     source: String,
@@ -76,7 +76,7 @@ async fn lookup_versions(s: &AppState, source: &str) -> Result<VersionLookup, Er
         )));
     };
 
-    // Matched by `source`, the same key `GET /registry/backends` uses to
+    // Matched by `source`, the same key `GET /registry/backend/list` uses to
     // decide `update_available` — and the same helper, so the two never drift.
     let installed_version: Option<String> = {
         let backends = s.daemon.backends.read().await;
@@ -125,10 +125,10 @@ fn select_update_compat(
 // Handler
 // ---------------------------------------------------------------------------
 
-/// `POST /registry/backends/update` — re-run install if registry has a newer version.
+/// `POST /registry/backend/update` — re-run install if registry has a newer version.
 #[utoipa::path(
     post,
-    path = "/registry/backends/update",
+    path = "/registry/backend/update",
     tag = "registry",
     summary = "Update an installed backend",
     description = "\

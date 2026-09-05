@@ -4,7 +4,7 @@ use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 use super_stt_shared::registry::InstallAccepted;
 
-/// `POST /registry/backends/install` — install a backend by its registry
+/// `POST /registry/backend/install` — install a backend by its registry
 /// `source` (e.g. `"github.com/super-stt/openai"`).
 pub async fn install_by_source(source: &str) -> HttpResult<InstallAccepted> {
     let body = serde_json::json!({ "source": source });
@@ -14,7 +14,7 @@ pub async fn install_by_source(source: &str) -> HttpResult<InstallAccepted> {
             transport::post_json::<InstallAccepted>(
                 socket,
                 &token,
-                "/registry/backends/install",
+                "/registry/backend/install",
                 &body,
             )
             .await
@@ -23,7 +23,7 @@ pub async fn install_by_source(source: &str) -> HttpResult<InstallAccepted> {
     .await
 }
 
-/// `POST /registry/backends/install` — install a backend by an arbitrary Git
+/// `POST /registry/backend/install` — install a backend by an arbitrary Git
 /// repository URL (custom / out-of-registry install).
 pub async fn install_by_repo_url(repo_url: &str) -> HttpResult<InstallAccepted> {
     let body = serde_json::json!({ "repo_url": repo_url });
@@ -33,7 +33,7 @@ pub async fn install_by_repo_url(repo_url: &str) -> HttpResult<InstallAccepted> 
             transport::post_json::<InstallAccepted>(
                 socket,
                 &token,
-                "/registry/backends/install",
+                "/registry/backend/install",
                 &body,
             )
             .await
@@ -42,7 +42,7 @@ pub async fn install_by_repo_url(repo_url: &str) -> HttpResult<InstallAccepted> 
     .await
 }
 
-/// `POST /registry/backends/install` — install a backend by copying it from
+/// `POST /registry/backend/install` — install a backend by copying it from
 /// a local directory (Import-from-dir). The daemon expects an absolute path.
 pub async fn install_by_local_path(local_path: &str) -> HttpResult<InstallAccepted> {
     let body = serde_json::json!({ "local_path": local_path });
@@ -52,7 +52,7 @@ pub async fn install_by_local_path(local_path: &str) -> HttpResult<InstallAccept
             transport::post_json::<InstallAccepted>(
                 socket,
                 &token,
-                "/registry/backends/install",
+                "/registry/backend/install",
                 &body,
             )
             .await

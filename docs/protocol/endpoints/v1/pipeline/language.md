@@ -13,6 +13,14 @@ and the stage is what resolves a bare model name against the backend filling
 it. Two preferences of the same shape addressed two different ways is something
 a client author has to memorise rather than infer.
 
+The symmetry goes one level further. What is *set* and what may *be set* are
+separate endpoints, as they are for the device:
+
+| | is set | may be set |
+|---|---|---|
+| device   | [`/device`](./device.md#get-pipelinestagemodelmodeldevice)   | [`/device/list`](./device.md#get-pipelinestagemodelmodeldevicelist) |
+| language | `/language`                                                  | [`/language/list`](#get-pipelinestagemodelmodellanguagelist)        |
+
 `{model}` is the model name as
 [`GET /pipeline/{stage}/model/list`](./model-list.md) spells it; names contain
 only alphanumerics and hyphens, so the segment is used as-is.
@@ -25,7 +33,7 @@ Every stage answers it. A post-processor is monolingual and says so in
 `multilingual` — a real answer rather than an error, since the point of
 addressing stages by position is that they answer the same verbs.
 
-> **Moved from `/backends/{backend_id}/models/{model}/language`.** The model's
+> **Moved from `/backend/{backend_id}/models/{model}/language`.** The model's
 > backend has to be filling a stage now, where the old spelling could reach any
 > installed model. That costs nothing real: a language control is only ever
 > shown on a stage's card, so the backend is selected by the time anyone asks.
@@ -62,14 +70,51 @@ Authorization: Bearer stt_…64hex…
     "source":    "override",      // "override" | "global" | "default"
     "effective": "es-419",        // the value sent to the backend; null = omitted (model primary)
     "override":  "es-419",        // the stored per-model value, or null
-    "primary":   "en",            // the model's primary_language (the fallback)
-    "supported": ["en", "es-419", "es-ES", "fr"]
+    "primary":   "en"             // the model's primary_language (the fallback)
   }
 }
 ```
 
-For a non-multilingual model: `"multilingual": false`, `"supported": ["en"]`,
-`"effective": null`, `"override": null`, `"primary": "en"`, `"source": "default"`.
+For a non-multilingual model: `"multilingual": false`, `"effective": null`,
+`"override": null`, `"primary": "en"`, `"source": "default"`.
+
+The tags this model accepts are **not** here — they are
+[`GET .../language/list`](#get-pipelinestagemodelmodellanguagelist), the way a
+model's device list is not part of its device. This endpoint answers what is
+set; that one answers what may be set, and only one of them changes when the
+user picks a language.
+
+## `GET /pipeline/{stage}/model/{model}/language/list`
+
+What `POST` will accept for this model: the tags it serves, plus the reserved
+`auto` for letting it detect the language itself.
+
+**Request:**
+
+```http
+GET /pipeline/1/model/whisper-large-v3/language/list HTTP/1.1
+Host: stt.local
+Authorization: Bearer stt_…64hex…
+```
+
+**Response (200):**
+
+```json
+{
+  "status": "success",
+  "available_languages": ["auto", "en", "es-419", "es-ES", "fr"]
+}
+```
+
+Fill a language picker from this rather than from a general BCP-47 list: a tag
+the model does not serve is refused, and offering one is an error the user only
+discovers by choosing it.
+
+**Empty for a monolingual model**, which has nothing to choose however many tags
+its manifest lists — the same shape
+[`/device/list`](./device.md#get-pipelinestagemodelmodeldevicelist) answers with
+for a model that runs remotely. A client hides the control on an empty list
+rather than special-casing a status.
 
 ## `POST /pipeline/{stage}/model/{model}/language`
 
@@ -86,7 +131,7 @@ Content-Type: application/json
 
 | Field      | Type   | Required | Notes                                                              |
 |------------|--------|----------|--------------------------------------------------------------------|
-| `language` | string | yes      | One of the model's `supported_languages`, or `auto`. To clear, `DELETE`. |
+| `language` | string | yes      | One of the tags [`/language/list`](#get-pipelinestagemodelmodellanguagelist) offers. To clear, `DELETE`. |
 
 **Response (200):** the resolution block (as `GET`).
 
@@ -108,7 +153,7 @@ Authorization: Bearer stt_…64hex…
 
 | HTTP | `message`              | Meaning                                                                                                      |
 |------|------------------------|--------------------------------------------------------------------------------------------------------------|
-| 400  | `unsupported_language` | `language` is not in the model's `supported_languages` (and isn't `auto`), or the model is not multilingual |
+| 400  | `unsupported_language` | `language` is not one [`/language/list`](#get-pipelinestagemodelmodellanguagelist) offers — a tag the model does not serve, or any tag at all for a monolingual model |
 | 401  | `invalid_session`      | Token unknown / expired / `exe_changed`                                                                      |
 | 403  | `scope_denied`         | Token lacks the `settings` scope                                                                             |
 | 404  | `unknown_backend`      | No installed backend has that `source`                                                                       |

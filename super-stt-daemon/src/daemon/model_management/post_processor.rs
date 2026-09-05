@@ -22,6 +22,12 @@ impl SuperSTTDaemon {
     /// Load the post-processor named by the config into its slot, replacing
     /// whatever was there.
     ///
+    /// The old instance is released first, so a load that fails leaves the
+    /// stage idle — and says so — rather than the previous model running. It
+    /// has to be: a subprocess backend cannot be instantiated twice for the
+    /// same model, so the replacement cannot be built while the old instance
+    /// still holds the name.
+    ///
     /// # Errors
     /// Returns an error if no post-processor is selected, the selection does
     /// not resolve to an installed `post_processor`-role model, or
@@ -54,17 +60,38 @@ impl SuperSTTDaemon {
         // only notice a client that did not start it ever gets, and the daemon
         // loads the post-processor on startup as well as on request.
         self.broadcast_model_loading_status(&name, PipelineStage::PostProcessor);
-        let (instance, definition) = self
+        // Release the running instance before spawning its replacement, the
+        // way every stage-1 load path does. A subprocess backend's identity —
+        // the `systemd-run --unit=` name and the socket it listens on — is
+        // keyed on (backend, model), so a second instance of the same model
+        // cannot coexist with the first: systemd refuses the duplicate unit
+        // name outright, and the new spawn's socket cleanup would unlink the
+        // live one's socket. Loading first was safe only for in-process (wasm)
+        // backends; for a subprocess it failed every in-place reload — a device
+        // switch, an option change — with an opaque systemd error while the old
+        // instance stayed up. It also keeps one copy of the weights on the GPU
+        // at a time.
+        //
+        // Silent, because the slot is normally refilled in the same breath: the
+        // `model_switched`/`ready` pair below is the event for this load,
+        // exactly as a stage-1 reload reports itself once. The instance is
+        // taken out of the lock before `shutdown()`, which can take seconds.
+        self.unload_post_processor().await;
+        let (instance, definition) = match self
             .instantiate_backend(&name, &source, &device_pref, PipelineStage::PostProcessor)
-            .await?;
+            .await
+        {
+            Ok(loaded) => loaded,
+            Err(e) => {
+                // The slot was emptied to make room and nothing filled it —
+                // announce it, or every client goes on showing a post-processor
+                // that is no longer running.
+                self.announce_post_processor_idle();
+                return Err(e);
+            }
+        };
 
         let actual_device = normalize_device(&instance.device());
-        // Same take-then-shutdown ordering as the transcription slot: the old
-        // instance is released outside the write lock, since a subprocess
-        // shutdown can take seconds. Silent, because the slot is about to be
-        // refilled: the `model_switched`/`ready` pair below is the event for
-        // this load, exactly as a stage-1 reload reports itself once.
-        self.unload_post_processor().await;
         *self.post_processor.write().await = Some(crate::daemon::types::LoadedModel {
             definition,
             instance,
@@ -116,6 +143,13 @@ impl SuperSTTDaemon {
             return;
         }
         self.unload_post_processor().await;
+        self.announce_post_processor_idle();
+    }
+
+    /// Announce that stage 2 is running nothing — the event a client needs to
+    /// stop showing a post-processor that is gone, whether it was unloaded on
+    /// request or a reload emptied the slot and failed to refill it.
+    fn announce_post_processor_idle(&self) {
         self.events.publish_daemon_status(DaemonStatusEvent::Ready {
             model_loaded: false,
             model_name: None,

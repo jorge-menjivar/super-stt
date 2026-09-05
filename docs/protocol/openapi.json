@@ -129,13 +129,13 @@
         ]
       }
     },
-    "/v1/backends": {
+    "/v1/backend/list": {
       "get": {
         "tags": [
           "backends"
         ],
         "summary": "List installed backends",
-        "description": "Every backend installed on this machine, each with the models it serves, the options it exposes, and which of its secrets are configured. Secret *values* are never returned — only whether each is set.\n\nThis is the full catalog, roles included. `GET /pipeline/{stage}/model/list` is the narrower read a stage's model picker wants; browsing what is *available to install* is `GET /registry/backends`.",
+        "description": "Every backend installed on this machine, each with the models it serves, the options it exposes, and which of its secrets are configured. Secret *values* are never returned — only whether each is set.\n\nThis is the full catalog, roles included. `GET /pipeline/{stage}/model/list` is the narrower read a stage's model picker wants; browsing what is *available to install* is `GET /registry/backend/list`.",
         "operationId": "list_backends",
         "responses": {
           "200": {
@@ -188,7 +188,7 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}": {
+    "/v1/backend/{backend_id}": {
       "delete": {
         "tags": [
           "backends"
@@ -200,7 +200,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -279,19 +279,19 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}/options/list": {
+    "/v1/backend/{backend_id}/option/list": {
       "get": {
         "tags": [
           "backends"
         ],
         "summary": "List a backend's options",
-        "description": "Every option this backend declares, each with its label, type, default, and the value actually in effect. This is what a settings UI renders a form from.\n\nOptions are the backend's own configuration — an endpoint URL, a model parameter — declared in its manifest. Credentials are not options; those are secrets, at `/backends/{backend_id}/secrets/list`.",
-        "operationId": "list",
+        "description": "Every option this backend declares, each with its label, type, default, and the value actually in effect. This is what a settings UI renders a form from.\n\nOptions are the backend's own configuration — an endpoint URL, a model parameter — declared in its manifest. Credentials are not options; those are secrets, at `/backend/{backend_id}/secret/list`.",
+        "operationId": "list_options",
         "parameters": [
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -360,19 +360,19 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}/options/{name}": {
+    "/v1/backend/{backend_id}/option/{name}": {
       "get": {
         "tags": [
           "backends"
         ],
         "summary": "Read one option's effective value",
         "description": "The value in effect for a single option, alongside the manifest default so a UI can show what clearing it would revert to.",
-        "operationId": "get_one",
+        "operationId": "get_option",
         "parameters": [
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -455,12 +455,12 @@
         ],
         "summary": "Override an option",
         "description": "Stores a value for this option, overriding the manifest default. Answers with the option's new effective value, so a UI can render the result without a second read.\n\nA `base_url` value is canonicalized before storage, so the field reads back the endpoint that will actually be dialed — the scheme in particular, since whether a request is encrypted should not be invisible in the field the user is looking at. A value that yields no host is stored as typed rather than refused; model load rejects it by name. Every other option is stored verbatim, whitespace included, because it may carry meaning the daemon does not interpret.\n\nA loaded model does not pick this up on its own — reload the stage with `POST /pipeline/{stage}/model/reload`.",
-        "operationId": "set",
+        "operationId": "set_option",
         "parameters": [
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -568,7 +568,7 @@
           {
             "name": "backend_id",
             "in": "path",
-            "description": "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -646,32 +646,24 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}/secrets/list": {
+    "/v1/backend/{backend_id}/secret/list": {
       "get": {
         "tags": [
           "backends"
         ],
         "summary": "List a backend's secrets",
         "description": "Every credential this backend declares, with whether each is currently set. **Values are never returned** — not here, not anywhere. They live in the system keyring, and the only operations are write and clear.\n\nThis is a separate scope from `settings` precisely because it is the credential surface: a token granted `settings` cannot reach it.",
-        "operationId": "list",
+        "operationId": "list_secrets",
         "parameters": [
           {
-            "name": "source",
+            "name": "backend_id",
             "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
             "required": true,
             "schema": {
               "type": "string"
             },
             "example": "github.com%2Facme%2Fopenai"
-          },
-          {
-            "name": "backend_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -735,19 +727,19 @@
         ]
       }
     },
-    "/v1/backends/{backend_id}/secrets/{name}": {
+    "/v1/backend/{backend_id}/secret/{name}": {
       "get": {
         "tags": [
           "backends"
         ],
         "summary": "Check whether one secret is set",
         "description": "Reports existence only. There is no endpoint that returns a stored credential.",
-        "operationId": "get_one",
+        "operationId": "get_secret",
         "parameters": [
           {
-            "name": "source",
+            "name": "backend_id",
             "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -758,14 +750,6 @@
             "name": "name",
             "in": "path",
             "description": "The secret's name, as the backend's manifest declares it.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "backend_id",
-            "in": "path",
             "required": true,
             "schema": {
               "type": "string"
@@ -838,12 +822,12 @@
         ],
         "summary": "Store a secret",
         "description": "Writes the credential to the system keyring. It cannot be read back afterwards; only replaced or cleared.\n\nA loaded model does not pick up a new credential on its own — reload the stage with `POST /pipeline/{stage}/model/reload`.",
-        "operationId": "set",
+        "operationId": "set_secret",
         "parameters": [
           {
-            "name": "source",
+            "name": "backend_id",
             "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -854,14 +838,6 @@
             "name": "name",
             "in": "path",
             "description": "The secret's name, as the backend's manifest declares it.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "backend_id",
-            "in": "path",
             "required": true,
             "schema": {
               "type": "string"
@@ -967,9 +943,9 @@
         "operationId": "delete_secret",
         "parameters": [
           {
-            "name": "source",
+            "name": "backend_id",
             "in": "path",
-            "description": "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
             "required": true,
             "schema": {
               "type": "string"
@@ -980,14 +956,6 @@
             "name": "name",
             "in": "path",
             "description": "The secret's name, as the backend's manifest declares it.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "backend_id",
-            "in": "path",
             "required": true,
             "schema": {
               "type": "string"
@@ -1266,7 +1234,7 @@
           "pipeline"
         ],
         "summary": "Report every pipeline stage",
-        "description": "The ordered stages a transcript passes through. Stage 1 turns audio into text; every later stage rewrites what the one before it produced.\n\nEach stage reports which backend fills it, which model is selected, whether that model is up, the accelerator it actually runs on, and any load still in flight. Stages are addressed by position precisely so a third can be appended without inventing a third endpoint for it.",
+        "description": "The ordered stages a transcript passes through. Stage 1 turns audio into text; every later stage rewrites what the one before it produced.\n\nEach stage reports the backend filling it and whether the stage is switched on. What that backend is running is one level down, at `GET /pipeline/{stage}/model` — a stage is a durable selection, its model has a runtime, and reporting the two together is what once let the stages drift apart. Stages are addressed by position precisely so a third can be appended without inventing a third endpoint for it.",
         "operationId": "get_pipeline",
         "responses": {
           "200": {
@@ -1325,7 +1293,7 @@
           "pipeline"
         ],
         "summary": "Report one pipeline stage",
-        "description": "The same object `GET /pipeline` carries in its array, for a client that only cares about one position. It is narrowed from that report rather than derived separately, so one stage and the whole list can never disagree.",
+        "description": "The backend filling this position, and whether the stage is switched on. The same object `GET /pipeline` carries in its array, for a client that only cares about one position — narrowed from that report rather than derived separately, so one stage and the whole list can never disagree.\n\nThe model is not here: read it at `GET /pipeline/{stage}/model`.",
         "operationId": "get_stage",
         "parameters": [
           {
@@ -1584,6 +1552,89 @@
         ]
       }
     },
+    "/v1/pipeline/{stage}/backend/list": {
+      "get": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "List the backends that can fill a stage",
+        "description": "The installed backends serving at least one model this stage can run, in the shape `GET /backend/list` returns them.\n\nFill a stage's backend picker from this rather than from `GET /backend/list`: a backend serving nothing this stage can run is refused by `POST /pipeline/{stage}`, and offering one hands the user an error to discover by choosing it. A backend serving both roles appears in both stages' lists.\n\nEmpty when nothing installed serves this stage — the state that should read as \"install one\" rather than as an empty dropdown.",
+        "operationId": "list_stage_backends",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "description": "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "example": 1
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The backends on offer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackendCatalog"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such stage (`unknown_stage`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/pipeline/{stage}/device/list": {
       "get": {
         "tags": [
@@ -1678,12 +1729,93 @@
       }
     },
     "/v1/pipeline/{stage}/model": {
+      "get": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "Report a stage's model",
+        "description": "What the stage is pointed at, whether it is loaded, which accelerator it runs on, and the load still in flight.\n\n`model` is the *selection*, not the running instance: it survives an unload, so a card can offer to load the same model again — onto another device, say — without the user picking it a second time. `loaded` is what says whether it is up. The two are separate at every stage; stage 1 collapsed them into one until the stages were made to behave alike.\n\n`device` carries the stored preference and what it resolved to, which is all a picker needs to render its current value. What the model *could* run on is `GET /pipeline/{stage}/model/{model}/device/list`, kept separate because that answer costs a fresh probe of the host's accelerators.",
+        "operationId": "get_stage_model",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "description": "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "example": 1
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stage's model slot. `model` is `null` when nothing is selected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StageModelEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such stage (`unknown_stage`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
       "post": {
         "tags": [
           "pipeline"
         ],
         "summary": "Run a model in a stage",
-        "description": "Loads `model` into the stage, downloading it first if this machine does not have it yet. That download can be long: watch the `download_progress` event topic, or poll `GET /pipeline/{stage}` and read `switch`. Abandon it with `POST /pipeline/{stage}/model/cancel`.\n\nOmitting `source` uses the backend already selected for the stage.",
+        "description": "Loads `model` into the stage, downloading it first if this machine does not have it yet. That download can be long: watch the `download_progress` event topic, or poll `GET /pipeline/{stage}/model` and read `switch`. Abandon it with `POST /pipeline/{stage}/model/cancel`.\n\nOmitting `source` uses the backend already selected for the stage.",
         "operationId": "set_stage_model",
         "parameters": [
           {
@@ -1960,7 +2092,7 @@
           "pipeline"
         ],
         "summary": "List the models a stage can run",
-        "description": "The models the backend filling this stage serves *in this stage's role* — transcription models for stage 1, post-processors for stage 2. Fill a model picker from this.\n\nScoped twice over, and both halves matter. A model from another backend cannot load here; a model with the wrong role loads and then fails on every use, which for a post-processor picked as a transcription model means each recording fails after the user has already spoken.\n\nThe full catalog, every installed backend and every role, is `GET /backends`. This is the narrow read a stage's picker wants, and it is answered per stage precisely so a client does not have to re-derive roles for itself.",
+        "description": "The models the backend filling this stage serves *in this stage's role* — transcription models for stage 1, post-processors for stage 2. Fill a model picker from this.\n\nScoped twice over, and both halves matter. A model from another backend cannot load here; a model with the wrong role loads and then fails on every use, which for a post-processor picked as a transcription model means each recording fails after the user has already spoken.\n\nThe full catalog, every installed backend and every role, is `GET /backend/list`. This is the narrow read a stage's picker wants, and it is answered per stage precisely so a client does not have to re-derive roles for itself.",
         "operationId": "list_stage_models",
         "parameters": [
           {
@@ -2043,7 +2175,7 @@
           "pipeline"
         ],
         "summary": "Re-instantiate a stage's model in place",
-        "description": "Tears the model down and brings it back up so it picks up changed secrets and options — an API key set through `/backends/{backend_id}/secrets`, say — without the client having to unload and reload by hand.\n\nNothing is re-downloaded; the files on disk are unchanged.",
+        "description": "Tears the model down and brings it back up so it picks up changed secrets and options — an API key set through `/backend/{backend_id}/secret/list`, say — without the client having to unload and reload by hand.\n\nNothing is re-downloaded; the files on disk are unchanged.",
         "operationId": "reload_stage_model",
         "parameters": [
           {
@@ -2144,7 +2276,7 @@
           {
             "name": "model",
             "in": "path",
-            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backends` spells it.",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it.",
             "required": true,
             "schema": {
               "type": "string"
@@ -2216,7 +2348,7 @@
           "pipeline"
         ],
         "summary": "Set a model's device preference",
-        "description": "Chooses the accelerator this model runs on. If it is the model the stage is currently running, it is reloaded onto the new device; otherwise the preference is stored and takes effect at the next load.\n\nList what this host can offer with `GET /pipeline/{stage}/model/{model}/device/list`.",
+        "description": "Chooses the accelerator this model runs on. If it is the model the stage is currently running, it is reloaded onto the new device; otherwise the preference is stored and takes effect at the next load.\n\nEvery stage reloads the same way — unload, then load on the new device — and a reload that fails puts the model back on the device it had, leaves the setting as it was, and answers `500` with the reason.\n\nList what this host can offer with `GET /pipeline/{stage}/model/{model}/device/list`.",
         "operationId": "set_model_device",
         "parameters": [
           {
@@ -2234,7 +2366,7 @@
           {
             "name": "model",
             "in": "path",
-            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backends` spells it.",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it.",
             "required": true,
             "schema": {
               "type": "string"
@@ -2311,6 +2443,16 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "The reload failed; the model was put back on the device it had.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2346,7 +2488,7 @@
           {
             "name": "model",
             "in": "path",
-            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backends` spells it.",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it.",
             "required": true,
             "schema": {
               "type": "string"
@@ -2420,8 +2562,8 @@
           "pipeline"
         ],
         "summary": "Read a model's language override",
-        "description": "The language this specific model transcribes in, which overrides the global `/language` setting. Addressed by `(source, model)` rather than \"the active model\", so it can be read whether or not the model is loaded.\n\n`null` means no override: the model follows the global setting.",
-        "operationId": "get_one",
+        "description": "The language this specific model transcribes in, and what decided it: the per-model override, the global `/settings/language` setting, or the model's own default. Addressed by `(source, model)` rather than \"the active model\", so it can be read whether or not the model is loaded.\n\n`override` is `null` when none is set, which is what \"follows the global setting\" looks like. What the override *may* be set to is `GET /pipeline/{stage}/model/{model}/language/list`.",
+        "operationId": "get_model_language",
         "parameters": [
           {
             "name": "stage",
@@ -2521,7 +2663,7 @@
         ],
         "summary": "Set a model's language override",
         "description": "Pins this model to a language regardless of the global `/settings/language` setting. A tag the model does not serve is refused rather than silently ignored.\n\nOverridden in turn by a `language` field in a single `POST /transcribe` body.",
-        "operationId": "set",
+        "operationId": "set_model_language",
         "parameters": [
           {
             "name": "stage",
@@ -2631,7 +2773,7 @@
         ],
         "summary": "Clear a model's language override",
         "description": "Removes the per-model pin, returning this model to the global `/settings/language` setting.",
-        "operationId": "clear",
+        "operationId": "clear_model_language",
         "parameters": [
           {
             "name": "stage",
@@ -2726,68 +2868,54 @@
         ]
       }
     },
-    "/v1/registry/backends": {
+    "/v1/pipeline/{stage}/model/{model}/language/list": {
       "get": {
         "tags": [
-          "registry"
+          "pipeline"
         ],
-        "summary": "Browse the published backend catalog",
-        "description": "Every backend published to the registry, with the models each serves and whether this machine can run it. `compatible` is decided against the host's actual accelerators and this Super STT's version, so the list reflects what is installable here rather than what exists in general.\n\n`needs_client_update` separates the two ways a backend can be blocked: a host that lacks the right GPU will never run it, but a Super STT one version behind is something the user can fix in a minute. Surface those differently.\n\nThis is what is *available*; `GET /backends` is what is installed.",
-        "operationId": "list_registry_backends",
+        "summary": "List the languages a model can be pinned to",
+        "description": "What `POST /pipeline/{stage}/model/{model}/language` will accept for this model: the tags it serves, plus the reserved `auto` for letting it detect the language itself.\n\nFill a language picker from this rather than from a general BCP-47 list — a tag the model does not serve is refused, and offering one is an error the user only discovers by choosing it.\n\nEmpty for a monolingual model, which has nothing to choose however many tags its manifest lists. That is the same shape `GET /pipeline/{stage}/model/{model}/device/list` answers with for a model that runs remotely, and a client hides the control on an empty list rather than special-casing a status.",
+        "operationId": "list_model_languages",
         "parameters": [
           {
-            "name": "include_incompatible",
-            "in": "query",
-            "description": "Include entries this machine cannot run. Off by default, so the catalog\nshows what is actually installable here.",
-            "required": false,
+            "name": "stage",
+            "in": "path",
+            "description": "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+            "required": true,
             "schema": {
-              "type": "boolean"
-            }
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "example": 1
           },
           {
-            "name": "kind",
-            "in": "query",
-            "description": "Filter by backend kind.",
-            "required": false,
+            "name": "model",
+            "in": "path",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage.",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "online",
-            "in": "query",
-            "description": "Filter by whether the backend calls out to a network service.",
-            "required": false,
-            "schema": {
-              "type": [
-                "boolean",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "q",
-            "in": "query",
-            "description": "Case-insensitive substring match over name and description.",
-            "required": false,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "The catalog.",
+            "description": "The languages on offer.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RegistryListResponse"
+                  "$ref": "#/components/schemas/LanguageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The stage has no backend selected, so there is nothing to resolve `model` against (`invalid_backend`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -2812,8 +2940,8 @@
               }
             }
           },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
+          "404": {
+            "description": "No such stage (`unknown_stage`), or this stage's backend serves no such model (`unknown_model`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2822,12 +2950,12 @@
               }
             }
           },
-          "503": {
-            "description": "The catalog could not be fetched and nothing is cached (`registry_unavailable`). Retry, or force a fetch with `POST /registry/backends/refresh`.",
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RegistryError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -2842,7 +2970,7 @@
         ]
       }
     },
-    "/v1/registry/backends/install": {
+    "/v1/registry/backend/install": {
       "post": {
         "tags": [
           "registry"
@@ -2941,13 +3069,129 @@
         ]
       }
     },
-    "/v1/registry/backends/refresh": {
+    "/v1/registry/backend/list": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "summary": "Browse the published backend catalog",
+        "description": "Every backend published to the registry, with the models each serves and whether this machine can run it. `compatible` is decided against the host's actual accelerators and this Super STT's version, so the list reflects what is installable here rather than what exists in general.\n\n`needs_client_update` separates the two ways a backend can be blocked: a host that lacks the right GPU will never run it, but a Super STT one version behind is something the user can fix in a minute. Surface those differently.\n\nThis is what is *available*; `GET /backend/list` is what is installed.",
+        "operationId": "list_registry_backends",
+        "parameters": [
+          {
+            "name": "include_incompatible",
+            "in": "query",
+            "description": "Include entries this machine cannot run. Off by default, so the catalog\nshows what is actually installable here.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "Filter by backend kind.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "online",
+            "in": "query",
+            "description": "Filter by whether the backend calls out to a network service.",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Case-insensitive substring match over name and description.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The catalog could not be fetched and nothing is cached (`registry_unavailable`). Retry, or force a fetch with `POST /registry/backend/refresh`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/registry/backend/refresh": {
       "post": {
         "tags": [
           "registry"
         ],
         "summary": "Re-fetch the backend catalog",
-        "description": "Pulls the published index again rather than serving what is cached, and reports how many backends it now holds. Use it after a backend is published, or to clear an `index_stale` flag.\n\n`GET /registry/backends` refreshes on its own schedule; this forces it now.",
+        "description": "Pulls the published index again rather than serving what is cached, and reports how many backends it now holds. Use it after a backend is published, or to clear an `index_stale` flag.\n\n`GET /registry/backend/list` refreshes on its own schedule; this forces it now.",
         "operationId": "refresh_registry",
         "responses": {
           "200": {
@@ -3010,7 +3254,7 @@
         ]
       }
     },
-    "/v1/registry/backends/update": {
+    "/v1/registry/backend/update": {
       "post": {
         "tags": [
           "registry"
@@ -3638,6 +3882,65 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LanguageState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/settings/language/list": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "List the languages the global setting accepts",
+        "description": "The tags `POST /settings/language` will take, plus the reserved `auto`.\n\nFill the global language picker from this rather than from a BCP-47 list of your own: the tags are region-qualified on purpose, and a backend is free to declare either `en` or `en-US` for its models — the daemon narrows a qualified global to whichever a model actually serves, which is a rule no client can infer.\n\nA tag for one particular model belongs on that model, at `POST /pipeline/{stage}/model/{model}/language`, whose own list may be narrower.",
+        "operationId": "list_languages",
+        "responses": {
+          "200": {
+            "description": "Done.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageList"
                 }
               }
             }
@@ -6049,6 +6352,38 @@
           }
         }
       },
+      "LanguageList": {
+        "type": "object",
+        "description": "The languages a model can be pinned to.",
+        "required": [
+          "status",
+          "available_languages"
+        ],
+        "properties": {
+          "available_languages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "BCP-47 tags, plus the reserved `auto`. Empty for a monolingual model,\nwhich has nothing to choose.",
+            "example": [
+              "auto",
+              "en",
+              "es"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
       "LanguageState": {
         "type": "object",
         "description": "The default transcription language.",
@@ -6121,8 +6456,7 @@
         "required": [
           "multilingual",
           "source",
-          "primary",
-          "supported"
+          "primary"
         ],
         "properties": {
           "effective": {
@@ -6150,13 +6484,6 @@
           "source": {
             "type": "string",
             "description": "Which setting `effective` came from: the per-model override, the global\nsetting, or the model's own default."
-          },
-          "supported": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Every tag this model accepts."
           }
         }
       },
@@ -6199,7 +6526,7 @@
                 }
               ]
             },
-            "description": "`[name, source]` pairs. Post-processor models are excluded — they are not\nswitchable transcription models, and offering one would fail every\nrecording. The full catalog, roles included, is at `GET /backends`.",
+            "description": "`[name, source]` pairs. Post-processor models are excluded — they are not\nswitchable transcription models, and offering one would fail every\nrecording. The full catalog, roles included, is at `GET /backend/list`.",
             "example": [
               [
                 "whisper-tiny",
@@ -6825,7 +7152,7 @@
         "properties": {
           "source": {
             "type": "string",
-            "description": "The backend's repo id, as `GET /backends` reports it.",
+            "description": "The backend's repo id, as `GET /backend/list` reports it.",
             "example": "github.com/acme/whisper"
           }
         }
@@ -6962,6 +7289,92 @@
           }
         }
       },
+      "StageModelDevice": {
+        "type": "object",
+        "description": "Which accelerator a stage's model runs on.",
+        "required": [
+          "preference"
+        ],
+        "properties": {
+          "preference": {
+            "type": "string",
+            "description": "The stored preference: `cpu`, `gpu`, or `none` for a model that runs\nremotely and therefore has no local device."
+          },
+          "resolved_accel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What a `gpu` preference resolved to once the model loaded — `cuda`,\n`rocm`, `metal`, `vulkan`. `null` while the preference is `gpu` and\nnothing has confirmed it yet, so a client is never told a device\nresolved before a load proved it."
+          }
+        }
+      },
+      "StageModelEnvelope": {
+        "type": "object",
+        "description": "One stage's model slot.",
+        "required": [
+          "status",
+          "model"
+        ],
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/StageModelReport"
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
+      "StageModelReport": {
+        "type": "object",
+        "description": "The model slot of one stage: what is selected, whether it is up, the device\nit runs on, and the load still in flight.\n\nAnswers `GET /pipeline/{stage}/model`, and answers it the same way at every\nposition — which is the point of it being its own object. `model` is the\n*selection* and survives an unload; `loaded` says whether that selection is\nrunning right now.",
+        "required": [
+          "stage",
+          "loaded"
+        ],
+        "properties": {
+          "device": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StageModelDevice",
+                "description": "The accelerator the selection runs on; `null` when nothing is selected.\n\nWhat it *could* run on is `GET /pipeline/{stage}/model/{model}/device/list`,\nkept out of here deliberately: that list costs a host probe, and a card\nfills its picker from it once rather than on every poll of this."
+              }
+            ]
+          },
+          "loaded": {
+            "type": "boolean",
+            "description": "Whether that model is loaded and ready to run."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model selected in this stage; `null` when none is picked."
+          },
+          "stage": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The stage whose model slot this is.",
+            "minimum": 0
+          },
+          "switch": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StageSwitch",
+                "description": "The load or download in flight for this stage; `null` when idle.\n\nHere rather than on the stage because it names a model. The daemon runs\none model operation at a time but not always for the same stage, so it\nis reported per stage."
+              }
+            ]
+          }
+        }
+      },
       "StageMutation": {
         "type": "object",
         "description": "The answer to a stage mutation.\n\nThe two stages answer with different keys — stage 1 with `active_backend`,\nstage 2 with `post_processor` — because each grew its own endpoint before\nthe pipeline addressed stages by position. Both are documented rather than\nreconciled: changing either is a breaking wire change. Read the stage back\nwith `GET /pipeline/{stage}` for the one shape both share.",
@@ -7005,37 +7418,16 @@
       },
       "StageReport": {
         "type": "object",
-        "description": "One stage of the pipeline: which backend fills it, what is running there,\nand the load still in flight, if any.\n\nEvery optional field here serializes as an explicit `null` rather than being\nomitted — a stage reports its whole shape whatever state it is in, so a\nclient can read `source` without first checking the key exists. `enabled` is\nthe one exception, and is absent rather than null on a stage that has no\non/off choice of its own.",
+        "description": "One stage of the pipeline: which backend fills it, and whether the user has\nit switched on.\n\nA stage reports its *backend*, not its model. The model is one level down,\nat `GET /pipeline/{stage}/model`, as [`StageModelReport`].\n\nThe two were one object until the stages were made to behave alike, and the\nsplit is what fixed them: stage 1 reported the model it had *loaded* while\nstage 2 reported the model it had *selected*, so the same field meant\ndifferent things at the two positions — and at stage 1 `loaded` was true\nexactly when `model` was non-null, carrying no information at all.\n\n`source` and `name` serialize as an explicit `null` rather than being\nomitted: a stage reports its whole shape whatever state it is in, so a\nclient can read `source` to decide whether the stage is filled without\nfirst checking the key exists.",
         "required": [
           "stage",
           "role",
-          "loaded"
+          "enabled"
         ],
         "properties": {
-          "device": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The accelerator the loaded model actually runs on — not the user's\npreference, which is read per model through\n`/pipeline/{stage}/model/{model}/device`. `null` when nothing is loaded,\nsince nothing runs anywhere."
-          },
           "enabled": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "The user's on/off choice, for stages that carry one separately from\nwhether the model came up: a stage can be enabled while its load failed,\nand transcripts then pass through untouched. Absent on stage 1, which\nhas no switch of its own."
-          },
-          "loaded": {
             "type": "boolean",
-            "description": "Whether that model is loaded and ready to run."
-          },
-          "model": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The model selected in this stage; `null` when none is picked."
+            "description": "Whether the user has this stage switched on — what Load sets and Unload\nclears.\n\nSeparate from whether the model actually came up, which is `loaded` on\n[`StageModelReport`]: a stage can be enabled while its load failed, and\ntranscripts then pass through untouched. Every stage carries one. Stage\n1 did not until the stages were made to behave alike, which is why its\nunload had to throw the selection away to stay idle across a restart."
           },
           "name": {
             "type": [
@@ -7059,17 +7451,6 @@
             "format": "int32",
             "description": "Position in the pipeline: [`TRANSCRIPTION_STAGE`], [`POST_PROCESSOR_STAGE`].",
             "minimum": 0
-          },
-          "switch": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/StageSwitch",
-                "description": "The load or download in flight for this stage; `null` when idle.\n\nThe daemon runs one model operation at a time but not always for the\nsame stage, so this is reported per stage rather than globally."
-              }
-            ]
           }
         }
       },

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::core::app::{AppModel, ModelOperationState};
-use crate::daemon::client::{get_gpu_info, get_stage};
+use crate::daemon::client::{get_gpu_info, get_stage_model, get_stage_view};
 use crate::state::device_offers::STT_STAGE;
 use crate::ui::messages::{DeviceMessage, Message, ModelMessage, ModelsPageMessage, StageMessage};
 use cosmic::prelude::*;
@@ -28,9 +28,12 @@ impl AppModel {
         // One-time startup load: models + device info
         Task::batch([
             self.fetch_current_model(),
-            Task::perform(get_stage(STT_STAGE), |result| match result {
-                Ok(stage) => {
-                    let device = stage.device;
+            // The accelerator stage 1 is actually on, which is a property of
+            // the model it is running rather than of the backend filling the
+            // stage — so it comes off the model slot, not off `/pipeline/1`.
+            Task::perform(get_stage_model(STT_STAGE), |result| match result {
+                Ok(slot) => {
+                    let device = slot.running_device().map(ToString::to_string);
                     info!("Initial device load successful: device={device:?}");
                     cosmic::Action::App(Message::Device(DeviceMessage::DeviceInfoLoaded(device)))
                 }
@@ -40,10 +43,15 @@ impl AppModel {
                 }
             }),
             crate::core::app::handlers::tasks::reload_backends(),
-            Task::perform(get_stage(STT_STAGE), |result| {
+            // Backend *and* the model it remembers, in one read: a stage keeps
+            // its selection through an unload, so the card comes back offering
+            // that model instead of empty.
+            Task::perform(get_stage_view(STT_STAGE), |result| {
+                let stage = result.unwrap_or_default();
                 cosmic::Action::App(Message::Stage(StageMessage::BackendSelected {
                     stage: STT_STAGE,
-                    source: result.ok().and_then(|stage| stage.source),
+                    source: stage.source,
+                    model: stage.model,
                 }))
             }),
             Task::perform(get_gpu_info(), |result| {
@@ -135,12 +143,17 @@ impl AppModel {
     /// (re)subscribe to resync robustly against reconnect/restart ordering.
     pub(in crate::core::app) fn fetch_current_model(&self) -> Task<cosmic::Action<Message>> {
         let epoch = self.current_model_epoch;
-        Task::perform(get_stage(STT_STAGE), move |result| match result {
+        Task::perform(get_stage_view(STT_STAGE), move |result| match result {
             Ok(stage) => {
                 // An idle daemon is a valid state, not an error: report an
                 // empty selection rather than a backend with no model, which is
                 // what the identity handler reads as "nothing loaded".
-                let (model, source) = match stage.model {
+                //
+                // The *loaded* model, not the selection: a stage remembers what
+                // it was pointed at through an unload, and reporting that as
+                // the current model would tell the Recording page a model is up
+                // when none is.
+                let (model, source) = match stage.model.filter(|_| stage.loaded) {
                     Some(model) => (model, stage.source.unwrap_or_default()),
                     None => (String::new(), String::new()),
                 };

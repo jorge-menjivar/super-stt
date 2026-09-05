@@ -14,7 +14,9 @@
 use crate::daemon::http::wire::Ack;
 use serde::Serialize;
 use super_stt_shared::models::backends::BackendInfo;
-use super_stt_shared::models::protocol::{DaemonResponse, GpuHostInfo, GpuInfo, StageReport};
+use super_stt_shared::models::protocol::{
+    DaemonResponse, GpuHostInfo, GpuInfo, StageModelReport, StageReport,
+};
 use super_stt_shared::models::theme::AudioTheme;
 use utoipa::ToSchema;
 
@@ -262,7 +264,7 @@ pub(crate) struct ModelList {
     status: &'static str,
     /// `[name, source]` pairs. Post-processor models are excluded — they are not
     /// switchable transcription models, and offering one would fail every
-    /// recording. The full catalog, roles included, is at `GET /backends`.
+    /// recording. The full catalog, roles included, is at `GET /backend/list`.
     #[schema(example = json!([["whisper-tiny", "github.com/super-stt/whisper"]]))]
     available_models: Vec<(String, String)>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -353,6 +355,14 @@ pub(crate) struct StageEnvelope {
     #[schema(example = "success")]
     pub(crate) status: &'static str,
     pub(crate) stage: StageReport,
+}
+
+/// One stage's model slot.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct StageModelEnvelope {
+    #[schema(example = "success")]
+    pub(crate) status: &'static str,
+    pub(crate) model: StageModelReport,
 }
 
 /// The devices a model or a stage can run on.
@@ -510,8 +520,29 @@ pub(crate) struct ModelLanguageBlock {
     model_override: Option<String>,
     /// The model's own default language.
     primary: String,
-    /// Every tag this model accepts.
-    supported: Vec<String>,
+}
+
+/// The languages a model can be pinned to.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct LanguageList {
+    #[schema(example = "success")]
+    status: &'static str,
+    /// BCP-47 tags, plus the reserved `auto`. Empty for a monolingual model,
+    /// which has nothing to choose.
+    #[schema(example = json!(["auto", "en", "es"]))]
+    available_languages: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+impl FromDaemon for LanguageList {
+    fn from_daemon(resp: DaemonResponse) -> Self {
+        Self {
+            status: "success",
+            available_languages: resp.available_languages.unwrap_or_default(),
+            message: resp.message,
+        }
+    }
 }
 
 /// The per-model language resolution.
@@ -535,7 +566,6 @@ impl FromDaemon for ModelLanguageState {
                     effective: None,
                     model_override: None,
                     primary: String::new(),
-                    supported: Vec::new(),
                 }),
         }
     }

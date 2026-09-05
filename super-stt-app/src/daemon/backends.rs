@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! The daemon's installed-backend catalog (`GET /backends`).
+//! The daemon's installed-backend catalog (`GET /backend/list`).
 //!
 //! The response shape is shared with the daemon (which serializes it) via
 //! [`super_stt_shared::models::backends`], so the two sides cannot drift. This

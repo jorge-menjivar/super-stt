@@ -42,7 +42,12 @@ impl SuperSTTDaemon {
             Command::GetAudioTheme => self.handle_get_audio_theme(),
             Command::TestAudioTheme => self.handle_test_audio_theme().await,
             Command::SetModel { model, source } => self.handle_set_model(model, source).await,
-            Command::GetModel => self.handle_get_model().await,
+            Command::GetModel => {
+                self.handle_get_stage_model(
+                    crate::daemon::device_management::PipelineStage::Transcription,
+                )
+                .await
+            }
             Command::ListModels => self.handle_list_stage_models(false).await,
             Command::ListPostProcessorModels => self.handle_list_stage_models(true).await,
             cmd @ (Command::SetModelDevice { .. }
@@ -72,7 +77,12 @@ impl SuperSTTDaemon {
             Command::SetPostProcessor { model, source } => {
                 self.handle_set_post_processor(model, source).await
             }
-            Command::GetPostProcessor => self.handle_get_post_processor().await,
+            Command::GetPostProcessor => {
+                self.handle_get_stage_model(
+                    crate::daemon::device_management::PipelineStage::PostProcessor,
+                )
+                .await
+            }
             Command::ClearPostProcessor => self.handle_clear_post_processor().await,
             Command::SetPostProcessorBackend { source } => {
                 self.handle_set_post_processor_backend(source).await
@@ -104,12 +114,16 @@ impl SuperSTTDaemon {
             }
             Command::GetPrimaryLanguage => self.handle_get_primary_language().await,
             Command::ClearPrimaryLanguage => self.handle_clear_primary_language().await,
+            Command::ListPrimaryLanguages => self.handle_list_primary_languages(),
             cmd @ (Command::SetModelLanguage { .. }
             | Command::GetModelLanguage { .. }
-            | Command::ClearModelLanguage { .. }) => self.handle_model_language(cmd).await,
+            | Command::ClearModelLanguage { .. }
+            | Command::ListModelLanguages { .. }) => self.handle_model_language(cmd).await,
             Command::SetCustomModelsDir { path } => self.handle_set_custom_models_dir(path).await,
             Command::GetCustomModelsDir => self.handle_get_custom_models_dir().await,
             Command::ListBackends => self.handle_list_backends().await,
+            Command::ListTranscriptionBackends => self.handle_list_stage_backends(false).await,
+            Command::ListPostProcessorBackends => self.handle_list_stage_backends(true).await,
             Command::ReloadActiveModel => self.handle_reload_active_model().await,
             Command::UnloadActiveModel => self.handle_unload_active_model().await,
             Command::SetBackendOption {

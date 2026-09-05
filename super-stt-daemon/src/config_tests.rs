@@ -486,35 +486,113 @@ fn v0_1_3_config_reserializes_to_stable_canonical() {
     assert_eq!(s1, s2, "canonical form must be idempotent");
 }
 
+/// The invariant behind the unload path (`disable_transcription`): unloading
+/// switches the stage off and keeps everything else — the model, its source,
+/// the backend — and that state must survive a save/reload.
+///
+/// Both halves matter, and they used to be in tension. A restart must not
+/// reload the model the user just stopped, which is why the unload once erased
+/// `preferred_model`; but erasing it also lost the selection, so the card came
+/// back empty. The flag separates the two, exactly as `post_processor.enabled`
+/// has always done for stage 2.
 #[test]
-fn cleared_preferred_model_persists_as_idle_with_backend_kept() {
-    // Invariant behind the unload path (`clear_preferred_model`): dropping the
-    // loaded model empties preferred_model/source but keeps the active backend
-    // selected, and that state must survive a save/reload so a daemon restart
-    // stays idle instead of reloading the just-unloaded model.
+fn an_unload_persists_as_switched_off_with_the_selection_kept() {
     let mut config = DaemonConfig::default();
-    config.transcription.preferred_model = "whisper-large-v3".to_string();
-    config.transcription.preferred_source = "openai-whisper".to_string();
+    config.update_preferred_model(
+        "whisper-large-v3".to_string(),
+        "openai-whisper".to_string(),
+        None,
+    );
     config.transcription.active_backend = Some("openai-whisper".to_string());
+    assert!(config.transcription.is_active(), "a loaded stage is active");
 
-    // Simulate the clear (the method itself also calls save(), which touches
-    // the real config path, so exercise the field effect directly).
-    config.transcription.preferred_model = String::new();
-    config.transcription.preferred_source = String::new();
+    config.disable_transcription();
 
     let toml_str = toml::to_string_pretty(&config).expect("should serialize");
     let (parsed, was_reset) = DaemonConfig::parse_or_reset(&toml_str);
-    assert!(!was_reset, "cleared config must re-parse cleanly");
+    assert!(!was_reset, "the config must re-parse cleanly");
     assert!(
-        parsed.transcription.preferred_model.is_empty(),
+        !parsed.transcription.is_active(),
         "restart must not reload an unloaded model"
     );
-    assert!(parsed.transcription.preferred_source.is_empty());
+    assert_eq!(
+        parsed.transcription.preferred_model, "whisper-large-v3",
+        "the selection survives, so the card can offer to load it again"
+    );
+    assert_eq!(parsed.transcription.preferred_source, "openai-whisper");
     assert_eq!(
         parsed.transcription.active_backend.as_deref(),
         Some("openai-whisper"),
         "unload keeps the active backend selected"
     );
+}
+
+/// A `daemon.toml` written before stage 1 had an `enabled` flag still loads
+/// its model.
+///
+/// The one thing the field's `true` serde default is for. Reading a missing key
+/// as `false` would idle every daemon on upgrade — no error, just a model that
+/// stopped coming up — because such a config loaded `preferred_model` on sight.
+#[test]
+fn a_config_predating_the_enabled_flag_still_loads_its_model() {
+    let with_a_model = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "classic"
+volume = 100
+
+[transcription]
+preferred_model = "whisper-tiny"
+preferred_source = "github.com/super-stt/openai"
+active_backend = "openai"
+"#;
+    let (parsed, was_reset) = DaemonConfig::parse_or_reset(with_a_model);
+    assert!(!was_reset, "an older config must re-parse cleanly");
+    assert!(
+        parsed.transcription.enabled,
+        "an absent flag reads as on, or the upgrade silently idles the daemon"
+    );
+    assert!(
+        parsed.transcription.is_active(),
+        "a config with a model and no flag was running that model"
+    );
+
+    // And one that named no model stays idle, which is the answer the default
+    // gave before the field existed — so the migration default is never wrong.
+    let without_a_model = with_a_model
+        .replace("preferred_model = \"whisper-tiny\"\n", "")
+        .replace("preferred_source = \"github.com/super-stt/openai\"\n", "");
+    let (idle, was_reset) = DaemonConfig::parse_or_reset(&without_a_model);
+    assert!(!was_reset);
+    assert!(!idle.transcription.is_active());
+}
+
+/// Both stages decide "should this be running?" the same way: switched on, and
+/// pointed at a complete `(model, source)` pair.
+///
+/// A stage switched on with nothing selected is not running — and a card told
+/// otherwise would offer to unload a model that does not exist.
+#[test]
+fn a_stage_with_no_selection_is_not_active_at_either_position() {
+    let mut config = DaemonConfig::default();
+    config.transcription.enabled = true;
+    config.post_processor.enabled = true;
+    assert!(!config.transcription.is_active());
+    assert!(!config.post_processor.is_active());
+
+    // Half a selection is no selection: a name without the backend serving it
+    // resolves to nothing.
+    config.transcription.preferred_model = "whisper-tiny".to_string();
+    config.post_processor.model = "cleanup".to_string();
+    assert!(!config.transcription.is_active());
+    assert!(!config.post_processor.is_active());
+
+    config.transcription.preferred_source = "github.com/super-stt/openai".to_string();
+    config.post_processor.source = "github.com/super-stt/openai".to_string();
+    assert!(config.transcription.is_active());
+    assert!(config.post_processor.is_active());
 }
 
 #[test]
@@ -757,6 +835,9 @@ fn update_config_round_trips() {
 
 /// Every path that drops the model preference drops the provider with it —
 /// otherwise the persisted triple names a model that is no longer selected.
+///
+/// An unload is no longer one of those paths: it switches the stage off and
+/// leaves the selection, provider included, for the next load to use.
 #[test]
 fn clearing_the_model_preference_clears_the_provider() {
     let seeded = || {
@@ -768,10 +849,6 @@ fn clearing_the_model_preference_clears_the_provider() {
         );
         c
     };
-
-    let mut c = seeded();
-    c.clear_preferred_model();
-    assert_eq!(c.transcription.preferred_provider, "");
 
     let mut c = seeded();
     c.update_active_backend("whisper".to_string());

@@ -1077,7 +1077,7 @@ supported_devices = ["cpu"]
     /// produces a path outside it.
     #[test]
     fn install_dir_name_never_escapes_the_backends_dir_when_joined() {
-        let backends_dir = Path::new("/var/lib/super-stt/backends");
+        let backends_dir = Path::new("/var/lib/super-stt/backend/list");
         for unsafe_id in ["..", "../../../../home/jorge/.ssh", "/etc/passwd", "a/b"] {
             let e = index_entry("voxtral", Some(unsafe_id));
             let joined = backends_dir.join(install_dir_name(&e));

@@ -21,6 +21,15 @@ use crate::state::LanguageResolution;
 #[derive(Debug, Clone, Default)]
 pub struct ModelLanguages {
     blocks: Vec<((u32, String, String), LanguageResolution)>,
+    /// The tags each answered-for model can be pinned to — what
+    /// `GET /pipeline/{stage}/model/{model}/language/list` returns.
+    ///
+    /// Held beside the blocks rather than inside them because the two arrive
+    /// from different requests and have different lifetimes: the block changes
+    /// every time the user picks a language, the offer never changes for a
+    /// given model. A single record would make every pick re-fetch a list that
+    /// cannot have moved.
+    offers: Vec<((u32, String, String), Vec<String>)>,
 }
 
 impl ModelLanguages {
@@ -50,6 +59,30 @@ impl ModelLanguages {
     pub fn pairs(&self) -> impl Iterator<Item = (u32, String, String)> + '_ {
         self.blocks.iter().map(|(key, _)| key.clone())
     }
+
+    /// The tags `(stage, source, model)` can be pinned to, or `None` if the
+    /// daemon has not answered for it.
+    ///
+    /// A miss and an empty answer are different, and a picker reads them
+    /// differently: not asked yet is a control still loading, while an empty
+    /// offer is a monolingual model with nothing to choose.
+    #[must_use]
+    pub fn offered(&self, stage: u32, source: &str, model: &str) -> Option<&[String]> {
+        self.offers
+            .iter()
+            .find(|((st, s, m), _)| *st == stage && s == source && m == model)
+            .map(|(_, tags)| tags.as_slice())
+    }
+
+    /// Record what a model can be pinned to.
+    pub fn record_offer(&mut self, stage: u32, source: String, model: String, tags: Vec<String>) {
+        let key = (stage, source, model);
+        if let Some(existing) = self.offers.iter_mut().find(|(k, _)| *k == key) {
+            existing.1 = tags;
+            return;
+        }
+        self.offers.push((key, tags));
+    }
 }
 
 /// The global Primary Language plus the per-model override picker state.
@@ -57,6 +90,14 @@ impl ModelLanguages {
 pub struct LanguageState {
     /// Global Primary Language from the daemon (`None` = unset). Display-only cache.
     pub primary_language: Option<String>,
+    /// The tags the global setting accepts, from
+    /// `GET /settings/language/list`.
+    ///
+    /// The daemon's vocabulary rather than one this client curates: which of
+    /// `en` and `en-US` a model wants is a rule only the daemon's resolver
+    /// knows, so a list of our own would offer tags the setter now refuses.
+    /// Empty until the answer lands, which renders as a picker still loading.
+    pub global_offers: Vec<String>,
     /// Per-model resolution blocks, one per `(source, model)` asked about.
     pub model_languages: ModelLanguages,
     /// The `(source, model)` pair the open per-model language sheet configures.
@@ -76,7 +117,6 @@ mod tests {
             effective: Some(primary.to_string()),
             source: "default".to_string(),
             primary: primary.to_string(),
-            supported: vec![primary.to_string()],
         }
     }
 
@@ -128,5 +168,35 @@ mod tests {
     fn an_unasked_pair_misses() {
         let langs = ModelLanguages::default();
         assert!(langs.get(1, "src/a", "whisper").is_none());
+    }
+
+    /// An offer of nothing is not the same as no offer, and the picker draws
+    /// them differently: a monolingual model has nothing to choose, while an
+    /// unanswered one is still loading.
+    #[test]
+    fn an_empty_offer_is_not_a_missing_one() {
+        let mut langs = ModelLanguages::default();
+        assert!(langs.offered(1, "src/a", "mono").is_none());
+
+        langs.record_offer(1, "src/a".into(), "mono".into(), Vec::new());
+        assert_eq!(langs.offered(1, "src/a", "mono"), Some(&[][..]));
+    }
+
+    /// Offers are keyed like blocks, so two stages showing the same model do
+    /// not answer for each other.
+    #[test]
+    fn offers_are_keyed_by_stage_too() {
+        let mut langs = ModelLanguages::default();
+        langs.record_offer(1, "src/a".into(), "shared".into(), vec!["auto".into()]);
+        langs.record_offer(2, "src/a".into(), "shared".into(), Vec::new());
+
+        assert_eq!(
+            langs.offered(1, "src/a", "shared").map(<[String]>::len),
+            Some(1)
+        );
+        assert_eq!(
+            langs.offered(2, "src/a", "shared").map(<[String]>::len),
+            Some(0)
+        );
     }
 }

@@ -44,9 +44,9 @@ graph TD
     R_Pipeline -.-> E8["POST /{stage}/model/reload"]
 
     %% Registry Endpoints
-    R_Registry -.-> E9["GET /backends"]
-    R_Registry -.-> E10["POST /backends/install"]
-    R_Registry -.-> E11["POST /backends/refresh"]
+    R_Registry -.-> E9["GET /backend/list"]
+    R_Registry -.-> E10["POST /registry/backend/install"]
+    R_Registry -.-> E11["POST /registry/backend/refresh"]
 
     %% Settings Endpoints
     R_Settings -.-> E12["GET/POST /settings/volume"]

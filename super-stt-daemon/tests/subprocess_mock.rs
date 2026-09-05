@@ -156,6 +156,68 @@ async fn two_backends_from_one_directory_run_concurrently() {
     transcriber.shutdown().await.expect("clean shutdown");
 }
 
+/// The reported bug, at the level it bites: reloading the *same* model in
+/// place. An instance owns its `systemd-run --unit=` name and its socket, both
+/// keyed on (backend, model), so a second instance of one model cannot be built
+/// while the first still holds them — `systemd-run` refuses the duplicate unit
+/// outright.
+///
+/// Worse, the attempt is not free: the spawn unlinks the socket path before it
+/// reaches systemd, so the failed second spawn leaves the *first* instance
+/// running but unreachable. That is why "build the replacement, keep the old
+/// one if it fails" was never a policy a subprocess backend could honor — and
+/// why every load path releases its instance before building the replacement.
+/// Stage 2 loaded first, so every in-place reload it was asked for — a device
+/// switch, an option change — failed with an opaque systemd error while the
+/// card went on showing the model it had just broken.
+#[tokio::test]
+async fn a_model_reloads_only_once_its_instance_is_released() {
+    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+        return; // needs a systemd --user session
+    }
+    install_crypto_provider();
+
+    let (dir, _cleanup) = seed_backend_dir("reload");
+
+    let mut running = SubprocessBackend::spawn(&dir, "mock-cleanup", "cpu", None, Vec::new())
+        .await
+        .expect("spawn + load the post-processor");
+
+    // The replacement cannot be built beside it.
+    let clash = SubprocessBackend::spawn(&dir, "mock-cleanup", "cpu", None, Vec::new()).await;
+    let error = clash
+        .err()
+        .expect("a second instance of one model must not spawn");
+    assert!(
+        error.to_string().contains("systemd-run failed"),
+        "expected the duplicate unit name to be refused: {error}"
+    );
+
+    // And the attempt took the running instance's socket with it.
+    assert!(
+        running
+            .process_text("um so hello", Some("en"))
+            .await
+            .is_err(),
+        "the failed spawn unlinked the live instance's socket, so keeping it \
+         was never an option"
+    );
+
+    // Released first, the same model comes straight back up — which is what
+    // makes unload-then-load the only order that reloads anything.
+    running.shutdown().await.expect("clean shutdown");
+    let mut reloaded = SubprocessBackend::spawn(&dir, "mock-cleanup", "cpu", None, Vec::new())
+        .await
+        .expect("the model reloads once its instance is released");
+    let processed = reloaded
+        .process_text("um so hello", Some("en"))
+        .await
+        .expect("the reloaded instance serves");
+    assert_eq!(processed, "processed: um so hello");
+
+    reloaded.shutdown().await.expect("clean shutdown");
+}
+
 /// The contract says every `/v1` request carries the user's `[[options]]` as
 /// `x-stt-option-*` headers, whichever transport. A subprocess backend that
 /// steers on an option — a register, a style prompt — reads them off the
