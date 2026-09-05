@@ -280,7 +280,8 @@ impl SuperSTTDaemon {
                     .await
             }
             PipelineStage::PostProcessor => {
-                self.reload_post_processor_device(target, &device).await
+                self.reload_post_processor_device(target, &device, &current)
+                    .await
             }
         }
     }
@@ -367,10 +368,19 @@ impl SuperSTTDaemon {
     /// not returned: the in-memory config already holds the choice, so the
     /// daemon behaves as asked until it restarts.
     async fn store_model_device(&self, target: &DeviceTarget, device: &str) {
+        self.write_model_device(target, Some(device.to_string()))
+            .await;
+    }
+
+    /// [`store_model_device`](Self::store_model_device) over the full range of
+    /// the setting, `None` included — what a rolled-back switch needs, since a
+    /// model that had no device of its own must be left with none rather than
+    /// pinned to the global default it was following.
+    async fn write_model_device(&self, target: &DeviceTarget, device: Option<String>) {
         self.config.write().await.update_model_device(
             &target.definition.source,
             &target.definition.name,
-            Some(device.to_string()),
+            device,
         );
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after device change: {e}");
@@ -574,36 +584,87 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// Reload the stage-2 model onto `device`. The setting is stored first
-    /// and a load failure is reported, not failed — the same best-effort
-    /// policy every other post-processor write follows — and the failed
-    /// reload leaves the previous instance in place, since
-    /// `load_configured_post_processor` replaces it only once the new one
-    /// came up.
+    /// Reload the stage-2 model onto `device`: unload, load, and on failure
+    /// recover onto `previous` — the same shape as
+    /// [`switch_transcription_device`](Self::switch_transcription_device),
+    /// because a stage should not answer for its own device differently from
+    /// its neighbour.
+    ///
+    /// A failed reload is reported as a *failure*. The best-effort policy the
+    /// other post-processor writes follow — save the setting, report the load
+    /// in the message — is right when the setting is the request and the load
+    /// is a consequence; here the reload *is* the request, and answering
+    /// `success` left every client showing a device the model never moved to.
+    ///
+    /// Stage 2 loads on whatever device its config names, so unlike stage 1 the
+    /// choice has to be stored before the load rather than after it — and put
+    /// back if the load fails.
     async fn reload_post_processor_device(
         &self,
         target: DeviceTarget,
         device: &str,
+        previous: &str,
     ) -> DaemonResponse {
         let name = target.definition.name.clone();
+        // The setting the model had of its own, which `previous` is not: that
+        // is the *effective* device, and may be the global default the model
+        // was merely following.
+        let prior = self
+            .config
+            .read()
+            .await
+            .model_device(&target.definition.source, &target.definition.name)
+            .map(str::to_string);
         self.store_model_device(&target, device).await;
-        let note = match self.load_configured_post_processor().await {
+        let response = match self.load_configured_post_processor().await {
             Ok(()) => {
                 info!("Post-processor {name} reloaded on {device}");
-                String::new()
+                self.model_device_response(
+                    PipelineStage::PostProcessor,
+                    &target,
+                    format!("Device for {name} set to {device}"),
+                )
+                .await
             }
             Err(e) => {
-                warn!("Post-processor {name} device set to {device} but not reloaded: {e}");
-                format!(" (not reloaded: {e})")
+                self.recover_post_processor_device(&target, &e, device, previous, prior)
+                    .await
             }
         };
         self.publish_settings_changed("post_processor");
-        self.model_device_response(
-            PipelineStage::PostProcessor,
-            &target,
-            format!("Device for {name} set to {device}{note}"),
-        )
-        .await
+        response
+    }
+
+    /// A failed stage-2 switch: put the setting back where it was and load the
+    /// model on it again, so a device the model cannot run on costs the user
+    /// neither the preference nor the running post-processor. The stage-2 twin
+    /// of [`recover_transcription_device`](Self::recover_transcription_device).
+    async fn recover_post_processor_device(
+        &self,
+        target: &DeviceTarget,
+        error: &anyhow::Error,
+        device: &str,
+        previous: &str,
+        prior: Option<String>,
+    ) -> DaemonResponse {
+        let name = &target.definition.name;
+        error!("Failed to reload post-processor {name} on {device}: {error}");
+        warn!("Attempting to recover by reverting {name} to previous device: {previous}");
+        self.write_model_device(target, prior).await;
+        match self.load_configured_post_processor().await {
+            Ok(()) => {
+                warn!("Recovery successful - post-processor {name} reverted to {previous}");
+                DaemonResponse::error(&format!(
+                    "Failed to switch to device '{device}': {error}. Reverted to previous device '{previous}'."
+                ))
+            }
+            Err(recovery_e) => {
+                error!("Post-processor recovery failed: {recovery_e}");
+                DaemonResponse::error(&format!(
+                    "Device switch failed: {error}. Recovery also failed: {recovery_e}. Stage 2 is now idle."
+                ))
+            }
+        }
     }
 
     /// Read-only GPU inventory for `GET /gpu_info`. Hardware detection runs on a

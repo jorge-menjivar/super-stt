@@ -2348,7 +2348,7 @@
           "pipeline"
         ],
         "summary": "Set a model's device preference",
-        "description": "Chooses the accelerator this model runs on. If it is the model the stage is currently running, it is reloaded onto the new device; otherwise the preference is stored and takes effect at the next load.\n\nList what this host can offer with `GET /pipeline/{stage}/model/{model}/device/list`.",
+        "description": "Chooses the accelerator this model runs on. If it is the model the stage is currently running, it is reloaded onto the new device; otherwise the preference is stored and takes effect at the next load.\n\nEvery stage reloads the same way — unload, then load on the new device — and a reload that fails puts the model back on the device it had, leaves the setting as it was, and answers `500` with the reason.\n\nList what this host can offer with `GET /pipeline/{stage}/model/{model}/device/list`.",
         "operationId": "set_model_device",
         "parameters": [
           {
@@ -2436,6 +2436,16 @@
           },
           "429": {
             "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The reload failed; the model was put back on the device it had.",
             "content": {
               "application/json": {
                 "schema": {

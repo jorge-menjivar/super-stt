@@ -2009,6 +2009,117 @@ async fn unloading_the_post_processor_announces_only_when_one_was_loaded() {
     assert_eq!(ready["stage"], 2);
 }
 
+/// A stage-2 backend serving one post-processor, installed but not runnable:
+/// the `dir` holds no component, so resolution succeeds and instantiation
+/// fails — which is what lets a test drive the failure paths of a reload.
+fn fixture_post_processor(source: &str) -> crate::stt_models::backends::DiscoveredBackend {
+    use super_stt_registry_types::manifest::{Device, ModelRole};
+    let mut backend = fixture_backend_devices(
+        "cleanup",
+        source,
+        "Cleanup",
+        "cleanup",
+        vec![Device::Cpu, Device::Gpu],
+    );
+    backend.models[0].role = ModelRole::PostProcessor;
+    backend
+}
+
+/// The reported bug: switching stage 2's device did nothing, and the daemon
+/// said `systemd-run failed: Unit …-s1-mini-q4-k-m-<pid>.service was already
+/// loaded`. Stage 2 built the replacement instance *before* releasing the one
+/// it was running, and a subprocess backend cannot be instantiated twice for
+/// the same model — its `systemd-run --unit=` name and its socket are keyed on
+/// (backend, model), so the second spawn collides with the first. Every
+/// in-place stage-2 reload failed that way while the old instance kept running,
+/// which is why the app went on showing the old device.
+///
+/// Stage 1 never had it: every stage-1 load path unloads first. So does stage 2
+/// now — the slot is empty once the load has been attempted, whether or not it
+/// succeeded.
+#[tokio::test]
+async fn a_stage_two_reload_releases_the_old_instance_before_building_its_replacement() {
+    use crate::daemon::events::Topic;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/cleanup";
+    *daemon.backends.write().await = vec![fixture_post_processor(source)];
+    daemon
+        .config
+        .write()
+        .await
+        .enable_post_processor("cleanup".to_string(), source.to_string());
+    seed_post_processor_named(&daemon, "cleanup", source).await;
+
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+    let result = daemon.load_configured_post_processor().await;
+
+    assert!(
+        result.is_err(),
+        "the fixture backend has no component to instantiate"
+    );
+    assert!(
+        daemon.post_processor.read().await.is_none(),
+        "the running instance must be released before its replacement is built"
+    );
+
+    // And the stage says it went idle: the slot was emptied to make room, so a
+    // client that is not told stops nowhere — it goes on showing a
+    // post-processor that is no longer running.
+    let (_topic, loading) = rx.recv_json().await.expect("loading_model event");
+    assert_eq!(loading["status"], "loading_model");
+    let (_topic, idle) = rx.recv_json().await.expect("ready event");
+    assert_eq!(idle["status"], "ready");
+    assert_eq!(idle["model_loaded"], false);
+    assert_eq!(idle["stage"], 2);
+}
+
+/// A stage-2 device switch that cannot load answers like stage 1's: an error
+/// naming the failure, with the model's setting left exactly as it was. It used
+/// to answer `success` with the reason buried in `message`, so the app reported
+/// a switch that never happened and then re-read the old device.
+///
+/// The model here has no device of its own — it follows the daemon default — so
+/// the rollback must leave it with none. Storing the *effective* device would
+/// pin it to a value the user never chose.
+#[tokio::test]
+async fn a_failed_stage_two_device_switch_fails_and_restores_the_setting() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/cleanup";
+    *daemon.backends.write().await = vec![fixture_post_processor(source)];
+    daemon
+        .config
+        .write()
+        .await
+        .enable_post_processor("cleanup".to_string(), source.to_string());
+    seed_post_processor_named(&daemon, "cleanup", source).await;
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "cleanup"),
+        None,
+        "the model starts out following the daemon default"
+    );
+
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::PostProcessor,
+            "cleanup".to_string(),
+            "gpu".to_string(),
+        )
+        .await;
+
+    assert_eq!(response.status, "error");
+    let message = response.message.unwrap_or_default();
+    assert!(
+        message.contains("Device switch failed"),
+        "the reason belongs in the answer: {message}"
+    );
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "cleanup"),
+        None,
+        "a failed switch must leave the setting as it was, `None` included"
+    );
+}
+
 /// A `Transcribe` fake whose `transcribe_audio` returns a fixed text or fails,
 /// for characterizing the one-shot `handle_transcribe` policy.
 struct ScriptedTranscribe {
@@ -2080,14 +2191,22 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
 /// something to unload. The instance never runs — only the slot's occupancy
 /// matters here.
 async fn seed_scripted_post_processor(daemon: &SuperSTTDaemon) {
+    seed_post_processor_named(daemon, "scripted-pp", "github.com/super-stt/test").await;
+}
+
+/// [`seed_scripted_post_processor`] under a chosen identity, for the tests that
+/// need the slot to hold the same `(source, model)` an installed fixture backend
+/// serves — which is what makes the daemon treat it as the model stage 2 is
+/// running rather than some other model with a device preference.
+async fn seed_post_processor_named(daemon: &SuperSTTDaemon, name: &str, source: &str) {
     use crate::daemon::types::LoadedModel;
     use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::ModelInfoData;
     use std::time::Duration;
 
     let definition = ModelDefinition {
-        name: "scripted-pp".to_string(),
-        source: "github.com/super-stt/test".to_string(),
+        name: name.to_string(),
+        source: source.to_string(),
         is_multilingual: false,
         primary_language: "en".to_string(),
         supported_languages: vec!["en".to_string()],
@@ -2098,13 +2217,7 @@ async fn seed_scripted_post_processor(daemon: &SuperSTTDaemon) {
         role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
         provider: None,
     };
-    let info = ModelInfoData::new(
-        "scripted-pp",
-        "github.com/super-stt/test",
-        false,
-        false,
-        Duration::from_secs(1),
-    );
+    let info = ModelInfoData::new(name, source, false, false, Duration::from_secs(1));
     *daemon.post_processor.write().await = Some(LoadedModel {
         definition,
         instance: Box::new(ScriptedTranscribe {
