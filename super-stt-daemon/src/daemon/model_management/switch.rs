@@ -8,23 +8,6 @@ use log::{error, info, warn};
 use super_stt_shared::models::protocol::{DaemonResponse, DaemonStatusEvent, ErrorCode};
 
 impl SuperSTTDaemon {
-    /// Handle get current model command.
-    pub async fn handle_get_model(&self) -> DaemonResponse {
-        let guard = self.model.read().await;
-
-        if let Some(loaded) = guard.as_ref() {
-            let name = loaded.definition.name.clone();
-            info!("Current model requested: {name}");
-            DaemonResponse::success()
-                .with_current_model(name.clone())
-                .with_current_source(loaded.definition.source.clone())
-                .with_message(format!("Current model: {name}"))
-        } else {
-            warn!("No model is currently loaded");
-            DaemonResponse::error("No model is currently loaded")
-        }
-    }
-
     /// Reject a model/backend/device mutation while a daemon-mic recording is in
     /// flight. `action` names the operation for the human `message` (e.g.
     /// "change the backend", "switch models"); the machine-readable identity is

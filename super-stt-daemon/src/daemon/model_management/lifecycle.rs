@@ -216,9 +216,11 @@ impl SuperSTTDaemon {
             .as_ref()
             .map(|l| l.definition.name.clone());
         self.unload_current_model().await;
-        // Drop the preferred model from config *and persist* so a daemon
-        // restart stays idle instead of reloading the just-unloaded model.
-        self.config.write().await.clear_preferred_model();
+        // Switch the stage off *and persist* so a daemon restart stays idle
+        // instead of reloading the just-unloaded model. The selection itself
+        // stays: the card shows the model it had, and loading it again — onto
+        // the same device or another — is one click rather than a re-pick.
+        self.config.write().await.disable_transcription();
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after unloading model: {e}");
         }

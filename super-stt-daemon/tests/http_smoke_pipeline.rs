@@ -303,9 +303,20 @@ async fn post_processor_defaults_to_disabled_and_unselected() {
     assert_eq!(pp["stage"], 2);
     assert_eq!(pp["role"], "post_processor");
     assert_eq!(pp["enabled"], false);
-    assert_eq!(pp["model"], serde_json::Value::Null);
     assert_eq!(pp["source"], serde_json::Value::Null);
-    assert_eq!(pp["loaded"], false);
+    // The model is one level down — a stage reports the backend filling it and
+    // nothing about what that backend is running.
+    assert!(
+        pp.get("model").is_none() && pp.get("loaded").is_none(),
+        "a stage must not carry model fields: {pp}"
+    );
+
+    let (status, body) = get(&sock, PP_STAGE_MODEL, &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["model"]["stage"], 2);
+    assert_eq!(body["model"]["model"], serde_json::Value::Null);
+    assert_eq!(body["model"]["loaded"], false);
+    assert_eq!(body["model"]["device"], serde_json::Value::Null);
 }
 
 /// Enable → read back → disable. `POST` names the model to run; `DELETE` stops
@@ -332,7 +343,13 @@ async fn post_processor_enable_read_back_and_disable() {
     let (status, body) = get(&sock, PP_STAGE, &token).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["stage"]["enabled"], true);
-    assert_eq!(body["stage"]["model"], "cleanup-1");
+    let (status, body) = get(&sock, PP_STAGE_MODEL, &token).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["model"]["model"], "cleanup-1");
+    assert_eq!(
+        body["model"]["loaded"], false,
+        "the fixture's placeholder entrypoint cannot load"
+    );
 
     let (status, body) = delete_req(&sock, PP_STAGE_MODEL, &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
@@ -341,6 +358,17 @@ async fn post_processor_enable_read_back_and_disable() {
         body["post_processor"]["model"], "cleanup-1",
         "disabling keeps the choice"
     );
+
+    // And the same read back through the pipeline: the stage is off, the model
+    // it was pointed at is still there to load again.
+    let (_, body) = get(&sock, PP_STAGE, &token).await;
+    assert_eq!(body["stage"]["enabled"], false);
+    let (_, body) = get(&sock, PP_STAGE_MODEL, &token).await;
+    assert_eq!(
+        body["model"]["model"], "cleanup-1",
+        "an unload keeps the selection"
+    );
+    assert_eq!(body["model"]["loaded"], false);
 }
 
 /// `DELETE /post_processor` is a no-op when nothing is running, the way
@@ -744,8 +772,8 @@ async fn a_models_device_is_its_own() {
 
     let (_, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
     assert_eq!(body["device"], "gpu", "the choice is recorded");
-    let (_, body) = get(&sock, "/pipeline/1", &token).await;
-    assert_eq!(body["stage"]["loaded"], false, "nothing was loaded");
+    let (_, body) = get(&sock, "/pipeline/1/model", &token).await;
+    assert_eq!(body["model"]["loaded"], false, "nothing was loaded");
 
     // The post-processor on the same backend has its own device.
     let (status, _) = post_req(

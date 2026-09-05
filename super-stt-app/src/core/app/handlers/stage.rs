@@ -13,10 +13,11 @@
 //! What a stage genuinely decides for itself is small, and each of those points
 //! appears exactly once below, marked `STAGE-SPECIFIC`:
 //!
-//! * where its selected backend is held, and
+//! * where its selected backend is held,
+//! * where the model it has up is held, and
 //! * what to do once the daemon has taken a load.
 //!
-//! The third — which of a backend's models a stage may run — is
+//! The fourth — which of a backend's models a stage may run — is
 //! `ui::views::models::models_for_stage`, where the cards that render the list
 //! can reach it.
 //!
@@ -44,13 +45,27 @@ impl AppModel {
                 self.select_stage_backend(stage, source)
             }
             StageMessage::DeselectBackend { stage } => self.deselect_stage_backend(stage),
-            StageMessage::BackendSelected { stage, source } => {
+            StageMessage::BackendSelected {
+                stage,
+                source,
+                model,
+            } => {
                 self.set_selected_backend(stage, source.clone());
-                // The card's device chips are the daemon's answer for the
-                // backend now selected, so every selection asks again.
-                source.map_or_else(Task::none, |source| {
-                    Self::load_backend_devices(stage, source)
-                })
+                let Some(source) = source else {
+                    return Task::none();
+                };
+                Task::batch([
+                    // The card's device chips are the daemon's answer for the
+                    // backend now selected, so every selection asks again.
+                    Self::load_backend_devices(stage, source.clone()),
+                    // The model the daemon remembers is the one the card offers
+                    // to load, running or not: a stage keeps its selection
+                    // through an unload, and reading it back is what stops the
+                    // card coming up empty after one.
+                    model.map_or_else(Task::none, |model| {
+                        self.stage_selection_if_unstaged(stage, &model, &source)
+                    }),
+                ])
             }
             StageMessage::BackendSelectFailed {
                 stage,
@@ -62,8 +77,23 @@ impl AppModel {
                 Task::none()
             }
             StageMessage::StageModel { stage, model } => self.stage_model(stage, model),
-            StageMessage::StageDevice { stage, device } => {
-                self.staged_picks.set_device(stage, Some(device));
+            StageMessage::StageDevice { stage, device } => self.choose_device(stage, device),
+            StageMessage::DeviceChangeFailed {
+                stage,
+                prev_device,
+                message,
+            } => {
+                // The model is still up on the device it had, so put the picker
+                // back on that rather than leaving it showing one the daemon
+                // never adopted.
+                self.staged_picks.set_device(stage, prev_device.clone());
+                if stage == STT_STAGE {
+                    self.device_state = crate::core::app::DeviceState::Ready;
+                    if let Some(device) = prev_device {
+                        self.current_device = device;
+                    }
+                }
+                self.report_stage_error(stage, &message);
                 Task::none()
             }
             StageMessage::StagedDevicesLoaded {
@@ -126,7 +156,7 @@ impl AppModel {
         }
     }
 
-    // ---- STAGE-SPECIFIC (1/3): where a stage holds its selected backend ----
+    // ---- STAGE-SPECIFIC (1/4): where a stage holds its selected backend ----
 
     /// The backend filling `stage`, as the app currently knows it.
     ///
@@ -152,7 +182,26 @@ impl AppModel {
         }
     }
 
-    // ---- STAGE-SPECIFIC (2/3): what a taken load means for a stage ----
+    // ---- STAGE-SPECIFIC (2/4): where a stage holds the model it has up ----
+
+    /// The model `stage` is currently running, as the app knows it.
+    ///
+    /// Stage 1 keeps its identity locally, kept live by the daemon's events;
+    /// later stages read it back from their own stage block. Both answer `None`
+    /// when nothing is up — which, since a stage remembers its selection
+    /// through an unload, is not the same as having no model selected.
+    #[must_use]
+    fn loaded_model(&self, stage: u32) -> Option<&str> {
+        if stage == STT_STAGE {
+            (!self.current_model.is_empty()).then_some(self.current_model.as_str())
+        } else if self.post_processor.loaded {
+            self.post_processor.model.as_deref()
+        } else {
+            None
+        }
+    }
+
+    // ---- STAGE-SPECIFIC (3/4): what a taken load means for a stage ----
 
     /// The message that follows the daemon accepting a load.
     ///
@@ -181,6 +230,20 @@ impl AppModel {
     /// drops its locally-held identity: a failed switch leaves it with no model
     /// loaded.
     pub(in crate::core::app) fn set_stage_error(&mut self, stage: u32, err: &str) {
+        self.report_stage_error(stage, err);
+        if stage == STT_STAGE {
+            self.clear_loaded_model();
+        }
+    }
+
+    /// Surface a failed stage operation without touching what the stage is
+    /// running.
+    ///
+    /// The half of [`Self::set_stage_error`] that a failed *device* change
+    /// wants: the daemon puts the model back on the device it had, so it is
+    /// still up, and dropping stage 1's identity here would blank a card whose
+    /// model never stopped running.
+    fn report_stage_error(&mut self, stage: u32, err: &str) {
         log::warn!("Stage {stage} operation failed: {err}");
         let home = std::env::var("HOME").unwrap_or_default();
         let sanitized = super::model::sanitize_home(err, &home);
@@ -188,9 +251,6 @@ impl AppModel {
             stage,
             crate::core::app::ModelOperationState::Error { message: sanitized },
         );
-        if stage == STT_STAGE {
-            self.clear_loaded_model();
-        }
     }
 
     /// Select the backend filling `stage`, without loading a model.
@@ -228,6 +288,9 @@ impl AppModel {
                 Ok(()) => cosmic::Action::App(Message::Stage(StageMessage::BackendSelected {
                     stage,
                     source: Some(selected.clone()),
+                    // A backend the user just picked has no model yet —
+                    // selecting one deliberately drops the previous stage's.
+                    model: None,
                 })),
                 Err(e) => cosmic::Action::App(Message::Stage(StageMessage::BackendSelectFailed {
                     stage,
@@ -305,6 +368,67 @@ impl AppModel {
             Self::load_staged_devices(stage, source.to_string(), model.to_string()),
             self.load_model_language(stage, source, model.to_string()),
         ])
+    }
+
+    /// Choose the device `stage`'s model runs on.
+    ///
+    /// Local while nothing is up: there is no model to move, and the Load
+    /// button commits the choice with the pick it belongs to. Once the model is
+    /// running the choice goes straight to the daemon, which reloads it onto
+    /// the new device in place — something it has always done, and that the
+    /// card used to make the user do by hand as unload, re-pick, load.
+    fn choose_device(&mut self, stage: u32, device: String) -> Task<cosmic::Action<Message>> {
+        // Re-picking the same device is not a change; sending it would reload a
+        // running model for nothing.
+        let previous = self.staged_picks.device(stage).map(ToString::to_string);
+        if previous.as_deref() == Some(device.as_str()) {
+            return Task::none();
+        }
+        self.staged_picks.set_device(stage, Some(device.clone()));
+
+        // Only the model actually running can be moved in place. A device
+        // chosen for a different pick is staged like any other and waits for
+        // Load — sending it would move the wrong model.
+        let picked = self.staged_picks.get(stage).map(|pick| pick.model.clone());
+        let Some(running) = self.loaded_model(stage).map(ToString::to_string) else {
+            return Task::none();
+        };
+        if picked.as_deref() != Some(running.as_str()) {
+            return Task::none();
+        }
+        // One operation per stage, as everywhere else here.
+        if !self.is_model_ready(stage) {
+            log::warn!(
+                "A stage-{stage} model operation is already in progress — ignoring device change"
+            );
+            return Task::none();
+        }
+
+        let source = self.selected_backend(stage).unwrap_or_default();
+        let prev_device = if stage == STT_STAGE {
+            let prev = self.current_device.clone();
+            self.set_device_switching(device.clone(), format!("Switching to {device}..."));
+            self.current_device.clone_from(&device);
+            (!prev.is_empty()).then_some(prev)
+        } else {
+            // Stage 2 publishes no device events of its own, so its card needs
+            // a progress line put up here or the reload passes unremarked.
+            self.set_model_loading(running.clone(), format!("Loading on {device}..."), stage);
+            previous
+        };
+
+        let (model, source_label) = (running.clone(), source.clone());
+        Task::perform(
+            set_model_device(stage, running, device),
+            move |result| match result {
+                Ok(()) => Self::load_committed(stage, &model, &source_label),
+                Err(e) => cosmic::Action::App(Message::Stage(StageMessage::DeviceChangeFailed {
+                    stage,
+                    prev_device: prev_device.clone(),
+                    message: e.to_string(),
+                })),
+            },
+        )
     }
 
     /// Commit `stage`'s staged pick: set the model's device, then load it.

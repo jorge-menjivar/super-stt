@@ -41,6 +41,8 @@ struct Stage {
     set_backend: &'static str,
     /// Deselect it.
     clear_backend: &'static str,
+    /// Read this stage's model slot.
+    get_model: &'static str,
     /// Run a model in this stage.
     set_model: &'static str,
     /// Stop it.
@@ -68,6 +70,7 @@ impl Stage {
             1 => Some(Self {
                 set_backend: "set_active_backend",
                 clear_backend: "clear_active_backend",
+                get_model: "get_model",
                 set_model: "set_model",
                 clear_model: "unload_active_model",
                 cancel_model: "cancel_download",
@@ -81,6 +84,7 @@ impl Stage {
             2 => Some(Self {
                 set_backend: "set_post_processor_backend",
                 clear_backend: "clear_post_processor_backend",
+                get_model: "get_post_processor",
                 set_model: "set_post_processor",
                 clear_model: "clear_post_processor",
                 cancel_model: "cancel_post_processor_download",
@@ -118,10 +122,11 @@ fn unknown_stage(stage: u32) -> Response {
 The ordered stages a transcript passes through. Stage 1 turns audio into text; every \
 later stage rewrites what the one before it produced.
 
-Each stage reports which backend fills it, which model is selected, whether that \
-model is up, the accelerator it actually runs on, and any load still in flight. \
-Stages are addressed by position precisely so a third can be appended without \
-inventing a third endpoint for it.",
+Each stage reports the backend filling it and whether the stage is switched on. What \
+that backend is running is one level down, at `GET /pipeline/{stage}/model` — a stage \
+is a durable selection, its model has a runtime, and reporting the two together is \
+what once let the stages drift apart. Stages are addressed by position precisely so a \
+third can be appended without inventing a third endpoint for it.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "Every stage, stage 1 first.", body = PipelineReport),
@@ -150,7 +155,11 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
             stage::set_stage_backend,
             stage::clear_stage_backend
         ))
-        .routes(routes!(model::set_stage_model, model::clear_stage_model))
+        .routes(routes!(
+            model::get_stage_model,
+            model::set_stage_model,
+            model::clear_stage_model
+        ))
         .routes(routes!(model::list_stage_models))
         .routes(routes!(model::cancel_stage_model))
         .routes(routes!(model::reload_stage_model))

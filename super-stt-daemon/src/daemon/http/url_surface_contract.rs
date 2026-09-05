@@ -43,7 +43,7 @@ const URL_SURFACE: &[(&str, &str)] = &[
     ("/v1/pipeline", "get"),
     ("/v1/pipeline/{stage}", "delete,get,post"),
     ("/v1/pipeline/{stage}/device/list", "get"),
-    ("/v1/pipeline/{stage}/model", "delete,post"),
+    ("/v1/pipeline/{stage}/model", "delete,get,post"),
     ("/v1/pipeline/{stage}/model/cancel", "post"),
     ("/v1/pipeline/{stage}/model/list", "get"),
     ("/v1/pipeline/{stage}/model/reload", "post"),

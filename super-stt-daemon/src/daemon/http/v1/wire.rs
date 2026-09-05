@@ -14,7 +14,9 @@
 use crate::daemon::http::wire::Ack;
 use serde::Serialize;
 use super_stt_shared::models::backends::BackendInfo;
-use super_stt_shared::models::protocol::{DaemonResponse, GpuHostInfo, GpuInfo, StageReport};
+use super_stt_shared::models::protocol::{
+    DaemonResponse, GpuHostInfo, GpuInfo, StageModelReport, StageReport,
+};
 use super_stt_shared::models::theme::AudioTheme;
 use utoipa::ToSchema;
 
@@ -353,6 +355,14 @@ pub(crate) struct StageEnvelope {
     #[schema(example = "success")]
     pub(crate) status: &'static str,
     pub(crate) stage: StageReport,
+}
+
+/// One stage's model slot.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct StageModelEnvelope {
+    #[schema(example = "success")]
+    pub(crate) status: &'static str,
+    pub(crate) model: StageModelReport,
 }
 
 /// The devices a model or a stage can run on.

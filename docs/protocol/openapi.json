@@ -1266,7 +1266,7 @@
           "pipeline"
         ],
         "summary": "Report every pipeline stage",
-        "description": "The ordered stages a transcript passes through. Stage 1 turns audio into text; every later stage rewrites what the one before it produced.\n\nEach stage reports which backend fills it, which model is selected, whether that model is up, the accelerator it actually runs on, and any load still in flight. Stages are addressed by position precisely so a third can be appended without inventing a third endpoint for it.",
+        "description": "The ordered stages a transcript passes through. Stage 1 turns audio into text; every later stage rewrites what the one before it produced.\n\nEach stage reports the backend filling it and whether the stage is switched on. What that backend is running is one level down, at `GET /pipeline/{stage}/model` — a stage is a durable selection, its model has a runtime, and reporting the two together is what once let the stages drift apart. Stages are addressed by position precisely so a third can be appended without inventing a third endpoint for it.",
         "operationId": "get_pipeline",
         "responses": {
           "200": {
@@ -1325,7 +1325,7 @@
           "pipeline"
         ],
         "summary": "Report one pipeline stage",
-        "description": "The same object `GET /pipeline` carries in its array, for a client that only cares about one position. It is narrowed from that report rather than derived separately, so one stage and the whole list can never disagree.",
+        "description": "The backend filling this position, and whether the stage is switched on. The same object `GET /pipeline` carries in its array, for a client that only cares about one position — narrowed from that report rather than derived separately, so one stage and the whole list can never disagree.\n\nThe model is not here: read it at `GET /pipeline/{stage}/model`.",
         "operationId": "get_stage",
         "parameters": [
           {
@@ -1678,12 +1678,93 @@
       }
     },
     "/v1/pipeline/{stage}/model": {
+      "get": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "Report a stage's model",
+        "description": "What the stage is pointed at, whether it is loaded, which accelerator it runs on, and the load still in flight.\n\n`model` is the *selection*, not the running instance: it survives an unload, so a card can offer to load the same model again — onto another device, say — without the user picking it a second time. `loaded` is what says whether it is up. The two are separate at every stage; stage 1 collapsed them into one until the stages were made to behave alike.\n\n`device` carries the stored preference and what it resolved to, which is all a picker needs to render its current value. What the model *could* run on is `GET /pipeline/{stage}/model/{model}/device/list`, kept separate because that answer costs a fresh probe of the host's accelerators.",
+        "operationId": "get_stage_model",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "description": "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "example": 1
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stage's model slot. `model` is `null` when nothing is selected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StageModelEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such stage (`unknown_stage`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
       "post": {
         "tags": [
           "pipeline"
         ],
         "summary": "Run a model in a stage",
-        "description": "Loads `model` into the stage, downloading it first if this machine does not have it yet. That download can be long: watch the `download_progress` event topic, or poll `GET /pipeline/{stage}` and read `switch`. Abandon it with `POST /pipeline/{stage}/model/cancel`.\n\nOmitting `source` uses the backend already selected for the stage.",
+        "description": "Loads `model` into the stage, downloading it first if this machine does not have it yet. That download can be long: watch the `download_progress` event topic, or poll `GET /pipeline/{stage}/model` and read `switch`. Abandon it with `POST /pipeline/{stage}/model/cancel`.\n\nOmitting `source` uses the backend already selected for the stage.",
         "operationId": "set_stage_model",
         "parameters": [
           {
@@ -6962,6 +7043,92 @@
           }
         }
       },
+      "StageModelDevice": {
+        "type": "object",
+        "description": "Which accelerator a stage's model runs on.",
+        "required": [
+          "preference"
+        ],
+        "properties": {
+          "preference": {
+            "type": "string",
+            "description": "The stored preference: `cpu`, `gpu`, or `none` for a model that runs\nremotely and therefore has no local device."
+          },
+          "resolved_accel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What a `gpu` preference resolved to once the model loaded — `cuda`,\n`rocm`, `metal`, `vulkan`. `null` while the preference is `gpu` and\nnothing has confirmed it yet, so a client is never told a device\nresolved before a load proved it."
+          }
+        }
+      },
+      "StageModelEnvelope": {
+        "type": "object",
+        "description": "One stage's model slot.",
+        "required": [
+          "status",
+          "model"
+        ],
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/StageModelReport"
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
+      "StageModelReport": {
+        "type": "object",
+        "description": "The model slot of one stage: what is selected, whether it is up, the device\nit runs on, and the load still in flight.\n\nAnswers `GET /pipeline/{stage}/model`, and answers it the same way at every\nposition — which is the point of it being its own object. `model` is the\n*selection* and survives an unload; `loaded` says whether that selection is\nrunning right now.",
+        "required": [
+          "stage",
+          "loaded"
+        ],
+        "properties": {
+          "device": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StageModelDevice",
+                "description": "The accelerator the selection runs on; `null` when nothing is selected.\n\nWhat it *could* run on is `GET /pipeline/{stage}/model/{model}/device/list`,\nkept out of here deliberately: that list costs a host probe, and a card\nfills its picker from it once rather than on every poll of this."
+              }
+            ]
+          },
+          "loaded": {
+            "type": "boolean",
+            "description": "Whether that model is loaded and ready to run."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model selected in this stage; `null` when none is picked."
+          },
+          "stage": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The stage whose model slot this is.",
+            "minimum": 0
+          },
+          "switch": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StageSwitch",
+                "description": "The load or download in flight for this stage; `null` when idle.\n\nHere rather than on the stage because it names a model. The daemon runs\none model operation at a time but not always for the same stage, so it\nis reported per stage."
+              }
+            ]
+          }
+        }
+      },
       "StageMutation": {
         "type": "object",
         "description": "The answer to a stage mutation.\n\nThe two stages answer with different keys — stage 1 with `active_backend`,\nstage 2 with `post_processor` — because each grew its own endpoint before\nthe pipeline addressed stages by position. Both are documented rather than\nreconciled: changing either is a breaking wire change. Read the stage back\nwith `GET /pipeline/{stage}` for the one shape both share.",
@@ -7005,37 +7172,16 @@
       },
       "StageReport": {
         "type": "object",
-        "description": "One stage of the pipeline: which backend fills it, what is running there,\nand the load still in flight, if any.\n\nEvery optional field here serializes as an explicit `null` rather than being\nomitted — a stage reports its whole shape whatever state it is in, so a\nclient can read `source` without first checking the key exists. `enabled` is\nthe one exception, and is absent rather than null on a stage that has no\non/off choice of its own.",
+        "description": "One stage of the pipeline: which backend fills it, and whether the user has\nit switched on.\n\nA stage reports its *backend*, not its model. The model is one level down,\nat `GET /pipeline/{stage}/model`, as [`StageModelReport`].\n\nThe two were one object until the stages were made to behave alike, and the\nsplit is what fixed them: stage 1 reported the model it had *loaded* while\nstage 2 reported the model it had *selected*, so the same field meant\ndifferent things at the two positions — and at stage 1 `loaded` was true\nexactly when `model` was non-null, carrying no information at all.\n\n`source` and `name` serialize as an explicit `null` rather than being\nomitted: a stage reports its whole shape whatever state it is in, so a\nclient can read `source` to decide whether the stage is filled without\nfirst checking the key exists.",
         "required": [
           "stage",
           "role",
-          "loaded"
+          "enabled"
         ],
         "properties": {
-          "device": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The accelerator the loaded model actually runs on — not the user's\npreference, which is read per model through\n`/pipeline/{stage}/model/{model}/device`. `null` when nothing is loaded,\nsince nothing runs anywhere."
-          },
           "enabled": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "The user's on/off choice, for stages that carry one separately from\nwhether the model came up: a stage can be enabled while its load failed,\nand transcripts then pass through untouched. Absent on stage 1, which\nhas no switch of its own."
-          },
-          "loaded": {
             "type": "boolean",
-            "description": "Whether that model is loaded and ready to run."
-          },
-          "model": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The model selected in this stage; `null` when none is picked."
+            "description": "Whether the user has this stage switched on — what Load sets and Unload\nclears.\n\nSeparate from whether the model actually came up, which is `loaded` on\n[`StageModelReport`]: a stage can be enabled while its load failed, and\ntranscripts then pass through untouched. Every stage carries one. Stage\n1 did not until the stages were made to behave alike, which is why its\nunload had to throw the selection away to stay idle across a restart."
           },
           "name": {
             "type": [
@@ -7059,17 +7205,6 @@
             "format": "int32",
             "description": "Position in the pipeline: [`TRANSCRIPTION_STAGE`], [`POST_PROCESSOR_STAGE`].",
             "minimum": 0
-          },
-          "switch": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/StageSwitch",
-                "description": "The load or download in flight for this stage; `null` when idle.\n\nThe daemon runs one model operation at a time but not always for the\nsame stage, so this is reported per stage rather than globally."
-              }
-            ]
           }
         }
       },

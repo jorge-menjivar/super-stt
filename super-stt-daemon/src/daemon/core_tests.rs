@@ -1662,10 +1662,11 @@ async fn selecting_a_post_processor_announces_its_load_as_stage_two() {
     assert_eq!(config.post_processor.selection(), Some(("cleanup", source)));
 }
 
-/// The polled mirror of the same rule: `GET /pipeline` reports an in-flight
-/// download under the stage that started it. The daemon runs one at a time,
-/// and before it said which stage that was, a post-processor's download
-/// surfaced as stage 1's — the progress bar under the transcription card.
+/// The polled mirror of the same rule: `GET /pipeline/{stage}/model` reports an
+/// in-flight download only under the stage that started it. The daemon runs one
+/// at a time, and before it said which stage that was, a post-processor's
+/// download surfaced as stage 1's — the progress bar under the transcription
+/// card.
 #[tokio::test]
 async fn a_stage_reports_only_its_own_download() {
     use crate::download_progress::DownloadProgressTracker;
@@ -1686,18 +1687,194 @@ async fn a_stage_reports_only_its_own_download() {
         .start_download(tracker)
         .expect("register download");
 
+    use crate::daemon::device_management::PipelineStage;
+    let slot = async |stage| {
+        daemon
+            .handle_get_stage_model(stage)
+            .await
+            .stage_model
+            .expect("a model slot")
+    };
+    assert!(
+        slot(PipelineStage::Transcription).await.switch.is_none(),
+        "stage 1 must not report the post-processor's download"
+    );
+    let switch = slot(PipelineStage::PostProcessor)
+        .await
+        .switch
+        .expect("stage 2 switch");
+    assert_eq!(switch.target.model, "s1-mini-q4_k_m");
+    assert_eq!(switch.target.source, "github.com/super-stt/s1-mini");
+}
+
+/// An unload switches stage 1 off and keeps what it was pointed at.
+///
+/// This is the asymmetry the stage/model split was made to fix. Stage 1
+/// reported the model it had *loaded*, and its unload erased
+/// `preferred_model` outright — the only way, before the stage had an
+/// `enabled` flag, to stop a restart reloading the model the user had just
+/// stopped. The card emptied with it, so loading the same model again on
+/// another device meant picking it from the dropdown a second time. Stage 2
+/// had kept its choice behind exactly such a flag all along.
+#[tokio::test]
+async fn an_unload_switches_stage_one_off_and_keeps_its_selection() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/whisper";
+    *daemon.backends.write().await =
+        vec![fixture_backend_local("whisper", source, "Whisper", "small")];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    seed_loaded_model(&daemon, "small", source).await;
+    daemon.config.write().await.update_preferred_model(
+        "small".to_string(),
+        source.to_string(),
+        None,
+    );
+
+    let slot = async || {
+        daemon
+            .handle_get_stage_model(PipelineStage::Transcription)
+            .await
+            .stage_model
+            .expect("a model slot")
+    };
+
+    let running = slot().await;
+    assert_eq!(running.model.as_deref(), Some("small"));
+    assert!(running.loaded, "the seeded model is up");
     let stages = daemon
         .handle_get_pipeline()
         .await
         .pipeline
         .expect("pipeline");
-    assert!(
-        stages[0].switch.is_none(),
-        "stage 1 must not report the post-processor's download"
+    assert!(stages[0].enabled, "a stage running a model is switched on");
+
+    let response = daemon.handle_unload_active_model().await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+
+    let stages = daemon
+        .handle_get_pipeline()
+        .await
+        .pipeline
+        .expect("pipeline");
+    assert!(!stages[0].enabled, "an unload switches the stage off");
+    assert_eq!(
+        stages[0].source.as_deref(),
+        Some(source),
+        "the backend stays selected, as it always did"
     );
-    let switch = stages[1].switch.as_ref().expect("stage 2 switch");
-    assert_eq!(switch.target.model, "s1-mini-q4_k_m");
-    assert_eq!(switch.target.source, "github.com/super-stt/s1-mini");
+
+    let idle = slot().await;
+    assert_eq!(
+        idle.model.as_deref(),
+        Some("small"),
+        "the selection survives the unload — this is the whole change"
+    );
+    assert!(!idle.loaded, "nothing is running");
+    assert!(
+        idle.device.is_some(),
+        "a selection that is not loaded still has a device to load onto"
+    );
+
+    // And the point of the flag: a restart is idle even though the model is
+    // still selected.
+    assert!(
+        daemon.pick_startup_model().await.is_none(),
+        "a stage switched off must not reload its model at startup"
+    );
+}
+
+/// Every stage answers `GET /pipeline/{stage}/model` with the same shape and
+/// the same meanings: `model` is the selection, `loaded` whether it is up.
+///
+/// The two used to disagree — stage 1's `model` came off the loaded instance,
+/// so `loaded` was true exactly when `model` was non-null and told a client
+/// nothing. A single assertion run against both positions is what keeps them
+/// from drifting apart again.
+#[tokio::test]
+async fn every_stage_reports_its_model_slot_alike() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/mixed";
+    let mut backend = fixture_backend_local("mixed", source, "Mixed", "transcribe");
+    let mut cleanup = backend.models[0].clone();
+    cleanup.name = "cleanup".to_string();
+    cleanup.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    backend.models.push(cleanup);
+    *daemon.backends.write().await = vec![backend];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    daemon.config.write().await.update_preferred_model(
+        "transcribe".to_string(),
+        source.to_string(),
+        None,
+    );
+    daemon
+        .config
+        .write()
+        .await
+        .enable_post_processor("cleanup".to_string(), source.to_string());
+
+    for (stage, model) in [
+        (PipelineStage::Transcription, "transcribe"),
+        (PipelineStage::PostProcessor, "cleanup"),
+    ] {
+        let slot = daemon
+            .handle_get_stage_model(stage)
+            .await
+            .stage_model
+            .expect("a model slot");
+        assert_eq!(slot.stage, stage.position());
+        assert_eq!(
+            slot.model.as_deref(),
+            Some(model),
+            "stage {} reports its selection",
+            stage.position()
+        );
+        assert!(
+            !slot.loaded,
+            "stage {} selected a model without loading it",
+            stage.position()
+        );
+        let device = slot
+            .device
+            .as_ref()
+            .unwrap_or_else(|| panic!("stage {} has a device block", stage.position()));
+        assert_eq!(device.preference, "cpu", "the global default");
+        assert_eq!(
+            device.resolved_accel.as_deref(),
+            Some("cpu"),
+            "cpu needs no resolution"
+        );
+    }
+}
+
+/// A stage reports the backend filling it and nothing about its model.
+///
+/// The fields moved to `/pipeline/{stage}/model`; a client still reading them
+/// off the stage would get nothing, silently, which is why the absence is
+/// asserted rather than left to the schema.
+#[tokio::test]
+async fn a_stage_reports_only_its_backend() {
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/whisper";
+    *daemon.backends.write().await =
+        vec![fixture_backend_local("whisper", source, "Whisper", "small")];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    seed_loaded_model(&daemon, "small", source).await;
+
+    let stages = daemon
+        .handle_get_pipeline()
+        .await
+        .pipeline
+        .expect("pipeline");
+    let json = serde_json::to_value(&stages[0]).expect("serializes");
+    let keys: Vec<&String> = json
+        .as_object()
+        .expect("a stage is an object")
+        .keys()
+        .collect();
+    assert_eq!(keys, ["stage", "role", "source", "name", "enabled"]);
+    assert_eq!(json["name"], "Whisper", "the backend's display name");
 }
 
 /// Cancel is addressed to a stage, so a stage with nothing of its own in

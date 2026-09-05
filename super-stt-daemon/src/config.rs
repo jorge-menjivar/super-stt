@@ -106,6 +106,13 @@ fn default_volume() -> u8 {
     100
 }
 
+/// The `enabled` a config predating the field is read with. See
+/// [`TranscriptionConfig::enabled`] for why it is `true` rather than the
+/// struct's own default.
+fn default_migrated_enabled() -> bool {
+    true
+}
+
 /// The transcript post-processor: a second model, selected independently of
 /// the transcription model, that rewrites each final transcript before the
 /// daemon types or returns it.
@@ -152,6 +159,21 @@ impl PostProcessorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionConfig {
+    /// Whether the user has stage 1 switched on: what Load sets and Unload
+    /// clears. Held separately from `preferred_model` so an unload can stay
+    /// idle across a restart *without* discarding the selection — which is how
+    /// [`PostProcessorConfig::enabled`] has always worked, and which stage 1
+    /// lacked until the stages were made to behave alike.
+    ///
+    /// Defaults to `true` when the key is absent, which is the only thing that
+    /// default is for: a `daemon.toml` written before this field existed loaded
+    /// its `preferred_model` on sight, so reading a missing key as `false`
+    /// would silently idle every upgraded daemon. A config with no model
+    /// selected is inert either way — see [`TranscriptionConfig::is_active`] —
+    /// so there is no case where the migration default is wrong. A *new* config
+    /// starts `false`, because nothing is selected yet.
+    #[serde(default = "default_migrated_enabled")]
+    pub enabled: bool,
     #[serde(default)]
     pub preferred_model: String,
     /// Compatibility shim; the daemon resolves its startup model by
@@ -210,6 +232,30 @@ pub struct TranscriptionConfig {
     pub primary_language: Option<String>,
 }
 
+impl TranscriptionConfig {
+    /// The selected `(model, source)` pair, or `None` when the selection is
+    /// incomplete. Deliberately the same shape as
+    /// [`PostProcessorConfig::selection`]: both halves are required, since a
+    /// name without the backend that serves it resolves to nothing.
+    #[must_use]
+    pub fn selection(&self) -> Option<(&str, &str)> {
+        (!self.preferred_model.is_empty() && !self.preferred_source.is_empty()).then_some((
+            self.preferred_model.as_str(),
+            self.preferred_source.as_str(),
+        ))
+    }
+
+    /// Whether stage 1 should actually be running: switched on *and* pointed at
+    /// a model. The twin of [`PostProcessorConfig::is_active`], and the value
+    /// the stage reports as `enabled` — a stage switched on with nothing
+    /// selected is not running, and a card told otherwise would offer to unload
+    /// a model that does not exist.
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.enabled && self.selection().is_some()
+    }
+}
+
 impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
@@ -224,6 +270,10 @@ impl Default for DaemonConfig {
                 // Empty preference: the daemon stays idle until a model is
                 // selected — it never auto-picks one, since loading a model can
                 // pull gigabytes.
+                // Nothing is selected yet, so the stage is not switched on.
+                // Distinct from the serde default above, which answers a
+                // different question: what an *older* config meant.
+                enabled: false,
                 preferred_model: String::new(),
                 preferred_provider: String::new(),
                 preferred_source: String::new(),
@@ -439,24 +489,31 @@ impl DaemonConfig {
         source: String,
         provider: Option<String>,
     ) {
+        // Selecting a model switches the stage on, exactly as
+        // `enable_post_processor` does for stage 2.
+        self.transcription.enabled = true;
         self.transcription.preferred_model = model;
         self.transcription.preferred_source = source;
         self.transcription.preferred_provider = provider.unwrap_or_default();
     }
 
-    /// Clear the loaded-model preference (model + source) while keeping the
-    /// active backend selected. Used by the unload path so a daemon restart
-    /// stays idle instead of reloading the unloaded model.
-    pub fn clear_preferred_model(&mut self) {
-        self.transcription.preferred_model = String::new();
-        self.transcription.preferred_source = String::new();
-        self.transcription.preferred_provider = String::new();
+    /// Stop running stage 1, keeping the selection so re-loading it is one
+    /// call. The exact twin of [`Self::disable_post_processor`].
+    ///
+    /// This used to erase `preferred_model`/`preferred_source` outright — the
+    /// only way, before the stage had an `enabled` flag, to keep a restart from
+    /// reloading the model the user had just unloaded. The cost was that the
+    /// card came back empty and the app had to remember the pick itself. The
+    /// flag is what lets the selection stay.
+    pub fn disable_transcription(&mut self) {
+        self.transcription.enabled = false;
     }
 
     /// Set the active backend (its relative install dir) and drop the loaded
     /// model preference — selecting a backend does not load a model.
     pub fn update_active_backend(&mut self, dir: String) {
         self.transcription.active_backend = Some(dir);
+        self.transcription.enabled = false;
         self.transcription.preferred_model = String::new();
         self.transcription.preferred_provider = String::new();
     }
@@ -479,6 +536,7 @@ impl DaemonConfig {
     /// Clear the active backend and the loaded-model preference (→ idle).
     pub fn clear_active_backend(&mut self) {
         self.transcription.active_backend = None;
+        self.transcription.enabled = false;
         self.transcription.preferred_model = String::new();
         self.transcription.preferred_source = String::new();
         self.transcription.preferred_provider = String::new();

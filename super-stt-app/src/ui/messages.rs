@@ -264,7 +264,17 @@ pub enum StageMessage {
     DeselectBackend { stage: u32 },
     /// The daemon took the selection (`None` = the stage is empty). Re-announced
     /// after a successful select, which is what asks for the backend's devices.
-    BackendSelected { stage: u32, source: Option<String> },
+    BackendSelected {
+        stage: u32,
+        source: Option<String>,
+        /// The model the daemon remembers for the stage, running or not.
+        ///
+        /// `None` for a backend the user has just picked, which has no model
+        /// yet. Carried on the startup read because a stage keeps its selection
+        /// through an unload, and the card offers that model again rather than
+        /// coming up empty.
+        model: Option<String>,
+    },
     /// A select or deselect was refused: restore `prev` and report it on the
     /// stage's card.
     BackendSelectFailed {
@@ -276,8 +286,23 @@ pub enum StageMessage {
     /// does *not* load. The device waits on the daemon, which is asked what the
     /// model can run on here and which device it already has.
     StageModel { stage: u32, model: String },
-    /// User picked a device in the card's device dropdown — staged locally.
+    /// User picked a device in the card's device dropdown.
+    ///
+    /// Staged locally while the model is not up. Once it is running the choice
+    /// is sent straight through: the daemon reloads the model onto the new
+    /// device in place, so switching device no longer means unload, re-pick,
+    /// load.
     StageDevice { stage: u32, device: String },
+    /// A device change the daemon refused or could not apply.
+    ///
+    /// Distinct from [`StageMessage::LoadFailed`]: the model is still up, on
+    /// the device it had, so this rolls the picker back and reports the failure
+    /// without dropping the stage's identity the way a failed load does.
+    DeviceChangeFailed {
+        stage: u32,
+        prev_device: Option<String>,
+        message: String,
+    },
     /// The daemon answered for the staged `model` of `source`: `devices` is what
     /// it can be loaded onto here, `current` the device it already has. `source`
     /// is the backend selected when the question was asked, so an answer a

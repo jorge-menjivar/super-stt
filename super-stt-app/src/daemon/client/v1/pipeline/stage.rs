@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The pipeline, addressed by stage position.
+//! `/pipeline/{stage}` — the backend filling one stage.
 //!
 //! A transcript passes through ordered stages: stage 1 turns audio into text,
 //! every later stage rewrites what the one before it produced. Every stage
-//! answers the same path — `/pipeline/{stage}` selects the backend filling it
-//! and reports what is running there — so there is one implementation here for
-//! all of them. Running a model in a stage is [`super::model`], one level down.
+//! answers this same path — it selects the backend filling the position and
+//! reports which one that is — so there is one implementation here for all of
+//! them. The model that backend runs is [`super::model`], one level down.
 //!
 //! It used to be one copy per stage, with the position baked into a `&str`
 //! constant in each file. The copies drifted: stage 2's `set` kept the header
@@ -20,83 +20,27 @@ use crate::daemon::client::internal::session::with_settings_token;
 use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 
-/// One pipeline stage: which backend fills it, what is running, and the
-/// progress of a load still in flight.
+/// The backend filling one stage, and whether the stage is switched on.
 ///
 /// Only the fields the settings app consumes are modeled; serde ignores the
 /// rest.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-pub struct StageState {
+pub struct StageBackend {
     /// `None` when the stage is empty (no backend selected).
     #[serde(default)]
     pub source: Option<String>,
-    /// `None` when the stage has a backend but no model picked.
+    /// The backend's display name; `None` when the stage is empty.
     #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub loaded: bool,
-    /// The accelerator the loaded model runs on; `None` when nothing is loaded.
-    #[serde(default)]
-    pub device: Option<String>,
-    /// The user's on/off choice, for stages that carry one separately from
-    /// whether the model actually came up. Absent for stage 1, which has no
-    /// switch of its own — read it through [`StageState::is_enabled`] rather
-    /// than directly.
-    #[serde(default)]
-    pub enabled: Option<bool>,
-}
-
-impl StageState {
-    /// The selected `(model, source)` pair, when the selection is complete.
-    #[must_use]
-    pub fn selection(&self) -> Option<(String, String)> {
-        Some((self.model.clone()?, self.source.clone()?))
-    }
-
-    /// Whether this stage is meant to be running.
+    pub name: Option<String>,
+    /// Whether the user has this stage switched on — what Load sets and Unload
+    /// clears.
     ///
-    /// A stage that carries its own on/off choice answers with it: it can be
-    /// enabled while its model failed to load, and transcripts then pass
-    /// through unprocessed, which is what the card reports. A stage without
-    /// one is on exactly when it has a model up.
-    #[must_use]
-    pub fn is_enabled(&self) -> bool {
-        self.enabled.unwrap_or(self.loaded)
-    }
-}
-
-/// Wire envelope for `GET /pipeline/{stage}`.
-#[derive(Debug, Clone, Deserialize)]
-struct StageEnvelope {
-    stage: StageSwitchPayload,
-}
-
-/// The switch sub-object, which only the download poller reads. The stage's
-/// own fields are deserialized into [`StageState`] by [`get_stage`]; serde
-/// ignores them here.
-#[derive(Debug, Clone, Deserialize)]
-struct StageSwitchPayload {
+    /// Every stage reports it. Stage 1 used to omit the field, and the app read
+    /// the absence as "on exactly when a model is loaded", which is why an
+    /// unload there emptied the card instead of leaving the selection to load
+    /// again.
     #[serde(default)]
-    switch: Option<StageSwitch>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct StageSwitch {
-    phase: String,
-    target: serde_json::Value,
-    started_at: Option<String>,
-    download: Option<StageDownload>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct StageDownload {
-    current_file: String,
-    file_index: usize,
-    total_files: usize,
-    bytes_downloaded: u64,
-    total_bytes: u64,
-    percentage: f32,
-    eta_seconds: Option<u64>,
+    pub enabled: bool,
 }
 
 /// The path a stage answers on. Its model answers one level down, in
@@ -105,12 +49,8 @@ fn stage_path(stage: u32) -> String {
     format!("/pipeline/{stage}")
 }
 
-async fn fetch(socket: std::path::PathBuf, token: &str, stage: u32) -> HttpResult<StageEnvelope> {
-    transport::get_json::<StageEnvelope>(socket, token, &stage_path(stage)).await
-}
-
-/// Read `stage`'s state (HTTP `GET /pipeline/{stage}`).
-pub async fn get_stage(stage: u32) -> HttpResult<StageState> {
+/// Read `stage`'s backend (HTTP `GET /pipeline/{stage}`).
+pub async fn get_stage(stage: u32) -> HttpResult<StageBackend> {
     with_settings_token(move |socket, token| async move {
         let resp = require_success(
             transport::settings_get(socket, &token, &stage_path(stage)).await?,
@@ -118,16 +58,11 @@ pub async fn get_stage(stage: u32) -> HttpResult<StageState> {
         )?;
         // A daemon that predates the pipeline omits the stage; read that as
         // "empty, nothing selected" rather than failing the settings load.
-        //
-        // The stage is a typed `StageReport` on the wire now, so this reads the
-        // fields the card needs straight off it rather than re-parsing JSON.
         Ok(resp
             .stage
-            .map(|st| StageState {
+            .map(|st| StageBackend {
                 source: st.source,
-                model: st.model,
-                loaded: st.loaded,
-                device: st.device,
+                name: st.name,
                 enabled: st.enabled,
             })
             .unwrap_or_default())
@@ -160,56 +95,11 @@ pub async fn set_stage_backend(stage: u32, source: String) -> HttpResult<()> {
 /// (HTTP `DELETE /pipeline/{stage}`).
 ///
 /// This is a card's Deselect. [`super::model::unload_stage_model`] is the softer
-/// one that keeps the backend.
+/// one that keeps the backend *and* the model it was pointed at.
 pub async fn clear_stage_backend(stage: u32) -> HttpResult<()> {
     with_settings_token(move |socket, token| async move {
         let resp = transport::settings_delete(socket, &token, &stage_path(stage)).await?;
         require_unit(resp, "clear_stage_backend")
-    })
-    .await
-}
-
-/// The download `stage` has in flight, composed from that stage's
-/// `switch.download` sub-object. The polled counterpart of the
-/// `download_progress` event, for the ticks a client may have missed.
-pub async fn get_download_status(
-    stage: u32,
-) -> HttpResult<Option<super_stt_shared::models::protocol::DownloadProgress>> {
-    with_settings_token(move |socket, token| async move {
-        let status = fetch(socket, &token, stage).await?;
-        let Some(switch) = status.stage.switch else {
-            return Ok(None);
-        };
-        let Some(download) = switch.download else {
-            return Ok(None);
-        };
-        let target_field = |key: &str| {
-            switch
-                .target
-                .get(key)
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string()
-        };
-        Ok(Some(super_stt_shared::models::protocol::DownloadProgress {
-            model_name: target_field("model"),
-            source: target_field("source"),
-            // The stage that was asked: `GET /pipeline/{stage}` reports only
-            // its own switch, so the answer belongs to the stage in the path.
-            stage,
-            current_file: download.current_file,
-            file_index: download.file_index,
-            total_files: download.total_files,
-            bytes_downloaded: download.bytes_downloaded,
-            total_bytes: download.total_bytes,
-            percentage: download.percentage,
-            status: switch.phase,
-            started_at: switch.started_at.unwrap_or_default(),
-            eta_seconds: download.eta_seconds,
-            // The polled `stage.switch` shape carries no error detail; failure
-            // text arrives on the `download_progress` SSE event.
-            error: None,
-        }))
     })
     .await
 }

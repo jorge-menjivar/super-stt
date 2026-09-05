@@ -48,15 +48,23 @@ pub enum StageRole {
     PostProcessor,
 }
 
-/// One stage of the pipeline: which backend fills it, what is running there,
-/// and the load still in flight, if any.
+/// One stage of the pipeline: which backend fills it, and whether the user has
+/// it switched on.
 ///
-/// Every optional field here serializes as an explicit `null` rather than being
-/// omitted — a stage reports its whole shape whatever state it is in, so a
-/// client can read `source` without first checking the key exists. `enabled` is
-/// the one exception, and is absent rather than null on a stage that has no
-/// on/off choice of its own.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+/// A stage reports its *backend*, not its model. The model is one level down,
+/// at `GET /pipeline/{stage}/model`, as [`StageModelReport`].
+///
+/// The two were one object until the stages were made to behave alike, and the
+/// split is what fixed them: stage 1 reported the model it had *loaded* while
+/// stage 2 reported the model it had *selected*, so the same field meant
+/// different things at the two positions — and at stage 1 `loaded` was true
+/// exactly when `model` was non-null, carrying no information at all.
+///
+/// `source` and `name` serialize as an explicit `null` rather than being
+/// omitted: a stage reports its whole shape whatever state it is in, so a
+/// client can read `source` to decide whether the stage is filled without
+/// first checking the key exists.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StageReport {
     /// Position in the pipeline: [`TRANSCRIPTION_STAGE`], [`POST_PROCESSOR_STAGE`].
@@ -66,26 +74,59 @@ pub struct StageReport {
     pub source: Option<String>,
     /// That backend's display name; `null` when the stage is empty.
     pub name: Option<String>,
+    /// Whether the user has this stage switched on — what Load sets and Unload
+    /// clears.
+    ///
+    /// Separate from whether the model actually came up, which is `loaded` on
+    /// [`StageModelReport`]: a stage can be enabled while its load failed, and
+    /// transcripts then pass through untouched. Every stage carries one. Stage
+    /// 1 did not until the stages were made to behave alike, which is why its
+    /// unload had to throw the selection away to stay idle across a restart.
+    pub enabled: bool,
+}
+
+/// The model slot of one stage: what is selected, whether it is up, the device
+/// it runs on, and the load still in flight.
+///
+/// Answers `GET /pipeline/{stage}/model`, and answers it the same way at every
+/// position — which is the point of it being its own object. `model` is the
+/// *selection* and survives an unload; `loaded` says whether that selection is
+/// running right now.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct StageModelReport {
+    /// The stage whose model slot this is.
+    pub stage: u32,
     /// The model selected in this stage; `null` when none is picked.
     pub model: Option<String>,
     /// Whether that model is loaded and ready to run.
     pub loaded: bool,
-    /// The accelerator the loaded model actually runs on — not the user's
-    /// preference, which is read per model through
-    /// `/pipeline/{stage}/model/{model}/device`. `null` when nothing is loaded,
-    /// since nothing runs anywhere.
-    pub device: Option<String>,
+    /// The accelerator the selection runs on; `null` when nothing is selected.
+    ///
+    /// What it *could* run on is `GET /pipeline/{stage}/model/{model}/device/list`,
+    /// kept out of here deliberately: that list costs a host probe, and a card
+    /// fills its picker from it once rather than on every poll of this.
+    pub device: Option<StageModelDevice>,
     /// The load or download in flight for this stage; `null` when idle.
     ///
-    /// The daemon runs one model operation at a time but not always for the
-    /// same stage, so this is reported per stage rather than globally.
+    /// Here rather than on the stage because it names a model. The daemon runs
+    /// one model operation at a time but not always for the same stage, so it
+    /// is reported per stage.
     pub switch: Option<StageSwitch>,
-    /// The user's on/off choice, for stages that carry one separately from
-    /// whether the model came up: a stage can be enabled while its load failed,
-    /// and transcripts then pass through untouched. Absent on stage 1, which
-    /// has no switch of its own.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
+}
+
+/// Which accelerator a stage's model runs on.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct StageModelDevice {
+    /// The stored preference: `cpu`, `gpu`, or `none` for a model that runs
+    /// remotely and therefore has no local device.
+    pub preference: String,
+    /// What a `gpu` preference resolved to once the model loaded — `cuda`,
+    /// `rocm`, `metal`, `vulkan`. `null` while the preference is `gpu` and
+    /// nothing has confirmed it yet, so a client is never told a device
+    /// resolved before a load proved it.
+    pub resolved_accel: Option<String>,
 }
 
 /// A model load in flight for one stage.
@@ -130,8 +171,8 @@ pub struct SwitchDownload {
 #[cfg(test)]
 mod tests {
     use super::{
-        POST_PROCESSOR_STAGE, StageReport, StageRole, StageSwitch, SwitchDownload, SwitchTarget,
-        TRANSCRIPTION_STAGE,
+        POST_PROCESSOR_STAGE, StageModelDevice, StageModelReport, StageReport, StageRole,
+        StageSwitch, SwitchDownload, SwitchTarget, TRANSCRIPTION_STAGE,
     };
 
     fn empty_stage(stage: u32, role: StageRole) -> StageReport {
@@ -140,11 +181,17 @@ mod tests {
             role,
             source: None,
             name: None,
+            enabled: false,
+        }
+    }
+
+    fn empty_model(stage: u32) -> StageModelReport {
+        StageModelReport {
+            stage,
             model: None,
             loaded: false,
             device: None,
             switch: None,
-            enabled: None,
         }
     }
 
@@ -161,37 +208,62 @@ mod tests {
             .expect("serializes");
         let object = json.as_object().expect("a stage is an object");
 
-        for key in ["source", "name", "model", "device", "switch"] {
+        for key in ["source", "name"] {
             assert!(object.contains_key(key), "an empty stage omits {key}");
             assert!(object[key].is_null(), "{key} should be null when unset");
         }
-        assert_eq!(object["loaded"], false);
+        assert_eq!(object["enabled"], false);
     }
 
-    /// `enabled` is the one field that is absent rather than null, and only on
-    /// the stage that has no on/off choice of its own.
+    /// A stage reports its backend and nothing about its model.
     ///
-    /// The client distinguishes the two: `StageState::is_enabled` falls back to
-    /// `loaded` when `enabled` is absent. A stage 1 that started sending
-    /// `"enabled": false` would read as "switched off" rather than "has no
-    /// switch", and the card would show a running model as disabled.
+    /// The regression this pins is the shape the split exists to prevent: a
+    /// stage that also carried `model`/`loaded`/`device` answered for two
+    /// different lifetimes at once — a durable backend selection and an
+    /// ephemeral loaded instance — and the two stages disagreed about which one
+    /// `model` meant. Those fields belong to [`StageModelReport`] now, and a
+    /// client reading them off a stage would silently get `null` forever.
     #[test]
-    fn only_a_stage_with_a_switch_reports_enabled() {
-        let stage_one =
-            serde_json::to_value(empty_stage(TRANSCRIPTION_STAGE, StageRole::Transcription))
-                .expect("serializes");
-        assert!(
-            stage_one.get("enabled").is_none(),
-            "stage 1 has no on/off choice, so it must not report one"
-        );
+    fn a_stage_carries_no_model_fields() {
+        let mut report = empty_stage(TRANSCRIPTION_STAGE, StageRole::Transcription);
+        report.source = Some("github.com/acme/whisper".to_string());
+        report.name = Some("Whisper".to_string());
+        let json = serde_json::to_value(report).expect("serializes");
+        let object = json.as_object().expect("a stage is an object");
 
-        let mut two = empty_stage(POST_PROCESSOR_STAGE, StageRole::PostProcessor);
-        two.enabled = Some(false);
-        let stage_two = serde_json::to_value(two).expect("serializes");
+        for key in ["model", "loaded", "device", "switch"] {
+            assert!(
+                !object.contains_key(key),
+                "{key} belongs to /pipeline/{{stage}}/model, not to the stage"
+            );
+        }
         assert_eq!(
-            stage_two["enabled"], false,
-            "stage 2 carries its choice separately from whether the model came up"
+            object.keys().collect::<Vec<_>>(),
+            ["stage", "role", "source", "name", "enabled"],
         );
+    }
+
+    /// Every stage reports `enabled`, at every position.
+    ///
+    /// Stage 1 used to omit it, meaning "has no on/off choice of its own", and
+    /// the client's `is_enabled()` fell back to `loaded`. That fallback is what
+    /// made stage 1 unable to hold a selection it was not running — and so what
+    /// made its unload throw the selection away. Both stages carry the field
+    /// now, and an absent one would resurrect the fallback.
+    #[test]
+    fn every_stage_reports_whether_it_is_switched_on() {
+        for (stage, role) in [
+            (TRANSCRIPTION_STAGE, StageRole::Transcription),
+            (POST_PROCESSOR_STAGE, StageRole::PostProcessor),
+        ] {
+            let mut report = empty_stage(stage, role);
+            report.enabled = true;
+            let json = serde_json::to_value(report).expect("serializes");
+            assert_eq!(
+                json["enabled"], true,
+                "stage {stage} must report its on/off state"
+            );
+        }
     }
 
     /// The role crosses the wire in `snake_case`, not as its Rust name.
@@ -207,22 +279,86 @@ mod tests {
         );
     }
 
-    /// A stage survives the round trip whole, switch included.
-    ///
-    /// `/pipeline/{stage}` narrows one stage out of the array `/pipeline`
-    /// returns, so the two views agree only for as long as the type they share
-    /// carries everything. A field lost in serialization would take the whole
-    /// switch report with it and the download progress a UI polls for.
+    /// A model slot with nothing in it reports nulls, not absent keys — the
+    /// same contract the stage keeps, and for the same reason.
     #[test]
-    fn a_stage_mid_download_round_trips() {
-        let report = StageReport {
+    fn an_empty_model_slot_reports_nulls_rather_than_absent_keys() {
+        let json = serde_json::to_value(empty_model(TRANSCRIPTION_STAGE)).expect("serializes");
+        let object = json.as_object().expect("a model slot is an object");
+
+        for key in ["model", "device", "switch"] {
+            assert!(object.contains_key(key), "an empty model slot omits {key}");
+            assert!(object[key].is_null(), "{key} should be null when unset");
+        }
+        assert_eq!(object["loaded"], false);
+    }
+
+    /// `model` is the selection and `loaded` is whether it is running, so the
+    /// pair "selected but not loaded" has to be expressible.
+    ///
+    /// This is the state stage 1 could not represent at all: its `model` came
+    /// off the loaded instance, so the two fields were one bit. It is what a
+    /// card shows after an unload, and what makes re-loading the same model on
+    /// a different device a single choice rather than a re-selection.
+    #[test]
+    fn a_selection_survives_without_being_loaded() {
+        let mut slot = empty_model(TRANSCRIPTION_STAGE);
+        slot.model = Some("whisper-large-v3".to_string());
+        slot.device = Some(StageModelDevice {
+            preference: "gpu".to_string(),
+            resolved_accel: None,
+        });
+
+        let json = serde_json::to_value(&slot).expect("serializes");
+        assert_eq!(json["model"], "whisper-large-v3");
+        assert_eq!(json["loaded"], false);
+        assert_eq!(json["device"]["preference"], "gpu");
+        // Nothing has loaded, so nothing has resolved the generic `gpu` yet —
+        // reporting one here would name an accelerator no load has confirmed.
+        assert!(json["device"]["resolved_accel"].is_null());
+
+        let back: StageModelReport = serde_json::from_value(json).expect("deserializes");
+        assert_eq!(back, slot);
+    }
+
+    /// The device block carries the preference and what it resolved to, and
+    /// nothing else.
+    ///
+    /// `available_devices` is deliberately not here: it costs a host probe, and
+    /// `GET /pipeline/{stage}/model/{model}/device/list` is the endpoint that
+    /// answers it. Adding it back would make every poll of a card's model
+    /// re-detect the host's GPUs.
+    #[test]
+    fn the_device_block_does_not_carry_the_device_list() {
+        let json = serde_json::to_value(StageModelDevice {
+            preference: "cpu".to_string(),
+            resolved_accel: Some("cpu".to_string()),
+        })
+        .expect("serializes");
+        assert_eq!(
+            json.as_object()
+                .expect("an object")
+                .keys()
+                .collect::<Vec<_>>(),
+            ["preference", "resolved_accel"],
+        );
+    }
+
+    /// A model slot mid-download round trips whole, switch included.
+    ///
+    /// The switch moved here from the stage when the two split, so this is what
+    /// the download poller now reads: a field lost in serialization would take
+    /// the whole progress report with it.
+    #[test]
+    fn a_model_slot_mid_download_round_trips() {
+        let slot = StageModelReport {
             stage: POST_PROCESSOR_STAGE,
-            role: StageRole::PostProcessor,
-            source: Some("github.com/super-stt/s1-mini".to_string()),
-            name: Some("S1 Mini".to_string()),
             model: Some("s1-mini-q4_k_m".to_string()),
             loaded: false,
-            device: None,
+            device: Some(StageModelDevice {
+                preference: "cpu".to_string(),
+                resolved_accel: Some("cpu".to_string()),
+            }),
             switch: Some(StageSwitch {
                 phase: "downloading".to_string(),
                 target: SwitchTarget {
@@ -240,12 +376,11 @@ mod tests {
                     eta_seconds: Some(30),
                 },
             }),
-            enabled: Some(true),
         };
 
-        let json = serde_json::to_string(&report).expect("serializes");
-        let back: StageReport = serde_json::from_str(&json).expect("deserializes");
-        assert_eq!(back, report, "a stage lost something on the wire");
+        let json = serde_json::to_string(&slot).expect("serializes");
+        let back: StageModelReport = serde_json::from_str(&json).expect("deserializes");
+        assert_eq!(back, slot, "a model slot lost something on the wire");
 
         // The nesting the download poller walks, spelled out: it reads
         // `switch.download.percentage` and `switch.target.model` by name.
@@ -253,6 +388,33 @@ mod tests {
         assert_eq!(value["switch"]["target"]["model"], "s1-mini-q4_k_m");
         assert_eq!(value["switch"]["download"]["percentage"], 25.0);
         assert_eq!(value["switch"]["download"]["eta_seconds"], 30);
+    }
+
+    /// A stage's very first load is in flight before anything is selected, so
+    /// the switch has to be readable while `model` is still `null`.
+    #[test]
+    fn a_first_load_reports_its_switch_before_there_is_a_selection() {
+        let mut slot = empty_model(TRANSCRIPTION_STAGE);
+        slot.switch = Some(StageSwitch {
+            phase: "loading_model".to_string(),
+            target: SwitchTarget {
+                model: "whisper-tiny".to_string(),
+                source: "github.com/acme/whisper".to_string(),
+            },
+            started_at: "2026-09-03T12:00:00Z".to_string(),
+            download: SwitchDownload {
+                current_file: String::new(),
+                file_index: 0,
+                total_files: 0,
+                bytes_downloaded: 0,
+                total_bytes: 0,
+                percentage: 100.0,
+                eta_seconds: None,
+            },
+        });
+        let json = serde_json::to_value(slot).expect("serializes");
+        assert!(json["model"].is_null());
+        assert_eq!(json["switch"]["target"]["model"], "whisper-tiny");
     }
 
     /// An estimate the daemon cannot make yet is `null`, not a zero that would

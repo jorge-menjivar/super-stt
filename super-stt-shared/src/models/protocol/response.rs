@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::pipeline::StageReport;
+use super::pipeline::{StageModelReport, StageReport};
 use crate::models::theme::AudioTheme;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -104,6 +104,12 @@ pub struct DaemonResponse {
     // carries, for a client that only cares about one position.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage: Option<StageReport>,
+
+    // One stage's model slot (GET /pipeline/{stage}/model): what is selected
+    // there, whether it is up, and the device it runs on. Separate from
+    // `stage`, which reports only the backend filling the position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_model: Option<StageModelReport>,
 
     // GPU inventory (GET /gpu_info): array of `GpuInfo` objects.
     // See docs/protocol/endpoints/v1/gpu_info.md.
@@ -404,6 +410,12 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_stage(mut self, stage: StageReport) -> Self {
         self.stage = Some(stage);
+        self
+    }
+
+    #[must_use]
+    pub fn with_stage_model(mut self, stage_model: StageModelReport) -> Self {
+        self.stage_model = Some(stage_model);
         self
     }
 

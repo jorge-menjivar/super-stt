@@ -37,6 +37,11 @@ pub enum Command {
         /// serving `model`.
         source: String,
     },
+    /// Stage 1's model slot: what is selected there, whether it is up, the
+    /// device it runs on, and the load still in flight.
+    ///
+    /// Reports the *selection*, which survives an unload — not the loaded
+    /// instance, which is what `loaded` is for.
     GetModel,
     /// The transcription models stage 1's backend serves.
     ListModels,
@@ -103,6 +108,9 @@ pub enum Command {
         model: String,
         source: String,
     },
+    /// Stage 2's model slot — the twin of `GetModel`, answering the identical
+    /// shape. A separate variant rather than a `stage` parameter because that
+    /// is how every other stage verb is spelled here.
     GetPostProcessor,
     /// Stop running the post-processor, keeping the selection.
     ClearPostProcessor,
