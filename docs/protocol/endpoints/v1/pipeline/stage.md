@@ -43,6 +43,10 @@ The model is not here — read it at
 Select the backend that fills this stage. Validates that it is installed and
 serves this stage's role; does **not** load anything.
 
+The backends it will accept are
+[`GET /pipeline/{stage}/backend/list`](./backend-list.md) — fill a picker from
+that rather than from `GET /backends`, or it offers backends this refuses.
+
 **Request:**
 
 ```http

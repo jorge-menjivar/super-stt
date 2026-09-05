@@ -121,6 +121,8 @@ impl SuperSTTDaemon {
             Command::SetCustomModelsDir { path } => self.handle_set_custom_models_dir(path).await,
             Command::GetCustomModelsDir => self.handle_get_custom_models_dir().await,
             Command::ListBackends => self.handle_list_backends().await,
+            Command::ListTranscriptionBackends => self.handle_list_stage_backends(false).await,
+            Command::ListPostProcessorBackends => self.handle_list_stage_backends(true).await,
             Command::ReloadActiveModel => self.handle_reload_active_model().await,
             Command::UnloadActiveModel => self.handle_unload_active_model().await,
             Command::SetBackendOption {

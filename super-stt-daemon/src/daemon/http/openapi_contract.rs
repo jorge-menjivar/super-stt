@@ -13,6 +13,7 @@
 //! - every operation carries prose, not a placeholder;
 //! - every success body names a real shape, not "some JSON";
 //! - every operation is addressable by an id no other operation shares;
+//! - every path parameter a URL contains is the one the operation describes;
 //! - every guarded endpoint documents the failures a client will actually hit.
 //!
 //! They iterate the whole document, so adding an endpoint adds nothing here —
@@ -180,6 +181,67 @@ fn no_two_operations_share_an_operation_id() {
         "operations share an id, so tooling keyed on it cannot tell them apart \
          (rename the handler functions):\n{}",
         collisions.join("\n")
+    );
+}
+
+/// The path parameters an operation documents must be the ones its URL contains.
+///
+/// A `#[utoipa::path]` writes the URL template and the parameter prose in two
+/// separate places, and utoipa reconciles them generously: a `params(...)` entry
+/// naming something the template does not contain is published anyway, and a
+/// placeholder the template does contain but `params(...)` omits is published
+/// too, bare, with no description. Rename a path segment without renaming its
+/// entry and you get both at once — a phantom parameter carrying all the prose,
+/// and the real one carrying none.
+///
+/// Nothing else notices, because the handler binds path segments positionally:
+/// the endpoint keeps serving correctly while its documentation describes a URL
+/// that does not exist. A generated client is where it surfaces, as a required
+/// argument that can never be substituted into the path.
+#[test]
+fn every_operation_documents_exactly_the_path_parameters_its_url_contains() {
+    let doc = document();
+    let mut wrong = Vec::new();
+
+    for (path, method, op) in operations(&doc) {
+        // The `{placeholder}` segments of the URL template itself.
+        let templated: Vec<&str> = path
+            .split('/')
+            .filter_map(|seg| seg.strip_prefix('{')?.strip_suffix('}'))
+            .collect();
+
+        let documented: Vec<&str> = op["parameters"]
+            .as_array()
+            .map(|params| {
+                params
+                    .iter()
+                    .filter(|p| p["in"] == "path")
+                    .map(|p| p["name"].as_str().expect("a parameter name is a string"))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let where_ = format!("{} {path}", method.to_uppercase());
+        for name in &documented {
+            if !templated.contains(name) {
+                wrong.push(format!(
+                    "  {where_} documents a path parameter `{name}` its URL does not contain"
+                ));
+            }
+        }
+        for name in &templated {
+            if !documented.contains(name) {
+                wrong.push(format!(
+                    "  {where_} leaves the path parameter `{name}` undescribed"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "documented path parameters disagree with the URLs they belong to:\n{}",
+        wrong.join("\n")
     );
 }
 

@@ -40,14 +40,14 @@ Each option has a manifest **default** and an optional user **override**. The
 the override; `DELETE` removes it, resetting the effective value back to the
 default.
 
-## `GET /backends/{backend_id}/options/list`
+## `GET /backends/{backend_id}/options`
 
 List the backend's declared options with their effective values.
 
 **Request:**
 
 ```http
-GET /backends/github.com%2Fsuper-stt%2Fopenai/options/list HTTP/1.1
+GET /backends/github.com%2Fsuper-stt%2Fopenai/options HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```

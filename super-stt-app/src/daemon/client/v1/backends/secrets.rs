@@ -42,13 +42,13 @@ pub async fn clear_backend_secret(source: String, name: String) -> HttpResult<()
     .await
 }
 
-/// List which secrets are configured for a backend (HTTP `GET /backends/{source}/secrets/list`).
+/// List which secrets are configured for a backend (HTTP `GET /backends/{source}/secrets`).
 /// Returns a `Vec<(name, configured)>` pair for each declared secret.
 pub async fn list_backend_secrets(source: String) -> HttpResult<Vec<(String, bool)>> {
     with_settings_token(move |socket, token| {
         let source = source.clone();
         async move {
-            let path = format!("/backends/{}/secrets/list", enc(&source));
+            let path = format!("/backends/{}/secrets", enc(&source));
             let resp = require_success(
                 transport::settings_get(socket, &token, &path).await?,
                 "list_backend_secrets",

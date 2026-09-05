@@ -90,7 +90,7 @@ fn effective(
 
 #[utoipa::path(
     get,
-    path = "/backends/{backend_id}/options/list",
+    path = "/backends/{backend_id}/options",
     tag = "backends",
     summary = "List a backend's options",
     description = "\
@@ -99,7 +99,7 @@ value actually in effect. This is what a settings UI renders a form from.
 
 Options are the backend's own configuration — an endpoint URL, a model parameter — \
 declared in its manifest. Credentials are not options; those are secrets, at \
-`/backends/{backend_id}/secrets/list`.",
+`/backends/{backend_id}/secrets`.",
     params(
         ("backend_id" = String, Path,
          description = "The backend's id — its `source` as `GET /backends` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",

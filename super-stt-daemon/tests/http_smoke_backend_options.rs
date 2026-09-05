@@ -347,10 +347,10 @@ async fn base_url_is_stored_canonical() {
 #[tokio::test]
 async fn option_list_returns_declared_options() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
-    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options/list");
+    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/options");
 
     let (s, body) = get(&sock, &list_path, &token).await;
-    assert_eq!(s, StatusCode::OK, "GET options/list: {body}");
+    assert_eq!(s, StatusCode::OK, "GET options: {body}");
     assert_eq!(body["status"], "success", "list status: {body}");
     let options = body["options"].as_array().expect("options array");
     assert_eq!(options.len(), 2, "two declared options: {body}");

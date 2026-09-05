@@ -3,10 +3,11 @@
 //!
 //! Contract: `docs/protocol/endpoints/v1/pipeline.md`.
 //!
-//! The modules mirror the paths: [`stage`] serves `/pipeline/{stage}`, [`model`]
-//! serves `/pipeline/{stage}/model` and its verbs, [`device`] and [`language`]
-//! serve the two per-model preferences. `GET /pipeline`, the whole
-//! report, is here at the root because that is where the path is.
+//! The modules mirror the paths: [`stage`] serves `/pipeline/{stage}`,
+//! [`backend`] the menu that fills it, [`model`] serves
+//! `/pipeline/{stage}/model` and its verbs, [`device`] and [`language`] serve
+//! the two per-model preferences. `GET /pipeline`, the whole report, is here at
+//! the root because that is where the path is.
 //!
 //! Every stage answers the same verbs — select a backend, deselect it, run a
 //! model, stop it, and read or set the device one of its models runs on — so a
@@ -15,6 +16,7 @@
 //! resolves; the handlers themselves are the ones each stage always had, so
 //! there is a single implementation of each operation.
 
+pub(crate) mod backend;
 pub(crate) mod device;
 pub(crate) mod language;
 pub(crate) mod model;
@@ -37,6 +39,8 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 /// Adding a third stage means one more arm here — not a new endpoint — which is
 /// the whole point of addressing stages by position.
 struct Stage {
+    /// The installed backends this stage can be filled with.
+    list_backends: &'static str,
     /// Select this stage's backend.
     set_backend: &'static str,
     /// Deselect it.
@@ -68,6 +72,7 @@ impl Stage {
     fn resolve(stage: u32) -> Option<Self> {
         match stage {
             1 => Some(Self {
+                list_backends: "list_transcription_backends",
                 set_backend: "set_active_backend",
                 clear_backend: "clear_active_backend",
                 get_model: "get_model",
@@ -82,6 +87,7 @@ impl Stage {
                 list_models: "list_models",
             }),
             2 => Some(Self {
+                list_backends: "list_post_processor_backends",
                 set_backend: "set_post_processor_backend",
                 clear_backend: "clear_post_processor_backend",
                 get_model: "get_post_processor",
@@ -163,6 +169,7 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(model::list_stage_models))
         .routes(routes!(model::cancel_stage_model))
         .routes(routes!(model::reload_stage_model))
+        .routes(routes!(backend::list_stage_backends))
         .routes(routes!(device::list_stage_devices))
         .routes(routes!(device::get_model_device, device::set_model_device))
         .routes(routes!(device::list_model_devices))

@@ -212,7 +212,7 @@ async fn secret_set_then_listed_configured_then_cleared() {
     let (_guard, sock, token) = start_daemon(&["secrets"]).await;
 
     let sec_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/openai_api_key");
-    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/list");
+    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets");
 
     // Initially not configured.
     let (s, body) = get(&sock, &sec_path, &token).await;
@@ -235,7 +235,7 @@ async fn secret_set_then_listed_configured_then_cleared() {
 
     // List shows it configured, never reveals the value.
     let (s, body) = get(&sock, &list_path, &token).await;
-    assert_eq!(s, StatusCode::OK, "GET secrets/list: {body}");
+    assert_eq!(s, StatusCode::OK, "GET secrets: {body}");
     assert_eq!(body["status"], "success", "list status: {body}");
     let secrets = body["secrets"].as_array().expect("secrets array");
     assert_eq!(secrets.len(), 1, "one declared secret: {body}");
@@ -262,7 +262,7 @@ async fn secret_endpoints_require_the_secrets_scope() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
     let secret_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/openai_api_key");
-    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets/list");
+    let list_path = format!("/backends/{FIXTURE_SOURCE_ENC}/secrets");
 
     let (s, body) = post(
         &sock,
@@ -291,7 +291,7 @@ async fn secret_endpoints_require_the_secrets_scope() {
     assert_eq!(
         s,
         StatusCode::FORBIDDEN,
-        "settings-only token must be 403 on secrets/list GET: {body}"
+        "settings-only token must be 403 on the secrets list GET: {body}"
     );
     assert_eq!(body["message"], "scope_denied", "error code: {body}");
 

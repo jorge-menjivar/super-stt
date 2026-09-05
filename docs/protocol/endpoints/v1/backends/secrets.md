@@ -49,7 +49,7 @@ general-purpose keyring. A `{name}` that the backend does not declare returns
 `list` is reserved for the collection endpoint below, so a backend cannot
 declare a secret named `list`.
 
-## `GET /backends/{backend_id}/secrets/list`
+## `GET /backends/{backend_id}/secrets`
 
 List the backend's declared secrets and whether each is configured. **No
 values.**
@@ -57,7 +57,7 @@ values.**
 **Request:**
 
 ```http
-GET /backends/github.com%2Fsuper-stt%2Fopenai/secrets/list HTTP/1.1
+GET /backends/github.com%2Fsuper-stt%2Fopenai/secrets HTTP/1.1
 Host: stt.local
 Authorization: Bearer stt_…64hex…
 ```

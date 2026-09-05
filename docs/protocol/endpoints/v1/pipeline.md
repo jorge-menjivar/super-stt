@@ -13,6 +13,7 @@ so a client learns one shape and applies it anywhere in the pipeline:
 | Verb | Path | Meaning |
 |---|---|---|
 | Read the backend | [`GET /pipeline/{stage}`](./pipeline/stage.md#get-pipelinestage)           | Which backend fills this stage, and whether it is switched on |
+| List its backends | [`GET /pipeline/{stage}/backend/list`](./pipeline/backend-list.md)       | The installed backends that can fill this stage |
 | Select backend   | [`POST /pipeline/{stage}`](./pipeline/stage.md#post-pipelinestage)         | Which installed backend fills this stage |
 | Deselect backend | [`DELETE /pipeline/{stage}`](./pipeline/stage.md#delete-pipelinestage)       | Empty the stage, forgetting its model     |
 | Read its model   | [`GET /pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel)     | What it is pointed at, whether that is up, and the device it runs on |
@@ -159,6 +160,7 @@ Each verb's reference lives with its path:
 | Page | Covers |
 |---|---|
 | [`pipeline/stage.md`](./pipeline/stage.md)   | `GET`, `POST`, `DELETE /pipeline/{stage}` |
+| [`pipeline/backend-list.md`](./pipeline/backend-list.md) | `GET /pipeline/{stage}/backend/list` |
 | [`pipeline/model.md`](./pipeline/model.md)   | `GET`, `POST`, `DELETE /pipeline/{stage}/model`, and its `cancel` / `reload` |
 | [`pipeline/model-list.md`](./pipeline/model-list.md) | `GET /pipeline/{stage}/model/list` |
 | [`pipeline/device.md`](./pipeline/device.md) | `/pipeline/{stage}/model/{model}/device`, both device lists |

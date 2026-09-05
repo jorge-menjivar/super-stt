@@ -6,16 +6,27 @@
 //! page filters through here, so a stage never offers something the daemon will
 //! refuse — and the two stages cannot drift apart in how they decide.
 
-use crate::daemon::backends::BackendInfo;
+use super_stt_registry_types::manifest::ModelRole;
 
-/// The `role` a post-processor model declares in its manifest.
-pub(crate) const POST_PROCESSOR: &str = "post_processor";
+use crate::daemon::backends::BackendInfo;
 
 /// Whether a role string names a post-processor. Anything else — including a
 /// role a newer backend invented — reads as transcription, matching the
 /// manifest's default.
+///
+/// Parsed through the manifest's own [`ModelRole`] rather than compared against
+/// a local `"post_processor"` literal: the spelling is the daemon's, and a
+/// second copy of it here is a copy that can drift. `FromStr` rejects anything
+/// it does not know, which is the lenient answer this wants.
+///
+/// The daemon answers the same question at
+/// `GET /pipeline/{stage}/backend/list` and `GET /pipeline/{stage}/model/list`.
+/// Those are the endpoints for a client that does not already hold the whole
+/// catalog; the Models page does hold it — the Library needs every backend's
+/// secrets and options — so it filters what it has rather than fetching a
+/// second, narrower copy of it.
 fn is_post_processor(role: &str) -> bool {
-    role == POST_PROCESSOR
+    role.parse() == Ok(ModelRole::PostProcessor)
 }
 
 /// The installed backends serving at least one model this stage can run, in

@@ -790,6 +790,89 @@ async fn a_models_device_is_its_own() {
     assert_eq!(body["device"], "cpu");
 }
 
+/// A stage's backend list is what its `POST` accepts, and nothing else.
+///
+/// The fixture makes the case that matters: one backend serves both roles, one
+/// serves only a post-processor. Stage 1 must not offer the second — selecting
+/// it leaves the model picker empty, and `POST /pipeline/1` refuses it anyway,
+/// so a picker built from `GET /backends` hands the user an error to discover
+/// by choosing it.
+#[tokio::test]
+async fn each_stage_lists_only_the_backends_that_can_fill_it() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    let sources = async |path: &str| -> Vec<String> {
+        let (status, body) = get(&sock, path, &token).await;
+        assert_eq!(status, StatusCode::OK, "GET {path}: {body}");
+        body["backends"]
+            .as_array()
+            .expect("backends is a list")
+            .iter()
+            .filter_map(|b| b["source"].as_str().map(ToString::to_string))
+            .collect()
+    };
+
+    let installed = sources("/backends").await;
+    assert!(installed.contains(&FIXTURE_SOURCE.to_string()));
+    assert!(
+        installed.contains(&PP_ONLY_SOURCE.to_string()),
+        "the whole catalog carries both: {installed:?}"
+    );
+
+    let stage_one = sources("/pipeline/1/backend/list").await;
+    assert!(
+        stage_one.contains(&FIXTURE_SOURCE.to_string()),
+        "the dual-role backend transcribes: {stage_one:?}"
+    );
+    assert!(
+        !stage_one.contains(&PP_ONLY_SOURCE.to_string()),
+        "a post-processor-only backend is not a transcription backend: {stage_one:?}"
+    );
+
+    let stage_two = sources("/pipeline/2/backend/list").await;
+    assert!(
+        stage_two.contains(&PP_ONLY_SOURCE.to_string()),
+        "and it is a post-processor backend: {stage_two:?}"
+    );
+    assert!(
+        stage_two.contains(&FIXTURE_SOURCE.to_string()),
+        "a backend serving both roles appears in both lists: {stage_two:?}"
+    );
+
+    // The list is the promise: every backend offered is one POST takes, and the
+    // one it withholds is one POST refuses.
+    for source in &stage_one {
+        let (status, body) = post_req(
+            &sock,
+            "/pipeline/1",
+            &token,
+            serde_json::json!({ "source": source }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "offered {source} but refused it: {body}"
+        );
+    }
+    let (status, body) = post_req(
+        &sock,
+        "/pipeline/1",
+        &token,
+        serde_json::json!({ "source": PP_ONLY_SOURCE }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "withheld from the list but accepted: {body}"
+    );
+
+    // An out-of-range position is the same 404 every stage path answers with.
+    let (status, _) = get(&sock, "/pipeline/9/backend/list", &token).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 /// What is set and what may be set are separate endpoints, and the second is
 /// the set the first will accept — not the manifest's list.
 ///

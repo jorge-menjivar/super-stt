@@ -158,10 +158,10 @@ Setting a secret or option is done per item under the backend's sub-resources,
 not on `/backends` itself:
 
 - **Secrets** — [`/backends/{backend_id}/secrets`](./backends/secrets.md):
-  `GET …/secrets/list` and `GET`/`POST`/`DELETE …/secrets/{name}`. Requires the
+  `GET …/secrets` and `GET`/`POST`/`DELETE …/secrets/{name}`. Requires the
   `secrets` scope; values are write-only.
 - **Options** — [`/backends/{backend_id}/options`](./backends/options.md):
-  `GET …/options/list` and `GET`/`POST`/`DELETE …/options/{name}`. Requires the
+  `GET …/options` and `GET`/`POST`/`DELETE …/options/{name}`. Requires the
   `settings` scope.
 
 For both, `POST` sets a value and `DELETE` resets it to its default — the

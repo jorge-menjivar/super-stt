@@ -76,6 +76,8 @@ impl TryFrom<DaemonRequest> for Command {
             "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
             "get_custom_models_dir" => Ok(Command::GetCustomModelsDir),
             "list_backends" => Ok(Command::ListBackends),
+            "list_transcription_backends" => Ok(Command::ListTranscriptionBackends),
+            "list_post_processor_backends" => Ok(Command::ListPostProcessorBackends),
             "reload_active_model" => Ok(Command::ReloadActiveModel),
             "unload_active_model" => Ok(Command::UnloadActiveModel),
             "set_backend_option" => cmd_set_backend_option(&request),

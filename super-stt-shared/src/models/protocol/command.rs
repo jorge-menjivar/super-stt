@@ -45,6 +45,16 @@ pub enum Command {
     GetModel,
     /// The transcription models stage 1's backend serves.
     ListModels,
+    /// The installed backends that can fill stage 1: those serving at least one
+    /// transcription model.
+    ///
+    /// The role filter lives in the daemon rather than in each client, because
+    /// the daemon already applies it when it accepts or refuses a stage's
+    /// backend — a client filtering on its own can offer one the daemon then
+    /// refuses.
+    ListTranscriptionBackends,
+    /// The stage-2 twin: backends serving at least one post-processor.
+    ListPostProcessorBackends,
     /// The post-processors stage 2's backend serves.
     ///
     /// A separate variant rather than a `stage` parameter because that is how

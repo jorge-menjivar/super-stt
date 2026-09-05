@@ -2,6 +2,7 @@
 
 use crate::daemon::types::SuperSTTDaemon;
 use log::{info, warn};
+use super_stt_registry_types::manifest::ModelRole;
 use super_stt_shared::models::backends::{BackendInfo, BackendModel, BackendOption, BackendSecret};
 use super_stt_shared::models::protocol::DaemonResponse;
 
@@ -19,6 +20,48 @@ impl SuperSTTDaemon {
     /// backend's models, declared secrets, and options (with effective values).
     /// Drives the settings UI; see `docs/protocol/endpoints/v1/backends.md`.
     pub async fn handle_list_backends(&self) -> DaemonResponse {
+        let catalog = self.backend_catalog().await;
+        info!("Backends catalog requested: {} backend(s)", catalog.len());
+        let backends_json = serde_json::to_value(&catalog).unwrap_or_default();
+        DaemonResponse::success()
+            .with_backends(backends_json)
+            .with_message("Backends listed successfully".to_string())
+    }
+
+    /// `GET /pipeline/{stage}/backend/list` — the installed backends that can
+    /// fill this stage: those serving at least one model carrying its role.
+    ///
+    /// The same catalog `GET /backends` returns, narrowed. Narrowed *here*
+    /// rather than by each client, because the daemon already decides this when
+    /// it accepts or refuses `POST /pipeline/{stage}` — and a client filtering
+    /// on its own can offer a backend the daemon then refuses, which is a
+    /// picker that hands the user an error.
+    pub async fn handle_list_stage_backends(&self, post_processor: bool) -> DaemonResponse {
+        let catalog: Vec<BackendInfo> = self
+            .backend_catalog()
+            .await
+            .into_iter()
+            .filter(|b| {
+                b.models
+                    .iter()
+                    .any(|m| (m.role == ModelRole::PostProcessor.to_string()) == post_processor)
+            })
+            .collect();
+        let stage = if post_processor { 2 } else { 1 };
+        info!(
+            "Stage {stage} backends requested: {} backend(s)",
+            catalog.len()
+        );
+        let backends_json = serde_json::to_value(&catalog).unwrap_or_default();
+        DaemonResponse::success()
+            .with_backends(backends_json)
+            .with_message(format!("Backends available to stage {stage} listed"))
+    }
+
+    /// The installed-backend catalog both list endpoints answer from, so a
+    /// stage's view of a backend and the whole catalog's cannot differ in
+    /// anything but which backends are in it.
+    async fn backend_catalog(&self) -> Vec<BackendInfo> {
         let config = self.config.read().await;
         let backends = self.backends.read().await;
 
@@ -110,12 +153,7 @@ impl SuperSTTDaemon {
                 }
             })
             .collect();
-
-        info!("Backends catalog requested: {} backend(s)", catalog.len());
-        let backends_json = serde_json::to_value(&catalog).unwrap_or_default();
-        DaemonResponse::success()
-            .with_backends(backends_json)
-            .with_message("Backends listed successfully".to_string())
+        catalog
     }
 
     /// Reload every stage running a model from `source`, so a just-changed

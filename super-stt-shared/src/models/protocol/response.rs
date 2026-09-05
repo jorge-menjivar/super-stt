@@ -83,7 +83,7 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backends: Option<Value>,
 
-    // Per-backend secret list (GET /backends/{source}/secrets/list): array of
+    // Per-backend secret list (GET /backends/{source}/secrets): array of
     // `{name, label, required, configured}` objects.
     // See docs/protocol/endpoints/v1/backends.md.
     #[serde(skip_serializing_if = "Option::is_none")]
