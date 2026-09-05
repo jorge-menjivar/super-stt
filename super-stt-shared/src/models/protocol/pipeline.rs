@@ -237,10 +237,12 @@ mod tests {
                 "{key} belongs to /pipeline/{{stage}}/model, not to the stage"
             );
         }
-        assert_eq!(
-            object.keys().collect::<Vec<_>>(),
-            ["stage", "role", "source", "name", "enabled"],
-        );
+        // Sorted: key order depends on whether `serde_json/preserve_order` is
+        // unified in by another crate in the build. The claim is which keys
+        // exist, not the order they serialize in.
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["enabled", "name", "role", "source", "stage"]);
     }
 
     /// Every stage reports `enabled`, at every position.
@@ -335,13 +337,14 @@ mod tests {
             resolved_accel: Some("cpu".to_string()),
         })
         .expect("serializes");
-        assert_eq!(
-            json.as_object()
-                .expect("an object")
-                .keys()
-                .collect::<Vec<_>>(),
-            ["preference", "resolved_accel"],
-        );
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["preference", "resolved_accel"]);
     }
 
     /// A model slot mid-download round trips whole, switch included.

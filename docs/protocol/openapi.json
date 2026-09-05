@@ -2501,7 +2501,7 @@
           "pipeline"
         ],
         "summary": "Read a model's language override",
-        "description": "The language this specific model transcribes in, which overrides the global `/language` setting. Addressed by `(source, model)` rather than \"the active model\", so it can be read whether or not the model is loaded.\n\n`null` means no override: the model follows the global setting.",
+        "description": "The language this specific model transcribes in, and what decided it: the per-model override, the global `/settings/language` setting, or the model's own default. Addressed by `(source, model)` rather than \"the active model\", so it can be read whether or not the model is loaded.\n\n`override` is `null` when none is set, which is what \"follows the global setting\" looks like. What the override *may* be set to is `GET /pipeline/{stage}/model/{model}/language/list`.",
         "operationId": "get_model_language",
         "parameters": [
           {
@@ -2749,6 +2749,108 @@
           },
           "400": {
             "description": "The stage has no backend selected (`invalid_backend`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such stage (`unknown_stage`), or this stage's backend serves no such model (`unknown_model`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/pipeline/{stage}/model/{model}/language/list": {
+      "get": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "List the languages a model can be pinned to",
+        "description": "What `POST /pipeline/{stage}/model/{model}/language` will accept for this model: the tags it serves, plus the reserved `auto` for letting it detect the language itself.\n\nFill a language picker from this rather than from a general BCP-47 list — a tag the model does not serve is refused, and offering one is an error the user only discovers by choosing it.\n\nEmpty for a monolingual model, which has nothing to choose however many tags its manifest lists. That is the same shape `GET /pipeline/{stage}/model/{model}/device/list` answers with for a model that runs remotely, and a client hides the control on an empty list rather than special-casing a status.",
+        "operationId": "list_model_languages",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "description": "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "example": 1
+          },
+          {
+            "name": "model",
+            "in": "path",
+            "description": "The model's name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The languages on offer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The stage has no backend selected, so there is nothing to resolve `model` against (`invalid_backend`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -6130,6 +6232,38 @@
           }
         }
       },
+      "LanguageList": {
+        "type": "object",
+        "description": "The languages a model can be pinned to.",
+        "required": [
+          "status",
+          "available_languages"
+        ],
+        "properties": {
+          "available_languages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "BCP-47 tags, plus the reserved `auto`. Empty for a monolingual model,\nwhich has nothing to choose.",
+            "example": [
+              "auto",
+              "en",
+              "es"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
       "LanguageState": {
         "type": "object",
         "description": "The default transcription language.",
@@ -6202,8 +6336,7 @@
         "required": [
           "multilingual",
           "source",
-          "primary",
-          "supported"
+          "primary"
         ],
         "properties": {
           "effective": {
@@ -6231,13 +6364,6 @@
           "source": {
             "type": "string",
             "description": "Which setting `effective` came from: the per-model override, the global\nsetting, or the model's own default."
-          },
-          "supported": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Every tag this model accepts."
           }
         }
       },

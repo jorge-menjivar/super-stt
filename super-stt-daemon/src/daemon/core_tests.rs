@@ -1868,12 +1868,18 @@ async fn a_stage_reports_only_its_backend() {
         .pipeline
         .expect("pipeline");
     let json = serde_json::to_value(&stages[0]).expect("serializes");
-    let keys: Vec<&String> = json
+    // Sorted, because key order depends on whether `serde_json/preserve_order`
+    // is unified in by another crate in the build — which differs between a
+    // workspace test run and a single-crate one. The claim is which keys exist,
+    // not what order they serialize in.
+    let mut keys: Vec<&str> = json
         .as_object()
         .expect("a stage is an object")
         .keys()
+        .map(String::as_str)
         .collect();
-    assert_eq!(keys, ["stage", "role", "source", "name", "enabled"]);
+    keys.sort_unstable();
+    assert_eq!(keys, ["enabled", "name", "role", "source", "stage"]);
     assert_eq!(json["name"], "Whisper", "the backend's display name");
 }
 

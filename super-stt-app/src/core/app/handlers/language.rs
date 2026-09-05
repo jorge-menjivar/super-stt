@@ -51,6 +51,43 @@ impl AppModel {
                     },
                 )
             }
+            per_model @ (LanguageMessage::ModelLanguagesLoaded { .. }
+            | LanguageMessage::ModelLanguageLoaded { .. }
+            | LanguageMessage::ModelLanguageSelected { .. }) => {
+                self.handle_model_language_messages(per_model)
+            }
+            LanguageMessage::LanguageError(e) => {
+                // The language picker lives on the Customization page — surface
+                // the failure on that page's banner instead of only logging it
+                // (Tier 3 #11).
+                log::warn!("Language settings error: {e}");
+                self.set_action_error(
+                    crate::state::ErrorScope::Customization,
+                    format!("Couldn't update language: {e}"),
+                );
+                Task::none()
+            }
+        }
+    }
+
+    /// The arms that act on one model's language, split out so the dispatch
+    /// above stays a table of the global settings.
+    fn handle_model_language_messages(
+        &mut self,
+        message: LanguageMessage,
+    ) -> Task<cosmic::Action<Message>> {
+        match message {
+            LanguageMessage::ModelLanguagesLoaded {
+                stage,
+                source,
+                model,
+                languages,
+            } => {
+                self.language
+                    .model_languages
+                    .record_offer(stage, source, model, languages);
+                Task::none()
+            }
             LanguageMessage::ModelLanguageLoaded {
                 stage,
                 source,
@@ -93,16 +130,8 @@ impl AppModel {
                     },
                 )
             }
-            LanguageMessage::LanguageError(e) => {
-                // The language picker lives on the Customization page — surface
-                // the failure on that page's banner instead of only logging it
-                // (Tier 3 #11).
-                log::warn!("Language settings error: {e}");
-                self.set_action_error(
-                    crate::state::ErrorScope::Customization,
-                    format!("Couldn't update language: {e}"),
-                );
-                Task::none()
+            other => {
+                unreachable!("handle_model_language_messages received {other:?}")
             }
         }
     }
@@ -140,8 +169,8 @@ impl AppModel {
         }
         let src = source.to_string();
         let mdl = model.clone();
-        Task::perform(
-            model_lang::get_model_language(stage, model),
+        let block = Task::perform(
+            model_lang::get_model_language(stage, model.clone()),
             move |res| match res {
                 Ok(block) => {
                     cosmic::Action::App(Message::Language(LanguageMessage::ModelLanguageLoaded {
@@ -154,6 +183,41 @@ impl AppModel {
                 Err(e) => cosmic::Action::App(Message::Language(LanguageMessage::LanguageError(
                     e.to_string(),
                 ))),
+            },
+        );
+        Task::batch([block, Self::load_model_languages(stage, source, model)])
+    }
+
+    /// Fetch what a model can be pinned to, so the picker offers exactly what
+    /// the daemon will accept.
+    ///
+    /// Paired with the block above rather than folded into it: they are
+    /// separate endpoints because they answer separate questions, and only one
+    /// of them changes when the user picks a language.
+    fn load_model_languages(
+        stage: u32,
+        source: &str,
+        model: String,
+    ) -> Task<cosmic::Action<Message>> {
+        let src = source.to_string();
+        let mdl = model.clone();
+        Task::perform(
+            model_lang::list_model_languages(stage, model),
+            move |res| match res {
+                Ok(languages) => {
+                    cosmic::Action::App(Message::Language(LanguageMessage::ModelLanguagesLoaded {
+                        stage,
+                        source: src.clone(),
+                        model: mdl.clone(),
+                        languages,
+                    }))
+                }
+                // A failed read leaves the picker with nothing to offer rather
+                // than a general language list the model would refuse.
+                Err(e) => {
+                    log::warn!("Could not read the languages for {mdl}: {e}");
+                    cosmic::Action::None
+                }
             },
         )
     }

@@ -520,8 +520,29 @@ pub(crate) struct ModelLanguageBlock {
     model_override: Option<String>,
     /// The model's own default language.
     primary: String,
-    /// Every tag this model accepts.
-    supported: Vec<String>,
+}
+
+/// The languages a model can be pinned to.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct LanguageList {
+    #[schema(example = "success")]
+    status: &'static str,
+    /// BCP-47 tags, plus the reserved `auto`. Empty for a monolingual model,
+    /// which has nothing to choose.
+    #[schema(example = json!(["auto", "en", "es"]))]
+    available_languages: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+impl FromDaemon for LanguageList {
+    fn from_daemon(resp: DaemonResponse) -> Self {
+        Self {
+            status: "success",
+            available_languages: resp.available_languages.unwrap_or_default(),
+            message: resp.message,
+        }
+    }
 }
 
 /// The per-model language resolution.
@@ -545,7 +566,6 @@ impl FromDaemon for ModelLanguageState {
                     effective: None,
                     model_override: None,
                     primary: String::new(),
-                    supported: Vec::new(),
                 }),
         }
     }

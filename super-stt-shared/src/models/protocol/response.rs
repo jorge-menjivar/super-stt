@@ -28,6 +28,11 @@ pub struct DaemonResponse {
     pub available_models: Option<Vec<(String, String)>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_devices: Option<Vec<String>>,
+    /// The languages a model can be pinned to, on
+    /// `GET /pipeline/{stage}/model/{model}/language/list`. The twin of
+    /// `available_devices`, and answered by the twin endpoint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_languages: Option<Vec<String>>,
     /// The accelerator `"gpu"` resolved to, on `GET`/`POST /active_device`.
     /// `"cpu"` when the preference itself is `"cpu"` (nothing to resolve);
     /// `"cuda"`/`"rocm"`/`"metal"`/`"vulkan"` once a local model has loaded
@@ -370,6 +375,12 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_available_devices(mut self, devices: Vec<String>) -> Self {
         self.available_devices = Some(devices);
+        self
+    }
+
+    #[must_use]
+    pub fn with_available_languages(mut self, languages: Vec<String>) -> Self {
+        self.available_languages = Some(languages);
         self
     }
 

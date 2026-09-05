@@ -116,7 +116,8 @@ impl SuperSTTDaemon {
             Command::ClearPrimaryLanguage => self.handle_clear_primary_language().await,
             cmd @ (Command::SetModelLanguage { .. }
             | Command::GetModelLanguage { .. }
-            | Command::ClearModelLanguage { .. }) => self.handle_model_language(cmd).await,
+            | Command::ClearModelLanguage { .. }
+            | Command::ListModelLanguages { .. }) => self.handle_model_language(cmd).await,
             Command::SetCustomModelsDir { path } => self.handle_set_custom_models_dir(path).await,
             Command::GetCustomModelsDir => self.handle_get_custom_models_dir().await,
             Command::ListBackends => self.handle_list_backends().await,

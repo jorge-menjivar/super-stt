@@ -469,6 +469,18 @@ pub enum LanguageMessage {
     PrimaryLanguageSelected(Option<String>),
     /// Per-model resolution block (`/pipeline/{stage}/model/{model}/language`)
     /// loaded from the daemon for `(source, model)`.
+    /// The languages a model can be pinned to, from
+    /// `GET /pipeline/{stage}/model/{model}/language/list`.
+    ///
+    /// Separate from the resolution block: the block changes with every pick,
+    /// the offer cannot change for a given model, so a pick does not re-fetch
+    /// a list that has not moved.
+    ModelLanguagesLoaded {
+        stage: u32,
+        source: String,
+        model: String,
+        languages: Vec<String>,
+    },
     ModelLanguageLoaded {
         /// The stage the block was read through.
         stage: u32,

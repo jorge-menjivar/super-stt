@@ -183,6 +183,16 @@ pub enum Command {
         source: String,
         model: String,
     },
+    /// The languages a specific `(source, model)` can be pinned to.
+    ///
+    /// The set `SetModelLanguage` accepts, not merely what the manifest
+    /// declares: `auto` is choosable and monolingual models accept nothing, so
+    /// a list built from `supported_languages` alone would offer a value the
+    /// setter refuses and omit one it takes.
+    ListModelLanguages {
+        source: String,
+        model: String,
+    },
     SetCustomModelsDir {
         path: Option<String>,
     },

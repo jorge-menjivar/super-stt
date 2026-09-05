@@ -72,6 +72,7 @@ impl TryFrom<DaemonRequest> for Command {
             "set_model_language" => cmd_set_model_language(&request),
             "get_model_language" => cmd_get_model_language(&request),
             "clear_model_language" => cmd_clear_model_language(&request),
+            "list_model_languages" => cmd_list_model_languages(&request),
             "set_custom_models_dir" => Ok(cmd_set_custom_models_dir(&request)),
             "get_custom_models_dir" => Ok(Command::GetCustomModelsDir),
             "list_backends" => Ok(Command::ListBackends),
@@ -495,4 +496,9 @@ fn cmd_get_model_language(request: &DaemonRequest) -> Result<Command, String> {
 fn cmd_clear_model_language(request: &DaemonRequest) -> Result<Command, String> {
     let (source, model) = model_language_target(request, "clear_model_language")?;
     Ok(Command::ClearModelLanguage { source, model })
+}
+
+fn cmd_list_model_languages(request: &DaemonRequest) -> Result<Command, String> {
+    let (source, model) = model_language_target(request, "list_model_languages")?;
+    Ok(Command::ListModelLanguages { source, model })
 }

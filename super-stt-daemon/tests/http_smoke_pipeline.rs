@@ -134,6 +134,7 @@ supported_devices = ["cpu", "gpu"]
 [[models]]
 name = "cleanup-1"
 role = "post_processor"
+multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["cpu"]
@@ -787,6 +788,98 @@ async fn a_models_device_is_its_own() {
     let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/device", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["device"], "cpu");
+}
+
+/// What is set and what may be set are separate endpoints, and the second is
+/// the set the first will accept — not the manifest's list.
+///
+/// Two things a picker filled from `supported_languages` gets wrong, and both
+/// are only discoverable by choosing the wrong entry: `auto` is accepted and is
+/// not declared, and a monolingual model declares tags while accepting none.
+#[tokio::test]
+async fn a_models_language_list_is_what_its_setter_accepts() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let (status, _) = post_req(
+        &sock,
+        "/pipeline/1",
+        &token,
+        serde_json::json!({ "source": FIXTURE_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The block says what is in effect, and no longer carries the list.
+    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/language", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert!(
+        body["language"].get("supported").is_none(),
+        "the list moved to /language/list: {body}"
+    );
+    assert_eq!(body["language"]["override"], serde_json::Value::Null);
+
+    let (status, body) = get(
+        &sock,
+        "/pipeline/1/model/whisper-local/language/list",
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let offered: Vec<&str> = body["available_languages"]
+        .as_array()
+        .expect("available_languages is a list")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert_eq!(
+        offered.first(),
+        Some(&"auto"),
+        "auto is accepted and is not declared, so the list has to add it: {offered:?}"
+    );
+    assert!(offered.contains(&"en"), "the model's own tag: {offered:?}");
+
+    // Every tag offered is one POST takes.
+    for tag in &offered {
+        let (status, body) = post_req(
+            &sock,
+            "/pipeline/1/model/whisper-local/language",
+            &token,
+            serde_json::json!({ "language": tag }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "offered {tag} but refused it: {body}"
+        );
+    }
+
+    // And a tag it does not offer is refused, so the list is the whole truth.
+    let (status, _) = post_req(
+        &sock,
+        "/pipeline/1/model/whisper-local/language",
+        &token,
+        serde_json::json!({ "language": "zz" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // A monolingual model offers nothing, however many tags it declares — the
+    // shape a picker hides its control on.
+    let (status, _) = post_req(
+        &sock,
+        PP_STAGE,
+        &token,
+        serde_json::json!({ "source": FIXTURE_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/language/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(
+        body["available_languages"],
+        serde_json::json!([]),
+        "a monolingual model has nothing to choose: {body}"
+    );
 }
 
 /// What the device verb refuses: a value that is not a device, a device the

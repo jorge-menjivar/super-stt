@@ -198,6 +198,11 @@ const RESPONSE_KEYS: &[(&str, &str, &[&str])] = &[
         &["language"],
     ),
     (
+        "/v1/pipeline/{stage}/model/{model}/language/list",
+        "get",
+        &["available_languages"],
+    ),
+    (
         "/v1/pipeline/{stage}/model/list",
         "get",
         &["available_models"],

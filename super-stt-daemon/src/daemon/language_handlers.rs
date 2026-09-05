@@ -68,6 +68,9 @@ impl SuperSTTDaemon {
             Command::ClearModelLanguage { source, model } => {
                 self.handle_clear_model_language(source, model).await
             }
+            Command::ListModelLanguages { source, model } => {
+                self.handle_list_model_languages(source, model).await
+            }
             _ => unreachable!("handle_model_language received a non-language command"),
         }
     }
@@ -110,8 +113,45 @@ impl SuperSTTDaemon {
             "effective": resolved.wire,
             "override": over,
             "primary": def.primary_language,
-            "supported": def.supported_languages,
         }))
+    }
+
+    /// The languages `(source, model)` can be pinned to — what
+    /// `GET /pipeline/{stage}/model/{model}/language/list` answers.
+    ///
+    /// The set [`Self::handle_set_model_language`] accepts, which is not the
+    /// manifest's `supported_languages`: `auto` is choosable and is not
+    /// declared, and a monolingual model accepts nothing at all however many
+    /// tags it lists. A picker filled from the manifest would therefore offer a
+    /// value the setter refuses and omit one it takes — so the two are derived
+    /// from the same rule, here.
+    pub async fn handle_list_model_languages(
+        &self,
+        source: String,
+        model: String,
+    ) -> DaemonResponse {
+        let Some(def) = self.find_model_definition(&source, &model).await else {
+            return DaemonResponse::error_with_code(ErrorCode::InvalidModel, "unknown_model");
+        };
+        // Empty rather than an error: a monolingual model is a real model with
+        // nothing to choose, the way an online model is a real model with no
+        // device. Both let a client hide the control on an empty list instead
+        // of special-casing a status.
+        let languages = if def.is_multilingual {
+            std::iter::once("auto".to_string())
+                .chain(
+                    def.supported_languages
+                        .iter()
+                        .filter(|tag| !tag.eq_ignore_ascii_case("auto"))
+                        .cloned(),
+                )
+                .collect()
+        } else {
+            Vec::new()
+        };
+        DaemonResponse::success()
+            .with_available_languages(languages)
+            .with_message(format!("Languages available to {model} listed"))
     }
 
     pub async fn handle_get_model_language(&self, source: String, model: String) -> DaemonResponse {

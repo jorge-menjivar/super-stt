@@ -124,9 +124,6 @@ pub struct LanguageResolution {
     /// The global Primary Language tag used as the default fallback.
     #[serde(default)]
     pub primary: String,
-    /// The languages this model supports.
-    #[serde(default)]
-    pub supported: Vec<String>,
 }
 
 /// Which tab of the Models page is active.
