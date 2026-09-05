@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Language-settings HTTP smoke test: `/v1/language` (global) +
-//! `/v1/backends/{source}/models/{model}/language` (per-model).
+//! `/v1/pipeline/{stage}/model/{model}/language` (per-model).
 //!
 //! Test cases:
 //! 1. Global round-trip: GET → null; POST `es-MX` → 200 + language; GET → `es-MX`; DELETE → null.
@@ -253,9 +253,28 @@ async fn global_language_round_trips() {
 /// The fixture backend's source, URL-percent-encoded for the path segment.
 const FIXTURE_SOURCE_ENC: &str = "github.com%2Fsuper-stt%2Fopenai";
 
-/// Per-model language path for the fixture's `whisper-1` model.
+/// Fill stage 1 with the fixture backend.
+///
+/// A precondition the `{source}`-addressed endpoint did not have: the stage is
+/// what resolves a bare model name now, so a model whose backend fills no stage
+/// has no path to it. The same precondition
+/// `/pipeline/{stage}/model/{model}/device` has always had.
+async fn select_fixture_backend(sock: &PathBuf, token: &str) {
+    let (st, body) = post_req(
+        sock,
+        "/pipeline/1",
+        token,
+        serde_json::json!({ "source": "github.com/super-stt/openai" }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "selecting the fixture backend: {body}");
+}
+
+/// Per-model language path for the fixture's `whisper-1` model, addressed
+/// through stage 1 — which is what resolves the bare model name against the
+/// backend filling it.
 fn fixture_model_lang_path() -> String {
-    format!("/backends/{FIXTURE_SOURCE_ENC}/models/whisper-1/language")
+    "/pipeline/1/model/whisper-1/language".to_string()
 }
 
 /// Case 2 — Per-model round-trip without a loaded model.
@@ -264,6 +283,7 @@ fn fixture_model_lang_path() -> String {
 #[tokio::test]
 async fn per_model_language_round_trips_without_loaded_model() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    select_fixture_backend(&sock, &token).await;
     let path = fixture_model_lang_path();
 
     // GET resolves even though no model is loaded (resolves against discovery).
@@ -327,9 +347,10 @@ async fn per_model_language_round_trips_without_loaded_model() {
 #[tokio::test]
 async fn per_model_language_unknown_targets_are_404() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    select_fixture_backend(&sock, &token).await;
 
-    // Unknown model under a known (fixture) source.
-    let unknown_model = format!("/backends/{FIXTURE_SOURCE_ENC}/models/does-not-exist/language");
+    // Unknown model under the backend filling stage 1.
+    let unknown_model = "/pipeline/1/model/does-not-exist/language".to_string();
     let (st, body) = get(&sock, &unknown_model, &token).await;
     assert_eq!(
         st,
@@ -352,15 +373,17 @@ async fn per_model_language_unknown_targets_are_404() {
     );
     assert_eq!(body["message"], "unknown_model", "{body}");
 
-    // Unknown source entirely.
-    let unknown_source = "/backends/github.com%2Fno%2Fsuch/models/whisper-1/language";
+    // A stage that does not exist. There is no `{source}` segment to get wrong
+    // any more; the equivalent failure is asking about a position the pipeline
+    // does not have.
+    let unknown_source = "/pipeline/9/model/whisper-1/language";
     let (st, body) = get(&sock, unknown_source, &token).await;
     assert_eq!(
         st,
         StatusCode::NOT_FOUND,
-        "GET unknown source must be 404: {body}"
+        "GET unknown stage must be 404: {body}"
     );
-    assert_eq!(body["message"], "unknown_backend", "{body}");
+    assert_eq!(body["error_code"], "unknown_stage", "{body}");
 
     let (st, body) = post_req(
         &sock,
@@ -372,15 +395,16 @@ async fn per_model_language_unknown_targets_are_404() {
     assert_eq!(
         st,
         StatusCode::NOT_FOUND,
-        "POST unknown source must be 404: {body}"
+        "POST unknown stage must be 404: {body}"
     );
-    assert_eq!(body["message"], "unknown_backend", "{body}");
+    assert_eq!(body["error_code"], "unknown_stage", "{body}");
 }
 
 /// Case 4 — POST an unsupported tag for a known model → 400.
 #[tokio::test]
 async fn per_model_language_unsupported_tag_is_400() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    select_fixture_backend(&sock, &token).await;
     let path = fixture_model_lang_path();
 
     // `ja` is not in the fixture's supported_languages (["en","es","es-MX","fr","de"]).

@@ -611,7 +611,7 @@ async fn list_backends_catalog_and_option_override() {
 /// deriving an offered device list from a non-empty `installed_accel` would
 /// otherwise conclude a WebAssembly backend has real GPU compute and offer a
 /// device picker it has no business showing. The companion `"cuda"` case pins
-/// the actual headline behaviour of `GET /backends`: a real accel written to
+/// the actual headline behaviour of `GET /backend/list`: a real accel written to
 /// `installed.json` must reach the wire catalog verbatim — stubbing the
 /// `installed_accel` expression in `backend_config_handlers.rs` to
 /// `Vec::new()` keeps the `"wasm"` case green but fails this one.
@@ -883,9 +883,9 @@ async fn clear_active_backend_returns_to_idle() {
     assert_eq!(resp.active_backend, Some(serde_json::Value::Null));
 }
 
-/// `handle_list_models` is scoped to the active backend's models. With no
-/// active backend, the list is empty even when backends are installed.
-/// With one selected, only its models appear.
+/// Stage 1's model list is scoped to the backend filling it. With no backend
+/// selected the list is empty even when backends are installed; with one
+/// selected, only its models appear.
 #[tokio::test]
 async fn list_models_is_scoped_to_active_backend() {
     let daemon = test_daemon().await;
@@ -897,7 +897,7 @@ async fn list_models_is_scoped_to_active_backend() {
     ];
 
     // Idle → empty list (even though two backends are installed).
-    let response = daemon.handle_list_models().await;
+    let response = daemon.handle_list_stage_models(false).await;
     let models = response.available_models.expect("available_models");
     assert!(
         models.is_empty(),
@@ -906,7 +906,7 @@ async fn list_models_is_scoped_to_active_backend() {
 
     // Select OpenAI → only its model.
     let _ = daemon.handle_set_active_backend(openai.to_string()).await;
-    let response = daemon.handle_list_models().await;
+    let response = daemon.handle_list_stage_models(false).await;
     let models = response.available_models.expect("available_models");
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].0, "whisper-1");
@@ -914,11 +914,60 @@ async fn list_models_is_scoped_to_active_backend() {
 
     // Switch to Mistral → only its model.
     let _ = daemon.handle_set_active_backend(mistral.to_string()).await;
-    let response = daemon.handle_list_models().await;
+    let response = daemon.handle_list_stage_models(false).await;
     let models = response.available_models.expect("available_models");
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].0, "voxtral-mini-latest");
     assert_eq!(models[0].1, mistral);
+}
+
+/// Each stage lists only the models carrying its own role.
+///
+/// The half `GET /models` could not express: it read stage 1's backend and
+/// filtered post-processors out, so stage 2's picker had to be derived by the
+/// client. A backend serving both roles is the case that separates them — and
+/// the one where offering the wrong list hands the user a model that loads and
+/// then fails on every use.
+#[tokio::test]
+async fn each_stage_lists_only_the_models_carrying_its_role() {
+    let daemon = test_daemon().await;
+    let combo = "github.com/super-stt/combo";
+
+    let mut backend = fixture_backend("combo", combo, "Combo", "whisper-1");
+    backend
+        .models
+        .push(crate::stt_models::model_definition::ModelDefinition {
+            name: "tidy".to_string(),
+            role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+            ..backend.models[0].clone()
+        });
+    *daemon.backends.write().await = vec![backend];
+
+    // Both stages point at the same backend.
+    let _ = daemon.handle_set_active_backend(combo.to_string()).await;
+    daemon.config.write().await.post_processor.source = combo.to_string();
+
+    let stage1 = daemon
+        .handle_list_stage_models(false)
+        .await
+        .available_models
+        .expect("available_models");
+    assert_eq!(
+        stage1.iter().map(|m| m.0.as_str()).collect::<Vec<_>>(),
+        vec!["whisper-1"],
+        "stage 1 must offer only transcription models"
+    );
+
+    let stage2 = daemon
+        .handle_list_stage_models(true)
+        .await
+        .available_models
+        .expect("available_models");
+    assert_eq!(
+        stage2.iter().map(|m| m.0.as_str()).collect::<Vec<_>>(),
+        vec!["tidy"],
+        "stage 2 must offer only post-processors"
+    );
 }
 
 /// Trivial in-process `Transcribe` impl used to seed the `model` lock so
@@ -1613,10 +1662,11 @@ async fn selecting_a_post_processor_announces_its_load_as_stage_two() {
     assert_eq!(config.post_processor.selection(), Some(("cleanup", source)));
 }
 
-/// The polled mirror of the same rule: `GET /pipeline` reports an in-flight
-/// download under the stage that started it. The daemon runs one at a time,
-/// and before it said which stage that was, a post-processor's download
-/// surfaced as stage 1's — the progress bar under the transcription card.
+/// The polled mirror of the same rule: `GET /pipeline/{stage}/model` reports an
+/// in-flight download only under the stage that started it. The daemon runs one
+/// at a time, and before it said which stage that was, a post-processor's
+/// download surfaced as stage 1's — the progress bar under the transcription
+/// card.
 #[tokio::test]
 async fn a_stage_reports_only_its_own_download() {
     use crate::download_progress::DownloadProgressTracker;
@@ -1637,18 +1687,200 @@ async fn a_stage_reports_only_its_own_download() {
         .start_download(tracker)
         .expect("register download");
 
+    use crate::daemon::device_management::PipelineStage;
+    let slot = async |stage| {
+        daemon
+            .handle_get_stage_model(stage)
+            .await
+            .stage_model
+            .expect("a model slot")
+    };
+    assert!(
+        slot(PipelineStage::Transcription).await.switch.is_none(),
+        "stage 1 must not report the post-processor's download"
+    );
+    let switch = slot(PipelineStage::PostProcessor)
+        .await
+        .switch
+        .expect("stage 2 switch");
+    assert_eq!(switch.target.model, "s1-mini-q4_k_m");
+    assert_eq!(switch.target.source, "github.com/super-stt/s1-mini");
+}
+
+/// An unload switches stage 1 off and keeps what it was pointed at.
+///
+/// This is the asymmetry the stage/model split was made to fix. Stage 1
+/// reported the model it had *loaded*, and its unload erased
+/// `preferred_model` outright — the only way, before the stage had an
+/// `enabled` flag, to stop a restart reloading the model the user had just
+/// stopped. The card emptied with it, so loading the same model again on
+/// another device meant picking it from the dropdown a second time. Stage 2
+/// had kept its choice behind exactly such a flag all along.
+#[tokio::test]
+async fn an_unload_switches_stage_one_off_and_keeps_its_selection() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/whisper";
+    *daemon.backends.write().await =
+        vec![fixture_backend_local("whisper", source, "Whisper", "small")];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    seed_loaded_model(&daemon, "small", source).await;
+    daemon.config.write().await.update_preferred_model(
+        "small".to_string(),
+        source.to_string(),
+        None,
+    );
+
+    let slot = async || {
+        daemon
+            .handle_get_stage_model(PipelineStage::Transcription)
+            .await
+            .stage_model
+            .expect("a model slot")
+    };
+
+    let running = slot().await;
+    assert_eq!(running.model.as_deref(), Some("small"));
+    assert!(running.loaded, "the seeded model is up");
     let stages = daemon
         .handle_get_pipeline()
         .await
         .pipeline
         .expect("pipeline");
-    assert!(
-        stages[0].switch.is_none(),
-        "stage 1 must not report the post-processor's download"
+    assert!(stages[0].enabled, "a stage running a model is switched on");
+
+    let response = daemon.handle_unload_active_model().await;
+    assert_eq!(response.status, "success", "{:?}", response.message);
+
+    let stages = daemon
+        .handle_get_pipeline()
+        .await
+        .pipeline
+        .expect("pipeline");
+    assert!(!stages[0].enabled, "an unload switches the stage off");
+    assert_eq!(
+        stages[0].source.as_deref(),
+        Some(source),
+        "the backend stays selected, as it always did"
     );
-    let switch = stages[1].switch.as_ref().expect("stage 2 switch");
-    assert_eq!(switch.target.model, "s1-mini-q4_k_m");
-    assert_eq!(switch.target.source, "github.com/super-stt/s1-mini");
+
+    let idle = slot().await;
+    assert_eq!(
+        idle.model.as_deref(),
+        Some("small"),
+        "the selection survives the unload — this is the whole change"
+    );
+    assert!(!idle.loaded, "nothing is running");
+    assert!(
+        idle.device.is_some(),
+        "a selection that is not loaded still has a device to load onto"
+    );
+
+    // And the point of the flag: a restart is idle even though the model is
+    // still selected.
+    assert!(
+        daemon.pick_startup_model().await.is_none(),
+        "a stage switched off must not reload its model at startup"
+    );
+}
+
+/// Every stage answers `GET /pipeline/{stage}/model` with the same shape and
+/// the same meanings: `model` is the selection, `loaded` whether it is up.
+///
+/// The two used to disagree — stage 1's `model` came off the loaded instance,
+/// so `loaded` was true exactly when `model` was non-null and told a client
+/// nothing. A single assertion run against both positions is what keeps them
+/// from drifting apart again.
+#[tokio::test]
+async fn every_stage_reports_its_model_slot_alike() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/mixed";
+    let mut backend = fixture_backend_local("mixed", source, "Mixed", "transcribe");
+    let mut cleanup = backend.models[0].clone();
+    cleanup.name = "cleanup".to_string();
+    cleanup.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    backend.models.push(cleanup);
+    *daemon.backends.write().await = vec![backend];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    daemon.config.write().await.update_preferred_model(
+        "transcribe".to_string(),
+        source.to_string(),
+        None,
+    );
+    daemon
+        .config
+        .write()
+        .await
+        .enable_post_processor("cleanup".to_string(), source.to_string());
+
+    for (stage, model) in [
+        (PipelineStage::Transcription, "transcribe"),
+        (PipelineStage::PostProcessor, "cleanup"),
+    ] {
+        let slot = daemon
+            .handle_get_stage_model(stage)
+            .await
+            .stage_model
+            .expect("a model slot");
+        assert_eq!(slot.stage, stage.position());
+        assert_eq!(
+            slot.model.as_deref(),
+            Some(model),
+            "stage {} reports its selection",
+            stage.position()
+        );
+        assert!(
+            !slot.loaded,
+            "stage {} selected a model without loading it",
+            stage.position()
+        );
+        let device = slot
+            .device
+            .as_ref()
+            .unwrap_or_else(|| panic!("stage {} has a device block", stage.position()));
+        assert_eq!(device.preference, "cpu", "the global default");
+        assert_eq!(
+            device.resolved_accel.as_deref(),
+            Some("cpu"),
+            "cpu needs no resolution"
+        );
+    }
+}
+
+/// A stage reports the backend filling it and nothing about its model.
+///
+/// The fields moved to `/pipeline/{stage}/model`; a client still reading them
+/// off the stage would get nothing, silently, which is why the absence is
+/// asserted rather than left to the schema.
+#[tokio::test]
+async fn a_stage_reports_only_its_backend() {
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/whisper";
+    *daemon.backends.write().await =
+        vec![fixture_backend_local("whisper", source, "Whisper", "small")];
+    let _ = daemon.handle_set_active_backend(source.to_string()).await;
+    seed_loaded_model(&daemon, "small", source).await;
+
+    let stages = daemon
+        .handle_get_pipeline()
+        .await
+        .pipeline
+        .expect("pipeline");
+    let json = serde_json::to_value(&stages[0]).expect("serializes");
+    // Sorted, because key order depends on whether `serde_json/preserve_order`
+    // is unified in by another crate in the build — which differs between a
+    // workspace test run and a single-crate one. The claim is which keys exist,
+    // not what order they serialize in.
+    let mut keys: Vec<&str> = json
+        .as_object()
+        .expect("a stage is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["enabled", "name", "role", "source", "stage"]);
+    assert_eq!(json["name"], "Whisper", "the backend's display name");
 }
 
 /// Cancel is addressed to a stage, so a stage with nothing of its own in
@@ -1777,6 +2009,117 @@ async fn unloading_the_post_processor_announces_only_when_one_was_loaded() {
     assert_eq!(ready["stage"], 2);
 }
 
+/// A stage-2 backend serving one post-processor, installed but not runnable:
+/// the `dir` holds no component, so resolution succeeds and instantiation
+/// fails — which is what lets a test drive the failure paths of a reload.
+fn fixture_post_processor(source: &str) -> crate::stt_models::backends::DiscoveredBackend {
+    use super_stt_registry_types::manifest::{Device, ModelRole};
+    let mut backend = fixture_backend_devices(
+        "cleanup",
+        source,
+        "Cleanup",
+        "cleanup",
+        vec![Device::Cpu, Device::Gpu],
+    );
+    backend.models[0].role = ModelRole::PostProcessor;
+    backend
+}
+
+/// The reported bug: switching stage 2's device did nothing, and the daemon
+/// said `systemd-run failed: Unit …-s1-mini-q4-k-m-<pid>.service was already
+/// loaded`. Stage 2 built the replacement instance *before* releasing the one
+/// it was running, and a subprocess backend cannot be instantiated twice for
+/// the same model — its `systemd-run --unit=` name and its socket are keyed on
+/// (backend, model), so the second spawn collides with the first. Every
+/// in-place stage-2 reload failed that way while the old instance kept running,
+/// which is why the app went on showing the old device.
+///
+/// Stage 1 never had it: every stage-1 load path unloads first. So does stage 2
+/// now — the slot is empty once the load has been attempted, whether or not it
+/// succeeded.
+#[tokio::test]
+async fn a_stage_two_reload_releases_the_old_instance_before_building_its_replacement() {
+    use crate::daemon::events::Topic;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/cleanup";
+    *daemon.backends.write().await = vec![fixture_post_processor(source)];
+    daemon
+        .config
+        .write()
+        .await
+        .enable_post_processor("cleanup".to_string(), source.to_string());
+    seed_post_processor_named(&daemon, "cleanup", source).await;
+
+    let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
+    let result = daemon.load_configured_post_processor().await;
+
+    assert!(
+        result.is_err(),
+        "the fixture backend has no component to instantiate"
+    );
+    assert!(
+        daemon.post_processor.read().await.is_none(),
+        "the running instance must be released before its replacement is built"
+    );
+
+    // And the stage says it went idle: the slot was emptied to make room, so a
+    // client that is not told stops nowhere — it goes on showing a
+    // post-processor that is no longer running.
+    let (_topic, loading) = rx.recv_json().await.expect("loading_model event");
+    assert_eq!(loading["status"], "loading_model");
+    let (_topic, idle) = rx.recv_json().await.expect("ready event");
+    assert_eq!(idle["status"], "ready");
+    assert_eq!(idle["model_loaded"], false);
+    assert_eq!(idle["stage"], 2);
+}
+
+/// A stage-2 device switch that cannot load answers like stage 1's: an error
+/// naming the failure, with the model's setting left exactly as it was. It used
+/// to answer `success` with the reason buried in `message`, so the app reported
+/// a switch that never happened and then re-read the old device.
+///
+/// The model here has no device of its own — it follows the daemon default — so
+/// the rollback must leave it with none. Storing the *effective* device would
+/// pin it to a value the user never chose.
+#[tokio::test]
+async fn a_failed_stage_two_device_switch_fails_and_restores_the_setting() {
+    use crate::daemon::device_management::PipelineStage;
+    let daemon = test_daemon().await;
+    let source = "github.com/super-stt/cleanup";
+    *daemon.backends.write().await = vec![fixture_post_processor(source)];
+    daemon
+        .config
+        .write()
+        .await
+        .enable_post_processor("cleanup".to_string(), source.to_string());
+    seed_post_processor_named(&daemon, "cleanup", source).await;
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "cleanup"),
+        None,
+        "the model starts out following the daemon default"
+    );
+
+    let response = daemon
+        .handle_set_model_device(
+            PipelineStage::PostProcessor,
+            "cleanup".to_string(),
+            "gpu".to_string(),
+        )
+        .await;
+
+    assert_eq!(response.status, "error");
+    let message = response.message.unwrap_or_default();
+    assert!(
+        message.contains("Device switch failed"),
+        "the reason belongs in the answer: {message}"
+    );
+    assert_eq!(
+        daemon.config.read().await.model_device(source, "cleanup"),
+        None,
+        "a failed switch must leave the setting as it was, `None` included"
+    );
+}
+
 /// A `Transcribe` fake whose `transcribe_audio` returns a fixed text or fails,
 /// for characterizing the one-shot `handle_transcribe` policy.
 struct ScriptedTranscribe {
@@ -1848,14 +2191,22 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
 /// something to unload. The instance never runs — only the slot's occupancy
 /// matters here.
 async fn seed_scripted_post_processor(daemon: &SuperSTTDaemon) {
+    seed_post_processor_named(daemon, "scripted-pp", "github.com/super-stt/test").await;
+}
+
+/// [`seed_scripted_post_processor`] under a chosen identity, for the tests that
+/// need the slot to hold the same `(source, model)` an installed fixture backend
+/// serves — which is what makes the daemon treat it as the model stage 2 is
+/// running rather than some other model with a device preference.
+async fn seed_post_processor_named(daemon: &SuperSTTDaemon, name: &str, source: &str) {
     use crate::daemon::types::LoadedModel;
     use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::ModelInfoData;
     use std::time::Duration;
 
     let definition = ModelDefinition {
-        name: "scripted-pp".to_string(),
-        source: "github.com/super-stt/test".to_string(),
+        name: name.to_string(),
+        source: source.to_string(),
         is_multilingual: false,
         primary_language: "en".to_string(),
         supported_languages: vec!["en".to_string()],
@@ -1866,13 +2217,7 @@ async fn seed_scripted_post_processor(daemon: &SuperSTTDaemon) {
         role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
         provider: None,
     };
-    let info = ModelInfoData::new(
-        "scripted-pp",
-        "github.com/super-stt/test",
-        false,
-        false,
-        Duration::from_secs(1),
-    );
+    let info = ModelInfoData::new(name, source, false, false, Duration::from_secs(1));
     *daemon.post_processor.write().await = Some(LoadedModel {
         definition,
         instance: Box::new(ScriptedTranscribe {

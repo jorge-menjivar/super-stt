@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::pipeline::StageReport;
+use super::pipeline::{StageModelReport, StageReport};
 use crate::models::theme::AudioTheme;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -28,6 +28,11 @@ pub struct DaemonResponse {
     pub available_models: Option<Vec<(String, String)>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub available_devices: Option<Vec<String>>,
+    /// The languages a model can be pinned to, on
+    /// `GET /pipeline/{stage}/model/{model}/language/list`. The twin of
+    /// `available_devices`, and answered by the twin endpoint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_languages: Option<Vec<String>>,
     /// The accelerator `"gpu"` resolved to, on `GET`/`POST /active_device`.
     /// `"cpu"` when the preference itself is `"cpu"` (nothing to resolve);
     /// `"cuda"`/`"rocm"`/`"metal"`/`"vulkan"` once a local model has loaded
@@ -73,14 +78,14 @@ pub struct DaemonResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub daemon_config: Option<Value>,
 
-    // Installed-backends catalog (GET /backends): array of backend objects
-    // with their models, secrets, and options. See docs/protocol/endpoints/v1/backends.md.
+    // Installed-backends catalog (GET /backend/list): array of backend objects
+    // with their models, secrets, and options. See docs/protocol/endpoints/v1/backend/list.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backends: Option<Value>,
 
-    // Per-backend secret list (GET /backends/{source}/secrets/list): array of
+    // Per-backend secret list (GET /backend/{source}/secret): array of
     // `{name, label, required, configured}` objects.
-    // See docs/protocol/endpoints/v1/backends.md.
+    // See docs/protocol/endpoints/v1/backend/list.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secrets: Option<Value>,
 
@@ -104,6 +109,12 @@ pub struct DaemonResponse {
     // carries, for a client that only cares about one position.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage: Option<StageReport>,
+
+    // One stage's model slot (GET /pipeline/{stage}/model): what is selected
+    // there, whether it is up, and the device it runs on. Separate from
+    // `stage`, which reports only the backend filling the position.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_model: Option<StageModelReport>,
 
     // GPU inventory (GET /gpu_info): array of `GpuInfo` objects.
     // See docs/protocol/endpoints/v1/gpu_info.md.
@@ -164,7 +175,7 @@ pub struct DaemonResponse {
     pub custom_models_dir: Option<Option<String>>,
 
     // Transcription language: for GET /language a string|null; for
-    // GET /backends/{source}/models/{model}/language the resolution block. See
+    // GET /backend/{source}/models/{model}/language the resolution block. See
     // docs/protocol/endpoints/v1/{language,backends/model-language}.md.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<Value>,
@@ -174,7 +185,7 @@ pub struct DaemonResponse {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DownloadProgress {
     pub model_name: String,
-    /// The backend serving `model_name` — the same repo id `/backends` reports.
+    /// The backend serving `model_name` — the same repo id `/backend/list` reports.
     /// A model name alone does not say whose it is, and two backends may serve
     /// the same one.
     #[serde(default)]
@@ -367,6 +378,12 @@ impl DaemonResponse {
         self
     }
 
+    #[must_use]
+    pub fn with_available_languages(mut self, languages: Vec<String>) -> Self {
+        self.available_languages = Some(languages);
+        self
+    }
+
     /// Set `resolved_accel` to the documented value, which may itself be
     /// `None` (unresolved). Wrapping in `Some` here marks the field present
     /// on this response, so an unresolved `"gpu"` preference serializes as
@@ -404,6 +421,12 @@ impl DaemonResponse {
     #[must_use]
     pub fn with_stage(mut self, stage: StageReport) -> Self {
         self.stage = Some(stage);
+        self
+    }
+
+    #[must_use]
+    pub fn with_stage_model(mut self, stage_model: StageModelReport) -> Self {
+        self.stage_model = Some(stage_model);
         self
     }
 

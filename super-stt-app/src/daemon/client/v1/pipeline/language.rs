@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/backends/{source}/models/{model}/language` — one model's language.
+//! `/pipeline/{stage}/model/{model}/language` — one model's language.
 //!
 //! A per-model override, and the resolution that answers which language is
-//! actually in effect: the override, the global `/language` setting, or the
-//! model's own default. The global setting these resolve against is
+//! actually in effect: the override, the global `/settings/language` setting,
+//! or the model's own default. The global setting these resolve against is
 //! [`crate::daemon::client::v1::settings::language`].
+//!
+//! Addressed through the stage, like [`super::device`]: the stage resolves a
+//! bare model name against the backend filling it, so the caller does not have
+//! to carry a `source` it already told the daemon about.
+//!
+//! And split like it, too: the override is one endpoint, the languages on offer
+//! another. One answers what is set, the other what can be set.
 
 use crate::daemon::client::internal::response::require_success;
 use crate::daemon::client::internal::session::with_settings_token;
@@ -16,18 +23,18 @@ fn enc(s: &str) -> String {
 }
 
 /// Read a specific model's resolved language block
-/// (HTTP `GET /backends/{source}/models/{model}/language`).
+/// (HTTP `GET /pipeline/{stage}/model/{model}/language`).
 /// Returns the full resolution `Value` (object with `effective`, `source`,
 /// `multilingual`, `supported`, `primary`, `override`), or `Value::Null`
 /// when the model is not found.
 pub async fn get_model_language(
-    source: String,
+    stage: u32,
     model: String,
 ) -> HttpResult<crate::state::LanguageResolution> {
     with_settings_token(move |socket, token| {
-        let (source, model) = (source.clone(), model.clone());
+        let model = model.clone();
         async move {
-            let path = format!("/backends/{}/models/{}/language", enc(&source), enc(&model));
+            let path = format!("/pipeline/{stage}/model/{}/language", enc(&model));
             let resp = require_success(
                 transport::settings_get(socket, &token, &path).await?,
                 "get_model_language",
@@ -45,17 +52,17 @@ pub async fn get_model_language(
 }
 
 /// Override a specific model's language
-/// (HTTP `POST /backends/{source}/models/{model}/language`).
+/// (HTTP `POST /pipeline/{stage}/model/{model}/language`).
 /// Returns the updated resolution block.
 pub async fn set_model_language(
-    source: String,
+    stage: u32,
     model: String,
     language: String,
 ) -> HttpResult<crate::state::LanguageResolution> {
     with_settings_token(move |socket, token| {
-        let (source, model, language) = (source.clone(), model.clone(), language.clone());
+        let (model, language) = (model.clone(), language.clone());
         async move {
-            let path = format!("/backends/{}/models/{}/language", enc(&source), enc(&model));
+            let path = format!("/pipeline/{stage}/model/{}/language", enc(&model));
             let resp = require_success(
                 transport::settings_post(
                     socket,
@@ -76,16 +83,16 @@ pub async fn set_model_language(
 }
 
 /// Clear a specific model's language override
-/// (HTTP `DELETE /backends/{source}/models/{model}/language`).
+/// (HTTP `DELETE /pipeline/{stage}/model/{model}/language`).
 /// Returns the updated resolution block.
 pub async fn clear_model_language(
-    source: String,
+    stage: u32,
     model: String,
 ) -> HttpResult<crate::state::LanguageResolution> {
     with_settings_token(move |socket, token| {
-        let (source, model) = (source.clone(), model.clone());
+        let model = model.clone();
         async move {
-            let path = format!("/backends/{}/models/{}/language", enc(&source), enc(&model));
+            let path = format!("/pipeline/{stage}/model/{}/language", enc(&model));
             let resp = require_success(
                 transport::settings_delete(socket, &token, &path).await?,
                 "clear_model_language",
@@ -94,6 +101,27 @@ pub async fn clear_model_language(
                 .language
                 .and_then(|v| serde_json::from_value(v).ok())
                 .unwrap_or_default())
+        }
+    })
+    .await
+}
+
+/// The languages `model` can be pinned to
+/// (HTTP `GET /pipeline/{stage}/model/{model}/language/list`).
+///
+/// What the setter accepts — the model's own tags plus the reserved `auto` —
+/// not a general BCP-47 list. Empty for a monolingual model, which is what
+/// tells a picker there is nothing to choose.
+pub async fn list_model_languages(stage: u32, model: String) -> HttpResult<Vec<String>> {
+    with_settings_token(move |socket, token| {
+        let model = model.clone();
+        async move {
+            let path = format!("/pipeline/{stage}/model/{}/language/list", enc(&model));
+            let resp = require_success(
+                transport::settings_get(socket, &token, &path).await?,
+                "list_model_languages",
+            )?;
+            Ok(resp.available_languages.unwrap_or_default())
         }
     })
     .await

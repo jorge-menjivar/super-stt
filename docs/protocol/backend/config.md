@@ -285,7 +285,7 @@ working from the same value the daemon authorized, and spares each one its own
 URL parser.
 
 The same rewrite is applied when the value is **set**, so what
-[`POST /backends/{source}/options/{name}`](../endpoints/v1/backends/options.md)
+[`POST /backend/{backend_id}/option/{name}`](../endpoints/v1/backends/options.md)
 stores is already canonical and the settings field reads back the endpoint that
 will be dialed. The scheme is why this is worth doing at the write boundary
 rather than only at load: whether a request is encrypted should not be
@@ -567,7 +567,7 @@ It says nothing about *which* accelerator — CUDA, ROCm, Vulkan — since one
 asset can serve several models and one of them may have no GPU path; that
 detail lives on the asset that ends up installed (see
 [`[[assets.subprocess]]`](#assets)) and is reported per-backend as
-`installed_accel` (see [`GET /backends`](../endpoints/v1/backends.md)). The
+`installed_accel` (see [`GET /backend/list`](../endpoints/v1/backend/list.md)). The
 settings app uses `supported_devices` to present the device choice at load
 time. `"none"` marks a remote/online model with no local compute; mixing
 `"none"` with any local device (`"cpu"` / `"gpu"`) is a contradiction and the

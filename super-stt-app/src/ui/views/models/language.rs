@@ -2,7 +2,7 @@
 
 //! The per-model language control, shared by both pipeline stages.
 //!
-//! The daemon's `/backends/{source}/models/{model}/language` is keyed by the
+//! The daemon's `/pipeline/{stage}/model/{model}/language` is keyed by the
 //! model, not by the stage it runs in, so one control serves the transcription
 //! card and the post-processing card alike. It lives here rather than on either
 //! card so the two cannot drift apart.
@@ -28,6 +28,7 @@ use crate::ui::messages::{LanguageMessage, Message};
 /// `None` only when the model is not in this backend's catalog, or when nothing
 /// is known about its language yet.
 pub(super) fn language_button<'a>(
+    stage: u32,
     backend: &'a BackendInfo,
     selected_model: &str,
     app: &'a AppModel,
@@ -36,7 +37,10 @@ pub(super) fn language_button<'a>(
     let source = &backend.source;
     // A miss is "not answered yet", never "no language": the label falls back
     // to what the catalog already declares rather than to nothing.
-    let block = app.language.model_languages.get(source, selected_model);
+    let block = app
+        .language
+        .model_languages
+        .get(stage, source, selected_model);
 
     if !catalog_model.multilingual {
         let tag = block
@@ -71,7 +75,7 @@ pub(super) fn language_button<'a>(
     Some(
         widget::button::standard(label)
             .on_press(Message::Language(LanguageMessage::OpenLanguagePicker {
-                model: Some((source.clone(), selected_model.to_string())),
+                model: Some((stage, source.clone(), selected_model.to_string())),
             }))
             .into(),
     )

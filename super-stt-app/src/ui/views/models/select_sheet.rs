@@ -61,10 +61,14 @@ pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
     let muted = muted_text_color();
     let active = app.models_page.active_backend.as_deref();
 
-    // Only backends that actually transcribe: one serving nothing but
-    // post-processors would be selected, then show an empty model picker — and
-    // the daemon refuses it anyway.
-    let eligible = super::roles::backends_for(&app.backends, false);
+    // What the daemon says can fill stage 1, not a filter of the catalog: a
+    // backend serving nothing but post-processors would be selected, then show
+    // an empty model picker — and `POST /pipeline/1` refuses it anyway.
+    //
+    // `None` is the answer still in flight; an empty answer is the daemon
+    // saying nothing installed transcribes. The two read differently below.
+    let answered = app.stage_catalog.backends(STT_STAGE);
+    let eligible: &[BackendInfo] = answered.unwrap_or_default();
     let mut col = widget::column::with_capacity(eligible.len() + 1)
         .spacing(spacing.space_xs)
         .width(Length::Fill)
@@ -77,10 +81,12 @@ pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
 
     if eligible.is_empty() {
         return col
-            .push(text::body(
+            .push(text::body(if answered.is_none() {
+                "Loading…"
+            } else {
                 "No installed backend provides a transcription model. Open the Library to \
-                 install one.",
-            ))
+                 install one."
+            }))
             .into();
     }
 

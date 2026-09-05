@@ -1,21 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/backends` — the backends installed on this machine.
+//! `/backend/list` — the backends installed on this machine.
 //!
-//! Contract: `docs/protocol/endpoints/v1/backends.md`.
+//! Contract: `docs/protocol/endpoints/v1/backend/list.md`.
 //!
 //! The catalog and one backend's removal are here, at the paths they answer on;
 //! the sub-resources each get their own module — [`options`] for
-//! `/backends/{source}/options`, [`secrets`] for `/backends/{source}/secrets`,
-//! [`model_language`] for `/backends/{source}/models/{model}/language`.
+//! `/backend/{backend_id}/option/list` and [`secrets`] for
+//! `/backend/{backend_id}/secret/list`.
+//!
+//! A model's language override is not here. It is a per-`(source, model)`
+//! preference like its device, and both are addressed through the stage that
+//! runs the model — see [`super::pipeline::language`].
 //!
 //! Installing is not here: that is the registry's job, at
-//! [`/registry/backends/install`](super::registry::install). This module is
+//! [`/registry/backend/install`](super::registry::install). This module is
 //! about what is already on disk.
 //!
 //! One split runs through the whole family: every path but the secrets ones is
 //! `settings`-scoped, and secrets are `secrets`-scoped. [`routes`] gathers the
 //! former; [`secrets::routes`] is wired to its own guard in [`super`].
-pub(crate) mod model_language;
 pub(crate) mod options;
 pub(crate) mod secrets;
 
@@ -32,7 +35,7 @@ use super_stt_shared::registry::UninstallResponse;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-/// Percent-decode a `{source}` path segment (e.g. `github.com%2Facme%2Fx`).
+/// Percent-decode a `{backend_id}` path segment (e.g. `github.com%2Facme%2Fx`).
 pub(crate) fn decode_source(raw: &str) -> String {
     urlencoding::decode(raw).map_or_else(|_| raw.to_string(), std::borrow::Cow::into_owned)
 }
@@ -83,7 +86,7 @@ pub(crate) fn ok<T: serde::Serialize>(v: &T) -> Response {
 
 #[utoipa::path(
     get,
-    path = "/backends",
+    path = "/backend/list",
     tag = "backends",
     summary = "List installed backends",
     description = "\
@@ -91,9 +94,9 @@ Every backend installed on this machine, each with the models it serves, the opt
 it exposes, and which of its secrets are configured. Secret *values* are never \
 returned — only whether each is set.
 
-This is the full catalog, roles included. `GET /models` is the narrower read a \
-transcription-model picker wants; browsing what is *available to install* is \
-`GET /registry/backends`.",
+This is the full catalog, roles included. `GET /pipeline/{stage}/model/list` is the \
+narrower read a stage's model picker wants; browsing what is *available to install* \
+is `GET /registry/backend/list`.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "The installed catalog.", body = BackendCatalog),
@@ -109,7 +112,7 @@ pub(crate) async fn list_backends(State(s): State<AppState>) -> Response {
 
 #[utoipa::path(
     delete,
-    path = "/backends/{source}",
+    path = "/backend/{backend_id}",
     tag = "backends",
     summary = "Uninstall a backend",
     description = "\
@@ -122,8 +125,8 @@ at files that no longer exist. The response says which stages were affected.
 Refused with `409 backend_busy` while a recording or realtime session is in flight \
 — removing files out from under one would strand state it still depends on.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
     ),
     security(("session_token" = ["settings"])),
@@ -221,7 +224,7 @@ pub(crate) async fn uninstall_backend(
         .into_response()
 }
 
-/// The `settings`-scoped `/backends` routes, gathered for the settings group.
+/// The `settings`-scoped `/backend/list` routes, gathered for the settings group.
 ///
 /// [`secrets`] is deliberately absent: those paths carry their own scope and are
 /// registered against their own guard in [`super`].
@@ -230,5 +233,4 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(list_backends))
         .routes(routes!(uninstall_backend))
         .merge(options::routes())
-        .merge(model_language::routes())
 }

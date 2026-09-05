@@ -4,15 +4,16 @@ One **stage** of the [pipeline](../pipeline.md), addressed by position: which
 backend fills it, and whether it is filled at all. Every stage answers these
 three verbs, so a client learns one shape and applies it anywhere.
 
-Filling a stage is not loading a model — that is
-[`/pipeline/{stage}/model`](./model.md), one level down. The split is
-deliberate: choosing a backend is cheap and cannot fail for runtime reasons,
-while loading a model downloads, allocates and can fail.
+**Only the backend.** What that backend is running is
+[`/pipeline/{stage}/model`](./model.md), one level down, and filling a stage is
+not loading a model. The split is deliberate: choosing a backend is cheap and
+cannot fail for runtime reasons, while loading a model downloads, allocates and
+can fail — and a backend selection outlives every model that comes and goes
+under it.
 
 The [stage object](../pipeline.md#the-stage-object) these endpoints report, the
-[`switch`](../pipeline.md#the-switch-object) sub-object, the stage roles and the
-[auth](../pipeline.md#auth) they all share are described once in the family
-overview.
+stage roles and the [auth](../pipeline.md#auth) they all share are described
+once in the family overview.
 
 ## `GET /pipeline/{stage}`
 
@@ -29,19 +30,22 @@ Content-Type: application/json
     "role":    "post_processor",
     "source":  "github.com/jorge-menjivar/super-stt-textclean",
     "name":    "Text Cleanup",
-    "model":   "textclean",
-    "loaded":  true,
-    "device":  "cpu",
-    "switch":  null,
     "enabled": true
   }
 }
 ```
 
+The model is not here — read it at
+[`GET /pipeline/{stage}/model`](./model.md#get-pipelinestagemodel).
+
 ## `POST /pipeline/{stage}`
 
 Select the backend that fills this stage. Validates that it is installed and
 serves this stage's role; does **not** load anything.
+
+The backends it will accept are
+[`GET /pipeline/{stage}/backend/list`](./backend-list.md) — fill a picker from
+that rather than from `GET /backend/list`, or it offers backends this refuses.
 
 **Request:**
 
@@ -59,8 +63,8 @@ Content-Type: application/json
 | `source` | string | yes      | Repo id of an installed backend serving this role  |
 
 Selecting a **different** backend drops the model with it — the name belonged to
-the old backend — and stops that stage until a model is chosen. Re-selecting the
-backend already there changes nothing.
+the old backend — and switches the stage off until a model is chosen.
+Re-selecting the backend already there changes nothing.
 
 **Errors:**
 

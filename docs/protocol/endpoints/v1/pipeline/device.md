@@ -49,7 +49,7 @@ Content-Type: application/json
 |---------------------|----------|-----------------------------------------------------------------------------------------|
 | `device`            | string   | The device the model loads on, `"cpu"` or `"gpu"` — its own, or the daemon's default when it has none of its own. `"none"` for an online model, which runs remotely and has no local device. |
 | `resolved_accel`    | string?  | What that preference resolved to: `"cuda"`, `"rocm"`, `"metal"`, `"vulkan"` or `"cpu"` while the model is loaded in this stage — always what actually loaded, so a `"gpu"` choice that fell back reads `"cpu"` here. When the model is not loaded: `"cpu"` for a `"cpu"` preference (nothing to resolve), `null` for `"gpu"` (nothing has resolved yet). `null` for an online model. |
-| `available_devices` | string[] | The devices this install can offer the model on this host: the model's `supported_devices`, narrowed to the accelerators its installed asset actually provides (`installed_accel` on [`GET /backends`](../backends.md)) and to what the host has. A CUDA-only backend on a host without an NVIDIA GPU installed its CPU asset, and is not offered a GPU here. Empty for an online model. |
+| `available_devices` | string[] | The devices this install can offer the model on this host: the model's `supported_devices`, narrowed to the accelerators its installed asset actually provides (`installed_accel` on [`GET /backend/list`](../backend/list.md)) and to what the host has. A CUDA-only backend on a host without an NVIDIA GPU installed its CPU asset, and is not offered a GPU here. Empty for an online model. |
 
 **Errors:**
 
@@ -88,14 +88,18 @@ Content-Type: application/json
 state. `message` says which of the three things happened: recorded for the
 next load, reloaded, or already on that device.
 
-The reload, when there is one, completes before the response: stage 1 unloads
-the model, publishes `switching_device` / `loading_model_for_device` on
-[`/events`](../events.md), reloads, and publishes `ready` with the resolved
-`actual_device`. If the reload fails the model is put back on its previous
-device, its setting is left as it was, and the call fails with the reason.
-Stage 2 follows the post-processor's best-effort policy instead: the setting
-is saved, the reload is attempted, and a failure is appended to `message`
-while the previous instance keeps running.
+The reload, when there is one, completes before the response, and every stage
+performs it the same way: unload, load on the new device, publish `ready` with
+the resolved `actual_device`. Stage 1 also publishes `switching_device` /
+`loading_model_for_device` on [`/events`](../events.md) along the way; stage
+2's reload reports itself as the plain reload it is. A stage unloads before it
+loads because a backend cannot be instantiated twice for the same model — the
+running instance holds the name its replacement needs.
+
+If the reload fails, the model is put back on the device it had and its setting
+is left as it was, and the call fails with the reason. Should putting it back
+fail too, the stage is left with nothing loaded and publishes a `ready` saying
+so.
 
 Asking for the device a loaded model is already on reloads nothing — a `gpu`
 preference already resolved to `cuda` is the same choice spelled twice — but a
@@ -108,6 +112,7 @@ the preference and the resolved accelerator separately is for.
 |------|-------------------------|----------------------------------------------------------------------------|
 | 400  | `invalid_device`        | `device` is not `"cpu"`, `"gpu"` or an accepted alias; or the model's manifest does not declare it (a CPU-only model cannot be sent to the GPU); or the model is online and has no local device. Nothing is recorded. |
 | 409  | `recording_in_progress` | A reload is needed and a recording is in flight                            |
+| 500  | —                       | The reload failed. The `message` names the failure and the device the model was put back on; the setting is unchanged. |
 
 Requesting `"gpu"` for a model whose install or host cannot provide one is
 **not** an error — only the manifest is consulted — and the load falls back to

@@ -1,4 +1,4 @@
-# POST /registry/backends/install
+# POST /registry/backend/install
 
 Installs a backend from the registry, from an arbitrary git-forge repository
 (Custom-repo path), or from a locally staged directory (Import-from-dir

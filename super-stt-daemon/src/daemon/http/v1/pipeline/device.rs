@@ -68,7 +68,7 @@ model, not per stage: two models in the same stage can prefer different devices.
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model's name, as `GET /models` or `GET /backends` spells it."),
+        ("model" = String, Path, description = "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it."),
     ),
     security(("session_token" = ["settings"])),
     responses(
@@ -115,12 +115,16 @@ Chooses the accelerator this model runs on. If it is the model the stage is \
 currently running, it is reloaded onto the new device; otherwise the preference is \
 stored and takes effect at the next load.
 
+Every stage reloads the same way — unload, then load on the new device — and a \
+reload that fails puts the model back on the device it had, leaves the setting as \
+it was, and answers `500` with the reason.
+
 List what this host can offer with `GET /pipeline/{stage}/model/{model}/device/list`.",
     params(
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model's name, as `GET /models` or `GET /backends` spells it."),
+        ("model" = String, Path, description = "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it."),
     ),
     request_body = SetDeviceBody,
     security(("session_token" = ["settings"])),
@@ -131,6 +135,7 @@ List what this host can offer with `GET /pipeline/{stage}/model/{model}/device/l
         (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
         (status = 404, description = "No such stage (`unknown_stage`).", body = ErrorEnvelope),
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+        (status = 500, description = "The reload failed; the model was put back on the device it had.", body = ErrorEnvelope),
     ),
 )]
 pub(crate) async fn set_model_device(
@@ -165,7 +170,7 @@ model supports.",
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model's name, as `GET /models` or `GET /backends` spells it."),
+        ("model" = String, Path, description = "The model's name, as `GET /pipeline/{stage}/model/list` or `GET /backend/list` spells it."),
     ),
     security(("session_token" = ["settings"])),
     responses(

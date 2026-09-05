@@ -44,14 +44,24 @@ impl SuperSTTDaemon {
     /// preference or it can't be found — the daemon never auto-picks an
     /// arbitrary model, since loading one can pull gigabytes.
     pub async fn pick_startup_model(&self) -> Option<(String, String)> {
-        let (pref_model, pref_source) = {
+        let (enabled, pref_model, pref_source) = {
             let c = self.config.read().await;
             (
+                c.transcription.enabled,
                 c.transcription.preferred_model.clone(),
                 c.transcription.preferred_source.clone(),
             )
         };
         if pref_model.is_empty() {
+            return None;
+        }
+        // The stage remembers its model across an unload now, so the selection
+        // alone no longer means "load this". The flag is what says so — the
+        // same gate `post_processor.is_active()` puts on stage 2's startup
+        // load. Checked after the empty case, so an idle daemon does not log a
+        // line naming no model.
+        if !enabled {
+            info!("Stage 1 is switched off; staying idle with {pref_model} still selected");
             return None;
         }
         // A config predating `preferred_source` names a model but not the

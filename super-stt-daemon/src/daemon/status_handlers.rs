@@ -58,35 +58,48 @@ impl SuperSTTDaemon {
             .with_message("Daemon configuration retrieved successfully".to_string())
     }
 
-    /// Handle list all available models command — every model served by an
-    /// installed backend, as `(name, source)` pairs.
-    pub async fn handle_list_models(&self) -> DaemonResponse {
-        // Scoped to the active backend: only its models are switchable. The
-        // full catalog of installed backends lives at `GET /backends`.
+    /// The models a pipeline stage can run, as `(name, source)` pairs.
+    ///
+    /// Scoped twice over: to the backend filling that stage, and to the models
+    /// that carry the stage's role. Both matter. Offering a stage a model from
+    /// another backend gives the user a pick that cannot load; offering it a
+    /// model with the wrong role gives one that loads and then fails on every
+    /// use — a post-processor selected as a transcription model fails each
+    /// recording, silently, at the point the user has already spoken.
+    ///
+    /// This is the per-stage read. The full catalog with roles, across every
+    /// installed backend, is `GET /backend/list`.
+    pub async fn handle_list_stage_models(&self, post_processor: bool) -> DaemonResponse {
         let backends = self.backends.read().await;
-        let active_dir = self.active_backend.read().await.clone();
-        let available_models = active_dir
-            .and_then(|dir| {
+
+        // The two stages name their backend differently: stage 1 holds an
+        // install directory, stage 2 the `source` itself. Resolving each to the
+        // same catalog entry is the only difference between them here.
+        let backend = if post_processor {
+            let source = self.config.read().await.post_processor.source.clone();
+            (!source.is_empty()).then(|| backends.iter().find(|b| b.source == source))
+        } else {
+            self.active_backend.read().await.clone().map(|dir| {
                 backends
                     .iter()
                     .find(|b| backends::dir_name(b).as_deref() == Some(dir.as_str()))
             })
+        }
+        .flatten();
+
+        let available_models = backend
             .map(|b| {
                 b.models
                     .iter()
-                    // Post-processors are not switchable *transcription*
-                    // models; they are selected through `/post_processor`.
-                    // Listing them here would offer the user a model that
-                    // fails on every recording. The full catalog, roles
-                    // included, is at `GET /backends`.
-                    .filter(|d| !d.is_post_processor())
+                    .filter(|d| d.is_post_processor() == post_processor)
                     .map(|d| (d.name.clone(), d.source.clone()))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
 
         info!(
-            "Available models requested, returning {} model(s) for the active backend",
+            "Model list requested for stage {}, returning {} model(s)",
+            u8::from(post_processor) + 1,
             available_models.len()
         );
 

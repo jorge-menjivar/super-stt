@@ -3,10 +3,11 @@
 //!
 //! Contract: `docs/protocol/endpoints/v1/pipeline.md`.
 //!
-//! The modules mirror the paths: [`stage`] serves `/pipeline/{stage}`, [`model`]
-//! serves `/pipeline/{stage}/model` and its verbs, [`device`] serves the two
-//! device lists and the per-model device preference. `GET /pipeline`, the whole
-//! report, is here at the root because that is where the path is.
+//! The modules mirror the paths: [`stage`] serves `/pipeline/{stage}`,
+//! [`backend`] the menu that fills it, [`model`] serves
+//! `/pipeline/{stage}/model` and its verbs, [`device`] and [`language`] serve
+//! the two per-model preferences. `GET /pipeline`, the whole report, is here at
+//! the root because that is where the path is.
 //!
 //! Every stage answers the same verbs — select a backend, deselect it, run a
 //! model, stop it, and read or set the device one of its models runs on — so a
@@ -15,7 +16,9 @@
 //! resolves; the handlers themselves are the ones each stage always had, so
 //! there is a single implementation of each operation.
 
+pub(crate) mod backend;
 pub(crate) mod device;
+pub(crate) mod language;
 pub(crate) mod model;
 pub(crate) mod stage;
 
@@ -36,10 +39,14 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 /// Adding a third stage means one more arm here — not a new endpoint — which is
 /// the whole point of addressing stages by position.
 struct Stage {
+    /// The installed backends this stage can be filled with.
+    list_backends: &'static str,
     /// Select this stage's backend.
     set_backend: &'static str,
     /// Deselect it.
     clear_backend: &'static str,
+    /// Read this stage's model slot.
+    get_model: &'static str,
     /// Run a model in this stage.
     set_model: &'static str,
     /// Stop it.
@@ -56,6 +63,8 @@ struct Stage {
     list_model_devices: &'static str,
     /// The devices this stage's backend can be run on here.
     list_backend_devices: &'static str,
+    /// The models this stage can run: its backend's, carrying its role.
+    list_models: &'static str,
 }
 
 impl Stage {
@@ -63,8 +72,10 @@ impl Stage {
     fn resolve(stage: u32) -> Option<Self> {
         match stage {
             1 => Some(Self {
+                list_backends: "list_transcription_backends",
                 set_backend: "set_active_backend",
                 clear_backend: "clear_active_backend",
+                get_model: "get_model",
                 set_model: "set_model",
                 clear_model: "unload_active_model",
                 cancel_model: "cancel_download",
@@ -73,10 +84,13 @@ impl Stage {
                 set_model_device: "set_model_device",
                 list_model_devices: "list_model_devices",
                 list_backend_devices: "list_active_backend_devices",
+                list_models: "list_models",
             }),
             2 => Some(Self {
+                list_backends: "list_post_processor_backends",
                 set_backend: "set_post_processor_backend",
                 clear_backend: "clear_post_processor_backend",
+                get_model: "get_post_processor",
                 set_model: "set_post_processor",
                 clear_model: "clear_post_processor",
                 cancel_model: "cancel_post_processor_download",
@@ -85,6 +99,7 @@ impl Stage {
                 set_model_device: "set_post_processor_device",
                 list_model_devices: "list_post_processor_devices",
                 list_backend_devices: "list_post_processor_backend_devices",
+                list_models: "list_post_processor_models",
             }),
             _ => None,
         }
@@ -113,10 +128,11 @@ fn unknown_stage(stage: u32) -> Response {
 The ordered stages a transcript passes through. Stage 1 turns audio into text; every \
 later stage rewrites what the one before it produced.
 
-Each stage reports which backend fills it, which model is selected, whether that \
-model is up, the accelerator it actually runs on, and any load still in flight. \
-Stages are addressed by position precisely so a third can be appended without \
-inventing a third endpoint for it.",
+Each stage reports the backend filling it and whether the stage is switched on. What \
+that backend is running is one level down, at `GET /pipeline/{stage}/model` — a stage \
+is a durable selection, its model has a runtime, and reporting the two together is \
+what once let the stages drift apart. Stages are addressed by position precisely so a \
+third can be appended without inventing a third endpoint for it.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "Every stage, stage 1 first.", body = PipelineReport),
@@ -145,10 +161,17 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
             stage::set_stage_backend,
             stage::clear_stage_backend
         ))
-        .routes(routes!(model::set_stage_model, model::clear_stage_model))
+        .routes(routes!(
+            model::get_stage_model,
+            model::set_stage_model,
+            model::clear_stage_model
+        ))
+        .routes(routes!(model::list_stage_models))
         .routes(routes!(model::cancel_stage_model))
         .routes(routes!(model::reload_stage_model))
+        .routes(routes!(backend::list_stage_backends))
         .routes(routes!(device::list_stage_devices))
         .routes(routes!(device::get_model_device, device::set_model_device))
         .routes(routes!(device::list_model_devices))
+        .merge(language::routes())
 }

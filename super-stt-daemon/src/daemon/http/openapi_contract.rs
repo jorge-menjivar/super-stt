@@ -12,6 +12,8 @@
 //! - the scope an endpoint advertises is the scope the router enforces on it;
 //! - every operation carries prose, not a placeholder;
 //! - every success body names a real shape, not "some JSON";
+//! - every operation is addressable by an id no other operation shares;
+//! - every path parameter a URL contains is the one the operation describes;
 //! - every guarded endpoint documents the failures a client will actually hit.
 //!
 //! They iterate the whole document, so adding an endpoint adds nothing here —
@@ -136,6 +138,110 @@ fn the_document_and_the_router_cover_the_same_paths() {
     assert_eq!(
         documented, served,
         "the document and the router disagree about which paths exist"
+    );
+}
+
+/// No two operations may share an `operationId`.
+///
+/// utoipa derives the id from the handler's function name alone, and nothing in
+/// the language objects to two modules each having a `set`. The result is a
+/// document that looks fine by every other measure — the paths are distinct,
+/// `openapi-check` is green — while the ids collide silently.
+///
+/// The id is what tooling keys on downstream, so the damage lands there. Swagger
+/// UI builds its per-operation DOM ids from it: two operations sharing one merge
+/// into a single section, and expanding one endpoint opens another. Generated
+/// clients fare worse and emit two methods under one name.
+///
+/// The fix is always to name the handler for what it does — `set_option` rather
+/// than `set` — since the id follows the function.
+#[test]
+fn no_two_operations_share_an_operation_id() {
+    use std::collections::BTreeMap;
+
+    let doc = document();
+    let mut by_id: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for (path, method, op) in operations(&doc) {
+        let id = op["operationId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{} {path} publishes no operationId", method.to_uppercase()));
+        by_id
+            .entry(id)
+            .or_default()
+            .push(format!("{} {path}", method.to_uppercase()));
+    }
+
+    let collisions: Vec<String> = by_id
+        .iter()
+        .filter(|(_, ops)| ops.len() > 1)
+        .map(|(id, ops)| format!("  `{id}` is claimed by {}", ops.join(", ")))
+        .collect();
+    assert!(
+        collisions.is_empty(),
+        "operations share an id, so tooling keyed on it cannot tell them apart \
+         (rename the handler functions):\n{}",
+        collisions.join("\n")
+    );
+}
+
+/// The path parameters an operation documents must be the ones its URL contains.
+///
+/// A `#[utoipa::path]` writes the URL template and the parameter prose in two
+/// separate places, and utoipa reconciles them generously: a `params(...)` entry
+/// naming something the template does not contain is published anyway, and a
+/// placeholder the template does contain but `params(...)` omits is published
+/// too, bare, with no description. Rename a path segment without renaming its
+/// entry and you get both at once — a phantom parameter carrying all the prose,
+/// and the real one carrying none.
+///
+/// Nothing else notices, because the handler binds path segments positionally:
+/// the endpoint keeps serving correctly while its documentation describes a URL
+/// that does not exist. A generated client is where it surfaces, as a required
+/// argument that can never be substituted into the path.
+#[test]
+fn every_operation_documents_exactly_the_path_parameters_its_url_contains() {
+    let doc = document();
+    let mut wrong = Vec::new();
+
+    for (path, method, op) in operations(&doc) {
+        // The `{placeholder}` segments of the URL template itself.
+        let templated: Vec<&str> = path
+            .split('/')
+            .filter_map(|seg| seg.strip_prefix('{')?.strip_suffix('}'))
+            .collect();
+
+        let documented: Vec<&str> = op["parameters"]
+            .as_array()
+            .map(|params| {
+                params
+                    .iter()
+                    .filter(|p| p["in"] == "path")
+                    .map(|p| p["name"].as_str().expect("a parameter name is a string"))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let where_ = format!("{} {path}", method.to_uppercase());
+        for name in &documented {
+            if !templated.contains(name) {
+                wrong.push(format!(
+                    "  {where_} documents a path parameter `{name}` its URL does not contain"
+                ));
+            }
+        }
+        for name in &templated {
+            if !documented.contains(name) {
+                wrong.push(format!(
+                    "  {where_} leaves the path parameter `{name}` undescribed"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "documented path parameters disagree with the URLs they belong to:\n{}",
+        wrong.join("\n")
     );
 }
 

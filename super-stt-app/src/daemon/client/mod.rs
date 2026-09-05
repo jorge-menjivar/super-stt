@@ -16,17 +16,18 @@ pub use v1::backends::list_backends;
 pub use v1::backends::options::{clear_backend_option, set_backend_option};
 pub use v1::backends::secrets::{clear_backend_secret, list_backend_secrets, set_backend_secret};
 pub use v1::gpu_info::get_gpu_info;
-pub use v1::models::list_available_models;
 pub use v1::ping::{ping_daemon, test_daemon_connection};
 pub use v1::transcribe::{RecordEvent, record_command_stream, stop_record_command};
 
+pub use v1::pipeline::backend::list_stage_backends;
 pub use v1::pipeline::device::{
     get_model_device, list_model_devices, list_stage_devices, set_model_device,
 };
-pub use v1::pipeline::model::{cancel_download, set_stage_model, unload_stage_model};
-pub use v1::pipeline::stage::{
-    StageState, clear_stage_backend, get_download_status, get_stage, set_stage_backend,
+pub use v1::pipeline::model::{
+    cancel_download, get_download_status, get_stage_model, set_stage_model, unload_stage_model,
 };
+pub use v1::pipeline::stage::{clear_stage_backend, set_stage_backend};
+pub use v1::pipeline::{StageState, get_stage_view};
 
 pub use v1::settings::audio_theme::{
     get_current_audio_theme, load_audio_themes, set_and_test_audio_theme, set_audio_theme,

@@ -12,9 +12,16 @@ so a client learns one shape and applies it anywhere in the pipeline:
 
 | Verb | Path | Meaning |
 |---|---|---|
+| Read the backend | [`GET /pipeline/{stage}`](./pipeline/stage.md#get-pipelinestage)           | Which backend fills this stage, and whether it is switched on |
+| List its backends | [`GET /pipeline/{stage}/backend/list`](./pipeline/backend-list.md)       | The installed backends that can fill this stage |
 | Select backend   | [`POST /pipeline/{stage}`](./pipeline/stage.md#post-pipelinestage)         | Which installed backend fills this stage |
 | Deselect backend | [`DELETE /pipeline/{stage}`](./pipeline/stage.md#delete-pipelinestage)       | Empty the stage, forgetting its model     |
+| Read its model   | [`GET /pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel)     | What it is pointed at, whether that is up, and the device it runs on |
 | Run a model      | [`POST /pipeline/{stage}/model`](./pipeline/model.md#post-pipelinestagemodel)   | Load and run one of that backend's models |
+| List its models  | [`GET /pipeline/{stage}/model/list`](./pipeline/model-list.md) | The models that backend serves in this stage's role |
+| Read a model's language | [`GET /pipeline/{stage}/model/{model}/language`](./pipeline/language.md) | The language one of that backend's models transcribes in |
+| Set it           | [`POST /pipeline/{stage}/model/{model}/language`](./pipeline/language.md#post-pipelinestagemodelmodellanguage) | Pin it, overriding the global setting |
+| List a model's languages | [`GET /pipeline/{stage}/model/{model}/language/list`](./pipeline/language.md#get-pipelinestagemodelmodellanguagelist) | What that model can be pinned to |
 | Stop it          | [`DELETE /pipeline/{stage}/model`](./pipeline/model.md#delete-pipelinestagemodel) | Unload, keeping the backend selected      |
 | Read a model's device | [`GET /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice)  | Where one of that backend's models runs |
 | Set it           | [`POST /pipeline/{stage}/model/{model}/device`](./pipeline/device.md#post-pipelinestagemodelmodeldevice) | Run it on the CPU or the GPU, reloading if it is loaded |
@@ -46,7 +53,7 @@ that used them moves as follows:
 
 | Was | Now |
 |---|---|
-| `GET /pipeline/1`          | `GET /pipeline/1` (`stage.source`)      |
+| `GET /pipeline/1`          | `GET /pipeline/1` (`stage.source`) plus `GET /pipeline/1/model` |
 | `POST /pipeline/1`         | `POST /pipeline/1`                      |
 | `DELETE /pipeline/1`       | `DELETE /pipeline/1`                    |
 | `GET /pipeline/1`            | `GET /pipeline/1`                       |
@@ -85,17 +92,53 @@ become insertable, renumbering is the thing to design — a client holding
 
 ## The stage object
 
+A stage is a **backend selection**: which backend fills the position, and
+whether the user has the position switched on. What that backend is *running* is
+[the model object](#the-model-object), one level down.
+
 | Field    | Type    | Notes                                                                   |
 |----------|---------|--------------------------------------------------------------------------|
 | `stage`  | int     | Its position, 1-based.                                                   |
 | `role`   | string  | `transcription` or `post_processor`.                                     |
 | `source` | string? | Repo id of the backend filling it; `null` when the stage is empty.       |
 | `name`   | string? | That backend's display name; `null` when the stage is empty.            |
-| `model`  | string? | Wire name of the selected model; `null` when none is selected.          |
-| `loaded` | bool    | Whether the model is loaded and running right now.                       |
-| `device` | string? | The accelerator the loaded model is actually on: `cpu`, `cuda`, `rocm`, `metal`, `vulkan`, or `remote` for an online model. `null` when nothing is loaded. This is where the work runs, not the user's preference — for that, and for what a `gpu` choice resolved to, read the model's [device](./pipeline/device.md#get-pipelinestagemodelmodeldevice). |
-| `enabled`| bool    | *Processor stages only.* Whether it should run. Distinct from `loaded`: a stage can be enabled while its model failed to load, and transcripts then pass through unchanged. |
-| `switch` | object? | The load this stage has in flight, or `null` when it has none. Scoped to the stage: a post-processor's download never appears under stage 1. |
+| `enabled`| bool    | Whether the user has this stage switched on — what Load sets and Unload clears. Distinct from `loaded`: a stage can be enabled while its model failed to come up, and transcripts then pass through unchanged. |
+
+**The stages behave alike, and did not always.** Stage 1 used to report the
+model it had *loaded* while stage 2 reported the model it had *selected*, so the
+same field meant different things at the two positions — and at stage 1 `loaded`
+was true exactly when `model` was non-null, telling a client nothing. Worse,
+stage 1 had no `enabled` of its own, so the only way to stop a restart reloading
+an unloaded model was to erase the selection: the card emptied, and re-loading
+the same model on a different device meant picking it from the dropdown again.
+Splitting the object and giving every stage an `enabled` is what fixed both.
+
+## The model object
+
+One stage's model slot, from
+[`GET /pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel).
+Every stage answers it with the same shape and the same meanings.
+
+| Field    | Type    | Notes                                                                   |
+|----------|---------|--------------------------------------------------------------------------|
+| `stage`  | int     | The position whose slot this is.                                         |
+| `model`  | string? | Wire name of the selected model; `null` when none is picked. This is the **selection**, and it survives an unload — so a client can offer to load the same model again without the user re-picking it. |
+| `loaded` | bool    | Whether that selection is running right now.                             |
+| `device` | object? | Which accelerator it runs on; `null` when nothing is selected. See below.|
+| `switch` | object? | The load this stage has in flight, or `null` when it has none. Scoped to the stage: a post-processor's download never appears under stage 1. It can be present while `model` is still `null` — that is a stage's very first load. |
+
+### The `device` object
+
+| Field            | Type    | Notes                                                            |
+|------------------|---------|-------------------------------------------------------------------|
+| `preference`     | string  | The stored choice: `cpu`, `gpu`, or `none` for a model that runs remotely. |
+| `resolved_accel` | string? | What a `gpu` preference resolved to once the model loaded — `cuda`, `rocm`, `metal`, `vulkan`. `null` while the preference is `gpu` and nothing has confirmed it yet, so a client is never told a device resolved before a load proved it. |
+
+What the model *could* run on is deliberately not here: that list costs a fresh
+probe of the host's accelerators, and
+[`GET /pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-pipelinestagemodelmodeldevicelist)
+is the endpoint that answers it. Filling a device picker means one call for the
+options and this one for the current value.
 
 ### The `switch` object
 
@@ -117,11 +160,14 @@ Each verb's reference lives with its path:
 | Page | Covers |
 |---|---|
 | [`pipeline/stage.md`](./pipeline/stage.md)   | `GET`, `POST`, `DELETE /pipeline/{stage}` |
-| [`pipeline/model.md`](./pipeline/model.md)   | `POST`, `DELETE /pipeline/{stage}/model`, and its `cancel` / `reload` |
+| [`pipeline/backend-list.md`](./pipeline/backend-list.md) | `GET /pipeline/{stage}/backend/list` |
+| [`pipeline/model.md`](./pipeline/model.md)   | `GET`, `POST`, `DELETE /pipeline/{stage}/model`, and its `cancel` / `reload` |
+| [`pipeline/model-list.md`](./pipeline/model-list.md) | `GET /pipeline/{stage}/model/list` |
 | [`pipeline/device.md`](./pipeline/device.md) | `/pipeline/{stage}/model/{model}/device`, both device lists |
+| [`pipeline/language.md`](./pipeline/language.md) | `/pipeline/{stage}/model/{model}/language`, and the list it offers |
 
-This page keeps what they share: the stages, the stage object, auth, the
-post-processing contract, and the events every stage emits.
+This page keeps what they share: the stages, the stage and model objects, auth,
+the post-processing contract, and the events every stage emits.
 
 ## `GET /pipeline`
 
@@ -145,29 +191,26 @@ Content-Type: application/json
   "status": "success",
   "pipeline": [
     {
-      "stage":  1,
-      "role":   "transcription",
-      "source": "github.com/super-stt/whisper",
-      "name":   "Whisper (local)",
-      "model":  "whisper-large-v3",
-      "loaded": true,
-      "device": "cuda",
-      "switch": null
+      "stage":   1,
+      "role":    "transcription",
+      "source":  "github.com/super-stt/whisper",
+      "name":    "Whisper (local)",
+      "enabled": true
     },
     {
       "stage":   2,
       "role":    "post_processor",
       "source":  "github.com/jorge-menjivar/super-stt-textclean",
       "name":    "Text Cleanup",
-      "model":   "textclean",
-      "loaded":  true,
-      "device":  "cpu",
-      "switch":  null,
       "enabled": true
     }
   ]
 }
 ```
+
+Which models those backends are running is one
+[`GET /pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel) per
+position.
 
 ## Post-processing behavior
 
@@ -183,7 +226,7 @@ latency paths, and a preview is rewritten again on the next pass anyway.
 A post-processor is driven over
 [`POST /v1/process`](../../backend/contract.md#post-v1process); what it does with
 the text, and how it is tuned, is the backend's own business, configured through
-its [options and secrets](./backends.md) like any other model.
+its [options and secrets](./backend/list.md) like any other model.
 
 ## Events
 

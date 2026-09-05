@@ -4,7 +4,7 @@ use cosmic::iced::Length;
 use cosmic::widget::{self, button, column, scrollable, text_input};
 
 use crate::core::app::AppModel;
-use crate::ui::languages::{GLOBAL_LANGUAGES, friendly_name};
+use crate::ui::languages::friendly_name;
 use crate::ui::messages::{LanguageMessage, Message};
 
 pub fn sheet(app: &AppModel) -> Element<'_, Message> {
@@ -16,26 +16,28 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
     // alphabetically by display name.
     let mut pinned: Vec<(Option<String>, String)> = Vec::new();
     let mut langs: Vec<(Option<String>, String)> = Vec::new();
-    if let Some((ref src, ref mdl)) = app.language.language_picker_target {
+    if let Some((stage, ref src, ref mdl)) = app.language.language_picker_target {
         // Per-model sheet.
         pinned.push((None, "Follow global".to_string())); // clear → DELETE
-        pinned.push((Some("auto".to_string()), friendly_name("auto"))); // "Auto-detect"
-        // Supported languages from the resolution block — but only when the
-        // block belongs to this exact (source, model) pair (stale-block guard).
-        if let Some(block) = app.language.model_languages.get(src, mdl) {
-            for tag in &block.supported {
-                if tag.eq_ignore_ascii_case("auto") {
-                    continue; // already pinned as "Auto-detect"
-                }
-                langs.push((Some(tag.clone()), friendly_name(tag)));
-            }
+        // What the daemon will accept for this model, from
+        // `/language/list` — `auto` included, which is why it is not pinned
+        // here the way the global sheet pins it. Offering a general BCP-47 list
+        // instead would put tags in front of the user that the setter refuses,
+        // discoverable only by choosing one.
+        for tag in app
+            .language
+            .model_languages
+            .offered(stage, src, mdl)
+            .unwrap_or_default()
+        {
+            langs.push((Some(tag.clone()), friendly_name(tag)));
         }
     } else {
-        // Global sheet — "Auto-detect" only; the unset state is reached by not
-        // choosing anything, so there is no explicit "No preference" entry.
-        pinned.push((Some("auto".to_string()), friendly_name("auto"))); // "Auto-detect"
-        for tag in GLOBAL_LANGUAGES {
-            langs.push((Some((*tag).to_string()), friendly_name(tag)));
+        // Global sheet — the daemon's own vocabulary, `auto` included, from
+        // `/settings/language/list`. The unset state is reached by not choosing
+        // anything, so there is no explicit "No preference" entry.
+        for tag in &app.language.global_offers {
+            langs.push((Some(tag.clone()), friendly_name(tag)));
         }
     }
     langs.sort_by(|a, b| a.1.cmp(&b.1));
@@ -60,8 +62,9 @@ pub fn sheet(app: &AppModel) -> Element<'_, Message> {
 
     let mut list = column::with_capacity(rows.len()).spacing(spacing.space_xxs);
     for (tag, label) in rows {
-        let msg = if let Some((ref src, ref mdl)) = app.language.language_picker_target {
+        let msg = if let Some((stage, ref src, ref mdl)) = app.language.language_picker_target {
             Message::Language(LanguageMessage::ModelLanguageSelected {
+                stage,
                 source: src.clone(),
                 model: mdl.clone(),
                 choice: tag,

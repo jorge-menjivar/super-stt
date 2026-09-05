@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}` — one stage: read it, fill it with a backend, empty it.
+//! `/pipeline/{stage}` — one stage's backend: read it, fill it, empty it.
 //!
-//! Filling a stage is not loading a model; that is `/pipeline/{stage}/model`,
-//! next door in [`super::model`]. The pair is deliberate — a card's Select and
-//! its Load are separate acts, and Deselect here forgets the backend where
-//! Unload there keeps it.
+//! Only the backend. What it is running is `/pipeline/{stage}/model`, next door
+//! in [`super::model`]. The pair is deliberate — a card's Select and its Load
+//! are separate acts, and Deselect here forgets the backend where Unload there
+//! keeps it.
 
 use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, narrowed};
 use crate::daemon::http::state::AppState;
@@ -24,9 +24,12 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
     tag = "pipeline",
     summary = "Report one pipeline stage",
     description = "\
-The same object `GET /pipeline` carries in its array, for a client that only cares \
-about one position. It is narrowed from that report rather than derived separately, \
-so one stage and the whole list can never disagree.",
+The backend filling this position, and whether the stage is switched on. The same \
+object `GET /pipeline` carries in its array, for a client that only cares about one \
+position — narrowed from that report rather than derived separately, so one stage and \
+the whole list can never disagree.
+
+The model is not here: read it at `GET /pipeline/{stage}/model`.",
     params(
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
@@ -64,7 +67,7 @@ pub(crate) async fn get_stage(State(s): State<AppState>, Path(stage): Path<u32>)
 /// Which backend should fill the stage.
 #[derive(Deserialize, utoipa::ToSchema)]
 pub(crate) struct SetBackendBody {
-    /// The backend's repo id, as `GET /backends` reports it.
+    /// The backend's repo id, as `GET /backend/list` reports it.
     #[schema(example = "github.com/acme/whisper")]
     pub(crate) source: String,
 }

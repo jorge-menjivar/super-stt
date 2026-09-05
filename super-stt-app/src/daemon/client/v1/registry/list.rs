@@ -5,16 +5,16 @@ use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 use super_stt_shared::registry::RegistryListResponse;
 
-/// `GET /registry/backends` — fetch the backend catalog, optionally filtered.
+/// `GET /registry/backend/list` — fetch the backend catalog, optionally filtered.
 pub async fn list(filters: &ListFilters) -> HttpResult<RegistryListResponse> {
     let query = filters.to_query_string();
     with_settings_token(move |socket, token| {
         let query = query.clone();
         async move {
             let path = if query.is_empty() {
-                "/registry/backends".to_string()
+                "/registry/backend/list".to_string()
             } else {
-                format!("/registry/backends?{query}")
+                format!("/registry/backend/list?{query}")
             };
             transport::get_json::<RegistryListResponse>(socket, &token, &path).await
         }

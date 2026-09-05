@@ -145,7 +145,7 @@ pub(super) fn active_backend_card<'a>(
     // Count what this stage can run, not everything the backend ships — a
     // backend serving two transcription models and a post-processor offers two
     // here, and the Library card is where the full inventory belongs.
-    let model_count = super::roles::models_for(backend, false).len();
+    let model_count = app.stage_catalog.models(STT_STAGE, &backend.source).len();
     if model_count > 0 {
         let label = if model_count == 1 {
             "1 model".to_string()
@@ -198,28 +198,86 @@ pub(super) fn active_backend_card<'a>(
     card_surface(card, true)
 }
 
+/// The device dropdown for one stage's `model`, or `None` when there is
+/// nothing to offer.
+///
+/// Rendered whether or not the model is loaded, and that is the point: a
+/// running model's device can be changed in place — the daemon reloads it onto
+/// the new one — so hiding the picker once it is up made the only route
+/// through unload, re-pick, load.
+///
+/// `None` covers two cases the caller must not distinguish: the daemon has not
+/// answered yet, and it answered with nothing. The answer is already the
+/// model's `supported_devices` narrowed to what this install and host can do,
+/// so an online model and a GPU the install cannot use both fall out here.
+pub(super) fn device_dropdown<'a>(
+    stage: u32,
+    source: &str,
+    model: &str,
+    app: &'a AppModel,
+) -> Option<Element<'a, Message>> {
+    let devices: Vec<String> = app.device_offers.model(stage, source, model)?.to_vec();
+    if devices.is_empty() {
+        return None;
+    }
+    let selected = app
+        .staged_picks
+        .device(stage)
+        .and_then(|d| devices.iter().position(|x| x == d));
+    let pick = devices.clone();
+    Some(
+        widget::dropdown(devices, selected, move |index| {
+            Message::Stage(StageMessage::StageDevice {
+                stage,
+                device: pick[index].clone(),
+            })
+        })
+        .placeholder("Device")
+        .width(Length::FillPortion(1))
+        .into(),
+    )
+}
+
+/// What a loaded model is *running* on, when that is not simply the device the
+/// picker already shows.
+///
+/// "cpu · cpu" is noise; a `gpu` choice running on `cuda`, or one that fell
+/// back to the CPU, is the thing worth saying. Returns `None` when there is
+/// nothing to add.
+pub(super) fn resolved_suffix(running: &str, chosen: Option<&str>) -> String {
+    if running.is_empty() || running == "none" || Some(running) == chosen {
+        return String::new();
+    }
+    format!(" \u{00b7} {running}")
+}
+
 /// Summary shown in the active-backend card when a model is currently
-/// loaded for this backend. Reads as e.g. "Active: whisper-1 · cuda" with
-/// an Unload button on the right; the Unload click drops the model but
-/// keeps the active backend selected.
+/// loaded for this backend. Reads as e.g. "Active: whisper-1" with its device
+/// picker, and an Unload button on the right; the Unload click drops the model
+/// but keeps the active backend — and the model — selected.
 pub(super) fn loaded_model_summary<'a>(
     backend: &'a BackendInfo,
     app: &'a AppModel,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
-    let device_suffix = if app.current_device.is_empty() || app.current_device == "none" {
-        String::new()
-    } else {
-        format!(" · {}", app.current_device)
-    };
-    let label = text::body(format!("Active: {}{device_suffix}", app.current_model))
-        .class(cosmic::theme::Text::Accent)
-        .width(Length::Fill);
+    let label = text::body(format!(
+        "Active: {}{}",
+        app.current_model,
+        resolved_suffix(&app.current_device, app.staged_picks.device(STT_STAGE))
+    ))
+    .class(cosmic::theme::Text::Accent)
+    .width(Length::Fill);
     let mut summary = row![label]
         .spacing(spacing.space_xs)
         .align_y(Alignment::Center);
+    // The same picker the unloaded card shows, in the same place. Changing it
+    // now reloads the model onto the new device rather than staging a choice
+    // for a Load that is not coming.
+    if let Some(devices) = device_dropdown(STT_STAGE, &backend.source, &app.current_model, app) {
+        summary = summary.push(devices);
+    }
     // Per-model language trigger, inline before Unload, for a multilingual model.
-    if let Some(lang_button) = language_button(backend, &app.current_model, app) {
+    if let Some(lang_button) = language_button(STT_STAGE, backend, &app.current_model, app) {
         summary = summary.push(lang_button);
     }
     // A leading stop glyph fronts the Unload label, mirroring the Load button's
@@ -285,7 +343,7 @@ pub(super) fn staged_model_picker<'a>(
     // Model dropdown — staged picks live in `app.models_page.staged_model`, not
     // loaded. Scoped to this stage's role: a post-processor here would be a
     // pick the daemon then refuses.
-    let model_names: Vec<String> = super::roles::models_for(backend, false);
+    let model_names: Vec<String> = app.stage_catalog.models(STT_STAGE, &backend.source);
     let staged_model = app
         .models_page
         .active_backend
@@ -317,29 +375,16 @@ pub(super) fn staged_model_picker<'a>(
     // answered-but-empty list rather than an absent one.
     let staged_devices: Option<&[String]> =
         staged_model.and_then(|m| app.device_offers.model(STT_STAGE, &backend.source, m));
-    let show_device_picker = staged_devices.is_some_and(|d| !d.is_empty());
-    if show_device_picker {
-        let devices: Vec<String> = staged_devices.unwrap_or_default().to_vec();
-        let device_index = app
-            .staged_picks
-            .device(STT_STAGE)
-            .and_then(|d| devices.iter().position(|x| x == d));
-        let devices_pick = devices.clone();
-        let device_dropdown = widget::dropdown(devices, device_index, move |index| {
-            Message::Stage(StageMessage::StageDevice {
-                stage: STT_STAGE,
-                device: devices_pick[index].clone(),
-            })
-        })
-        .placeholder("Device")
-        .width(Length::FillPortion(1));
-        picker_row = picker_row.push(device_dropdown);
+    if let Some(model) = staged_model
+        && let Some(devices) = device_dropdown(STT_STAGE, &backend.source, model, app)
+    {
+        picker_row = picker_row.push(devices);
     }
 
     // Per-model language trigger, inline after the device dropdown — shown only
     // for a staged multilingual model.
     if let Some(model) = staged_model
-        && let Some(lang_button) = language_button(backend, model, app)
+        && let Some(lang_button) = language_button(STT_STAGE, backend, model, app)
     {
         picker_row = picker_row.push(lang_button);
     }

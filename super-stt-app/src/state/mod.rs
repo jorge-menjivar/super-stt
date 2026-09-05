@@ -8,6 +8,7 @@ pub mod model_operations;
 pub mod models;
 pub mod models_page;
 pub mod registry;
+pub mod stage_catalog;
 pub mod staged_picks;
 pub mod update;
 

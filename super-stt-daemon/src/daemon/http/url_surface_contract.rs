@@ -25,37 +25,40 @@ use serde_json::Value;
 const URL_SURFACE: &[(&str, &str)] = &[
     ("/v1/auth/request", "post"),
     ("/v1/auth/status", "get"),
-    ("/v1/backends", "get"),
-    ("/v1/backends/{source}", "delete"),
-    (
-        "/v1/backends/{source}/models/{model}/language",
-        "delete,get,post",
-    ),
-    ("/v1/backends/{source}/options/list", "get"),
-    ("/v1/backends/{source}/options/{name}", "delete,get,post"),
-    ("/v1/backends/{source}/secrets/list", "get"),
-    ("/v1/backends/{source}/secrets/{name}", "delete,get,post"),
+    ("/v1/backend/list", "get"),
+    ("/v1/backend/{backend_id}", "delete"),
+    ("/v1/backend/{backend_id}/option/list", "get"),
+    ("/v1/backend/{backend_id}/option/{name}", "delete,get,post"),
+    ("/v1/backend/{backend_id}/secret/list", "get"),
+    ("/v1/backend/{backend_id}/secret/{name}", "delete,get,post"),
     ("/v1/events", "get"),
     ("/v1/gpu_info", "get"),
-    ("/v1/models", "get"),
     ("/v1/ping", "get"),
     ("/v1/pipeline", "get"),
     ("/v1/pipeline/{stage}", "delete,get,post"),
+    ("/v1/pipeline/{stage}/backend/list", "get"),
     ("/v1/pipeline/{stage}/device/list", "get"),
-    ("/v1/pipeline/{stage}/model", "delete,post"),
+    ("/v1/pipeline/{stage}/model", "delete,get,post"),
     ("/v1/pipeline/{stage}/model/cancel", "post"),
+    ("/v1/pipeline/{stage}/model/list", "get"),
     ("/v1/pipeline/{stage}/model/reload", "post"),
     ("/v1/pipeline/{stage}/model/{model}/device", "get,post"),
     ("/v1/pipeline/{stage}/model/{model}/device/list", "get"),
-    ("/v1/registry/backends", "get"),
-    ("/v1/registry/backends/install", "post"),
-    ("/v1/registry/backends/refresh", "post"),
-    ("/v1/registry/backends/update", "post"),
+    (
+        "/v1/pipeline/{stage}/model/{model}/language",
+        "delete,get,post",
+    ),
+    ("/v1/pipeline/{stage}/model/{model}/language/list", "get"),
+    ("/v1/registry/backend/list", "get"),
+    ("/v1/registry/backend/install", "post"),
+    ("/v1/registry/backend/refresh", "post"),
+    ("/v1/registry/backend/update", "post"),
     ("/v1/settings/audio_theme", "get,post"),
     ("/v1/settings/audio_theme/list", "get"),
     ("/v1/settings/audio_theme/test", "post"),
     ("/v1/settings/custom_models_dir", "get,post"),
     ("/v1/settings/language", "delete,get,post"),
+    ("/v1/settings/language/list", "get"),
     ("/v1/settings/notification_method", "get,post"),
     ("/v1/settings/preview_typing", "get,post"),
     ("/v1/settings/recording_stop_mode", "get,post"),
@@ -244,6 +247,49 @@ fn no_operation_is_served_at_two_paths() {
         dupes.is_empty(),
         "the same operation is served at two paths:\n  {}",
         dupes.join("\n  ")
+    );
+}
+
+/// The declared tags and the tags in use are the same set.
+///
+/// Both directions drift silently. A tag declared and no longer carried by any
+/// operation renders as an empty section in the published docs — which is how
+/// `models` was left behind when `GET /models` became
+/// `GET /pipeline/{stage}/model/list`. A tag used but never declared renders
+/// with no description at all, under a heading the reader has to guess at.
+#[test]
+fn every_declared_tag_is_used_and_every_used_tag_is_declared() {
+    let doc = document();
+    const METHODS: [&str; 7] = ["get", "put", "post", "delete", "options", "head", "patch"];
+
+    let declared: BTreeSet<String> = doc["tags"]
+        .as_array()
+        .expect("the document declares tags")
+        .iter()
+        .map(|t| t["name"].as_str().expect("a tag has a name").to_string())
+        .collect();
+
+    let mut used = BTreeSet::new();
+    for (_, item) in doc["paths"].as_object().expect("paths is an object") {
+        for (method, op) in item.as_object().expect("a path item is an object") {
+            if !METHODS.contains(&method.as_str()) {
+                continue;
+            }
+            for t in op["tags"].as_array().expect("every operation carries tags") {
+                used.insert(t.as_str().expect("a tag is a string").to_string());
+            }
+        }
+    }
+
+    let orphaned: Vec<_> = declared.difference(&used).collect();
+    let undeclared: Vec<_> = used.difference(&declared).collect();
+    assert!(
+        orphaned.is_empty(),
+        "declared but carried by no operation: {orphaned:?}"
+    );
+    assert!(
+        undeclared.is_empty(),
+        "used but never declared, so they publish with no description: {undeclared:?}"
     );
 }
 

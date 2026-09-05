@@ -9,7 +9,7 @@
 //! 4. A model that is not installed is refused.
 //! 5. A transcription model is refused for this stage, and a post-processor is
 //!    refused for `/active_model` — the two roles do not cross.
-//! 6. `GET /backends` reports each model's `role`.
+//! 6. `GET /backend/list` reports each model's `role`.
 //! 7. `GET /pipeline` lists both stages, and an out-of-range stage 404s.
 //! 8. `/pipeline/{stage}/model/{model}/device` reads and records a model's
 //!    device through its stage, per model, with the same validation.
@@ -134,6 +134,7 @@ supported_devices = ["cpu", "gpu"]
 [[models]]
 name = "cleanup-1"
 role = "post_processor"
+multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["cpu"]
@@ -303,9 +304,20 @@ async fn post_processor_defaults_to_disabled_and_unselected() {
     assert_eq!(pp["stage"], 2);
     assert_eq!(pp["role"], "post_processor");
     assert_eq!(pp["enabled"], false);
-    assert_eq!(pp["model"], serde_json::Value::Null);
     assert_eq!(pp["source"], serde_json::Value::Null);
-    assert_eq!(pp["loaded"], false);
+    // The model is one level down — a stage reports the backend filling it and
+    // nothing about what that backend is running.
+    assert!(
+        pp.get("model").is_none() && pp.get("loaded").is_none(),
+        "a stage must not carry model fields: {pp}"
+    );
+
+    let (status, body) = get(&sock, PP_STAGE_MODEL, &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(body["model"]["stage"], 2);
+    assert_eq!(body["model"]["model"], serde_json::Value::Null);
+    assert_eq!(body["model"]["loaded"], false);
+    assert_eq!(body["model"]["device"], serde_json::Value::Null);
 }
 
 /// Enable → read back → disable. `POST` names the model to run; `DELETE` stops
@@ -332,7 +344,13 @@ async fn post_processor_enable_read_back_and_disable() {
     let (status, body) = get(&sock, PP_STAGE, &token).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["stage"]["enabled"], true);
-    assert_eq!(body["stage"]["model"], "cleanup-1");
+    let (status, body) = get(&sock, PP_STAGE_MODEL, &token).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["model"]["model"], "cleanup-1");
+    assert_eq!(
+        body["model"]["loaded"], false,
+        "the fixture's placeholder entrypoint cannot load"
+    );
 
     let (status, body) = delete_req(&sock, PP_STAGE_MODEL, &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
@@ -341,6 +359,17 @@ async fn post_processor_enable_read_back_and_disable() {
         body["post_processor"]["model"], "cleanup-1",
         "disabling keeps the choice"
     );
+
+    // And the same read back through the pipeline: the stage is off, the model
+    // it was pointed at is still there to load again.
+    let (_, body) = get(&sock, PP_STAGE, &token).await;
+    assert_eq!(body["stage"]["enabled"], false);
+    let (_, body) = get(&sock, PP_STAGE_MODEL, &token).await;
+    assert_eq!(
+        body["model"]["model"], "cleanup-1",
+        "an unload keeps the selection"
+    );
+    assert_eq!(body["model"]["loaded"], false);
 }
 
 /// `DELETE /post_processor` is a no-op when nothing is running, the way
@@ -420,13 +449,13 @@ async fn the_two_roles_do_not_cross() {
     );
 }
 
-/// `GET /backends` carries each model's role, which is what lets a settings UI
+/// `GET /backend/list` carries each model's role, which is what lets a settings UI
 /// offer the right models in each picker.
 #[tokio::test]
 async fn the_backends_catalog_reports_each_models_role() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
-    let (status, body) = get(&sock, "/backends", &token).await;
+    let (status, body) = get(&sock, "/backend/list", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     let models = body["backends"][0]["models"]
         .as_array()
@@ -744,8 +773,8 @@ async fn a_models_device_is_its_own() {
 
     let (_, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
     assert_eq!(body["device"], "gpu", "the choice is recorded");
-    let (_, body) = get(&sock, "/pipeline/1", &token).await;
-    assert_eq!(body["stage"]["loaded"], false, "nothing was loaded");
+    let (_, body) = get(&sock, "/pipeline/1/model", &token).await;
+    assert_eq!(body["model"]["loaded"], false, "nothing was loaded");
 
     // The post-processor on the same backend has its own device.
     let (status, _) = post_req(
@@ -759,6 +788,181 @@ async fn a_models_device_is_its_own() {
     let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/device", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["device"], "cpu");
+}
+
+/// A stage's backend list is what its `POST` accepts, and nothing else.
+///
+/// The fixture makes the case that matters: one backend serves both roles, one
+/// serves only a post-processor. Stage 1 must not offer the second — selecting
+/// it leaves the model picker empty, and `POST /pipeline/1` refuses it anyway,
+/// so a picker built from `GET /backend/list` hands the user an error to discover
+/// by choosing it.
+#[tokio::test]
+async fn each_stage_lists_only_the_backends_that_can_fill_it() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+
+    let sources = async |path: &str| -> Vec<String> {
+        let (status, body) = get(&sock, path, &token).await;
+        assert_eq!(status, StatusCode::OK, "GET {path}: {body}");
+        body["backends"]
+            .as_array()
+            .expect("backends is a list")
+            .iter()
+            .filter_map(|b| b["source"].as_str().map(ToString::to_string))
+            .collect()
+    };
+
+    let installed = sources("/backend/list").await;
+    assert!(installed.contains(&FIXTURE_SOURCE.to_string()));
+    assert!(
+        installed.contains(&PP_ONLY_SOURCE.to_string()),
+        "the whole catalog carries both: {installed:?}"
+    );
+
+    let stage_one = sources("/pipeline/1/backend/list").await;
+    assert!(
+        stage_one.contains(&FIXTURE_SOURCE.to_string()),
+        "the dual-role backend transcribes: {stage_one:?}"
+    );
+    assert!(
+        !stage_one.contains(&PP_ONLY_SOURCE.to_string()),
+        "a post-processor-only backend is not a transcription backend: {stage_one:?}"
+    );
+
+    let stage_two = sources("/pipeline/2/backend/list").await;
+    assert!(
+        stage_two.contains(&PP_ONLY_SOURCE.to_string()),
+        "and it is a post-processor backend: {stage_two:?}"
+    );
+    assert!(
+        stage_two.contains(&FIXTURE_SOURCE.to_string()),
+        "a backend serving both roles appears in both lists: {stage_two:?}"
+    );
+
+    // The list is the promise: every backend offered is one POST takes, and the
+    // one it withholds is one POST refuses.
+    for source in &stage_one {
+        let (status, body) = post_req(
+            &sock,
+            "/pipeline/1",
+            &token,
+            serde_json::json!({ "source": source }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "offered {source} but refused it: {body}"
+        );
+    }
+    let (status, body) = post_req(
+        &sock,
+        "/pipeline/1",
+        &token,
+        serde_json::json!({ "source": PP_ONLY_SOURCE }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "withheld from the list but accepted: {body}"
+    );
+
+    // An out-of-range position is the same 404 every stage path answers with.
+    let (status, _) = get(&sock, "/pipeline/9/backend/list", &token).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// What is set and what may be set are separate endpoints, and the second is
+/// the set the first will accept — not the manifest's list.
+///
+/// Two things a picker filled from `supported_languages` gets wrong, and both
+/// are only discoverable by choosing the wrong entry: `auto` is accepted and is
+/// not declared, and a monolingual model declares tags while accepting none.
+#[tokio::test]
+async fn a_models_language_list_is_what_its_setter_accepts() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let (status, _) = post_req(
+        &sock,
+        "/pipeline/1",
+        &token,
+        serde_json::json!({ "source": FIXTURE_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The block says what is in effect, and no longer carries the list.
+    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/language", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert!(
+        body["language"].get("supported").is_none(),
+        "the list moved to /language/list: {body}"
+    );
+    assert_eq!(body["language"]["override"], serde_json::Value::Null);
+
+    let (status, body) = get(
+        &sock,
+        "/pipeline/1/model/whisper-local/language/list",
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let offered: Vec<&str> = body["available_languages"]
+        .as_array()
+        .expect("available_languages is a list")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert_eq!(
+        offered.first(),
+        Some(&"auto"),
+        "auto is accepted and is not declared, so the list has to add it: {offered:?}"
+    );
+    assert!(offered.contains(&"en"), "the model's own tag: {offered:?}");
+
+    // Every tag offered is one POST takes.
+    for tag in &offered {
+        let (status, body) = post_req(
+            &sock,
+            "/pipeline/1/model/whisper-local/language",
+            &token,
+            serde_json::json!({ "language": tag }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "offered {tag} but refused it: {body}"
+        );
+    }
+
+    // And a tag it does not offer is refused, so the list is the whole truth.
+    let (status, _) = post_req(
+        &sock,
+        "/pipeline/1/model/whisper-local/language",
+        &token,
+        serde_json::json!({ "language": "zz" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // A monolingual model offers nothing, however many tags it declares — the
+    // shape a picker hides its control on.
+    let (status, _) = post_req(
+        &sock,
+        PP_STAGE,
+        &token,
+        serde_json::json!({ "source": FIXTURE_SOURCE }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/language/list", &token).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    assert_eq!(
+        body["available_languages"],
+        serde_json::json!([]),
+        "a monolingual model has nothing to choose: {body}"
+    );
 }
 
 /// What the device verb refuses: a value that is not a device, a device the
@@ -967,7 +1171,7 @@ async fn uninstalling_a_backend_empties_every_stage_it_filled() {
     assert_eq!(body["stage"]["source"], PP_ONLY_SOURCE);
 
     let encoded = PP_ONLY_SOURCE.replace('/', "%2F");
-    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    let (status, body) = delete_req(&sock, &format!("/backend/{encoded}"), &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["uninstalled"], true);
     assert_eq!(body["was_active"], false, "it was never stage 1's");
@@ -1001,7 +1205,7 @@ async fn uninstalling_a_backend_names_every_stage_it_filled() {
     }
 
     let encoded = FIXTURE_SOURCE.replace('/', "%2F");
-    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    let (status, body) = delete_req(&sock, &format!("/backend/{encoded}"), &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["uninstalled"], true);
     assert_eq!(body["was_active"], true, "it was stage 1's: {body}");
@@ -1017,7 +1221,7 @@ async fn uninstalling_a_backend_names_every_stage_it_filled() {
     // The other install was never selected anywhere: gone, and no stage to
     // report.
     let encoded = PP_ONLY_SOURCE.replace('/', "%2F");
-    let (status, body) = delete_req(&sock, &format!("/backends/{encoded}"), &token).await;
+    let (status, body) = delete_req(&sock, &format!("/backend/{encoded}"), &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["uninstalled"], true);
     assert_eq!(body["was_active"], false, "body: {body}");

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/registry/backends` — the installable catalog: list, install, refresh, update.
+//! `/registry/backend/list` — the installable catalog: list, install, refresh, update.
 //!
 //! Removing an installed backend is not here: it is served at
-//! `DELETE /backends/{source}` and lives in [`super::backends`].
+//! `DELETE /backend/{source}` and lives in [`super::backends`].
 
 mod install;
 mod list;

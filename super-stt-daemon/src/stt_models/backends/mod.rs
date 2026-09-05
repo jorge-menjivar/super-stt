@@ -33,7 +33,7 @@ pub struct DiscoveredBackend {
     /// Human-facing backend name (`[backend].name`).
     pub name: String,
     /// `[backend].description` from the manifest, empty when omitted. Carried
-    /// so `GET /backends` can report it: the registry index has one only for
+    /// so `GET /backend/list` can report it: the registry index has one only for
     /// backends it lists, leaving a sideloaded backend with none anywhere.
     pub description: String,
     /// The backend's own version (`[backend].version`) as of the last scan.
@@ -69,8 +69,8 @@ pub struct DiscoveredBackend {
 /// changed outside the daemon (a hand-edited manifest, an install from another
 /// tool) would otherwise read as its pre-change self until the next rescan.
 ///
-/// The same read backs `GET /backends` and the `installed_version` on
-/// `GET /registry/backends`, so the version a client sees and the one an update
+/// The same read backs `GET /backend/list` and the `installed_version` on
+/// `GET /registry/backend/list`, so the version a client sees and the one an update
 /// is judged against cannot disagree.
 #[must_use]
 pub fn installed_version(dir: &Path) -> Option<String> {
@@ -323,7 +323,7 @@ pub fn list_models(backends: &[DiscoveredBackend]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The default backends search directory: `<data_dir>/super-stt/backends`.
+/// The default backends search directory: `<data_dir>/super-stt/backend/list`.
 #[must_use]
 pub fn default_backends_dir() -> PathBuf {
     super_stt_shared::paths::data_dir().join("backends")

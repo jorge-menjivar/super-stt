@@ -15,8 +15,8 @@ use utoipa_axum::routes;
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list))
-        .routes(routes!(get_one, set, delete_option))
+        .routes(routes!(list_options))
+        .routes(routes!(get_option, set_option, delete_option))
 }
 
 /// The value to store for an option.
@@ -90,7 +90,7 @@ fn effective(
 
 #[utoipa::path(
     get,
-    path = "/backends/{source}/options/list",
+    path = "/backend/{backend_id}/option/list",
     tag = "backends",
     summary = "List a backend's options",
     description = "\
@@ -99,10 +99,10 @@ value actually in effect. This is what a settings UI renders a form from.
 
 Options are the backend's own configuration — an endpoint URL, a model parameter — \
 declared in its manifest. Credentials are not options; those are secrets, at \
-`/backends/{source}/secrets/list`.",
+`/backend/{backend_id}/secret/list`.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
     ),
     security(("session_token" = ["settings"])),
@@ -114,7 +114,7 @@ declared in its manifest. Credentials are not options; those are secrets, at \
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response {
+async fn list_options(State(s): State<AppState>, Path(source): Path<String>) -> Response {
     let source = decode_source(&source);
     let Some(b) = find_backend(&s, &source).await else {
         return json_error(StatusCode::NOT_FOUND, "unknown_backend");
@@ -133,15 +133,15 @@ async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response
 
 #[utoipa::path(
     get,
-    path = "/backends/{source}/options/{name}",
+    path = "/backend/{backend_id}/option/{name}",
     tag = "backends",
     summary = "Read one option's effective value",
     description = "\
 The value in effect for a single option, alongside the manifest default so a UI can \
 show what clearing it would revert to.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
         ("name" = String, Path, description = "The option's name, as the backend's manifest declares it."),
     ),
@@ -154,14 +154,14 @@ show what clearing it would revert to.",
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn get_one(
+async fn get_option(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
 ) -> Response {
-    get_one_inner(s, decode_source(&source), name).await
+    get_option_inner(s, decode_source(&source), name).await
 }
 
-async fn get_one_inner(s: AppState, source: String, name: String) -> Response {
+async fn get_option_inner(s: AppState, source: String, name: String) -> Response {
     let Some(b) = find_backend(&s, &source).await else {
         return json_error(StatusCode::NOT_FOUND, "unknown_backend");
     };
@@ -179,7 +179,7 @@ async fn get_one_inner(s: AppState, source: String, name: String) -> Response {
 
 #[utoipa::path(
     post,
-    path = "/backends/{source}/options/{name}",
+    path = "/backend/{backend_id}/option/{name}",
     tag = "backends",
     summary = "Override an option",
     description = "\
@@ -196,8 +196,8 @@ because it may carry meaning the daemon does not interpret.
 A loaded model does not pick this up on its own — reload the stage with \
 `POST /pipeline/{stage}/model/reload`.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
         ("name" = String, Path, description = "The option's name, as the backend's manifest declares it."),
     ),
@@ -212,7 +212,7 @@ A loaded model does not pick this up on its own — reload the stage with \
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn set(
+async fn set_option(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
     axum::Json(body): axum::Json<OptionBody>,
@@ -252,12 +252,12 @@ async fn set(
     if code != StatusCode::OK {
         return (code, [("content-type", "application/json")], body_str).into_response();
     }
-    get_one_inner(s, source, name).await
+    get_option_inner(s, source, name).await
 }
 
 #[utoipa::path(
     delete,
-    path = "/backends/{source}/options/{name}",
+    path = "/backend/{backend_id}/option/{name}",
     tag = "backends",
     summary = "Clear an option override",
     description = "\
@@ -265,8 +265,8 @@ Removes the stored value, reverting the option to the manifest default. Answers 
 the effective value that results, which is the default when one is declared and \
 `null` when none is.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fwhisper`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
          example = "github.com%2Facme%2Fwhisper"),
         ("name" = String, Path, description = "The option's name, as the backend's manifest declares it."),
     ),
@@ -298,7 +298,7 @@ async fn delete_option(
     if code != StatusCode::OK {
         return (code, [("content-type", "application/json")], body_str).into_response();
     }
-    get_one_inner(s, source, name).await
+    get_option_inner(s, source, name).await
 }
 
 /// The `base_url` form to store: canonical when the value can be read as a

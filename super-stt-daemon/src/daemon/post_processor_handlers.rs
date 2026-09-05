@@ -20,18 +20,6 @@ use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use crate::daemon::types::SuperSTTDaemon;
 
 impl SuperSTTDaemon {
-    /// Report the current selection: `{ enabled, model, source, loaded }`.
-    ///
-    /// `loaded` is the runtime fact, distinct from `enabled`: a selection can
-    /// be enabled while its model failed to load, in which case transcripts
-    /// pass through unprocessed.
-    pub async fn handle_get_post_processor(&self) -> DaemonResponse {
-        let payload = self.post_processor_payload().await;
-        DaemonResponse::success()
-            .with_post_processor(payload)
-            .with_message("Post-processor setting retrieved successfully".to_string())
-    }
-
     /// Run final transcripts through `model` — the post-processing twin of
     /// `POST /active_model`.
     ///

@@ -73,7 +73,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     let config_home = tmp.join(format!("{unique}-config"));
     std::fs::create_dir_all(&config_home).expect("create test config dir");
     // Isolate XDG_DATA_HOME too: the daemon discovers backends under
-    // `<data_dir>/super-stt/backends`. An empty isolated dir keeps the smoke
+    // `<data_dir>/super-stt/backend/list`. An empty isolated dir keeps the smoke
     // test hermetic and fast — no real backend is spawned at startup, so the
     // daemon comes up idle (which the assertions below tolerate).
     let data_home = tmp.join(format!("{unique}-data"));
@@ -425,29 +425,77 @@ async fn a_rejected_write_leaves_the_setting_alone() {
     );
 }
 
-/// `POST /settings/write_method/test` reports what it did, either way.
+/// `POST /settings/write_method/test` is routed, scoped, and — where it is safe
+/// to run — names its outcome.
 ///
 /// The one settings endpoint with a side effect and no stored value, and one of
 /// the two that had no coverage at all.
 ///
-/// Whether a write method exists is a property of the host, not of the daemon:
-/// on a desktop the probe types into the focused window and answers `200`; on a
-/// headless CI runner there is nothing to type into and it answers
-/// `500 write_method_unavailable`. Both are correct, and asserting either one
-/// alone makes the test a report on where it happened to run — this went red on
-/// CI for exactly that reason, having passed on a machine with a display.
+/// The side effect is the catch: the probe *types* its fixed string into
+/// whatever window has focus. On a developer's machine that is the window they
+/// are working in, which is not something a `just test` run may do. So the
+/// probe itself runs only where there is nothing to type into — a headless CI
+/// runner — and the parts that are true everywhere are checked everywhere:
+/// the path is routed, and it is behind the settings scope. A `404` means a
+/// rename missed it; a `403` for a settings token means it left its scope.
 ///
-/// What the endpoint actually promises is narrower and true everywhere: it is
-/// routed, it is behind the settings scope, and it names its outcome rather
-/// than failing blank. A `404` here means the rename missed it; a `500` with no
-/// `error_code` means a client is told the probe failed and never why.
+/// Where the probe does run, either answer is correct and both are asserted.
+/// Whether a write method exists is a property of the host: headless, there is
+/// no window and it answers `500 write_method_unavailable`. Asserting `200`
+/// alone made the test a report on where it happened to run, and it went red on
+/// CI for exactly that reason.
 #[tokio::test]
 async fn the_write_method_probe_reports_what_it_did() {
     let (_guard, sock) = start_daemon().await;
-    let token = token_for(&sock, &["settings"]).await;
 
+    // Routed and scoped, checked without firing the probe: a token that lacks
+    // the scope is refused before the handler runs, so nothing is typed.
+    let wrong = token_for(&sock, &["transcribe", "status"]).await;
     let (status, body) = raw_post_json(
         &sock,
+        "/settings/write_method/test",
+        &wrong,
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "POST /settings/write_method/test answered {status} to a non-settings token: {body}\n\
+         404 means the rename missed it; 200 means it is not behind the settings scope"
+    );
+
+    let Some(session) = graphical_session() else {
+        return run_the_probe(&sock).await;
+    };
+    eprintln!(
+        "skipping the write-method probe: it types into the focused window, and \
+         this host has a graphical session ({session})"
+    );
+}
+
+/// The window server this host has, or `None` when it has none and the probe is
+/// safe to fire.
+fn graphical_session() -> Option<String> {
+    for key in ["WAYLAND_DISPLAY", "DISPLAY"] {
+        if let Ok(value) = std::env::var(key)
+            && !value.is_empty()
+        {
+            return Some(format!("{key}={value}"));
+        }
+    }
+    match std::env::var("XDG_SESSION_TYPE") {
+        Ok(kind) if kind != "tty" && !kind.is_empty() => Some(format!("XDG_SESSION_TYPE={kind}")),
+        _ => None,
+    }
+}
+
+/// Fire the probe and check it names its outcome. Headless only — see
+/// [`the_write_method_probe_reports_what_it_did`].
+async fn run_the_probe(sock: &PathBuf) {
+    let token = token_for(sock, &["settings"]).await;
+    let (status, body) = raw_post_json(
+        sock,
         "/settings/write_method/test",
         &token,
         serde_json::json!({}),

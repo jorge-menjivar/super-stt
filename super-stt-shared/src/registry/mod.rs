@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Wire types for `/registry/backends` and friends. All fields `snake_case`.
+//! Wire types for `/registry/backend/list` and friends. All fields `snake_case`.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ pub struct RegistryListResponse {
     pub backends: Vec<RegistryBackend>,
 }
 
-// A flat mirror of the `/registry/backends` JSON. The lint wants related flags
+// A flat mirror of the `/registry/backend/list` JSON. The lint wants related flags
 // grouped into a sub-struct, which here would reshape the wire payload to suit
 // an internal API guideline.
 #[allow(clippy::struct_excessive_bools)]
@@ -68,7 +68,7 @@ pub struct RegistryBackend {
     pub index_stale: Option<IndexStale>,
 }
 
-// The `/registry/backends` model/secret/option leaves are field-identical to
+// The `/registry/backend/list` model/secret/option leaves are field-identical to
 // the `index.json` leaves, so they share one canonical definition rather than
 // drifting. Re-exported under the historical `Registry*` names.
 pub use super_stt_registry_types::index::{
@@ -182,7 +182,7 @@ pub use super_stt_registry_types::{is_safe_component, is_safe_relative_path};
 mod tests {
     use super::RegistryBackend;
 
-    /// The minimal `/registry/backends` entry every test below starts from,
+    /// The minimal `/registry/backend/list` entry every test below starts from,
     /// extending it with `serde_json::Value` indexing for the field each test
     /// cares about. One fixture rather than three keeps them from drifting
     /// apart on the fields that are merely required to parse at all.
@@ -258,7 +258,7 @@ mod tests {
     }
 
     /// An app built before the list form declares `accel` as a required
-    /// `String` and fails to parse the *whole* `/registry/backends` response
+    /// `String` and fails to parse the *whole* `/registry/backend/list` response
     /// when it turns into an array. Every asset carrying one runtime — which
     /// is every asset a backend can publish — therefore keeps the bare-string
     /// shape on the wire.

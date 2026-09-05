@@ -91,11 +91,10 @@ pub enum DaemonMessage {
     DaemonEventsReceived(Vec<super_stt_shared::models::protocol::NotificationEvent>),
 }
 
-/// Model identity: startup load, catalog, and the current/loaded model.
+/// Model identity: startup load, and the current/loaded model.
 #[derive(Debug, Clone)]
 pub enum ModelMessage {
-    LoadInitialData, // Load models + device info at startup
-    AvailableModelsLoaded(Vec<(String, String)>),
+    LoadInitialData, // Load device info at startup
     CurrentModelLoaded {
         model: String,
         source: String,
@@ -108,7 +107,6 @@ pub enum ModelMessage {
         model: String,
         source: String,
     },
-    ModelError(String),
     /// A `fetch_current_model` snapshot query failed. Carries the
     /// `current_model_epoch` captured when the fetch was issued: the handler
     /// clears the loaded model only if the epoch is unchanged. If a live
@@ -172,9 +170,9 @@ pub enum ModelsPageMessage {
     UninstallFailed { source: String, error: String },
     /// User clicked Retry on the Download-tab empty state, or any other refresh trigger.
     RefreshRegistry,
-    /// Initial fetch of /registry/backends succeeded.
+    /// Initial fetch of /registry/backend/list succeeded.
     RegistryListLoaded(super_stt_shared::registry::RegistryListResponse),
-    /// Initial fetch of /registry/backends failed.
+    /// Initial fetch of /registry/backend/list failed.
     RegistryListFailed(String),
     /// User typed in the search box.
     RegistrySearchChanged(String),
@@ -266,7 +264,17 @@ pub enum StageMessage {
     DeselectBackend { stage: u32 },
     /// The daemon took the selection (`None` = the stage is empty). Re-announced
     /// after a successful select, which is what asks for the backend's devices.
-    BackendSelected { stage: u32, source: Option<String> },
+    BackendSelected {
+        stage: u32,
+        source: Option<String>,
+        /// The model the daemon remembers for the stage, running or not.
+        ///
+        /// `None` for a backend the user has just picked, which has no model
+        /// yet. Carried on the startup read because a stage keeps its selection
+        /// through an unload, and the card offers that model again rather than
+        /// coming up empty.
+        model: Option<String>,
+    },
     /// A select or deselect was refused: restore `prev` and report it on the
     /// stage's card.
     BackendSelectFailed {
@@ -278,8 +286,33 @@ pub enum StageMessage {
     /// does *not* load. The device waits on the daemon, which is asked what the
     /// model can run on here and which device it already has.
     StageModel { stage: u32, model: String },
-    /// User picked a device in the card's device dropdown — staged locally.
+    /// User picked a device in the card's device dropdown.
+    ///
+    /// Staged locally while the model is not up. Once it is running the choice
+    /// is sent straight through: the daemon reloads the model onto the new
+    /// device in place, so switching device no longer means unload, re-pick,
+    /// load.
     StageDevice { stage: u32, device: String },
+    /// A device change the daemon refused or could not apply.
+    ///
+    /// Distinct from [`StageMessage::LoadFailed`]: the model is still up, on
+    /// the device it had, so this rolls the picker back and reports the failure
+    /// without dropping the stage's identity the way a failed load does.
+    DeviceChangeFailed {
+        stage: u32,
+        prev_device: Option<String>,
+        message: String,
+    },
+    /// The daemon answered what can fill `stage`: the backends, each already
+    /// narrowed to the models this stage can run.
+    ///
+    /// Re-asked whenever the installed catalog changes, since installing or
+    /// uninstalling a backend changes the answer — and never on selection,
+    /// because the answer does not depend on what is selected.
+    StageBackendsLoaded {
+        stage: u32,
+        backends: Vec<BackendInfo>,
+    },
     /// The daemon answered for the staged `model` of `source`: `devices` is what
     /// it can be loaded onto here, `current` the device it already has. `source`
     /// is the backend selected when the question was asked, so an answer a
@@ -434,17 +467,35 @@ pub enum LanguageMessage {
     /// `model = None` → global Primary Language sheet.
     /// `model = Some((source, model))` → per-model sheet for that specific model.
     OpenLanguagePicker {
-        model: Option<(String, String)>,
+        /// `(stage, source, model)` for a per-model override, `None` for the
+        /// global setting. The stage is what resolves the bare model name.
+        model: Option<(u32, String, String)>,
     },
     CloseLanguagePicker,
     LanguagePickerQueryChanged(String),
     /// Global Primary Language loaded from the daemon (None = unset).
     PrimaryLanguageLoaded(Option<String>),
+    /// The tags the global setting accepts, from `GET /settings/language/list`.
+    PrimaryLanguagesLoaded(Vec<String>),
     /// User picked a global language (None = clear → DELETE).
     PrimaryLanguageSelected(Option<String>),
-    /// Per-model resolution block (`/backends/{source}/models/{model}/language`)
+    /// Per-model resolution block (`/pipeline/{stage}/model/{model}/language`)
     /// loaded from the daemon for `(source, model)`.
+    /// The languages a model can be pinned to, from
+    /// `GET /pipeline/{stage}/model/{model}/language/list`.
+    ///
+    /// Separate from the resolution block: the block changes with every pick,
+    /// the offer cannot change for a given model, so a pick does not re-fetch
+    /// a list that has not moved.
+    ModelLanguagesLoaded {
+        stage: u32,
+        source: String,
+        model: String,
+        languages: Vec<String>,
+    },
     ModelLanguageLoaded {
+        /// The stage the block was read through.
+        stage: u32,
         source: String,
         model: String,
         block: crate::state::LanguageResolution,
@@ -454,6 +505,9 @@ pub enum LanguageMessage {
     /// `choice = Some("auto")` → Auto-detect;
     /// `choice = Some(tag)` → explicit BCP-47 tag.
     ModelLanguageSelected {
+        /// The stage the model is addressed through: it resolves the bare
+        /// model name against the backend filling it.
+        stage: u32,
         source: String,
         model: String,
         choice: Option<String>,

@@ -12,8 +12,8 @@ use utoipa_axum::routes;
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list))
-        .routes(routes!(get_one, set, delete_secret))
+        .routes(routes!(list_secrets))
+        .routes(routes!(get_secret, set_secret, delete_secret))
 }
 
 /// The secret to store.
@@ -60,7 +60,7 @@ struct SecretConfigured {
 
 #[utoipa::path(
     get,
-    path = "/backends/{source}/secrets/list",
+    path = "/backend/{backend_id}/secret/list",
     tag = "backends",
     summary = "List a backend's secrets",
     description = "\
@@ -71,8 +71,8 @@ keyring, and the only operations are write and clear.
 This is a separate scope from `settings` precisely because it is the credential \
 surface: a token granted `settings` cannot reach it.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
          example = "github.com%2Facme%2Fopenai"),
     ),
     security(("session_token" = ["secrets"])),
@@ -84,7 +84,7 @@ surface: a token granted `settings` cannot reach it.",
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response {
+async fn list_secrets(State(s): State<AppState>, Path(source): Path<String>) -> Response {
     let source = decode_source(&source);
     let Some(backend) = find_backend(&s, &source).await else {
         return json_error(StatusCode::NOT_FOUND, "unknown_backend");
@@ -109,14 +109,14 @@ async fn list(State(s): State<AppState>, Path(source): Path<String>) -> Response
 
 #[utoipa::path(
     get,
-    path = "/backends/{source}/secrets/{name}",
+    path = "/backend/{backend_id}/secret/{name}",
     tag = "backends",
     summary = "Check whether one secret is set",
     description = "\
 Reports existence only. There is no endpoint that returns a stored credential.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
          example = "github.com%2Facme%2Fopenai"),
         ("name" = String, Path, description = "The secret's name, as the backend's manifest declares it."),
     ),
@@ -129,7 +129,7 @@ Reports existence only. There is no endpoint that returns a stored credential.",
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn get_one(
+async fn get_secret(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
 ) -> Response {
@@ -152,7 +152,7 @@ async fn get_one(
 
 #[utoipa::path(
     post,
-    path = "/backends/{source}/secrets/{name}",
+    path = "/backend/{backend_id}/secret/{name}",
     tag = "backends",
     summary = "Store a secret",
     description = "\
@@ -162,8 +162,8 @@ only replaced or cleared.
 A loaded model does not pick up a new credential on its own — reload the stage with \
 `POST /pipeline/{stage}/model/reload`.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
          example = "github.com%2Facme%2Fopenai"),
         ("name" = String, Path, description = "The secret's name, as the backend's manifest declares it."),
     ),
@@ -179,7 +179,7 @@ A loaded model does not pick up a new credential on its own — reload the stage
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
-async fn set(
+async fn set_secret(
     State(s): State<AppState>,
     Path((source, name)): Path<(String, String)>,
     axum::Json(body): axum::Json<SecretBody>,
@@ -203,15 +203,15 @@ async fn set(
 
 #[utoipa::path(
     delete,
-    path = "/backends/{source}/secrets/{name}",
+    path = "/backend/{backend_id}/secret/{name}",
     tag = "backends",
     summary = "Clear a secret",
     description = "\
 Removes the stored credential from the keyring, returning the secret to unset. A \
 backend that requires it will refuse to load until one is stored again.",
     params(
-        ("source" = String, Path,
-         description = "The backend's `source`, percent-encoded — e.g. `github.com%2Facme%2Fopenai`.",
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",
          example = "github.com%2Facme%2Fopenai"),
         ("name" = String, Path, description = "The secret's name, as the backend's manifest declares it."),
     ),

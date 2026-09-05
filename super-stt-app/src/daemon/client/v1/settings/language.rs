@@ -50,3 +50,19 @@ pub async fn clear_primary_language() -> HttpResult<()> {
     })
     .await
 }
+
+/// The languages the global setting accepts
+/// (HTTP `GET /settings/language/list`).
+///
+/// The daemon's own vocabulary, not a list this client curates: which of `en`
+/// and `en-US` to send is a rule only the daemon's resolver knows.
+pub async fn list_primary_languages() -> HttpResult<Vec<String>> {
+    with_settings_token(|socket, token| async move {
+        let resp = require_success(
+            transport::settings_get(socket, &token, "/settings/language/list").await?,
+            "list_primary_languages",
+        )?;
+        Ok(resp.available_languages.unwrap_or_default())
+    })
+    .await
+}

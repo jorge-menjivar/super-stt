@@ -4,7 +4,7 @@ use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::http_client::transport;
 use super_stt_shared::registry::UpdateResponse;
 
-/// `POST /registry/backends/update` — update an installed backend to the
+/// `POST /registry/backend/update` — update an installed backend to the
 /// latest compatible release.
 pub async fn update(source: &str) -> HttpResult<UpdateResponse> {
     let source = source.to_string();
@@ -14,7 +14,7 @@ pub async fn update(source: &str) -> HttpResult<UpdateResponse> {
             transport::post_json::<UpdateResponse>(
                 socket,
                 &token,
-                "/registry/backends/update",
+                "/registry/backend/update",
                 &serde_json::json!({ "source": source }),
             )
             .await

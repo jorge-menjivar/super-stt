@@ -5,8 +5,8 @@
 
 use crate::daemon::client::{
     get_current_audio_theme, get_custom_models_dir, get_notification_method, get_preview_typing,
-    get_recording_stop_mode, get_stage, get_update_check_enabled, get_update_status, get_volume,
-    get_write_method, list_backends, ping_daemon,
+    get_recording_stop_mode, get_stage_view, get_update_check_enabled, get_update_status,
+    get_volume, get_write_method, list_backends, ping_daemon,
 };
 use crate::state::AudioTheme;
 use crate::state::device_offers::PP_STAGE;
@@ -32,8 +32,8 @@ pub(in crate::core::app) fn ping_task() -> Task<cosmic::Action<Message>> {
 
 /// Reload both backend catalogs: the installed list and the annotated registry.
 ///
-/// They carry different halves of one picture — `/backends` names what is
-/// installed (and its version), `/registry/backends` annotates each entry with
+/// They carry different halves of one picture — `/backend/list` names what is
+/// installed (and its version), `/registry/backend/list` annotates each entry with
 /// the `installed_version` it reads off disk per request — and every question a
 /// card asks needs both. Refreshed apart, a card can report a version from one
 /// and an update from the other and have them disagree.
@@ -48,12 +48,18 @@ pub(in crate::core::app) fn reload_backend_catalogs() -> Task<cosmic::Action<Mes
 /// Reload the installed-backend catalog and map the result to `BackendsLoaded`
 /// / `BackendsError`.
 pub(in crate::core::app) fn reload_backends() -> Task<cosmic::Action<Message>> {
-    Task::perform(list_backends(), |result| {
-        cosmic::Action::App(match result {
-            Ok(backends) => Message::Backend(BackendMessage::BackendsLoaded(backends)),
-            Err(e) => Message::Backend(BackendMessage::BackendsError(e.to_string())),
-        })
-    })
+    Task::batch([
+        Task::perform(list_backends(), |result| {
+            cosmic::Action::App(match result {
+                Ok(backends) => Message::Backend(BackendMessage::BackendsLoaded(backends)),
+                Err(e) => Message::Backend(BackendMessage::BackendsError(e.to_string())),
+            })
+        }),
+        // Which of them can fill each stage is the daemon's answer, not a
+        // filter of the catalog above — and it changes for exactly the same
+        // reasons, so it is re-asked here rather than anywhere else.
+        crate::core::app::AppModel::load_stage_backends(),
+    ])
 }
 
 /// Fetch the full annotated registry catalog (optionally refreshing the index
@@ -185,7 +191,7 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
 /// section at its default (off, nothing selected) rather than failing the whole
 /// settings load, like every other getter in the batch.
 pub(in crate::core::app) fn load_post_processor() -> Task<cosmic::Action<Message>> {
-    Task::perform(get_stage(PP_STAGE), |result| match result {
+    Task::perform(get_stage_view(PP_STAGE), |result| match result {
         Ok(state) => {
             cosmic::Action::App(Message::PostProcessor(PostProcessorMessage::Loaded(state)))
         }
