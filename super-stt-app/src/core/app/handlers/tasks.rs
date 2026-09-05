@@ -48,12 +48,18 @@ pub(in crate::core::app) fn reload_backend_catalogs() -> Task<cosmic::Action<Mes
 /// Reload the installed-backend catalog and map the result to `BackendsLoaded`
 /// / `BackendsError`.
 pub(in crate::core::app) fn reload_backends() -> Task<cosmic::Action<Message>> {
-    Task::perform(list_backends(), |result| {
-        cosmic::Action::App(match result {
-            Ok(backends) => Message::Backend(BackendMessage::BackendsLoaded(backends)),
-            Err(e) => Message::Backend(BackendMessage::BackendsError(e.to_string())),
-        })
-    })
+    Task::batch([
+        Task::perform(list_backends(), |result| {
+            cosmic::Action::App(match result {
+                Ok(backends) => Message::Backend(BackendMessage::BackendsLoaded(backends)),
+                Err(e) => Message::Backend(BackendMessage::BackendsError(e.to_string())),
+            })
+        }),
+        // Which of them can fill each stage is the daemon's answer, not a
+        // filter of the catalog above — and it changes for exactly the same
+        // reasons, so it is re-asked here rather than anywhere else.
+        crate::core::app::AppModel::load_stage_backends(),
+    ])
 }
 
 /// Fetch the full annotated registry catalog (optionally refreshing the index

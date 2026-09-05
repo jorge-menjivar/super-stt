@@ -37,14 +37,19 @@ impl SuperSTTDaemon {
     /// on its own can offer a backend the daemon then refuses, which is a
     /// picker that hands the user an error.
     pub async fn handle_list_stage_backends(&self, post_processor: bool) -> DaemonResponse {
+        let role = ModelRole::PostProcessor.to_string();
         let catalog: Vec<BackendInfo> = self
             .backend_catalog()
             .await
             .into_iter()
-            .filter(|b| {
-                b.models
-                    .iter()
-                    .any(|m| (m.role == ModelRole::PostProcessor.to_string()) == post_processor)
+            .filter_map(|mut b| {
+                // Each backend's models are narrowed to this stage's role too,
+                // not just the list of backends. The whole answer is about one
+                // position, so a caller can render a row straight from it — and
+                // a backend serving both roles must not show stage 1 the
+                // post-processor it also ships.
+                b.models.retain(|m| (m.role == role) == post_processor);
+                (!b.models.is_empty()).then_some(b)
             })
             .collect();
         let stage = if post_processor { 2 } else { 1 };

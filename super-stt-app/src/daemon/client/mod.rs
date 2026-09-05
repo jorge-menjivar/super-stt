@@ -19,6 +19,7 @@ pub use v1::gpu_info::get_gpu_info;
 pub use v1::ping::{ping_daemon, test_daemon_connection};
 pub use v1::transcribe::{RecordEvent, record_command_stream, stop_record_command};
 
+pub use v1::pipeline::backend::list_stage_backends;
 pub use v1::pipeline::device::{
     get_model_device, list_model_devices, list_stage_devices, set_model_device,
 };

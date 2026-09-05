@@ -130,6 +130,10 @@ pub struct AppModel {
     /// from the catalog, so the app and the daemon cannot disagree about what
     /// this install can run.
     pub device_offers: crate::state::device_offers::DeviceOffers,
+    /// What the daemon says each stage can be filled with — its eligible
+    /// backends and their models for that stage. Read rather than derived from
+    /// the catalog, so a picker cannot offer what the daemon would refuse.
+    pub stage_catalog: crate::state::stage_catalog::StageCatalog,
 
     // Recording stop mode
     pub recording_stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,

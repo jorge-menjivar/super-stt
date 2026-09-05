@@ -145,7 +145,7 @@ pub(super) fn active_backend_card<'a>(
     // Count what this stage can run, not everything the backend ships — a
     // backend serving two transcription models and a post-processor offers two
     // here, and the Library card is where the full inventory belongs.
-    let model_count = super::roles::models_for(backend, false).len();
+    let model_count = app.stage_catalog.models(STT_STAGE, &backend.source).len();
     if model_count > 0 {
         let label = if model_count == 1 {
             "1 model".to_string()
@@ -343,7 +343,7 @@ pub(super) fn staged_model_picker<'a>(
     // Model dropdown — staged picks live in `app.models_page.staged_model`, not
     // loaded. Scoped to this stage's role: a post-processor here would be a
     // pick the daemon then refuses.
-    let model_names: Vec<String> = super::roles::models_for(backend, false);
+    let model_names: Vec<String> = app.stage_catalog.models(STT_STAGE, &backend.source);
     let staged_model = app
         .models_page
         .active_backend

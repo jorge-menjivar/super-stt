@@ -28,10 +28,10 @@ use cosmic::prelude::*;
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
 use crate::daemon::client::{
-    clear_stage_backend, get_model_device, list_model_devices, list_stage_devices,
-    set_model_device, set_stage_backend, set_stage_model, unload_stage_model,
+    clear_stage_backend, get_model_device, list_model_devices, list_stage_backends,
+    list_stage_devices, set_model_device, set_stage_backend, set_stage_model, unload_stage_model,
 };
-use crate::state::device_offers::{STT_STAGE, staged_device};
+use crate::state::device_offers::{PP_STAGE, STT_STAGE, staged_device};
 use crate::ui::messages::{Message, ModelMessage, PostProcessorMessage, StageMessage};
 
 impl AppModel {
@@ -96,6 +96,39 @@ impl AppModel {
                 self.report_stage_error(stage, &message);
                 Task::none()
             }
+            answer @ (StageMessage::StageBackendsLoaded { .. }
+            | StageMessage::StagedDevicesLoaded { .. }
+            | StageMessage::BackendDevicesLoaded { .. }) => self.handle_stage_answers(answer),
+            StageMessage::Load { stage } => self.load_staged(stage),
+            StageMessage::LoadFailed {
+                stage,
+                prev_device,
+                message,
+            } => {
+                // Roll the device back rather than leaving the card on one the
+                // daemon never adopted.
+                if stage == STT_STAGE {
+                    self.current_device = prev_device;
+                }
+                self.set_stage_error(stage, &message);
+                Task::none()
+            }
+            StageMessage::Unload { stage } => self.unload_stage(stage),
+        }
+    }
+
+    /// The arms that only record what the daemon answered.
+    ///
+    /// Split from the dispatch above because they are all the same shape — a
+    /// list arrives, it is filed under the stage and source it describes — and
+    /// together they were half the length of a handler whose other half decides
+    /// things.
+    fn handle_stage_answers(&mut self, message: StageMessage) -> Task<cosmic::Action<Message>> {
+        match message {
+            StageMessage::StageBackendsLoaded { stage, backends } => {
+                self.stage_catalog.record(stage, backends);
+                Task::none()
+            }
             StageMessage::StagedDevicesLoaded {
                 stage,
                 source,
@@ -138,21 +171,7 @@ impl AppModel {
                 }
                 Task::none()
             }
-            StageMessage::Load { stage } => self.load_staged(stage),
-            StageMessage::LoadFailed {
-                stage,
-                prev_device,
-                message,
-            } => {
-                // Roll the device back rather than leaving the card on one the
-                // daemon never adopted.
-                if stage == STT_STAGE {
-                    self.current_device = prev_device;
-                }
-                self.set_stage_error(stage, &message);
-                Task::none()
-            }
-            StageMessage::Unload { stage } => self.unload_stage(stage),
+            other => unreachable!("handle_stage_answers received {other:?}"),
         }
     }
 
@@ -579,6 +598,27 @@ impl AppModel {
                 }
             },
         )
+    }
+
+    /// Ask the daemon which backends can fill each stage.
+    ///
+    /// Both positions at once: the answer depends only on what is installed, so
+    /// it is re-asked when the catalog changes rather than when a card opens.
+    pub(in crate::core::app) fn load_stage_backends() -> Task<cosmic::Action<Message>> {
+        Task::batch([STT_STAGE, PP_STAGE].map(|stage| {
+            Task::perform(list_stage_backends(stage), move |result| match result {
+                Ok(backends) => {
+                    cosmic::Action::App(Message::Stage(StageMessage::StageBackendsLoaded {
+                        stage,
+                        backends,
+                    }))
+                }
+                Err(e) => {
+                    log::warn!("Could not read stage {stage}'s backends: {e}");
+                    cosmic::Action::None
+                }
+            })
+        }))
     }
 
     /// Ask the daemon which devices `stage`'s backend can run its models on.

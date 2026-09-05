@@ -303,6 +303,16 @@ pub enum StageMessage {
         prev_device: Option<String>,
         message: String,
     },
+    /// The daemon answered what can fill `stage`: the backends, each already
+    /// narrowed to the models this stage can run.
+    ///
+    /// Re-asked whenever the installed catalog changes, since installing or
+    /// uninstalling a backend changes the answer — and never on selection,
+    /// because the answer does not depend on what is selected.
+    StageBackendsLoaded {
+        stage: u32,
+        backends: Vec<BackendInfo>,
+    },
     /// The daemon answered for the staged `model` of `source`: `devices` is what
     /// it can be loaded onto here, `current` the device it already has. `source`
     /// is the backend selected when the question was asked, so an answer a

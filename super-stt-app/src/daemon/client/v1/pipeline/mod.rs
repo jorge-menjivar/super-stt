@@ -2,8 +2,9 @@
 //! `/pipeline` — the ordered stages a transcript passes through.
 //!
 //! Mirrors the daemon's `v1/pipeline/` tree: [`stage`] wraps `/pipeline/{stage}`,
-//! [`model`] wraps `/pipeline/{stage}/model` and its verbs, [`device`] and
-//! [`language`] wrap the two per-model preferences.
+//! [`backend`] the menu that fills it, [`model`] wraps
+//! `/pipeline/{stage}/model` and its verbs, [`device`] and [`language`] wrap the
+//! two per-model preferences.
 //!
 //! [`StageState`] sits here, above them, because it is the one thing that
 //! belongs to no single path: a card draws a stage's backend and its model
@@ -12,6 +13,7 @@
 //! a model that has a runtime — and joining them in the client is cheaper than
 //! the drift that came of joining them on the wire.
 
+pub(crate) mod backend;
 pub(crate) mod device;
 pub(crate) mod language;
 pub(crate) mod model;

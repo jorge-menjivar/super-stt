@@ -131,6 +131,7 @@ impl AppModel {
             post_processor: crate::daemon::client::StageState::default(),
             staged_picks: crate::state::staged_picks::StagedPicks::default(),
             device_offers: crate::state::device_offers::DeviceOffers::default(),
+            stage_catalog: crate::state::stage_catalog::StageCatalog::default(),
             recording_stop_mode:
                 super_stt_shared::models::recording_stop_mode::RecordingStopMode::default(),
             write_method: super_stt_shared::models::write_method::WriteMethod::default(),

@@ -38,18 +38,19 @@ use super::surface::{
     repo_button,
 };
 
-/// The installed backends that serve at least one post-processor, in catalog
-/// order.
+/// The backends that can fill stage 2, each already narrowed to the
+/// post-processors it serves — the daemon's answer, from
+/// `GET /pipeline/2/backend/list`.
 ///
-/// This is what the "Select a post-processor" sheet lists — the post-processing
-/// twin of the Load-a-backend sheet's full backend list.
-pub(crate) fn post_processor_backends(backends: &[BackendInfo]) -> Vec<&BackendInfo> {
-    super::roles::backends_for(backends, true)
+/// `None` while the answer is in flight, which the sheet draws differently from
+/// an empty answer: one is loading, the other is "install one".
+pub(crate) fn post_processor_backends(app: &AppModel) -> Option<&[BackendInfo]> {
+    app.stage_catalog.backends(PP_STAGE)
 }
 
 /// The post-processor model names one backend serves, in manifest order.
-fn post_processor_models(backend: &BackendInfo) -> Vec<String> {
-    super::models_for_stage(backend, true)
+fn post_processor_models(app: &AppModel, backend: &BackendInfo) -> Vec<String> {
+    app.stage_catalog.models(PP_STAGE, &backend.source)
 }
 
 /// The backend the card is about: the one the daemon has selected.
@@ -67,7 +68,10 @@ fn selected_backend(app: &AppModel) -> Option<&BackendInfo> {
 pub(crate) fn section(app: &AppModel) -> Element<'_, Message> {
     // Nothing installed serves one: say so, rather than offering a picker that
     // opens an empty sheet.
-    if post_processor_backends(&app.backends).is_empty() {
+    // Only once the daemon has answered: while the question is in flight the
+    // section falls through to its normal prompt rather than flashing "install
+    // one" and then replacing it.
+    if post_processor_backends(app).is_some_and(<[BackendInfo]>::is_empty) {
         return prompt_row(
             "Install a post-processor from the Library to clean up text before \
              is is typed and remove filler words.",
@@ -168,7 +172,7 @@ fn chip_row<'a>(backend: &'a BackendInfo, app: &AppModel) -> Option<Element<'a, 
         backend,
     );
     let caps = capability_chips(compute.gpu, compute.cpu, egress, true);
-    let count = post_processor_models(backend).len();
+    let count = post_processor_models(app, backend).len();
     if caps.is_none() && count == 0 {
         return None;
     }
@@ -255,7 +259,7 @@ fn control_row<'a>(app: &'a AppModel, backend: &'a BackendInfo) -> Element<'a, M
             .into();
     }
 
-    let models = post_processor_models(backend);
+    let models = post_processor_models(app, backend);
     let shown = shown_model(
         app.staged_picks.for_backend(PP_STAGE, &backend.source),
         app.post_processor.model.as_deref(),
@@ -383,7 +387,8 @@ pub fn post_processor_sheet(app: &AppModel) -> Element<'_, Message> {
     let muted = muted_text_color();
     let selected = app.post_processor.source.as_deref();
 
-    let eligible = post_processor_backends(&app.backends);
+    let answered = post_processor_backends(app);
+    let eligible: &[BackendInfo] = answered.unwrap_or_default();
     let mut col = widget::column::with_capacity(eligible.len() + 1)
         .spacing(spacing.space_xs)
         .width(Length::Fill)
@@ -397,10 +402,12 @@ pub fn post_processor_sheet(app: &AppModel) -> Element<'_, Message> {
 
     if eligible.is_empty() {
         return col
-            .push(text::body(
+            .push(text::body(if answered.is_none() {
+                "Loading…"
+            } else {
                 "No installed backend provides a post-processor. Open the Library to \
-                 install one.",
-            ))
+                 install one."
+            }))
             .into();
     }
 
@@ -419,7 +426,9 @@ fn sheet_row(backend: &BackendInfo, is_selected: bool) -> Element<'static, Messa
     let spacing = cosmic::theme::spacing();
     let muted = muted_text_color();
 
-    let models = post_processor_models(backend);
+    // Already narrowed: the stage's backend list carries only the models that
+    // stage can run, so the row shows them without filtering anything.
+    let models: Vec<String> = backend.models.iter().map(|m| m.name.clone()).collect();
     let mut meta = widget::column::with_capacity(2)
         .spacing(spacing.space_xxxs)
         .width(Length::Fill)
@@ -468,63 +477,13 @@ fn sheet_row(backend: &BackendInfo, is_selected: bool) -> Element<'static, Messa
 
 #[cfg(test)]
 mod tests {
+    //! Which backends and models a stage may offer is no longer decided here —
+    //! it is `GET /pipeline/2/backend/list`, and the daemon's own tests
+    //! (`each_stage_lists_only_the_backends_that_can_fill_it`,
+    //! `each_stage_lists_only_the_models_carrying_its_role`) cover the rule,
+    //! including manifest order. What is left here is what this file still
+    //! decides.
     use super::*;
-    use crate::daemon::backends::BackendModel;
-
-    fn model(name: &str, role: &str) -> BackendModel {
-        BackendModel {
-            name: name.into(),
-            provider: String::new(),
-            supported_devices: vec!["cpu".into()],
-            estimated_vram_bytes: 0,
-            multilingual: false,
-            supported_languages: Vec::new(),
-            primary_language: "en".into(),
-            realtime: false,
-            role: role.into(),
-        }
-    }
-
-    fn backend(source: &str, name: &str, models: Vec<BackendModel>) -> BackendInfo {
-        BackendInfo {
-            source: source.into(),
-            description: String::new(),
-            name: name.into(),
-            version: "1.0.0".into(),
-            kind: "wasm".into(),
-            allowed_hosts: Vec::new(),
-            installed_accel: Vec::new(),
-            models,
-            secrets: Vec::new(),
-            options: Vec::new(),
-        }
-    }
-
-    /// The picker sheet offers only backends that actually serve a
-    /// post-processor. Listing one that does not would select a backend whose
-    /// model dropdown is then empty, with nothing saying why.
-    #[test]
-    fn only_backends_serving_a_post_processor_are_offered() {
-        let backends = vec![
-            backend(
-                "github.com/x/stt-only",
-                "STT Only",
-                vec![model("whisper", "transcription")],
-            ),
-            backend(
-                "github.com/x/combo",
-                "Combo",
-                vec![
-                    model("whisper", "transcription"),
-                    model("clean", "post_processor"),
-                ],
-            ),
-        ];
-
-        let offered = post_processor_backends(&backends);
-        let names: Vec<&str> = offered.iter().map(|b| b.name.as_str()).collect();
-        assert_eq!(names, vec!["Combo"]);
-    }
 
     fn pick(model: &str) -> crate::state::staged_picks::StagedPick {
         crate::state::staged_picks::StagedPick {
@@ -561,49 +520,5 @@ mod tests {
     #[test]
     fn nothing_is_shown_without_a_pick_or_a_selection() {
         assert_eq!(shown_model(None, None), None);
-    }
-
-    /// A catalog with no post-processor anywhere offers nothing, and the card
-    /// falls back to its "none installed" state.
-    #[test]
-    fn a_catalog_without_post_processors_offers_no_backend() {
-        let backends = vec![backend(
-            "github.com/x/a",
-            "A",
-            vec![model("whisper", "transcription")],
-        )];
-        assert!(post_processor_backends(&backends).is_empty());
-    }
-
-    /// The card's dropdown is scoped to the selected backend and lists only its
-    /// post-processors — a transcription model here would let the user pick one
-    /// the daemon then refuses.
-    #[test]
-    fn a_backends_models_are_its_post_processors_only() {
-        let b = backend(
-            "github.com/x/combo",
-            "Combo",
-            vec![
-                model("whisper", "transcription"),
-                model("clean-a", "post_processor"),
-                model("clean-b", "post_processor"),
-            ],
-        );
-        assert_eq!(post_processor_models(&b), vec!["clean-a", "clean-b"]);
-    }
-
-    /// Manifest order is preserved, because the dropdown selection is an index
-    /// into this list and a reordering would move the user's pick.
-    #[test]
-    fn model_order_follows_the_manifest() {
-        let b = backend(
-            "github.com/x/a",
-            "A",
-            vec![
-                model("zeta", "post_processor"),
-                model("alpha", "post_processor"),
-            ],
-        );
-        assert_eq!(post_processor_models(&b), vec!["zeta", "alpha"]);
     }
 }

@@ -181,6 +181,7 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
 /// schema.
 const RESPONSE_KEYS: &[(&str, &str, &[&str])] = &[
     ("/v1/pipeline/{stage}", "get", &["stage"]),
+    ("/v1/pipeline/{stage}/backend/list", "get", &["backends"]),
     ("/v1/pipeline/{stage}/model", "get", &["model"]),
     (
         "/v1/pipeline/{stage}/model/{model}/device",
@@ -206,11 +207,6 @@ const RESPONSE_KEYS: &[(&str, &str, &[&str])] = &[
         "/v1/settings/language/list",
         "get",
         &["available_languages"],
-    ),
-    (
-        "/v1/pipeline/{stage}/model/list",
-        "get",
-        &["available_models"],
     ),
     ("/v1/pipeline", "get", &["pipeline"]),
     ("/v1/backend/list", "get", &["backends"]),
