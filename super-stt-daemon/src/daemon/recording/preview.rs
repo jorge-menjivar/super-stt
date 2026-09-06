@@ -6,7 +6,44 @@ use crate::output::typer::Typer;
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::time::Instant;
+
+/// The shortest preview window: enough context for a batch model to transcribe
+/// a fragment well, and what every window was before it followed the pass
+/// cadence.
+const MIN_PREVIEW_WINDOW: Duration = Duration::from_secs(5);
+
+/// The longest preview window. A model slower than its own interval widens the
+/// window to keep the overlap (see [`preview_window`]), and each wider window
+/// takes longer still; this is where that stops.
+const MAX_PREVIEW_WINDOW: Duration = Duration::from_secs(15);
+
+/// Audio shared between consecutive windows. The typer stitches previews by
+/// finding the tail of what it has in the next window
+/// (`find_tail_match_in_text`), which needs the two windows to have heard some
+/// of the same speech. Without overlap the match can only succeed by
+/// coincidence, the typer falls back to keeping the longer text, and the typed
+/// preview stalls after the first window.
+const PREVIEW_OVERLAP: Duration = Duration::from_secs(3);
+
+/// How much recent capture a preview pass transcribes: everything since the
+/// previous pass began plus [`PREVIEW_OVERLAP`], clamped to
+/// [`MIN_PREVIEW_WINDOW`]..=[`MAX_PREVIEW_WINDOW`] and rounded down to whole
+/// seconds.
+///
+/// Sized from the measured gap rather than the model's declared interval
+/// because the gap is what actually separates two windows: a model whose pass
+/// takes longer than its interval spaces its windows by the pass, and a window
+/// sized to the interval would leave them adjacent with no shared audio — which
+/// is exactly what a fixed 5-second window did for whisper-large's 5-second
+/// interval.
+fn preview_window(since_last_pass: Duration) -> Duration {
+    let secs = (since_last_pass + PREVIEW_OVERLAP)
+        .clamp(MIN_PREVIEW_WINDOW, MAX_PREVIEW_WINDOW)
+        .as_secs();
+    Duration::from_secs(secs)
+}
 
 impl SuperSTTDaemon {
     /// Phase 1: create the stop broadcast channel, set up the recorder, and
@@ -158,7 +195,8 @@ impl SuperSTTDaemon {
             }
 
             // Throttle the actual preview transcription to the model's interval.
-            if last_preview.elapsed() < session.model_processing_interval {
+            let since_last_pass = last_preview.elapsed();
+            if since_last_pass < session.model_processing_interval {
                 continue;
             }
             last_preview = Instant::now();
@@ -177,7 +215,8 @@ impl SuperSTTDaemon {
                 continue;
             }
 
-            let audio_data = Self::read_preview_audio_from_buffer(session);
+            let audio_data =
+                Self::read_preview_audio_from_buffer(session, preview_window(since_last_pass));
             debug!("Got {} audio samples for preview", audio_data.len());
             if audio_data.is_empty() {
                 debug!("No audio data available for preview yet");
@@ -197,12 +236,14 @@ impl SuperSTTDaemon {
         }
     }
 
-    /// Extract up to 5 seconds of recent audio from the shared ring-buffer,
+    /// Extract the most recent `window` of audio from the shared ring-buffer,
     /// discarding silence. Returns an empty vec when there is nothing to
     /// transcribe yet.
-    fn read_preview_audio_from_buffer(session: &RecordingSession) -> Vec<f32> {
-        // Get last 5 seconds of audio data directly from buffer for preview
-        debug!("About to get 10 secs from buffer");
+    fn read_preview_audio_from_buffer(session: &RecordingSession, window: Duration) -> Vec<f32> {
+        debug!(
+            "Reading the last {}s from the capture buffer",
+            window.as_secs()
+        );
         let buffer_guard = session.preview_buffer.lock();
 
         let total_samples = buffer_guard.len();
@@ -211,10 +252,12 @@ impl SuperSTTDaemon {
             return Vec::new();
         }
 
-        // For preview, get the most recent audio (last 3-5 seconds is usually enough)
-        // Using 5 seconds at the actual device sample rate
-        let samples_for_preview =
-            std::cmp::min(total_samples, session.device_sample_rate as usize * 5);
+        // The window is whole seconds at the device's own rate; resampling to
+        // the model's rate happens after the read.
+        let window_samples =
+            usize::try_from(u64::from(session.device_sample_rate) * window.as_secs())
+                .unwrap_or(usize::MAX);
+        let samples_for_preview = total_samples.min(window_samples);
         let start_idx = total_samples - samples_for_preview;
 
         let samples: Vec<f32> = buffer_guard.range(start_idx..).copied().collect();
@@ -257,8 +300,8 @@ impl SuperSTTDaemon {
         } else {
             let device_rate = session.device_sample_rate;
             debug!("Resampling from {device_rate}Hz to 16kHz for preview");
-            // Resampling is synchronous CPU work over up to ~5s of capture each
-            // tick (and the whole recording on the final drain); run it on a
+            // Resampling is synchronous CPU work over a preview window of
+            // capture each tick (and the whole recording on the final drain); run it on a
             // blocking thread rather than parking the request's async worker
             // (audit 2 Tier 3 #2).
             let input_len = audio_data.len();
@@ -447,5 +490,46 @@ impl SuperSTTDaemon {
             .await;
 
         Ok(full_audio_data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_PREVIEW_WINDOW, MIN_PREVIEW_WINDOW, PREVIEW_OVERLAP, preview_window};
+    use std::time::Duration;
+
+    /// Fast models keep the window they always had: the minimum is wider than
+    /// their gap plus the overlap.
+    #[test]
+    fn a_short_gap_gets_the_minimum_window() {
+        assert_eq!(preview_window(Duration::from_secs(1)), MIN_PREVIEW_WINDOW);
+        assert_eq!(preview_window(Duration::from_secs(2)), MIN_PREVIEW_WINDOW);
+    }
+
+    /// The regression: a 5-second gap used to get a 5-second window, so
+    /// consecutive windows shared nothing. Now the window covers the gap and
+    /// the overlap.
+    #[test]
+    fn a_gap_as_long_as_the_old_window_still_overlaps() {
+        assert_eq!(
+            preview_window(Duration::from_secs(5)),
+            Duration::from_secs(5) + PREVIEW_OVERLAP
+        );
+    }
+
+    /// A slow pass widens the next window to keep the overlap, rounded down
+    /// to whole seconds.
+    #[test]
+    fn a_slow_pass_widens_the_window() {
+        assert_eq!(
+            preview_window(Duration::from_millis(7_500)),
+            Duration::from_secs(10)
+        );
+    }
+
+    /// Widening cannot run away: a model slower than the cap gets the cap.
+    #[test]
+    fn the_window_is_capped() {
+        assert_eq!(preview_window(Duration::from_secs(60)), MAX_PREVIEW_WINDOW);
     }
 }
