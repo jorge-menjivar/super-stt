@@ -26,6 +26,7 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde::Serialize;
+use super_stt_shared::models::protocol::PreviewSource;
 use tokio::sync::broadcast;
 
 /// Ring-buffer depth for each topic. These bound the *replay window* —
@@ -85,6 +86,10 @@ pub struct FrequencyBandsEvent {
 pub struct SttEvent {
     pub text: String,
     pub confidence: f32,
+    /// What a `partial_stt` text spans — set on every partial, absent on a
+    /// final, which is neither kind of preview.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<PreviewSource>,
 }
 
 /// `daemon_status_changed` carries a heterogeneous payload: the `status`
@@ -297,12 +302,20 @@ impl EventBus {
         });
     }
 
-    pub fn publish_partial_stt(&self, text: String, confidence: f32) {
-        let _ = self.partial_stt.send(SttEvent { text, confidence });
+    pub fn publish_partial_stt(&self, text: String, confidence: f32, source: PreviewSource) {
+        let _ = self.partial_stt.send(SttEvent {
+            text,
+            confidence,
+            source: Some(source),
+        });
     }
 
     pub fn publish_final_stt(&self, text: String, confidence: f32) {
-        let _ = self.final_stt.send(SttEvent { text, confidence });
+        let _ = self.final_stt.send(SttEvent {
+            text,
+            confidence,
+            source: None,
+        });
     }
 
     /// Publish a `daemon_status_changed` event. Payload is whatever the
@@ -529,7 +542,29 @@ mod tests {
     async fn publish_with_no_subscribers_is_silent() {
         let bus = EventBus::new();
         // No subscriber for partial_stt — call must not panic / propagate.
-        bus.publish_partial_stt("hello".into(), 0.9);
+        bus.publish_partial_stt("hello".into(), 0.9, PreviewSource::Window);
+    }
+
+    /// `source` is what tells a client whether a preview replaces the last one
+    /// or extends it, so a partial carries it on the wire — and a final does
+    /// not, since a final is neither.
+    #[test]
+    fn a_partial_carries_its_source_and_a_final_omits_it() {
+        let partial = serde_json::to_value(SttEvent {
+            text: "hi".into(),
+            confidence: 1.0,
+            source: Some(PreviewSource::Window),
+        })
+        .expect("serializes");
+        assert_eq!(partial["source"], "window");
+
+        let final_ = serde_json::to_value(SttEvent {
+            text: "hi".into(),
+            confidence: 1.0,
+            source: None,
+        })
+        .expect("serializes");
+        assert!(final_.get("source").is_none(), "got {final_}");
     }
 
     #[test]

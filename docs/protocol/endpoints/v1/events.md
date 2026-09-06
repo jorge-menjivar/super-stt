@@ -111,7 +111,7 @@ broadcasts only those.
 
 | Topic         | Scope                   | Payload                                              |
 |---------------|-------------------------|------------------------------------------------------|
-| `partial_stt` | `global_transcriptions` | `{ "text", "confidence" }` — live preview text       |
+| `partial_stt` | `global_transcriptions` | `{ "text", "confidence", "source" }` — live preview text. `source` is `"stream"` (a realtime model's running transcript: `text` is everything heard so far and extends the last event) or `"window"` (a sliding window the daemon re-transcribed: `text` is only the last few seconds and replaces the last event); see [previews](./transcribe.md#previews). Absent from a daemon older than the field. |
 | `final_stt`   | `global_transcriptions` | `{ "text", "confidence" }` — final transcription     |
 
 These carry the transcription text of every app, not just the subscriber's own —

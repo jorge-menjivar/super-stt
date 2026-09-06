@@ -4,6 +4,7 @@ use cosmic::iced::widget::row;
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, settings, text};
 use super_stt_shared::models::notification_method::NotificationMethod;
+use super_stt_shared::models::protocol::PreviewSource;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 
 use super::common::{error_banner, page_layout};
@@ -103,12 +104,24 @@ fn live_tail(text: &str, max_chars: usize) -> String {
     format!("\u{2026}{tail}")
 }
 
+/// What the Live line's caption says the text is, for each kind of preview.
+///
+/// A window preview restarts every few seconds, which looks like text being
+/// lost unless the line says it only ever shows the last few seconds.
+fn live_caption(source: PreviewSource) -> &'static str {
+    match source {
+        PreviewSource::Stream => "so far",
+        PreviewSource::Window => "last few seconds",
+    }
+}
+
 /// Test recording section: record button, audio level, live preview line,
 /// transcription output
 fn test_section<'a>(
     recording_status: &'a RecordingStatus,
     transcription_text: &'a str,
     preview_text: &'a str,
+    preview_source: Option<PreviewSource>,
     audio_level: f32,
     is_speech_detected: bool,
 ) -> Element<'a, Message> {
@@ -139,21 +152,26 @@ fn test_section<'a>(
     .spacing(10);
 
     // One line that keeps changing: the newest incremental text, held to a
-    // single row so the section doesn't reflow on every update. Previews grow
-    // word by word, so the tail is the part worth showing.
+    // single row so the section doesn't reflow on every update. The tail is
+    // the part worth showing either way, but what the text *is* depends on
+    // the model — a stream preview is the whole take so far, a window preview
+    // only the last few seconds — so the daemon's `source` becomes a caption.
     let live_widget = {
         let content = if preview_text.is_empty() {
             "\u{2014}".to_string()
         } else {
             live_tail(preview_text, LIVE_LINE_CHARS)
         };
-        widget::container(
+        let mut line = row![].spacing(8).align_y(Alignment::Center);
+        if let Some(caption) = preview_source.map(live_caption) {
+            line = line.push(text::caption(caption));
+        }
+        line = line.push(
             text::body(content)
                 .wrapping(cosmic::iced::widget::text::Wrapping::None)
                 .width(Length::Fill),
-        )
-        .width(Length::Fill)
-        .clip(true)
+        );
+        widget::container(line).width(Length::Fill).clip(true)
     };
 
     // The transcript has no label, so it goes into the section as a plain list
@@ -191,6 +209,7 @@ pub fn page<'a>(
     recording_status: &'a RecordingStatus,
     transcription_text: &'a str,
     preview_text: &'a str,
+    preview_source: Option<PreviewSource>,
     audio_level: f32,
     is_speech_detected: bool,
     action_error: Option<&'a str>,
@@ -208,6 +227,7 @@ pub fn page<'a>(
         recording_status,
         transcription_text,
         preview_text,
+        preview_source,
         audio_level,
         is_speech_detected,
     ));

@@ -98,6 +98,7 @@ pub(crate) use wire_enum_strings;
 #[cfg(test)]
 mod tests {
     use crate::models::notification_method::NotificationMethod;
+    use crate::models::protocol::PreviewSource;
     use crate::models::recording_stop_mode::RecordingStopMode;
     use crate::models::theme::AudioTheme;
     use crate::models::update_beta_optin::UpdateBetaOptIn;
@@ -160,6 +161,7 @@ mod tests {
         assert_wire_forms_agree!(WriteMethod);
         assert_wire_forms_agree!(NotificationMethod);
         assert_wire_forms_agree!(UpdateBetaOptIn);
+        assert_wire_forms_agree!(PreviewSource);
     }
 
     /// An unrecognized token is refused rather than silently defaulted, so a
@@ -219,5 +221,6 @@ mod tests {
         assert_schema_matches_table!(WriteMethod);
         assert_schema_matches_table!(NotificationMethod);
         assert_schema_matches_table!(UpdateBetaOptIn);
+        assert_schema_matches_table!(PreviewSource);
     }
 }

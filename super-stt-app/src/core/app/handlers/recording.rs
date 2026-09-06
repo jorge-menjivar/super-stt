@@ -34,7 +34,7 @@ impl AppModel {
         match &message {
             RecordingMessage::StartRecording
             | RecordingMessage::StopRecording
-            | RecordingMessage::PreviewTextReceived(_)
+            | RecordingMessage::PreviewReceived { .. }
             | RecordingMessage::TranscriptionReceived(_) => self.handle_recording_control(message),
 
             RecordingMessage::AudioFeedbackToggled(_)
@@ -63,12 +63,16 @@ impl AppModel {
                 self.recording_status = RecordingStatus::Recording;
                 self.transcription_text.clear();
                 self.preview_text.clear();
+                self.preview_source = None;
 
                 let stream = record_command_stream();
                 cosmic::task::stream(stream.map(|event| match event {
-                    RecordEvent::Preview(text) => cosmic::Action::App(Message::Recording(
-                        RecordingMessage::PreviewTextReceived(text),
-                    )),
+                    RecordEvent::Preview { text, source } => {
+                        cosmic::Action::App(Message::Recording(RecordingMessage::PreviewReceived {
+                            text,
+                            source,
+                        }))
+                    }
                     RecordEvent::Final(Ok(text)) => cosmic::Action::App(Message::Recording(
                         RecordingMessage::TranscriptionReceived(text),
                     )),
@@ -85,10 +89,11 @@ impl AppModel {
                 cosmic::Action::None
             }),
 
-            RecordingMessage::PreviewTextReceived(text) => {
+            RecordingMessage::PreviewReceived { text, source } => {
                 // Previews land on their own line; the final result below is
                 // left alone until it actually arrives.
                 self.preview_text = text;
+                self.preview_source = source;
                 Task::none()
             }
 
@@ -100,6 +105,7 @@ impl AppModel {
                 self.transcription_text = text;
                 // The live line has been superseded by the final transcript.
                 self.preview_text.clear();
+                self.preview_source = None;
                 self.recording_status = RecordingStatus::Idle;
                 self.audio_level = 0.0;
                 Task::none()

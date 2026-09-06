@@ -8,14 +8,18 @@ use crate::daemon::client::internal::session::{
 use super_stt_shared::daemon::http_client;
 use super_stt_shared::daemon::http_client::HttpResult;
 use super_stt_shared::daemon::session;
+use super_stt_shared::models::protocol::PreviewSource;
 use super_stt_shared::validation::get_http_socket_path;
 
 /// Result type for streaming record responses.
 pub enum RecordEvent {
-    /// Intermediate preview text during recording. Snapshot semantics:
-    /// the text replaces (not appends to) any previously-displayed
-    /// preview.
-    Preview(String),
+    /// Intermediate preview text during recording. The text replaces (not
+    /// appends to) any previously-displayed preview; `source` says what it
+    /// spans — everything heard so far, or only the last few seconds.
+    Preview {
+        text: String,
+        source: Option<PreviewSource>,
+    },
     /// Final transcription result.
     Final(Result<String, String>),
 }
@@ -83,8 +87,8 @@ pub fn record_command_stream() -> impl futures_util::Stream<Item = RecordEvent> 
 
                 while let Some(event) = stream.next().await {
                     match event {
-                        TranscribeEvent::Preview(text) => {
-                            let _ = channel.send(RecordEvent::Preview(text)).await;
+                        TranscribeEvent::Preview { text, source } => {
+                            let _ = channel.send(RecordEvent::Preview { text, source }).await;
                         }
                         TranscribeEvent::Done(text) => {
                             let result = if text.trim().is_empty() {

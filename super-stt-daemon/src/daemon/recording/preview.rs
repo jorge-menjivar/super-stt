@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::RecordingSession;
-use crate::daemon::types::SuperSTTDaemon;
+use crate::daemon::types::{PreviewFrame, SuperSTTDaemon};
 use crate::output::typer::Typer;
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::sync::Arc;
 use std::time::Duration;
+use super_stt_shared::models::protocol::PreviewSource;
 use tokio::time::Instant;
 
 /// The shortest preview window: enough context for a batch model to transcribe
@@ -342,7 +343,8 @@ impl SuperSTTDaemon {
             .transcribe_audio_chunk(&resampled_audio, request_language)
             .await
         {
-            self.emit_preview(&text, session, typer, write_mode).await;
+            self.emit_preview(&text, PreviewSource::Window, session, typer, write_mode)
+                .await;
         }
 
         false // Normal completion — do not skip the timeout check
@@ -355,10 +357,14 @@ impl SuperSTTDaemon {
     ///
     /// Shared by both producers of incremental text: the sliding-window loop
     /// that simulates streaming for batch models, and the live session a
-    /// realtime model streams through. Empty text is not a preview.
+    /// realtime model streams through. Each names itself in `source`, which
+    /// travels with the text: a window replaces the previous preview and a
+    /// stream extends it, and a client cannot tell which from the text alone.
+    /// Empty text is not a preview.
     pub(super) async fn emit_preview(
         &self,
         text: &str,
+        source: PreviewSource,
         session: &RecordingSession,
         typer: &mut Typer,
         write_mode: bool,
@@ -369,17 +375,21 @@ impl SuperSTTDaemon {
         let processed = crate::output::preview::preprocess_text(text, true);
 
         info!(
-            "Preview: '{}'",
+            "Preview ({source}): '{}'",
             processed.chars().take(30).collect::<String>()
         );
 
         // Live preview to widgets holding `global_transcriptions`.
-        self.events.publish_partial_stt(processed.clone(), 1.0);
+        self.events
+            .publish_partial_stt(processed.clone(), 1.0, source);
 
         // Stream to the waiting client (the id is only used to gate slot
         // claim/clear in the HTTP handler).
         if let Some((_, ref tx)) = *self.preview_text.read().await {
-            let _ = tx.send(processed);
+            let _ = tx.send(PreviewFrame {
+                text: processed,
+                source,
+            });
         }
 
         // Type on screen if in write mode. The typing is now async, and the

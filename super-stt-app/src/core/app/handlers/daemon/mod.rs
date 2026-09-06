@@ -105,6 +105,7 @@ impl AppModel {
             self.model_operations.reset();
             self.transcription_text.clear();
             self.preview_text.clear();
+            self.preview_source = None;
         }
 
         // The /events subscription is self-healing

@@ -4,6 +4,7 @@ mod daemon_status;
 mod dispatch;
 mod error_code;
 mod pipeline;
+mod preview_source;
 mod request;
 mod response;
 
@@ -17,6 +18,7 @@ pub use pipeline::{
     POST_PROCESSOR_STAGE, StageModelDevice, StageModelReport, StageReport, StageRole, StageSwitch,
     SwitchDownload, SwitchTarget, TRANSCRIPTION_STAGE,
 };
+pub use preview_source::PreviewSource;
 pub use request::DaemonRequest;
 pub use response::{
     CudaHostInfo, DaemonResponse, DownloadProgress, GpuHostInfo, GpuInfo, NotificationEvent,

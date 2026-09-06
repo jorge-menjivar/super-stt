@@ -9,6 +9,7 @@
 //! error at both ends instead of silently falling through to `Task::none()`.
 
 use super_stt_shared::models::notification_method::NotificationMethod;
+use super_stt_shared::models::protocol::PreviewSource;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::write_method::WriteMethod;
 
@@ -520,7 +521,12 @@ pub enum LanguageMessage {
 pub enum RecordingMessage {
     StartRecording,
     StopRecording,
-    PreviewTextReceived(String),
+    /// A preview frame from the test recording. `source` is what the daemon
+    /// said the text spans, when it said.
+    PreviewReceived {
+        text: String,
+        source: Option<PreviewSource>,
+    },
     TranscriptionReceived(String),
     AudioFeedbackToggled(bool),
     AudioThemeSelected(AudioTheme),

@@ -76,14 +76,14 @@ To stop an in-flight daemon-mic capture, see
 |-------------------------------------|-------------------------------------------------------------------------|
 | Daemon-mic, `wait: false`           | `202` with `{ "status": "success", "message": "Recording started" }`     |
 | Daemon-mic, `wait: true`, no stream | `200 text/event-stream` with a single `event: done` carrying `{ "transcription": "..." }` |
-| Daemon-mic, `wait: true`, streaming | `200 text/event-stream`: zero or more `event: preview` / `data: { "text": "..." }` blocks, then a single `event: done` / `data: { "transcription": "..." }` block |
+| Daemon-mic, `wait: true`, streaming | `200 text/event-stream`: zero or more `event: preview` / `data: { "text": "...", "source": "..." }` blocks, then a single `event: done` / `data: { "transcription": "..." }` block |
 | Pre-captured (`audio_data`)         | `200` with `{ "status": "success", "transcription": "..." }`             |
 
 **SSE events emitted on a streaming response:**
 
 | `event:`   | `data:` payload                       | When                                                                  |
 |------------|---------------------------------------|-----------------------------------------------------------------------|
-| `preview`  | `{ "text": "hello wor…" }`            | Streaming preview while audio keeps arriving                          |
+| `preview`  | `{ "text": "hello wor…", "source": "window" }` | Streaming preview while audio keeps arriving; see [previews](#previews) for what `text` spans |
 | `done`     | `{ "transcription": "hello world" }`  | Final transcription; stream closes after this. Empty when the captured take had no speech — that capture still completes successfully. |
 | `error`    | `{ "message": "..." }`                | Fatal error before `done`; stream closes after this                   |
 
@@ -100,21 +100,27 @@ proxy in between) would drop it before the `done` event lands.
 
 ## Previews
 
-Whether `preview` frames arrive at all depends on the active model, not on
-the request. A `stream_realtime: true` request only asks for them.
+Whether `preview` frames arrive at all, and what their `text` spans, depend
+on the active model, not on the request. A `stream_realtime: true` request
+only asks for them. Each frame's `source` says which kind it is:
 
-- A **realtime** model (`realtime = true` in its manifest) streams its own
-  incremental transcript, and its previews are forwarded as they come.
-- Any other model has no incremental output, so the daemon **simulates**
-  previews: every `processing_interval_ms` it re-transcribes a sliding window
-  of the most recent capture and emits the result. Each pass is a full
-  transcription that the final pass repeats, and for an online model a billed
-  request whose output is then discarded. Simulation is therefore off unless
-  the model's manifest turns it on with
-  [`[[models]].force_preview_support`](../../backend/config.md#models).
+| `source`   | Produced by                                                        | `text` is                                                                 |
+|------------|--------------------------------------------------------------------|---------------------------------------------------------------------------|
+| `stream`   | A **realtime** model (`realtime = true` in its manifest), which streams its own incremental transcript | everything heard so far; each frame extends the one before it |
+| `window`   | The daemon, for any other model, which has no incremental output: every `processing_interval_ms` it re-transcribes a sliding window of the most recent capture | only the last few seconds; each frame replaces the one before it |
 
-A take on a model with no previews still streams normally: the response
-carries the keep-alive comments and then the single `done` frame.
+A client rendering "the transcript so far" cannot do it from `window` frames,
+and one showing "what was just said" gets the whole take from `stream` frames.
+Neither kind is a delta, and neither is the final transcript: `done` is.
+
+A simulated pass is a full transcription that the final pass repeats, and for
+an online model a billed request whose output is then discarded. Simulation
+is therefore off unless the model's manifest turns it on with
+[`[[models]].force_preview_support`](../../backend/config.md#models). A take on a model
+with no previews still streams normally: the response carries the keep-alive
+comments and then the single `done` frame.
+
+A daemon older than the `source` field omits it.
 
 **Stopping early via socket disconnect:** for any `POST /transcribe`
 issued with `wait: true`, closing the HTTP connection acts as an

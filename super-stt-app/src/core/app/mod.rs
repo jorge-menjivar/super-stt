@@ -65,6 +65,10 @@ pub struct AppModel {
     /// indistinguishable from a result; keeping them apart is what makes a
     /// realtime model's incremental output visible as such.
     pub preview_text: String,
+    /// What `preview_text` spans, as the daemon said: the whole take so far,
+    /// or only the last few seconds. `None` before the first frame, and when
+    /// the daemon did not say.
+    pub preview_source: Option<super_stt_shared::models::protocol::PreviewSource>,
     /// Current audio level (0.0 to 1.0)
     pub audio_level: f32,
     /// Whether speech is currently detected
