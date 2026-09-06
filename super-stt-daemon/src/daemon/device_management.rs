@@ -1141,6 +1141,7 @@ mod tests {
             processing_interval: std::time::Duration::from_secs(1),
             supported_devices: devices,
             realtime: false,
+            force_preview_support: true,
             role: super_stt_registry_types::manifest::ModelRole::Transcription,
             provider: None,
         }

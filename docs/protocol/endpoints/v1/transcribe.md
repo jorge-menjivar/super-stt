@@ -98,6 +98,24 @@ tens of seconds). Without the comment frames the underlying HTTP
 connection would go idle and intermediaries (hyper's client, any
 proxy in between) would drop it before the `done` event lands.
 
+## Previews
+
+Whether `preview` frames arrive at all depends on the active model, not on
+the request. A `stream_realtime: true` request only asks for them.
+
+- A **realtime** model (`realtime = true` in its manifest) streams its own
+  incremental transcript, and its previews are forwarded as they come.
+- Any other model has no incremental output, so the daemon **simulates**
+  previews: every `processing_interval_ms` it re-transcribes a sliding window
+  of the most recent capture and emits the result. Each pass is a full
+  transcription that the final pass repeats, and for an online model a billed
+  request whose output is then discarded. Simulation is therefore off unless
+  the model's manifest turns it on with
+  [`[[models]].force_preview_support`](../../backend/config.md#models).
+
+A take on a model with no previews still streams normally: the response
+carries the keep-alive comments and then the single `done` frame.
+
 **Stopping early via socket disconnect:** for any `POST /transcribe`
 issued with `wait: true`, closing the HTTP connection acts as an
 implicit stop signal — the disconnect is detected on the next SSE

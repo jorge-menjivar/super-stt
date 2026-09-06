@@ -233,6 +233,7 @@ mod tests {
             processing_interval: Duration::from_secs(1),
             supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
             realtime: false,
+            force_preview_support: true,
             role: super_stt_registry_types::manifest::ModelRole::Transcription,
             provider: None,
         };

@@ -25,6 +25,11 @@ const CLIENT_ID: &str = "daemon_recorder";
 struct RecordingSession {
     pub(super) recorder_handle: tokio::task::JoinHandle<Result<Vec<f32>>>,
     pub(super) model_processing_interval: std::time::Duration,
+    // Whether previews are forced onto the model at all
+    // (`ModelDefinition::force_preview_support`). Off unless its manifest
+    // turns it on: every sliding-window pass is a transcription Phase 4
+    // repeats, and for an online model a billed one.
+    pub(super) force_preview_support: bool,
     pub(super) actually_typed: Arc<std::sync::Mutex<String>>,
     // Shared with the recorder's ring buffer (`get_audio_buffer_ref`), which is
     // a `parking_lot::Mutex` (Tier 3 #5).
@@ -171,7 +176,9 @@ impl SuperSTTDaemon {
         // A realtime model streams through one live session for the whole take,
         // which also produces the final transcript — so Phase 4 is skipped when
         // it succeeds. Every other model has no incremental output, so previews
-        // are simulated by re-transcribing a sliding window.
+        // are simulated by re-transcribing a sliding window — when the model
+        // asks for it (`session.force_preview_support`); otherwise the loop only waits for
+        // capture to end.
         #[cfg(feature = "wasm-backends")]
         let streamed = self
             .run_realtime_stream_loop(&session, typer, write_mode, request_language)

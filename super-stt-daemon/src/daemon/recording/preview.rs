@@ -33,13 +33,19 @@ impl SuperSTTDaemon {
         let (stop_tx, stop_rx) = tokio::sync::broadcast::channel(1);
         *self.manual_stop_tx.write().await = Some(stop_tx);
 
-        // Get model processing interval from current model
-        let model_processing_interval = {
+        // The preview cadence and whether previews are forced at all both
+        // come from the loaded model. No model is unreachable here — the
+        // caller refuses to record without one — so the fallback only has to
+        // be harmless.
+        let (model_processing_interval, force_preview_support) = {
             let guard = self.model.read().await;
             guard
                 .as_ref()
-                .map_or(std::time::Duration::from_secs(2), |loaded| {
-                    loaded.definition.processing_interval
+                .map_or((std::time::Duration::from_secs(2), false), |loaded| {
+                    (
+                        loaded.definition.processing_interval,
+                        loaded.definition.force_preview_support,
+                    )
                 })
         };
 
@@ -83,6 +89,7 @@ impl SuperSTTDaemon {
         Ok(RecordingSession {
             recorder_handle,
             model_processing_interval,
+            force_preview_support,
             actually_typed,
             preview_buffer,
             speech_state,
@@ -113,6 +120,10 @@ impl SuperSTTDaemon {
         // throttled to once per `model_processing_interval`.
         const COMPLETION_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
+        if !session.force_preview_support {
+            info!("Preview support is not forced for the active model; waiting for capture to end");
+        }
+
         let mut last_preview = Instant::now();
         loop {
             // Notice the recorder finishing promptly — before and after the nap.
@@ -137,6 +148,13 @@ impl SuperSTTDaemon {
                     let _ = tx.send(());
                 }
                 break;
+            }
+
+            // A model without forced previews still needs this loop for the
+            // completion poll and the runaway guard above; only the
+            // transcription work is skipped.
+            if !session.force_preview_support {
+                continue;
             }
 
             // Throttle the actual preview transcription to the model's interval.

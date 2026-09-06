@@ -168,6 +168,7 @@ mod tests {
             processing_interval: std::time::Duration::from_secs(1),
             supported_devices: vec![Device::None],
             realtime: false,
+            force_preview_support: false,
             role: ModelRole::PostProcessor,
             provider: None,
         };
