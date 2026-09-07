@@ -190,3 +190,54 @@ pub async fn transcribe_stop(socket_path: PathBuf, token: &str) -> HttpResult<Da
     let req = transport::build_post_json("/transcribe/stop", &serde_json::json!({}), Some(token))?;
     transport::send_request::<DaemonResponse>(&socket_path, req).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn preview(data: &str) -> TranscribeEvent {
+        parse_sse_block(&format!("event: preview\ndata: {data}")).expect("a preview block yields")
+    }
+
+    fn source_of(event: TranscribeEvent) -> (String, Option<PreviewSource>) {
+        match event {
+            TranscribeEvent::Preview { text, source } => (text, source),
+            other => panic!("expected a preview, got {other:?}"),
+        }
+    }
+
+    /// `source` is the client's only way to tell a window preview (replaces
+    /// the last) from a stream preview (extends it), so a frame that carries
+    /// it must come through typed.
+    #[test]
+    fn a_preview_carries_its_source() {
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello wor","source":"window"}"#)),
+            ("hello wor".to_string(), Some(PreviewSource::Window))
+        );
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello","source":"stream"}"#)),
+            ("hello".to_string(), Some(PreviewSource::Stream))
+        );
+    }
+
+    /// A daemon older than the field sends no `source`. The text is still a
+    /// preview; the client is simply not told which kind.
+    #[test]
+    fn a_preview_without_a_source_still_parses() {
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello"}"#)),
+            ("hello".to_string(), None)
+        );
+    }
+
+    /// A token this client does not know — a newer daemon's, say — is neither
+    /// an error nor a guess: it reads as absent.
+    #[test]
+    fn an_unknown_source_reads_as_absent() {
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello","source":"delta"}"#)),
+            ("hello".to_string(), None)
+        );
+    }
+}

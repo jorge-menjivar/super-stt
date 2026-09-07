@@ -505,8 +505,72 @@ impl SuperSTTDaemon {
 
 #[cfg(test)]
 mod tests {
+    use super::super::RecordingSession;
     use super::{MAX_PREVIEW_WINDOW, MIN_PREVIEW_WINDOW, PREVIEW_OVERLAP, preview_window};
+    use crate::daemon::types::SuperSTTDaemon;
+    use std::collections::VecDeque;
+    use std::sync::Arc;
     use std::time::Duration;
+
+    /// A session over `buffer` captured at `rate`, with everything else inert.
+    fn session_over(buffer: Vec<f32>, rate: usize) -> RecordingSession {
+        RecordingSession {
+            recorder_handle: tokio::spawn(async { anyhow::Ok(Vec::<f32>::new()) }),
+            model_processing_interval: Duration::from_secs(2),
+            force_preview_support: true,
+            actually_typed: Arc::new(std::sync::Mutex::new(String::new())),
+            preview_buffer: Arc::new(parking_lot::Mutex::new(VecDeque::from(buffer))),
+            speech_state: Arc::new(parking_lot::Mutex::new(
+                crate::audio::state::RecordingState::default(),
+            )),
+            device_sample_rate: u32::try_from(rate).expect("a test rate fits"),
+            start_time: tokio::time::Instant::now(),
+        }
+    }
+
+    /// Samples that ramp from 0 towards 1, so a slice's first value says where
+    /// in the capture it came from.
+    // reason: a test ramp; the index never exceeds f32's exact range here.
+    #[allow(clippy::cast_precision_loss)]
+    fn ramp(len: usize) -> Vec<f32> {
+        (0..len).map(|i| i as f32 / len as f32).collect()
+    }
+
+    fn read(session: &RecordingSession, secs: u64) -> Vec<f32> {
+        SuperSTTDaemon::read_preview_audio_from_buffer(session, Duration::from_secs(secs))
+    }
+
+    /// The window is counted at the device's own rate, and it is the most
+    /// recent audio: the slice ends where the capture ends.
+    #[tokio::test]
+    async fn the_read_takes_the_most_recent_window_at_the_device_rate() {
+        let rate = 48_000;
+        let total = 20 * rate;
+        let capture = ramp(total);
+        let session = session_over(capture.clone(), rate);
+
+        let out = read(&session, 8);
+
+        assert_eq!(out.len(), 8 * rate);
+        assert_eq!(out[0], capture[total - 8 * rate]);
+        assert_eq!(out.last(), capture.last());
+    }
+
+    /// Early in a take the buffer is shorter than the window; the read is
+    /// everything captured so far, not nothing.
+    #[tokio::test]
+    async fn a_window_longer_than_the_capture_reads_all_of_it() {
+        let rate = 16_000;
+        let session = session_over(ramp(3 * rate), rate);
+        assert_eq!(read(&session, 5).len(), 3 * rate);
+    }
+
+    /// Near-silence is not worth a transcription pass.
+    #[tokio::test]
+    async fn silence_reads_as_nothing() {
+        let session = session_over(vec![0.0005; 5 * 16_000], 16_000);
+        assert!(read(&session, 5).is_empty());
+    }
 
     /// Fast models keep the window they always had: the minimum is wider than
     /// their gap plus the overlap.
