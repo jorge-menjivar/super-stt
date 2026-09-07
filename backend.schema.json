@@ -106,6 +106,7 @@
           "models": {
             "items": {
               "properties": {
+                "force_preview_support": false,
                 "role": false
               }
             }
@@ -530,6 +531,11 @@
             "$ref": "#/definitions/FileSpec"
           },
           "type": "array"
+        },
+        "force_preview_support": {
+          "default": false,
+          "description": "Force live previews onto a model that has none of its own: while the\nmicrophone is open, the daemon re-transcribes a sliding window of the\ncapture every `processing_interval_ms` and shows the result. Each pass\nis a full transcription the final pass repeats — for an online model,\na billed request per pass whose output is discarded — so it is off\nunless the manifest turns it on. Default `false`. Not consulted for a\n`realtime` model, which streams its own previews.\n\nA v2 field: declaring it under `contract = \"v1\"` is a parse error.",
+          "type": "boolean"
         },
         "multilingual": {
           "default": true,
