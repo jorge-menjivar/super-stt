@@ -2,7 +2,7 @@
 use super::super::internal::error::HttpResult;
 use super::super::internal::sse;
 use super::super::internal::transport;
-use crate::models::protocol::DaemonResponse;
+use crate::models::protocol::{DaemonResponse, PreviewSource};
 use std::path::PathBuf;
 
 /// Options for [`transcribe`]. v1 only wires the daemon-mic capture path
@@ -43,8 +43,14 @@ fn record_body(opts: &TranscribeOptions) -> serde_json::Value {
 /// daemon-side failure — each an SSE block of `event:` / `data:` lines.
 #[derive(Debug, Clone)]
 pub enum TranscribeEvent {
-    /// Incremental preview text (full text so far, not a delta).
-    Preview(String),
+    /// Incremental preview text. Never a delta, but what it spans depends on
+    /// `source`: a [`PreviewSource::Stream`] frame is everything heard so far
+    /// and extends the last one, a [`PreviewSource::Window`] frame is the last
+    /// few seconds and replaces it. `None` when the daemon predates the field.
+    Preview {
+        text: String,
+        source: Option<PreviewSource>,
+    },
     /// Final transcription, after the recording stopped and the model
     /// produced its result. The string is the transcribed text or an
     /// empty string if no speech was detected.
@@ -76,7 +82,7 @@ pub async fn transcribe(
     let mut last_preview = String::new();
     while let Some(event) = stream.next().await {
         match event {
-            TranscribeEvent::Preview(t) => last_preview = t,
+            TranscribeEvent::Preview { text, .. } => last_preview = text,
             TranscribeEvent::Done(text) => {
                 return Ok(DaemonResponse::success().with_transcription(text));
             }
@@ -144,13 +150,19 @@ fn parse_sse_block(block: &str) -> Option<TranscribeEvent> {
     let payload: serde_json::Value =
         serde_json::from_str(&fields.data).unwrap_or(serde_json::Value::Null);
     match fields.event {
-        Some("preview") => Some(TranscribeEvent::Preview(
-            payload
+        Some("preview") => Some(TranscribeEvent::Preview {
+            text: payload
                 .get("text")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
-        )),
+            // An unrecognized token is treated like an absent one: the text
+            // is still a preview, the client just is not told which kind.
+            source: payload
+                .get("source")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok()),
+        }),
         Some("done") => Some(TranscribeEvent::Done(
             payload
                 .get("transcription")
@@ -177,4 +189,55 @@ fn parse_sse_block(block: &str) -> Option<TranscribeEvent> {
 pub async fn transcribe_stop(socket_path: PathBuf, token: &str) -> HttpResult<DaemonResponse> {
     let req = transport::build_post_json("/transcribe/stop", &serde_json::json!({}), Some(token))?;
     transport::send_request::<DaemonResponse>(&socket_path, req).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn preview(data: &str) -> TranscribeEvent {
+        parse_sse_block(&format!("event: preview\ndata: {data}")).expect("a preview block yields")
+    }
+
+    fn source_of(event: TranscribeEvent) -> (String, Option<PreviewSource>) {
+        match event {
+            TranscribeEvent::Preview { text, source } => (text, source),
+            other => panic!("expected a preview, got {other:?}"),
+        }
+    }
+
+    /// `source` is the client's only way to tell a window preview (replaces
+    /// the last) from a stream preview (extends it), so a frame that carries
+    /// it must come through typed.
+    #[test]
+    fn a_preview_carries_its_source() {
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello wor","source":"window"}"#)),
+            ("hello wor".to_string(), Some(PreviewSource::Window))
+        );
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello","source":"stream"}"#)),
+            ("hello".to_string(), Some(PreviewSource::Stream))
+        );
+    }
+
+    /// A daemon older than the field sends no `source`. The text is still a
+    /// preview; the client is simply not told which kind.
+    #[test]
+    fn a_preview_without_a_source_still_parses() {
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello"}"#)),
+            ("hello".to_string(), None)
+        );
+    }
+
+    /// A token this client does not know — a newer daemon's, say — is neither
+    /// an error nor a guess: it reads as absent.
+    #[test]
+    fn an_unknown_source_reads_as_absent() {
+        assert_eq!(
+            source_of(preview(r#"{"text":"hello","source":"delta"}"#)),
+            ("hello".to_string(), None)
+        );
+    }
 }

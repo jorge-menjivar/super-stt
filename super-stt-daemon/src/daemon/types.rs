@@ -8,7 +8,7 @@ use crate::services::dbus::DBusManager;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use anyhow::Result;
 use std::sync::{Arc, RwLock};
-use super_stt_shared::models::protocol::DaemonStatusEvent;
+use super_stt_shared::models::protocol::{DaemonStatusEvent, PreviewSource};
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
 
@@ -58,11 +58,19 @@ pub struct LoadedModel {
 /// Shared handle to the currently-loaded model (or `None` while idle/loading).
 pub type SharedLoadedModel = Arc<tokio::sync::RwLock<Option<LoadedModel>>>;
 
+/// One preview on its way to the waiting `/transcribe` client: the text and
+/// what it spans, which the client cannot tell from the text alone.
+#[derive(Debug, Clone)]
+pub struct PreviewFrame {
+    pub text: String,
+    pub source: PreviewSource,
+}
+
 /// The single `/transcribe` preview slot: an `(id, sender)` guarded by a lock,
 /// where `id` lets a racing request claim the slot only when free and clear it
 /// only when it is still its own.
 pub type PreviewSlot =
-    Arc<tokio::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<String>)>>>;
+    Arc<tokio::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<PreviewFrame>)>>>;
 
 #[derive(Clone)]
 pub struct SuperSTTDaemon {

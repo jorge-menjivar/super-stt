@@ -18,7 +18,7 @@ that is part of [`transcribe`](./transcribe.md), returned inline on the
 
 | Topic         | Carries                                              |
 |---------------|------------------------------------------------------|
-| `partial_stt` | `{ text, confidence }` — live transcription preview  |
+| `partial_stt` | `{ text, confidence, source }` — live transcription preview; `source` says whether `text` is the take so far (`stream`) or only the last few seconds (`window`) |
 | `final_stt`   | `{ text, confidence }` — final transcription text    |
 
 Full payload semantics and the SSE framing rules live on

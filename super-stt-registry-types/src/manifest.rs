@@ -318,6 +318,12 @@ pub const CONTRACT_FIELDS: &[ContractField] = &[
         table: "models",
         key: "role",
     },
+    ContractField {
+        since: Contract::V2,
+        rule: FieldRule::Added,
+        table: "models",
+        key: "force_preview_support",
+    },
     // `id` names the install directory and is what the registry matches an
     // entry against, so a published backend has always needed one — the
     // indexer refuses a release without it. It stayed optional in the type
@@ -633,6 +639,17 @@ pub struct ModelEntry {
     /// `[capabilities] websocket = true`. Default `false`.
     #[serde(default)]
     pub realtime: bool,
+    /// Force live previews onto a model that has none of its own: while the
+    /// microphone is open, the daemon re-transcribes a sliding window of the
+    /// capture every `processing_interval_ms` and shows the result. Each pass
+    /// is a full transcription the final pass repeats — for an online model,
+    /// a billed request per pass whose output is discarded — so it is off
+    /// unless the manifest turns it on. Default `false`. Not consulted for a
+    /// `realtime` model, which streams its own previews.
+    ///
+    /// A v2 field: declaring it under `contract = "v1"` is a parse error.
+    #[serde(default)]
+    pub force_preview_support: bool,
     /// What the model is for: transcribing audio, or post-processing a
     /// transcript. Default [`ModelRole::Transcription`], so every manifest
     /// written before the field existed keeps its models transcribing.
@@ -1508,6 +1525,55 @@ mod tests {
         assert!(with.models[0].role.is_post_processor());
         let without = Manifest::parse(&manifest_with("v2", "")).expect("plain v2 parses");
         assert_eq!(without.models[0].role, ModelRole::Transcription);
+    }
+
+    /// `force_preview_support` is a v2 field too, and it is refused under v1 by the same
+    /// table row mechanism as `role` — this pins that the row exists.
+    #[test]
+    fn a_v1_manifest_may_not_declare_force_preview_support() {
+        let err = Manifest::parse(&manifest_with("v1", "force_preview_support = false"))
+            .expect_err("force_preview_support under v1 must be refused");
+        match err {
+            ManifestError::FieldRequiresContract { field, since, .. } => {
+                assert_eq!(field, "[[models]].force_preview_support");
+                assert_eq!(since, Contract::V2);
+            }
+            other => panic!("expected FieldRequiresContract, got {other}"),
+        }
+    }
+
+    /// With the manifest silent, no model gets simulated previews — local or
+    /// online. Every pass is a transcription the final repeats, and for an
+    /// online model a billed one, so the cost is the author's to turn on.
+    #[test]
+    fn preview_support_is_not_forced_unless_declared() {
+        let local = Manifest::parse(&manifest_with("v2", "")).expect("parses");
+        assert!(!local.models[0].force_preview_support);
+
+        let online = Manifest::parse(&manifest_with("v2", "").replace(
+            r#"supported_devices = ["cpu"]"#,
+            r#"supported_devices = ["none"]"#,
+        ))
+        .expect("parses");
+        assert!(online.models[0].is_online());
+        assert!(!online.models[0].force_preview_support);
+    }
+
+    /// Declaring it is what turns it on, for any model.
+    #[test]
+    fn a_declared_force_preview_support_turns_previews_on() {
+        let local =
+            Manifest::parse(&manifest_with("v2", "force_preview_support = true")).expect("parses");
+        assert!(local.models[0].force_preview_support);
+
+        let online = Manifest::parse(
+            &manifest_with("v2", "force_preview_support = true").replace(
+                r#"supported_devices = ["cpu"]"#,
+                r#"supported_devices = ["none"]"#,
+            ),
+        )
+        .expect("parses");
+        assert!(online.models[0].force_preview_support);
     }
 
     /// The closed enum is the gate: a generation this crate does not know is a

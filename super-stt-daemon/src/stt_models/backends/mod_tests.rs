@@ -110,6 +110,10 @@ processing_interval_ms = 2000
         vec![super_stt_registry_types::manifest::Device::None],
         "online model carries its declared supported_devices"
     );
+    assert!(
+        !def.force_preview_support,
+        "preview support is not forced unless the manifest asks"
+    );
 
     let (_, vox) = find_model(&backends, "voxtral-mini", "github.com/super-stt/voxtral")
         .expect("resolve voxtral-mini");
@@ -123,6 +127,10 @@ processing_interval_ms = 2000
             super_stt_registry_types::manifest::Device::Gpu
         ],
         "local model carries its declared supported_devices"
+    );
+    assert!(
+        !vox.force_preview_support,
+        "preview support is not forced unless the manifest asks, local or not"
     );
 
     // list_models flattens both.
@@ -577,6 +585,7 @@ fn an_empty_source_resolves_nothing() {
                 processing_interval: StdDuration::from_secs(1),
                 supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
                 realtime: false,
+                force_preview_support: true,
                 role: super_stt_registry_types::manifest::ModelRole::Transcription,
                 provider: None,
             }],
@@ -764,4 +773,42 @@ fn distinct_sources_are_never_duplicates() {
     ]);
     assert_eq!(winners.len(), 2);
     assert!(losers.is_empty());
+}
+
+/// A backend that wants simulated previews says so with
+/// `force_preview_support = true`, and the definition carries it. Shown on an
+/// online model, where the pass it accepts is a billed one.
+#[test]
+fn a_model_forces_preview_support() {
+    let root = scratch("force-preview-support");
+    let dir = root.join("cloud");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("backend.toml"),
+        r#"
+[backend]
+id = "app.super-stt.cloud"
+source = "github.com/super-stt/cloud"
+name = "Cloud"
+version = "0.1.0"
+kind = "wasm"
+entrypoint = "cloud.wasm"
+contract = "v2"
+description = "Test backend."
+
+[[models]]
+name = "fast"
+multilingual = true
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
+force_preview_support = true
+"#,
+    )
+    .unwrap();
+
+    let (backends, _) = discover(&root);
+    let (_, def) = find_model(&backends, "fast", "github.com/super-stt/cloud").expect("resolves");
+    assert!(def.is_online());
+    assert!(def.force_preview_support, "the declared opt-in is carried");
 }

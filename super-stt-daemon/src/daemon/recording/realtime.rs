@@ -27,6 +27,7 @@ use std::time::Duration;
 
 use log::{debug, info, warn};
 use serde_json::Value;
+use super_stt_shared::models::protocol::PreviewSource;
 
 use super::RecordingSession;
 use crate::daemon::types::SuperSTTDaemon;
@@ -251,7 +252,8 @@ impl SuperSTTDaemon {
     ) {
         match classify_frame(frame) {
             Some(StreamEvent::Preview(text)) => {
-                self.emit_preview(&text, session, typer, write_mode).await;
+                self.emit_preview(&text, PreviewSource::Stream, session, typer, write_mode)
+                    .await;
             }
             Some(StreamEvent::Done(text)) => {
                 info!(

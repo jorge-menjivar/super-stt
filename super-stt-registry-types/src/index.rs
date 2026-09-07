@@ -453,6 +453,7 @@ mod tests {
             estimated_vram_bytes: 0,
             processing_interval_ms: None,
             realtime: false,
+            force_preview_support: false,
             role: ModelRole::Transcription,
             files: vec![],
             provider: None,

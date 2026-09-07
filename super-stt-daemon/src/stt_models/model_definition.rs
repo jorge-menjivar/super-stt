@@ -50,6 +50,13 @@ pub struct ModelDefinition {
     /// Whether this model is reached over the realtime WebSocket path
     /// (`/v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`.
     pub realtime: bool,
+    /// Whether a microphone take forces live previews onto this model, which
+    /// has none of its own, by re-transcribing a sliding window every
+    /// `processing_interval`. The manifest's `force_preview_support`, off
+    /// unless declared: each simulated pass is a transcription Phase 4 repeats
+    /// over the whole take, and for an online model a billed one. Meaningless
+    /// for a `realtime` model, which streams its own previews.
+    pub force_preview_support: bool,
     /// What the model is for — transcribing audio, or post-processing a
     /// finished transcript. Decides which of the daemon's two model slots it
     /// may be selected into, and which `/v1` route it is driven over.

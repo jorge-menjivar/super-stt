@@ -105,7 +105,7 @@ is.
 | Generation | Adds                                                                         | First supported by |
 |------------|------------------------------------------------------------------------------|--------------------|
 | `v1`       | The base contract: transcription over `POST /v1/transcribe`.                 | Super STT 0.2.0    |
-| `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors. Also **requires** [`[backend].id`](#backend). | Super STT 0.2.4    |
+| `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors; [`[[models]].force_preview_support`](#models) — live previews for a model that has none of its own. Also **requires** [`[backend].id`](#backend). | Super STT 0.2.4    |
 
 Extending the contract does not oblige a backend to serve all of it. Which
 routes a backend must implement is decided by the models it declares, not by
@@ -505,6 +505,7 @@ processing_interval_ms = 1000
 | `estimated_vram_bytes`   | integer         | no       | Conservative GPU memory estimate. Default `0`; use `0` for cloud models. |
 | `processing_interval_ms` | integer         | no       | Suggested minimum interval between streaming passes, in ms.      |
 | `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. |
+| `force_preview_support`  | bool            | no       | **`contract = "v2"`.** Force live previews onto a model that has none of its own: while its microphone is open, the daemon re-transcribes a sliding window of the capture every `processing_interval_ms` and shows the result. Each pass is a full transcription the final pass repeats, and for an online model a billed request whose output is discarded, so it is off unless the manifest turns it on. Default `false`. Not consulted for a `realtime` model, which streams its own previews. See [previews](../endpoints/v1/transcribe.md#previews). |
 | `role`                   | string          | no       | **`contract = "v2"`.** What the model is for: `transcription` (default) or `post_processor`. A `post_processor` model is driven over [`POST /v1/process`](./contract.md#post-v1process) instead of `/v1/transcribe`, and is run in [stage 2 of the pipeline](../endpoints/v1/pipeline.md) rather than stage 1. |
 | `provider`               | string          | no       | Compatibility field. Not part of model identity and read by nothing in the daemon; it is echoed back verbatim as `provider` in [`POST /v1/load`](./contract.md#post-v1load) so a backend that still validates it keeps loading. |
 

@@ -9,6 +9,7 @@ use crate::daemon::http::state::AppState;
 use crate::daemon::http::wire::{Ack, ErrorEnvelope, ReasonEnvelope};
 // Only the wasm-backends realtime handler references the daemon type / bare
 // `Response`; gated so the subprocess-only and no-backend builds stay warning-clean.
+use crate::daemon::types::PreviewFrame;
 #[cfg(feature = "wasm-backends")]
 use crate::daemon::types::SuperSTTDaemon;
 use axum::extract::State;
@@ -370,9 +371,16 @@ closing the connection stops the recording. Frames are:
 
 | `event:` | `data:` |
 |---|---|
-| `preview` | `{ \"text\": \"hello wor…\" }` |
+| `preview` | `{ \"text\": \"hello wor…\", \"source\": \"window\" }` |
 | `done` | `{ \"transcription\": \"hello world\" }` |
 | `error` | `{ \"message\": \"…\" }` |
+
+A preview's `source` says what its text spans: `stream` is a realtime model's own \
+running transcript, everything heard so far, and each frame extends the last; \
+`window` is a few seconds of capture the daemon re-transcribed, and each frame \
+replaces the last. Whether previews arrive at all is the model's call, not the \
+request's — a batch model streams only `done` unless its manifest sets \
+`force_preview_support`.
 
 Starting while a recording is already in flight is `409 recording_in_progress` — \
 this endpoint only ever *starts* one. Read `busy` from `GET /status` and call \
@@ -540,7 +548,7 @@ fn transcribe_mic_sse(
         // atomically: if another `/transcribe` already holds it we lost the
         // busy-check race (line 203 is a plain read), so bail with an error
         // frame rather than clobbering the winner's stream.
-        let (preview_tx, mut preview_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (preview_tx, mut preview_rx) = tokio::sync::mpsc::unbounded_channel::<PreviewFrame>();
         let slot_id = next_preview_slot_id();
         // Claim the shared preview slot only when the client asked to stream
         // preview frames (`stream_realtime`). Otherwise the response carries just
@@ -593,8 +601,11 @@ fn transcribe_mic_sse(
                     break;
                 }
                 preview = preview_rx.recv() => {
-                    if let Some(text) = preview {
-                        let payload = serde_json::json!({ "text": text });
+                    if let Some(frame) = preview {
+                        let payload = serde_json::json!({
+                            "text": frame.text,
+                            "source": frame.source,
+                        });
                         if !emit_sse_event(&line_tx, "preview", &payload) {
                             client_disconnected = true;
                             break;
