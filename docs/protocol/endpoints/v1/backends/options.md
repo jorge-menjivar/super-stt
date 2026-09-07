@@ -64,7 +64,17 @@ Authorization: Bearer stt_…64hex…
       "type":     "string",
       "default":  "https://api.openai.com",
       "required": false,
+      "choices":  [],                       // open-ended; a text field
       "value":    "https://api.openai.com"  // effective value (override or default)
+    },
+    {
+      "name":     "styling",
+      "label":    "Styling",
+      "type":     "string",
+      "default":  "semi-formal",
+      "required": false,
+      "choices":  ["casual", "semi-formal", "formal"],  // closed set; a dropdown
+      "value":    "formal"
     }
   ]
 }
@@ -77,6 +87,7 @@ Authorization: Bearer stt_…64hex…
 | `…[].label`    | string           | Human-readable label; falls back to `name` when absent.        |
 | `…[].type`     | string           | Declared value type (e.g. `string`).                           |
 | `…[].default`  | any              | Manifest default; the effective value when no override is set. |
+| `…[].choices`  | array            | The values this option accepts. Empty means any value of `type`, which a client renders as a text field; a non-empty list is a dropdown, and a `POST` of anything outside it is refused. |
 | `…[].required` | boolean          | Whether the backend needs it to operate.                      |
 | `…[].value`    | any              | Effective value: the override if set, else `default`.          |
 
@@ -124,7 +135,7 @@ Content-Type: application/json
 
 | Field   | Type   | Required | Notes                                                  |
 |---------|--------|----------|--------------------------------------------------------|
-| `value` | string | yes      | New override value. Use `DELETE` to reset to default.  |
+| `value` | string | yes      | New override value. Use `DELETE` to reset to default. When the option declares `choices`, must be one of them. |
 
 **Response (200):**
 
@@ -166,7 +177,8 @@ Authorization: Bearer stt_…64hex…
 
 | HTTP | `message`         | Meaning                                              |
 |------|-------------------|------------------------------------------------------|
-| 400  | `invalid_request` | Malformed body.                                      |
+| 400  | `invalid_request` | Malformed body, or an empty `value`.                 |
+| 400  | `invalid_value`   | The option declares `choices` and the posted value is not one of them. The `message` names the values on offer. |
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`.             |
 | 403  | `scope_denied`    | Token lacks the `settings` scope.                    |
 | 404  | `unknown_backend` | No installed backend has that `source`.             |

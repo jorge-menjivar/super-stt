@@ -408,9 +408,14 @@ fn conditional_property_names_exist() {
     let opt_props = defs["Opt"]["properties"]
         .as_object()
         .expect("Opt properties");
-    for key in ["name", "default"] {
+    for key in ["name", "default", "choices"] {
         assert!(opt_props.contains_key(key), "Opt missing `{key}`");
     }
+    assert_eq!(
+        opt_props["choices"]["uniqueItems"],
+        serde_json::json!(true),
+        "a choice offered twice must not validate"
+    );
 }
 
 /// Every table a `CONTRACT_FIELDS` row may name resolves to a definition the

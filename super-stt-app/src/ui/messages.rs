@@ -455,6 +455,13 @@ pub enum BackendMessage {
         name: String,
         value: bool,
     },
+    /// A value was picked from an option's dropdown. Like the switch, a
+    /// dropdown has nothing to press afterwards, so choosing writes.
+    BackendOptionChosen {
+        source: String,
+        name: String,
+        value: String,
+    },
     BackendOptionReset {
         source: String,
         name: String,

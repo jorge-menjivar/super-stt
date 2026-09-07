@@ -499,7 +499,7 @@
             }
           },
           "400": {
-            "description": "The value was empty (`invalid_request`). Use `DELETE` to clear an override.",
+            "description": "The value was empty (`invalid_request`), or the option declares `choices` and the value is not one of them (`invalid_value`). Use `DELETE` to clear an override.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5734,6 +5734,13 @@
           "name"
         ],
         "properties": {
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The values this option accepts, when it accepts a closed set. Empty\nmeans any value of `type`, so a client renders a free-text field;\na non-empty list is a dropdown, and the daemon refuses a write of\nanything outside it."
+          },
           "default": {
             "type": [
               "string",
@@ -5780,9 +5787,17 @@
           "name",
           "label",
           "type",
+          "choices",
           "required"
         ],
         "properties": {
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The values this option accepts, when it accepts a closed set. Empty\nmeans any value of `type`, which is what a client renders a free-text\nfield for; a non-empty list is a dropdown, and the only values a write\nwill be allowed to store."
+          },
           "default": {
             "type": [
               "string",

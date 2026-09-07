@@ -174,6 +174,12 @@ pub struct BackendOption {
     pub r#type: Option<String>,
     #[serde(default)]
     pub default: Option<String>,
+    /// The values this option accepts, when it accepts a closed set. Empty
+    /// means any value of `type`, so a client renders a free-text field;
+    /// a non-empty list is a dropdown, and the daemon refuses a write of
+    /// anything outside it.
+    #[serde(default)]
+    pub choices: Vec<String>,
     #[serde(default)]
     pub required: bool,
     /// Current effective value (override or default) reported by the daemon.
@@ -214,6 +220,29 @@ impl BackendOption {
     #[must_use]
     pub fn bool_default(&self) -> Option<bool> {
         self.default.as_deref().map(parse_bool)
+    }
+
+    /// Whether this option offers a closed set of values, so a client shows a
+    /// dropdown rather than a text field.
+    ///
+    /// A `bool` never does: it is a switch, whose two values the type already
+    /// names. A manifest declaring both is refused at publication, and this
+    /// keeps an older one that slipped through rendering as the switch.
+    #[must_use]
+    pub fn has_choices(&self) -> bool {
+        !self.choices.is_empty() && !self.is_bool()
+    }
+
+    /// Where this option's effective value sits in [`Self::choices`].
+    ///
+    /// `None` when nothing is set, and also when the stored value is not one
+    /// of the offered ones — a backend that dropped a choice its user had
+    /// picked. The dropdown then shows no selection rather than the wrong one,
+    /// and the user picks again.
+    #[must_use]
+    pub fn choice_index(&self) -> Option<usize> {
+        let current = self.value.as_deref().or(self.default.as_deref())?;
+        self.choices.iter().position(|c| c == current)
     }
 }
 
@@ -354,9 +383,61 @@ mod tests {
             description: String::new(),
             r#type: r#type.map(Into::into),
             default: default.map(Into::into),
+            choices: Vec::new(),
             required: false,
             value: value.map(Into::into),
         }
+    }
+
+    fn with_choices(
+        r#type: Option<&str>,
+        default: Option<&str>,
+        value: Option<&str>,
+        choices: &[&str],
+    ) -> BackendOption {
+        let mut opt = option(r#type, default, value);
+        opt.choices = choices.iter().map(|c| (*c).to_string()).collect();
+        opt
+    }
+
+    /// A closed set is what a client renders a dropdown from, so it has to be
+    /// distinguishable from the open-ended case by the payload alone.
+    #[test]
+    fn only_an_option_offering_values_gets_a_dropdown() {
+        assert!(with_choices(Some("string"), None, None, &["a", "b"]).has_choices());
+        assert!(!option(Some("string"), None, None).has_choices());
+        assert!(
+            !with_choices(Some("bool"), None, None, &["a", "b"]).has_choices(),
+            "a bool is a switch, whatever else it declares"
+        );
+    }
+
+    /// The dropdown shows the effective value, and shows nothing at all when
+    /// that value is not on the list — a backend that dropped a choice its
+    /// user had picked. Selecting the wrong row would be worse than selecting
+    /// none.
+    #[test]
+    fn the_dropdown_selects_the_effective_value_or_nothing() {
+        let offered = ["casual", "formal"];
+        assert_eq!(
+            with_choices(Some("string"), Some("casual"), Some("formal"), &offered).choice_index(),
+            Some(1),
+            "the override wins over the default"
+        );
+        assert_eq!(
+            with_choices(Some("string"), Some("casual"), None, &offered).choice_index(),
+            Some(0),
+            "and the default stands in for it"
+        );
+        assert_eq!(
+            with_choices(Some("string"), None, Some("formalish"), &offered).choice_index(),
+            None,
+            "a value no longer offered selects nothing"
+        );
+        assert_eq!(
+            with_choices(Some("string"), None, None, &offered).choice_index(),
+            None
+        );
     }
 
     /// Only an explicit `bool` gets a switch: an untyped option is a string by

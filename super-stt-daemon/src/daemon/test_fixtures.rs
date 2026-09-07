@@ -46,6 +46,8 @@ pub(crate) fn openai_backend(
             description: "Base URL".to_string(),
             r#type: Some(OptionType::String),
             default: base_url_default.map(|d| OptionDefault::String(d.to_string())),
+            // An endpoint override is open-ended by nature, so no closed set.
+            choices: Vec::new(),
             required: false,
         }],
         models,
