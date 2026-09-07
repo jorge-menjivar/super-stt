@@ -118,6 +118,7 @@ impl SuperSTTDaemon {
                             description: o.description.clone(),
                             r#type: o.r#type.map(|t| t.as_str().to_string()),
                             default,
+                            choices: o.choices.iter().map(ToString::to_string).collect(),
                             required: o.required,
                             value,
                         }

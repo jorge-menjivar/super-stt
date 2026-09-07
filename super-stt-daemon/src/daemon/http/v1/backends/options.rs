@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::{decode_source, find_backend, json_error, ok};
+use super::{decode_source, find_backend, json_error, json_error_msg, ok};
 use crate::daemon::http::internal::helpers::dispatch::dispatch_command;
 use crate::daemon::http::state::AppState;
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
@@ -40,6 +40,11 @@ struct BackendOptionValue {
     kind: String,
     /// The manifest's default, or `null` when it declares none.
     default: Option<String>,
+    /// The values this option accepts, when it accepts a closed set. Empty
+    /// means any value of `type`, which is what a client renders a free-text
+    /// field for; a non-empty list is a dropdown, and the only values a write
+    /// will be allowed to store.
+    choices: Vec<String>,
     /// Whether the backend refuses to load without a value.
     required: bool,
     /// What is actually in effect: the user's override if set, otherwise the
@@ -83,6 +88,7 @@ fn effective(
         label: opt.label.clone().unwrap_or_else(|| opt.name.clone()),
         kind: opt.r#type.map_or("string", OptionType::as_str).to_string(),
         default,
+        choices: opt.choices.iter().map(ToString::to_string).collect(),
         required: opt.required,
         value,
     })
@@ -205,7 +211,7 @@ A loaded model does not pick this up on its own — reload the stage with \
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "Stored; this is the new effective value.", body = OptionValue),
-        (status = 400, description = "The value was empty (`invalid_request`). Use `DELETE` to clear an override.", body = ErrorEnvelope),
+        (status = 400, description = "The value was empty (`invalid_request`), or the option declares `choices` and the value is not one of them (`invalid_value`). Use `DELETE` to clear an override.", body = ErrorEnvelope),
         (status = 404, description = "No such backend (`unknown_backend`) or no such option (`unknown_option`).", body = ErrorEnvelope),
         (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
         (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
@@ -241,6 +247,14 @@ async fn set_option(
         return json_error(StatusCode::BAD_REQUEST, "invalid_request");
     }
     if let Some(r) = guard_missing(&s, &source, &name).await {
+        return r;
+    }
+    // An option that declares `choices` accepts those and nothing else. The
+    // dropdown a settings UI renders cannot offer anything else either, so
+    // this is for the clients that write straight to the API — and for the
+    // stored value to stay one the backend understands, since it is injected
+    // into the load headers verbatim.
+    if let Some(r) = guard_not_a_choice(&s, &source, &name, value).await {
         return r;
     }
     let (code, _hdrs, body_str) = dispatch_command(
@@ -320,6 +334,35 @@ fn canonical_base_url(value: &str) -> String {
 #[cfg(not(feature = "wasm-backends"))]
 fn canonical_base_url(value: &str) -> String {
     value.trim().to_string()
+}
+
+/// Returns an error `Response` when the option declares a closed set of values
+/// and `value` is not one of them, `None` when the write can proceed.
+///
+/// Runs after [`guard_missing`], so a missing backend or option is already
+/// reported and this only ever looks at an option that exists.
+async fn guard_not_a_choice(
+    s: &AppState,
+    source: &str,
+    name: &str,
+    value: &str,
+) -> Option<Response> {
+    let backend = find_backend(s, source).await?;
+    let opt = backend.options.iter().find(|o| o.name == name)?;
+    if opt.accepts(value) {
+        return None;
+    }
+    let offered = opt
+        .choices
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(json_error_msg(
+        StatusCode::BAD_REQUEST,
+        "invalid_value",
+        &format!("option `{name}` accepts one of: {offered}"),
+    ))
 }
 
 /// Returns an error `Response` when the backend or the named option is missing,

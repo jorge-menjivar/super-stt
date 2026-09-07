@@ -94,6 +94,7 @@ mod unmet_requirements_tests {
             description: String::new(),
             r#type: None,
             default: None,
+            choices: Vec::new(),
             required,
             value: value.map(str::to_string),
         }

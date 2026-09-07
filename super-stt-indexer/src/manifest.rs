@@ -6,7 +6,7 @@ use semver::Version;
 use thiserror::Error;
 
 pub use super_stt_registry_types::manifest::{
-    Kind, Manifest, ManifestError as ParseError, SubprocessAsset,
+    Kind, Manifest, ManifestError as ParseError, OptionType, SubprocessAsset,
 };
 
 #[derive(Debug, Error)]
@@ -47,6 +47,22 @@ pub enum ManifestError {
          realtime path"
     )]
     PostProcessorRealtime(String),
+    /// An option's `default` is not one of the values its `choices` allow.
+    #[error(
+        "option `{0}` declares `default = {1:?}` but its `choices` do not offer \
+         it: the value a user never changes would be one the option rejects"
+    )]
+    DefaultNotAChoice(String, String),
+    /// A `bool` option declared choices. It is rendered as a switch, and a
+    /// switch has exactly the two values the type already names.
+    #[error(
+        "option `{0}` is a `bool` and must not declare `choices`: a boolean is \
+         rendered as a switch, whose values are already true and false"
+    )]
+    BoolWithChoices(String),
+    /// The same value appears twice in one option's `choices`.
+    #[error("option `{0}` lists the choice {1:?} more than once")]
+    DuplicateChoice(String, String),
 }
 
 pub fn validate(
@@ -118,6 +134,35 @@ pub fn validate(
     }) {
         return Err(ManifestError::BaseUrlDefault);
     }
+    // A closed set of values has to be internally consistent, and the settings
+    // UI renders it as a dropdown that cannot express a contradiction: a
+    // default outside the list, or a duplicate entry, would be a list the user
+    // can neither choose from nor return to. Caught at publication because the
+    // daemon reads a manifest it cannot fix.
+    for o in &m.options {
+        if o.choices.is_empty() {
+            continue;
+        }
+        if o.r#type == Some(OptionType::Bool) {
+            return Err(ManifestError::BoolWithChoices(o.name.clone()));
+        }
+        let mut seen: Vec<String> = Vec::with_capacity(o.choices.len());
+        for choice in &o.choices {
+            let choice = choice.to_string();
+            if seen.contains(&choice) {
+                return Err(ManifestError::DuplicateChoice(o.name.clone(), choice));
+            }
+            seen.push(choice);
+        }
+        if let Some(default) = &o.default
+            && !o.accepts(&default.to_string())
+        {
+            return Err(ManifestError::DefaultNotAChoice(
+                o.name.clone(),
+                default.to_string(),
+            ));
+        }
+    }
     // Mirrors the daemon's discovery-time rule, so a contradiction is caught at
     // publication rather than skipping the backend on every user's machine.
     if let Some(model) = m
@@ -152,6 +197,94 @@ mod tests {
 
     fn with_id(id: &str) -> String {
         VALID.replace("[backend]", &format!("[backend]\n    id = \"{id}\""))
+    }
+
+    fn with_option(body: &str) -> String {
+        format!("{VALID}\n[[options]]\n{body}\n")
+    }
+
+    fn validate_option(body: &str) -> Result<(), ManifestError> {
+        let m = Manifest::parse(&with_option(body)).expect("parses");
+        validate(&m, &Version::new(1, 0, 0), "github.com/x/y", None)
+    }
+
+    /// A closed set of values is only useful if it is coherent, and the
+    /// registry is where an author finds out — the daemon reads a manifest it
+    /// cannot fix, and the settings UI renders a dropdown that cannot express
+    /// a default sitting outside its own list.
+    #[test]
+    fn a_choice_list_must_offer_its_own_default() {
+        validate_option(
+            r#"
+            name = "styling"
+            description = "The register."
+            default = "formal"
+            choices = ["casual", "formal"]
+            "#,
+        )
+        .expect("a default on the list validates");
+
+        let err = validate_option(
+            r#"
+            name = "styling"
+            description = "The register."
+            default = "brisk"
+            choices = ["casual", "formal"]
+            "#,
+        )
+        .expect_err("a default off the list is refused");
+        assert!(
+            matches!(err, ManifestError::DefaultNotAChoice(ref n, ref d) if n == "styling" && d == "brisk"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn a_bool_option_cannot_offer_choices() {
+        let err = validate_option(
+            r#"
+            name = "tidy"
+            description = "Tidy up."
+            type = "bool"
+            default = true
+            choices = [true, false]
+            "#,
+        )
+        .expect_err("a switch does not get a list");
+        assert!(
+            matches!(err, ManifestError::BoolWithChoices(ref n) if n == "tidy"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn a_choice_offered_twice_is_refused() {
+        let err = validate_option(
+            r#"
+            name = "styling"
+            description = "The register."
+            choices = ["formal", "formal"]
+            "#,
+        )
+        .expect_err("a duplicate row cannot be chosen");
+        assert!(
+            matches!(err, ManifestError::DuplicateChoice(ref n, ref c) if n == "styling" && c == "formal"),
+            "got: {err}"
+        );
+    }
+
+    /// Every manifest published before the field, and every option that is
+    /// genuinely open-ended, declares no list and is unaffected.
+    #[test]
+    fn an_option_offering_nothing_is_left_alone() {
+        validate_option(
+            r#"
+            name = "custom_model"
+            description = "Any model name."
+            default = "whisper-large-v3"
+            "#,
+        )
+        .expect("an open-ended option validates");
     }
 
     #[test]

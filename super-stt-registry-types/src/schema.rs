@@ -142,6 +142,14 @@ fn inject_definition_rules(defs: &mut serde_json::Map<String, Value>) {
         }),
     );
 
+    // A value offered twice is a dropdown with two identical rows, one of
+    // which cannot be chosen. The indexer refuses to publish it; the schema
+    // says so where the author is typing.
+    opt["properties"]["choices"]
+        .as_object_mut()
+        .expect("choices property")
+        .insert("uniqueItems".into(), json!(true));
+
     // `supported_devices` must be non-empty (discovery rejects an empty
     // list); serde can't express minItems, so inject it here.
     let model = defs.get_mut("ModelEntry").expect("ModelEntry def");

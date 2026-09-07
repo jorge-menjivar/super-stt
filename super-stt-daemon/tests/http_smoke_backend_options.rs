@@ -11,8 +11,9 @@
 //!
 //! The fixture backend (`fixture-openai/backend.toml`) is written into the
 //! isolated `XDG_DATA_HOME/super-stt/backends/` tree so the daemon discovers
-//! it on startup. It declares one option (`base_url`) with default
-//! `"https://api.openai.com"`.
+//! it on startup. It declares three options: `base_url` and `region` are
+//! open-ended, and `styling` offers a closed set, so both sides of the
+//! `choices` gate are exercisable.
 
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
@@ -96,6 +97,14 @@ label = "Region"
 description = "Upstream region."
 type = "string"
 default = "us-east-1"
+
+[[options]]
+name = "styling"
+label = "Styling"
+description = "The register."
+type = "string"
+default = "formal"
+choices = ["casual", "formal"]
 
 [[models]]
 name = "whisper-1"
@@ -353,7 +362,7 @@ async fn option_list_returns_declared_options() {
     assert_eq!(s, StatusCode::OK, "GET options: {body}");
     assert_eq!(body["status"], "success", "list status: {body}");
     let options = body["options"].as_array().expect("options array");
-    assert_eq!(options.len(), 2, "two declared options: {body}");
+    assert_eq!(options.len(), 3, "three declared options: {body}");
     let o0 = &options[0];
     assert_eq!(o0["name"], "base_url", "option name: {body}");
     assert!(
@@ -363,6 +372,79 @@ async fn option_list_returns_declared_options() {
     let o1 = &options[1];
     assert_eq!(o1["name"], "region", "option name: {body}");
     assert_eq!(o1["value"], "us-east-1", "default value in list: {body}");
+    assert_eq!(
+        o1["choices"],
+        serde_json::json!([]),
+        "an open-ended option offers no list, which is what a client renders \
+         a text field from: {body}"
+    );
+    let o2 = &options[2];
+    assert_eq!(o2["name"], "styling", "option name: {body}");
+    assert_eq!(
+        o2["choices"],
+        serde_json::json!(["casual", "formal"]),
+        "the values the option accepts, in manifest order: {body}"
+    );
+}
+
+/// An option that declares `choices` accepts those and nothing else. The
+/// settings app renders a dropdown that cannot offer anything else, so this is
+/// the guard for every other client — and for the stored value staying one the
+/// backend understands, since it is injected into the load headers verbatim.
+#[tokio::test]
+async fn an_option_with_choices_takes_only_those() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let opt_path = format!("/backend/{FIXTURE_SOURCE_ENC}/option/styling");
+
+    let (s, body) = post_req(
+        &sock,
+        &opt_path,
+        &token,
+        serde_json::json!({ "value": "casual" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "an offered value stores: {body}");
+    assert_eq!(body["value"], "casual", "body: {body}");
+
+    let (s, body) = post_req(
+        &sock,
+        &opt_path,
+        &token,
+        serde_json::json!({ "value": "formalish" }),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::BAD_REQUEST,
+        "a value off the list must be refused: {body}"
+    );
+    assert_eq!(body["error_code"], "invalid_value", "body: {body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("casual, formal"),
+        "the refusal names what is on offer: {body}"
+    );
+
+    // Refused, so the earlier value is still what is in effect.
+    let (s, body) = get(&sock, &opt_path, &token).await;
+    assert_eq!(s, StatusCode::OK, "body: {body}");
+    assert_eq!(
+        body["value"], "casual",
+        "a refused write changes nothing: {body}"
+    );
+
+    // An option declaring no list still takes anything.
+    let region = format!("/backend/{FIXTURE_SOURCE_ENC}/option/region");
+    let (s, body) = post_req(
+        &sock,
+        &region,
+        &token,
+        serde_json::json!({ "value": "eu-west-9" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "an open-ended option is ungated: {body}");
 }
 
 /// GET on an undeclared option name returns 404 `unknown_option`.

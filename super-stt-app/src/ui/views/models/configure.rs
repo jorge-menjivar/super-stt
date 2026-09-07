@@ -50,6 +50,14 @@ pub fn configure_sheet<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Eleme
                 section = section.add(bool_option_row(&backend.source, option));
                 continue;
             }
+            // An option offering a closed set is the same case as the switch,
+            // widened: nothing to type, so nothing to type wrong, and picking
+            // is the write. It is what an option whose allowed values lived in
+            // its help text always wanted to be.
+            if option.has_choices() {
+                section = section.add(choice_option_row(&backend.source, option));
+                continue;
+            }
             let key = (backend.source.clone(), option.name.clone());
             let input = app
                 .backend_option_inputs
@@ -190,6 +198,45 @@ pub(super) fn bool_option_row<'a>(
         item = item.description(option.description.clone());
     }
     item.control(toggle).into()
+}
+
+/// One option row for an option that declares `choices`: the label and
+/// description beside a dropdown of the values the backend accepts.
+///
+/// Like the switch, and unlike the text field, there is no Save button —
+/// picking is the write. And as with the switch, picking the declared default
+/// clears the override rather than storing a copy of it, which is what keeps
+/// the Reset affordance unnecessary here.
+///
+/// A stored value the backend no longer offers leaves the dropdown showing its
+/// placeholder rather than a wrong selection, so the user picks again.
+pub(super) fn choice_option_row<'a>(
+    source: &'a str,
+    option: &'a BackendOption,
+) -> Element<'a, Message> {
+    let display = option.label.clone().unwrap_or_else(|| option.name.clone());
+    let source = source.to_string();
+    let name = option.name.clone();
+    let choices = option.choices.clone();
+
+    let dropdown = widget::dropdown(
+        option.choices.as_slice(),
+        option.choice_index(),
+        move |index| {
+            Message::Backend(BackendMessage::BackendOptionChosen {
+                source: source.clone(),
+                name: name.clone(),
+                value: choices[index].clone(),
+            })
+        },
+    )
+    .placeholder("Select");
+
+    let mut item = settings::item::builder(display);
+    if !option.description.is_empty() {
+        item = item.description(option.description.clone());
+    }
+    item.control(dropdown).into()
 }
 
 /// One option-entry row for a backend (e.g. `base_url`): the label/description

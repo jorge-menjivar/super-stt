@@ -54,6 +54,7 @@ impl AppModel {
             | BackendMessage::BackendOptionInputChanged { .. }
             | BackendMessage::BackendOptionSaved { .. }
             | BackendMessage::BackendOptionToggled { .. }
+            | BackendMessage::BackendOptionChosen { .. }
             | BackendMessage::BackendOptionReset { .. } => self.handle_backend_config(message),
         }
     }
@@ -137,6 +138,17 @@ impl AppModel {
             .find(|b| b.source == source)
             .and_then(|b| b.options.iter().find(|o| o.name == name))
             .and_then(BackendOption::bool_default)
+    }
+
+    /// The `default` an option declares, as stored. The dropdown's twin of
+    /// [`Self::option_bool_default`], and reverting reads the same way there:
+    /// picking the default back off the list clears the override.
+    fn option_default(&self, source: &str, name: &str) -> Option<String> {
+        self.backends
+            .iter()
+            .find(|b| b.source == source)
+            .and_then(|b| b.options.iter().find(|o| o.name == name))
+            .and_then(|o| o.default.clone())
     }
 
     /// Handle per-backend secret and option configuration messages.
@@ -246,6 +258,19 @@ impl AppModel {
 
             // Explicit reset: clear the stored override and reload so the
             // option reverts to its daemon default.
+            BackendMessage::BackendOptionChosen {
+                source,
+                name,
+                value,
+            } => {
+                self.action_error = None;
+                if self.option_default(&source, &name).as_ref() == Some(&value) {
+                    option_write(clear_backend_option(source, name))
+                } else {
+                    option_write(set_backend_option(source, name, value))
+                }
+            }
+
             BackendMessage::BackendOptionReset { source, name } => {
                 self.action_error = None;
                 option_write(clear_backend_option(source, name))

@@ -549,10 +549,29 @@ pub struct Opt {
     /// Value used when the user sets none. Should match `type`.
     #[serde(default)]
     pub default: Option<OptionDefault>,
+    /// The values this option accepts, when it accepts a closed set. Empty
+    /// means any value of the declared `type`.
+    ///
+    /// Declaring them is what turns a free-text field into a dropdown, and
+    /// what lets the daemon refuse a value the backend would not understand.
+    /// An option whose allowed values were only ever written into its
+    /// `description` accepted anything the user typed, and shipped it.
+    #[serde(default)]
+    pub choices: Vec<OptionDefault>,
     /// Whether a value must be set before the backend can load. Default
     /// `false`.
     #[serde(default)]
     pub required: bool,
+}
+
+impl Opt {
+    /// Whether `value`, in the string form the daemon stores and injects, is
+    /// one this option accepts. An option declaring no choices accepts
+    /// anything, so this is the check itself, not a precondition for it.
+    #[must_use]
+    pub fn accepts(&self, value: &str) -> bool {
+        self.choices.is_empty() || self.choices.iter().any(|c| c.to_string() == value)
+    }
 }
 
 /// The input type of an option.
@@ -1805,6 +1824,64 @@ mod tests {
             m.options[1].default,
             Some(OptionDefault::String("30".into()))
         );
+    }
+
+    /// A `choices` list parses by TOML type the way `default` does, and an
+    /// option that declares none accepts anything — which is what keeps every
+    /// manifest written before the field a valid one.
+    #[test]
+    fn choices_parse_and_gate_the_values_an_option_takes() {
+        let m = Manifest::parse(
+            r#"
+            [backend]
+            source = "github.com/x/y"
+            name = "Y"
+            version = "1.0.0"
+            kind = "wasm"
+            entrypoint = "y.wasm"
+            contract = "v1"
+            description = "Test backend."
+
+            [[options]]
+            name = "styling"
+            description = "The register."
+            default = "formal"
+            choices = ["casual", "formal"]
+
+            [[options]]
+            name = "beam"
+            description = "Beam width."
+            type = "integer"
+            choices = [1, 4]
+
+            [[options]]
+            name = "base_url"
+            description = "Anything goes."
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            m.options[0].choices,
+            vec![
+                OptionDefault::String("casual".into()),
+                OptionDefault::String("formal".into())
+            ]
+        );
+        assert!(m.options[0].accepts("casual"));
+        assert!(!m.options[0].accepts("formalish"));
+
+        // Integers are compared in the string form the daemon stores and
+        // injects, so a numeric choice gates the same way a string one does.
+        assert_eq!(
+            m.options[1].choices,
+            vec![OptionDefault::Integer(1), OptionDefault::Integer(4)]
+        );
+        assert!(m.options[1].accepts("4"));
+        assert!(!m.options[1].accepts("3"));
+
+        // No list, no gate: every option written before this field existed.
+        assert!(m.options[2].choices.is_empty());
+        assert!(m.options[2].accepts("https://gateway.example.com/v1"));
     }
 
     /// Unknown fields and tables are ignored — older daemons must tolerate

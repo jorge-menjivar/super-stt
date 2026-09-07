@@ -224,6 +224,14 @@ label       = "Remove filler sounds"
 description = "Drop um, uh and similar from the transcript."
 type        = "bool"
 default     = true
+
+[[options]]
+name        = "styling"
+label       = "Styling"
+description = "The register the transcript is rewritten in."
+type        = "string"
+default     = "semi-formal"
+choices     = ["casual", "semi-casual", "semi-formal", "formal"]
 ```
 
 A `bool` option is rendered as a switch, so it has no Save button: flipping it
@@ -232,13 +240,27 @@ override rather than writing a value identical to it. Declare a `default` for
 every `bool` — without one the switch starts off, and turning it off again has
 nothing to revert to.
 
+An option that declares `choices` is rendered as a dropdown, and behaves the
+same way: picking writes, and picking the `default` back off the list clears
+the override. Declare them whenever the option takes a closed set of values.
+Writing the allowed values into the `description` instead leaves the user a
+text field, and a value that is merely close enough is stored and sent to the
+backend as if it were valid.
+
+The daemon refuses a write of any value not on the list, so `choices` is a
+contract and not only a hint: `POST /backend/{id}/option/{name}` answers
+`400 invalid_value`. A `bool` must not declare `choices` — it is already a
+switch over the two values its type names — and the `default`, when there is
+one, has to be on the list. Both are refused at publication.
+
 | Field         | Type           | Required | Notes                                                  |
 |---------------|----------------|----------|--------------------------------------------------------|
 | `name`        | string         | yes      | snake_case identifier the backend reads the value by. `[a-z][a-z0-9_]*`, unique within the table. |
 | `label`       | string         | no       | Human-readable label shown in the settings UI. Falls back to `name` when absent. |
 | `description` | string         | yes      | Help text shown beside the input in the settings UI.   |
 | `type`        | string         | no       | `string`, `integer`, or `bool`. Drives the input the UI renders: `bool` gets a switch that writes on the flip, everything else a text field the user saves. Default `string`. |
-| `default`     | matches `type` | no       | Value used when the user sets none. Forbidden on `base_url` — see below. |
+| `default`     | matches `type` | no       | Value used when the user sets none. Forbidden on `base_url` — see below. When `choices` is present, must be one of them. |
+| `choices`     | array of `type` | no      | The values this option accepts. Renders a dropdown, and the daemon refuses to store anything else. Omit it for an open-ended option. Entries must be unique, and a `bool` must not declare any. |
 | `required`    | bool           | no       | Whether a value must be set before the backend can load. Default `false`. |
 
 #### `base_url` and egress
@@ -724,6 +746,10 @@ supported_devices   = ["none"]
   loaded with defaults.
 - Whether a model is online/remote is decided solely by `supported_devices`
   (the `none` sentinel).
+- An option's `choices`, when declared, must be unique, must contain the
+  option's `default` if it declares one, and must not appear on a `bool`. The
+  registry indexer refuses to publish a manifest breaking any of these, and
+  the daemon refuses to store a value the list does not offer.
 - Secret and option `name`s are **snake_case** identifiers matching
   `[a-z][a-z0-9_]*` (e.g. `openai_api_key`, `base_url`), unique within their
   table. The `name` is the wire identifier the backend reads the value by;
