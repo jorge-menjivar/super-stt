@@ -659,6 +659,15 @@
       ],
       "description": "One `[[options]]` declaration — non-secret configuration the backend reads\nas an `x-stt-option-<name>` request header.",
       "properties": {
+        "choices": {
+          "default": [],
+          "description": "The values this option accepts, when it accepts a closed set. Empty\nmeans any value of the declared `type`.\n\nDeclaring them is what turns a free-text field into a dropdown, and\nwhat lets the daemon refuse a value the backend would not understand.\nAn option whose allowed values were only ever written into its\n`description` accepted anything the user typed, and shipped it.",
+          "items": {
+            "$ref": "#/definitions/OptionDefault"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
         "default": {
           "anyOf": [
             {
