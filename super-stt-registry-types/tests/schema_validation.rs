@@ -113,9 +113,9 @@ fn the_schema_still_accepts_the_legacy_provider_key() {
     );
 }
 
-/// The schema requires an `id` of every entry. Six predate the requirement and
-/// cannot be fixed from this file: an entry that declares an `id` pins the
-/// release to it, and none of those six backends publishes a manifest
+/// The schema requires an `id` of every entry. Three predate the requirement
+/// and cannot be fixed from this file: an entry that declares an `id` pins the
+/// release to it, and none of those three backends publishes a manifest
 /// declaring one — so adding it here would turn a missing id into an
 /// `IdMismatch` and drop the backend out of the catalog. Fixing one means
 /// adding `[backend].id` to that backend's own repo, cutting a release, and
@@ -124,14 +124,7 @@ fn the_schema_still_accepts_the_legacy_provider_key() {
 /// They are named here so the backlog is visible and shrinking: delete a name
 /// when its entry gains an `id`. Anything *else* the schema objects to — a new
 /// entry with no id, a malformed key — fails this test.
-const ENTRIES_STILL_WITHOUT_AN_ID: &[&str] = &[
-    "deepgram",
-    "mistral",
-    "openai",
-    "qwen3_asr",
-    "voxtral",
-    "whisper",
-];
+const ENTRIES_STILL_WITHOUT_AN_ID: &[&str] = &["deepgram", "qwen3_asr", "voxtral"];
 
 #[test]
 fn accepts_registry_toml() {
