@@ -15,12 +15,11 @@
 //! work unchanged. The session's `done` frame is the final transcript, so the
 //! separate Phase 4 decode is skipped entirely.
 //!
-//! **What this does not fix.** The daemon's `ws-stream::subscribe` still traps,
-//! so a guest cannot wait on the consumer and its upstream at once and runs
-//! half-duplex: it forwards all audio first, then drains transcripts. Previews
-//! therefore still arrive in a burst after the take ends. This makes the path
-//! honest and cheap — one session per recording carrying the backend's real
-//! output — not yet responsive.
+//! Whether previews arrive as speech is heard is then the guest's doing. The
+//! daemon's `ws-stream::subscribe` is backed by a one-frame lookahead, so a
+//! guest can wait on its consumer and its upstream at once; one that instead
+//! forwards all audio before draining transcripts still delivers its previews
+//! in a burst after the take ends.
 #![cfg(feature = "wasm-backends")]
 
 use std::time::Duration;
