@@ -32,15 +32,6 @@ fn preprocess_text_strips_unsafe_control_and_format_chars() {
 }
 
 #[test]
-fn test_is_simple_extension() {
-    assert!(is_simple_extension("hello", "hello world"));
-    assert!(is_simple_extension("", "hello"));
-    assert!(!is_simple_extension("hello", "hi world"));
-    assert!(!is_simple_extension("hello", "hello"));
-    assert!(!is_simple_extension("hello world", "hello"));
-}
-
-#[test]
 fn test_find_common_prefix() {
     assert_eq!(find_common_prefix("hello world", "hello there"), 6);
     assert_eq!(find_common_prefix("abc", "def"), 0);

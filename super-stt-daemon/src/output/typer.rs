@@ -14,26 +14,13 @@ use log::{debug, info, warn};
 use super_stt_shared::models::protocol::PreviewSource;
 
 /// State for tracking preview updates
+#[derive(Default)]
 pub struct State {
-    pub last_transcription: String,
     /// The last normalized preview, so a repeat is not retyped.
     pub prev_text: String,
     /// Everything recognized so far this recording: a stream's own running
     /// transcript, or the daemon's sliding windows stitched together.
     pub full_session_text: String,
-    /// When we last saw substantial text growth (to commit to full session)
-    pub last_growth_time: std::time::Instant,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            last_transcription: String::new(),
-            prev_text: String::new(),
-            full_session_text: String::new(),
-            last_growth_time: std::time::Instant::now(),
-        }
-    }
 }
 
 impl State {
@@ -197,7 +184,7 @@ impl Typer {
         // user's focused window every time a recording produces no text.
         if processed_text.trim().is_empty() {
             info!("Final transcription is empty; typing nothing");
-            self.reset_after_recording(processed_text);
+            self.reset_after_recording();
             return;
         }
 
@@ -208,19 +195,17 @@ impl Typer {
             info!("Step 6 complete: Final transcription typed directly");
         }
 
-        self.reset_after_recording(processed_text);
+        self.reset_after_recording();
     }
 
     /// Clear the per-recording transcript state so the next recording starts
-    /// clean. Preview tail-matching reads `full_session_text` and `prev_text`,
-    /// so anything left here would be treated as a prefix to extend.
+    /// clean. Window stitching reads `full_session_text` and the repeat check
+    /// reads `prev_text`, so anything left here would be extended.
     ///
     /// Split out of [`Self::process_final_text`] because the no-speech path
     /// finishes a recording without typing anything and still has to reset.
-    pub fn reset_after_recording(&mut self, last_transcription: String) {
+    pub fn reset_after_recording(&mut self) {
         self.state.prev_text.clear();
-        self.state.last_transcription = last_transcription;
-        self.state.last_growth_time = std::time::Instant::now();
 
         info!(
             "Completed sentence. Session text: '{}'",
@@ -238,7 +223,7 @@ impl Typer {
     /// Type a fixed daemon-authored notice into the focused window.
     ///
     /// Deliberately **not** `process_final_text`. That method mutates
-    /// transcript state (`last_transcription`, `prev_text`, `full_session_text`)
+    /// transcript state (`prev_text`, `full_session_text`)
     /// which feeds preview tail-matching on the next recording, and applies
     /// transcript semantics — capitalization, a trailing period, a trailing
     /// space — that a fixed marker must not inherit. A notice is typed verbatim
@@ -314,9 +299,7 @@ impl Typer {
 
         // Also clear state when explicitly clearing preview
         self.state.prev_text.clear();
-        self.state.last_transcription.clear();
         self.state.full_session_text.clear();
-        self.state.last_growth_time = std::time::Instant::now();
 
         info!("Cleared all {chars_to_delete} characters and reset state");
     }

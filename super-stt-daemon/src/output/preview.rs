@@ -72,17 +72,6 @@ pub(crate) fn preprocess_text(text: &str, is_preview: bool) -> String {
     text
 }
 
-/// Simple extension check - much faster than complex word matching
-#[must_use]
-pub fn is_simple_extension(current: &str, new_text: &str) -> bool {
-    if current.is_empty() {
-        return !new_text.is_empty();
-    }
-
-    // Check if new text starts with current text
-    new_text.starts_with(current) && new_text.len() > current.len()
-}
-
 /// Find common prefix (in `char`s) between two strings
 #[must_use]
 pub(crate) fn find_common_prefix(text1: &str, text2: &str) -> usize {

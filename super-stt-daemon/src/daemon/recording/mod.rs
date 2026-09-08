@@ -244,7 +244,7 @@ impl SuperSTTDaemon {
                 // Typed nothing, but the per-recording transcript state still
                 // has to be cleared or it feeds the next recording's preview
                 // tail-matching.
-                typer.reset_after_recording(String::new());
+                typer.reset_after_recording();
             }
             // `transcribing_started` is deliberately NOT emitted: decode never
             // begins. `finalize_recording_session` still emits `final_stt` with

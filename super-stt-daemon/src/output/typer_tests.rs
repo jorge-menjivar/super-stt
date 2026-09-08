@@ -52,7 +52,6 @@ async fn type_notice_leaves_transcript_state_untouched() {
 
     typer.type_notice(notice::TRANSCRIPTION_FAILED).await;
 
-    assert_eq!(typer.state.last_transcription, "");
     assert_eq!(typer.state.prev_text, "");
     assert_eq!(typer.state.full_session_text, "");
 }
@@ -149,11 +148,10 @@ fn reset_after_recording_clears_transcript_state() {
     typer.state.prev_text = "stale".to_string();
     typer.state.full_session_text = "stale session".to_string();
 
-    typer.reset_after_recording(String::new());
+    typer.reset_after_recording();
 
     assert_eq!(typer.state.prev_text, "");
     assert_eq!(typer.state.full_session_text, "");
-    assert_eq!(typer.state.last_transcription, "");
 }
 
 // ---------------------------------------------------------------------------
