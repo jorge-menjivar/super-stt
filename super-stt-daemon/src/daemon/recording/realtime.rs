@@ -255,10 +255,9 @@ impl SuperSTTDaemon {
                     .await;
             }
             Some(StreamEvent::Done(text)) => {
-                info!(
-                    "Realtime session finished: '{}'",
-                    text.chars().take(30).collect::<String>()
-                );
+                // The transcript itself is logged by `post_process_final`,
+                // next to what the processor makes of it.
+                info!("Realtime session finished");
                 *transcript = Some(text);
             }
             Some(StreamEvent::Error(message)) => {

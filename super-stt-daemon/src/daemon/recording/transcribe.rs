@@ -138,10 +138,9 @@ impl SuperSTTDaemon {
 
         match dispatch_transcription(&self.model, processed_audio, 16000, language).await {
             Ok(text) => {
-                info!(
-                    "Transcription completed in {:?}: '{text}'",
-                    start_time.elapsed()
-                );
+                // The text itself is logged by `post_process_final`, next to
+                // what the processor makes of it.
+                info!("Transcription completed in {:?}", start_time.elapsed());
                 Ok(text)
             }
             // One place decides the origin, so the notice cannot disagree with
