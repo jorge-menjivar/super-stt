@@ -180,13 +180,13 @@ fn window(
 /// the words the stitched transcript ended up with.
 fn simulate(
     seed: u64,
+    vocabulary: &Vocabulary,
     interval_secs: f64,
     words: usize,
     reword: f64,
 ) -> (Vec<String>, Vec<String>) {
     let mut rng = Rng(seed);
-    let vocabulary = Vocabulary::load();
-    let text = passage(&mut rng, &vocabulary, words);
+    let text = passage(&mut rng, vocabulary, words);
     let chars: Vec<char> = text.chars().collect();
     // reason: a test timeline; the count fits comfortably.
     #[allow(clippy::cast_precision_loss)]
@@ -207,7 +207,7 @@ fn simulate(
         let from = ((now - window_secs).max(0.0) * CHARS_PER_SECOND) as usize;
         spoken_to = to;
 
-        let normalized = normalize_text(&window(&mut rng, &vocabulary, &chars, from, to, reword));
+        let normalized = normalize_text(&window(&mut rng, vocabulary, &chars, from, to, reword));
         if !normalized.is_empty() && normalized != prev {
             session = merge_window_preview(&session, &normalized);
             prev = normalized;
@@ -255,6 +255,7 @@ struct Score {
 }
 
 fn score(seeds: std::ops::Range<u64>, interval_secs: f64, reword: f64) -> Score {
+    let vocabulary = Vocabulary::load();
     let mut total = Score {
         spoken: 0,
         lost: 0,
@@ -262,7 +263,7 @@ fn score(seeds: std::ops::Range<u64>, interval_secs: f64, reword: f64) -> Score 
     };
     for seed in seeds {
         let words = 60 + usize::try_from(seed % 60).expect("small");
-        let (spoken, stitched) = simulate(seed, interval_secs, words, reword);
+        let (spoken, stitched) = simulate(seed, &vocabulary, interval_secs, words, reword);
         let common = common_words(&spoken, &stitched);
         total.spoken += spoken.len();
         total.lost += spoken.len() - common;
