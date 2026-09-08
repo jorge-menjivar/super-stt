@@ -4,30 +4,38 @@
 # sorted. See registry/README.md for the submission rules.
 
 [deepgram]
-    repo = "github.com/jorge-menjivar/super-stt-deepgram"
-    forge = "github"
+  repo  = "github.com/jorge-menjivar/super-stt-deepgram"
+  forge = "github"
 
 [mistral]
-    repo = "github.com/jorge-menjivar/super-stt-mistral"
-    forge = "github"
+  id    = "app.super-stt.mistral"
+  repo  = "github.com/jorge-menjivar/super-stt-mistral"
+  forge = "github"
 
 [openai]
-    repo = "github.com/jorge-menjivar/super-stt-openai"
-    forge = "github"
+  id    = "app.super-stt.openai"
+  repo  = "github.com/jorge-menjivar/super-stt-openai"
+  forge = "github"
 
 [qwen3_asr]
-    repo = "github.com/jorge-menjivar/super-stt-qwen-asr"
-    forge = "github"
+  repo  = "github.com/jorge-menjivar/super-stt-qwen-asr"
+  forge = "github"
+
+[s1_mini]
+  id    = "app.super-stt.s1-mini"
+  repo  = "github.com/jorge-menjivar/super-stt-s1-mini"
+  forge = "github"
 
 [tidy]
-    id = "app.super-stt.tidy"
-    repo = "github.com/jorge-menjivar/super-stt-tidy"
-    forge = "github"
+  id    = "app.super-stt.tidy"
+  repo  = "github.com/jorge-menjivar/super-stt-tidy"
+  forge = "github"
 
 [voxtral]
-    repo = "github.com/jorge-menjivar/super-stt-voxtral"
-    forge = "github"
+  repo  = "github.com/jorge-menjivar/super-stt-voxtral"
+  forge = "github"
 
 [whisper]
-    repo = "github.com/jorge-menjivar/super-stt-whisper"
-    forge = "github"
+  id    = "app.super-stt.whisper"
+  repo  = "github.com/jorge-menjivar/super-stt-whisper"
+  forge = "github"
