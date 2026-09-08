@@ -132,6 +132,34 @@ fn merge_extends_when_the_window_is_a_re_read_of_the_whole_take() {
     );
 }
 
+/// The model gave the first window lowercase and the second a capital. Same
+/// speech; the second extends the first. This used to type "After After".
+#[test]
+fn merge_extends_when_the_re_read_differs_only_in_case() {
+    assert_eq!(
+        merge_window_preview("after", "After doing the first review"),
+        "After doing the first review"
+    );
+}
+
+/// A window that ends at a pause gets a period the next re-read does not
+/// repeat mid-sentence.
+#[test]
+fn merge_extends_past_the_windows_closing_punctuation() {
+    assert_eq!(
+        merge_window_preview("after doing.", "After doing the first review"),
+        "After doing the first review"
+    );
+}
+
+#[test]
+fn merge_keeps_the_transcript_when_a_shorter_re_read_differs_only_in_case() {
+    assert_eq!(
+        merge_window_preview("After doing the first review", "after."),
+        "After doing the first review"
+    );
+}
+
 #[test]
 fn merge_keeps_the_transcript_when_the_window_is_a_shorter_re_read() {
     assert_eq!(

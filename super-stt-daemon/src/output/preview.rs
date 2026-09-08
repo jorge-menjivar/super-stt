@@ -117,6 +117,22 @@ fn fold(c: char) -> char {
     c.to_lowercase().next().unwrap_or(c)
 }
 
+/// Sentence punctuation the model puts on a window that ends at a pause. It
+/// is not part of what the next window says about the same speech.
+fn trim_trailing_punctuation(text: &str) -> &str {
+    text.trim_end_matches(['.', ',', ';', ':', '!', '?'])
+}
+
+/// Whether `text` starts with `prefix`, ignoring case. Two windows that start
+/// at the same audio can still differ in how the model capitalized their
+/// first word.
+fn starts_with_ignoring_case(text: &str, prefix: &str) -> bool {
+    let mut text = text.chars();
+    prefix
+        .chars()
+        .all(|p| text.next().is_some_and(|t| fold(t) == fold(p)))
+}
+
 /// The longest run of text the end of `session` and the start of `preview`
 /// have in common, compared case-insensitively.
 ///
@@ -182,10 +198,18 @@ pub(crate) fn find_overlap(session: &str, preview: &str) -> Option<Overlap> {
 /// pass replaces the preview anyway.
 #[must_use]
 pub(crate) fn merge_window_preview(session: &str, preview: &str) -> String {
-    if session.is_empty() || preview.starts_with(session) {
+    if session.is_empty() {
         return preview.to_string();
     }
-    if session.starts_with(preview) {
+    // A re-read of the whole take so far. The two readings may differ in the
+    // capital on the first word or the period at the end, which is not a
+    // disagreement about the speech: "after" then "After doing the first
+    // review" used to fail this check and be appended as "After After doing".
+    let session_core = trim_trailing_punctuation(session);
+    if starts_with_ignoring_case(preview, session_core) {
+        return preview.to_string();
+    }
+    if starts_with_ignoring_case(session_core, trim_trailing_punctuation(preview)) {
         return session.to_string();
     }
     if let Some(overlap) = find_overlap(session, preview) {
