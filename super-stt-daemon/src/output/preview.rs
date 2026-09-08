@@ -256,3 +256,7 @@ pub(crate) fn merge_window_preview(session: &str, preview: &str) -> String {
 #[cfg(test)]
 #[path = "preview_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "stitch_simulation_tests.rs"]
+mod stitch_simulation;
