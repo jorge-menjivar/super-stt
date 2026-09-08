@@ -195,25 +195,25 @@ impl SuperSTTDaemon {
                 }
             }
         };
-        // Temporarily override preview setting for this recording, restore after.
-        let original_preview = self
-            .preview_typing_enabled
-            .load(std::sync::atomic::Ordering::Relaxed);
-        if let Some(override_val) = preview {
+        // The per-request override applies to this recording only. It used to
+        // be written into the daemon-wide flag for the recording's duration and
+        // restored afterwards, which also reverted any `/settings/preview_typing`
+        // write that landed in between — the user's toggle did not stick.
+        let preview_typing = preview.unwrap_or_else(|| {
             self.preview_typing_enabled
-                .store(override_val, std::sync::atomic::Ordering::Relaxed);
-        }
+                .load(std::sync::atomic::Ordering::Relaxed)
+        });
 
         let mut typer = Typer::new(simulator);
         let response = self
-            .handle_record_internal(&mut typer, write_mode, effective_mode, language.as_deref())
+            .handle_record_internal(
+                &mut typer,
+                write_mode,
+                effective_mode,
+                preview_typing,
+                language.as_deref(),
+            )
             .await;
-
-        // Restore original preview setting.
-        if preview.is_some() {
-            self.preview_typing_enabled
-                .store(original_preview, std::sync::atomic::Ordering::Relaxed);
-        }
         // Return the simulator to the cache for reuse, unless this backend
         // goes stale while idle (see `Simulator::is_cacheable`) — in which
         // case it is dropped here and the next recording builds a fresh one.

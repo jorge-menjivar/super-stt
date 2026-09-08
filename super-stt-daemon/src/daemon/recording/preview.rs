@@ -53,6 +53,7 @@ impl SuperSTTDaemon {
         &self,
         write_mode: bool,
         stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
+        preview_typing: bool,
     ) -> Result<RecordingSession> {
         let silence_detection_disabled = !stop_mode.silence_detection_enabled();
         info!("🎛️ Recording mode: {stop_mode}");
@@ -127,6 +128,7 @@ impl SuperSTTDaemon {
             recorder_handle,
             model_processing_interval,
             force_preview_support,
+            preview_typing,
             actually_typed,
             preview_buffer,
             speech_state,
@@ -207,10 +209,7 @@ impl SuperSTTDaemon {
             // incremental results — the two are decoupled (a client can stream
             // preview without on-screen typing, and vice versa).
             let streaming = self.preview_text.read().await.is_some();
-            let typing = self
-                .preview_typing_enabled
-                .load(std::sync::atomic::Ordering::Relaxed);
-            if !streaming && !typing {
+            if !streaming && !session.preview_typing {
                 debug!("No preview client and preview-typing off; skipping preview transcription");
                 continue;
             }
@@ -402,10 +401,7 @@ impl SuperSTTDaemon {
         // active. The loop may be running purely to stream preview frames to
         // a client (`stream_realtime`) with preview-typing off, in which case
         // it must not type.
-        let type_on_screen = write_mode
-            && self
-                .preview_typing_enabled
-                .load(std::sync::atomic::Ordering::Relaxed);
+        let type_on_screen = write_mode && session.preview_typing;
         let taken = if type_on_screen {
             session
                 .actually_typed
@@ -514,6 +510,7 @@ mod tests {
             recorder_handle: tokio::spawn(async { anyhow::Ok(Vec::<f32>::new()) }),
             model_processing_interval: Duration::from_secs(2),
             force_preview_support: true,
+            preview_typing: true,
             actually_typed: Arc::new(std::sync::Mutex::new(String::new())),
             preview_buffer: Arc::new(parking_lot::Mutex::new(VecDeque::from(buffer))),
             speech_state: Arc::new(parking_lot::Mutex::new(
@@ -603,13 +600,16 @@ mod tests {
         assert_eq!(preview_window(Duration::from_secs(60)), MAX_PREVIEW_WINDOW);
     }
 
-    /// Turning preview typing off mid-recording must not strand the preview
-    /// already on screen: the clear goes by what was typed, not by the flag.
+    /// The clear goes by what was typed, not by any flag. Here the recording
+    /// types previews (a per-request override) while the daemon-wide default
+    /// is off; the preview must still be erased.
     #[tokio::test]
-    async fn the_clear_erases_what_was_typed_even_after_preview_typing_is_turned_off() {
+    async fn the_clear_erases_what_was_typed_whatever_the_default_says() {
         use std::sync::atomic::Ordering;
         let daemon = crate::daemon::types::test_daemon().await;
-        daemon.preview_typing_enabled.store(true, Ordering::Relaxed);
+        daemon
+            .preview_typing_enabled
+            .store(false, Ordering::Relaxed);
         let session = session_over(Vec::new(), 16_000);
         let (sim, screen) = crate::output::keyboard::Simulator::capture();
         let mut typer = crate::output::typer::Typer::new(sim);
@@ -624,9 +624,6 @@ mod tests {
             .await;
         assert_eq!(*screen.lock().unwrap(), "Hello world");
 
-        daemon
-            .preview_typing_enabled
-            .store(false, Ordering::Relaxed);
         SuperSTTDaemon::clear_preview_text(&session.actually_typed, &mut typer, true).await;
 
         assert_eq!(*screen.lock().unwrap(), "");

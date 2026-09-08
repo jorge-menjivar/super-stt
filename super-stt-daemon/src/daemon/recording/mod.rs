@@ -30,6 +30,11 @@ struct RecordingSession {
     // turns it on: every sliding-window pass is a transcription Phase 4
     // repeats, and for an online model a billed one.
     pub(super) force_preview_support: bool,
+    // Whether previews are typed on screen during this recording: the
+    // request's override, or the daemon-wide default when it gave none.
+    // Resolved once at the start so a settings change mid-recording neither
+    // affects the take in progress nor gets reverted when it ends.
+    pub(super) preview_typing: bool,
     pub(super) actually_typed: Arc<std::sync::Mutex<String>>,
     // Shared with the recorder's ring buffer (`get_audio_buffer_ref`), which is
     // a `parking_lot::Mutex` (Tier 3 #5).
@@ -67,6 +72,7 @@ impl SuperSTTDaemon {
         typer: &mut Typer,
         write_mode: bool,
         stop_mode: RecordingStopMode,
+        preview_typing: bool,
         request_language: Option<&str>,
     ) -> DaemonResponse {
         // Check if already busy - prevent multiple simultaneous recordings
@@ -97,7 +103,13 @@ impl SuperSTTDaemon {
 
         // Wait for recording to complete and return the transcription.
         match self
-            .record_and_transcribe(typer, write_mode, stop_mode, request_language)
+            .record_and_transcribe(
+                typer,
+                write_mode,
+                stop_mode,
+                preview_typing,
+                request_language,
+            )
             .await
         {
             // Cycle completed successfully (empty text = no speech, still success).
@@ -162,12 +174,15 @@ impl SuperSTTDaemon {
         typer: &mut Typer,
         write_mode: bool,
         stop_mode: RecordingStopMode,
+        preview_typing: bool,
         request_language: Option<&str>,
     ) -> Result<Result<String, String>> {
         info!("Starting direct audio recording in daemon with simplified architecture");
 
         // Phase 1: spawn the recorder. `busy` is set inside setup.
-        let session = self.spawn_recorder(write_mode, stop_mode).await?;
+        let session = self
+            .spawn_recorder(write_mode, stop_mode, preview_typing)
+            .await?;
         // Capture is starting — announce it now that the recorder exists.
         self.emit_recording_started(write_mode).await;
 
