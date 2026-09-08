@@ -390,17 +390,10 @@ impl SuperSTTDaemon {
             });
         }
 
-        // Type on screen if in write mode. The typing is now async, and the
-        // `actually_typed` guard is a `!Send` `std::Mutex` guard that cannot
-        // be held across an `.await`. Take the mirror string out in a scope
-        // that drops the guard before typing, then write it back — safe
-        // because `update_preview` and `clear_preview` both run under
-        // `&mut Typer` and never overlap (audit Tier 3 #35). Skip on a
-        // poisoned lock, as before.
-        // Type on screen only when write-mode AND preview-typing are both
-        // active. The loop may be running purely to stream preview frames to
-        // a client (`stream_realtime`) with preview-typing off, in which case
-        // it must not type.
+        // Type on screen only when write mode and preview typing are both on.
+        // The loop may be running purely to stream preview frames to a client
+        // (`stream_realtime`) with preview typing off, in which case it must
+        // not type.
         //
         // And only while capture is still running. A preview whose
         // transcription finishes after the recorder stopped is typed and then
@@ -408,6 +401,13 @@ impl SuperSTTDaemon {
         // delays the final transcript by exactly those keystrokes. Clients
         // still get the frame: for them it is the latest text, not wasted
         // motion.
+        //
+        // The `actually_typed` guard is a `!Send` `std::Mutex` guard that
+        // cannot be held across an `.await`. Take the mirror string out in a
+        // scope that drops the guard before typing, then write it back — safe
+        // because `update_preview` and `clear_preview` both run under
+        // `&mut Typer` and never overlap (audit Tier 3 #35). Skip on a
+        // poisoned lock, as before.
         let type_on_screen =
             write_mode && session.preview_typing && !session.recorder_handle.is_finished();
         let taken = if type_on_screen {
@@ -496,7 +496,7 @@ impl SuperSTTDaemon {
         // rejects new recordings while transcription is in progress.
         *self.manual_stop_tx.write().await = None;
 
-        // Clear preview after recording is done (only if preview typing was enabled)
+        // Erase whatever preview was typed during Phase 2.
         Self::clear_preview_text(&session.actually_typed, typer, write_mode).await;
 
         Ok(full_audio_data)

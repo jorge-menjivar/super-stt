@@ -263,8 +263,8 @@ impl SuperSTTDaemon {
             info!("🎤 No speech detected during the take; skipping transcription");
             if write_mode {
                 // Typed nothing, but the per-recording transcript state still
-                // has to be cleared or it feeds the next recording's preview
-                // tail-matching.
+                // has to be cleared or it feeds the next recording's window
+                // stitching.
                 typer.reset_after_recording();
             }
             // `transcribing_started` is deliberately NOT emitted: decode never

@@ -40,7 +40,7 @@ async fn type_notice_types_the_marker_verbatim() {
     assert_eq!(*buf.lock().unwrap(), "[Super STT: no model loaded]");
 }
 
-/// Transcript state feeds preview tail-matching on the *next* recording. If a
+/// Transcript state feeds window stitching on the *next* recording. If a
 /// notice landed in it, the typer would try to extend "[Super STT: …]" into the
 /// following sentence.
 // `start_paused` so the notice's key-release delay is virtual — this test
@@ -125,7 +125,7 @@ async fn process_final_text_still_types_a_non_empty_transcript() {
 }
 
 /// Skipping the typing must NOT skip the state reset: leftover session text
-/// would feed preview tail-matching on the next recording.
+/// would feed window stitching on the next recording.
 #[tokio::test]
 async fn process_final_text_resets_state_even_when_it_types_nothing() {
     let (sim, _buf) = Simulator::capture();

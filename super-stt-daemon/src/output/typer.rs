@@ -13,7 +13,7 @@ use crate::output::preview::{
 use log::{debug, info, warn};
 use super_stt_shared::models::protocol::PreviewSource;
 
-/// State for tracking preview updates
+/// The running transcript of the current recording.
 #[derive(Default)]
 pub struct State {
     /// The last normalized preview, so a repeat is not retyped.
@@ -67,7 +67,7 @@ impl State {
 /// been captured and transcribed, long past any plausible key-release window.
 const NOTICE_KEY_RELEASE_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Unified, simplified preview typer that combines the best of both approaches
+/// Types previews and the final transcript into the focused window.
 pub struct Typer {
     keyboard_simulator: Simulator,
     state: State,
@@ -176,7 +176,7 @@ impl Typer {
         self.state.prev_text = normalized;
     }
 
-    /// Process final text (completed sentence) - Uses full session audio
+    /// Type the final transcript, then reset for the next recording.
     pub async fn process_final_text(&mut self, transcription_result: &str) {
         // No preview typing, type directly
         let processed_text = preprocess_text(transcription_result, false);
@@ -194,7 +194,7 @@ impl Typer {
         if let Err(e) = self.keyboard_simulator.type_text(&final_text).await {
             warn!("Failed to type final transcription: {e}");
         } else {
-            info!("Step 6 complete: Final transcription typed directly");
+            info!("Final transcript typed");
         }
 
         self.reset_after_recording();
@@ -225,11 +225,11 @@ impl Typer {
     /// Type a fixed daemon-authored notice into the focused window.
     ///
     /// Deliberately **not** `process_final_text`. That method mutates
-    /// transcript state (`prev_text`, `full_session_text`)
-    /// which feeds preview tail-matching on the next recording, and applies
-    /// transcript semantics — capitalization, a trailing period, a trailing
-    /// space — that a fixed marker must not inherit. A notice is typed verbatim
-    /// and leaves session state alone.
+    /// transcript state (`prev_text`, `full_session_text`), which the next
+    /// recording's window stitching would extend, and applies transcript
+    /// semantics — capitalization, a trailing period, a trailing space — that
+    /// a fixed marker must not inherit. A notice is typed verbatim and leaves
+    /// session state alone.
     ///
     /// Routed through the same [`sanitize_for_typing`] choke point as every
     /// other write path (audit 2 Tier 3 #8). The callers pass constants, so
