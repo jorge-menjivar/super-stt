@@ -456,12 +456,7 @@ impl SuperSTTDaemon {
             None
         };
         if let Some(mut taken) = taken {
-            info!(
-                "Clearing preview text: '{}'",
-                taken.chars().take(50).collect::<String>()
-            );
             typer.clear_preview(&mut taken).await;
-            info!("Preview cleared, actually_typed is now: '{taken}'");
             if let Ok(mut g) = actually_typed.lock() {
                 *g = taken;
             }

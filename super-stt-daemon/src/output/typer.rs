@@ -138,40 +138,26 @@ impl Typer {
         actually_typed: &mut String,
     ) {
         let normalized = normalize_text(new_text);
-
-        info!(
-            "Preview update ({source}): new='{}', prev='{}', typed='{}'",
-            normalized.chars().take(30).collect::<String>(),
-            self.state.prev_text.chars().take(30).collect::<String>(),
-            actually_typed.chars().take(30).collect::<String>()
+        debug!(
+            "Preview update ({source}): new='{normalized}', prev='{}', typed='{actually_typed}'",
+            self.state.prev_text
         );
 
-        // Skip if text hasn't changed
         if normalized == self.state.prev_text {
-            debug!("Text unchanged, skipping");
+            debug!("Preview unchanged; nothing to type");
             return;
         }
-
-        // Skip empty text
         if normalized.is_empty() {
-            debug!("Empty text, skipping");
+            debug!("Preview is empty; nothing to type");
             return;
         }
 
         self.state.absorb(&normalized, source);
         let display_text = capitalize_first(&self.state.full_session_text);
+        // The head of a running transcript stops changing after the first
+        // seconds; its tail is where each window lands.
+        info!("Transcript so far ends '{}'", tail_of(&display_text, 40));
 
-        info!(
-            "Display logic: display='{}', session='{}'",
-            display_text.chars().take(30).collect::<String>(),
-            self.state
-                .full_session_text
-                .chars()
-                .take(30)
-                .collect::<String>()
-        );
-
-        // Apply the update to screen
         self.apply_text_update(&display_text, actually_typed).await;
         self.state.prev_text = normalized;
     }
@@ -208,17 +194,6 @@ impl Typer {
     /// finishes a recording without typing anything and still has to reset.
     pub fn reset_after_recording(&mut self) {
         self.state.prev_text.clear();
-
-        info!(
-            "Completed sentence. Session text: '{}'",
-            self.state
-                .full_session_text
-                .chars()
-                .take(50)
-                .collect::<String>()
-        );
-
-        // Clear session for next recording
         self.state.full_session_text.clear();
     }
 
@@ -266,12 +241,6 @@ impl Typer {
     /// old text behind, and the clear at the end of a recording left the first
     /// characters of the preview in front of the final transcript.
     async fn apply_text_update(&mut self, new_text: &str, actually_typed: &mut String) {
-        info!(
-            "Typing logic: old_typed='{}', new_display='{}'",
-            actually_typed.chars().take(30).collect::<String>(),
-            new_text.chars().take(30).collect::<String>(),
-        );
-
         self.retype_from_first_difference(actually_typed, new_text)
             .await;
 
@@ -279,32 +248,31 @@ impl Typer {
         actually_typed.push_str(new_text);
     }
 
-    /// Clear all typed text and reset state
+    /// Erase the typed preview from the screen and reset the transcript state.
     pub async fn clear_preview(&mut self, actually_typed: &mut String) {
-        info!("clear_preview called with actually_typed: '{actually_typed}'");
-
-        if actually_typed.is_empty() {
-            info!("actually_typed is empty, nothing to clear");
-            return;
-        }
-
         let chars_to_delete = actually_typed.chars().count();
-        info!("Backspacing {chars_to_delete} characters");
-
-        if let Err(e) = self.keyboard_simulator.backspace_n(chars_to_delete).await {
-            warn!("Failed to backspace preview text: {e}");
+        if chars_to_delete == 0 {
+            debug!("No preview on screen to clear");
         } else {
-            info!("Successfully backspaced {chars_to_delete} characters");
+            info!("Clearing the {chars_to_delete}-character preview");
+            if let Err(e) = self.keyboard_simulator.backspace_n(chars_to_delete).await {
+                warn!("Failed to backspace preview text: {e}");
+            }
         }
 
         actually_typed.clear();
-
-        // Also clear state when explicitly clearing preview
         self.state.prev_text.clear();
         self.state.full_session_text.clear();
-
-        info!("Cleared all {chars_to_delete} characters and reset state");
     }
+}
+
+/// The last `n` chars of `text`, marked when that is not all of it.
+fn tail_of(text: &str, n: usize) -> String {
+    let total = text.chars().count();
+    if total <= n {
+        return text.to_string();
+    }
+    format!("…{}", text.chars().skip(total - n).collect::<String>())
 }
 
 #[cfg(test)]
