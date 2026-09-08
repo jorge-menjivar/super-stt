@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Contract: the published document has to be worth publishing.
 //!
-//! `just openapi-check` already proves the committed `openapi.json` matches
-//! what the router generates. That is a narrower claim than it sounds: it
-//! catches a *stale* file, not a *wrong* one. Regenerating turns any mistake
-//! into a committed mistake, and the check goes green.
+//! CI generates `openapi.json` from the router and publishes it, so the
+//! document can never be stale. That says nothing about it being *right*:
+//! generation turns any mistake in the route declarations into a published
+//! mistake, quietly.
 //!
 //! These tests are the other half. They assert the things a reader depends on
 //! and nothing else enforces:
@@ -146,7 +146,7 @@ fn the_document_and_the_router_cover_the_same_paths() {
 /// utoipa derives the id from the handler's function name alone, and nothing in
 /// the language objects to two modules each having a `set`. The result is a
 /// document that looks fine by every other measure — the paths are distinct,
-/// `openapi-check` is green — while the ids collide silently.
+/// generation succeeds — while the ids collide silently.
 ///
 /// The id is what tooling keys on downstream, so the damage lands there. Swagger
 /// UI builds its per-operation DOM ids from it: two operations sharing one merge

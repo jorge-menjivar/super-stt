@@ -55,8 +55,9 @@ Reference:
 
 - **[Browse the API reference](https://jorge-menjivar.github.io/super-stt/protocol/)**
   — every endpoint, parameter and response shape, rendered from
-  [openapi.json](./openapi.json). Point a client generator at that file to get
-  a typed client in your language.
+  [openapi.json](https://jorge-menjivar.github.io/super-stt/protocol/openapi.json).
+  Point a client generator at that file to get a typed client in your
+  language.
 
   Two renderings of the same document, each linking to the other:
   [Swagger UI](https://jorge-menjivar.github.io/super-stt/protocol/) and
@@ -73,10 +74,11 @@ Reference:
 
 The OpenAPI document is generated from the daemon's router, not maintained
 alongside it: every route is registered through the same declaration that
-carries its documentation, and CI fails when the committed file and the router
-disagree. Regenerate it with `just openapi`. The prose above is not replaced by
-it — that explains *when* to call an endpoint and how the pieces fit, where the
-spec states the shapes exactly, for tooling.
+carries its documentation. It is not committed; CI generates it on every push
+and publishes it at the link above, and `just openapi` writes it locally to
+`docs/protocol/openapi.json`. The prose above is not replaced by it — that
+explains *when* to call an endpoint and how the pieces fit, where the spec
+states the shapes exactly, for tooling.
 
 ## Add your own model
 

@@ -85,13 +85,6 @@ jobs:
       - name: Check generated TOML schemas are current
         run: just schema-check
 
-      # The protocol spec is generated from the daemon's router, so a route
-      # added or changed without regenerating it is drift between what the
-      # daemon serves and what it publishes. Failing here is the whole point:
-      # the fix is `just openapi`, and the diff above says what moved.
-      - name: Check the OpenAPI document is current
-        run: just openapi-check
-
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -174,21 +167,53 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # No Rust, and no build: this job copies files the repo already contains.
-      #
-      # It used to run `just openapi` so that what it published came from the
-      # router rather than the committed file. That bought nothing —
-      # `openapi-check` in the `test` job already proves those are the same
-      # thing on this commit — and it cost a way to fail, which it promptly
-      # did: building the daemon needs its full system dependency set (it links
-      # xkbcommon through enigo), and a trimmed list broke this job while every
-      # other check stayed green.
+      - uses: taiki-e/install-action@v2.87.5
+        with:
+          tool: just
+
+      # The generator is a daemon binary, and the daemon links xkbcommon
+      # through enigo, so it needs the same system libraries the test job
+      # installs. A trimmed list broke this job once; keep it identical.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libegl1-mesa-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxss-dev \
+            libasound2-dev \
+            libdbus-1-dev \
+            pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-openapi-${{ hashFiles('**/Cargo.lock') }}
+
+      # The OpenAPI document is not committed. It is built from the router
+      # here, on every push and pull request, so what gets published is what
+      # this commit's daemon serves and nobody has to regenerate it by hand.
+      # A route change that breaks generation fails this job on the PR.
       #
       # Deliberately not `needs: test`. On a push to main that matrix is beta
       # and nightly, so gating on it would let an unrelated nightly regression
-      # stop the docs publishing. Nothing here can publish an internally
-      # inconsistent site: it ships the committed document as-is, and a stale
-      # one means `openapi-check` is already failing loudly on the same run.
+      # stop the docs publishing.
+      - name: Generate the OpenAPI document
+        run: just openapi
+
       - name: Assemble the site
         run: |
           set -euo pipefail

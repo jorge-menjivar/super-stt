@@ -19,6 +19,10 @@
 lcov.info
 coverage-html/
 
+# Generated from the daemon's router by `just openapi`; CI generates and
+# publishes it, so it is never committed.
+docs/protocol/openapi.json
+
 docs/design/
 docs/superpowers/
 .superpowers/
