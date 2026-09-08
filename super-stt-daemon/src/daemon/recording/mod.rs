@@ -47,6 +47,27 @@ struct RecordingSession {
     pub(super) start_time: Instant,
 }
 
+/// The take's audio for the final decode: cut back to its last speech.
+///
+/// A take's last moments are the stop key and a breath, and a batch model
+/// invents words for them ("…everything works. you"). The cut is judged by the
+/// same adaptive threshold the recorder used to hear the speech. A streamed
+/// take never comes here: its backend heard the audio live.
+fn audio_for_final_decode<'a>(
+    full_audio_data: &'a [f32],
+    speech_state: &parking_lot::Mutex<crate::audio::state::RecordingState>,
+) -> &'a [f32] {
+    let threshold = speech_state.lock().get_speech_threshold();
+    let audio = crate::audio::trim::trim_trailing_silence(full_audio_data, 16000, threshold);
+    if audio.len() < full_audio_data.len() {
+        info!(
+            "Trimmed {} ms of trailing non-speech before the final decode",
+            (full_audio_data.len() - audio.len()) * 1000 / 16000
+        );
+    }
+    audio
+}
+
 impl SuperSTTDaemon {
     /// Surface a recording failure through the user's configured channel.
     ///
@@ -262,7 +283,10 @@ impl SuperSTTDaemon {
         let raw_transcript = match streamed {
             Some(text) => text,
             None => match self
-                .transcribe_final(&full_audio_data, request_language)
+                .transcribe_final(
+                    audio_for_final_decode(&full_audio_data, &speech_state),
+                    request_language,
+                )
                 .await
             {
                 Ok(text) => text,
