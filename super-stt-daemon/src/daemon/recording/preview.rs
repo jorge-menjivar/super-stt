@@ -401,7 +401,15 @@ impl SuperSTTDaemon {
         // active. The loop may be running purely to stream preview frames to
         // a client (`stream_realtime`) with preview-typing off, in which case
         // it must not type.
-        let type_on_screen = write_mode && session.preview_typing;
+        //
+        // And only while capture is still running. A preview whose
+        // transcription finishes after the recorder stopped is typed and then
+        // erased by the clear that follows within the same second, so it only
+        // delays the final transcript by exactly those keystrokes. Clients
+        // still get the frame: for them it is the latest text, not wasted
+        // motion.
+        let type_on_screen =
+            write_mode && session.preview_typing && !session.recorder_handle.is_finished();
         let taken = if type_on_screen {
             session
                 .actually_typed
@@ -505,9 +513,10 @@ mod tests {
     use std::time::Duration;
 
     /// A session over `buffer` captured at `rate`, with everything else inert.
+    /// The recorder is still running, as it is while previews are typed.
     fn session_over(buffer: Vec<f32>, rate: usize) -> RecordingSession {
         RecordingSession {
-            recorder_handle: tokio::spawn(async { anyhow::Ok(Vec::<f32>::new()) }),
+            recorder_handle: tokio::spawn(std::future::pending()),
             model_processing_interval: Duration::from_secs(2),
             force_preview_support: true,
             preview_typing: true,
@@ -598,6 +607,34 @@ mod tests {
     #[test]
     fn the_window_is_capped() {
         assert_eq!(preview_window(Duration::from_secs(60)), MAX_PREVIEW_WINDOW);
+    }
+
+    /// A preview that lands after capture ended is not typed: the clear is
+    /// about to erase it anyway, and clients still receive the frame.
+    #[tokio::test]
+    async fn a_preview_that_lands_after_capture_ended_is_not_typed() {
+        let daemon = crate::daemon::types::test_daemon().await;
+        let mut session = session_over(Vec::new(), 16_000);
+        session.recorder_handle = tokio::spawn(async { anyhow::Ok(Vec::<f32>::new()) });
+        // Let the recorder task run to completion before the preview lands.
+        while !session.recorder_handle.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        let (sim, screen) = crate::output::keyboard::Simulator::capture();
+        let mut typer = crate::output::typer::Typer::new(sim);
+
+        daemon
+            .emit_preview(
+                "the words",
+                super_stt_shared::models::protocol::PreviewSource::Window,
+                &session,
+                &mut typer,
+                true,
+            )
+            .await;
+
+        assert_eq!(*screen.lock().unwrap(), "");
+        assert_eq!(*session.actually_typed.lock().unwrap(), "");
     }
 
     /// The clear goes by what was typed, not by any flag. Here the recording
