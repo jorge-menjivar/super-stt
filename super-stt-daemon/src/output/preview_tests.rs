@@ -83,18 +83,57 @@ fn find_overlap_ignores_case() {
 fn find_overlap_rejects_a_run_far_from_the_seam() {
     assert_eq!(
         find_overlap(
-            "the cat sat on the mat and then it slept",
+            "the cat sat on the mat and then it slept for a very long time in the warm afternoon sun",
             "the cat sat purring"
         ),
         None
     );
 }
 
-/// A common word and its space is not evidence of shared audio.
+/// A small model rewords both ends of the shared stretch. "I'm trying
+/// whisper. It's more breathing timing" and "And a whisper, a small breathing
+/// tiny model" share "breathing" thirty characters short of the transcript's
+/// end and thirty into the window, and that is still the seam.
 #[test]
-fn find_overlap_needs_a_run_long_enough_to_mean_something() {
-    assert_eq!(find_overlap("i went to the", "the store"), None);
-    assert_eq!(find_overlap("and i like", "like it"), None);
+fn find_overlap_survives_a_reworded_seam() {
+    let session = "I'm trying whisper. It's more breathing timing";
+    let preview = "And a whisper, a small breathing tiny model";
+    let o = find_overlap(session, preview).expect("breathing is shared");
+    // The run is "breathing" plus whatever its neighbours happen to share
+    // ("timing" and "tiny" both start with "ti"); where exactly it ends is
+    // immaterial as long as the transcript keeps its text up to there and the
+    // window supplies the rest.
+    assert!(
+        session[..o.session_end].contains("more breathing"),
+        "run ends at {:?}",
+        &session[..o.session_end]
+    );
+    assert!(
+        preview[o.preview_end..].ends_with("ny model"),
+        "window continues with {:?}",
+        &preview[o.preview_end..]
+    );
+}
+
+/// A whole word exactly at the seam is the seam, however short.
+#[test]
+fn find_overlap_accepts_a_whole_word_exactly_at_the_seam() {
+    let o = find_overlap("i went to the", "the store").expect("the seam word");
+    assert_eq!(o.session_end, 13);
+    assert_eq!(o.preview_end, 3);
+    // The transcript's closing period does not move the seam.
+    let o = find_overlap("saying to text.", "Text right now").expect("the seam word");
+    assert_eq!(o.session_end, 14);
+    assert_eq!(o.preview_end, 4);
+}
+
+/// Short runs that do not sit at the seam are still coincidences.
+#[test]
+fn find_overlap_rejects_a_short_run_away_from_the_seam() {
+    // "like" ends the transcript but the window does not start with it.
+    assert_eq!(find_overlap("and i like", "we like it"), None);
+    // Two characters are never enough, even at the seam.
+    assert_eq!(find_overlap("i went to", "to be"), None);
 }
 
 /// Two equally long runs: "hello " at the window's start and " world" deeper
@@ -197,6 +236,26 @@ fn merge_never_shrinks_the_transcript() {
     assert_eq!(
         merge_window_preview("my name is jorge washington", "name is jorge"),
         "my name is jorge washington"
+    );
+}
+
+/// What the whisper take produced as "…to text. text right now".
+#[test]
+fn merge_stitches_a_whole_word_at_the_seam() {
+    assert_eq!(
+        merge_window_preview("what I'm saying to text.", "Text right now"),
+        "what I'm saying to text right now"
+    );
+}
+
+#[test]
+fn merge_continues_from_a_reworded_seam() {
+    assert_eq!(
+        merge_window_preview(
+            "I'm trying whisper. It's more breathing timing",
+            "And a whisper, a small breathing tiny model"
+        ),
+        "I'm trying whisper. It's more breathing tiny model"
     );
 }
 
