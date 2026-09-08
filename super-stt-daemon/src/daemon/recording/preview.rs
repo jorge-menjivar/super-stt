@@ -20,12 +20,11 @@ const MIN_PREVIEW_WINDOW: Duration = Duration::from_secs(5);
 /// takes longer still; this is where that stops.
 const MAX_PREVIEW_WINDOW: Duration = Duration::from_secs(15);
 
-/// Audio shared between consecutive windows. The typer stitches previews by
-/// finding the tail of what it has in the next window
-/// (`find_tail_match_in_text`), which needs the two windows to have heard some
-/// of the same speech. Without overlap the match can only succeed by
-/// coincidence, the typer falls back to keeping the longer text, and the typed
-/// preview stalls after the first window.
+/// Audio shared between consecutive windows. The typer stitches windows by the
+/// text they share (`merge_window_preview`), which needs the two windows to
+/// have heard some of the same speech. Without overlap the match can only
+/// succeed by coincidence, the typer falls back to appending the window whole,
+/// and the typed preview repeats itself at every seam.
 const PREVIEW_OVERLAP: Duration = Duration::from_secs(3);
 
 /// How much recent capture a preview pass transcribes: everything since the
@@ -417,7 +416,9 @@ impl SuperSTTDaemon {
             None
         };
         if let Some(mut actually_typed) = taken {
-            typer.update_preview(text, &mut actually_typed).await;
+            typer
+                .update_preview(text, source, &mut actually_typed)
+                .await;
             if let Ok(mut g) = session.actually_typed.lock() {
                 *g = actually_typed;
             }

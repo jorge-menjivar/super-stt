@@ -1,27 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! The preview typer state machine: session/stabilization state plus the
-//! keyboard-driving update logic. The pure text-diff algorithms it builds on
-//! live in [`crate::output::preview`].
+//! The preview typer state machine: the running transcript of the current
+//! recording plus the keyboard-driving update logic. The pure text algorithms
+//! it builds on — normalization, the screen diff, window stitching — live in
+//! [`crate::output::preview`].
 
 use crate::output::keyboard::Simulator;
 use crate::output::preview::{
-    find_common_prefix, find_tail_match_in_text, preprocess_text, sanitize_for_typing,
+    capitalize_first, find_common_prefix, merge_window_preview, normalize_text, preprocess_text,
+    sanitize_for_typing,
 };
 use log::{debug, info, warn};
+use super_stt_shared::models::protocol::PreviewSource;
 
 /// State for tracking preview updates
 pub struct State {
     pub last_transcription: String,
+    /// The last normalized preview, so a repeat is not retyped.
     pub prev_text: String,
-    /// Complete transcription built from all audio (for final output)
+    /// Everything recognized so far this recording: a stream's own running
+    /// transcript, or the daemon's sliding windows stitched together.
     pub full_session_text: String,
     /// When we last saw substantial text growth (to commit to full session)
     pub last_growth_time: std::time::Instant,
-    /// History of transcriptions for stabilization
-    pub text_storage: Vec<String>,
-    /// Text confirmed by appearing in multiple transcriptions
-    pub stabilized_text: String,
 }
 
 impl Default for State {
@@ -31,123 +32,29 @@ impl Default for State {
             prev_text: String::new(),
             full_session_text: String::new(),
             last_growth_time: std::time::Instant::now(),
-            text_storage: Vec::new(),
-            stabilized_text: String::new(),
         }
     }
 }
 
 impl State {
-    /// Stabilization and session text update (Phase 1).
+    /// Fold one preview into the running transcript.
     ///
-    /// Keyboard-free: mutates only session/stabilization state, so it is
-    /// independently testable.
-    fn update_with_stabilization(&mut self, new_preview_text: &str) {
-        // Add current text to storage
-        self.text_storage.push(new_preview_text.to_string());
-
-        // Keep only recent texts for stabilization (prevent unbounded growth)
-        if self.text_storage.len() > 10 {
-            self.text_storage.remove(0);
-        }
-
-        // Find common prefix between last two texts
-        if self.text_storage.len() >= 2 {
-            let last_two = &self.text_storage[self.text_storage.len() - 2..];
-            let common_prefix = find_common_prefix(&last_two[0], &last_two[1]);
-            let prefix_text = last_two[0].chars().take(common_prefix).collect::<String>();
-
-            // Only update stabilized text if we found a longer stable prefix
-            if prefix_text.len() > self.stabilized_text.len() {
-                self.stabilized_text = prefix_text;
-                debug!(
-                    "Updated stabilized text: '{}'",
-                    self.stabilized_text.chars().take(30).collect::<String>()
-                );
-            }
-        }
-
-        // Update full session text using stabilized text + tail matching
-        self.update_full_session_text(new_preview_text);
-    }
-
-    /// Update the full session text using stabilized text as base.
-    fn update_full_session_text(&mut self, new_preview_text: &str) {
-        // If we have stabilized text, use it as our base
-        if !self.stabilized_text.is_empty()
-            && self.stabilized_text.len() > self.full_session_text.len()
-        {
-            self.full_session_text = self.stabilized_text.clone();
-            self.last_growth_time = std::time::Instant::now();
-            debug!(
-                "Updated session from stabilized: '{}'",
-                self.full_session_text.chars().take(30).collect::<String>()
-            );
-        }
-
-        // Only grow the session text, never shrink it
-        if self.full_session_text.is_empty() {
-            self.full_session_text = new_preview_text.to_string();
-            self.last_growth_time = std::time::Instant::now();
-            debug!(
-                "Started session text: '{}'",
-                self.full_session_text.chars().take(30).collect::<String>()
-            );
-            return;
-        }
-
-        // Check if preview text extends our session text
-        if new_preview_text.len() > self.full_session_text.len()
-            && new_preview_text.starts_with(&self.full_session_text)
-        {
-            // Perfect extension - just grow
-            self.full_session_text = new_preview_text.to_string();
-            self.last_growth_time = std::time::Instant::now();
-            debug!(
-                "Extended session text to: '{}'",
-                self.full_session_text.chars().take(40).collect::<String>()
-            );
-            return;
-        }
-
-        // Use tail matching to extend session with new content
-        if let Some(pos) = find_tail_match_in_text(&self.full_session_text, new_preview_text, 3) {
-            let extended = format!("{}{}", self.full_session_text, &new_preview_text[pos..]);
-            if extended.len() > self.full_session_text.len() {
-                self.full_session_text = extended;
-                self.last_growth_time = std::time::Instant::now();
-                debug!(
-                    "Extended session via tail match: '{}'",
-                    self.full_session_text.chars().take(40).collect::<String>()
-                );
-            }
-        }
-    }
-
-    /// Build the display text (Phase 2) - what actually shows on screen.
-    fn build_display_text(&self, preview_text: &str) -> String {
-        // Use stabilized text as base, but be smart about it
-
-        // If no stabilized text yet, show the preview
-        if self.stabilized_text.is_empty() {
-            return preview_text.to_string();
-        }
-
-        // Try tail matching first
-        if let Some(pos) = find_tail_match_in_text(&self.stabilized_text, preview_text, 3) {
-            // Found overlap - combine stabilized text with new part from preview
-            return format!("{}{}", self.stabilized_text, &preview_text[pos..]);
-        }
-
-        // No tail match found - be conservative to avoid text loss
-        // Prefer the longer text (session text or preview) to avoid disappearing words
-        let best_text = if self.full_session_text.len() >= preview_text.len() {
-            &self.full_session_text
-        } else {
-            preview_text
+    /// A stream frame is the transcript so far and simply replaces it. A window
+    /// frame is the last few seconds only, so it is stitched onto the
+    /// transcript by the audio the two windows share.
+    ///
+    /// The old two-phase scheme — lock a "stabilized" prefix from consecutive
+    /// previews, then graft each preview onto it by its last three characters —
+    /// was built for previews that all start at the same audio. Sliding windows
+    /// do not, so the prefix froze after the first seconds, and the three-char
+    /// graft found the *rightmost* recurrence of the prefix's tail and dropped
+    /// whatever lay between ("the cat sat on the mat and the dog" became
+    /// "the cat sat on the dog").
+    fn absorb(&mut self, preview: &str, source: PreviewSource) {
+        self.full_session_text = match source {
+            PreviewSource::Stream => preview.to_string(),
+            PreviewSource::Window => merge_window_preview(&self.full_session_text, preview),
         };
-
-        best_text.to_string()
     }
 }
 
@@ -232,45 +139,44 @@ impl Typer {
         }
     }
 
-    /// Update preview text using two-phase approach
-    pub async fn update_preview(&mut self, new_text: &str, actually_typed: &mut String) {
-        let processed_text = preprocess_text(new_text, true);
+    /// Type one preview: fold it into the running transcript and put the
+    /// result on screen. The screen shows the transcript so far, never the
+    /// preview itself — a window is only a few seconds of it.
+    pub async fn update_preview(
+        &mut self,
+        new_text: &str,
+        source: PreviewSource,
+        actually_typed: &mut String,
+    ) {
+        let normalized = normalize_text(new_text);
 
         info!(
-            "Preview update: new='{}', prev='{}', typed='{}'",
-            processed_text.chars().take(30).collect::<String>(),
+            "Preview update ({source}): new='{}', prev='{}', typed='{}'",
+            normalized.chars().take(30).collect::<String>(),
             self.state.prev_text.chars().take(30).collect::<String>(),
             actually_typed.chars().take(30).collect::<String>()
         );
 
         // Skip if text hasn't changed
-        if processed_text == self.state.prev_text {
+        if normalized == self.state.prev_text {
             debug!("Text unchanged, skipping");
             return;
         }
 
         // Skip empty text
-        if processed_text.is_empty() {
+        if normalized.is_empty() {
             debug!("Empty text, skipping");
             return;
         }
 
-        // PHASE 1: Stabilization and session text update
-        self.state.update_with_stabilization(&processed_text);
-
-        // PHASE 2: Decide what to show on screen
-        let display_text = self.state.build_display_text(&processed_text);
+        self.state.absorb(&normalized, source);
+        let display_text = capitalize_first(&self.state.full_session_text);
 
         info!(
-            "Display logic: display='{}', session='{}', stabilized='{}'",
+            "Display logic: display='{}', session='{}'",
             display_text.chars().take(30).collect::<String>(),
             self.state
                 .full_session_text
-                .chars()
-                .take(30)
-                .collect::<String>(),
-            self.state
-                .stabilized_text
                 .chars()
                 .take(30)
                 .collect::<String>()
@@ -278,7 +184,7 @@ impl Typer {
 
         // Apply the update to screen
         self.apply_text_update(&display_text, actually_typed).await;
-        self.state.prev_text = processed_text;
+        self.state.prev_text = normalized;
     }
 
     /// Process final text (completed sentence) - Uses full session audio
