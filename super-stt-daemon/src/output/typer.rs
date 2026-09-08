@@ -114,15 +114,17 @@ impl Typer {
             text_to_type.chars().take(20).collect::<String>()
         );
 
+        // A refused keystroke is the only sign that the screen and the mirror
+        // may now disagree; it has to be visible in the log.
         if chars_to_delete > 0
             && let Err(e) = self.keyboard_simulator.backspace_n(chars_to_delete).await
         {
-            debug!("Failed to backspace preview text: {e}");
+            warn!("Failed to backspace preview text: {e}");
         }
         if !text_to_type.is_empty()
             && let Err(e) = self.keyboard_simulator.type_text(&text_to_type).await
         {
-            debug!("Failed to type preview text: {e}");
+            warn!("Failed to type preview text: {e}");
         }
     }
 
