@@ -1,162 +1,162 @@
 [workspace]
-    resolver = "2"
-    members = [
-        "super-stt-app",
-        "super-stt-cli",
-        "super-stt-consent",
-        "super-stt-cosmic-applet",
-        "super-stt-daemon",
-        "super-stt-forge",
-        "super-stt-indexer",
-        "super-stt-install",
-        "super-stt-registry-types",
-        "super-stt-shared",
-    ]
-    # The mock WASM backend fixtures build for wasm32-wasip2, not the host target
-    # (the daemon's wasm_mock.rs / wasm_mock_realtime.rs load them) — keep them
-    # out of the workspace entirely.
-    exclude = [
-        "super-stt-daemon/tests/fixtures/mock-wasm-backend",
-        "super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend",
-    ]
-    # The indexer is a host binary, so it's a workspace member — `--workspace`
-    # lints and tests it like everything else. But it's a CI-only tool with
-    # heavy deps, so keep it out of `default-members`: the everyday
-    # `cargo build`/`run`/`test` (no `--workspace`) stays lean.
-    default-members = [
-        "super-stt-app",
-        "super-stt-cli",
-        "super-stt-consent",
-        "super-stt-cosmic-applet",
-        "super-stt-daemon",
-        "super-stt-forge",
-        "super-stt-install",
-        "super-stt-registry-types",
-        "super-stt-shared",
-    ]
+  resolver        = "2"
+  members         = [
+    "super-stt-app",
+    "super-stt-cli",
+    "super-stt-consent",
+    "super-stt-cosmic-applet",
+    "super-stt-daemon",
+    "super-stt-forge",
+    "super-stt-indexer",
+    "super-stt-install",
+    "super-stt-registry-types",
+    "super-stt-shared",
+  ]
+  # The mock WASM backend fixtures build for wasm32-wasip2, not the host target
+  # (the daemon's wasm_mock.rs / wasm_mock_realtime.rs load them) — keep them
+  # out of the workspace entirely.
+  exclude         = [
+    "super-stt-daemon/tests/fixtures/mock-wasm-backend",
+    "super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend",
+  ]
+  # The indexer is a host binary, so it's a workspace member — `--workspace`
+  # lints and tests it like everything else. But it's a CI-only tool with
+  # heavy deps, so keep it out of `default-members`: the everyday
+  # `cargo build`/`run`/`test` (no `--workspace`) stays lean.
+  default-members = [
+    "super-stt-app",
+    "super-stt-cli",
+    "super-stt-consent",
+    "super-stt-cosmic-applet",
+    "super-stt-daemon",
+    "super-stt-forge",
+    "super-stt-install",
+    "super-stt-registry-types",
+    "super-stt-shared",
+  ]
 
-    [workspace.package]
-        version = "0.2.4-beta.1"
-        authors = ["Jorge Menjivar <jorge@menjivar.ai>"]
-        edition = "2024"
+  [workspace.package]
+    version = "0.2.4-beta.1"
+    authors = ["Jorge Menjivar <jorge@menjivar.ai>"]
+    edition = "2024"
 
-    [workspace.dependencies]
-        anyhow = "1.0.100"
-        chrono = { version = "0.4", features = ["serde"] }
-        clap = { version = "4.5.54", features = ["cargo", "derive"] }
-        cpal = "0.17.3"
-        dashmap = "6.1.0"
-        dirs = "6.0.0"
-        # Input simulation (for client)
-        enigo = {
-            git = "https://github.com/jorge-menjivar/enigo",
-            default-features = false,
-            features = [
-                "wayland",
-            ]
-        }
-        env_logger = "0.11.8"
-        futures-util = "0.3.31"
-        # Audio processing
-        hound = "3.5.1"
-        i18n-embed = {
-            version = "0.16.0",
-            features = [
-                "desktop-requester",
-                "fluent-system",
-            ]
-        }
-        i18n-embed-fl = "0.10.0"
-        keyring = { version = "3", features = ["sync-secret-service"] }
-        # System calls (for client singleton)
-        libc = "0.2"
-        # Cosmic specific. The lib target is `cosmic`, so this is `use cosmic::`
-        # in code despite the package being `libcosmic` — no rename needed.
-        #
-        # Pinned by rev: libcosmic has no releases, so an unpinned git dep
-        # silently drifts to whatever the default branch points at. That matters
-        # more than usual here — cosmic-theme versions its cosmic-config schema,
-        # so a revision far enough from the installed COSMIC reads a theme
-        # directory the desktop no longer writes and the UI quietly renders
-        # stock colors. Bump deliberately: change the rev, then
-        # `cargo update -p libcosmic`.
-        #
-        # Pinning costs a small duplication: cosmic-panel-config, which
-        # libcosmic pulls in for `applet`, depends on cosmic-config from this
-        # same repo *unpinned*, and cargo treats a pinned and unpinned source as
-        # two sources. So cosmic-config, cosmic-config-derive and build_helpers
-        # each compile twice, and `cargo tree -d` reports them. Harmless, and
-        # not ours to fix upstream.
-        #
-        # Features live on each member instead of here, since the consent helper
-        # wants a much smaller build than the app. `default-features` can only be
-        # turned off at the workspace level, so members opt into "default" by
-        # name rather than inheriting it.
-        libcosmic = {
-            git = "https://github.com/pop-os/libcosmic.git",
-            rev = "ef162b8e16ba4493e05c169cd56c7b9f77f0fda5",
-            default-features = false,
-        }
-        log = "0.4.29"
-        open = "5.3.3"
-        parking_lot = "0.12"
-        reqwest = {
-            version = "0.13.2",
-            default-features = false,
-            features = [
-                "json",
-                "multipart",
-                "rustls-no-provider",
-                "stream",
-            ]
-        }
-        rubato = "3.0"
-        rust-embed = "8.11.0"
-        serde = { version = "1.0.219", features = ["derive"] }
-        serde_json = "1.0.149"
-        spectrum-analyzer = "1.7.0"
-        strum = { version = "0.28.0", features = ["derive"] }
-        strum_macros = "0.28"
-        thiserror = "2.0"
-        tokio = {
-            version = "1.49.0",
-            features = [
-                "full",
-                "macros",
-                "net",
-                "rt-multi-thread",
-                "time",
-            ]
-        }
-        tokio-util = "0.7"
-        # Filesystem utilities
-        toml = "1.0.6"
-        # OpenAPI: the daemon protocol spec is generated from the router and the
-        # wire types, not hand-maintained (see `just openapi`). `axum_extras`
-        # teaches the `#[utoipa::path]` macro to read axum's own extractors, so
-        # path/query parameters come from the handler signature instead of a
-        # second declaration that could disagree with it.
-        utoipa = { version = "5.5.0", features = ["axum_extras", "chrono"] }
-        # Binds utoipa to axum: `OpenApiRouter` collects each route's spec as the
-        # route itself is registered, so a route and its documentation are one
-        # declaration and cannot drift apart.
-        utoipa-axum = "0.2.0"
-        uuid = { version = "1.23.0", features = ["v4"] }
-        # Build dependencies
-        vergen = { version = "8.3.1", features = ["git", "gitcl"] }
-        # D-Bus integration
-        zbus = "5.14.0"
+  [workspace.dependencies]
+    anyhow            = "1.0.100"
+    chrono            = { version = "0.4", features = ["serde"] }
+    clap              = { version = "4.5.54", features = ["cargo", "derive"] }
+    cpal              = "0.17.3"
+    dashmap           = "6.1.0"
+    dirs              = "6.0.0"
+    # Input simulation (for client)
+    enigo             = {
+      git              = "https://github.com/jorge-menjivar/enigo",
+      default-features = false,
+      features         = [
+        "wayland",
+      ]
+    }
+    env_logger        = "0.11.8"
+    futures-util      = "0.3.31"
+    # Audio processing
+    hound             = "3.5.1"
+    i18n-embed        = {
+      version  = "0.16.0",
+      features = [
+        "desktop-requester",
+        "fluent-system",
+      ]
+    }
+    i18n-embed-fl     = "0.10.0"
+    keyring           = { version = "3", features = ["sync-secret-service"] }
+    # System calls (for client singleton)
+    libc              = "0.2"
+    # Cosmic specific. The lib target is `cosmic`, so this is `use cosmic::`
+    # in code despite the package being `libcosmic` — no rename needed.
+    #
+    # Pinned by rev: libcosmic has no releases, so an unpinned git dep
+    # silently drifts to whatever the default branch points at. That matters
+    # more than usual here — cosmic-theme versions its cosmic-config schema,
+    # so a revision far enough from the installed COSMIC reads a theme
+    # directory the desktop no longer writes and the UI quietly renders
+    # stock colors. Bump deliberately: change the rev, then
+    # `cargo update -p libcosmic`.
+    #
+    # Pinning costs a small duplication: cosmic-panel-config, which
+    # libcosmic pulls in for `applet`, depends on cosmic-config from this
+    # same repo *unpinned*, and cargo treats a pinned and unpinned source as
+    # two sources. So cosmic-config, cosmic-config-derive and build_helpers
+    # each compile twice, and `cargo tree -d` reports them. Harmless, and
+    # not ours to fix upstream.
+    #
+    # Features live on each member instead of here, since the consent helper
+    # wants a much smaller build than the app. `default-features` can only be
+    # turned off at the workspace level, so members opt into "default" by
+    # name rather than inheriting it.
+    libcosmic         = {
+      git              = "https://github.com/pop-os/libcosmic.git",
+      rev              = "ef162b8e16ba4493e05c169cd56c7b9f77f0fda5",
+      default-features = false,
+    }
+    log               = "0.4.29"
+    open              = "5.3.3"
+    parking_lot       = "0.12"
+    reqwest           = {
+      version          = "0.13.2",
+      default-features = false,
+      features         = [
+        "json",
+        "multipart",
+        "rustls-no-provider",
+        "stream",
+      ]
+    }
+    rubato            = "3.0"
+    rust-embed        = "8.11.0"
+    serde             = { version = "1.0.219", features = ["derive"] }
+    serde_json        = "1.0.149"
+    spectrum-analyzer = "1.7.0"
+    strum             = { version = "0.28.0", features = ["derive"] }
+    strum_macros      = "0.28"
+    thiserror         = "2.0"
+    tokio             = {
+      version  = "1.49.0",
+      features = [
+        "full",
+        "macros",
+        "net",
+        "rt-multi-thread",
+        "time",
+      ]
+    }
+    tokio-util        = "0.7"
+    # Filesystem utilities
+    toml              = "1.0.6"
+    # OpenAPI: the daemon protocol spec is generated from the router and the
+    # wire types, not hand-maintained (see `just openapi`). `axum_extras`
+    # teaches the `#[utoipa::path]` macro to read axum's own extractors, so
+    # path/query parameters come from the handler signature instead of a
+    # second declaration that could disagree with it.
+    utoipa            = { version = "5.5.0", features = ["axum_extras", "chrono"] }
+    # Binds utoipa to axum: `OpenApiRouter` collects each route's spec as the
+    # route itself is registered, so a route and its documentation are one
+    # declaration and cannot drift apart.
+    utoipa-axum       = "0.2.0"
+    uuid              = { version = "1.23.0", features = ["v4"] }
+    # Build dependencies
+    vergen            = { version = "8.3.1", features = ["git", "gitcl"] }
+    # D-Bus integration
+    zbus              = "5.14.0"
 
-    [workspace.lints.clippy]
-        pedantic = { level = "warn", priority = -1 }
+  [workspace.lints.clippy]
+    pedantic = { level = "warn", priority = -1 }
 
-    # Lints applied to every workspace crate via `lints.workspace = true`.
-    # Mirrors the CI clippy gate (see justfile `check`) so `cargo clippy` /
-    # `cargo build` apply the same standard locally instead of only in CI.
-    [workspace.lints.rust]
-        unused_must_use = "deny"
+  # Lints applied to every workspace crate via `lints.workspace = true`.
+  # Mirrors the CI clippy gate (see justfile `check`) so `cargo clippy` /
+  # `cargo build` apply the same standard locally instead of only in CI.
+  [workspace.lints.rust]
+    unused_must_use = "deny"
 
 [profile.release]
-    lto = true
-    panic = "abort"
-    codegen-units = 1
+  lto           = true
+  panic         = "abort"
+  codegen-units = 1
