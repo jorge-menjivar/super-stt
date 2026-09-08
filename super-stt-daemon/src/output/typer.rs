@@ -199,56 +199,37 @@ impl Typer {
         self.keyboard_simulator
     }
 
-    /// Apply a simple differential update by backspacing to the first differing
-    /// character and retyping the rest. Returns the **net change in screen
-    /// characters** (chars typed minus chars deleted) so callers accounting in
-    /// chars stay consistent — mixing this with a byte length would drift on any
-    /// multibyte text.
-    pub async fn apply_simple_diff(&mut self, old_text: &str, new_text: &str) -> isize {
-        // Safety checks
+    /// Drive the screen from `old_text` to `new_text`: backspace to the first
+    /// differing character and type the rest.
+    ///
+    /// The one path every preview update takes. An empty screen (common prefix
+    /// 0, nothing to delete) and a pure extension (the prefix is all of
+    /// `old_text`, nothing to delete) are just what the diff computes, not
+    /// separate branches that can disagree about what they typed.
+    async fn retype_from_first_difference(&mut self, old_text: &str, new_text: &str) {
         if old_text == new_text {
-            return 0;
+            return;
         }
 
-        if old_text.is_empty() && !new_text.is_empty() {
-            if let Err(e) = self.keyboard_simulator.type_text(new_text).await {
-                debug!("Failed to type new text: {e}");
-            }
-            return isize::try_from(new_text.chars().count()).unwrap_or(isize::MAX);
-        }
-
-        if new_text.is_empty() {
-            // Skip
-            return 0;
-        }
-
-        let old_chars: Vec<char> = old_text.chars().collect();
-        let new_chars: Vec<char> = new_text.chars().collect();
-
-        // Find first different character position
         let common_prefix = find_common_prefix(old_text, new_text);
-
-        // Calculate what to delete and what to type
-        let chars_to_delete = old_chars.len() - common_prefix;
-        let text_to_type: String = new_chars[common_prefix..].iter().collect();
-        let chars_to_type = new_chars.len() - common_prefix;
+        let chars_to_delete = old_text.chars().count() - common_prefix;
+        let text_to_type: String = new_text.chars().skip(common_prefix).collect();
 
         debug!(
-            "Simple diff: prefix={}, delete={}, type='{}'",
-            common_prefix,
-            chars_to_delete,
+            "Retype: prefix={common_prefix}, delete={chars_to_delete}, type='{}'",
             text_to_type.chars().take(20).collect::<String>()
         );
 
-        // Backspace to the first different position
-        let _ = self.keyboard_simulator.backspace_n(chars_to_delete).await;
-
-        // Type the new part
-        let _ = self.keyboard_simulator.type_text(&text_to_type).await;
-
-        // Net screen delta in chars: what we added minus what we removed.
-        isize::try_from(chars_to_type).unwrap_or(isize::MAX)
-            - isize::try_from(chars_to_delete).unwrap_or(isize::MAX)
+        if chars_to_delete > 0
+            && let Err(e) = self.keyboard_simulator.backspace_n(chars_to_delete).await
+        {
+            debug!("Failed to backspace preview text: {e}");
+        }
+        if !text_to_type.is_empty()
+            && let Err(e) = self.keyboard_simulator.type_text(&text_to_type).await
+        {
+            debug!("Failed to type preview text: {e}");
+        }
     }
 
     /// Update preview text using two-phase approach
@@ -381,7 +362,16 @@ impl Typer {
         }
     }
 
-    /// Apply text update to screen (common logic)
+    /// Put `new_text` on screen in place of what `actually_typed` says is
+    /// there, then record `new_text` as what is there now.
+    ///
+    /// The mirror has to be exactly the screen: `clear_preview` backspaces its
+    /// length and the next update diffs against it. It used to drift by one
+    /// space per update — the first text and every extension were typed with a
+    /// trailing space the mirror never held — so extensions doubled spaces,
+    /// replacements backspaced too few characters and left fragments of the
+    /// old text behind, and the clear at the end of a recording left the first
+    /// characters of the preview in front of the final transcript.
     async fn apply_text_update(&mut self, new_text: &str, actually_typed: &mut String) {
         info!(
             "Typing logic: old_typed='{}', new_display='{}'",
@@ -389,39 +379,9 @@ impl Typer {
             new_text.chars().take(30).collect::<String>(),
         );
 
-        if actually_typed.is_empty() {
-            // Screen is empty — type the whole thing.
-            info!(
-                "Screen empty, typing new text: '{}'",
-                new_text.chars().take(30).collect::<String>()
-            );
-            let _ = self
-                .keyboard_simulator
-                .type_text(&format!("{new_text} "))
-                .await;
-        } else if new_text.starts_with(actually_typed.as_str())
-            && new_text.len() > actually_typed.len()
-        {
-            // Perfect extension — append only the new suffix.
-            let suffix = &new_text[actually_typed.len()..];
-            info!("Perfect extension, adding suffix: '{suffix}'");
-            let _ = self
-                .keyboard_simulator
-                .type_text(&format!("{suffix} "))
-                .await;
-        } else {
-            // Replacement — backspace to the first difference and retype.
-            let net_change = self.apply_simple_diff(actually_typed, new_text).await;
-            info!("Diff replacement: net {net_change} char(s)");
-        }
+        self.retype_from_first_difference(actually_typed, new_text)
+            .await;
 
-        // `actually_typed` mirrors what we drove onto the screen so
-        // `clear_preview` backspaces the right count next time. Every branch
-        // above leaves the screen showing `new_text`. The keyboard results are
-        // best-effort and unchecked, so there is no measured count to reconcile
-        // against — the old byte-vs-char reconciliation was both wrong (it added
-        // `apply_simple_diff`'s byte length to a char count) and dead (both of
-        // its branches did exactly this assignment).
         actually_typed.clear();
         actually_typed.push_str(new_text);
     }

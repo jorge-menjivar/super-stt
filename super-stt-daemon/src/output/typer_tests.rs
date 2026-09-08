@@ -235,3 +235,109 @@ fn reset_after_recording_clears_transcript_state() {
     assert_eq!(typer.state.full_session_text, "");
     assert_eq!(typer.state.last_transcription, "");
 }
+
+// ---------------------------------------------------------------------------
+// Preview typing keeps its mirror equal to the screen
+// ---------------------------------------------------------------------------
+
+/// Type `previews` in order, checking after each that the mirror is exactly
+/// what the capture backend holds. Everything downstream — the next diff, the
+/// clear at the end of the recording — trusts that equality. Returns the
+/// mirror so the caller can go on to clear it.
+async fn type_previews(
+    typer: &mut Typer,
+    screen: &std::sync::Arc<std::sync::Mutex<String>>,
+    previews: &[&str],
+) -> String {
+    let mut typed = String::new();
+    for preview in previews {
+        typer.update_preview(preview, &mut typed).await;
+        assert_eq!(
+            *screen.lock().unwrap(),
+            typed,
+            "after preview {preview:?} the mirror must be what is on screen"
+        );
+    }
+    typed
+}
+
+/// The first text and every extension used to be typed with a trailing space
+/// the mirror did not hold, so "hello" then "hello world" put "Hello  world "
+/// on screen.
+#[tokio::test]
+async fn an_extension_appends_only_the_new_words() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(&mut typer, &screen, &["hello", "hello world"]).await;
+
+    assert_eq!(*screen.lock().unwrap(), "Hello world");
+}
+
+/// A replacement backspaces from the mirror's length. With the mirror short of
+/// the screen, too little was deleted and a fragment of the old text stayed:
+/// this sequence used to end as "Hello  wthere world".
+#[tokio::test]
+async fn a_replacement_leaves_no_fragment_of_the_old_text() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(
+        &mut typer,
+        &screen,
+        &["hello", "hello world", "hello there world"],
+    )
+    .await;
+
+    assert_eq!(*screen.lock().unwrap(), "Hello there world");
+}
+
+/// The diff is by character, not byte, so multibyte text is neither split nor
+/// over-deleted.
+#[tokio::test]
+async fn multibyte_text_is_diffed_by_character() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(
+        &mut typer,
+        &screen,
+        &["wörld", "wörld peace", "wörld piece"],
+    )
+    .await;
+
+    assert_eq!(*screen.lock().unwrap(), "Wörld piece");
+}
+
+/// The clear backspaces the mirror's length. When the mirror was short of the
+/// screen, the start of the preview survived it — "He" here.
+#[tokio::test]
+async fn clearing_a_preview_leaves_the_screen_empty() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+    let mut typed = type_previews(
+        &mut typer,
+        &screen,
+        &["hello", "hello world", "hello there world"],
+    )
+    .await;
+
+    typer.clear_preview(&mut typed).await;
+
+    assert_eq!(*screen.lock().unwrap(), "");
+    assert_eq!(typed, "");
+}
+
+/// What the user actually saw: the leftover of the preview glued to the front
+/// of the final transcript ("HeHello there world. ").
+#[tokio::test]
+async fn the_final_transcript_follows_a_cleared_preview_with_nothing_in_between() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+    let mut typed = type_previews(&mut typer, &screen, &["hello", "hello there world"]).await;
+
+    typer.clear_preview(&mut typed).await;
+    typer.process_final_text("hello there world").await;
+
+    assert_eq!(*screen.lock().unwrap(), "Hello there world. ");
+}
