@@ -9,9 +9,10 @@
 //! crate's test suite did, either, before this.
 //!
 //! So the paths are read back out of the source and checked against the
-//! published `openapi.json` — the same document a third-party client would
-//! generate from. Renaming a daemon endpoint and forgetting a call site here
-//! now fails the build rather than shipping.
+//! OpenAPI document the daemon builds from its router — the same document CI
+//! publishes for third-party clients to generate from. Renaming a daemon
+//! endpoint and forgetting a call site here now fails the build rather than
+//! shipping.
 //!
 //! Reading source rather than a registry of constants is deliberate: a registry
 //! is only honest while every call site uses it, and the first `format!` that
@@ -40,16 +41,15 @@ fn normalize(path: &str) -> String {
     out.split('?').next().unwrap_or(&out).to_string()
 }
 
-/// Every path in the published document, `/v1` stripped and params normalized.
-fn documented() -> BTreeSet<String> {
-    let spec =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/protocol/openapi.json");
-    let doc: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&spec).unwrap_or_else(|e| panic!("read {}: {e}", spec.display())),
-    )
-    .expect("openapi.json is valid JSON");
+/// The daemon's OpenAPI document, as JSON: what a client generator receives.
+fn document() -> serde_json::Value {
+    serde_json::to_value(super_stt_daemon::daemon::http::openapi_document())
+        .expect("the document serializes")
+}
 
-    doc["paths"]
+/// Every path in the document, `/v1` stripped and params normalized.
+fn documented() -> BTreeSet<String> {
+    document()["paths"]
         .as_object()
         .expect("paths is an object")
         .keys()
@@ -230,7 +230,7 @@ fn success_body_keys(doc: &serde_json::Value, path: &str, method: &str) -> BTree
     resolved["properties"]
         .as_object()
         .unwrap_or_else(|| {
-            panic!("{method} {path}: the 200 body has no properties in openapi.json")
+            panic!("{method} {path}: the 200 body has no properties in the OpenAPI document")
         })
         .keys()
         .cloned()
@@ -239,13 +239,7 @@ fn success_body_keys(doc: &serde_json::Value, path: &str, method: &str) -> BTree
 
 #[test]
 fn every_response_key_the_client_reads_is_one_the_daemon_sends() {
-    let spec =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/protocol/openapi.json");
-    let doc: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&spec).unwrap_or_else(|e| panic!("read {}: {e}", spec.display())),
-    )
-    .expect("openapi.json is valid JSON");
-
+    let doc = document();
     let mut missing = Vec::new();
     for (path, method, keys) in RESPONSE_KEYS {
         let sent = success_body_keys(&doc, path, method);

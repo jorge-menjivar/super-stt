@@ -59,6 +59,10 @@
 
 [dev-dependencies]
     mockito = "1.7.2"
+    # The path and response-key contract tests check the client against the
+    # OpenAPI document the daemon builds from its router. Taken from the crate
+    # rather than a file so the tests need nothing generated first.
+    super-stt-daemon = { path = "../super-stt-daemon" }
 
 [lints]
     workspace = true
