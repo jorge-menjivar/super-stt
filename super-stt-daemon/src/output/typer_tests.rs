@@ -2,87 +2,7 @@
 use super::*;
 use crate::output::keyboard::Simulator;
 use crate::output::notice;
-
-// ---------------------------------------------------------------------------
-// State machine characterization (keyboard-free transitions)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn build_display_text_returns_preview_when_no_stabilized_text() {
-    let s = State::default();
-    assert_eq!(s.build_display_text("Hello world"), "Hello world");
-}
-
-#[test]
-fn build_display_text_combines_stabilized_with_tail_matched_suffix() {
-    let s = State {
-        stabilized_text: "Hello engi".to_string(),
-        ..Default::default()
-    };
-    // "engi"'s tail "ngi" overlaps "engineer…"; suffix "neer is good" is grafted on.
-    assert_eq!(
-        s.build_display_text("engineer is good"),
-        "Hello engineer is good"
-    );
-}
-
-#[test]
-fn build_display_text_prefers_session_when_no_tail_match_and_session_longer() {
-    let s = State {
-        stabilized_text: "abc".to_string(),
-        full_session_text: "abcdefghij".to_string(),
-        ..Default::default()
-    };
-    assert_eq!(s.build_display_text("wxyz"), "abcdefghij");
-}
-
-#[test]
-fn build_display_text_prefers_preview_when_no_tail_match_and_preview_longer() {
-    let s = State {
-        stabilized_text: "abc".to_string(),
-        full_session_text: "ab".to_string(),
-        ..Default::default()
-    };
-    assert_eq!(s.build_display_text("wxyz"), "wxyz");
-}
-
-#[test]
-fn update_full_session_text_adopts_first_preview() {
-    let mut s = State::default();
-    s.update_full_session_text("Hello");
-    assert_eq!(s.full_session_text, "Hello");
-}
-
-#[test]
-fn update_full_session_text_grows_on_perfect_extension() {
-    let mut s = State {
-        full_session_text: "Hello".to_string(),
-        ..Default::default()
-    };
-    s.update_full_session_text("Hello world");
-    assert_eq!(s.full_session_text, "Hello world");
-}
-
-#[test]
-fn update_full_session_text_extends_via_tail_match() {
-    let mut s = State {
-        full_session_text: "Hello engi".to_string(),
-        ..Default::default()
-    };
-    s.update_full_session_text("engineer here");
-    assert_eq!(s.full_session_text, "Hello engineer here");
-}
-
-#[test]
-fn update_with_stabilization_locks_common_prefix_across_two_texts() {
-    let mut s = State::default();
-    s.update_with_stabilization("Hello world");
-    s.update_with_stabilization("Hello there");
-    // The two texts share the char-prefix "Hello ", which stabilizes.
-    assert_eq!(s.stabilized_text, "Hello ");
-    // Session text was seeded by the first (longer) preview and not shrunk.
-    assert_eq!(s.full_session_text, "Hello world");
-}
+use super_stt_shared::models::protocol::PreviewSource;
 
 // ---------------------------------------------------------------------------
 // type_notice (fixed failure markers)
@@ -120,7 +40,7 @@ async fn type_notice_types_the_marker_verbatim() {
     assert_eq!(*buf.lock().unwrap(), "[Super STT: no model loaded]");
 }
 
-/// Transcript state feeds preview tail-matching on the *next* recording. If a
+/// Transcript state feeds window stitching on the *next* recording. If a
 /// notice landed in it, the typer would try to extend "[Super STT: …]" into the
 /// following sentence.
 // `start_paused` so the notice's key-release delay is virtual — this test
@@ -132,7 +52,6 @@ async fn type_notice_leaves_transcript_state_untouched() {
 
     typer.type_notice(notice::TRANSCRIPTION_FAILED).await;
 
-    assert_eq!(typer.state.last_transcription, "");
     assert_eq!(typer.state.prev_text, "");
     assert_eq!(typer.state.full_session_text, "");
 }
@@ -206,7 +125,7 @@ async fn process_final_text_still_types_a_non_empty_transcript() {
 }
 
 /// Skipping the typing must NOT skip the state reset: leftover session text
-/// would feed preview tail-matching on the next recording.
+/// would feed window stitching on the next recording.
 #[tokio::test]
 async fn process_final_text_resets_state_even_when_it_types_nothing() {
     let (sim, _buf) = Simulator::capture();
@@ -229,9 +148,244 @@ fn reset_after_recording_clears_transcript_state() {
     typer.state.prev_text = "stale".to_string();
     typer.state.full_session_text = "stale session".to_string();
 
-    typer.reset_after_recording(String::new());
+    typer.reset_after_recording();
 
     assert_eq!(typer.state.prev_text, "");
     assert_eq!(typer.state.full_session_text, "");
-    assert_eq!(typer.state.last_transcription, "");
+}
+
+// ---------------------------------------------------------------------------
+// Preview typing keeps its mirror equal to the screen
+// ---------------------------------------------------------------------------
+
+/// Type `previews` in order, checking after each that the mirror is exactly
+/// what the capture backend holds. Everything downstream — the next diff, the
+/// clear at the end of the recording — trusts that equality. Returns the
+/// mirror so the caller can go on to clear it.
+async fn type_previews(
+    typer: &mut Typer,
+    screen: &std::sync::Arc<std::sync::Mutex<String>>,
+    source: PreviewSource,
+    previews: &[&str],
+) -> String {
+    let mut typed = String::new();
+    for preview in previews {
+        typer.update_preview(preview, source, &mut typed).await;
+        assert_eq!(
+            *screen.lock().unwrap(),
+            typed,
+            "after preview {preview:?} the mirror must be what is on screen"
+        );
+    }
+    typed
+}
+
+/// The first text and every extension used to be typed with a trailing space
+/// the mirror did not hold, so "hello" then "hello world" put "Hello  world "
+/// on screen.
+#[tokio::test]
+async fn an_extension_appends_only_the_new_words() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(
+        &mut typer,
+        &screen,
+        PreviewSource::Window,
+        &["hello", "hello world"],
+    )
+    .await;
+
+    assert_eq!(*screen.lock().unwrap(), "Hello world");
+}
+
+/// A replacement backspaces from the mirror's length. With the mirror short of
+/// the screen, too little was deleted and a fragment of the old text stayed:
+/// this sequence used to end as "Hello  wthere world".
+#[tokio::test]
+async fn a_replacement_leaves_no_fragment_of_the_old_text() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(
+        &mut typer,
+        &screen,
+        PreviewSource::Window,
+        &["hello", "hello world", "hello there world"],
+    )
+    .await;
+
+    assert_eq!(*screen.lock().unwrap(), "Hello there world");
+}
+
+/// The diff is by character, not byte, so multibyte text is neither split nor
+/// over-deleted.
+#[tokio::test]
+async fn multibyte_text_is_diffed_by_character() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(
+        &mut typer,
+        &screen,
+        PreviewSource::Window,
+        &["wörld", "wörld peace", "wörld piece"],
+    )
+    .await;
+
+    assert_eq!(*screen.lock().unwrap(), "Wörld piece");
+}
+
+/// The clear backspaces the mirror's length. When the mirror was short of the
+/// screen, the start of the preview survived it — "He" here.
+#[tokio::test]
+async fn clearing_a_preview_leaves_the_screen_empty() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+    let mut typed = type_previews(
+        &mut typer,
+        &screen,
+        PreviewSource::Window,
+        &["hello", "hello world", "hello there world"],
+    )
+    .await;
+
+    typer.clear_preview(&mut typed).await;
+
+    assert_eq!(*screen.lock().unwrap(), "");
+    assert_eq!(typed, "");
+}
+
+/// What the user actually saw: the leftover of the preview glued to the front
+/// of the final transcript ("HeHello there world. ").
+#[tokio::test]
+async fn the_final_transcript_follows_a_cleared_preview_with_nothing_in_between() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+    let mut typed = type_previews(
+        &mut typer,
+        &screen,
+        PreviewSource::Window,
+        &["hello", "hello there world"],
+    )
+    .await;
+
+    typer.clear_preview(&mut typed).await;
+    typer.process_final_text("hello there world").await;
+
+    assert_eq!(*screen.lock().unwrap(), "Hello there world. ");
+}
+
+// ---------------------------------------------------------------------------
+// What the screen shows is the transcript so far
+// ---------------------------------------------------------------------------
+
+/// A stream frame is the transcript so far. The old three-char graft found the
+/// rightmost "the" and dropped "mat and", showing "The cat sat on the dog".
+#[tokio::test]
+async fn a_stream_preview_is_the_transcript_so_far() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(
+        &mut typer,
+        &screen,
+        PreviewSource::Stream,
+        &["the cat sat on the", "the cat sat on the mat and the dog"],
+    )
+    .await;
+
+    assert_eq!(
+        *screen.lock().unwrap(),
+        "The cat sat on the mat and the dog"
+    );
+}
+
+/// A backend may revise what it already said. The screen follows, retyped from
+/// the first character that changed.
+#[tokio::test]
+async fn a_stream_revision_is_retyped_from_the_change() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(
+        &mut typer,
+        &screen,
+        PreviewSource::Stream,
+        &[
+            "the cat sat on the mat and the dog",
+            "the cat sat on the mat, and the dog barked",
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        *screen.lock().unwrap(),
+        "The cat sat on the mat, and the dog barked"
+    );
+}
+
+/// Sliding windows: the first two are re-reads of the whole take, the rest are
+/// the last few seconds each, overlapping the one before. The screen shows one
+/// transcript, not the latest window.
+#[tokio::test]
+async fn sliding_windows_are_stitched_into_one_transcript() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(
+        &mut typer,
+        &screen,
+        PreviewSource::Window,
+        &[
+            "hello my name",
+            "hello my name is jorge",
+            "name is jorge and i like yellow",
+            "like yellow cats a lot",
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        *screen.lock().unwrap(),
+        "Hello my name is jorge and i like yellow cats a lot"
+    );
+}
+
+/// The model capitalizes a window's first word as if it opened a sentence.
+/// The transcript keeps its own reading of the shared text, so that capital
+/// never lands mid-sentence on screen.
+#[tokio::test]
+async fn a_windows_opening_capital_stays_off_the_screen() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+
+    type_previews(
+        &mut typer,
+        &screen,
+        PreviewSource::Window,
+        &["hello my name is Jorge", "Name is Jorge and I like"],
+    )
+    .await;
+
+    assert_eq!(*screen.lock().unwrap(), "Hello my name is Jorge and I like");
+}
+
+/// The same window twice — a quiet tick — must not touch the keyboard.
+#[tokio::test]
+async fn a_repeated_preview_types_nothing() {
+    let (sim, screen) = Simulator::capture();
+    let mut typer = Typer::new(sim);
+    let mut typed = String::new();
+    typer
+        .update_preview("hello world", PreviewSource::Window, &mut typed)
+        .await;
+    // Poison the screen: any keystroke now would show up as a difference.
+    screen.lock().unwrap().push('!');
+
+    typer
+        .update_preview("hello world", PreviewSource::Window, &mut typed)
+        .await;
+
+    assert_eq!(*screen.lock().unwrap(), "Hello world!");
 }

@@ -187,10 +187,7 @@ impl Simulator {
     /// The test-only capture backend panics if its buffer mutex is poisoned.
     pub async fn backspace_n(&mut self, n: usize) -> Result<()> {
         match self {
-            Self::WaylandProtocol(b) => {
-                tokio::task::block_in_place(|| b.backspace_n(n));
-                Ok(())
-            }
+            Self::WaylandProtocol(b) => tokio::task::block_in_place(|| b.backspace_n(n)),
             Self::Ydotool(_) => tokio::task::block_in_place(|| YdotoolBackend::backspace_n(n)),
             Self::XdgPortal(b) => b.backspace_n(n).await,
             #[cfg(test)]

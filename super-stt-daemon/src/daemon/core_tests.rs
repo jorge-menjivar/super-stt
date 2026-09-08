@@ -2305,7 +2305,7 @@ async fn record_with_no_model_types_a_notice_in_write_mode() {
     let mut typer = crate::output::typer::Typer::new(sim);
 
     let resp = daemon
-        .handle_record_internal(&mut typer, true, RecordingStopMode::ManualOnly, None)
+        .handle_record_internal(&mut typer, true, RecordingStopMode::ManualOnly, false, None)
         .await;
 
     assert_eq!(resp.status, "error");
@@ -2329,7 +2329,13 @@ async fn record_with_no_model_types_nothing_without_write_mode() {
     let mut typer = crate::output::typer::Typer::new(sim);
 
     let resp = daemon
-        .handle_record_internal(&mut typer, false, RecordingStopMode::ManualOnly, None)
+        .handle_record_internal(
+            &mut typer,
+            false,
+            RecordingStopMode::ManualOnly,
+            false,
+            None,
+        )
         .await;
 
     assert_eq!(resp.error_code, Some(ErrorCode::ModelNotLoaded));

@@ -195,10 +195,11 @@ impl SuperSTTDaemon {
         match dispatch_transcription(&self.model, processed_audio, 16000, language.clone()).await {
             Ok(text) => {
                 let duration = start_time.elapsed();
-                info!("Transcription completed in {duration:?}: '{text}'");
+                info!("Transcription completed in {duration:?}");
                 // Post-processing is part of producing the final transcript, so
                 // it lands inside the reported duration. Best-effort: this
-                // returns the raw text unchanged when it is off or fails.
+                // returns the raw text unchanged when it is off or fails. It
+                // also logs the raw text and the processed one side by side.
                 let text = self.post_process_final(text, language).await;
                 Ok(Ok((text, start_time.elapsed())))
             }

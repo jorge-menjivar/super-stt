@@ -30,6 +30,11 @@ struct RecordingSession {
     // turns it on: every sliding-window pass is a transcription Phase 4
     // repeats, and for an online model a billed one.
     pub(super) force_preview_support: bool,
+    // Whether previews are typed on screen during this recording: the
+    // request's override, or the daemon-wide default when it gave none.
+    // Resolved once at the start so a settings change mid-recording neither
+    // affects the take in progress nor gets reverted when it ends.
+    pub(super) preview_typing: bool,
     pub(super) actually_typed: Arc<std::sync::Mutex<String>>,
     // Shared with the recorder's ring buffer (`get_audio_buffer_ref`), which is
     // a `parking_lot::Mutex` (Tier 3 #5).
@@ -40,6 +45,27 @@ struct RecordingSession {
     pub(super) speech_state: Arc<parking_lot::Mutex<crate::audio::state::RecordingState>>,
     pub(super) device_sample_rate: u32,
     pub(super) start_time: Instant,
+}
+
+/// The take's audio for the final decode: cut back to its last speech.
+///
+/// A take's last moments are the stop key and a breath, and a batch model
+/// invents words for them ("…everything works. you"). The cut is judged by the
+/// same adaptive threshold the recorder used to hear the speech. A streamed
+/// take never comes here: its backend heard the audio live.
+fn audio_for_final_decode<'a>(
+    full_audio_data: &'a [f32],
+    speech_state: &parking_lot::Mutex<crate::audio::state::RecordingState>,
+) -> &'a [f32] {
+    let threshold = speech_state.lock().get_speech_threshold();
+    let audio = crate::audio::trim::trim_trailing_silence(full_audio_data, 16000, threshold);
+    if audio.len() < full_audio_data.len() {
+        info!(
+            "Trimmed {} ms of trailing non-speech before the final decode",
+            (full_audio_data.len() - audio.len()) * 1000 / 16000
+        );
+    }
+    audio
 }
 
 impl SuperSTTDaemon {
@@ -67,6 +93,7 @@ impl SuperSTTDaemon {
         typer: &mut Typer,
         write_mode: bool,
         stop_mode: RecordingStopMode,
+        preview_typing: bool,
         request_language: Option<&str>,
     ) -> DaemonResponse {
         // Check if already busy - prevent multiple simultaneous recordings
@@ -97,7 +124,13 @@ impl SuperSTTDaemon {
 
         // Wait for recording to complete and return the transcription.
         match self
-            .record_and_transcribe(typer, write_mode, stop_mode, request_language)
+            .record_and_transcribe(
+                typer,
+                write_mode,
+                stop_mode,
+                preview_typing,
+                request_language,
+            )
             .await
         {
             // Cycle completed successfully (empty text = no speech, still success).
@@ -162,12 +195,15 @@ impl SuperSTTDaemon {
         typer: &mut Typer,
         write_mode: bool,
         stop_mode: RecordingStopMode,
+        preview_typing: bool,
         request_language: Option<&str>,
     ) -> Result<Result<String, String>> {
         info!("Starting direct audio recording in daemon with simplified architecture");
 
         // Phase 1: spawn the recorder. `busy` is set inside setup.
-        let session = self.spawn_recorder(write_mode, stop_mode).await?;
+        let session = self
+            .spawn_recorder(write_mode, stop_mode, preview_typing)
+            .await?;
         // Capture is starting — announce it now that the recorder exists.
         self.emit_recording_started(write_mode).await;
 
@@ -227,9 +263,9 @@ impl SuperSTTDaemon {
             info!("🎤 No speech detected during the take; skipping transcription");
             if write_mode {
                 // Typed nothing, but the per-recording transcript state still
-                // has to be cleared or it feeds the next recording's preview
-                // tail-matching.
-                typer.reset_after_recording(String::new());
+                // has to be cleared or it feeds the next recording's window
+                // stitching.
+                typer.reset_after_recording();
             }
             // `transcribing_started` is deliberately NOT emitted: decode never
             // begins. `finalize_recording_session` still emits `final_stt` with
@@ -247,7 +283,10 @@ impl SuperSTTDaemon {
         let raw_transcript = match streamed {
             Some(text) => text,
             None => match self
-                .transcribe_final(&full_audio_data, request_language)
+                .transcribe_final(
+                    audio_for_final_decode(&full_audio_data, &speech_state),
+                    request_language,
+                )
                 .await
             {
                 Ok(text) => text,

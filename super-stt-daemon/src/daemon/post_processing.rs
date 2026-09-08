@@ -11,6 +11,10 @@
 //! processor erroring, the processor hanging — yields the raw transcript. The
 //! user asked to dictate; a cleanup step that is down must not cost them the
 //! words. Failures are logged, and the raw text is what gets typed.
+//!
+//! This is also where a take is written to the log: the raw transcript, and
+//! right after it the processed one when a processor ran. Reading the two
+//! together is how to judge what the processor did to a take.
 
 use std::time::Duration;
 
@@ -38,6 +42,9 @@ impl SuperSTTDaemon {
         text: String,
         language: Option<String>,
     ) -> String {
+        // Whole, and before any early return: this is the one line that says
+        // what the model heard, whether or not a processor rewrites it.
+        info!("Raw transcript: '{text}'");
         // Empty input covers "no speech": there is nothing to clean up, and a
         // processor handed an empty string tends to invent one.
         if text.trim().is_empty() {
@@ -67,7 +74,7 @@ impl SuperSTTDaemon {
                     return raw;
                 }
                 info!(
-                    "Post-processing completed in {:?}: '{processed}'",
+                    "Post-processed transcript ({:?}): '{processed}'",
                     start.elapsed()
                 );
                 processed
