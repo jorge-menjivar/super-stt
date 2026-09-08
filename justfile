@@ -226,8 +226,8 @@ coverage-badge:
     cat coverage-html/coverage.json
 
 # Full local CI gate: format, lint, feature-combo compile, tests, install.sh
-# tests, doctests, schemas, protocol spec
-ci: fmt-check check check-features test test-install doctest schema-check openapi-check
+# tests, doctests, schemas
+ci: fmt-check check check-features test test-install doctest schema-check
 
 # Run the app for testing purposes
 run-app *args:
@@ -445,32 +445,13 @@ check-wit-sync:
 gen-schemas:
     cargo run -p super-stt-registry-types --features schema --bin gen_schemas
 
-# Regenerate docs/protocol/openapi.json from the daemon's live /v1 router.
-# Run it after changing anything under super-stt-daemon/src/daemon/http/v1/;
-# `just openapi-check` (part of `just ci`) fails when the committed file is
-# stale. Starts no daemon and touches no keyring — the document is built from
-# the route registrations themselves.
+# Write docs/protocol/openapi.json from the daemon's live /v1 router. The file
+# is not committed: CI generates it the same way on every push and publishes
+# it, so it cannot fall behind the protocol. Run this to read it locally
+# (`just openapi-serve` does so for you). Starts no daemon and touches no
+# keyring — the document is built from the route registrations themselves.
 openapi:
     cargo run -q -p super-stt-daemon --bin gen_openapi
-
-# CI check: the committed OpenAPI document must match what the router produces.
-# Regenerates into a temp file and diffs, so a failing check never leaves the
-# working tree modified — the fix is `just openapi`.
-openapi-check:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    spec=docs/protocol/openapi.json
-    before=$(mktemp)
-    cp "$spec" "$before"
-    trap 'cp "$before" "$spec"; rm -f "$before"' EXIT
-    cargo run -q -p super-stt-daemon --bin gen_openapi >/dev/null
-    if ! diff -u "$before" "$spec"; then
-        echo >&2
-        echo "openapi.json is stale — the router and the published spec disagree." >&2
-        echo "Run 'just openapi' and commit the result." >&2
-        exit 1
-    fi
-    echo "openapi.json is current"
 
 # Browse the protocol spec locally. Regenerates it first so what you read is
 # what the router currently serves, then serves docs/protocol/ over HTTP —

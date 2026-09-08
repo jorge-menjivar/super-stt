@@ -12,8 +12,8 @@
     path = "src/bin/mock_backend.rs"
     required-features = ["test-fixtures"]
 
-# Writes docs/protocol/openapi.json from the live `/v1` router. Run via
-# `just openapi`; `just openapi-check` fails when the committed file is stale.
+# Writes docs/protocol/openapi.json from the live `/v1` router. CI runs it
+# (`just openapi`) and publishes the result; the file is not committed.
 [[bin]]
     name = "gen_openapi"
     path = "src/bin/gen_openapi.rs"

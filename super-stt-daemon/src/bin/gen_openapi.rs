@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Write the daemon protocol's `OpenAPI` document to `docs/protocol/openapi.json`.
 //!
-//! Run it with `just openapi` after changing anything under
-//! `src/daemon/http/v1/`; `just openapi-check` (part of `just ci`) fails when
-//! the committed file no longer matches what the router produces, so the
-//! published spec cannot fall behind the protocol.
+//! The file is not committed. CI runs this on every push and publishes the
+//! result, so the published spec is always what that commit's router serves
+//! and cannot fall behind the protocol. `just openapi` writes it locally.
 //!
 //! The document is built from the route registrations themselves, so this
 //! starts no daemon, opens no socket, and touches no keyring.
@@ -26,8 +25,7 @@ fn main() -> std::io::Result<()> {
     let mut json = doc
         .to_pretty_json()
         .expect("the generated document is always serializable");
-    // A trailing newline, so the committed file is a well-formed text file and
-    // `git diff` does not report "\ No newline at end of file" on every change.
+    // A trailing newline, so the file is a well-formed text file.
     json.push('\n');
 
     let path = output_path();
