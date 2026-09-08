@@ -429,20 +429,18 @@ impl SuperSTTDaemon {
     /// `collect_and_clear_preview` so the recorder-failure paths clear the field
     /// too — otherwise a failed capture leaves half-typed preview text behind
     /// for the failure notice to append to.
+    ///
+    /// Whether there is anything to erase is the mirror's call, not the
+    /// preview-typing flag's. The flag says whether the *next* preview gets
+    /// typed; consulting it here meant that turning preview typing off
+    /// mid-recording left the preview already on screen in place, with the
+    /// final transcript typed after it.
     async fn clear_preview_text(
-        &self,
         actually_typed: &Arc<std::sync::Mutex<String>>,
         typer: &mut Typer,
         write_mode: bool,
     ) {
         if !write_mode {
-            return;
-        }
-        if !self
-            .preview_typing_enabled
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            debug!("Preview typing was disabled, no preview to clear");
             return;
         }
         // Take the mirror out in a scope that drops the `!Send` guard before the
@@ -479,14 +477,12 @@ impl SuperSTTDaemon {
             Ok(Ok(data)) => data,
             Ok(Err(e)) => {
                 *self.manual_stop_tx.write().await = None;
-                self.clear_preview_text(&session.actually_typed, typer, write_mode)
-                    .await;
+                Self::clear_preview_text(&session.actually_typed, typer, write_mode).await;
                 return Err(e);
             }
             Err(e) => {
                 *self.manual_stop_tx.write().await = None;
-                self.clear_preview_text(&session.actually_typed, typer, write_mode)
-                    .await;
+                Self::clear_preview_text(&session.actually_typed, typer, write_mode).await;
                 return Err(anyhow::anyhow!("Recorder task failed: {e}"));
             }
         };
@@ -497,8 +493,7 @@ impl SuperSTTDaemon {
         *self.manual_stop_tx.write().await = None;
 
         // Clear preview after recording is done (only if preview typing was enabled)
-        self.clear_preview_text(&session.actually_typed, typer, write_mode)
-            .await;
+        Self::clear_preview_text(&session.actually_typed, typer, write_mode).await;
 
         Ok(full_audio_data)
     }
@@ -606,5 +601,34 @@ mod tests {
     #[test]
     fn the_window_is_capped() {
         assert_eq!(preview_window(Duration::from_secs(60)), MAX_PREVIEW_WINDOW);
+    }
+
+    /// Turning preview typing off mid-recording must not strand the preview
+    /// already on screen: the clear goes by what was typed, not by the flag.
+    #[tokio::test]
+    async fn the_clear_erases_what_was_typed_even_after_preview_typing_is_turned_off() {
+        use std::sync::atomic::Ordering;
+        let daemon = crate::daemon::types::test_daemon().await;
+        daemon.preview_typing_enabled.store(true, Ordering::Relaxed);
+        let session = session_over(Vec::new(), 16_000);
+        let (sim, screen) = crate::output::keyboard::Simulator::capture();
+        let mut typer = crate::output::typer::Typer::new(sim);
+        daemon
+            .emit_preview(
+                "hello world",
+                super_stt_shared::models::protocol::PreviewSource::Window,
+                &session,
+                &mut typer,
+                true,
+            )
+            .await;
+        assert_eq!(*screen.lock().unwrap(), "Hello world");
+
+        daemon
+            .preview_typing_enabled
+            .store(false, Ordering::Relaxed);
+        SuperSTTDaemon::clear_preview_text(&session.actually_typed, &mut typer, true).await;
+
+        assert_eq!(*screen.lock().unwrap(), "");
     }
 }
