@@ -58,185 +58,53 @@ impl Rng {
     }
 }
 
-/// Everyday words, heavy on the short function words that recur and line up
-/// by coincidence, which is what a false seam is made of.
-const WORDS: &[&str] = &[
-    "the",
-    "and",
-    "to",
-    "of",
-    "a",
-    "in",
-    "that",
-    "it",
-    "is",
-    "was",
-    "for",
-    "on",
-    "with",
-    "as",
-    "at",
-    "by",
-    "this",
-    "but",
-    "not",
-    "are",
-    "from",
-    "or",
-    "have",
-    "an",
-    "they",
-    "which",
-    "one",
-    "you",
-    "were",
-    "her",
-    "all",
-    "she",
-    "there",
-    "would",
-    "their",
-    "we",
-    "him",
-    "been",
-    "has",
-    "when",
-    "who",
-    "will",
-    "more",
-    "no",
-    "if",
-    "out",
-    "so",
-    "said",
-    "what",
-    "up",
-    "its",
-    "about",
-    "into",
-    "than",
-    "them",
-    "can",
-    "only",
-    "other",
-    "new",
-    "some",
-    "could",
-    "time",
-    "these",
-    "two",
-    "may",
-    "then",
-    "do",
-    "first",
-    "any",
-    "my",
-    "now",
-    "such",
-    "like",
-    "our",
-    "over",
-    "man",
-    "me",
-    "even",
-    "most",
-    "made",
-    "after",
-    "also",
-    "did",
-    "many",
-    "before",
-    "must",
-    "through",
-    "back",
-    "years",
-    "where",
-    "much",
-    "your",
-    "way",
-    "well",
-    "down",
-    "should",
-    "because",
-    "each",
-    "just",
-    "those",
-    "people",
-    "how",
-    "too",
-    "little",
-    "state",
-    "good",
-    "very",
-    "make",
-    "world",
-    "still",
-    "own",
-    "see",
-    "men",
-    "work",
-    "long",
-    "get",
-    "here",
-    "between",
-    "both",
-    "life",
-    "being",
-    "under",
-    "never",
-    "day",
-    "same",
-    "another",
-    "know",
-    "while",
-    "last",
-    "might",
-    "us",
-    "great",
-    "old",
-    "year",
-    "off",
-    "come",
-    "since",
-    "against",
-    "go",
-    "came",
-    "right",
-    "used",
-    "take",
-    "three",
-    "model",
-    "whisper",
-    "transcription",
-    "computer",
-    "supermarket",
-    "tomorrow",
-    "review",
-    "feature",
-    "project",
-    "change",
-    "second",
-    "working",
-    "correctly",
-    "everything",
-    "expected",
-    "stitch",
-    "multiple",
-    "lines",
-    "together",
-    "breathing",
-    "tiny",
-    "subscribe",
-    "saying",
-    "text",
-    "happens",
-    "figuring",
-    "looking",
-];
+/// English words by how often they are spoken, from the OpenSubtitles corpus
+/// (see `tests/fixtures/words/SOURCE.md`). Sampling by count keeps the short
+/// function words as common as they are in speech, and a false seam is made
+/// of exactly those lining up by coincidence.
+const WORD_LIST: &str = include_str!("../../tests/fixtures/words/en_10k.txt");
+
+/// The words and, for sampling, the running total of their counts.
+struct Vocabulary {
+    words: Vec<&'static str>,
+    cumulative: Vec<u64>,
+}
+
+impl Vocabulary {
+    fn load() -> Self {
+        let mut words = Vec::new();
+        let mut cumulative = Vec::new();
+        let mut total = 0u64;
+        for line in WORD_LIST.lines() {
+            let mut fields = line.split_whitespace();
+            let (Some(word), Some(count)) = (fields.next(), fields.next()) else {
+                continue;
+            };
+            // Contraction pieces ("'s", "'t") are tokens, not words.
+            if !word.chars().all(|c| c.is_ascii_alphabetic()) {
+                continue;
+            }
+            let count: u64 = count.parse().expect("a count per line");
+            total += count;
+            words.push(word);
+            cumulative.push(total);
+        }
+        assert!(words.len() > 1000, "the word list loaded");
+        Self { words, cumulative }
+    }
+
+    /// A word, as likely as it is in speech.
+    fn pick(&self, rng: &mut Rng) -> &'static str {
+        let total = *self.cumulative.last().expect("non-empty");
+        let target = rng.next() % total;
+        let i = self.cumulative.partition_point(|&c| c <= target);
+        self.words[i.min(self.words.len() - 1)]
+    }
+}
 
 /// A passage of `words` words in sentences of six to fourteen, lowercase,
 /// each sentence closed with a period.
-fn passage(rng: &mut Rng, words: usize) -> String {
+fn passage(rng: &mut Rng, vocabulary: &Vocabulary, words: usize) -> String {
     let mut out = String::new();
     let mut in_sentence = 0;
     let mut sentence_len = 6 + rng.below(9);
@@ -244,7 +112,7 @@ fn passage(rng: &mut Rng, words: usize) -> String {
         if i > 0 {
             out.push(' ');
         }
-        out.push_str(WORDS[rng.below(WORDS.len())]);
+        out.push_str(vocabulary.pick(rng));
         in_sentence += 1;
         if in_sentence == sentence_len && i + 1 < words {
             out.push('.');
@@ -260,7 +128,14 @@ fn passage(rng: &mut Rng, words: usize) -> String {
 /// `to` of the passage: cut words at the edges dropped or kept as fragments,
 /// a word swapped now and then, the first word capitalized, sometimes a
 /// closing period.
-fn window(rng: &mut Rng, chars: &[char], from: usize, to: usize, reword: f64) -> String {
+fn window(
+    rng: &mut Rng,
+    vocabulary: &Vocabulary,
+    chars: &[char],
+    from: usize,
+    to: usize,
+    reword: f64,
+) -> String {
     let slice: String = chars[from..to].iter().collect();
     let cut_at_start = from > 0 && chars[from - 1] != ' ' && chars[from] != ' ';
     let cut_at_end = to < chars.len() && chars[to] != ' ' && chars[to - 1] != ' ';
@@ -283,7 +158,7 @@ fn window(rng: &mut Rng, chars: &[char], from: usize, to: usize, reword: f64) ->
     }
     if rng.chance(reword) {
         let i = rng.below(words.len());
-        words[i] = WORDS[rng.below(WORDS.len())].to_string();
+        words[i] = vocabulary.pick(rng).to_string();
     }
     let mut text = words.join(" ");
     if rng.chance(0.5) {
@@ -310,7 +185,8 @@ fn simulate(
     reword: f64,
 ) -> (Vec<String>, Vec<String>) {
     let mut rng = Rng(seed);
-    let text = passage(&mut rng, words);
+    let vocabulary = Vocabulary::load();
+    let text = passage(&mut rng, &vocabulary, words);
     let chars: Vec<char> = text.chars().collect();
     // reason: a test timeline; the count fits comfortably.
     #[allow(clippy::cast_precision_loss)]
@@ -331,7 +207,7 @@ fn simulate(
         let from = ((now - window_secs).max(0.0) * CHARS_PER_SECOND) as usize;
         spoken_to = to;
 
-        let normalized = normalize_text(&window(&mut rng, &chars, from, to, reword));
+        let normalized = normalize_text(&window(&mut rng, &vocabulary, &chars, from, to, reword));
         if !normalized.is_empty() && normalized != prev {
             session = merge_window_preview(&session, &normalized);
             prev = normalized;
