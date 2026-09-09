@@ -117,20 +117,34 @@ async fn download_one(
     // Per-file counters: both totals are this file's size so the UI shows
     // "X.X / X.X MB" at 100%, then the file_index advances next iteration.
     if let Some(len) = usable_existing(dest, item.sha256.as_deref()).await? {
-        info!("Already present: {}", dest.display());
         if let Some(t) = tracker {
+            info!(
+                "File {}/{} already present, skipping download: {}",
+                file_index + 1,
+                t.total_files.load(Ordering::Relaxed),
+                dest.display()
+            );
             t.start_file(&name, file_index);
             t.bytes_downloaded.store(len, Ordering::Relaxed);
             t.total_bytes.store(len, Ordering::Relaxed);
             t.broadcast_progress();
+        } else {
+            info!("Already present: {}", dest.display());
         }
         return Ok(());
     }
 
     let url = &item.url;
-    info!("Downloading {url} -> {}", dest.display());
     if let Some(t) = tracker {
+        info!(
+            "Downloading file {}/{}: {url} -> {}",
+            file_index + 1,
+            t.total_files.load(Ordering::Relaxed),
+            dest.display()
+        );
         t.start_file(&name, file_index);
+    } else {
+        info!("Downloading {url} -> {}", dest.display());
     }
     let response = client.get(url).send().await?;
     if !response.status().is_success() {

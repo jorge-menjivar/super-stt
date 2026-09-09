@@ -217,6 +217,10 @@ impl DownloadProgressTracker {
         }
     }
 
+    /// Advance the tracker to the next file. Purely a state update — the
+    /// caller logs, because only it knows whether the file is being fetched
+    /// or was already on disk (cached files come through here too, so the
+    /// progress bar advances without claiming a download happened).
     pub fn start_file(&self, filename: &str, file_index: usize) {
         *self.current_file.write() = filename.to_string();
         self.file_index.store(file_index, Ordering::Relaxed);
@@ -234,12 +238,6 @@ impl DownloadProgressTracker {
         // store, so the UI never observes the transient.
         self.bytes_downloaded.store(0, Ordering::Relaxed);
         self.total_bytes.store(0, Ordering::Relaxed);
-        info!(
-            "Downloading file {}/{}: {}",
-            file_index + 1,
-            self.total_files.load(Ordering::Relaxed),
-            filename
-        );
     }
 
     pub fn is_cancelled(&self) -> bool {
