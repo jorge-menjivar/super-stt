@@ -39,6 +39,7 @@ fn custom_repo_error_response(
             (StatusCode::UNPROCESSABLE_ENTITY, "manifest_invalid")
         }
         ResolveError::SourceSpoof { .. } => (StatusCode::UNPROCESSABLE_ENTITY, "source_mismatch"),
+        ResolveError::NoRelease { .. } => (StatusCode::NOT_FOUND, "not_found"),
         ResolveError::AssetMissing(_) => (StatusCode::UNPROCESSABLE_ENTITY, "asset_missing"),
         ResolveError::Forge(err) => {
             // 404 from the forge means the repo, release, or backend.toml at the
