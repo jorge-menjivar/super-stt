@@ -265,3 +265,297 @@ fn build_paths(wave_points: &[Point], bottom_y: f32) -> (path::Path, path::Path)
 
     (stroke_builder.build(), fill_builder.build())
 }
+
+#[cfg(test)]
+mod waveform_tests {
+    //! The waveform is the one visualization built from a spline rather than
+    //! from rectangles, so its geometry has failure modes the bar renderers
+    //! don't: a Catmull-Rom curve overshoots around a spike, and the left and
+    //! right applets have to meet at the seam without a step. These pin the
+    //! pure math behind `draw`, which needs a live renderer and can't be
+    //! exercised here.
+    use super::*;
+    use crate::util::usize_to_f32;
+    use cosmic::iced::widget::canvas::path::lyon_path::PathEvent;
+
+    fn bounds(width: f32, height: f32) -> Rectangle {
+        Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height,
+        }
+    }
+
+    fn frequency_data(bands: Vec<f32>) -> FrequencyData {
+        FrequencyData {
+            bands,
+            ..FrequencyData::default()
+        }
+    }
+
+    fn heights(points: &[(f32, f32)]) -> Vec<f32> {
+        points.iter().map(|(_, height)| *height).collect()
+    }
+
+    #[test]
+    fn the_two_halves_meet_at_the_seam() {
+        // A Left applet and a Right applet draw one wave across a gap. Left
+        // pads only its outer edge and runs its last band up to x = 1.0;
+        // Right starts at x = 0.0 on its first band and pads only its own
+        // outer edge. Pad the inner edges too and the wave would dive to the
+        // baseline in the middle of the panel.
+        let viz = WaveformVisualization::default();
+        let data = frequency_data(vec![FREQUENCY_NORMALIZATION_MAX; 4]);
+        let bounds = bounds(120.0, 40.0);
+
+        let full = viz.build_control_points(&data, &VisualizationSide::Full, bounds);
+        assert_eq!(full.first().unwrap().0, -0.1);
+        assert_eq!(full.last().unwrap().0, 1.1);
+
+        let left = viz.build_control_points(&data, &VisualizationSide::Left, bounds);
+        assert_eq!(left.first().unwrap().0, -0.1);
+        assert_eq!(left.last().unwrap().0, 1.0);
+        assert!(
+            left.last().unwrap().1 > 0.0,
+            "left dropped to the baseline at the seam"
+        );
+
+        let right = viz.build_control_points(&data, &VisualizationSide::Right, bounds);
+        assert_eq!(right.first().unwrap().0, 0.0);
+        assert!(
+            right.first().unwrap().1 > 0.0,
+            "right dropped to the baseline at the seam"
+        );
+        assert_eq!(right.last().unwrap().0, 1.1);
+    }
+
+    #[test]
+    fn amplitudes_are_normalized_and_capped_at_the_drawable_height() {
+        let viz = WaveformVisualization::default();
+        let bounds = bounds(120.0, 40.0);
+        let data = frequency_data(vec![
+            FREQUENCY_NORMALIZATION_MAX,
+            FREQUENCY_NORMALIZATION_MAX / 2.0,
+            FREQUENCY_NORMALIZATION_MAX * 100.0,
+            0.0,
+        ]);
+
+        let points = viz.build_control_points(&data, &VisualizationSide::Full, bounds);
+
+        // Index 0 is the leading virtual zero, so the bands start at 1.
+        assert!((points[1].1 - 40.0).abs() < 1e-3);
+        assert!((points[2].1 - 20.0).abs() < 1e-3);
+        assert!(
+            (points[3].1 - 40.0).abs() < 1e-3,
+            "a band past the normalization max has to cap, not run off the panel",
+        );
+        assert_eq!(points[4].1, 0.0);
+    }
+
+    #[test]
+    fn control_points_advance_left_to_right() {
+        let viz = WaveformVisualization::default();
+        let data = frequency_data(vec![1.0; 8]);
+
+        let points = viz.build_control_points(&data, &VisualizationSide::Full, bounds(120.0, 40.0));
+
+        assert!(
+            points.windows(2).all(|pair| pair[1].0 > pair[0].0),
+            "the spline needs strictly increasing x to find its segments",
+        );
+    }
+
+    #[test]
+    fn smoothing_keeps_the_ends_pinned() {
+        // The virtual zeros are what make the wave fade in and out at the
+        // panel edges. Smoothing must not lift them off the baseline.
+        let mut points = vec![
+            (-0.1, 0.0),
+            (0.25, 30.0),
+            (0.5, 12.0),
+            (0.75, 4.0),
+            (1.1, 0.0),
+        ];
+
+        smooth_control_points(&mut points);
+
+        assert_eq!(points.first().unwrap().1, 0.0);
+        assert_eq!(points.last().unwrap().1, 0.0);
+    }
+
+    #[test]
+    fn smoothing_spreads_a_spike_without_overshooting_it() {
+        let original = vec![
+            (0.0, 0.0),
+            (0.25, 0.0),
+            (0.5, 30.0),
+            (0.75, 0.0),
+            (1.0, 0.0),
+        ];
+        let mut points = original.clone();
+
+        smooth_control_points(&mut points);
+
+        assert!(points[2].1 < 30.0, "the peak has to come down");
+        assert!(
+            points[1].1 > 0.0 && points[3].1 > 0.0,
+            "and its neighbours have to come up",
+        );
+        // Each pass is a convex combination, so no height can leave the range
+        // it started in — that is what keeps a smoothed wave inside the panel.
+        let ceiling = heights(&original).into_iter().fold(f32::MIN, f32::max);
+        assert!(heights(&points).iter().all(|h| (0.0..=ceiling).contains(h)));
+    }
+
+    #[test]
+    fn smoothing_leaves_a_flat_wave_alone() {
+        let mut points: Vec<(f32, f32)> = (0..6).map(|i| (usize_to_f32(i), 5.0)).collect();
+
+        smooth_control_points(&mut points);
+
+        assert!(heights(&points).iter().all(|h| (h - 5.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn smoothing_survives_a_wave_too_short_to_smooth() {
+        for len in 0..3 {
+            let mut points: Vec<(f32, f32)> = (0..len).map(|i| (usize_to_f32(i), 10.0)).collect();
+
+            smooth_control_points(&mut points);
+
+            assert_eq!(points.len(), len);
+        }
+    }
+
+    #[test]
+    fn the_curve_is_sampled_once_per_horizontal_pixel() {
+        let viz = WaveformVisualization::default();
+        let data = frequency_data(vec![1.0; 8]);
+        let bounds = Rectangle {
+            x: 10.0,
+            y: 5.0,
+            width: 120.0,
+            height: 40.0,
+        };
+        let control = viz.build_control_points(&data, &VisualizationSide::Full, bounds);
+
+        let wave = compute_wave_points(&control, bounds);
+
+        assert_eq!(wave.len(), 121);
+        assert!((wave.first().unwrap().x - 10.0).abs() < 1e-3);
+        assert!((wave.last().unwrap().x - 130.0).abs() < 1e-3);
+        assert!(
+            wave.windows(2).all(|pair| pair[1].x >= pair[0].x),
+            "sample x must never go backwards",
+        );
+    }
+
+    #[test]
+    fn a_spline_overshoot_is_clamped_inside_the_panel() {
+        // Catmull-Rom overshoots on both sides of a sharp step. Unclamped,
+        // the curve would be drawn above the applet and below its baseline.
+        let bounds = bounds(60.0, 40.0);
+        let control = vec![(-0.1, 0.0), (0.2, 0.0), (0.4, 40.0), (0.6, 0.0), (1.1, 0.0)];
+
+        let wave = compute_wave_points(&control, bounds);
+
+        let bottom_y = bounds.y + bounds.height;
+        for point in &wave {
+            assert!(
+                point.y >= bounds.y - 1e-3 && point.y <= bottom_y + 1e-3,
+                "sample at x={} left the panel at y={}",
+                point.x,
+                point.y,
+            );
+        }
+    }
+
+    #[test]
+    fn a_silent_wave_sits_flat_on_the_baseline() {
+        let bounds = bounds(60.0, 40.0);
+        let control = vec![(-0.1, 0.0), (0.5, 0.0), (1.1, 0.0)];
+
+        let wave = compute_wave_points(&control, bounds);
+
+        let bottom_y = bounds.y + bounds.height;
+        assert!(wave.iter().all(|point| (point.y - bottom_y).abs() < 1e-4));
+    }
+
+    #[test]
+    fn coincident_control_points_do_not_produce_nan() {
+        // Both divisions in the sampler are guarded against a zero span; an
+        // unguarded one would put NaN into the path and blank the applet.
+        let wave = compute_wave_points(&[(0.5, 0.0), (0.5, 10.0), (0.5, 0.0)], bounds(60.0, 40.0));
+
+        assert!(
+            wave.iter()
+                .all(|point| point.x.is_finite() && point.y.is_finite())
+        );
+    }
+
+    #[test]
+    fn the_fill_path_closes_along_the_baseline() {
+        let bottom_y = 40.0;
+        let wave = vec![
+            Point { x: 0.0, y: 30.0 },
+            Point { x: 1.0, y: 20.0 },
+            Point { x: 2.0, y: 25.0 },
+        ];
+
+        let (stroke, fill) = build_paths(&wave, bottom_y);
+
+        let fill_events: Vec<PathEvent> = fill.raw().iter().collect();
+        let Some(PathEvent::Begin { at }) = fill_events.first() else {
+            panic!("the fill path never began");
+        };
+        assert!(
+            (at.y - bottom_y).abs() < 1e-4,
+            "the filled area has to start on the baseline, not on the curve",
+        );
+        assert!(
+            fill_events
+                .iter()
+                .any(|event| matches!(event, PathEvent::End { close: true, .. })),
+            "an unclosed fill leaves the area under the curve unpainted",
+        );
+
+        assert!(
+            stroke
+                .raw()
+                .iter()
+                .any(|event| matches!(event, PathEvent::End { close: false, .. })),
+            "the outline is an open curve, not a closed shape",
+        );
+    }
+
+    #[test]
+    fn the_stroke_path_follows_the_wave() {
+        let wave = vec![
+            Point { x: 0.0, y: 30.0 },
+            Point { x: 1.0, y: 20.0 },
+            Point { x: 2.0, y: 25.0 },
+        ];
+
+        let (stroke, _) = build_paths(&wave, 40.0);
+
+        let lines = stroke
+            .raw()
+            .iter()
+            .filter(|event| matches!(event, PathEvent::Line { .. }))
+            .count();
+        assert_eq!(
+            lines,
+            wave.len() - 1,
+            "one segment between each pair of samples"
+        );
+    }
+
+    #[test]
+    fn no_wave_points_means_no_paths() {
+        let (stroke, fill) = build_paths(&[], 40.0);
+
+        assert_eq!(stroke.raw().iter().count(), 0);
+        assert_eq!(fill.raw().iter().count(), 0);
+    }
+}
