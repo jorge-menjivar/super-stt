@@ -105,7 +105,7 @@ fn update_available(installed: Option<&str>, index_version: &str, compatible: bo
 }
 
 /// Map a registry entry + compatibility result to the wire `RegistryBackend` shape.
-fn map_entry(
+pub(super) fn map_entry(
     entry: &crate::registry::index_schema::IndexBackend,
     compat_field: Compatibility,
     installed_version: Option<String>,

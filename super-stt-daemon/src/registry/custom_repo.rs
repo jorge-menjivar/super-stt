@@ -27,7 +27,7 @@ pub enum ResolveError {
     #[error("forge: {0}")]
     Forge(#[from] super_stt_forge::ForgeError),
     #[error(
-        "no published release at `{repo}`. The repo may be private, missing, or have no release yet; a fork does not inherit the upstream's releases"
+        "No published release at {repo}. The repo may be private, missing, or have no release yet. A fork does not inherit the upstream's releases"
     )]
     NoRelease { repo: String },
     #[error("backend.toml exceeds {MAX_MANIFEST_BYTES} bytes")]
@@ -284,11 +284,21 @@ mod tests {
             panic!("a 404 on the latest release must not stay a transport error: {err}");
         };
         assert_eq!(repo, "github.com/o/b");
+        assert!(
+            !msg_has_markup(&err.to_string()),
+            "drawer copy carries no backticks: {err}"
+        );
         let msg = err.to_string();
         assert!(
             !msg.contains("api.github.com"),
             "the message must not leak the forge API URL: {msg}"
         );
+    }
+
+    /// The message is read in a drawer, not only a log, so it carries no
+    /// markdown delimiters that would render as stray punctuation there.
+    fn msg_has_markup(s: &str) -> bool {
+        s.contains('`')
     }
 
     #[test]

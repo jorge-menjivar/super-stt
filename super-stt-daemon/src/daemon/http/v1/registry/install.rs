@@ -78,14 +78,14 @@ fn local_dir_error_response(
 
 // Convenience alias: helpers return boxed responses so the `Err` variant
 // stays pointer-sized and does not trip `clippy::result_large_err`.
-type ErrResp = Box<axum::response::Response>;
+pub(super) type ErrResp = Box<axum::response::Response>;
 
 /// Phase 1 — Parse and validate the request body.
 ///
 /// Returns `(body, source_key)` on success, or an HTTP error response on
 /// failure. `source_key` is whichever of `source`, `repo_url`, or
 /// `local_path` was provided.
-fn parse_install_body(
+pub(super) fn parse_install_body(
     raw: Option<axum::Json<InstallBody>>,
 ) -> Result<(InstallBody, String), ErrResp> {
     let Some(axum::Json(body)) = raw else {
@@ -191,7 +191,7 @@ fn install_forge(
 ///
 /// On any error an HTTP error response is returned; the caller's
 /// [`InflightMarker`] cleans up the inflight set.
-async fn resolve_install_entry(
+pub(super) async fn resolve_install_entry(
     s: &AppState,
     body: &InstallBody,
 ) -> Result<crate::registry::index_schema::IndexBackend, ErrResp> {
