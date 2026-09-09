@@ -3000,7 +3000,7 @@
             }
           },
           "400": {
-            "description": "Not exactly one of `source`, `repo_url`, `local_path` (`bad_request`), or no asset matches this host.",
+            "description": "Not exactly one of `source`, `repo_url`, `local_path` (`bad_request`), a `repo_url` that is not a `<host>/<owner>/<repo>` reference (`bad_repo_url`), a `repo_url` on a host no forge adapter serves and no `forge` to pick one (`unsupported_forge`), or no asset matches this host.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6072,6 +6072,13 @@
           }
         }
       },
+      "Forge": {
+        "type": "string",
+        "description": "The forge hosting a backend's releases.",
+        "enum": [
+          "github"
+        ]
+      },
       "GpuHostInfo": {
         "type": "object",
         "description": "Host-wide GPU toolchain/driver versions reported on\n[`GET /gpu_info`](../../../docs/protocol/endpoints/v1/gpu_info.md), independent\nof any one GPU. Each field is `null` when that accelerator's runtime isn't\ndetected on this host — see `docs/protocol/endpoints/v1/gpu_info.md` for\nwhat presence and absence do and don't imply for each one.",
@@ -6312,6 +6319,17 @@
               "repo_url"
             ],
             "properties": {
+              "forge": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Forge",
+                    "description": "Which forge API to speak. Optional: the daemon reads the host out\nof `repo_url` when it is absent, and only a host no adapter serves\nneeds it spelled out."
+                  }
+                ]
+              },
               "repo_url": {
                 "type": "string"
               }
