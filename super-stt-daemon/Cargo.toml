@@ -100,7 +100,7 @@
     }
     tokio-util.workspace = true
     toml.workspace = true
-    ulid = "1.2.1"
+    ulid = "3.0.0"
     urlencoding = "2.1.3"
     utoipa.workspace = true
     utoipa-axum.workspace = true
