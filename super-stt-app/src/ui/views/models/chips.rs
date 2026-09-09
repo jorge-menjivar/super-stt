@@ -238,32 +238,89 @@ pub(super) fn inert_chip(
     fg: cosmic::iced::Color,
 ) -> Element<'static, Message> {
     let spacing = cosmic::theme::spacing();
+    chip_shell(
+        row![
+            icons::phosphor_tinted(icon, 14.0, fg),
+            text::caption(label).class(cosmic::theme::Text::Color(fg)),
+        ]
+        .spacing(spacing.space_xxxs)
+        .align_y(Alignment::Center),
+        fg,
+        spacing.space_xs,
+    )
+}
+
+/// The pill itself: soft same-hue fill, hairline border, pill radius. Shared so
+/// a chip with a glyph alone cannot drift from one carrying a label.
+fn chip_shell<'a>(
+    content: impl Into<Element<'a, Message>>,
+    fg: cosmic::iced::Color,
+    h_padding: u16,
+) -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
     let radius = cosmic::theme::active().cosmic().corner_radii.radius_xl;
     let mut fill = fg;
     fill.a = 0.14;
     let mut edge = fg;
     edge.a = 0.32;
 
-    row![
-        icons::phosphor_tinted(icon, 14.0, fg),
-        text::caption(label).class(cosmic::theme::Text::Color(fg)),
+    content
+        .into()
+        .apply(widget::container)
+        .padding([spacing.space_xxxs, h_padding])
+        .class(cosmic::theme::Container::custom(move |_| {
+            cosmic::iced::widget::container::Style {
+                background: Some(cosmic::iced::Background::Color(fill)),
+                border: cosmic::iced::Border {
+                    radius: radius.into(),
+                    width: 1.0,
+                    color: edge,
+                },
+                ..Default::default()
+            }
+        }))
+        .into()
+}
+
+/// One chip per device a model runs on, glyph only, in the order the
+/// backend-level [`capability_chips`] use.
+///
+/// Every device the model declares, not the first one that matches: a Whisper
+/// model runs on GPU *and* CPU, and collapsing that to one badge told the
+/// reader the wrong thing about where it can run.
+///
+/// The glyph carries it without a word. A model list is read down the names,
+/// and nine rows each repeating "GPU" beside a graphics-card icon is nine
+/// copies of what the icon already said. The tooltip keeps the word reachable.
+pub(super) fn model_device_chips(devices: &[String]) -> Vec<Element<'static, Message>> {
+    use super::surface::rounded_tooltip;
+    let spacing = cosmic::theme::spacing();
+    let fg: cosmic::iced::Color = cosmic::theme::active()
+        .current_container()
+        .component
+        .on
+        .into();
+    let has = |want: &str| devices.iter().any(|d| d == want);
+
+    [
+        (has("gpu"), icons::GRAPHICS_CARD, "Accelerated on GPU"),
+        (has("cpu"), icons::CPU, "Runs on the CPU"),
+        (has("none"), icons::CLOUD, "Runs in the cloud"),
     ]
-    .spacing(spacing.space_xxxs)
-    .align_y(Alignment::Center)
-    .apply(widget::container)
-    .padding([spacing.space_xxxs, spacing.space_xs])
-    .class(cosmic::theme::Container::custom(move |_| {
-        cosmic::iced::widget::container::Style {
-            background: Some(cosmic::iced::Background::Color(fill)),
-            border: cosmic::iced::Border {
-                radius: radius.into(),
-                width: 1.0,
-                color: edge,
-            },
-            ..Default::default()
-        }
-    }))
-    .into()
+    .into_iter()
+    .filter(|(present, _, _)| *present)
+    .map(|(_, glyph, tip)| {
+        rounded_tooltip(
+            chip_shell(
+                icons::phosphor_tinted(glyph, 14.0, fg),
+                fg,
+                spacing.space_xxs,
+            ),
+            text::body(tip),
+            widget::tooltip::Position::Top,
+        )
+    })
+    .collect()
 }
 
 /// A neutral, text-only pill — same shape/tone as [`capability_chip`] but
@@ -636,10 +693,15 @@ pub(super) fn chip_group(
     .into()
 }
 
-/// The "{shown} backends found" result-count caption above the filter chips.
+/// The "{shown} backends found" result-count caption above the filter chips,
+/// singular at one.
 pub(super) fn result_count<'a>(shown: usize) -> Element<'a, Message> {
     let muted = muted_text_color();
-    let label = format!("{shown} backends found");
+    let label = if shown == 1 {
+        "1 backend found".to_string()
+    } else {
+        format!("{shown} backends found")
+    };
     text::caption(label)
         .class(cosmic::theme::Text::Color(muted))
         .into()

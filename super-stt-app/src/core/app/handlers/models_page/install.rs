@@ -32,26 +32,6 @@ impl AppModel {
                 )
             }
 
-            ModelsPageMessage::InstallBackendFromRepoUrl(url) => {
-                self.registry.install_errors.remove(&url);
-                let u = url.clone();
-                Task::perform(
-                    async move { crate::daemon::registry::install_by_repo_url(&u).await },
-                    move |res| {
-                        cosmic::Action::App(Message::ModelsPage(match res {
-                            Ok(a) => ModelsPageMessage::InstallAccepted {
-                                source: url.clone(),
-                                install_id: a.install_id,
-                            },
-                            Err(e) => ModelsPageMessage::InstallFailedToStart {
-                                source: url.clone(),
-                                error: e.to_string(),
-                            },
-                        }))
-                    },
-                )
-            }
-
             ModelsPageMessage::InstallAccepted { source, install_id } => {
                 use crate::state::registry::InstallStatus;
                 use super_stt_shared::registry::events::InstallPhase;
@@ -72,6 +52,8 @@ impl AppModel {
 
             ModelsPageMessage::InstallFailedToStart { source, error } => {
                 log::error!("install({source}) failed to start: {error}");
+                let error =
+                    super_stt_shared::daemon::http_client::HttpError::Other(error).user_message();
                 // Drop the pending marker (there is no background install) and
                 // record the reason so the Browse card shows "Failed" + a note
                 // instead of silently snapping back to the Install button.
@@ -176,6 +158,21 @@ impl AppModel {
             }
 
             ModelsPageMessage::InstallCompleted { source } => {
+                // The drawer's whole job is done the moment the thing it
+                // previewed is installed: the preview now describes a backend
+                // that is already there, and the Install button under it would
+                // offer to fetch it again. Close it and empty it.
+                //
+                // Only for the install this drawer started — a Browse card's
+                // install reports on the same channel, and it has its own card
+                // to report on.
+                if self.core.window.show_context
+                    && self.context_page == crate::state::models::ContextPage::AddBackend
+                    && self.registry.add_key() == source
+                {
+                    self.core.window.show_context = false;
+                    self.registry.clear_add_sheet();
+                }
                 self.registry.installs.remove(&source);
                 self.registry.install_errors.remove(&source);
                 // Both catalogs, because they carry different halves of what

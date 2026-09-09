@@ -9,6 +9,6 @@
 //! the registry; removing is a property of what is already installed.
 pub use crate::daemon::client::v1::backends::uninstall;
 pub use crate::daemon::client::v1::registry::{
-    ListFilters, install_by_local_path, install_by_repo_url, install_by_source, list, refresh,
-    update,
+    ListFilters, install_by_local_path, install_by_repo_url, install_by_source, list,
+    preview_by_local_path, preview_by_repo_url, refresh, update,
 };

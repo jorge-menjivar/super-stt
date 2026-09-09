@@ -174,6 +174,77 @@ pub(super) fn deselect_button(tooltip_text: &str, message: Message) -> Element<'
     )
 }
 
+/// The surface a "\u{22ef}" overflow menu's popup sits on.
+///
+/// Explicitly opaque. The component base it takes its hue from carries the
+/// system theme's frosted alpha, which is right for a window and wrong for a
+/// popup: a menu floating over a list of cards has to be readable against
+/// whatever it happens to land on, and at the theme's alpha the card titles
+/// behind it showed straight through the item labels.
+///
+/// Shared by the Browse toolbar's menu and the installed-card menu so the two
+/// cannot drift apart.
+pub(super) fn menu_surface<'a>(
+    content: impl Into<Element<'a, Message>>,
+    width: f32,
+) -> Element<'a, Message> {
+    widget::container(content.into())
+        .padding(cosmic::theme::spacing().space_xxs)
+        .width(Length::Fixed(width))
+        .class(cosmic::theme::Container::custom(|theme| {
+            let cosmic = theme.cosmic();
+            let component = &theme.current_container().component;
+            let mut background: cosmic::iced::Color = component.base.into();
+            background.a = 1.0;
+            cosmic::iced::widget::container::Style {
+                background: Some(cosmic::iced::Background::Color(background)),
+                border: cosmic::iced::Border {
+                    radius: cosmic.corner_radii.radius_s.into(),
+                    width: 1.0,
+                    color: component.divider.into(),
+                },
+                shadow: cosmic::iced::Shadow {
+                    color: cosmic::iced::Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 0.25,
+                    },
+                    offset: cosmic::iced::Vector::new(0.0, 4.0),
+                    blur_radius: 12.0,
+                },
+                snap: true,
+                ..Default::default()
+            }
+        }))
+        .into()
+}
+
+/// One row of an overflow menu: an icon, then its label.
+///
+/// The icon is what makes the two items tell themselves apart at a glance;
+/// without one, a menu of short verbs reads as a wall of text.
+pub(super) fn menu_item(
+    glyph: &'static [u8],
+    label: &'static str,
+    message: Message,
+) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    widget::button::custom(
+        cosmic::iced::widget::row![
+            crate::ui::icons::phosphor(glyph).size(16),
+            widget::text::body(label),
+        ]
+        .spacing(spacing.space_xs)
+        .align_y(cosmic::iced::Alignment::Center),
+    )
+    .class(cosmic::theme::Button::Text)
+    .padding([spacing.space_xxs, spacing.space_xs])
+    .width(Length::Fill)
+    .on_press(message)
+    .into()
+}
+
 /// A faint full-width rule used inside cards to separate the header/body from a
 /// footer action row.
 pub(super) fn card_divider<'a>() -> Element<'a, Message> {

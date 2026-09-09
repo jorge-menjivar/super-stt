@@ -33,7 +33,7 @@ use crate::ui::messages::Message;
 
 pub use post_processing::post_processor_sheet;
 
-pub use add_sheet::add_backend_sheet;
+pub use add_sheet::{add_backend_footer, add_backend_sheet};
 pub use configure::configure_sheet;
 pub use select_sheet::select_backend_sheet;
 

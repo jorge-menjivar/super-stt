@@ -231,44 +231,11 @@ pub(super) fn installed_card<'a>(
 /// update offered in two places is one more than the card needs, and the chip
 /// is the one a settled card gives a reason to look at.
 pub(super) fn installed_overflow_menu(source: &str) -> Element<'static, Message> {
-    let spacing = cosmic::theme::spacing();
-    let item = |label: String, msg: Message| -> Element<'static, Message> {
-        button::text(label).width(Length::Fill).on_press(msg).into()
-    };
+    let col = widget::column::with_capacity(1).push(super::surface::menu_item(
+        icons::X,
+        "Uninstall",
+        Message::ModelsPage(ModelsPageMessage::UninstallBackend(source.to_string())),
+    ));
 
-    let col = widget::column::with_capacity(1)
-        .spacing(spacing.space_xxxs)
-        .push(item(
-            "Uninstall".to_string(),
-            Message::ModelsPage(ModelsPageMessage::UninstallBackend(source.to_string())),
-        ));
-
-    widget::container(col)
-        .padding(spacing.space_xxs)
-        .width(Length::Fixed(190.0))
-        .class(cosmic::theme::Container::custom(|theme| {
-            let cosmic = theme.cosmic();
-            let component = &theme.current_container().component;
-            cosmic::iced::widget::container::Style {
-                background: Some(cosmic::iced::Background::Color(component.base.into())),
-                border: cosmic::iced::Border {
-                    radius: cosmic.corner_radii.radius_s.into(),
-                    width: 1.0,
-                    color: component.divider.into(),
-                },
-                shadow: cosmic::iced::Shadow {
-                    color: cosmic::iced::Color {
-                        r: 0.0,
-                        g: 0.0,
-                        b: 0.0,
-                        a: 0.25,
-                    },
-                    offset: cosmic::iced::Vector::new(0.0, 4.0),
-                    blur_radius: 12.0,
-                },
-                snap: true,
-                ..Default::default()
-            }
-        }))
-        .into()
+    super::surface::menu_surface(col, 190.0)
 }

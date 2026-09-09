@@ -50,6 +50,7 @@ const URL_SURFACE: &[(&str, &str)] = &[
     ),
     ("/v1/pipeline/{stage}/model/{model}/language/list", "get"),
     ("/v1/registry/backend/list", "get"),
+    ("/v1/registry/backend/preview", "post"),
     ("/v1/registry/backend/install", "post"),
     ("/v1/registry/backend/refresh", "post"),
     ("/v1/registry/backend/update", "post"),

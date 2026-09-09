@@ -33,6 +33,18 @@ Copyright (c) System76, Inc.
 Licensed under the Mozilla Public License 2.0
 Source: https://github.com/pop-os/libcosmic
 
+Phosphor Icons
+--------------
+Copyright (c) 2023 Phosphor Icons
+Licensed under the MIT License
+Source: https://github.com/phosphor-icons/core
+
+Unlike the entries above, these are redistributed in this repository rather
+than fetched at build time: the nineteen SVGs under
+super-stt-app/resources/icons/phosphor/ are copied verbatim from that project's
+raw/regular/ directory and embedded in the settings app. The MIT license text
+they are provided under sits beside them in that directory.
+
 Rust Ecosystem Libraries
 ------------------------
 This project uses various Rust crates from the ecosystem, each with their own

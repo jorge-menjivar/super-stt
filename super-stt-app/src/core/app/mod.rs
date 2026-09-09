@@ -324,7 +324,7 @@ impl cosmic::Application for AppModel {
         // readout (and the staged-load fit warning) live.
         const GPU_POLL_INTERVAL_SECS: u64 = 3;
 
-        Subscription::batch(vec![
+        let mut subs = vec![
             // HTTP /events SSE subscription. Covers the recording /
             // audio-meter topics and the model/device/download status
             // topics — the settings app's token holds every scope these
@@ -340,7 +340,20 @@ impl cosmic::Application for AppModel {
             // handler, so it's a no-op while disconnected).
             cosmic::iced::time::every(std::time::Duration::from_secs(GPU_POLL_INTERVAL_SECS))
                 .map(|_| Message::ModelsPage(ModelsPageMessage::RefreshGpuInfo)),
-        ])
+        ];
+
+        // The Add-a-backend drawer's spinner is a still SVG per angle, so it
+        // needs a tick to step through them. Only while a check is actually in
+        // flight: outside that the drawer draws no spinner, and a timer left
+        // running would wake the app for nothing.
+        if self.registry.add_preview.is_checking() {
+            subs.push(
+                cosmic::iced::time::every(crate::ui::icons::SPINNER_FRAME)
+                    .map(|_| Message::ModelsPage(ModelsPageMessage::AddPreviewSpin)),
+            );
+        }
+
+        Subscription::batch(subs)
     }
 
     /// Handles messages emitted by the application and its widgets.
@@ -360,6 +373,7 @@ impl cosmic::Application for AppModel {
         // any open per-card overflow menu.
         self.core.window.show_context = false;
         self.models_page.installed_menu_open = None;
+        self.models_page.browse_menu_open = false;
 
         // Opening a page that draws backend cards refetches both catalogs. The
         // daemon reads `installed_version` off disk on every request, so it is

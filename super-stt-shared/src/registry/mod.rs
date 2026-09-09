@@ -138,6 +138,19 @@ pub enum InstallRequest {
     },
 }
 
+/// Answer to `POST /registry/backend/preview`: what a source would install,
+/// in the same shape a catalog listing uses, so a client renders it with
+/// whatever it already renders Browse cards with.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviewResponse {
+    pub backend: RegistryBackend,
+    /// `unverified_source` for the custom-repo and local-import routes, as the
+    /// install response carries it. `None` for a registry `source`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallAccepted {
