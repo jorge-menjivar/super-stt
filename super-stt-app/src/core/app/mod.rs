@@ -237,7 +237,17 @@ impl cosmic::Application for AppModel {
     type Message = Message;
 
     /// Unique identifier in RDNN (reverse domain name notation) format.
-    const APP_ID: &'static str = "ai.menjivar.super-stt-app";
+    ///
+    /// Keep it free of hyphens. `run_single_instance` derives the D-Bus
+    /// object path from this id by swapping `.` for `/`, and D-Bus path
+    /// elements only accept `[A-Za-z0-9_]`. A hyphen makes serving the
+    /// activation interface fail, and libcosmic answers that failure by
+    /// exiting the process with status 1 before the window ever opens.
+    ///
+    /// It is also the window's Wayland `app_id`, so `StartupWMClass` in
+    /// `resources/super-stt-app.desktop` has to be kept equal to it for the
+    /// window to match its desktop entry.
+    const APP_ID: &'static str = "ai.menjivar.SuperSTT";
 
     fn core(&self) -> &cosmic::Core {
         &self.core

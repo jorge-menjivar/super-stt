@@ -6,6 +6,9 @@ Icon=super-stt-app
 Exec=super-stt-app
 Terminal=false
 StartupNotify=true
+# Must match AppModel::APP_ID: the window announces that as its
+# Wayland app_id, and it differs from this file's name.
+StartupWMClass=ai.menjivar.SuperSTT
 Categories=AudioVideo;Audio;
 Keywords=speech;transcription;stt;voice;audio;speech-to-text;
 MimeType=
