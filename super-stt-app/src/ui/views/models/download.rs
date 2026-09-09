@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use cosmic::Element;
 use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, space::horizontal as horizontal_space, text};
-use cosmic::{Apply, Element};
 
 use crate::core::app::AppModel;
 use crate::state::ContextPage;
@@ -112,31 +112,21 @@ pub(super) fn download_toolbar<'a>(
         ))
         .width(Length::Fill);
 
-    let add_btn = button::suggested("+ Add backend").on_press(Message::Shell(
-        ShellMessage::ToggleContextPage(ContextPage::AddBackend),
-    ));
-    // Refresh shows as an icon-only button (a refresh glyph) with a tooltip
-    // rather than a text label. A `Standard`-classed custom button gives it the
-    // surface fill + hairline border that matches the neighbouring text buttons.
-    // Fixed height (`space_l`) squares it off so it lines up with "Add backend"
-    // instead of shrinking to its icon.
-    let btn_height = spacing.space_l;
-    let refresh_btn = widget::tooltip(
-        button::custom(
-            icons::phosphor(icons::ARROWS_CLOCKWISE)
-                .size(16)
-                .apply(widget::container)
-                .center_x(Length::Fixed(f32::from(btn_height)))
-                .center_y(Length::Fill),
-        )
-        .class(cosmic::theme::Button::Standard)
-        .padding(0)
-        .height(Length::Fixed(f32::from(btn_height)))
-        .on_press(Message::ModelsPage(ModelsPageMessage::RefreshRegistry)),
-        widget::container(text::body("Refresh registry")).padding(spacing.space_xxs),
-        widget::tooltip::Position::Bottom,
-    );
-    let search_row = row![search, add_btn, refresh_btn]
+    // One overflow menu rather than two competing buttons. Browse is how a
+    // backend is meant to be added, so refreshing the catalog and installing
+    // from outside it are both secondary to the search field they were
+    // crowding. Mirrors the installed card's own "⋯" menu.
+    let menu_open = app.models_page.browse_menu_open;
+    let trigger = button::icon(icons::phosphor_handle(icons::DOTS_THREE_VERTICAL))
+        .on_press(Message::ModelsPage(ModelsPageMessage::ToggleBrowseMenu));
+    let mut overflow = widget::popover(trigger).position(widget::popover::Position::Bottom);
+    if menu_open {
+        overflow = overflow
+            .popup(browse_overflow_menu())
+            .on_close(Message::ModelsPage(ModelsPageMessage::CloseBrowseMenu));
+    }
+
+    let search_row = row![search, overflow]
         .spacing(spacing.space_xs)
         .align_y(Alignment::Center)
         .width(Length::Fill);
@@ -340,6 +330,34 @@ pub(super) fn download_card<'a>(
     card = card.push(card_divider()).push(footer);
 
     card_surface(card, false)
+}
+
+/// The popup body for the Browse toolbar's "⋯" menu: refresh the catalog, or
+/// open the manual-install drawer.
+///
+/// Both are catalog-level actions rather than actions on any one backend, which
+/// is why they share a menu and why neither needs to hold a place in the search
+/// row. "Install manually" is the name the drawer carries too, so the item and
+/// what it opens read as one thing.
+fn browse_overflow_menu() -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    let col = widget::column::with_capacity(2)
+        .spacing(spacing.space_xxxs)
+        .push(super::surface::menu_item(
+            icons::ARROWS_CLOCKWISE,
+            "Refresh catalog",
+            Message::ModelsPage(ModelsPageMessage::RefreshRegistry),
+        ))
+        // Git-branch rather than a download glyph: the drawer's default source
+        // is a repository, and it is the mark this app already uses for one on
+        // every backend card.
+        .push(super::surface::menu_item(
+            icons::GIT_BRANCH,
+            "Install manually\u{2026}",
+            Message::Shell(ShellMessage::ToggleContextPage(ContextPage::AddBackend)),
+        ));
+
+    super::surface::menu_surface(col, 200.0)
 }
 
 /// Human-readable label for an [`InstallPhase`], shown inside the "Installing…"

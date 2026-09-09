@@ -18,6 +18,10 @@ impl AppModel {
             }
 
             ShellMessage::ToggleContextPage(context_page) => {
+                // A context sheet is opened from the Browse toolbar's overflow
+                // menu, among other places; whichever it was, that menu has
+                // served its purpose.
+                self.models_page.browse_menu_open = false;
                 if self.context_page == context_page {
                     self.core.window.show_context = !self.core.window.show_context;
                 } else {

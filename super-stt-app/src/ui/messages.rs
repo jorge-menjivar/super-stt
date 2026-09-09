@@ -139,8 +139,6 @@ pub enum ModelsPageMessage {
     // Registry / Download-tab messages
     /// User clicked Install on a Download-tab card.
     InstallBackend(String),
-    /// User clicked Install on the Custom-repo input.
-    InstallBackendFromRepoUrl(String),
     /// Daemon accepted the install request.
     InstallAccepted { source: String, install_id: String },
     /// Install POST failed (couldn't start).
@@ -200,6 +198,27 @@ pub enum ModelsPageMessage {
     ImportBackendFromDirPicked(Option<String>),
     /// User typed in the Custom-repo URL field in the Download tab.
     RegistryCustomRepoInputChanged(String),
+    /// Toggle the Browse toolbar's overflow ("⋯") menu.
+    ToggleBrowseMenu,
+    /// Dismiss the Browse toolbar's overflow menu (click-outside).
+    CloseBrowseMenu,
+    /// User picked an install source in the Add-a-backend drawer. Switching
+    /// clears the preview: it described the other source.
+    AddSourceChanged(crate::state::registry::AddSource),
+    /// User typed in the drawer's folder-path field.
+    AddFolderInputChanged(String),
+    /// User pressed Check in the drawer, or submitted the URL field. Resolves
+    /// the source without installing it.
+    CheckAddSource,
+    /// A preview resolved. Carries the backend the source would install.
+    AddPreviewLoaded(Box<super_stt_shared::registry::PreviewResponse>),
+    /// A preview failed. Carries the daemon's message, shown verbatim.
+    AddPreviewFailed(String),
+    /// One frame of the drawer's "reading" spinner. Only fires while a check
+    /// is in flight; the subscription that emits it is gated on that.
+    AddPreviewSpin,
+    /// User pressed Install in the drawer, committing to the previewed backend.
+    InstallPreviewed,
 }
 
 /// The stage-1 model's device + device-switch errors.

@@ -8,6 +8,8 @@
 //! beside these. Take any new icon from `raw/regular/` too. The SVGs use
 //! `currentColor`, so they pick up the active theme via the symbolic flag.
 
+use std::sync::LazyLock;
+
 use cosmic::iced::Length;
 use cosmic::iced::widget::svg;
 use cosmic::widget::icon::{self, Icon};
@@ -30,6 +32,7 @@ pub const STOP: &[u8] = include_bytes!("../../resources/icons/phosphor/stop.svg"
 pub const GIT_BRANCH: &[u8] = include_bytes!("../../resources/icons/phosphor/git-branch.svg");
 pub const BOOKS: &[u8] = include_bytes!("../../resources/icons/phosphor/books.svg");
 pub const X: &[u8] = include_bytes!("../../resources/icons/phosphor/x.svg");
+pub const CIRCLE_NOTCH: &[u8] = include_bytes!("../../resources/icons/phosphor/circle-notch.svg");
 
 /// The Super STT app logo, full-color artwork. Not a Phosphor glyph, so it
 /// lives at the app resources root rather than the phosphor set; shown beside
@@ -101,6 +104,68 @@ pub fn phosphor_tinted(
     size: f32,
     color: cosmic::iced::Color,
 ) -> cosmic::widget::Svg<'static, cosmic::Theme> {
+    tinted_svg(
+        bytes,
+        size,
+        cosmic::theme::Svg::custom(move |_| svg::Style { color: Some(color) }),
+    )
+}
+
+/// How many angles the [`CIRCLE_NOTCH`] spinner is drawn at.
+///
+/// Divides 360 exactly, so every frame lands on a whole number of degrees.
+pub const SPINNER_FRAME_COUNT: usize = 24;
+
+/// How long each spinner frame holds — [`SPINNER_FRAME_COUNT`] of these make
+/// one turn a second.
+pub const SPINNER_FRAME: std::time::Duration = std::time::Duration::from_millis(42);
+
+/// [`CIRCLE_NOTCH`] as SVG source, pre-turned to each of the
+/// [`SPINNER_FRAME_COUNT`] angles.
+///
+/// Rotating at draw time is the obvious way and the wrong one here: iced
+/// rasterizes an SVG once at its layout size, caches that bitmap under
+/// `(id, width, height, color)` — rotation is not in the key — and then spins
+/// it in the shader sampling *nearest-neighbour*. An 18px glyph turned that way
+/// comes out visibly chewed. Turning the geometry instead means resvg draws
+/// each angle from the path with its own antialiasing. The frames are a fixed
+/// set of byte strings and the cache keys off their hash, so this costs exactly
+/// `SPINNER_FRAME_COUNT` small rasters rather than one per angle ever shown.
+static SPINNER_FRAMES: LazyLock<Vec<Vec<u8>>> = LazyLock::new(|| {
+    let inner = svg_inner(CIRCLE_NOTCH);
+    (0..SPINNER_FRAME_COUNT)
+        .map(|i| {
+            // Whole degrees: 360 / 24 = 15, so no rounding creeps in and the
+            // frame at index 0 is the source art untouched.
+            let deg = 360 * i / SPINNER_FRAME_COUNT;
+            format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\">\
+                 <g transform=\"rotate({deg} 128 128)\">{inner}</g></svg>"
+            )
+            .into_bytes()
+        })
+        .collect()
+});
+
+/// The drawing inside an embedded Phosphor SVG, without its root element, so it
+/// can be re-wrapped in one carrying a transform.
+///
+/// Every file in `resources/icons/phosphor/` is one `<svg …>…</svg>` on a
+/// single line, which is what makes this a slice rather than a parse.
+fn svg_inner(bytes: &'static [u8]) -> &'static str {
+    let s = std::str::from_utf8(bytes).expect("embedded Phosphor SVGs are UTF-8");
+    let body = s.find('>').map_or(s, |i| &s[i + 1..]);
+    body.trim_end().trim_end_matches("</svg>")
+}
+
+/// The [`CIRCLE_NOTCH`] spinner at `frame`, which the caller advances on its
+/// own tick. Indices past the last frame wrap, so a counter can just count up.
+pub fn spinner(
+    size: f32,
+    color: cosmic::iced::Color,
+    frame: usize,
+) -> cosmic::widget::Svg<'static, cosmic::Theme> {
+    let bytes = SPINNER_FRAMES[frame % SPINNER_FRAME_COUNT].as_slice();
     tinted_svg(
         bytes,
         size,

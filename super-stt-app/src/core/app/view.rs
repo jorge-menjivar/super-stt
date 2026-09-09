@@ -78,7 +78,10 @@ impl AppModel {
                         views::models::add_backend_sheet(self),
                         Message::Shell(ShellMessage::ToggleContextPage(ContextPage::AddBackend)),
                     )
-                    .title("Add a backend")
+                    .title("Install manually")
+                    // Outside the scrollable body: a resolved preview is tall
+                    // enough to scroll the Install button off the bottom.
+                    .footer(views::models::add_backend_footer(self))
                 })
             }
             // The post-processing twin of the Select-a-backend sheet, scoped
