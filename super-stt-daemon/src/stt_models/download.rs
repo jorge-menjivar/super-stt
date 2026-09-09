@@ -13,9 +13,12 @@ use crate::download_stream::{StreamError, stream_body_to_writer};
 use anyhow::Result;
 use log::info;
 use ring::digest::{Context, SHA256};
+use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::UNIX_EPOCH;
 use super_stt_registry_types::verify::sha256_matches;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
@@ -50,6 +53,87 @@ async fn sha256_hex_of_file(path: &Path) -> Result<String> {
     Ok(hex::encode(ctx.finish().as_ref()))
 }
 
+/// Sidecar recording that a file was verified against its pinned hash, so a
+/// later load can accept it without streaming it through SHA-256 again.
+///
+/// Without this, every model load re-hashes every pinned file it finds on
+/// disk: a several-hundred-megabyte weight file is read and digested in full
+/// on each daemon start, to reach the same answer as last time.
+///
+/// The stamp only skips work already done — it never widens what is trusted
+/// off the network, where the pin is still checked before the file is
+/// published at its final path. Anything that could mean different bytes —
+/// a change in size, a change in mtime, or a different pin in the manifest —
+/// falls back to the full digest. It is not a defence against local
+/// tampering: whoever can rewrite the model file in place can rewrite its
+/// stamp too, and already holds the directory either way.
+#[derive(Serialize, Deserialize)]
+struct VerifiedStamp {
+    /// The pinned hash the file was verified against, hex-encoded.
+    sha256: String,
+    /// The file's size, in bytes, when it passed.
+    size: u64,
+    /// The file's mtime, in nanoseconds since the Unix epoch, when it passed.
+    mtime_ns: u64,
+}
+
+/// Where `dest`'s stamp lives: a dotfile beside it, so it is carried and
+/// removed with the model directory rather than kept in a separate cache that
+/// could outlive the file it describes.
+fn stamp_path(dest: &Path) -> PathBuf {
+    let mut name = OsString::from(".");
+    match dest.file_name() {
+        Some(base) => name.push(base),
+        None => name.push("file"),
+    }
+    name.push(".verified");
+    dest.with_file_name(name)
+}
+
+/// Nanoseconds since the Unix epoch. `None` when the platform has no mtime for
+/// the file or it predates the epoch, which simply leaves the file to be
+/// hashed as before.
+fn mtime_ns(md: &std::fs::Metadata) -> Option<u64> {
+    u64::try_from(
+        md.modified()
+            .ok()?
+            .duration_since(UNIX_EPOCH)
+            .ok()?
+            .as_nanos(),
+    )
+    .ok()
+}
+
+/// Whether `dest` carries a stamp saying these exact bytes already passed
+/// `expected`.
+async fn stamp_says_verified(dest: &Path, md: &std::fs::Metadata, expected: &str) -> bool {
+    let Ok(raw) = fs::read(stamp_path(dest)).await else {
+        return false;
+    };
+    let Ok(stamp) = serde_json::from_slice::<VerifiedStamp>(&raw) else {
+        return false;
+    };
+    stamp.size == md.len()
+        && Some(stamp.mtime_ns) == mtime_ns(md)
+        && sha256_matches(&stamp.sha256, expected)
+}
+
+/// Record that `dest` passed `expected`, best effort: a stamp that cannot be
+/// written costs a re-hash on the next load and nothing else.
+async fn write_stamp(dest: &Path, md: &std::fs::Metadata, expected: &str) {
+    let Some(mtime_ns) = mtime_ns(md) else {
+        return;
+    };
+    let stamp = VerifiedStamp {
+        sha256: expected.to_string(),
+        size: md.len(),
+        mtime_ns,
+    };
+    if let Ok(json) = serde_json::to_vec(&stamp) {
+        let _ = fs::write(stamp_path(dest), json).await;
+    }
+}
+
 /// If `dest` already holds a usable copy (non-empty, and matching `sha256` when
 /// one is declared), returns its size. Returns `None` when the file is absent,
 /// empty, or fails verification — in which case it should be re-downloaded.
@@ -60,16 +144,24 @@ async fn usable_existing(dest: &Path, sha256: Option<&str>) -> Result<Option<u64
     if md.len() == 0 {
         return Ok(None);
     }
-    if let Some(expected) = sha256 {
-        let actual = sha256_hex_of_file(dest).await?;
-        if !sha256_matches(&actual, expected) {
-            info!(
-                "Hash mismatch for existing {} (expected {expected}, got {actual}); re-downloading",
-                dest.display()
-            );
-            return Ok(None);
-        }
+    let Some(expected) = sha256 else {
+        return Ok(Some(md.len()));
+    };
+    // A stamp left by an earlier verification of these exact bytes answers the
+    // question the digest would, so a pinned multi-gigabyte file is not read
+    // end to end on every load.
+    if stamp_says_verified(dest, &md, expected).await {
+        return Ok(Some(md.len()));
     }
+    let actual = sha256_hex_of_file(dest).await?;
+    if !sha256_matches(&actual, expected) {
+        info!(
+            "Hash mismatch for existing {} (expected {expected}, got {actual}); re-downloading",
+            dest.display()
+        );
+        return Ok(None);
+    }
+    write_stamp(dest, &md, expected).await;
     Ok(Some(md.len()))
 }
 
@@ -208,6 +300,14 @@ async fn download_one(
     }
 
     fs::rename(&tmp, dest).await?;
+
+    // These bytes were just verified against the pin; stamp them so the next
+    // load doesn't repeat the digest.
+    if let Some(expected) = item.sha256.as_ref()
+        && let Ok(md) = fs::metadata(dest).await
+    {
+        write_stamp(dest, &md, expected).await;
+    }
     Ok(())
 }
 
@@ -249,4 +349,104 @@ pub async fn download_files(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two payloads of the same length, so a test can swap one for the other
+    /// and leave every cheap signal about the file unchanged.
+    const ORIGINAL: &[u8] = b"the original bytes";
+    const SWAPPED: &[u8] = b"the swapped bytes!";
+
+    /// Overwrite `path`, restoring the mtime it had, so only a digest could
+    /// tell the content changed.
+    fn rewrite_preserving_mtime(path: &Path, bytes: &[u8]) {
+        let mtime = std::fs::metadata(path)
+            .and_then(|md| md.modified())
+            .unwrap();
+        std::fs::write(path, bytes).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(mtime))
+            .unwrap();
+    }
+
+    /// Write `ORIGINAL` into a fresh directory and return it with its own hash
+    /// as the pin.
+    async fn pinned_file() -> (tempfile::TempDir, PathBuf, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("weights.bin");
+        std::fs::write(&file, ORIGINAL).unwrap();
+        let pin = sha256_hex_of_file(&file).await.unwrap();
+        (dir, file, pin)
+    }
+
+    /// The first verification hashes the file and leaves a stamp; the second
+    /// takes the stamp's word for it. Proven by swapping the content for
+    /// same-length bytes with the same mtime — a re-hash would reject them.
+    #[tokio::test]
+    async fn a_stamp_stands_in_for_the_rehash() {
+        let (_dir, file, pin) = pinned_file().await;
+
+        let size = ORIGINAL.len() as u64;
+        assert_eq!(
+            usable_existing(&file, Some(&pin)).await.unwrap(),
+            Some(size)
+        );
+        assert!(stamp_path(&file).exists());
+
+        rewrite_preserving_mtime(&file, SWAPPED);
+        assert_eq!(
+            usable_existing(&file, Some(&pin)).await.unwrap(),
+            Some(size)
+        );
+    }
+
+    /// A file whose size no longer matches its stamp is hashed again, and the
+    /// mismatch sends it back for re-download.
+    #[tokio::test]
+    async fn a_changed_file_is_rehashed_despite_its_stamp() {
+        let (_dir, file, pin) = pinned_file().await;
+        assert!(usable_existing(&file, Some(&pin)).await.unwrap().is_some());
+
+        std::fs::write(&file, b"truncated").unwrap();
+        assert_eq!(usable_existing(&file, Some(&pin)).await.unwrap(), None);
+    }
+
+    /// A stamp is scoped to the pin it was taken against: when the manifest
+    /// moves to a new revision, the old stamp doesn't vouch for it.
+    #[tokio::test]
+    async fn a_changed_pin_is_rehashed_despite_its_stamp() {
+        let (_dir, file, pin) = pinned_file().await;
+        assert!(usable_existing(&file, Some(&pin)).await.unwrap().is_some());
+
+        let moved_revision = "0".repeat(64);
+        assert_eq!(
+            usable_existing(&file, Some(&moved_revision)).await.unwrap(),
+            None
+        );
+    }
+
+    /// Nothing is hashed or stamped for a file the manifest doesn't pin.
+    #[tokio::test]
+    async fn an_unpinned_file_is_accepted_without_a_stamp() {
+        let (_dir, file, _pin) = pinned_file().await;
+
+        assert!(usable_existing(&file, None).await.unwrap().is_some());
+        assert!(!stamp_path(&file).exists());
+    }
+
+    /// An empty file is never usable, pinned or not.
+    #[tokio::test]
+    async fn an_empty_file_is_not_usable() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("weights.bin");
+        std::fs::write(&file, b"").unwrap();
+
+        assert_eq!(usable_existing(&file, None).await.unwrap(), None);
+    }
 }
