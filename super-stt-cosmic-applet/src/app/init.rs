@@ -9,7 +9,7 @@ use super::SuperSttApplet;
 use crate::app::Message;
 use crate::config::AppletConfig;
 use crate::daemon::{RetryStrategy, ping_daemon};
-use crate::models::state::{DaemonConnectionState, IsOpen, RecordingState};
+use crate::models::state::{DaemonConnectionState, IsOpen, RecordingPhase};
 use crate::models::theme::{IconAlignment, VisualizationSide};
 use crate::ui::components::sound_visualization::VisualizationComponent;
 use crate::ui::components::working_animation_component::WorkingAnimationComponent;
@@ -80,7 +80,7 @@ impl SuperSttApplet {
 
         let applet = Self {
             core,
-            recording_state: RecordingState::Idle,
+            phase: RecordingPhase::default(),
             daemon_state: DaemonConnectionState::Connecting,
             popup: None,
             socket_path: get_http_socket_path(),
@@ -90,7 +90,6 @@ impl SuperSttApplet {
             udp_restart_counter: 0,
             visualization,
             working_animation,
-            working_anim_start: None,
             config,
             icon_alignment_model,
             icon_alignment_start,

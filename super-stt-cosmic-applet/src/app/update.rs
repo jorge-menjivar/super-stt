@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use std::time::Instant;
-
 use cosmic::{
     app as cosmic_app,
     iced::window,
@@ -13,7 +11,7 @@ use super::SuperSttApplet;
 use crate::app::Message;
 use crate::daemon::identity::APP_ID;
 use crate::daemon::{RetryStrategy, ping_daemon};
-use crate::models::state::{DaemonConnectionState, IsOpen, RecordingState};
+use crate::models::state::{CycleEvent, DaemonConnectionState, IsOpen};
 use crate::models::theme::{
     IconAlignment, VisualizationColor, VisualizationTheme, WorkingAnimationTheme,
 };
@@ -32,25 +30,17 @@ impl SuperSttApplet {
             Message::SetVisualizationTheme(theme) => self.set_visualization_theme(theme),
             Message::SetWorkingAnimation(theme) => self.set_working_animation(theme),
             Message::WidgetRecordingState(is_recording) => {
-                self.widget_recording_state(is_recording)
+                self.apply_cycle_event(CycleEvent::RecordingFlag(is_recording))
             }
             Message::WidgetFrequencyBands {
                 bands,
                 total_energy,
             } => self.widget_frequency_bands(&bands, total_energy),
             Message::WidgetTranscribingStarted => {
-                // Guard against out-of-order delivery: only enter Processing
-                // mid-cycle, never resurrect it after transcribing_stopped
-                // already returned us to Idle.
-                if !matches!(self.recording_state, RecordingState::Idle) {
-                    self.set_recording_state(RecordingState::Processing);
-                }
-                cosmic_app::Task::none()
+                self.apply_cycle_event(CycleEvent::TranscribingStarted)
             }
             Message::WidgetTranscribingStopped => {
-                self.set_recording_state(RecordingState::Idle);
-                self.visualization.clear();
-                cosmic_app::Task::none()
+                self.apply_cycle_event(CycleEvent::TranscribingStopped)
             }
             Message::WidgetRevoked(reason) => self.widget_revoked(&reason),
             Message::WidgetOtherEvent(_) | Message::WidgetSubscriptionError(_) => {
@@ -73,9 +63,8 @@ impl SuperSttApplet {
             }
             Message::SetColorThemeEntity(entity) => self.set_color_theme(entity),
             Message::WorkingAnimationTick => {
-                if let Some(start) = self.working_anim_start {
-                    self.working_animation
-                        .set_elapsed(start.elapsed().as_secs_f32() * 1000.0);
+                if let Some(elapsed_ms) = self.phase.animation_elapsed_ms() {
+                    self.working_animation.set_elapsed(elapsed_ms);
                 }
                 cosmic_app::Task::none()
             }
@@ -205,31 +194,16 @@ impl SuperSttApplet {
         cosmic_app::Task::none()
     }
 
-    /// Set the recording state, managing the working-animation clock: start it
-    /// when entering Processing, stop it otherwise. Centralizes the lifecycle
-    /// so every transition keeps the animation in sync.
-    fn set_recording_state(&mut self, new: RecordingState) {
-        if matches!(new, RecordingState::Processing) {
-            if self.working_anim_start.is_none() {
-                self.working_anim_start = Some(Instant::now());
-                self.working_animation.reset();
-            }
-        } else {
-            self.working_anim_start = None;
+    /// Fold one recording-cycle event into [`RecordingPhase`] and carry out
+    /// whatever it leaves for the drawing components. The transitions live in
+    /// the phase itself, which folds these events in without assuming the
+    /// order they arrive in.
+    fn apply_cycle_event(&mut self, event: CycleEvent) -> cosmic_app::Task<Message> {
+        let change = self.phase.apply(event);
+        if change.animation_restarted {
+            self.working_animation.reset();
         }
-        self.recording_state = new;
-    }
-
-    /// Handle a `recording_state` event. The transition itself lives in
-    /// [`RecordingState::with_recording_flag`], which folds the event in
-    /// without assuming it arrives before `transcribing_started`.
-    fn widget_recording_state(&mut self, is_recording: bool) -> cosmic_app::Task<Message> {
-        let mic_was_live = !matches!(self.recording_state, RecordingState::Idle);
-        let new_state = self.recording_state.with_recording_flag(is_recording);
-        self.set_recording_state(new_state);
-        if mic_was_live && !is_recording {
-            // Mic capture ended, so the live bars are stale whether or not
-            // `transcribing_started` already moved us to Processing.
+        if change.visualization_stale {
             self.visualization.clear();
         }
         cosmic_app::Task::none()
