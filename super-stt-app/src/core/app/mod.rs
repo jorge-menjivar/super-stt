@@ -231,7 +231,7 @@ impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
 
     /// Data that your application receives to its init method.
-    type Flags = ();
+    type Flags = crate::Flags;
 
     /// Messages which the application and its widgets will emit.
     type Message = Message;

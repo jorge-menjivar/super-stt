@@ -43,16 +43,30 @@ impl SuperSTTDaemon {
                 let method = self.config.read().await.transcription.notification_method;
                 if matches!(method, NotificationMethod::Dbus | NotificationMethod::Auto) {
                     let mut notifier = self.notifier.lock().await;
-                    if notifier
-                        .send(
+                    let sent = notifier
+                        .send_with_actions(
                             &format!("Super STT {tag} is available"),
                             "Open Super STT to install the update.",
+                            &[(
+                                crate::output::notification::OPEN_APP_ACTION_KEY,
+                                "Open Super STT",
+                            )],
                         )
-                        .await
-                        .is_ok()
-                    {
-                        drop(notifier);
+                        .await;
+                    let conn = notifier.connection();
+                    drop(notifier);
+                    if let Ok(id) = sent {
                         self.self_update.record_notified(&tag).await;
+                        // The bubble carries an "Open Super STT" action; a
+                        // click on it (or the bubble itself, on servers that
+                        // bind the default action) should bring the app up.
+                        // Spawned so the check path isn't blocked waiting on
+                        // a click that may never come.
+                        if let Some(conn) = conn {
+                            tokio::spawn(async move {
+                                Self::wait_for_update_notification_click(conn, id).await;
+                            });
+                        }
                     }
                 } else {
                     // Off/Typed: typing an update notice into the focused
@@ -63,6 +77,24 @@ impl SuperSTTDaemon {
             }
         }
         status
+    }
+
+    /// Wait for the user to click the "Open Super STT" action on the update
+    /// notification `id`, then launch the app. The app is single-instance
+    /// (its `org.freedesktop.DbusActivation` interface), so launching it
+    /// while it is already running activates and focuses the existing window
+    /// instead of opening a second one.
+    async fn wait_for_update_notification_click(conn: zbus::Connection, id: u32) {
+        let Some(key) = crate::output::notification::Notifier::wait_for_action(&conn, id).await
+        else {
+            return;
+        };
+        if key != crate::output::notification::OPEN_APP_ACTION_KEY {
+            return;
+        }
+        if let Err(e) = tokio::process::Command::new("super-stt-app").spawn() {
+            log::warn!("failed to launch Super STT app from update notification: {e}");
+        }
     }
 }
 

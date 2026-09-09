@@ -85,7 +85,7 @@ impl AppModel {
     /// Initializes the application with any given flags and startup commands.
     pub(super) fn init_model(
         core: cosmic::Core,
-        _flags: (),
+        _flags: crate::Flags,
     ) -> (Self, Task<cosmic::Action<Message>>) {
         let nav = build_nav();
 
