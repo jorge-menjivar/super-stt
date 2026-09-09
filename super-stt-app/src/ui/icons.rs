@@ -2,8 +2,11 @@
 
 //! Phosphor icons (regular weight) embedded for the settings UI.
 //!
-//! Source: <https://github.com/phosphor-icons/core> — SVGs use `currentColor`,
-//! so they pick up the active theme via the symbolic flag.
+//! Source: <https://github.com/phosphor-icons/core>, copied verbatim from
+//! `raw/regular/` — the stroked source art, not the outlined `assets/regular/`
+//! export, which draws the same glyphs as filled paths and sits visibly heavier
+//! beside these. Take any new icon from `raw/regular/` too. The SVGs use
+//! `currentColor`, so they pick up the active theme via the symbolic flag.
 
 use cosmic::iced::Length;
 use cosmic::iced::widget::svg;
