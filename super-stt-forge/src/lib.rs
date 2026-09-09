@@ -160,6 +160,23 @@ pub fn client(forge: Forge) -> Box<dyn ForgeClient> {
     }
 }
 
+/// The forge serving `host`, for a caller resolving a repository URL a person
+/// pasted rather than reading a declared `forge` — the Custom-repo install
+/// path, where the URL already names its host and there is nothing else for a
+/// client to restate. Matched case-insensitively.
+///
+/// This is a lookup, not a default: a host no adapter serves returns `None`
+/// and the caller must fail rather than guess. Declaring `forge` explicitly
+/// stays the way to reach a host that is not in this map — a GitHub Enterprise
+/// install, say, whose API base comes from `GITHUB_API_BASE`.
+#[must_use]
+pub fn forge_for_host(host: &str) -> Option<Forge> {
+    match host.trim().to_ascii_lowercase().as_str() {
+        "github.com" => Some(Forge::Github),
+        _ => None,
+    }
+}
+
 /// Whether an operator-provided API base URL may be used: `https://`, or a
 /// loopback `http://` for local testing. Anything else is rejected so adapters
 /// fall back to their secure default. Shared with the daemon's registry client
@@ -187,6 +204,28 @@ mod base_url_tests {
         assert!(!accept_base_url("http://evil.example.com"));
         assert!(!accept_base_url("ftp://x"));
         assert!(!accept_base_url("https://"));
+    }
+}
+
+#[cfg(test)]
+mod forge_for_host_tests {
+    use super::forge_for_host;
+    use super_stt_registry_types::forge::Forge;
+
+    #[test]
+    fn maps_known_hosts_case_insensitively() {
+        assert_eq!(forge_for_host("github.com"), Some(Forge::Github));
+        assert_eq!(forge_for_host("GitHub.com"), Some(Forge::Github));
+        assert_eq!(forge_for_host("  github.com  "), Some(Forge::Github));
+    }
+
+    #[test]
+    fn an_unserved_host_is_none_not_a_fallback() {
+        // A GitLab URL must not resolve to the GitHub adapter, which ignores
+        // `RepoRef::host` and would query api.github.com for that owner/repo.
+        for host in ["gitlab.com", "codeberg.org", "github.mycorp.com", ""] {
+            assert_eq!(forge_for_host(host), None, "{host}");
+        }
     }
 }
 
