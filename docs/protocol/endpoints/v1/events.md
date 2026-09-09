@@ -86,6 +86,14 @@ For one daemon-mic capture the lifecycle events fire in this order:
 the visualization signal drops at mic-stop, independent of the transcription
 that follows.
 
+That is the order the daemon *publishes* them in. Each topic of a subscription
+is forwarded on its own task, so two events from different topics can still
+reach the client in either order — notably
+`recording_state{is_recording:false}` and `transcribing_started`, which are
+published microseconds apart. Fold lifecycle events into your state without
+assuming their relative arrival order: treat a mic-stop as "capture ended", not
+as "the cycle is over", and return to idle only on `transcribing_stopped`.
+
 **Lifecycle terminal and optional events:**
 - `transcribing_started` is emitted only when model decode actually begins
   (Phase 4). It is skipped entirely when the cycle fails during audio capture,

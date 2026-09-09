@@ -220,20 +220,16 @@ impl SuperSttApplet {
         self.recording_state = new;
     }
 
+    /// Handle a `recording_state` event. The transition itself lives in
+    /// [`RecordingState::with_recording_flag`], which folds the event in
+    /// without assuming it arrives before `transcribing_started`.
     fn widget_recording_state(&mut self, is_recording: bool) -> cosmic_app::Task<Message> {
-        let was_recording = matches!(self.recording_state, RecordingState::Recording);
-        let new_state = if is_recording {
-            RecordingState::Recording
-        } else if was_recording {
-            // Just left Recording — show a brief Processing state while
-            // the daemon transcribes.
-            RecordingState::Processing
-        } else {
-            RecordingState::Idle
-        };
-
+        let mic_was_live = !matches!(self.recording_state, RecordingState::Idle);
+        let new_state = self.recording_state.with_recording_flag(is_recording);
         self.set_recording_state(new_state);
-        if was_recording && !is_recording {
+        if mic_was_live && !is_recording {
+            // Mic capture ended, so the live bars are stale whether or not
+            // `transcribing_started` already moved us to Processing.
             self.visualization.clear();
         }
         cosmic_app::Task::none()
