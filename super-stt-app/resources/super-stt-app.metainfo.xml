@@ -1,18 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>ai.menjivar.super-stt-app</id>
+  <id>ai.menjivar.SuperSTT</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3</project_license>
-  <name>Super Stt App</name>
-  <summary>An application for the COSMIC™ desktop</summary>
+  <name>Super STT</name>
+  <summary>High-performance speech-to-text application</summary>
+  <description>
+    <p>
+      Super STT types what you say into whatever app is focused. Bind a
+      shortcut, speak, and the text appears where you are working.
+    </p>
+    <p>
+      A background daemon installs speech models from a library of local
+      and cloud backends and keeps one loaded, so transcription starts
+      right away. This app is where you pick a backend, load a model, and
+      configure the daemon.
+    </p>
+  </description>
+  <developer id="ai.menjivar">
+    <name>Jorge Menjivar</name>
+  </developer>
   <icon type="stock">super-stt-app</icon>
+  <url type="homepage">https://github.com/jorge-menjivar/super-stt</url>
   <url type="vcs-browser">https://github.com/jorge-menjivar/super-stt</url>
   <launchable type="desktop-id">super-stt-app.desktop</launchable>
   <provides>
-    <id>ai.menjivar.super-stt-app</id>
-    <binaries>
-      <binary>super-stt-app</binary>
-    </binaries>
+    <binary>super-stt-app</binary>
   </provides>
   <requires>
     <display_length compare="ge">360</display_length>
