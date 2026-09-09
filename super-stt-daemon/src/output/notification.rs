@@ -14,6 +14,7 @@
 use crate::output::notice::Failure;
 use crate::output::typer::Typer;
 use anyhow::{Context, Result};
+use futures::StreamExt;
 use log::{debug, info, warn};
 use std::collections::HashMap;
 use super_stt_shared::models::notification_method::NotificationMethod;
@@ -33,6 +34,12 @@ const APP_ICON: &str = "super-stt-app";
 const URGENCY_NORMAL: u8 = 1;
 /// Let the notification server pick the timeout.
 const EXPIRE_DEFAULT: i32 = -1;
+
+/// The action key offered on update-available bubbles. The spec's
+/// `default` action is what most servers bind to clicking the bubble
+/// itself, so it is the one that makes "click the notification to open
+/// the app" work everywhere.
+pub(crate) const OPEN_APP_ACTION_KEY: &str = "default";
 
 /// Sends failure notices to the session's notification server.
 ///
@@ -77,6 +84,27 @@ impl Notifier {
     /// Never in practice: the `expect` below only unwraps the connection slot
     /// this same call just populated a few lines above.
     pub async fn send(&mut self, summary: &str, body: &str) -> Result<()> {
+        self.send_with_actions(summary, body, &[]).await.map(|_| ())
+    }
+
+    /// Deliver `summary` and `body` as a desktop notification carrying
+    /// `actions` (pairs of action key and label), returning the notification
+    /// id the server assigned. When the user picks one, the notification
+    /// server emits `ActionInvoked` on the same bus; the caller is
+    /// responsible for listening for it (see
+    /// [`crate::daemon::self_update_handlers`]).
+    ///
+    /// # Errors
+    /// As [`Self::send`].
+    ///
+    /// # Panics
+    /// As [`Self::send`].
+    pub async fn send_with_actions(
+        &mut self,
+        summary: &str,
+        body: &str,
+        actions: &[(&str, &str)],
+    ) -> Result<u32> {
         match &mut self.inner {
             Inner::Dbus(slot) => {
                 if slot.is_none() {
@@ -93,7 +121,10 @@ impl Notifier {
 
                 let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
                 hints.insert("urgency", Value::U8(URGENCY_NORMAL));
-                let actions: Vec<&str> = Vec::new();
+                let actions: Vec<&str> = actions
+                    .iter()
+                    .flat_map(|(key, label)| [*key, *label])
+                    .collect();
 
                 // Notify(app_name, replaces_id, app_icon, summary, body,
                 //        actions, hints, expire_timeout) -> id
@@ -116,7 +147,7 @@ impl Notifier {
 
                 self.last_id = id;
                 debug!("Delivered failure notification (id {id})");
-                Ok(())
+                Ok(id)
             }
             #[cfg(test)]
             Inner::Fake { fail, sent } => {
@@ -126,7 +157,7 @@ impl Notifier {
                 sent.lock()
                     .unwrap()
                     .push((summary.to_string(), body.to_string()));
-                Ok(())
+                Ok(0)
             }
         }
     }
@@ -146,6 +177,41 @@ impl Notifier {
             },
             sent,
         )
+    }
+
+    /// Resolve when the user activates an action on the notification `id`,
+    /// returning the action key (e.g. [`OPEN_APP_ACTION_KEY`]). The
+    /// `ActionInvoked` signal carries the id of the bubble the action came
+    /// from, so only that bubble resolves the wait — another app's
+    /// notifications are ignored.
+    ///
+    /// The subscription is built lazily per call on `conn`; a failure to
+    /// subscribe resolves `None` (the click simply does nothing, which is how
+    /// the bubble behaved before actions existed).
+    ///
+    /// # Errors
+    /// Never: every failure path resolves `None` rather than erroring, since
+    /// a missed click is not worth surfacing.
+    pub async fn wait_for_action(conn: &Connection, id: u32) -> Option<String> {
+        let proxy = zbus::Proxy::new(conn, NOTIFY_BUS, NOTIFY_PATH, NOTIFY_IFACE)
+            .await
+            .ok()?;
+        let mut signals = proxy.receive_signal("ActionInvoked").await.ok()?;
+        let signal = signals.next().await?;
+        let (signal_id, key): (u32, String) = signal.body().deserialize().ok()?;
+        (signal_id == id).then_some(key)
+    }
+
+    /// A clone of the cached session-bus connection, if one has been
+    /// established by a prior send. Used by callers that must wait for an
+    /// `ActionInvoked` without holding the notifier's mutex across the wait.
+    #[must_use]
+    pub fn connection(&self) -> Option<Connection> {
+        match &self.inner {
+            Inner::Dbus(slot) => slot.clone(),
+            #[cfg(test)]
+            Inner::Fake { .. } => None,
+        }
     }
 }
 
