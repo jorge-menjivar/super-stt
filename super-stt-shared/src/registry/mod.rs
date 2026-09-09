@@ -122,9 +122,20 @@ pub use super_stt_registry_types::index::IndexStale;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum InstallRequest {
-    BySource { source: String },
-    ByRepoUrl { repo_url: String },
-    ByLocalPath { local_path: String },
+    BySource {
+        source: String,
+    },
+    ByRepoUrl {
+        repo_url: String,
+        /// Which forge API to speak. Optional: the daemon reads the host out
+        /// of `repo_url` when it is absent, and only a host no adapter serves
+        /// needs it spelled out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        forge: Option<super_stt_registry_types::forge::Forge>,
+    },
+    ByLocalPath {
+        local_path: String,
+    },
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

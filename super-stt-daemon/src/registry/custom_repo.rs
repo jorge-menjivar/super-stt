@@ -26,6 +26,10 @@ pub enum ResolveError {
     BadRepoUrl(String),
     #[error("forge: {0}")]
     Forge(#[from] super_stt_forge::ForgeError),
+    #[error(
+        "no published release at `{repo}`. The repo may be private, missing, or have no release yet; a fork does not inherit the upstream's releases"
+    )]
+    NoRelease { repo: String },
     #[error("backend.toml exceeds {MAX_MANIFEST_BYTES} bytes")]
     ManifestTooLarge,
     #[error("backend.toml is not valid UTF-8: {0}")]
@@ -58,7 +62,19 @@ pub async fn resolve(
     repo_url: &str,
 ) -> Result<IndexBackend, ResolveError> {
     let repo = RepoRef::parse(repo_url).map_err(|_| ResolveError::BadRepoUrl(repo_url.into()))?;
-    let release = client.latest_release(&repo).await?;
+    // A 404 here is the ordinary case, not a forge outage: the repo has no
+    // published release yet, or is private, or does not exist. Left as a
+    // transport error it reaches the operator as a raw `api.github.com` URL,
+    // which names nothing they typed and nothing they can act on.
+    let release = client.latest_release(&repo).await.map_err(|e| {
+        if e.http_status() == Some(reqwest::StatusCode::NOT_FOUND) {
+            ResolveError::NoRelease {
+                repo: repo.canonical(),
+            }
+        } else {
+            ResolveError::Forge(e)
+        }
+    })?;
 
     // The manifest is the `backend.toml` release asset — the exact bytes the
     // daemon installs verbatim. Read and validate those, and pin the asset
@@ -242,6 +258,37 @@ mod tests {
         // Prefix-only overlap must not pass (requires a `/` boundary).
         let err = ensure_source_matches_repo("github.com/a/bbb", &repo).unwrap_err();
         assert!(matches!(err, ResolveError::SourceSpoof { .. }));
+    }
+
+    /// A repo with no published release — a fork, most often, since GitHub
+    /// gives a fork none of the upstream's. The forge answers `404`, and left
+    /// as a transport error that reached the operator as
+    /// `…(https://api.github.com/repos/o/b/releases/latest) (HTTP 404)`, which
+    /// names neither what they pasted nor anything to do about it.
+    #[tokio::test]
+    async fn a_repo_with_no_published_release_names_the_repo_not_the_api_url() {
+        super_stt_forge::install_crypto_provider();
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/repos/o/b/releases/latest")
+            .with_status(404)
+            .create_async()
+            .await;
+        let gh = super_stt_forge::Github::new(server.url(), None);
+
+        let err = resolve(&gh, "https://github.com/o/b")
+            .await
+            .expect_err("no release to install");
+
+        let ResolveError::NoRelease { ref repo } = err else {
+            panic!("a 404 on the latest release must not stay a transport error: {err}");
+        };
+        assert_eq!(repo, "github.com/o/b");
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("api.github.com"),
+            "the message must not leak the forge API URL: {msg}"
+        );
     }
 
     #[test]

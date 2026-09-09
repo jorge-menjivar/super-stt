@@ -35,10 +35,22 @@ registry entry without a `manifest` pin is not installable.
 
 **Custom-repo install:**
 ```json
-{ "repo_url": "github.com/your-name/your-backend", "forge": "github" }
+{ "repo_url": "github.com/your-name/your-backend" }
 ```
 
-The daemon queries the declared forge's API for the repo's latest release,
+`forge` names which forge API to speak and is optional: when it is absent the
+daemon reads the host out of `repo_url` and picks the adapter serving it
+(`github.com` -> `github`). A host no adapter serves is a `400
+unsupported_forge`, never a guess — the GitHub adapter addresses a repo by
+owner and name alone, so guessing it for another host would query
+`api.github.com` for that owner/repo. Send `forge` explicitly to reach a host
+outside that map, such as a GitHub Enterprise install behind `GITHUB_API_BASE`:
+
+```json
+{ "repo_url": "github.mycorp.example/your-name/your-backend", "forge": "github" }
+```
+
+The daemon queries that forge's API for the repo's latest release,
 downloads its `backend.toml` release asset, runs the same selection algorithm
 over the declared binary assets, and installs the manifest verbatim. **The
 manifest and assets are not hash-verified against any registry** — TLS to the
@@ -182,7 +194,7 @@ Typed `error` values:
 
 | Status | Cause |
 |---|---|
-| `400` | Body has zero or more than one of `source` / `repo_url` / `local_path`. Body: `{"error":"bad_request"}`. For Custom-repo, `repo_url` not a `<host>/<owner>/<repo>` reference: `{"error":"bad_repo_url"}`. Custom-repo `forge` missing: `{"error":"bad_request"}` (an unrecognized `forge` value is rejected earlier as a malformed body). For Import-from-dir, `local_path` not an absolute path: `{"error":"bad_local_path"}`. |
+| `400` | Body has zero or more than one of `source` / `repo_url` / `local_path`. Body: `{"error":"bad_request"}`. For Custom-repo, `repo_url` not a `<host>/<owner>/<repo>` reference: `{"error":"bad_repo_url"}`; no forge adapter serves the host in `repo_url` and no `forge` was sent to pick one: `{"error":"unsupported_forge"}` (an unrecognized `forge` value is rejected earlier as a malformed body). For Import-from-dir, `local_path` not an absolute path: `{"error":"bad_local_path"}`. |
 | `404` | `source` not in the cached or refreshed index, or Custom-repo repo/release/`backend.toml` not found at the forge: `{"error":"not_found"}`. For Import-from-dir, `<local_path>`, its `backend.toml`, or the file `[backend].entrypoint` names does not exist: `{"error":"not_found"}`. |
 | `409` | An install for this `source` is already in flight. Body: `{"error":"install_in_progress"}`. |
 | `422` | No compatible asset on this host: `{"error":"incompatible"}`. For Custom-repo, `backend.toml` invalid: `{"error":"manifest_invalid"}` or `{"error":"manifest_too_large"}`; a declared asset is missing from the release: `{"error":"asset_missing"}`; the manifest's `source` is not the repo it was fetched from or namespaced under it (identity spoofing): `{"error":"source_mismatch"}`. For Import-from-dir, `<local_path>/backend.toml` failed to parse or yields an unsafe install id: `{"error":"manifest_invalid"}`. |
