@@ -3185,6 +3185,95 @@
         ]
       }
     },
+    "/v1/registry/backend/preview": {
+      "post": {
+        "tags": [
+          "registry"
+        ],
+        "summary": "Preview what a source would install",
+        "description": "Resolves `source`, `repo_url`, or `local_path` exactly as `/registry/backend/install` does, then answers with the backend it found instead of installing it. Send exactly one of the three.\n\nThe backend comes back in the same shape as a `/registry/backend/list` entry, `compatibility` included, so a client can show a preview with whatever it already uses for the catalog. `warning` carries `unverified_source` for the custom-repo and local-import routes, the same as the install response.\n\nNothing is written and nothing is downloaded beyond the manifest needed to answer, so this is safe to call before every install and safe to call twice.",
+        "operationId": "preview_registry_backend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The backend this source would install.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not exactly one of `source`, `repo_url`, `local_path` (`bad_request`), a `repo_url` that is not a `<host>/<owner>/<repo>` reference (`bad_repo_url`), or a `repo_url` on a host no forge adapter serves (`unsupported_forge`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No catalog entry for that `source`, or the repo has no published release (`not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/registry/backend/refresh": {
       "post": {
         "tags": [
@@ -6693,6 +6782,25 @@
               "null"
             ],
             "description": "The selected backend, or `null` when the stage is empty."
+          }
+        }
+      },
+      "PreviewResponse": {
+        "type": "object",
+        "description": "Answer to `POST /registry/backend/preview`: what a source would install,\nin the same shape a catalog listing uses, so a client renders it with\nwhatever it already renders Browse cards with.",
+        "required": [
+          "backend"
+        ],
+        "properties": {
+          "backend": {
+            "$ref": "#/components/schemas/RegistryBackend"
+          },
+          "warning": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`unverified_source` for the custom-repo and local-import routes, as the\ninstall response carries it. `None` for a registry `source`."
           }
         }
       },
