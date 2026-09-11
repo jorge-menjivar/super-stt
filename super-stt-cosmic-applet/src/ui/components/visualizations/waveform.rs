@@ -162,6 +162,12 @@ fn smooth_control_points(points: &mut Vec<(f32, f32)>) {
 /// Sample the Catmull-Rom spline through `control_points` at one point per
 /// horizontal pixel, returning canvas-space points along the curve.
 fn compute_wave_points(control_points: &[(f32, f32)], effective_bounds: Rectangle) -> Vec<Point> {
+    // No control points, no curve. The segment search below indexes
+    // `control_points.len() - 1`, which underflows on an empty slice.
+    if control_points.is_empty() {
+        return Vec::new();
+    }
+
     let render_points = f32_to_usize(effective_bounds.width);
     let bottom_y = effective_bounds.y + effective_bounds.height;
 
@@ -480,6 +486,14 @@ mod waveform_tests {
 
         let bottom_y = bounds.y + bounds.height;
         assert!(wave.iter().all(|point| (point.y - bottom_y).abs() < 1e-4));
+    }
+
+    #[test]
+    fn no_control_points_yields_no_samples() {
+        // `build_control_points` always emits at least one virtual pad, so
+        // this is unreachable today — but the sampler indexes `len() - 1`,
+        // which underflows the moment that stops being true.
+        assert!(compute_wave_points(&[], bounds(60.0, 40.0)).is_empty());
     }
 
     #[test]
