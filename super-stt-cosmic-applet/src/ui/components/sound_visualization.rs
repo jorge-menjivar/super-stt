@@ -312,3 +312,255 @@ fn extract_dominant_frequency_from_bands(bands: &[f32]) -> (f32, f32) {
 
     (estimated_freq, confidence)
 }
+
+#[cfg(test)]
+mod frequency_math_tests {
+    //! The band math between the daemon's frequency payload and the
+    //! renderers. `draw` needs a live renderer, but everything that decides
+    //! *what* is drawn — the simulated spectrum, the pitch-to-wave mapping,
+    //! and the dominant-frequency estimate — is plain arithmetic.
+    use super::*;
+
+    fn mean(bands: &[f32], range: std::ops::Range<usize>) -> f32 {
+        let len = range.len();
+        bands[range].iter().sum::<f32>() / usize_to_f32(len)
+    }
+
+    #[test]
+    fn silence_simulates_a_silent_spectrum() {
+        let data = simulate_frequency_data(0.0);
+
+        assert_eq!(data.bands.len(), 64);
+        assert!(data.bands.iter().all(|band| *band == 0.0));
+        assert_eq!(data.total_energy, 0.0);
+    }
+
+    #[test]
+    fn the_simulated_spectrum_is_speech_shaped() {
+        // The point of simulating at all is that a bare audio level draws a
+        // flat block. Energy has to peak in the vowel/consonant bands and
+        // taper at both extremes or the equalizer looks like a level meter.
+        let data = simulate_frequency_data(1.0);
+
+        let low = mean(&data.bands, 0..6);
+        let mid = mean(&data.bands, 19..51);
+        let high = mean(&data.bands, 58..64);
+
+        assert!(mid > low * 2.0, "mid {mid} should tower over low {low}");
+        assert!(mid > high * 2.0, "mid {mid} should tower over high {high}");
+        assert!(data.bands.iter().all(|band| *band >= 0.0));
+    }
+
+    #[test]
+    fn simulated_data_asks_for_the_default_wave_frequency() {
+        // Nothing was measured, so the confidence has to stay under the
+        // threshold and leave the smoother on its default.
+        let data = simulate_frequency_data(0.8);
+
+        assert!(data.frequency_confidence < FREQUENCY_CONFIDENCE_THRESHOLD);
+    }
+
+    #[test]
+    fn wave_frequency_mapping_covers_the_configured_range() {
+        let slowest = map_audio_frequency_to_wave_frequency(MIN_AUDIO_FREQUENCY);
+        let fastest = map_audio_frequency_to_wave_frequency(MAX_AUDIO_FREQUENCY);
+
+        assert!((slowest - MIN_VISUALIZATION_WAVE_FREQUENCY).abs() < 1e-3);
+        assert!((fastest - MAX_VISUALIZATION_WAVE_FREQUENCY).abs() < 1e-3);
+    }
+
+    #[test]
+    fn wave_frequency_mapping_clamps_audio_outside_the_speech_range() {
+        // Room rumble and sibilance land outside the mapped band; they pin to
+        // the ends instead of driving the wave off its range.
+        assert_eq!(
+            map_audio_frequency_to_wave_frequency(0.0),
+            map_audio_frequency_to_wave_frequency(MIN_AUDIO_FREQUENCY),
+        );
+        assert_eq!(
+            map_audio_frequency_to_wave_frequency(48_000.0),
+            map_audio_frequency_to_wave_frequency(MAX_AUDIO_FREQUENCY),
+        );
+    }
+
+    #[test]
+    fn wave_frequency_rises_with_pitch_and_favours_the_low_end() {
+        let mut previous = f32::MIN;
+        for hz in [80.0, 200.0, 400.0, 800.0, 1600.0] {
+            let wave = map_audio_frequency_to_wave_frequency(hz);
+            assert!(wave > previous, "{hz} Hz did not raise the wave frequency");
+            previous = wave;
+        }
+
+        // The square-root shaping is what gives a low voice visible movement:
+        // the middle of the audio range maps above the middle of the wave
+        // range, not onto it.
+        let audio_middle = (MIN_AUDIO_FREQUENCY + MAX_AUDIO_FREQUENCY) / 2.0;
+        let wave_middle =
+            (MIN_VISUALIZATION_WAVE_FREQUENCY + MAX_VISUALIZATION_WAVE_FREQUENCY) / 2.0;
+        assert!(map_audio_frequency_to_wave_frequency(audio_middle) > wave_middle);
+    }
+
+    #[test]
+    fn too_few_bands_falls_back_to_a4_with_no_confidence() {
+        // Below 32 bands the index-to-Hz mapping is meaningless, so the
+        // estimate has to be declared worthless rather than guessed.
+        assert_eq!(
+            extract_dominant_frequency_from_bands(&[1.0; 31]),
+            (440.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_low_peak_maps_into_the_linear_range() {
+        let mut bands = vec![0.0; 64];
+        bands[2] = 1.0;
+
+        let (hz, confidence) = extract_dominant_frequency_from_bands(&bands);
+
+        assert!((50.0..=800.0).contains(&hz), "got {hz} Hz");
+        assert!(confidence > 0.0);
+    }
+
+    #[test]
+    fn a_high_peak_maps_into_the_logarithmic_range() {
+        let mut bands = vec![0.0; 64];
+        bands[60] = 1.0;
+
+        let (hz, _) = extract_dominant_frequency_from_bands(&bands);
+
+        assert!((800.0..=16_000.0).contains(&hz), "got {hz} Hz");
+    }
+
+    #[test]
+    fn a_clear_peak_beats_a_flat_spectrum_on_confidence() {
+        let mut peaked = vec![0.01; 64];
+        peaked[10] = 1.0;
+
+        let (_, flat_confidence) = extract_dominant_frequency_from_bands(&[0.5; 64]);
+        let (_, peak_confidence) = extract_dominant_frequency_from_bands(&peaked);
+
+        assert!(
+            peak_confidence > flat_confidence,
+            "a spectrum with no peak ({flat_confidence}) must not outrank one with a peak ({peak_confidence})",
+        );
+        assert!(peak_confidence >= FREQUENCY_CONFIDENCE_THRESHOLD);
+        assert!(flat_confidence < FREQUENCY_CONFIDENCE_THRESHOLD);
+    }
+
+    #[test]
+    fn silence_has_no_dominant_frequency() {
+        let (_, confidence) = extract_dominant_frequency_from_bands(&[0.0; 64]);
+
+        assert_eq!(confidence, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod visualization_component_tests {
+    //! The component's own state: what a daemon `frequency_bands` event does
+    //! to the smoothed wave frequency the renderers read, and what a mic stop
+    //! leaves behind.
+    use super::*;
+    use crate::models::theme::{VisualizationColorConfig, VisualizationSide, VisualizationTheme};
+
+    fn component() -> VisualizationComponent {
+        VisualizationComponent::new(
+            0.0,
+            false,
+            VisualizationTheme::Waveform,
+            VisualizationSide::Full,
+            VisualizationColorConfig::default(),
+        )
+    }
+
+    /// Bands with a single strong low peak — confident enough to move the
+    /// smoother off its default.
+    fn peaked_bands() -> Vec<f32> {
+        let mut bands = vec![0.01; 64];
+        bands[3] = 1.0;
+        bands
+    }
+
+    #[test]
+    fn a_spectrum_with_no_peak_keeps_the_default_wave_frequency() {
+        let mut component = component();
+
+        component.update_frequency_bands(&[0.05; 64], 0.1);
+
+        assert!(
+            (component.smoothed_visualization_frequency - DEFAULT_VISUALIZATION_WAVE_FREQUENCY)
+                .abs()
+                < f32::EPSILON,
+            "a low-confidence estimate must not steer the wave",
+        );
+    }
+
+    #[test]
+    fn a_confident_spectrum_eases_the_wave_frequency_toward_its_target() {
+        let mut component = component();
+        let before = component.smoothed_visualization_frequency;
+
+        component.update_frequency_bands(&peaked_bands(), 1.0);
+
+        let after = component.smoothed_visualization_frequency;
+        let target =
+            map_audio_frequency_to_wave_frequency(component.frequency_data.dominant_frequency);
+        assert!(
+            (after - target).abs() < (before - target).abs(),
+            "smoothing moved away from the target: {before} -> {after}, target {target}",
+        );
+        assert!(
+            (after - target).abs() > f32::EPSILON,
+            "smoothing jumped straight to the target instead of easing into it",
+        );
+    }
+
+    #[test]
+    fn the_smoothed_frequency_is_what_the_renderers_read() {
+        let mut component = component();
+
+        component.update_frequency_bands(&peaked_bands(), 1.0);
+
+        assert_eq!(
+            component.frequency_data.dynamic_wave_frequency,
+            Some(component.smoothed_visualization_frequency),
+        );
+    }
+
+    #[test]
+    fn the_bands_and_energy_reach_the_renderers_unchanged() {
+        let mut component = component();
+        let bands = peaked_bands();
+
+        component.update_frequency_bands(&bands, 0.42);
+
+        assert_eq!(component.frequency_data.bands, bands);
+        assert!((component.frequency_data.total_energy - 0.42).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn clearing_retires_the_last_take() {
+        // Run on every mic stop: whatever is left over must not be drawn into
+        // the next recording, and the wave has to start from the default
+        // again rather than from the last speaker's pitch.
+        let mut component = component();
+        component.update_frequency_bands(&peaked_bands(), 1.0);
+
+        component.clear();
+
+        assert!(
+            component
+                .frequency_data
+                .bands
+                .iter()
+                .all(|band| *band == 0.0)
+        );
+        assert_eq!(component.audio_level, 0.0);
+        assert!(
+            (component.smoothed_visualization_frequency - DEFAULT_VISUALIZATION_WAVE_FREQUENCY)
+                .abs()
+                < f32::EPSILON,
+        );
+    }
+}

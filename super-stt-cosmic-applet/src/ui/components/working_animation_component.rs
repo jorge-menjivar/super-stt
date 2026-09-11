@@ -98,3 +98,46 @@ impl Program<Message, Theme, Renderer> for WorkingAnimationComponent {
         vec![frame.into_geometry()]
     }
 }
+
+#[cfg(test)]
+mod working_animation_component_tests {
+    use super::*;
+
+    fn component() -> WorkingAnimationComponent {
+        WorkingAnimationComponent::new(
+            WorkingAnimationTheme::Droplet,
+            VisualizationSide::Full,
+            VisualizationColorConfig::default(),
+        )
+    }
+
+    #[test]
+    fn a_new_animation_starts_at_its_first_frame() {
+        assert_eq!(component().elapsed_ms, 0.0);
+    }
+
+    #[test]
+    fn resetting_rewinds_to_the_first_frame() {
+        // The applet resets the component whenever the transcribing clock
+        // starts, so a second recording opens on frame zero instead of
+        // wherever the previous one stopped.
+        let mut component = component();
+        component.set_elapsed(4_200.0);
+
+        component.reset();
+
+        assert_eq!(component.elapsed_ms, 0.0);
+    }
+
+    #[test]
+    fn switching_theme_keeps_the_clock_running() {
+        // Picking a different animation mid-cycle must not restart it: the
+        // clock lives in the applet, and the component only follows it.
+        let mut component = component();
+        component.set_elapsed(1_500.0);
+
+        component.update_theme(WorkingAnimationTheme::Comet);
+
+        assert_eq!(component.elapsed_ms, 1_500.0);
+    }
+}

@@ -6,10 +6,7 @@ mod subscription;
 mod update;
 mod view;
 
-use std::{
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{path::PathBuf, time::Duration};
 
 use cosmic::{
     Element, app as cosmic_app,
@@ -21,7 +18,7 @@ pub use messages::*;
 
 use crate::config::AppletConfig;
 use crate::daemon::RetryStrategy;
-use crate::models::state::{DaemonConnectionState, IsOpen, RecordingState};
+use crate::models::state::{DaemonConnectionState, IsOpen, RecordingPhase};
 use crate::models::theme::VisualizationSide;
 use crate::ui::components::sound_visualization::VisualizationComponent;
 use crate::ui::components::working_animation_component::WorkingAnimationComponent;
@@ -29,7 +26,9 @@ use subscription::{PING_INTERVAL_SECS, UdpSubscriptionId, applet_events_subscrip
 
 pub struct SuperSttApplet {
     core: cosmic::app::Core,
-    recording_state: RecordingState,
+    /// Which phase of a recording cycle the daemon is in, plus the clock
+    /// behind the transcribing animation.
+    phase: RecordingPhase,
     daemon_state: DaemonConnectionState,
     popup: Option<window::Id>,
     socket_path: PathBuf,
@@ -39,9 +38,6 @@ pub struct SuperSttApplet {
     udp_restart_counter: u64,
     visualization: VisualizationComponent,
     working_animation: WorkingAnimationComponent,
-    /// Wall-clock start of the current Processing phase; `Some` only while
-    /// transcribing, used to derive the animation's elapsed time.
-    working_anim_start: Option<Instant>,
     config: AppletConfig,
     icon_alignment_model: SingleSelectModel,
     icon_alignment_start: Entity,
@@ -94,9 +90,7 @@ impl cosmic::Application for SuperSttApplet {
             cosmic::iced::time::every(Duration::from_secs(PING_INTERVAL_SECS))
                 .map(|_| Message::PingTimeout),
         ];
-        if self.daemon_state == DaemonConnectionState::Connected
-            && matches!(self.recording_state, RecordingState::Processing)
-        {
+        if self.daemon_state == DaemonConnectionState::Connected && self.phase.is_transcribing() {
             subs.push(
                 cosmic::iced::time::every(Duration::from_millis(33))
                     .map(|_| Message::WorkingAnimationTick),

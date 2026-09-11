@@ -246,3 +246,91 @@ mod visible_band_range_tests {
         assert_eq!(visible_band_range(&VisualizationSide::Left, 0), (0, 0));
     }
 }
+
+#[cfg(test)]
+mod visualization_config_tests {
+    //! The height math every bar renderer shares. Its whole job is keeping an
+    //! element inside the panel: the applet draws into a fixed-size strip of
+    //! someone else's panel, so a bar that overshoots is drawn over its
+    //! neighbours rather than clipped.
+    use super::VisualizationConfig;
+    use cosmic::iced::{Padding, border::Radius, core::Rectangle};
+
+    fn config(min_element_height: f32, height_safety_margin: f32) -> VisualizationConfig {
+        VisualizationConfig {
+            margins: Padding {
+                top: 2.0,
+                right: 4.0,
+                bottom: 6.0,
+                left: 8.0,
+            },
+            corner_radius: Radius::new(2.0),
+            min_element_height,
+            height_safety_margin,
+        }
+    }
+
+    #[test]
+    fn effective_bounds_inset_every_margin() {
+        let bounds = config(4.0, 0.0).effective_bounds(Rectangle {
+            x: 10.0,
+            y: 20.0,
+            width: 100.0,
+            height: 50.0,
+        });
+
+        assert_eq!((bounds.x, bounds.y), (18.0, 22.0));
+        assert_eq!(bounds.width, 100.0 - (8.0 + 4.0));
+        assert_eq!(bounds.height, 50.0 - (2.0 + 6.0));
+    }
+
+    #[test]
+    fn heights_never_collapse_to_zero() {
+        // A panel shorter than the safety margin still has to draw something:
+        // a zero height is an invisible bar, not a small one.
+        let config = config(4.0, 40.0);
+
+        assert_eq!(config.max_element_height(10.0), 1.0);
+        assert_eq!(config.min_element_height(0.0), 1.0);
+    }
+
+    #[test]
+    fn the_minimum_element_height_is_capped_by_the_canvas() {
+        // On a short panel a quarter of the canvas wins over the configured
+        // minimum, so a quiet band can never fill the whole applet.
+        let config = config(20.0, 0.0);
+
+        assert_eq!(config.min_element_height(40.0), 10.0);
+        assert_eq!(config.min_element_height(200.0), 20.0);
+    }
+
+    #[test]
+    fn clamped_element_height_keeps_a_bar_between_its_floor_and_ceiling() {
+        let config = config(4.0, 6.0);
+        let canvas = 60.0;
+
+        assert_eq!(
+            config.clamped_element_height(1000.0, canvas),
+            config.max_element_height(canvas),
+        );
+        assert_eq!(
+            config.clamped_element_height(0.0, canvas),
+            config.min_element_height(canvas),
+        );
+        assert_eq!(config.clamped_element_height(20.0, canvas), 20.0);
+    }
+
+    #[test]
+    fn the_ceiling_wins_when_it_sits_below_the_floor() {
+        // A safety margin that eats the whole canvas leaves the floor above
+        // the ceiling. The ceiling has to win, or the bar is drawn outside
+        // the panel.
+        let config = config(20.0, 100.0);
+
+        assert_eq!(config.clamped_element_height(50.0, 60.0), 1.0);
+        assert_eq!(
+            config.clamped_element_height(50.0, 60.0),
+            config.max_element_height(60.0)
+        );
+    }
+}
