@@ -240,11 +240,7 @@ fn compute_wave_points(control_points: &[(f32, f32)], effective_bounds: Rectangl
 fn build_paths(wave_points: &[Point], bottom_y: f32) -> (path::Path, path::Path) {
     let mut stroke_builder = path::Builder::new();
     if let Some(first) = wave_points.first() {
-        // Nudge the first point so a perfectly flat wave still strokes.
-        stroke_builder.line_to(Point {
-            x: first.x,
-            y: first.y - 0.000_001,
-        });
+        stroke_builder.move_to(*first);
         for point in wave_points.iter().skip(1) {
             stroke_builder.line_to(*point);
         }
@@ -553,6 +549,14 @@ mod waveform_tests {
 
         let (stroke, _) = build_paths(&wave, 40.0);
 
+        let Some(PathEvent::Begin { at }) = stroke.raw().iter().next() else {
+            panic!("the stroke path never began");
+        };
+        assert_eq!(
+            (at.x, at.y),
+            (wave[0].x, wave[0].y),
+            "the outline has to start on the curve it traces",
+        );
         let lines = stroke
             .raw()
             .iter()
