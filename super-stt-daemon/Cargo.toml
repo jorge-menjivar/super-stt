@@ -113,6 +113,12 @@
 [dev-dependencies]
     futures-util.workspace = true
     hound.workspace = true
+    # Integration tests route their own (client-side) keyring access to the
+    # in-memory mock. `session::install_mock_keyring_if_requested` is the
+    # production entry point for that, but it is gated on an env var, and
+    # setting one from a threaded test process is unsound under edition 2024 —
+    # so `tests/common` calls the builder directly. See `common::install_mock_keyring`.
+    keyring.workspace = true
     http-body-util = "0.1"
     hyper = { version = "1", features = ["client", "http1"] }
     hyper-util = { version = "0.1", features = ["tokio"] }

@@ -28,6 +28,8 @@
 //! cargo test -p super-stt --test http_smoke_full -- --ignored --nocapture
 //! ```
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -80,8 +82,7 @@ struct DaemonGuard {
 
 impl Drop for DaemonGuard {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        common::shutdown(&mut self.child);
         for p in &self.cleanup_paths {
             let _ = std::fs::remove_file(p);
         }
