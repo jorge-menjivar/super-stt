@@ -33,7 +33,10 @@ impl Drop for DaemonGuard {
     fn drop(&mut self) {
         common::shutdown(&mut self.child);
         for p in &self.cleanup_paths {
+            // The list holds the socket file and the three XDG dirs, so try
+            // both; whichever does not apply is a no-op.
             let _ = std::fs::remove_file(p);
+            let _ = std::fs::remove_dir_all(p);
         }
     }
 }
@@ -63,6 +66,12 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     // daemon comes up idle (which the assertions below tolerate).
     let data_home = tmp.join(format!("{unique}-data"));
     std::fs::create_dir_all(&data_home).expect("create test data dir");
+    // Isolate the cache too. The registry client persists its index (and its
+    // ETag) under XDG_CACHE_HOME; sharing one file across concurrently
+    // spawned test daemons has them overwrite each other's catalog, and
+    // unisolated it is the developer's own.
+    let cache_home = tmp.join(format!("{unique}-cache"));
+    std::fs::create_dir_all(&cache_home).expect("create test cache dir");
 
     let child = Command::new(DAEMON_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
@@ -70,6 +79,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
+        .env("XDG_CACHE_HOME", &cache_home)
         // Point the daemon's self-update forge client at a guaranteed-refused
         // loopback port (`accept_base_url` allows loopback `http://`), so
         // `POST /update/check` below fails deterministically and offline
@@ -85,7 +95,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     // panic below must still kill and reap the daemon, not leak it.
     let guard = DaemonGuard {
         child,
-        cleanup_paths: vec![http_socket.clone()],
+        cleanup_paths: vec![http_socket.clone(), config_home, data_home, cache_home],
     };
 
     let deadline = Instant::now() + Duration::from_mins(2);

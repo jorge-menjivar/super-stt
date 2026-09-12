@@ -148,6 +148,12 @@ async fn start_daemon(component: &Path) -> (DaemonGuard, PathBuf, String) {
     let data_home = tmp.join(format!("{unique}-data"));
     std::fs::create_dir_all(&config_home).expect("create test config dir");
     std::fs::create_dir_all(&data_home).expect("create test data dir");
+    // Isolate the cache too. The registry client persists its index (and its
+    // ETag) under XDG_CACHE_HOME; sharing one file across concurrently
+    // spawned test daemons has them overwrite each other's catalog, and
+    // unisolated it is the developer's own.
+    let cache_home = tmp.join(format!("{unique}-cache"));
+    std::fs::create_dir_all(&cache_home).expect("create test cache dir");
     seed_mock_backend(&data_home, component);
 
     let child = Command::new(DAEMON_BIN)
@@ -156,6 +162,7 @@ async fn start_daemon(component: &Path) -> (DaemonGuard, PathBuf, String) {
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
+        .env("XDG_CACHE_HOME", &cache_home)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -165,7 +172,7 @@ async fn start_daemon(component: &Path) -> (DaemonGuard, PathBuf, String) {
     // below must still kill and reap the daemon, not leak it.
     let guard = DaemonGuard {
         child,
-        cleanup_paths: vec![http_socket.clone(), config_home, data_home],
+        cleanup_paths: vec![http_socket.clone(), config_home, data_home, cache_home],
     };
 
     let deadline = Instant::now() + Duration::from_mins(2);
