@@ -146,3 +146,28 @@ impl BackendFixture<'_> {
         }
     }
 }
+
+// ---------- client-side keyring ----------------------------------------------
+
+/// Route *this process's* keyring access to the in-memory mock.
+///
+/// The daemon subprocess gets the mock from `SUPER_STT_KEYRING_MOCK=1` in its
+/// environment. A test that drives a client helper — anything reaching
+/// `session::obtain`/`save`/`forget` — does that work in the test process
+/// itself, which has no such routing and so reaches the real secret service:
+/// it writes entries into the developer's keyring, and on a headless CI runner
+/// it blocks on an unlock prompt that never comes. That is what kept the widget
+/// subscription tests behind `#[ignore]`.
+///
+/// `session::install_mock_keyring_if_requested` is the production entry point,
+/// but it is gated on reading that env var, and *setting* an env var from a
+/// process that already has threads running is unsound under edition 2024. So
+/// this calls the same builder directly. Idempotent, and safe to call from
+/// every test: the default builder must be set before any keyring access, and
+/// `Once` makes the first caller win while the rest wait.
+pub fn install_mock_keyring() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+    });
+}
