@@ -29,6 +29,8 @@
 //! validation, which happen before any component is loaded, so a load failure
 //! on the post-processor is expected and asserted as a non-fatal note.
 
+mod common;
+
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::client::conn::http1::handshake;
@@ -60,8 +62,7 @@ struct DaemonGuard {
 
 impl Drop for DaemonGuard {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        common::shutdown(&mut self.child);
         for p in &self.cleanup_paths {
             let _ = std::fs::remove_file(p);
             let _ = std::fs::remove_dir_all(p);

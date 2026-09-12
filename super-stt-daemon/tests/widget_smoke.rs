@@ -11,6 +11,8 @@
 //! cargo test -p super-stt-daemon --test widget_smoke -- --nocapture
 //! ```
 
+mod common;
+
 use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -48,8 +50,7 @@ impl DaemonGuard {
 
 impl Drop for DaemonGuard {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        common::shutdown(&mut self.child);
         for p in &self.cleanup_paths {
             let _ = std::fs::remove_file(p);
         }

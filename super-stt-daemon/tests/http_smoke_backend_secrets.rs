@@ -13,6 +13,8 @@
 //! isolated `XDG_DATA_HOME/super-stt/backends/` tree so the daemon discovers
 //! it on startup. It declares one secret (`openai_api_key`) and one model.
 
+mod common;
+
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::client::conn::http1::handshake;
@@ -37,8 +39,7 @@ struct DaemonGuard {
 
 impl Drop for DaemonGuard {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        common::shutdown(&mut self.child);
         for p in &self.cleanup_paths {
             let _ = std::fs::remove_file(p);
             let _ = std::fs::remove_dir_all(p);

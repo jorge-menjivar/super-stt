@@ -17,6 +17,8 @@
 //! cargo test -p super-stt --test http_smoke -- --nocapture
 //! ```
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -34,8 +36,7 @@ struct DaemonGuard {
 
 impl Drop for DaemonGuard {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        common::shutdown(&mut self.child);
         let _ = std::fs::remove_dir_all(&self.xdg_runtime_dir);
     }
 }
