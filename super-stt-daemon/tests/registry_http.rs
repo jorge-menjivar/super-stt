@@ -11,13 +11,12 @@
 //!   in the install pipeline surfaces as a `registry.install.failed` SSE
 //!   event.
 //!
-//! Both tests carry `#[ignore]` so they are skipped by the automated
-//! `cargo test --lib` run (which hangs on a locked keyring). Run them
-//! manually with:
-//!
-//! ```bash
-//! cargo test -p super-stt-daemon --test registry_http -- --ignored --nocapture
-//! ```
+//! These once carried `#[ignore]`, on the grounds that a real daemon needs a
+//! responsive system keyring and CI's hangs on an unlock prompt. The harness
+//! below has since set `SUPER_STT_KEYRING_MOCK=1` — the in-memory store the
+//! rest of the smoke tests run against — so there is no prompt to hang on, and
+//! the whole `/registry` surface was being skipped for a reason that no longer
+//! held. They run with the suite.
 
 mod common;
 
@@ -332,7 +331,6 @@ fn fixture_index_correct_hash(asset_url: &str) -> String {
 /// `compatibility.compatible == true` for a wasm backend (wasm is always
 /// compatible on any host) and `id == "openai"`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "spawns real daemon; requires a responsive system keyring"]
 async fn list_registry_backends_returns_compat() {
     let mut mock_server = mockito::Server::new_async().await;
 
@@ -392,7 +390,6 @@ async fn list_registry_backends_returns_compat() {
 /// - Drain the SSE stream (with a timeout) looking for
 ///   `registry.install.failed` carrying `error == "asset_hash_mismatch"`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "spawns real daemon; requires a responsive system keyring"]
 async fn install_pipeline_rejects_hash_mismatch() {
     // Two independent mockito servers: one for the registry index, one for
     // the asset download. Using separate servers avoids path-collision issues
@@ -424,10 +421,17 @@ async fn install_pipeline_rejects_hash_mismatch() {
     let registry_url = format!("{}/index.json", index_server.url());
     let (_guard, http_socket) = start_daemon_with_registry(&registry_url).await;
 
-    // Mint a settings-scope token.
-    let auth = http_client::auth_request(http_socket.clone(), "registry-test", &["settings"])
-        .await
-        .expect("auth_request should succeed");
+    // `settings` for the install POST, `daemon_status` for the SSE topic:
+    // `/events` scopes per *topic*, and `registry_install` sits under
+    // `daemon_status`. A settings-only token opens the stream with a `403`,
+    // which is what this test did while it was `#[ignore]`d.
+    let auth = http_client::auth_request(
+        http_socket.clone(),
+        "registry-test",
+        &["settings", "daemon_status"],
+    )
+    .await
+    .expect("auth_request should succeed");
     let token = auth.session_token;
 
     // Open SSE subscription BEFORE posting the install so no events are
@@ -458,32 +462,49 @@ async fn install_pipeline_rejects_hash_mismatch() {
         .to_owned();
     assert!(!install_id.is_empty(), "install_id must not be empty");
 
-    // Collect SSE bytes until the failed event arrives (timeout 30 s).
-    let sse_bytes = tokio::time::timeout(Duration::from_secs(30), async {
-        sse_resp
-            .into_body()
-            .collect()
-            .await
-            .expect("collect sse body")
-            .to_bytes()
-    })
-    .await
-    .unwrap_or_default(); // On timeout we work with whatever arrived.
+    // Read the stream frame by frame until the failed event shows up.
+    //
+    // Not `collect()`: an SSE stream does not end, so collecting the whole
+    // body never resolves, and a `timeout` around it drops the future along
+    // with every byte it had buffered — leaving nothing to match on. This
+    // test reported "frames seen: []" for exactly that reason the first time
+    // it was run after its `#[ignore]` came off.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut sse_bytes: Vec<u8> = Vec::new();
+    let mut body = sse_resp.into_body();
 
-    let frames = extract_sse_data_for_event(&sse_bytes, "registry_install");
-    let failed_frame = frames.iter().find(|data| {
-        let v: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
-        v["type"] == "registry.install.failed" && v["install_id"] == install_id.as_str()
-    });
+    let failed = loop {
+        if let Some(found) = extract_sse_data_for_event(&sse_bytes, "registry_install")
+            .into_iter()
+            .find(|data| {
+                let v: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
+                v["type"] == "registry.install.failed" && v["install_id"] == install_id.as_str()
+            })
+        {
+            break found;
+        }
 
-    let failed = failed_frame.unwrap_or_else(|| {
-        panic!(
-            "no registry.install.failed event for install_id={install_id} within 30 s; \
-             frames seen: {frames:?}"
-        )
-    });
+        match tokio::time::timeout_at(deadline, body.frame()).await {
+            Ok(Some(Ok(frame))) => {
+                if let Some(chunk) = frame.data_ref() {
+                    sse_bytes.extend_from_slice(chunk);
+                }
+            }
+            Ok(Some(Err(e))) => panic!("SSE stream errored while waiting: {e}"),
+            Ok(None) => panic!(
+                "SSE stream closed before registry.install.failed for \
+                 install_id={install_id}; saw: {:?}",
+                String::from_utf8_lossy(&sse_bytes)
+            ),
+            Err(_) => panic!(
+                "no registry.install.failed event for install_id={install_id} within 30 s; \
+                 saw: {:?}",
+                String::from_utf8_lossy(&sse_bytes)
+            ),
+        }
+    };
 
-    let v: serde_json::Value = serde_json::from_str(failed).expect("parse failed frame");
+    let v: serde_json::Value = serde_json::from_str(&failed).expect("parse failed frame");
     assert_eq!(
         v["error"], "asset_hash_mismatch",
         "wrong error variant: {v}"
