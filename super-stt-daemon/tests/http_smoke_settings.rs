@@ -502,6 +502,28 @@ async fn settings_scope_endpoints() {
     )
     .await;
 
+    // --- GET /gpu_info: a live probe of the host's accelerators. Settings
+    // scope guards it, but it is not a stored preference — it reports what
+    // this machine has right now. A host with no GPU (every CI runner) is a
+    // 200 with an empty list, never a 404 or a 500, so the shape below is
+    // what a client can rely on everywhere.
+    let (s, body) = raw_get_json(&http_socket, "/gpu_info", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /gpu_info: {body}");
+    assert_eq!(body["status"], "success", "{body}");
+    let gpus = body["gpu_info"]
+        .as_array()
+        .unwrap_or_else(|| panic!("gpu_info must be an array, got: {body}"));
+    // Each entry names a GPU and its memory; nothing here assumes one exists.
+    for gpu in gpus {
+        assert!(gpu["name"].is_string(), "gpu entry without a name: {gpu}");
+    }
+    // `host` is the driver/runtime inventory, reported whether or not any GPU
+    // was found — it is what decides which backend builds will run here.
+    assert!(
+        body["host"].is_object(),
+        "host toolchain versions must be present even with no GPU: {body}"
+    );
+
     // --- GET /update: a read-only snapshot. `latest_version` must still be
     // null: `GITHUB_API_BASE` points at a refused loopback port (see
     // `start_daemon`), so no candidate can ever resolve, whether this is the

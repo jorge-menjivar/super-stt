@@ -1,22 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! HTTP integration tests for the `/registry/*` endpoints.
 //!
-//! These tests spawn the real `super-stt-daemon` binary, wire it to a
-//! mockito HTTP server in place of the live registry, and exercise the
-//! two core paths:
+//! These tests spawn the real `super-stt-daemon` binary and wire it to a
+//! mockito HTTP server in place of the live registry, so the whole surface is
+//! exercised without reaching the published catalog:
 //!
 //! - `GET  /v1/registry/backend/list`  — index fetched, compat evaluated, list
 //!   returned.
 //! - `POST /v1/registry/backend/install` + `GET /v1/events` — hash mismatch
 //!   in the install pipeline surfaces as a `registry.install.failed` SSE
 //!   event.
+//! - `POST /v1/registry/backend/refresh` — re-fetch, and what an unreachable
+//!   catalog answers.
+//! - `POST /v1/registry/backend/preview` — resolve a source without
+//!   installing it, and the ways a body can be malformed.
+//! - `POST /v1/registry/backend/update` — the version lookup's failure modes,
+//!   and that a failed update releases its inflight marker.
 //!
-//! These once carried `#[ignore]`, on the grounds that a real daemon needs a
-//! responsive system keyring and CI's hangs on an unlock prompt. The harness
-//! below has since set `SUPER_STT_KEYRING_MOCK=1` — the in-memory store the
-//! rest of the smoke tests run against — so there is no prompt to hang on, and
-//! the whole `/registry` surface was being skipped for a reason that no longer
-//! held. They run with the suite.
+//! The first two once carried `#[ignore]`, on the grounds that a real daemon
+//! needs a responsive system keyring and CI's hangs on an unlock prompt. The
+//! harness below has since set `SUPER_STT_KEYRING_MOCK=1` — the in-memory
+//! store the rest of the smoke tests run against — so there is no prompt to
+//! hang on, and the whole `/registry` surface was being skipped for a reason
+//! that no longer held. They run with the suite.
 
 mod common;
 
@@ -510,4 +516,299 @@ async fn install_pipeline_rejects_hash_mismatch() {
         "wrong error variant: {v}"
     );
     assert_eq!(v["source"], "github.com/x/y", "wrong source in event: {v}");
+}
+
+/// A POST carrying no body at all — no `content-type`, no bytes. The
+/// `Option<Json<_>>` extractor answers `None` for this, which the handlers
+/// turn into `missing_body`; sending `{}` instead would take a different
+/// branch, so this needs its own helper.
+async fn raw_post_no_body(
+    socket_path: &PathBuf,
+    path: &str,
+    token: &str,
+) -> (StatusCode, serde_json::Value) {
+    let stream = UnixStream::connect(socket_path).await.expect("connect");
+    let io = hyper_util::rt::TokioIo::new(stream);
+    let (mut sender, conn) = handshake::<_, Empty<Bytes>>(io).await.expect("handshake");
+    tokio::spawn(async move {
+        let _ = conn.await;
+    });
+
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri(format!("http://stt.local/v1{path}"))
+        .header("host", "stt.local")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Empty::<Bytes>::new())
+        .expect("build req");
+
+    let resp = sender.send_request(req).await.expect("send req");
+    let status = resp.status();
+    let bytes = resp
+        .into_body()
+        .collect()
+        .await
+        .expect("collect")
+        .to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, body)
+}
+
+/// A daemon wired to a mock catalog, and everything a test needs to talk to it.
+///
+/// The two `mockito` handles are held, not used: a `Mock` de-registers itself
+/// when dropped and a `ServerGuard` shuts the server down, so letting either go
+/// early pulls the catalog out from under a daemon that is still running. That
+/// is invisible to anything reading a *cached* index and fatal to
+/// `/registry/backend/refresh`, whose whole job is to fetch it again.
+///
+/// Field order is drop order: the daemon stops before the server it talks to.
+struct CatalogFixture {
+    _daemon: DaemonGuard,
+    socket: PathBuf,
+    token: String,
+    _index_mock: mockito::Mock,
+    _server: mockito::ServerGuard,
+}
+
+/// Spawn a daemon against an index server serving `fixture_index_correct_hash`,
+/// and mint a `settings`-scope token. The shape every test below opens with.
+async fn start_with_catalog() -> CatalogFixture {
+    let mut server = mockito::Server::new_async().await;
+    let asset_url = format!("{}/openai.wasm", server.url());
+    let index_mock = server
+        .mock("GET", "/index.json")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(fixture_index_correct_hash(&asset_url))
+        // The daemon fetches at startup and again on every refresh.
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let registry_url = format!("{}/index.json", server.url());
+    let (daemon, socket) = start_daemon_with_registry(&registry_url).await;
+
+    let token = http_client::auth_request(socket.clone(), "registry-test", &["settings"])
+        .await
+        .expect("auth_request should succeed under SUPER_STT_AUTO_APPROVE=1")
+        .session_token;
+
+    CatalogFixture {
+        _daemon: daemon,
+        socket,
+        token,
+        _index_mock: index_mock,
+        _server: server,
+    }
+}
+
+// ---------- POST /registry/backend/refresh -----------------------------------
+
+/// The catalog is re-fetched and the count reported back. `backend_count` is
+/// what a client renders after a publish, so it has to be the count of the
+/// index just fetched rather than of whatever was cached.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refresh_reports_the_refetched_catalog() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_no_body(sock, "/registry/backend/refresh", token).await;
+    assert_eq!(status, StatusCode::OK, "POST refresh: {body}");
+    assert_eq!(body["backend_count"], 1, "{body}");
+    assert_eq!(body["schema_version"], 1, "{body}");
+    assert_eq!(body["generated_at"], "2026-01-01T00:00:00Z", "{body}");
+}
+
+/// An index the daemon cannot fetch is `503 registry_unavailable`, not a `500`
+/// and not an empty `200`: "the catalog is unreachable" and "the catalog is
+/// empty" are different answers and a client shows different things for them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refresh_reports_an_unreachable_catalog_as_unavailable() {
+    let mut index_server = mockito::Server::new_async().await;
+    let _index_mock = index_server
+        .mock("GET", "/index.json")
+        .with_status(500)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let registry_url = format!("{}/index.json", index_server.url());
+    let (_guard, sock) = start_daemon_with_registry(&registry_url).await;
+    let token = http_client::auth_request(sock.clone(), "registry-test", &["settings"])
+        .await
+        .expect("auth_request")
+        .session_token;
+
+    let (status, body) = raw_post_no_body(&sock, "/registry/backend/refresh", &token).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["error"], "registry_unavailable", "{body}");
+    // transport.md: every error carries the machine-readable code too.
+    assert_eq!(body["error_code"], "registry_unavailable", "{body}");
+}
+
+// ---------- POST /registry/backend/preview -----------------------------------
+
+/// A catalog `source` is described in the same shape `/registry/backend/list`
+/// returns, and nothing is installed as a result — the whole point of the
+/// endpoint being that it runs before the install's point of no return.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn preview_describes_a_catalog_source_without_installing_it() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/preview",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "POST preview: {body}");
+
+    assert_eq!(body["backend"]["id"], "openai", "{body}");
+    assert_eq!(body["backend"]["source"], "github.com/x/y", "{body}");
+    assert!(
+        body["backend"]["compatibility"]["compatible"]
+            .as_bool()
+            .unwrap_or(false),
+        "a wasm backend is compatible on any host: {body}"
+    );
+    // A catalog source is the trusted route, so no `unverified_source`.
+    assert!(body["warning"].is_null(), "{body}");
+    assert!(
+        body["backend"]["installed_version"].is_null(),
+        "nothing is installed on a fresh daemon: {body}"
+    );
+
+    // Preview writes nothing: the backend list still holds no install, and a
+    // second identical call answers the same. (Two calls are one call.)
+    let (status, again) = raw_post_json(
+        sock,
+        "/registry/backend/preview",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "second preview: {again}");
+    assert_eq!(again, body, "preview is not idempotent");
+}
+
+/// `source` / `repo_url` / `local_path` are exactly-one-of. Neither zero nor
+/// two is a request the daemon can act on, and both have to say so before any
+/// resolution happens.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn preview_requires_exactly_one_source_field() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    for body in [
+        serde_json::json!({}),
+        serde_json::json!({ "source": "github.com/x/y", "repo_url": "github.com/a/b" }),
+    ] {
+        let (status, resp) =
+            raw_post_json(sock, "/registry/backend/preview", &token, body.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "for {body}: {resp}");
+        assert_eq!(resp["error"], "bad_request", "for {body}: {resp}");
+        assert_eq!(
+            resp["message"], "provide exactly one of source, repo_url, local_path",
+            "for {body}: {resp}"
+        );
+    }
+
+    // No body at all is its own code — the client sent nothing, rather than
+    // sending something the daemon could not act on.
+    let (status, resp) = raw_post_no_body(sock, "/registry/backend/preview", token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{resp}");
+    assert_eq!(resp["error"], "missing_body", "{resp}");
+}
+
+/// A `source` the catalog does not carry is `404`, not an empty `200`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn preview_404s_for_a_source_the_catalog_lacks() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/preview",
+        token,
+        serde_json::json!({ "source": "github.com/nobody/nothing" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"], "not_found", "{body}");
+}
+
+// ---------- POST /registry/backend/update ------------------------------------
+
+/// Updating something that was never installed is `not_installed`, and that is
+/// deliberately a different code from `not_found`: the first says "install it
+/// first", the second says "no such backend anywhere". A client that conflated
+/// them would offer the wrong recovery.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_distinguishes_not_installed_from_not_found() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    // In the catalog, absent from disk.
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"], "not_installed", "{body}");
+
+    // In neither.
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/nobody/nothing" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["error"], "not_found", "{body}");
+}
+
+/// The inflight marker must be released on every early return, not just the
+/// happy path. If a failed update left its marker behind, the next attempt for
+/// that source would answer `409 update_in_progress` forever — recoverable only
+/// by restarting the daemon. Two failing updates in a row is what catches it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_releases_its_inflight_marker_when_it_fails() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    for attempt in 1..=2 {
+        let (status, body) = raw_post_json(
+            &sock,
+            "/registry/backend/update",
+            token,
+            serde_json::json!({ "source": "github.com/x/y" }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "attempt {attempt} should still be not_installed, not a stuck 409: {body}"
+        );
+        assert_eq!(body["error"], "not_installed", "attempt {attempt}: {body}");
+    }
+}
+
+/// `POST /registry/backend/update` with no body is `missing_body`, and is
+/// rejected before the inflight marker is taken — there is no source to key it
+/// on yet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_rejects_a_missing_body() {
+    let fx = start_with_catalog().await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_no_body(sock, "/registry/backend/update", token).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], "missing_body", "{body}");
 }
