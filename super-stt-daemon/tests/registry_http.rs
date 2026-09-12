@@ -68,6 +68,19 @@ fn next_test_uniq() -> u64 {
 /// Spawn a hermetic daemon configured to use `registry_url` instead of the
 /// live registry URL. Returns the guard and the Unix socket path.
 async fn start_daemon_with_registry(registry_url: &str) -> (DaemonGuard, PathBuf) {
+    start_daemon_with_registry_and_backend(registry_url, None).await
+}
+
+/// As [`start_daemon_with_registry`], but with `installed` seeded into the
+/// daemon's backends directory before it starts.
+///
+/// Seeding has to happen before the spawn: the daemon discovers backends once,
+/// during `post_init`, so a manifest written afterwards is not found until the
+/// next start.
+async fn start_daemon_with_registry_and_backend(
+    registry_url: &str,
+    installed: Option<&str>,
+) -> (DaemonGuard, PathBuf) {
     let unique = format!("stt-reg-{}-{}", std::process::id(), next_test_uniq());
     let tmp = std::env::temp_dir();
     let http_socket = tmp.join(format!("{unique}-http.sock"));
@@ -81,6 +94,19 @@ async fn start_daemon_with_registry(registry_url: &str) -> (DaemonGuard, PathBuf
     // unisolated it is the developer's own.
     let cache_home = tmp.join(format!("{unique}-cache"));
     std::fs::create_dir_all(&cache_home).expect("create test cache dir");
+
+    if let Some(manifest) = installed {
+        common::BackendFixture {
+            dir_name: "fixture-openai",
+            manifest,
+            entrypoint: "openai.wasm",
+            // Discovery reads the manifest and never execs the entrypoint, and
+            // nothing here asks the backend to run — only what version of it is
+            // installed.
+            component: None,
+        }
+        .install(&data_home);
+    }
 
     let child = Command::new(DAEMON_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
@@ -295,8 +321,13 @@ fn fixture_index_wasm(asset_url: &str) -> String {
 }
 
 /// Same fixture but with a correct sha256 for the wasm-magic bytes
-/// `\x00\x61\x73\x6d` (never actually used here, kept for reference).
-fn fixture_index_correct_hash(asset_url: &str) -> String {
+/// `\x00\x61\x73\x6d`, at whatever version the caller wants to publish.
+///
+/// The version is a parameter because `/registry/backend/update` decides what
+/// to do by comparing it against the version installed on disk: newer is an
+/// update, equal (or older) is a no-op. Both answers need the same catalog with
+/// a different number in it.
+fn fixture_index_at_version(asset_url: &str, version: &str) -> String {
     serde_json::json!({
         "schema_version": 1,
         "generated_at": "2026-01-01T00:00:00Z",
@@ -304,8 +335,8 @@ fn fixture_index_correct_hash(asset_url: &str) -> String {
         "backends": [{
             "id": "openai",
             "source": "github.com/x/y",
-            "version": "1.0.0",
-            "tag": "v1.0.0",
+            "version": version,
+            "tag": format!("v{version}"),
             "name": "OpenAI",
             "description": null,
             "license": "Apache-2.0",
@@ -330,6 +361,39 @@ fn fixture_index_correct_hash(asset_url: &str) -> String {
     })
     .to_string()
 }
+
+/// The catalog at `1.0.0` — the same version [`FIXTURE_BACKEND_MANIFEST`]
+/// installs, so tests that are not about updating see nothing on offer.
+fn fixture_index_correct_hash(asset_url: &str) -> String {
+    fixture_index_at_version(asset_url, "1.0.0")
+}
+
+/// The catalog's `github.com/x/y` as an *installed* backend at `1.0.0`.
+///
+/// `source` is what ties the two together: it is the key
+/// `/registry/backend/update` matches on to find the installed version, and the
+/// same key `/registry/backend/list` uses to decide `update_available`. A
+/// fixture whose `source` does not match the index entry is simply a different
+/// backend, and every update against it answers `not_installed`.
+const FIXTURE_BACKEND_MANIFEST: &str = r#"[backend]
+source = "github.com/x/y"
+name = "OpenAI"
+version = "1.0.0"
+kind = "wasm"
+entrypoint = "openai.wasm"
+contract = "v1"
+description = "Installed at 1.0.0, so the catalog can offer something newer."
+license = "Apache-2.0"
+
+[network]
+allowed_hosts = ["api.openai.com"]
+
+[[models]]
+name = "whisper-1"
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["none"]
+"#;
 
 // ---------- tests -------------------------------------------------------------
 
@@ -811,4 +875,161 @@ async fn update_rejects_a_missing_body() {
     let (status, body) = raw_post_no_body(sock, "/registry/backend/update", token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"], "missing_body", "{body}");
+}
+
+/// A daemon with `github.com/x/y` installed at `1.0.0` and a catalog offering
+/// `catalog_version`. Returns the fixture plus the asset server, which has to
+/// outlive the daemon that may fetch from it.
+async fn start_with_installed_backend(catalog_version: &str) -> CatalogFixture {
+    let mut server = mockito::Server::new_async().await;
+    let asset_url = format!("{}/openai.wasm", server.url());
+    let index_mock = server
+        .mock("GET", "/index.json")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(fixture_index_at_version(&asset_url, catalog_version))
+        .expect_at_least(1)
+        .create_async()
+        .await;
+    // The update pipeline downloads in the background once the endpoint has
+    // answered. Serve the bytes the catalog's sha256 is for, so the fetch that
+    // follows the `202` is a real one rather than a connection error in the log.
+    let _asset_mock = server
+        .mock("GET", "/openai.wasm")
+        .with_status(200)
+        .with_header("content-type", "application/wasm")
+        .with_body(&[0x00, 0x61, 0x73, 0x6d][..])
+        .create_async()
+        .await;
+
+    let registry_url = format!("{}/index.json", server.url());
+    let (daemon, socket) =
+        start_daemon_with_registry_and_backend(&registry_url, Some(FIXTURE_BACKEND_MANIFEST)).await;
+
+    let token = http_client::auth_request(socket.clone(), "registry-test", &["settings"])
+        .await
+        .expect("auth_request should succeed under SUPER_STT_AUTO_APPROVE=1")
+        .session_token;
+
+    CatalogFixture {
+        _daemon: daemon,
+        socket,
+        token,
+        _index_mock: index_mock,
+        _server: server,
+    }
+}
+
+/// The catalog offering something newer than what is on disk: the update is
+/// accepted, `202`, with an `install_id` to follow and both versions named so a
+/// client can say what it is upgrading from and to.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_accepts_a_newer_catalog_version() {
+    let fx = start_with_installed_backend("2.0.0").await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    assert_eq!(body["from_version"], "1.0.0", "{body}");
+    assert_eq!(body["to_version"], "2.0.0", "{body}");
+    assert_eq!(body["noop"], false, "{body}");
+    assert!(
+        body["install_id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("ins_")),
+        "an accepted update must name the install to follow: {body}"
+    );
+}
+
+/// The catalog offering the version already installed is a no-op: `200`, not
+/// `202`, and no `install_id` — there is nothing to follow.
+///
+/// The interesting half is that `noop` is a *refusal to act*, not just a label.
+/// A client that polled an `install_id` here would wait forever.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_is_a_noop_when_the_catalog_matches_what_is_installed() {
+    let fx = start_with_installed_backend("1.0.0").await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a no-op is not an accepted job: {body}"
+    );
+    assert_eq!(body["noop"], true, "{body}");
+    assert_eq!(body["from_version"], "1.0.0", "{body}");
+    assert_eq!(body["to_version"], "1.0.0", "{body}");
+    assert!(body["install_id"].is_null(), "{body}");
+}
+
+/// A catalog *older* than what is installed is refused the same way — as a
+/// no-op, never as an update.
+///
+/// This is the downgrade guard (audit Tier 1 #31). Before the shared semver
+/// check, a lower registry version "updated" happily and walked the install
+/// backwards. Nothing else in the suite covers it: the equal-version case above
+/// passes whether the check is `!=` or `is_newer`, and only this one fails if
+/// the comparison loosens.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn update_refuses_to_walk_backwards_to_an_older_catalog_version() {
+    let fx = start_with_installed_backend("0.9.0").await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_post_json(
+        sock,
+        "/registry/backend/update",
+        token,
+        serde_json::json!({ "source": "github.com/x/y" }),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a downgrade must not be accepted: {body}"
+    );
+    assert_eq!(body["noop"], true, "{body}");
+    assert_eq!(
+        body["to_version"], "1.0.0",
+        "a no-op reports the installed version on both sides, never the older \
+         one it declined to install: {body}"
+    );
+    assert!(body["install_id"].is_null(), "{body}");
+}
+
+/// With the backend installed, the catalog listing says so: `installed_version`
+/// is filled in and `update_available` reflects the comparison the update
+/// endpoint would make. The two read the same manifest through the same helper,
+/// so a client can trust Browse and the update to agree.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn list_reports_installed_version_and_offers_the_update() {
+    let fx = start_with_installed_backend("2.0.0").await;
+    let (sock, token) = (&fx.socket, &fx.token);
+
+    let (status, body) = raw_get_json(sock, "/registry/backend/list", token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let backend = &body["backends"][0];
+    assert_eq!(backend["source"], "github.com/x/y", "{body}");
+    assert_eq!(backend["installed_version"], "1.0.0", "{body}");
+    assert_eq!(backend["version"], "2.0.0", "{body}");
+    assert_eq!(
+        backend["update_available"], true,
+        "the catalog is newer, so Browse must offer it: {body}"
+    );
 }
