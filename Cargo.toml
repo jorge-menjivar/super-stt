@@ -48,8 +48,19 @@
     dashmap           = "6.1.0"
     dirs              = "6.0.0"
     # Input simulation (for client)
+    #
+    # On the `fix-shifted-characters-drop` branch rather than `main` until it
+    # merges upstream. `main` types a character absent from level 0 of the
+    # user's layout — every capital, `!`, `?`, `"`, and anything off the layout
+    # entirely — by inventing a keycode for it, which lands above 255. X11
+    # carries keycodes in one byte, so XWayland discards those and the
+    # character never reaches an X11 app: `I think I am OK at NASA` arrived as
+    # ` think  am  at ` (jorge-menjivar/super-stt#432). The branch types
+    # capitals as Shift plus the real key and binds off-layout characters to
+    # keys the keymap already has.
     enigo             = {
       git              = "https://github.com/jorge-menjivar/enigo",
+      branch           = "fix-shifted-characters-drop",
       default-features = false,
       features         = [
         "wayland",
