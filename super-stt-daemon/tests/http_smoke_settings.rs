@@ -9,6 +9,8 @@
 //! Uses `SUPER_STT_AUTO_APPROVE=1` so no GUI is needed — it's part of
 //! the default `cargo test` flow.
 
+mod common;
+
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::Bytes;
 use hyper::client::conn::http1::handshake;
@@ -29,10 +31,12 @@ struct DaemonGuard {
 
 impl Drop for DaemonGuard {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        common::shutdown(&mut self.child);
         for p in &self.cleanup_paths {
+            // The list holds the socket file and the three XDG dirs, so try
+            // both; whichever does not apply is a no-op.
             let _ = std::fs::remove_file(p);
+            let _ = std::fs::remove_dir_all(p);
         }
     }
 }
@@ -62,6 +66,12 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     // daemon comes up idle (which the assertions below tolerate).
     let data_home = tmp.join(format!("{unique}-data"));
     std::fs::create_dir_all(&data_home).expect("create test data dir");
+    // Isolate the cache too. The registry client persists its index (and its
+    // ETag) under XDG_CACHE_HOME; sharing one file across concurrently
+    // spawned test daemons has them overwrite each other's catalog, and
+    // unisolated it is the developer's own.
+    let cache_home = tmp.join(format!("{unique}-cache"));
+    std::fs::create_dir_all(&cache_home).expect("create test cache dir");
 
     let child = Command::new(DAEMON_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
@@ -69,6 +79,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
+        .env("XDG_CACHE_HOME", &cache_home)
         // Point the daemon's self-update forge client at a guaranteed-refused
         // loopback port (`accept_base_url` allows loopback `http://`), so
         // `POST /update/check` below fails deterministically and offline
@@ -84,7 +95,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     // panic below must still kill and reap the daemon, not leak it.
     let guard = DaemonGuard {
         child,
-        cleanup_paths: vec![http_socket.clone()],
+        cleanup_paths: vec![http_socket.clone(), config_home, data_home, cache_home],
     };
 
     let deadline = Instant::now() + Duration::from_mins(2);
@@ -490,6 +501,28 @@ async fn settings_scope_endpoints() {
         serde_json::json!({ "value": initial_beta_optin }),
     )
     .await;
+
+    // --- GET /gpu_info: a live probe of the host's accelerators. Settings
+    // scope guards it, but it is not a stored preference — it reports what
+    // this machine has right now. A host with no GPU (every CI runner) is a
+    // 200 with an empty list, never a 404 or a 500, so the shape below is
+    // what a client can rely on everywhere.
+    let (s, body) = raw_get_json(&http_socket, "/gpu_info", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /gpu_info: {body}");
+    assert_eq!(body["status"], "success", "{body}");
+    let gpus = body["gpu_info"]
+        .as_array()
+        .unwrap_or_else(|| panic!("gpu_info must be an array, got: {body}"));
+    // Each entry names a GPU and its memory; nothing here assumes one exists.
+    for gpu in gpus {
+        assert!(gpu["name"].is_string(), "gpu entry without a name: {gpu}");
+    }
+    // `host` is the driver/runtime inventory, reported whether or not any GPU
+    // was found — it is what decides which backend builds will run here.
+    assert!(
+        body["host"].is_object(),
+        "host toolchain versions must be present even with no GPU: {body}"
+    );
 
     // --- GET /update: a read-only snapshot. `latest_version` must still be
     // null: `GITHUB_API_BASE` points at a refused loopback port (see

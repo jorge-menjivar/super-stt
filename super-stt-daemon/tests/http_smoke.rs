@@ -17,6 +17,8 @@
 //! cargo test -p super-stt --test http_smoke -- --nocapture
 //! ```
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -34,8 +36,7 @@ struct DaemonGuard {
 
 impl Drop for DaemonGuard {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        common::shutdown(&mut self.child);
         let _ = std::fs::remove_dir_all(&self.xdg_runtime_dir);
     }
 }
@@ -68,6 +69,12 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     // it comes up idle and fast, without spawning a real backend at startup.
     let data_home = xdg.join("data");
     std::fs::create_dir_all(&data_home).expect("create xdg/data dir");
+    // Isolate the cache too. The registry client persists its index (and its
+    // ETag) under XDG_CACHE_HOME; sharing one file across concurrently
+    // spawned test daemons has them overwrite each other's catalog, and
+    // unisolated it is the developer's own.
+    let cache_home = xdg.join("cache");
+    std::fs::create_dir_all(&cache_home).expect("create test cache dir");
 
     let http_socket = xdg.join("stt").join("super-stt-http.sock");
 
@@ -76,6 +83,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
         .env("XDG_RUNTIME_DIR", &xdg)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
+        .env("XDG_CACHE_HOME", &cache_home)
         .env("SUPER_STT_AUTO_APPROVE", "1") // bypass consent popup
         .stdout(Stdio::null())
         .stderr(Stdio::null())
