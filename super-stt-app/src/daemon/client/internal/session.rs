@@ -26,6 +26,15 @@ pub(crate) const SETTINGS_SCOPES: &[&str] = &[
 pub(crate) const APP_NAME: &str = "Super STT Settings App";
 pub(crate) const APP_ID_NAME: AppId = AppId("super-stt-app");
 
+/// The socket every app→daemon call connects on.
+///
+/// One resolver rather than a `get_http_socket_path()` per call site: the
+/// streaming path in [`crate::daemon::client::v1::transcribe`] does not go
+/// through [`with_settings_token`], and both have to reach the same daemon.
+pub(crate) fn socket_path() -> std::path::PathBuf {
+    get_http_socket_path()
+}
+
 /// Run an HTTP-protocol operation with the cached settings-scope token.
 /// On `invalid_session` the cache is invalidated and the operation
 /// retries once with a fresh consent flow.
@@ -34,7 +43,7 @@ where
     F: Fn(std::path::PathBuf, String) -> Fut,
     Fut: std::future::Future<Output = HttpResult<T>>,
 {
-    let socket = get_http_socket_path();
+    let socket = socket_path();
     let socket_for_op = socket.clone();
     session::with_token(
         socket,
