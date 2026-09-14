@@ -58,6 +58,18 @@
     default = []
 
 [dev-dependencies]
+    # The `v1/` wrapper tests drive each call against a fake daemon served on a
+    # Unix socket (see `daemon/client/tests/fake_daemon.rs`), so the request the
+    # wrapper actually builds is the thing under test. Same HTTP stack the real
+    # daemon serves with.
+    http-body-util = "0.1"
+    hyper = { version = "1", features = ["http1", "server"] }
+    hyper-util = { version = "0.1", features = ["tokio"] }
+    # Those tests seed the session cache so no call reaches the consent popup.
+    # `session::save` writes through to the keyring on its way, which in an
+    # automated run must not be the developer's own — so the tests install the
+    # in-memory mock builder first.
+    keyring.workspace = true
     mockito = "1.7.2"
     # The path and response-key contract tests check the client against the
     # OpenAPI document the daemon builds from its router. Taken from the crate
