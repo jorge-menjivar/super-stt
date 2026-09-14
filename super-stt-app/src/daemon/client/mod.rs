@@ -8,6 +8,8 @@
 
 #[cfg(test)]
 mod path_contract;
+#[cfg(test)]
+mod tests;
 
 pub(crate) mod internal;
 pub(crate) mod v1;
