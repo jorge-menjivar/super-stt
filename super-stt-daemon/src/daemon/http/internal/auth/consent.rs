@@ -125,7 +125,15 @@ pub(crate) async fn ask_user_for_consent(
         .env("STT_AUTH_EXE_PATH", exe_path.to_string_lossy().as_ref())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+        .stderr(std::process::Stdio::null())
+        // The timeout below only reaps the helper while *this* request is
+        // still running. A client that exits mid-consent cancels it, which
+        // drops the future and this `Child` with it — and a dropped
+        // `tokio::process::Child` leaves the process alone unless asked not
+        // to. Without this the dialog is orphaned for the life of the
+        // session, holding an exclusive-keyboard layer surface and ~40 MB
+        // that nothing is left to kill.
+        .kill_on_drop(true);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
