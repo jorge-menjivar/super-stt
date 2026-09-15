@@ -33,8 +33,17 @@ app_src := 'target' / 'release' / app_name
 daemon_src := 'target' / 'release' / daemon_bin_name
 cli_src := 'target' / 'release' / cli_name
 consent_src := 'target' / 'release' / consent_name
-applet_src := 'target' / 'release' / applet_name
-debug_applet_src := 'target' / 'debug' / applet_name
+# The applet builds in a target directory of its own, and is the only binary
+# that does. Cargo resolves features for every package a single invocation
+# selects, so building the applet alongside the rest of the workspace hands it
+# `libcosmic/wgpu` — which `super-stt-app` asks for and the applet, per its own
+# manifest, does not. The applet then initialises a GPU renderer at startup and
+# loads the Mesa and NVIDIA driver stacks: 108 MB of RSS per instance against
+# 23 MB without, measured on an idle applet, once per side per panel. Upstream
+# COSMIC draws the same line — its apps link wgpu, its applets do not.
+applet_target := 'target' / 'applet'
+applet_src := applet_target / 'release' / applet_name
+debug_applet_src := applet_target / 'debug' / applet_name
 app_dst := bin_dir / app_name
 daemon_dst := bin_dir / daemon_bin_name
 cli_dst := bin_dir / cli_name
@@ -299,7 +308,7 @@ run-applet *args:
     sudo_keepalive=$!
     trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
 
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build --bin {{ applet_name }} {{ args }}
+    env CARGO_TARGET_DIR={{ applet_target }} RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build -p {{ applet_name }} {{ args }}
 
     echo "Installing Debug Super STT COSMIC applet..."
     sudo mkdir -p {{ bin_dir }}
@@ -337,7 +346,7 @@ run-applet-kill *args:
     sudo_keepalive=$!
     trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
 
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build --bin {{ applet_name }} {{ args }}
+    env CARGO_TARGET_DIR={{ applet_target }} RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build -p {{ applet_name }} {{ args }}
 
     echo "Installing Debug Super STT COSMIC applet..."
     sudo mkdir -p {{ bin_dir }}
@@ -393,10 +402,34 @@ build-install:
 build-consent:
     cargo build --release --bin {{ consent_name }}
 
-# Build only the cosmic applet
+# Build only the cosmic applet, on its own so it doesn't inherit wgpu
 build-applet:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `-p` and not `--bin`: `--bin` still selects every default workspace
+    # member for feature resolution, so it is exactly the command that gave
+    # the applet a GPU renderer. See `applet_target` above.
     echo "🔧 Building COSMIC applet..."
-    cargo build --release --bin {{ applet_name }}
+    CARGO_TARGET_DIR={{ applet_target }} cargo build --release -p {{ applet_name }}
+    just check-applet-renderer
+
+# Fail if the applet binary carries the wgpu renderer
+check-applet-renderer:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The feature that puts it there is enabled by another crate in the
+    # workspace, so nothing in the applet's own manifest can refuse it and
+    # nothing in either crate's types notices. What is left is to check the
+    # artifact: a GPU renderer in a panel applet is ~85 MB of RSS per
+    # instance and no visible symptom.
+    if grep -aq iced_wgpu {{ applet_src }}; then
+        echo "❌ {{ applet_src }} links iced_wgpu."
+        echo "   The applet renders with tiny-skia; a build that selects other"
+        echo "   workspace members turns wgpu on for it. Build it with"
+        echo "   \`just build-applet\`, which selects the package alone."
+        exit 1
+    fi
+    echo "✅ applet renders with tiny-skia (no wgpu linked)"
 
 # Build the generic mock WASM backend fixture (wasm32-wasip2) that
 # tests/wasm_mock.rs loads to exercise the daemon's WasmBackend orchestration.
