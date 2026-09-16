@@ -977,7 +977,16 @@ async fn each_stage_lists_only_the_models_carrying_its_role() {
 /// without touching real inference code.
 struct MockTranscribe {
     info: crate::stt_models::transcribe::ModelInfoData,
+    /// Every context this instance has been handed, in order.
+    reconfigured: SeenContexts,
 }
+
+/// The contexts a seeded fake has been handed, newest last. Shared with the
+/// instance in the slot, so a test that finds its writes recorded here has also
+/// established that the slot still holds *that* instance — a reload would have
+/// replaced it.
+type SeenContexts =
+    std::sync::Arc<std::sync::Mutex<Vec<crate::stt_models::transcribe::BackendContext>>>;
 impl crate::stt_models::transcribe::ModelInfo for MockTranscribe {
     fn info(&self) -> &crate::stt_models::transcribe::ModelInfoData {
         &self.info
@@ -998,12 +1007,20 @@ impl crate::stt_models::transcribe::Transcribe for MockTranscribe {
     ) -> anyhow::Result<String> {
         Ok(String::new())
     }
+
+    fn reconfigure(&self, context: crate::stt_models::transcribe::BackendContext) {
+        self.reconfigured.lock().unwrap().push(context);
+    }
 }
 
 /// Place a loaded mock model in the daemon's `model` lock with the given
 /// `(name, source)`. Used to verify the always-unload semantics in
 /// `handle_set_active_backend`.
-async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
+///
+/// Returns the handle on what the instance is handed by
+/// [`Transcribe::reconfigure`](crate::stt_models::transcribe::Transcribe::reconfigure);
+/// callers that only need the slot occupied ignore it.
+async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) -> SeenContexts {
     use crate::daemon::types::LoadedModel;
     use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::ModelInfoData;
@@ -1024,18 +1041,139 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) {
         provider: None,
     };
     let info = ModelInfoData::new(name, source, true, true, Duration::from_secs(1));
+    let reconfigured: SeenContexts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     *daemon.model.write().await = Some(LoadedModel {
         definition,
-        instance: Box::new(MockTranscribe { info }),
+        instance: Box::new(MockTranscribe {
+            info,
+            reconfigured: std::sync::Arc::clone(&reconfigured),
+        }),
     });
+    reconfigured
 }
 
-/// A backend option write for the *active* backend triggers a reload so the
-/// change takes effect. If that reload fails (here: the backend isn't installed,
-/// so re-instantiation errors), the option write still succeeds — but the reload
-/// failure must be surfaced in the response, not silently swallowed.
+/// [`fixture_backend`] plus one declared option, for the config-write paths.
+fn backend_with_option(
+    source: &str,
+    option: &str,
+) -> crate::stt_models::backends::DiscoveredBackend {
+    use super_stt_registry_types::manifest::{Opt, OptionType};
+
+    let mut backend = fixture_backend("opts", source, "Opts", "m");
+    backend.options = vec![Opt {
+        name: option.to_string(),
+        label: None,
+        description: "an option".to_string(),
+        r#type: Some(OptionType::String),
+        default: None,
+        choices: Vec::new(),
+        required: false,
+    }];
+    backend
+}
+
+/// An option write for a *running* backend reaches the model without reloading
+/// it.
+///
+/// Both halves matter. The instance is handed the new value, so the setting is
+/// live on the next request; and it is still the same instance afterwards, so
+/// nothing unmapped and remapped the weights to deliver a header. The fixture
+/// backend cannot actually be instantiated, so a reload would have emptied the
+/// slot — finding a model there is what proves none happened.
 #[tokio::test]
-async fn set_backend_option_surfaces_reload_failure() {
+async fn an_option_write_reconfigures_the_running_model() {
+    let daemon = test_daemon().await;
+    let source = "github.com/x/opts";
+    *daemon.backends.write().await = vec![backend_with_option(source, "remove_fillers")];
+    let seen = seed_loaded_model(&daemon, "m", source).await;
+
+    let resp = daemon
+        .handle_set_backend_option(
+            source.to_string(),
+            "remove_fillers".to_string(),
+            "false".to_string(),
+        )
+        .await;
+
+    assert_eq!(resp.status, "success");
+    let msg = resp.message.unwrap_or_default();
+    assert!(
+        !msg.contains("kept the old value"),
+        "the value reached the backend, so nothing should be warned about: {msg}"
+    );
+
+    let headers = {
+        let contexts = seen.lock().unwrap();
+        assert_eq!(contexts.len(), 1, "one write, one reconfigure");
+        contexts[0].headers.clone()
+    };
+    assert!(
+        headers
+            .iter()
+            .any(|(k, v)| k == "x-stt-option-remove_fillers" && v == "false"),
+        "the new value must be in the headers the instance now injects: {headers:?}"
+    );
+
+    assert!(
+        daemon.model.read().await.is_some(),
+        "the model must still be loaded — a reload would have failed and emptied the slot"
+    );
+}
+
+/// Writing the value already stored is not a write.
+///
+/// The settings UI cannot help sending these: re-picking the value already
+/// showing is a write, and so is a toggle put back where it started. Each one
+/// used to reload the model — both stages of it.
+#[tokio::test]
+async fn an_unchanged_option_write_does_nothing() {
+    let daemon = test_daemon().await;
+    let source = "github.com/x/opts";
+    *daemon.backends.write().await = vec![backend_with_option(source, "remove_fillers")];
+    let seen = seed_loaded_model(&daemon, "m", source).await;
+
+    for _ in 0..2 {
+        daemon
+            .handle_set_backend_option(
+                source.to_string(),
+                "remove_fillers".to_string(),
+                "false".to_string(),
+            )
+            .await;
+    }
+
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        1,
+        "the second write stores the same value and must not reach the backend again"
+    );
+
+    // And clearing an option that was never set is equally nothing.
+    let daemon = test_daemon().await;
+    *daemon.backends.write().await = vec![backend_with_option(source, "remove_fillers")];
+    let seen = seed_loaded_model(&daemon, "m", source).await;
+    let resp = daemon
+        .handle_set_backend_option(
+            source.to_string(),
+            "remove_fillers".to_string(),
+            String::new(),
+        )
+        .await;
+    assert_eq!(resp.status, "success");
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "clearing an unset option changes nothing"
+    );
+}
+
+/// The option write succeeds even when the new value cannot be delivered — it
+/// is stored either way — but the response has to say so.
+///
+/// Here the loaded model names a backend that is not installed, so there is no
+/// manifest to resolve a context against. Silence would leave the settings UI
+/// showing a value the backend is not using, with nothing to say which.
+#[tokio::test]
+async fn set_backend_option_surfaces_an_undeliverable_value() {
     let daemon = test_daemon().await;
     let source = "github.com/x/not-installed";
     seed_loaded_model(&daemon, "m", source).await;
@@ -1051,8 +1189,8 @@ async fn set_backend_option_surfaces_reload_failure() {
     assert_eq!(resp.status, "success", "the option write itself succeeds");
     let msg = resp.message.unwrap_or_default();
     assert!(
-        msg.to_lowercase().contains("reload"),
-        "reload failure should be surfaced, got: {msg}"
+        msg.contains("kept the old value"),
+        "an undeliverable value should be surfaced, got: {msg}"
     );
 }
 
@@ -1932,31 +2070,49 @@ async fn reloading_an_idle_post_processor_is_a_no_op() {
     assert_eq!(resp.message.as_deref(), Some("No post-processor to reload"));
 }
 
-/// The reported gap: an option or secret written for a backend reloaded only
-/// the transcription model, so a post-processor kept running with the value
-/// the user had just replaced — an API key change that silently did nothing.
-/// Both stages are reloaded now; the fake's source resolves to no installed
-/// backend, so the attempt fails and says so, which is what proves it ran.
+/// The reported gap: an option written for a backend reached only the
+/// transcription model, so a post-processor kept running with the value the
+/// user had just replaced — a change that silently did nothing.
+///
+/// Still both stages, now that neither is reloaded: stage 2's own instance is
+/// handed the new context while stage 1, running a different backend, is left
+/// alone. `super-stt-tidy`'s toggles are stage-2 options and nothing else, so
+/// this is the path that actually carries them.
 #[tokio::test]
-async fn changing_an_option_reloads_the_post_processor_too() {
+async fn changing_an_option_reconfigures_the_post_processor_too() {
     let daemon = test_daemon().await;
-    seed_scripted_post_processor(&daemon).await;
+    let source = "github.com/super-stt/test";
+    *daemon.backends.write().await = vec![backend_with_option(source, "style")];
+    let stage_one = seed_loaded_model(&daemon, "m", "github.com/x/elsewhere").await;
+    let stage_two = seed_scripted_post_processor(&daemon).await;
 
     let resp = daemon
-        .handle_set_backend_option(
-            "github.com/super-stt/test".to_string(),
-            "style".to_string(),
-            "terse".to_string(),
-        )
+        .handle_set_backend_option(source.to_string(), "style".to_string(), "terse".to_string())
         .await;
     assert_eq!(resp.status, "success");
-    let message = resp.message.unwrap_or_default();
-    assert!(
-        message.contains("reloading the running model failed"),
-        "the post-processor's stage must be reloaded: {message}"
+    assert_eq!(
+        resp.message.as_deref(),
+        Some("Option style updated"),
+        "the value was delivered, so there is nothing to warn about"
     );
 
-    // A backend neither stage is running is not reloaded at all.
+    let headers = {
+        let contexts = stage_two.lock().unwrap();
+        assert_eq!(contexts.len(), 1, "the post-processor must be reconfigured");
+        contexts[0].headers.clone()
+    };
+    assert!(
+        headers
+            .iter()
+            .any(|(k, v)| k == "x-stt-option-style" && v == "terse"),
+        "stage 2 must now inject the new value: {headers:?}"
+    );
+    assert!(
+        stage_one.lock().unwrap().is_empty(),
+        "stage 1 runs another backend and must be left alone"
+    );
+
+    // A backend neither stage is running is not touched at all.
     let resp = daemon
         .handle_set_backend_option(
             "github.com/super-stt/other".to_string(),
@@ -1965,6 +2121,11 @@ async fn changing_an_option_reloads_the_post_processor_too() {
         )
         .await;
     assert_eq!(resp.message.as_deref(), Some("Option style updated"));
+    assert_eq!(
+        stage_two.lock().unwrap().len(),
+        1,
+        "and stage 2 is not reconfigured for a backend it is not running"
+    );
 }
 
 /// Stage 1's events keep saying stage 1, so a client filtering on the field
@@ -2129,6 +2290,8 @@ struct ScriptedTranscribe {
     info: crate::stt_models::transcribe::ModelInfoData,
     /// `Ok(text)` to return `text`; `Err(())` to fail like a real backend would.
     result: Result<String, ()>,
+    /// Every context this instance has been handed, in order.
+    reconfigured: SeenContexts,
 }
 impl crate::stt_models::transcribe::ModelInfo for ScriptedTranscribe {
     fn info(&self) -> &crate::stt_models::transcribe::ModelInfoData {
@@ -2152,6 +2315,10 @@ impl crate::stt_models::transcribe::Transcribe for ScriptedTranscribe {
             Ok(text) => Ok(text.clone()),
             Err(()) => anyhow::bail!("scripted backend failure"),
         }
+    }
+
+    fn reconfigure(&self, context: crate::stt_models::transcribe::BackendContext) {
+        self.reconfigured.lock().unwrap().push(context);
     }
 }
 
@@ -2187,22 +2354,30 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
     );
     *daemon.model.write().await = Some(LoadedModel {
         definition,
-        instance: Box::new(ScriptedTranscribe { info, result }),
+        instance: Box::new(ScriptedTranscribe {
+            info,
+            result,
+            reconfigured: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }),
     });
 }
 
 /// Seed the daemon's `post_processor` slot with a fake, so an unload has
 /// something to unload. The instance never runs — only the slot's occupancy
 /// matters here.
-async fn seed_scripted_post_processor(daemon: &SuperSTTDaemon) {
-    seed_post_processor_named(daemon, "scripted-pp", "github.com/super-stt/test").await;
+async fn seed_scripted_post_processor(daemon: &SuperSTTDaemon) -> SeenContexts {
+    seed_post_processor_named(daemon, "scripted-pp", "github.com/super-stt/test").await
 }
 
 /// [`seed_scripted_post_processor`] under a chosen identity, for the tests that
 /// need the slot to hold the same `(source, model)` an installed fixture backend
 /// serves — which is what makes the daemon treat it as the model stage 2 is
 /// running rather than some other model with a device preference.
-async fn seed_post_processor_named(daemon: &SuperSTTDaemon, name: &str, source: &str) {
+async fn seed_post_processor_named(
+    daemon: &SuperSTTDaemon,
+    name: &str,
+    source: &str,
+) -> SeenContexts {
     use crate::daemon::types::LoadedModel;
     use crate::stt_models::ModelDefinition;
     use crate::stt_models::transcribe::ModelInfoData;
@@ -2223,13 +2398,16 @@ async fn seed_post_processor_named(daemon: &SuperSTTDaemon, name: &str, source: 
         provider: None,
     };
     let info = ModelInfoData::new(name, source, false, false, Duration::from_secs(1));
+    let reconfigured: SeenContexts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     *daemon.post_processor.write().await = Some(LoadedModel {
         definition,
         instance: Box::new(ScriptedTranscribe {
             info,
             result: Ok(String::new()),
+            reconfigured: std::sync::Arc::clone(&reconfigured),
         }),
     });
+    reconfigured
 }
 
 /// One second of finite samples — passes `validate_audio` and survives

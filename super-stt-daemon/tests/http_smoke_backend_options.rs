@@ -352,8 +352,11 @@ async fn base_url_is_stored_canonical() {
         assert_eq!(body["value"], want, "GET after {posted:?}: {body}");
     }
 
-    // A value yielding no host is kept as typed rather than dropped, so the
-    // model load can refuse it by name.
+    // A value yielding no host is refused on the write. It used to be stored as
+    // typed so the next model load could refuse it by name — but an option
+    // write no longer reloads anything, so there is no later load to catch it,
+    // and storing it would report success while the backend kept its old
+    // endpoint. What must not happen either way is dropping it silently.
     let (s, body) = post_req(
         &sock,
         &opt_path,
@@ -361,8 +364,14 @@ async fn base_url_is_stored_canonical() {
         serde_json::json!({ "value": "http://" }),
     )
     .await;
-    assert_eq!(s, StatusCode::OK, "POST unreadable: {body}");
-    assert_eq!(body["value"], "http://", "kept as typed: {body}");
+    assert_eq!(s, StatusCode::BAD_REQUEST, "POST unreadable: {body}");
+    assert_eq!(body["error_code"], "invalid_value", "{body}");
+
+    // And the previous value is still the one in effect — a refused write
+    // stores nothing.
+    let (s, body) = get(&sock, &opt_path, &token).await;
+    assert_eq!(s, StatusCode::OK, "GET after refusal: {body}");
+    assert_eq!(body["value"], "https://gw.example.com/v1", "{body}");
 }
 
 /// Listing all options for the backend.

@@ -5,8 +5,13 @@ configuration values (a base-URL override, a timeout, and so on) a backend
 declares as `[[options]]` in its
 [`backend.toml`](../../../backend/config.md). The daemon stores option
 overrides as plaintext in its config and injects each as an
-`x-stt-option-<name>` request header at model-load time (see
+`x-stt-option-<name>` request header on every `/v1` request (see
 [contract.md](../../../backend/contract.md#request-headers)).
+
+A write takes effect on the backend's **next request**, not its next model
+load: the daemon hands the running instances the new value rather than
+reloading them. Setting `base_url` is no exception — the endpoint it authorizes
+is checked per outbound connection, so that too is swapped in place.
 
 `{backend_id}` is the backend's id — its `source` as `GET /backend/list` reports it (e.g. `github.com/super-stt/openai`),
 **URL-percent-encoded** in the path — the same identifier used by
@@ -117,10 +122,19 @@ Authorization: Bearer stt_…64hex…
 ## `POST /backend/{backend_id}/option/list/{name}`
 
 Set the option override. Every stage currently running a model from that
-backend is reloaded so the new value takes effect at once — a transcription
-model and a post-processor alike; anything not loaded picks it up on its next
-load. A reload that fails is reported in `message`, and the stage keeps
-running the old instance.
+backend is handed the new value immediately and uses it from its next request —
+a transcription model and a post-processor alike; nothing is reloaded. A stage
+that is not loaded picks the value up when it loads.
+
+Writing the value already stored is a no-op, reported as such in `message`.
+
+If the new value cannot be delivered to a running stage — its backend is no
+longer installed, or a required secret has gone missing — the write still
+succeeds, because the override is stored either way, and `message` says the
+running backend kept the old value. No stage is left with nothing loaded.
+
+`base_url` is validated here rather than at the next load: a value no host can
+be read from is refused with `400 invalid_value`, and nothing is stored.
 
 **Request:**
 

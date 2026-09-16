@@ -51,12 +51,7 @@ impl SuperSTTDaemon {
         def: &ModelDefinition,
     ) -> Result<Box<dyn Transcribe>> {
         use crate::stt_models::transcribe::ModelInfoData;
-        // One snapshot of the user's options for both the headers the component
-        // is handed and the egress it is granted: read separately, a config
-        // write landing between them would authorize a different endpoint than
-        // the one the component is told to use.
-        let overrides = self.backend_option_overrides(backend).await?;
-        let headers = self.backend_headers(backend, &overrides).await?;
+        let context = self.backend_context(backend).await?;
         let component = backend.dir.join(&backend.entrypoint);
         let info = ModelInfoData::new(
             def.name.clone(),
@@ -75,13 +70,12 @@ impl SuperSTTDaemon {
         // Egress = the manifest-pinned `allowed_hosts` (fully SSRF-guarded) plus
         // what the user authorized via the `base_url` option, whose `host:port`
         // may be local or private.
-        let user_allowed_hosts = Self::base_url_egress_hosts(backend, &overrides);
         let inst = crate::stt_models::wasm::WasmBackend::with_info(
             &component,
             backend.allowed_hosts.clone(),
-            user_allowed_hosts,
+            context.user_allowed_hosts,
             info,
-            headers,
+            context.headers,
             websocket_capability,
             def.realtime,
         )?;
@@ -112,8 +106,7 @@ impl SuperSTTDaemon {
         // subprocess backend reads its `[[options]]` off the request too.
         // Resolved before the download tracker exists, so a missing required
         // secret fails the load without leaving a progress card behind.
-        let overrides = self.backend_option_overrides(backend).await?;
-        let headers = self.backend_headers(backend, &overrides).await?;
+        let headers = self.backend_context(backend).await?.headers;
 
         // Count the files we'll provision so the tracker's denominator is
         // accurate from the first broadcast. Each `[[models.files]]` entry is
@@ -193,6 +186,39 @@ impl SuperSTTDaemon {
             "backend {} is a subprocess backend, unsupported in this build (rebuild with --features subprocess-backends)",
             backend.source
         )
+    }
+
+    /// Everything the daemon resolves from the user's settings for one
+    /// backend, as the one bundle both a load and a settings write hand over.
+    ///
+    /// The single entry point matters more than the saving: the headers and the
+    /// egress list must come from one snapshot of the options (see
+    /// [`BackendContext`](crate::stt_models::transcribe::BackendContext)), and
+    /// having two callers assemble that pair for themselves is how they would
+    /// come to disagree. A load builds an instance around it; a settings write
+    /// hands the running instance a new one.
+    ///
+    /// # Errors
+    /// Returns an error if a required secret is unset or a declared `base_url`
+    /// names no host.
+    #[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
+    pub(crate) async fn backend_context(
+        &self,
+        backend: &DiscoveredBackend,
+    ) -> Result<crate::stt_models::transcribe::BackendContext> {
+        let overrides = self.backend_option_overrides(backend).await?;
+        let headers = self.backend_headers(backend, &overrides).await?;
+        // Only the WASM transport can dial anything; a subprocess backend runs
+        // under `PrivateNetwork=yes`, so there is no egress for a `base_url` to
+        // authorize and nothing to derive.
+        #[cfg(feature = "wasm-backends")]
+        let user_allowed_hosts = Self::base_url_egress_hosts(backend, &overrides);
+        #[cfg(not(feature = "wasm-backends"))]
+        let user_allowed_hosts = Vec::new();
+        Ok(crate::stt_models::transcribe::BackendContext {
+            headers,
+            user_allowed_hosts,
+        })
     }
 
     /// Form the `x-stt-secret-*` / `x-stt-option-*` headers a backend is

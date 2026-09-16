@@ -232,13 +232,30 @@ async fn set_option(
     // the value verbatim, whitespace included: it may carry meaning in one the
     // daemon does not interpret.
     //
-    // Canonicalized, not validated: a value that yields no host is stored as
-    // typed rather than refused. Rejecting it here would catch garbage but not
-    // the mistake that actually misleads people — a well-formed URL naming the
-    // wrong port — and model load already refuses it with a message naming the
-    // option. What this must not do is quietly drop it.
+    // Validated here as well as canonicalized. A value yielding no host used to
+    // be stored as typed and refused at the next model load, a fair division of
+    // labour while an option write reloaded the model — it now reconfigures the
+    // running stages instead, so there is no later load to catch it and storing
+    // an unreadable URL would report success while the backend kept its old
+    // endpoint. It still cannot catch the mistake that misleads people most, a
+    // well-formed URL naming the wrong port; nothing at this layer can.
     let value = if name == crate::stt_models::backends::base_url::OPTION_NAME {
-        canonical_base_url(&body.value)
+        // An all-whitespace value is not a malformed URL, it is the empty value
+        // every option refuses just below — `DELETE` is how an override is
+        // cleared — so it takes that answer rather than "not a URL".
+        match body.value.trim() {
+            "" => String::new(),
+            trimmed => match canonical_base_url(trimmed) {
+                Some(canonical) => canonical,
+                None => {
+                    return json_error_msg(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_value",
+                        &format!("option `{name}` takes a URL, and {trimmed:?} is not one"),
+                    );
+                }
+            },
+        }
     } else {
         body.value.clone()
     };
@@ -315,25 +332,27 @@ async fn delete_option(
     get_option_inner(s, source, name).await
 }
 
-/// The `base_url` form to store: canonical when the value can be read as a
-/// URL, trimmed otherwise.
+/// The `base_url` form to store, or `None` for a value no host can be read
+/// from.
 ///
-/// A value that yields no host is kept as the user typed it so model load can
-/// refuse it by name; dropping it here would leave the backend on its built-in
+/// Refusing is the point of the `Option`. A value that yields no host used to
+/// be stored as typed so the next model load could refuse it by name, which
+/// worked while an option write reloaded the model — it no longer does, so the
+/// write itself has to be the thing that says no. The one outcome still ruled
+/// out is dropping it silently: that would leave the backend on its built-in
 /// endpoint, sending the user's audio and credentials to the vendor they had
 /// configured their way out of.
 #[cfg(feature = "wasm-backends")]
-fn canonical_base_url(value: &str) -> String {
+fn canonical_base_url(value: &str) -> Option<String> {
     crate::stt_models::backends::base_url::normalize(value)
-        .unwrap_or_else(|| value.trim().to_string())
 }
 
 /// Without the wasm transport nothing derives an endpoint from this value, so
-/// there is no canonical form to agree on — only the trim that keeps a padded
-/// value from reading back padded.
+/// there is no canonical form to agree on and nothing to read it with — only
+/// the trim that keeps a padded value from reading back padded.
 #[cfg(not(feature = "wasm-backends"))]
-fn canonical_base_url(value: &str) -> String {
-    value.trim().to_string()
+fn canonical_base_url(value: &str) -> Option<String> {
+    Some(value.trim().to_string())
 }
 
 /// Returns an error `Response` when the option declares a closed set of values

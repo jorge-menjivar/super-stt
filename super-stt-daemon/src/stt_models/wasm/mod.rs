@@ -48,12 +48,17 @@ pub struct WasmBackend {
     allowed_hosts: Arc<[String]>,
     /// Hosts the *user* authorized via backend options (e.g. a `base_url` set in
     /// the settings UI). Exempt from the SSRF guard — see [`AllowlistHooks`].
-    user_allowed_hosts: Arc<[String]>,
+    ///
+    /// Swappable, unlike [`Self::allowed_hosts`]: the manifest's list can only
+    /// change by reinstalling the backend, while this one changes whenever the
+    /// user edits the setting. See [`Transcribe::reconfigure`].
+    user_allowed_hosts: std::sync::RwLock<Arc<[String]>>,
     allow_loopback: bool,
     /// The `x-stt-*` header set injected on every `/v1` request to this
-    /// backend — the user's secrets and options, resolved once at load. Shared
-    /// by transcribe, process, and realtime alike.
-    request_headers: Vec<(String, String)>,
+    /// backend — the user's secrets and options. Shared by transcribe,
+    /// process, and realtime alike, and swappable for the same reason as
+    /// [`Self::user_allowed_hosts`]: every request path holds only `&self`.
+    request_headers: std::sync::RwLock<Vec<(String, String)>>,
     model_id: String,
     /// Whether the active model is realtime-only (`[[models]] realtime = true`).
     /// When set, the batch `transcribe_audio` path is served by an internal
@@ -121,9 +126,9 @@ impl WasmBackend {
             engine,
             pre,
             allowed_hosts: allowed_hosts.into(),
-            user_allowed_hosts: user_allowed_hosts.into(),
+            user_allowed_hosts: std::sync::RwLock::new(user_allowed_hosts.into()),
             allow_loopback: false,
-            request_headers,
+            request_headers: std::sync::RwLock::new(request_headers),
             model_id,
             realtime,
             info,
@@ -140,16 +145,35 @@ impl WasmBackend {
     /// them the other way round would hand a backend the relaxation for hosts it
     /// declared itself.
     ///
-    /// Both lists are immutable for the backend's lifetime and the hooks only
-    /// read them, so they are shared rather than copied: this runs once per
-    /// transcription and once per realtime session.
+    /// The hooks only read the lists, so both are shared rather than copied:
+    /// this runs once per transcription and once per realtime session, and each
+    /// call takes whatever the user had authorized at that moment. A session
+    /// already running keeps the policy it started with — the check happens on
+    /// every outbound connection, but against the list its own store holds.
     #[must_use]
     pub fn allowlist_hooks(&self) -> AllowlistHooks {
         AllowlistHooks {
             allowed_hosts: self.allowed_hosts.clone(),
-            user_allowed_hosts: self.user_allowed_hosts.clone(),
+            user_allowed_hosts: self.user_allowed_hosts(),
             allow_loopback: self.allow_loopback,
         }
+    }
+
+    /// The hosts the user has authorized as of right now.
+    fn user_allowed_hosts(&self) -> Arc<[String]> {
+        self.user_allowed_hosts
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The secret/option pairs to inject on this request. Cloned so the guard
+    /// is dropped before the call, per [`Self::user_allowed_hosts`].
+    fn request_headers(&self) -> Vec<(String, String)> {
+        self.request_headers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Permit this backend's egress to loopback addresses (`127.0.0.1`, `::1`).
@@ -325,11 +349,13 @@ impl WasmBackend {
         Ok((status, collected.to_vec()))
     }
 
-    /// The headers every model-bound `/v1` request carries: the load-time
+    /// The headers every model-bound `/v1` request carries: the configured
     /// `x-stt-*` set plus the active model and a JSON content type. Built per
-    /// call because `x-stt-model` is appended to a clone of the stored set.
+    /// call because `x-stt-model` is appended to a copy of the stored set —
+    /// and because the stored set can change under it (see
+    /// [`Transcribe::reconfigure`]).
     fn v1_headers(&self) -> Vec<(String, String)> {
-        let mut headers = self.request_headers.clone();
+        let mut headers = self.request_headers();
         headers.push(("content-type".to_string(), "application/json".to_string()));
         headers.push(("x-stt-model".to_string(), self.model_id.clone()));
         headers
@@ -460,6 +486,27 @@ impl ModelState for WasmBackend {
 
 #[async_trait]
 impl Transcribe for WasmBackend {
+    /// Swap the injected secret/option pairs and the egress the user's
+    /// `base_url` authorizes, together, because they came from one snapshot of
+    /// the settings and disagreeing about the endpoint is exactly the failure
+    /// [`BackendContext`](crate::stt_models::transcribe::BackendContext) exists
+    /// to prevent.
+    ///
+    /// Nothing is rebuilt: the `Engine`, the `Component` and its
+    /// pre-instantiation are not parameterized by either list, and the `Store`
+    /// that carries the egress policy is built fresh for every call anyway. A
+    /// call already in flight finishes under the policy it started with.
+    fn reconfigure(&self, context: crate::stt_models::transcribe::BackendContext) {
+        *self
+            .request_headers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = context.headers;
+        *self
+            .user_allowed_hosts
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = context.user_allowed_hosts.into();
+    }
+
     async fn transcribe_audio(
         &mut self,
         audio: &[f32],
@@ -509,9 +556,9 @@ impl Transcribe for WasmBackend {
         let mut store = Store::new(&self.engine, host);
         // Inject the same x-stt-* headers a batch call gets, plus the model id.
         let mut headers: Vec<(String, Vec<u8>)> = self
-            .request_headers
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone().into_bytes()))
+            .request_headers()
+            .into_iter()
+            .map(|(k, v)| (k, v.into_bytes()))
             .collect();
         headers.push((
             "x-stt-model".to_string(),

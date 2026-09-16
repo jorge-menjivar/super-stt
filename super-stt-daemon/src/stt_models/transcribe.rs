@@ -86,6 +86,32 @@ pub trait ModelState: ModelInfo {
     fn device(&self) -> String;
 }
 
+/// The settings-derived context a backend runs with: everything the daemon
+/// resolves from the user's secrets and options, as against what the backend
+/// declares for itself.
+///
+/// The two fields travel together because one snapshot of the user's options
+/// produces both, and they have to agree — the headers tell a backend which
+/// endpoint to dial, the host list is what the sandbox will let it reach.
+/// Resolved independently, a config write landing between them hands a backend
+/// one gateway while a different one is authorized, and every request is
+/// refused until the model is reloaded.
+///
+/// Both halves are read per request — the headers on each `/v1` call, the host
+/// list on each outbound connection — which is what makes
+/// [`Transcribe::reconfigure`] possible at all.
+#[derive(Debug, Clone, Default)]
+pub struct BackendContext {
+    /// `x-stt-secret-*` / `x-stt-option-*` pairs injected on every `/v1`
+    /// request, per the contract's request-header section.
+    pub headers: Vec<(String, String)>,
+    /// Hosts the *user* authorized through a `base_url` option, which the SSRF
+    /// guard is relaxed for. Empty for a backend declaring no such option, and
+    /// for every subprocess backend — those run under `PrivateNetwork=yes` and
+    /// can dial nothing at all.
+    pub user_allowed_hosts: Vec<String>,
+}
+
 /// Common contract for any STT backend.
 ///
 /// Implementations drive an out-of-tree backend over the `/v1` contract
@@ -130,6 +156,33 @@ pub trait Transcribe: ModelState {
     ) -> Result<()> {
         let _ = transport;
         anyhow::bail!("this model does not support realtime streaming")
+    }
+
+    /// Replace the settings-derived context this backend was loaded with, so a
+    /// changed option takes effect on the next request instead of the next
+    /// load.
+    ///
+    /// Swapping it is the whole of applying a new option value. Both halves of
+    /// [`BackendContext`] are consulted per request, and none of the expensive
+    /// setup is parameterized by either one — not the component and its
+    /// pre-instantiation, not the spawned unit, not the weights. A reload
+    /// reaches the same state by rebuilding the instance around a fresh
+    /// snapshot, which for a local backend means unmapping and remapping
+    /// several gigabytes to change a number the running process would have read
+    /// off the next request anyway.
+    ///
+    /// Takes `&self`, unlike the inference calls, so the daemon can apply a
+    /// settings write while holding only a read guard on the model slot — a
+    /// write guard would queue behind whatever transcription is in flight.
+    ///
+    /// Not every option is one a backend can honour mid-flight: the context
+    /// rides `/v1/load` too, so a backend is free to read a value there and
+    /// hold it. That is the backend's own concern. The daemon's job is to make
+    /// the current value available on every request, which this does.
+    ///
+    /// Default no-op, for a host that holds no such context.
+    fn reconfigure(&self, context: BackendContext) {
+        let _ = context;
     }
 
     /// Release any external resources the backend holds. Default no-op.

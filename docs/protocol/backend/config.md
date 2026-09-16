@@ -268,10 +268,16 @@ one, has to be on the list. Both are refused at publication.
 An option named `base_url` is the convention for a backend's configurable
 endpoint. When the user sets one, the daemon treats its authority as
 **user-authorized egress** for the backend: it is added to the WASM transport's
-egress set at model-load time, and the SSRF resolver guard is relaxed for it
-(see [wasm.md — Network egress](./wasm.md#network-egress)). This lets a cloud
-backend be pointed at an arbitrary gateway — public, local, or on a private
-network — without re-installing the backend.
+egress set, and the SSRF resolver guard is relaxed for it (see
+[wasm.md — Network egress](./wasm.md#network-egress)). This lets a cloud backend
+be pointed at an arbitrary gateway — public, local, or on a private network —
+without re-installing the backend.
+
+The egress set is consulted per outbound connection, so changing `base_url`
+takes effect on the backend's next request. Nothing is reloaded, and the value
+is checked when it is written rather than when the model next loads: a value no
+host can be read from is refused by
+[`POST .../option/list/base_url`](../endpoints/v1/backends/options.md).
 
 The name is load-bearing: the daemon recognizes `base_url` and nothing else. An
 option called `endpoint`, `api_base`, or `server_url` is a perfectly valid
