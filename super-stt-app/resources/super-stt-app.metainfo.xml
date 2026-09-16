@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>ai.menjivar.SuperSTT</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>GPL-3</project_license>
+  <project_license>GPL-3.0-only</project_license>
   <name>Super STT</name>
   <summary>High-performance speech-to-text application</summary>
   <description>
@@ -21,9 +21,28 @@
     <name>Jorge Menjivar</name>
   </developer>
   <icon type="stock">super-stt-app</icon>
-  <url type="homepage">https://github.com/jorge-menjivar/super-stt</url>
-  <url type="vcs-browser">https://github.com/jorge-menjivar/super-stt</url>
   <launchable type="desktop-id">super-stt-app.desktop</launchable>
+  <url type="homepage">https://github.com/jorge-menjivar/super-stt</url>
+  <url type="bugtracker">https://github.com/jorge-menjivar/super-stt/issues</url>
+  <url type="vcs-browser">https://github.com/jorge-menjivar/super-stt</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Pick a backend and load a speech model</caption>
+      <image>https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/.github/assets/screenshots/app-1.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Choose which model runs, and whether it runs on CPU or GPU</caption>
+      <image>https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/.github/assets/screenshots/app-4.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Browse the catalog of available backends</caption>
+      <image>https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/.github/assets/screenshots/app-7.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Tune audio feedback and recording behavior</caption>
+      <image>https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/.github/assets/screenshots/app-8.png</image>
+    </screenshot>
+  </screenshots>
   <provides>
     <binary>super-stt-app</binary>
   </provides>
@@ -36,10 +55,29 @@
     <control>touch</control>
   </supports>
   <categories>
-    <category>COSMIC</category>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Utility</category>
   </categories>
   <keywords>
     <keyword>COSMIC</keyword>
+    <keyword>speech</keyword>
+    <keyword>transcription</keyword>
+    <keyword>dictation</keyword>
+    <keyword>voice</keyword>
   </keywords>
   <content_rating type="oars-1.1" />
+  <!-- Release notes live on the GitHub release each entry links to, rather
+       than being restated (and drifting) here. -->
+  <releases>
+    <release version="0.2.4" date="2026-09-08">
+      <url type="details">https://github.com/jorge-menjivar/super-stt/releases/tag/v0.2.4</url>
+    </release>
+    <release version="0.2.3" date="2026-08-27">
+      <url type="details">https://github.com/jorge-menjivar/super-stt/releases/tag/v0.2.3</url>
+    </release>
+    <release version="0.2.2" date="2026-08-26">
+      <url type="details">https://github.com/jorge-menjivar/super-stt/releases/tag/v0.2.2</url>
+    </release>
+  </releases>
 </component>
