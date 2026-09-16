@@ -77,6 +77,17 @@ const DISMISSED: &str = "dismissed";
 /// already decided.
 static DECIDED: AtomicBool = AtomicBool::new(false);
 
+/// How long the dialog stays up before dismissing itself.
+///
+/// Deliberately longer than the daemon's own one-minute wait, so this
+/// never truncates a decision the daemon would still have accepted —
+/// it is a backstop for a dialog that outlived whoever asked for it,
+/// not a second deadline. The daemon reaps the helper itself, but only
+/// while the request that spawned it is alive; nothing can kill a
+/// dialog whose daemon has since exited. Left to wait forever such a
+/// dialog holds an exclusive-keyboard layer surface and ~40 MB.
+const DISMISS_AFTER: std::time::Duration = std::time::Duration::from_secs(90);
+
 #[derive(Clone, Debug)]
 enum Message {
     Allow,
@@ -403,6 +414,36 @@ fn install_termination_handlers() {
     }
 }
 
+/// Dismiss the dialog if nobody has decided within [`DISMISS_AFTER`].
+///
+/// Unlike the auto-approve timer below this is compiled into release
+/// builds: it only ever denies, so it cannot be used to wave a consent
+/// prompt through. Fail-closed is also the right answer when it does
+/// fire — reaching the deadline means no human answered.
+fn spawn_dismiss_timer() {
+    std::thread::spawn(|| {
+        std::thread::sleep(DISMISS_AFTER);
+        // Claim the decision. If someone else got there first, their
+        // verdict is already on stdout and must not be followed by
+        // ours — the daemon reads one line and we would be racing to
+        // define it.
+        if DECIDED
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            unsafe { libc::_exit(0) }
+        }
+        // Same async-signal-safe write + `_exit` as the SIGTERM handler,
+        // rather than trying to unwind the iced event loop from a thread
+        // that does not own it.
+        let msg = b"dismissed\n";
+        unsafe {
+            libc::write(1, msg.as_ptr().cast::<libc::c_void>(), msg.len());
+            libc::_exit(0);
+        }
+    });
+}
+
 /// If `STT_AUTH_AUTO_APPROVE_AFTER_MS` is set to a parseable u64,
 /// spawn a background thread that sleeps for that many milliseconds
 /// and then writes "allow\n" to stdout + `_exit(0)`. Lets you (or a
@@ -467,6 +508,7 @@ fn main() -> cosmic::iced::Result {
     super_stt_shared::logging::init();
 
     install_termination_handlers();
+    spawn_dismiss_timer();
     maybe_spawn_auto_approve_timer();
 
     let payload = read_env();
