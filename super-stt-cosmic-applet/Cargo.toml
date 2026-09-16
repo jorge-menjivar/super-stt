@@ -15,6 +15,19 @@
 [dependencies]
     base64 = "0.22.1"
     clap = { version = "4.5", features = ["derive"] }
+    # No `wgpu`: the applet renders with iced's tiny-skia backend, which draws
+    # everything here — the visualization and working-animation canvases
+    # included — on the CPU. A GPU renderer in a panel applet costs ~85 MB of
+    # RSS per instance (108 MB against 23 MB, measured idle) because it loads
+    # the Mesa and NVIDIA driver stacks at startup, and the applet runs one
+    # process per side per panel. Upstream COSMIC draws the same line: its apps
+    # link wgpu, its applets do not.
+    #
+    # Asking for it here is not the same as getting it. Cargo resolves features
+    # for every package an invocation selects, so any build that also selects
+    # `super-stt-app` — which does want wgpu — turns it on for this crate too.
+    # `just build-applet` selects this package alone and asserts the result;
+    # see `applet_target` in the justfile.
     libcosmic = {
         workspace = true,
         features = [
