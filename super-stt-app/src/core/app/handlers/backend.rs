@@ -221,7 +221,9 @@ impl AppModel {
             }
 
             // Options go to the daemon config. If the input is empty, clear the
-            // override; otherwise set the new value. The daemon reloads-if-active.
+            // override; otherwise set the new value. The daemon hands the value
+            // to the running stages itself — an option is a request header, so
+            // nothing is reloaded and the change is live on the next request.
             BackendMessage::BackendOptionSaved { source, name } => {
                 self.action_error = None;
                 let value = self
@@ -256,8 +258,8 @@ impl AppModel {
                 }
             }
 
-            // Explicit reset: clear the stored override and reload so the
-            // option reverts to its daemon default.
+            // Explicit reset: clear the stored override so the option reverts to
+            // the backend's own default, then refresh the catalog to show it.
             BackendMessage::BackendOptionChosen {
                 source,
                 name,

@@ -57,6 +57,17 @@ multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["cpu"]
+
+# A third, so two tests in one process do not collide: the transient unit is
+# named for the model and the pid, and the daemon never runs two subprocess
+# backends of one stage at once, so the name is only ambiguous under a test.
+[[models]]
+name = "mock-reconfigure"
+role = "post_processor"
+multilingual = false
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu"]
 "#;
 
 /// Build a backend dir holding the mock manifest and binary, outside `/tmp`:
@@ -216,6 +227,58 @@ async fn a_model_reloads_only_once_its_instance_is_released() {
     assert_eq!(processed, "processed: um so hello");
 
     reloaded.shutdown().await.expect("clean shutdown");
+}
+
+/// Changing an option reaches a *running* backend, without reloading it.
+///
+/// The end-to-end version of the claim the daemon's option write rests on: the
+/// headers are read per request, so swapping them is enough. Same spawned unit
+/// throughout — nothing torn down, no model provisioned again — and the second
+/// `/v1/process` carries the new value where the first carried the old one.
+#[tokio::test]
+async fn a_changed_option_reaches_a_running_subprocess() {
+    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+        return; // needs a systemd --user session
+    }
+    install_crypto_provider();
+
+    let (dir, _cleanup) = seed_backend_dir("reconfigure");
+
+    let option = "x-stt-option-styling".to_string();
+    let mut processor = SubprocessBackend::spawn(
+        &dir,
+        "mock-reconfigure",
+        "cpu",
+        None,
+        vec![(option.clone(), "formal".to_string())],
+    )
+    .await
+    .expect("spawn + load the post-processor");
+
+    assert_eq!(
+        processor
+            .process_text("hello", Some("en"))
+            .await
+            .expect("the post-processor serves /v1/process"),
+        "processed: hello [styling=formal]",
+        "the spawn value must arrive first"
+    );
+
+    processor.reconfigure(super_stt_daemon::stt_models::transcribe::BackendContext {
+        headers: vec![(option, "casual".to_string())],
+        user_allowed_hosts: Vec::new(),
+    });
+
+    assert_eq!(
+        processor
+            .process_text("hello", Some("en"))
+            .await
+            .expect("the post-processor serves /v1/process"),
+        "processed: hello [styling=casual]",
+        "the new value must arrive on the next request, with no reload in between"
+    );
+
+    processor.shutdown().await.expect("clean shutdown");
 }
 
 /// The contract says every `/v1` request carries the user's `[[options]]` as

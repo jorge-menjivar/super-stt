@@ -40,9 +40,15 @@ pub struct SubprocessBackend {
     /// Device label reported by the backend's `/v1/status` (e.g. `"cuda"`).
     device: String,
     /// The `x-stt-secret-*` / `x-stt-option-*` pairs injected on every `/v1`
-    /// request, per the contract's request-header section. Formed once at
-    /// spawn from the user's settings, like the WASM transport's.
-    context_headers: Vec<(String, String)>,
+    /// request, per the contract's request-header section. Resolved from the
+    /// user's settings at spawn, like the WASM transport's, and replaced in
+    /// place by [`Transcribe::reconfigure`] when those settings change.
+    ///
+    /// Behind a lock rather than owned outright because the request path holds
+    /// only `&self`, and because the alternative to swapping it is reloading
+    /// the model — which for a subprocess backend means tearing down the unit
+    /// and re-provisioning the weights to change a header.
+    context_headers: std::sync::RwLock<Vec<(String, String)>>,
 }
 
 impl SubprocessBackend {
@@ -168,7 +174,7 @@ impl SubprocessBackend {
             model_id: model_name.to_string(),
             info,
             device: "unknown".to_string(),
-            context_headers,
+            context_headers: std::sync::RwLock::new(context_headers),
         };
 
         backend.wait_for_ping(Duration::from_secs(30)).await?;
@@ -235,6 +241,19 @@ impl SubprocessBackend {
         }
     }
 
+    /// The secret/option pairs to inject on this request.
+    ///
+    /// Cloned rather than borrowed so the guard is dropped before the socket
+    /// round-trip: these are a handful of short strings, and holding a read
+    /// guard across a transcription would block a settings write for as long as
+    /// the transcription runs.
+    fn context_headers(&self) -> Vec<(String, String)> {
+        self.context_headers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     /// One HTTP request over the backend's Unix socket, carrying `headers`
     /// plus the secret/option context every `/v1` request gets.
     async fn request(
@@ -257,7 +276,8 @@ impl SubprocessBackend {
             .method(method)
             .uri(path)
             .header("host", "backend.local");
-        for (k, v) in headers.iter().chain(&self.context_headers) {
+        let context = self.context_headers();
+        for (k, v) in headers.iter().chain(&context) {
             builder = builder.header(k.as_str(), v.as_str());
         }
         let req = builder.body(Full::new(Bytes::from(body)))?;
@@ -325,6 +345,19 @@ impl ModelState for SubprocessBackend {
 
 #[async_trait]
 impl Transcribe for SubprocessBackend {
+    /// Swap the injected secret/option pairs. The next `/v1` request carries
+    /// them; one already in flight keeps the set it was built with.
+    ///
+    /// `user_allowed_hosts` is ignored, and there is nothing here to ignore it
+    /// with: the unit runs under `PrivateNetwork=yes`, so a subprocess backend
+    /// has no egress to authorize and `base_url` means nothing to it.
+    fn reconfigure(&self, context: crate::stt_models::transcribe::BackendContext) {
+        *self
+            .context_headers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = context.headers;
+    }
+
     /// Stop the `systemd-run --user` transient unit asynchronously and
     /// remove the socket file. Called by the daemon before the
     /// [`LoadedModel`](crate::daemon::types::LoadedModel) is dropped — gives
