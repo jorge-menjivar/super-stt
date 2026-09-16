@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::daemon::http::internal::auth::consent::{PeerIdentity, resolve_peer_identity};
 use crate::daemon::http::internal::auth::middleware::AuthContext;
 use crate::daemon::http::internal::auth::tokens::TokenStore;
 use crate::daemon::http::internal::helpers::responses::{invalid_session, reason, scope_denied};
@@ -8,7 +9,6 @@ use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use std::path::PathBuf;
 
 // ---------- /events (SSE) --------------------------------------------------
 
@@ -181,7 +181,10 @@ pub(crate) async fn events(
         peer.and_then(|p| p.0.pid),
         s.tokens.clone(),
         ctx.token,
-        ctx.meta.exe_path,
+        PeerIdentity {
+            exe_path: ctx.meta.exe_path,
+            flatpak_app_id: ctx.meta.flatpak_app_id,
+        },
     );
 
     // The handler's own `sse_tx` clone is dropped here. The forwarders
@@ -276,7 +279,7 @@ fn spawn_events_keepalive_and_exe_watch(
     peer_pid: Option<u32>,
     tokens: TokenStore,
     token_str: String,
-    stored_exe: PathBuf,
+    stored: PeerIdentity,
 ) {
     use tokio::time::{Duration, MissedTickBehavior, interval};
 
@@ -308,14 +311,23 @@ fn spawn_events_keepalive_and_exe_watch(
                 }
                 _ = exe_watch.tick() => {
                     let Some(pid) = peer_pid else { continue; };
-                    let current = std::fs::read_link(format!("/proc/{pid}/exe")).ok();
-                    if current.as_ref().is_some_and(|c| *c == stored_exe) {
+                    // Re-resolve the whole identity, not just the path: a
+                    // sandboxed peer's path is one every sandbox can share, so
+                    // comparing paths alone would miss a swap between them.
+                    let current = resolve_peer_identity(
+                        Some(&PeerInfo { pid: Some(pid), uid: None }),
+                        "events exe-watch",
+                    );
+                    if current.as_ref().is_some_and(|c| *c == stored) {
                         continue;
                     }
                     log::info!(
-                        "widget exe_changed on pid {pid}: stored={} current={:?}; revoking session",
-                        stored_exe.display(),
-                        current,
+                        "widget exe_changed on pid {pid}: stored={} current={}; revoking session",
+                        stored.describe(),
+                        current.as_ref().map_or_else(
+                            || "<unidentifiable>".to_string(),
+                            PeerIdentity::describe,
+                        ),
                     );
                     let _ = try_emit_sse_event(
                         &tx,

@@ -4,6 +4,7 @@ pub mod logging;
 pub mod models;
 pub mod paths;
 pub mod registry;
+pub mod sandbox;
 pub mod utils;
 pub mod validation;
 

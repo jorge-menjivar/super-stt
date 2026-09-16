@@ -2,12 +2,12 @@
 //! Super STT consent dialog — a small floating libcosmic window that the
 //! daemon spawns when an app asks to authenticate.
 //!
-//! The daemon spawns this binary with three env vars carrying the request
-//! details:
+//! The daemon spawns this binary with env vars carrying the request details:
 //!
 //! - `STT_AUTH_APP_NAME` — declared (untrusted) app name from the request
 //! - `STT_AUTH_SCOPES`   — space-separated scope set (e.g. `transcribe status`)
 //! - `STT_AUTH_EXE_PATH` — peer `/proc/<pid>/exe` (trusted, kernel-resolved)
+//! - `STT_AUTH_FLATPAK_APP_ID` — set only when the caller is inside a flatpak
 //!
 //! The user clicks Allow or Deny. The dialog writes one of `allow`, `deny`,
 //! or `dismissed` to stdout (newline-terminated) and exits.
@@ -103,6 +103,7 @@ struct ConsentApp {
     app_name: String,
     scopes: Vec<String>,
     exe_path: String,
+    flatpak_app_id: Option<String>,
 }
 
 impl cosmic::Application for ConsentApp {
@@ -183,6 +184,7 @@ impl cosmic::Application for ConsentApp {
                 app_name: flags.app_name,
                 scopes: flags.scopes,
                 exe_path: flags.exe_path,
+                flatpak_app_id: flags.flatpak_app_id,
             },
             task,
         )
@@ -220,7 +222,12 @@ impl cosmic::Application for ConsentApp {
         }
 
         let control = cosmic::widget::column::with_capacity(2)
-            .push(text::body(format!("Executable:  {}", self.exe_path)))
+            .push(text::body(match &self.flatpak_app_id {
+                // Name the app the user installed. Its executable path lives
+                // inside its sandbox, so it identifies nothing here.
+                Some(id) => format!("Flatpak app:  {id}"),
+                None => format!("Executable:  {}", self.exe_path),
+            }))
             .push(
                 cosmic::widget::column::with_capacity(2)
                     .push(text::heading("This will allow it to:"))
@@ -488,6 +495,10 @@ struct AuthRequestPayload {
     app_name: String,
     scopes: Vec<String>,
     exe_path: String,
+    /// Set only for a sandboxed caller. Its `exe_path` is resolved inside its
+    /// own sandbox, so showing that path would name a file the user cannot go
+    /// and look at, and one that every other flatpak could equally present.
+    flatpak_app_id: Option<String>,
 }
 
 fn read_env() -> AuthRequestPayload {
@@ -501,6 +512,9 @@ fn read_env() -> AuthRequestPayload {
             .collect(),
         exe_path: std::env::var("STT_AUTH_EXE_PATH")
             .unwrap_or_else(|_| "<unknown path>".to_string()),
+        flatpak_app_id: std::env::var("STT_AUTH_FLATPAK_APP_ID")
+            .ok()
+            .filter(|id| !id.is_empty()),
     }
 }
 
