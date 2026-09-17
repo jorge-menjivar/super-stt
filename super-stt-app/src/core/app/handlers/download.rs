@@ -89,7 +89,7 @@ impl AppModel {
             }
 
             DownloadMessage::NoDownloadInProgress(stage) => {
-                // Only clear a `Downloading` state. A `Loading` state means
+                // Only clear a `Provisioning` state. A `Loading` state means
                 // the daemon's `set_model` HTTP call is still in flight (the
                 // subprocess might still be spawning, or the WASM component
                 // might still be initialising) — its `ModelChanged` /
@@ -103,7 +103,7 @@ impl AppModel {
                 // contract (see `ModelError` handler).
                 if matches!(
                     self.model_operations.get(stage),
-                    Some(ModelOperationState::Downloading { .. })
+                    Some(ModelOperationState::Provisioning { .. })
                 ) {
                     self.model_operations.set_ready(stage);
                 }

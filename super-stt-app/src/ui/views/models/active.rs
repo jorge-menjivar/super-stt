@@ -440,10 +440,10 @@ pub(super) fn staged_model_picker<'a>(
 pub(super) fn operation_status(app: &AppModel, stage: u32) -> Option<Element<'_, Message>> {
     match app.model_operations.get(stage)? {
         ModelOperationState::Ready => None,
-        ModelOperationState::Downloading {
+        ModelOperationState::Provisioning {
             target_model,
             progress,
-        } => Some(card_download_progress(target_model, progress)),
+        } => Some(card_provisioning_progress(target_model, progress)),
         ModelOperationState::Loading {
             target_model,
             status_message,
@@ -452,11 +452,32 @@ pub(super) fn operation_status(app: &AppModel, stage: u32) -> Option<Element<'_,
     }
 }
 
-/// In-card download progress (bar + text + Cancel), shown at the bottom of the
-/// active-backend card while model files are downloading.
+/// How the card names the phase the daemon reports. `verifying` is checking
+/// files already on disk against their checksums; everything else the daemon
+/// routes to this card is bytes coming off the network, and an unrecognised
+/// status reads as a download because that is what every status other than
+/// `verifying` has ever meant here.
+fn provisioning_verb(status: &str) -> &'static str {
+    if status == "verifying" {
+        "Verifying"
+    } else {
+        "Downloading"
+    }
+}
+
+/// In-card provisioning progress (bar + text + Cancel), shown at the bottom of
+/// the active-backend card while the model's files are being verified or
+/// downloaded.
+///
+/// The verb comes from the daemon's phase, and that distinction is the whole
+/// point: loading a model whose files are all present still walks every file to
+/// check it, and for one whose verification stamp is missing that means hashing
+/// it end to end — seconds of real work for multi-GB weights. Calling that
+/// "Downloading" told the user their files were being fetched again. Both
+/// phases are byte-tracked the same way, so they share one bar.
 // reason: display-only; the imprecision is cosmetic
 #[allow(clippy::cast_precision_loss)]
-pub(super) fn card_download_progress<'a>(
+pub(super) fn card_provisioning_progress<'a>(
     target_model: &'a str,
     progress: &'a DownloadProgress,
 ) -> Element<'a, Message> {
@@ -466,7 +487,8 @@ pub(super) fn card_download_progress<'a>(
         (progress.percentage / 100.0).clamp(0.0, 1.0)
     };
     let line = format!(
-        "Downloading {} ({}/{}): {:.1}%",
+        "{} {} ({}/{}): {:.1}%",
+        provisioning_verb(&progress.status),
         target_model,
         progress.file_index + 1,
         progress.total_files,
@@ -557,5 +579,31 @@ mod vram_shortfall_tests {
     #[test]
     fn no_gpu_info_is_silent() {
         assert_eq!(vram_shortfall(Some("gpu"), 48 * GIB, None), None);
+    }
+}
+
+#[cfg(test)]
+mod provisioning_verb_tests {
+    //! The card takes its verb from the daemon's phase. A load whose files are
+    //! all on disk spends its whole life in `verifying` — calling that
+    //! "Downloading" is what had every cached load showing a download bar for
+    //! files the user already had.
+    use super::provisioning_verb;
+
+    #[test]
+    fn verifying_says_so_rather_than_claiming_a_download() {
+        assert_eq!(provisioning_verb("verifying"), "Verifying");
+    }
+
+    #[test]
+    fn downloading_is_still_a_download() {
+        assert_eq!(provisioning_verb("downloading"), "Downloading");
+    }
+
+    /// An unrecognised phase reads as a download: every status the daemon has
+    /// ever routed to this card other than `verifying` is one.
+    #[test]
+    fn an_unknown_phase_falls_back_to_downloading() {
+        assert_eq!(provisioning_verb("something_new"), "Downloading");
     }
 }

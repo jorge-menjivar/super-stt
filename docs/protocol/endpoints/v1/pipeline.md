@@ -142,15 +142,15 @@ options and this one for the current value.
 
 ### The `switch` object
 
-Present while a stage is provisioning a model — downloading its files, then
-loading the weights.
+Present while a stage is provisioning a model — checking the files it already
+has, downloading the ones it doesn't, then loading the weights.
 
 | Field        | Type    | Notes                                                          |
 |--------------|---------|-----------------------------------------------------------------|
-| `phase`      | string  | `downloading`, `loading_model`, `completed`, `cancelled`, or `error` — the same vocabulary the `download_progress` event's `status` uses. |
+| `phase`      | string  | `verifying`, `downloading`, `loading_model`, `completed`, `cancelled`, or `error` — the same vocabulary the `download_progress` event's `status` uses. A load opens in `verifying` and one with nothing to fetch never leaves it, so a client must not word that phase as a download. |
 | `target`     | object  | `{ model, source }` — what is being loaded, and the backend serving it. |
 | `started_at` | string  | RFC 3339 timestamp of when the load began.                      |
-| `download`   | object  | `{ current_file, file_index, total_files, bytes_downloaded, total_bytes, percentage, eta_seconds }`, per file — see [`download_progress`](./events.md#daemon-status) for what the counters mean. |
+| `download`   | object  | `{ current_file, file_index, total_files, bytes_downloaded, total_bytes, percentage, eta_seconds }`, per file — counting bytes hashed in `verifying` and bytes received in `downloading`; see [`download_progress`](./events.md#daemon-status) for what the counters mean. |
 
 The polled mirror of the [events](#events) below: a client that wants live
 progress subscribes, and one that reconnects mid-load reads it here.

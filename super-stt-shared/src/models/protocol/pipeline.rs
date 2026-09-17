@@ -133,14 +133,15 @@ pub struct StageModelDevice {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StageSwitch {
-    /// Where the operation has got to: `downloading`, `loading_model`,
-    /// `cancelled`, `completed`, or `error`.
+    /// Where the operation has got to: `verifying`, `downloading`,
+    /// `loading_model`, `cancelled`, `completed`, or `error`.
     pub phase: String,
     /// The model being loaded into the stage.
     pub target: SwitchTarget,
     /// RFC 3339 timestamp of when the operation started.
     pub started_at: String,
-    /// Byte and file progress, for the `downloading` phase.
+    /// Byte and file progress, for the `verifying` and `downloading` phases:
+    /// bytes hashed off disk and bytes received respectively.
     pub download: SwitchDownload,
 }
 

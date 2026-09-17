@@ -20,14 +20,19 @@ use std::time::{Duration, Instant};
 
 pub use super::device_offers::{PP_STAGE, STT_STAGE};
 
-/// A stage's model operation: downloading files, loading them, or done.
+/// A stage's model operation: provisioning its files, loading them, or done.
 #[derive(Debug, Clone, Default)]
 pub enum ModelOperationState {
     /// Nothing in flight for this stage.
     #[default]
     Ready,
-    /// Downloading model files, with the daemon's latest progress.
-    Downloading {
+    /// Provisioning the model's files: verifying the copies already on disk,
+    /// and downloading the ones that are missing or stale. One state for both
+    /// phases because the daemon reports them through one byte-tracked
+    /// progress shape and the UI treats them alike; `progress.status`
+    /// (`"verifying"` / `"downloading"`) says which is running, and is the only
+    /// thing the card's wording depends on.
+    Provisioning {
         target_model: String,
         progress: super_stt_shared::models::protocol::DownloadProgress,
     },
@@ -47,7 +52,7 @@ impl ModelOperationState {
     /// by one.
     #[must_use]
     pub const fn is_pending(&self) -> bool {
-        matches!(self, Self::Loading { .. } | Self::Downloading { .. })
+        matches!(self, Self::Loading { .. } | Self::Provisioning { .. })
     }
 }
 
