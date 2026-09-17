@@ -39,7 +39,16 @@ pub struct DownloadItem {
 
 /// Hex-encoded SHA-256 of a file on disk, streamed so large weights don't load
 /// into memory.
-async fn sha256_hex_of_file(path: &Path) -> Result<String> {
+///
+/// Reports through `tracker` as it goes: a file without a usable stamp is read
+/// end to end, which for multi-GB weights is seconds of real work, and without
+/// per-chunk updates the client's card sits frozen on the *previous* file's
+/// numbers for the whole of it. Each chunk also honours the cancel flag, so
+/// Cancel is live during verification the same way it is during a download.
+async fn sha256_hex_of_file(
+    path: &Path,
+    tracker: Option<&Arc<DownloadProgressTracker>>,
+) -> Result<String> {
     let mut file = fs::File::open(path).await?;
     let mut ctx = Context::new(&SHA256);
     let mut buf = vec![0u8; 1024 * 1024];
@@ -49,6 +58,15 @@ async fn sha256_hex_of_file(path: &Path) -> Result<String> {
             break;
         }
         ctx.update(&buf[..n]);
+        if let Some(t) = tracker {
+            if t.is_cancelled() {
+                anyhow::bail!("download cancelled");
+            }
+            t.bytes_downloaded
+                .fetch_add(u64::try_from(n).unwrap_or(u64::MAX), Ordering::Relaxed);
+            // The tracker throttles to 1% increments, so per-chunk is fine.
+            t.broadcast_progress();
+        }
     }
     Ok(hex::encode(ctx.finish().as_ref()))
 }
@@ -137,7 +155,11 @@ async fn write_stamp(dest: &Path, md: &std::fs::Metadata, expected: &str) {
 /// If `dest` already holds a usable copy (non-empty, and matching `sha256` when
 /// one is declared), returns its size. Returns `None` when the file is absent,
 /// empty, or fails verification — in which case it should be re-downloaded.
-async fn usable_existing(dest: &Path, sha256: Option<&str>) -> Result<Option<u64>> {
+async fn usable_existing(
+    dest: &Path,
+    sha256: Option<&str>,
+    tracker: Option<&Arc<DownloadProgressTracker>>,
+) -> Result<Option<u64>> {
     let Ok(md) = fs::metadata(dest).await else {
         return Ok(None);
     };
@@ -149,11 +171,19 @@ async fn usable_existing(dest: &Path, sha256: Option<&str>) -> Result<Option<u64
     };
     // A stamp left by an earlier verification of these exact bytes answers the
     // question the digest would, so a pinned multi-gigabyte file is not read
-    // end to end on every load.
+    // end to end on every load. Nothing to report when it hits: the caller
+    // publishes this file at 100% the moment we return.
     if stamp_says_verified(dest, &md, expected).await {
         return Ok(Some(md.len()));
     }
-    let actual = sha256_hex_of_file(dest).await?;
+    if let Some(t) = tracker {
+        // Size first, bytes after: the hash loop fills `bytes_downloaded` from
+        // zero, so publishing the size here is what gives the bar a denominator
+        // before the first chunk is read.
+        t.total_bytes.store(md.len(), Ordering::Relaxed);
+        t.broadcast_progress();
+    }
+    let actual = sha256_hex_of_file(dest, tracker).await?;
     if !sha256_matches(&actual, expected) {
         info!(
             "Hash mismatch for existing {} (expected {expected}, got {actual}); re-downloading",
@@ -205,10 +235,22 @@ async fn download_one(
     let parent = dest.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).await?;
 
+    // Point the tracker at this file *before* deciding what to do with it. The
+    // check itself can be the slow part — a file whose stamp is missing is
+    // hashed end to end — so a tracker still describing the previous file
+    // leaves the client frozen on stale numbers for the whole of it. No
+    // broadcast yet: the next publish belongs to whichever phase this file
+    // turns out to be in, so a file that isn't on disk goes straight to
+    // "downloading" without a verify flicker.
+    if let Some(t) = tracker {
+        t.start_file(&name, file_index);
+        t.mark_verifying();
+    }
+
     // Skip a file that's already on disk (verified against `sha256` when set).
     // Per-file counters: both totals are this file's size so the UI shows
     // "X.X / X.X MB" at 100%, then the file_index advances next iteration.
-    if let Some(len) = usable_existing(dest, item.sha256.as_deref()).await? {
+    if let Some(len) = usable_existing(dest, item.sha256.as_deref(), tracker).await? {
         if let Some(t) = tracker {
             info!(
                 "File {}/{} already present, skipping download: {}",
@@ -216,7 +258,6 @@ async fn download_one(
                 t.total_files.load(Ordering::Relaxed),
                 dest.display()
             );
-            t.start_file(&name, file_index);
             t.bytes_downloaded.store(len, Ordering::Relaxed);
             t.total_bytes.store(len, Ordering::Relaxed);
             t.broadcast_progress();
@@ -234,7 +275,13 @@ async fn download_one(
             t.total_files.load(Ordering::Relaxed),
             dest.display()
         );
-        t.start_file(&name, file_index);
+        // Bytes are about to come off the network, so the phase changes and
+        // this file's accounting starts over — a failed verification leaves
+        // `bytes_downloaded` holding however much of the bad copy was hashed.
+        t.bytes_downloaded.store(0, Ordering::Relaxed);
+        t.total_bytes.store(0, Ordering::Relaxed);
+        t.mark_downloading();
+        t.broadcast_progress();
     } else {
         info!("Downloading {url} -> {}", dest.display());
     }
@@ -247,9 +294,10 @@ async fn download_one(
         match resolve_total_size(client, &response, url).await {
             Some(len) => {
                 info!("Resolved size for {name}: {len} bytes");
-                // `start_file` already zeroed the per-file counters; a plain
-                // store of the resolved total is what we want. Broadcast at
-                // once so the UI's MB display flips before the first chunk.
+                // The counters were zeroed on entering the download phase
+                // above; a plain store of the resolved total is what we want.
+                // Broadcast at once so the UI's MB display flips before the
+                // first chunk.
                 t.total_bytes.store(len, Ordering::Relaxed);
                 t.broadcast_progress();
             }
@@ -319,8 +367,14 @@ async fn download_one(
 /// and, when a `sha256` is declared, verified.
 ///
 /// When `tracker` is `Some`, per-file and per-byte progress is reported through
-/// it. When `None`, downloads run silently (used by unit tests and one-off
-/// calls that don't go through the daemon's `DownloadStateManager`).
+/// it, in two phases per file: `verifying` while an existing copy is checked
+/// (a file whose stamp is missing is hashed end to end, and that is reported
+/// byte-by-byte like any other work), then `downloading` only if that check
+/// came up short. A fully cached model therefore never reports a download —
+/// which is the difference between a client saying "checking files" and a
+/// client showing a download bar for files it already has. When `None`,
+/// downloads run silently (used by unit tests and one-off calls that don't go
+/// through the daemon's `DownloadStateManager`).
 ///
 /// `starting_file_index` lets the caller compose multiple `download_files`
 /// calls against a single tracker so the file counter stays monotonic — pass
@@ -381,7 +435,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("weights.bin");
         std::fs::write(&file, ORIGINAL).unwrap();
-        let pin = sha256_hex_of_file(&file).await.unwrap();
+        let pin = sha256_hex_of_file(&file, None).await.unwrap();
         (dir, file, pin)
     }
 
@@ -394,14 +448,14 @@ mod tests {
 
         let size = ORIGINAL.len() as u64;
         assert_eq!(
-            usable_existing(&file, Some(&pin)).await.unwrap(),
+            usable_existing(&file, Some(&pin), None).await.unwrap(),
             Some(size)
         );
         assert!(stamp_path(&file).exists());
 
         rewrite_preserving_mtime(&file, SWAPPED);
         assert_eq!(
-            usable_existing(&file, Some(&pin)).await.unwrap(),
+            usable_existing(&file, Some(&pin), None).await.unwrap(),
             Some(size)
         );
     }
@@ -411,10 +465,18 @@ mod tests {
     #[tokio::test]
     async fn a_changed_file_is_rehashed_despite_its_stamp() {
         let (_dir, file, pin) = pinned_file().await;
-        assert!(usable_existing(&file, Some(&pin)).await.unwrap().is_some());
+        assert!(
+            usable_existing(&file, Some(&pin), None)
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         std::fs::write(&file, b"truncated").unwrap();
-        assert_eq!(usable_existing(&file, Some(&pin)).await.unwrap(), None);
+        assert_eq!(
+            usable_existing(&file, Some(&pin), None).await.unwrap(),
+            None
+        );
     }
 
     /// A stamp is scoped to the pin it was taken against: when the manifest
@@ -422,11 +484,18 @@ mod tests {
     #[tokio::test]
     async fn a_changed_pin_is_rehashed_despite_its_stamp() {
         let (_dir, file, pin) = pinned_file().await;
-        assert!(usable_existing(&file, Some(&pin)).await.unwrap().is_some());
+        assert!(
+            usable_existing(&file, Some(&pin), None)
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         let moved_revision = "0".repeat(64);
         assert_eq!(
-            usable_existing(&file, Some(&moved_revision)).await.unwrap(),
+            usable_existing(&file, Some(&moved_revision), None)
+                .await
+                .unwrap(),
             None
         );
     }
@@ -436,7 +505,7 @@ mod tests {
     async fn an_unpinned_file_is_accepted_without_a_stamp() {
         let (_dir, file, _pin) = pinned_file().await;
 
-        assert!(usable_existing(&file, None).await.unwrap().is_some());
+        assert!(usable_existing(&file, None, None).await.unwrap().is_some());
         assert!(!stamp_path(&file).exists());
     }
 
@@ -447,6 +516,222 @@ mod tests {
         let file = dir.path().join("weights.bin");
         std::fs::write(&file, b"").unwrap();
 
-        assert_eq!(usable_existing(&file, None).await.unwrap(), None);
+        assert_eq!(usable_existing(&file, None, None).await.unwrap(), None);
+    }
+
+    // --- The phases a load reports ------------------------------------------
+
+    /// `download_files` builds a client up front even when every file turns
+    /// out to be cached, and `reqwest` panics without a crypto provider — the
+    /// daemon installs one in `main`, so a test standing in for it does too.
+    /// Idempotent, so every test can call it.
+    fn install_crypto_provider() {
+        super_stt_forge::http::install_crypto_provider();
+    }
+
+    /// Write `contents` at `dir/name` and return the item that declares it,
+    /// pinned to the hash of what was written — i.e. a file already
+    /// provisioned.
+    async fn cached_item(dir: &Path, name: &str, contents: &[u8]) -> DownloadItem {
+        let destination = dir.join(name);
+        fs::write(&destination, contents)
+            .await
+            .expect("write fixture");
+        let sha256 = sha256_hex_of_file(&destination, None)
+            .await
+            .expect("hash fixture");
+        DownloadItem {
+            // Unreachable on purpose: these tests are about the paths that must
+            // never touch the network. One that did would fail here rather than
+            // pass quietly.
+            url: "http://127.0.0.1:1/never-fetched".to_string(),
+            destination,
+            sha256: Some(sha256),
+        }
+    }
+
+    fn tracker_on(
+        bus: &Arc<crate::daemon::events::EventBus>,
+        total_files: usize,
+    ) -> Arc<DownloadProgressTracker> {
+        Arc::new(
+            DownloadProgressTracker::new(
+                "test-model".to_string(),
+                "github.com/super-stt/test".to_string(),
+                super_stt_shared::models::protocol::TRANSCRIPTION_STAGE,
+                total_files,
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .with_event_bus(Arc::clone(bus)),
+        )
+    }
+
+    /// Every `status` published to the bus, in order, until it goes quiet.
+    async fn published_statuses(rx: &mut crate::daemon::events::AnyReceiver) -> Vec<String> {
+        let mut statuses = Vec::new();
+        while let Ok(Ok((_, payload))) =
+            tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv_json()).await
+        {
+            if let Some(status) = payload["status"].as_str() {
+                statuses.push(status.to_string());
+            }
+        }
+        statuses
+    }
+
+    /// The regression this phase split exists for: loading a model whose files
+    /// are all on disk must report `verifying` and nothing else. It used to
+    /// report `downloading` for every cached file, so a load that fetched
+    /// nothing showed a download bar — and sat on it for however long the
+    /// checksums took.
+    #[tokio::test]
+    async fn a_fully_cached_model_verifies_and_never_reports_a_download() {
+        install_crypto_provider();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let items = vec![
+            cached_item(dir.path(), "config.json", b"{}").await,
+            cached_item(dir.path(), "model.safetensors", &vec![7u8; 4096]).await,
+        ];
+
+        let bus = Arc::new(crate::daemon::events::EventBus::new());
+        let mut rx = bus.subscribe(crate::daemon::events::Topic::DownloadProgress);
+        let tracker = tracker_on(&bus, items.len());
+
+        download_files(&items, Some(&tracker), 0)
+            .await
+            .expect("files already on disk provision without a download");
+
+        let statuses = published_statuses(&mut rx).await;
+        assert!(
+            !statuses.is_empty(),
+            "a cached load still reports what it is doing"
+        );
+        assert!(
+            statuses.iter().all(|s| s == "verifying"),
+            "a cached load must never claim a download: {statuses:?}"
+        );
+
+        let progress = tracker.get_progress();
+        assert_eq!(progress.file_index, 1, "the counter walked both files");
+        assert_eq!(progress.bytes_downloaded, 4096);
+        assert_eq!(progress.total_bytes, 4096);
+    }
+
+    /// Verification of a file with no usable stamp reports progress as it
+    /// hashes. Without this, the card sits on the *previous* file's numbers for
+    /// the whole checksum, which is what made a cached load look frozen.
+    #[tokio::test]
+    async fn verification_reports_progress_while_it_hashes() {
+        install_crypto_provider();
+        let dir = tempfile::tempdir().expect("temp dir");
+        // Comfortably more than the 1 MiB hash chunk, so the loop publishes
+        // more than once for this one file. No stamp exists yet, so this load
+        // is the one that hashes it.
+        let item = cached_item(dir.path(), "weights.bin", &vec![3u8; 5 * 1024 * 1024]).await;
+
+        let bus = Arc::new(crate::daemon::events::EventBus::new());
+        let mut rx = bus.subscribe(crate::daemon::events::Topic::DownloadProgress);
+        let tracker = tracker_on(&bus, 1);
+
+        download_files(std::slice::from_ref(&item), Some(&tracker), 0)
+            .await
+            .expect("cached file verifies");
+
+        let mut percentages = Vec::new();
+        while let Ok(Ok((_, payload))) =
+            tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv_json()).await
+        {
+            percentages.push(payload["percentage"].as_f64().unwrap_or(-1.0));
+        }
+        assert!(
+            percentages.len() > 2,
+            "hashing a 5 MiB file should tick more than once: {percentages:?}"
+        );
+        assert!(
+            percentages.windows(2).all(|w| w[0] <= w[1]),
+            "verification progress must only go forward: {percentages:?}"
+        );
+        assert!(
+            percentages.last().is_some_and(|p| (p - 100.0).abs() < 0.01),
+            "verification ends with the file fully accounted for: {percentages:?}"
+        );
+    }
+
+    /// A cached copy that no longer matches its pin is not a verified file: the
+    /// phase flips to `downloading` and the bytes are fetched again. The
+    /// counters start over with it, so the download's bar measures the download
+    /// and not the bytes hashed on the way to rejecting the old copy.
+    #[tokio::test]
+    async fn a_stale_cached_file_flips_to_downloading_and_is_refetched() {
+        install_crypto_provider();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let good = vec![9u8; 2048];
+        let mut item = cached_item(dir.path(), "weights.bin", &good).await;
+        // Same name, wrong bytes: what a truncated or tampered cache looks like.
+        fs::write(&item.destination, vec![0u8; 2048])
+            .await
+            .expect("corrupt the cached copy");
+
+        let mut server = mockito::Server::new_async().await;
+        let asset = server
+            .mock("GET", "/weights.bin")
+            .with_status(200)
+            .with_body(good.clone())
+            .create_async()
+            .await;
+        item.url = format!("{}/weights.bin", server.url());
+
+        let bus = Arc::new(crate::daemon::events::EventBus::new());
+        let mut rx = bus.subscribe(crate::daemon::events::Topic::DownloadProgress);
+        let tracker = tracker_on(&bus, 1);
+
+        download_files(std::slice::from_ref(&item), Some(&tracker), 0)
+            .await
+            .expect("a stale file is replaced, not fatal");
+
+        asset.assert_async().await;
+        assert_eq!(
+            fs::read(&item.destination)
+                .await
+                .expect("read repaired file"),
+            good,
+            "the stale copy is replaced by the real one"
+        );
+
+        let statuses = published_statuses(&mut rx).await;
+        assert_eq!(
+            statuses.first().map(String::as_str),
+            Some("verifying"),
+            "the check comes first: {statuses:?}"
+        );
+        assert!(
+            statuses.iter().any(|s| s == "downloading"),
+            "rejecting the cached copy must announce the download: {statuses:?}"
+        );
+    }
+
+    /// Cancel is live during verification. Hashing an unstamped multi-GB file
+    /// is seconds of work, and a Cancel that only took effect once the download
+    /// started would do nothing at all for a fully cached load.
+    #[tokio::test]
+    async fn cancelling_during_verification_stops_the_hash() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let item = cached_item(dir.path(), "weights.bin", &vec![1u8; 4096]).await;
+
+        let tracker = Arc::new(DownloadProgressTracker::new(
+            "test-model".to_string(),
+            "github.com/super-stt/test".to_string(),
+            super_stt_shared::models::protocol::TRANSCRIPTION_STAGE,
+            1,
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        ));
+
+        let err = usable_existing(&item.destination, item.sha256.as_deref(), Some(&tracker))
+            .await
+            .expect_err("a cancelled verification does not report a usable file");
+        assert!(
+            err.to_string().contains("cancelled"),
+            "cancellation surfaces as itself, not as a hash mismatch: {err}"
+        );
     }
 }

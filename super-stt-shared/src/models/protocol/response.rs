@@ -202,7 +202,12 @@ pub struct DownloadProgress {
     pub bytes_downloaded: u64,
     pub total_bytes: u64,
     pub percentage: f32,
-    pub status: String, // "downloading", "loading_model", "cancelled", "completed", "error"
+    /// Phase of the provisioning run: `"verifying"` (checking the files
+    /// already on disk — every load starts here, and a fully cached one never
+    /// leaves it), `"downloading"` (bytes coming off the network),
+    /// `"loading_model"` (files present, weights loading), then one of the
+    /// terminal `"completed"` / `"cancelled"` / `"error"`.
+    pub status: String,
     pub started_at: String,
     pub eta_seconds: Option<u64>,
     /// Failure detail, present only when `status == "error"`. Lets a client

@@ -32,9 +32,11 @@ impl AppModel {
         self.current_source.clear();
     }
 
-    /// Set model to downloading state. `stage` is the pipeline position the
-    /// download is provisioning for, straight off the daemon's report.
-    pub(in crate::core::app) fn set_model_downloading(
+    /// Set model to the provisioning state — its files are being verified or
+    /// downloaded, and which of the two is in `progress.status`. `stage` is the
+    /// pipeline position being provisioned for, straight off the daemon's
+    /// report.
+    pub(in crate::core::app) fn set_model_provisioning(
         &mut self,
         target_model: String,
         progress: super_stt_shared::models::protocol::DownloadProgress,
@@ -43,7 +45,7 @@ impl AppModel {
         // A tick is progress, so it restarts that stage's stall clock.
         self.model_operations.start(
             stage,
-            ModelOperationState::Downloading {
+            ModelOperationState::Provisioning {
                 target_model,
                 progress,
             },
@@ -87,7 +89,12 @@ impl AppModel {
     /// - `"error"` → `Error` state, surfacing the daemon's failure detail
     /// - `"completed" | "cancelled"` → no state change (`ModelChanged` /
     ///   `DownloadCancelled` carry those transitions)
-    /// - anything else (`"downloading"`, …) → `Downloading` state
+    /// - `"verifying" | "downloading"` (and anything unrecognised) →
+    ///   `Provisioning` state, which keeps the snapshot verbatim so the card
+    ///   can word itself from `progress.status`. The two phases share a state
+    ///   deliberately: both are byte-tracked work on the model's files, and
+    ///   every gate that asks "is an operation in flight?" wants the same
+    ///   answer for both.
     ///
     /// Any progress event also resets the stall watchdog (see `PingTimeout`).
     pub(in crate::core::app) fn apply_download_progress(
@@ -132,8 +139,9 @@ impl AppModel {
                 log::info!("Download finished with status: {}", progress.status);
             }
             _ => {
-                // "downloading" and other states default to downloading
-                self.set_model_downloading(target_model, progress.clone(), stage);
+                // "verifying", "downloading", and anything the daemon adds
+                // later: files are being provisioned.
+                self.set_model_provisioning(target_model, progress.clone(), stage);
             }
         }
     }

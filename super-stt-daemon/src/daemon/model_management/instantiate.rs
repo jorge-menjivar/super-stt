@@ -144,8 +144,10 @@ impl SuperSTTDaemon {
             {
                 log::warn!("could not register download tracker: {e}");
             }
-            // Emit the initial state immediately so the UI shows "0%" rather
-            // than nothing while the first chunk lands.
+            // Emit the initial state immediately so the UI has something to
+            // show while the first file is checked. The tracker opens in its
+            // `verifying` phase, so a load whose files are all present reports
+            // exactly that and never claims a download.
             t.broadcast_progress();
             Some(t)
         };

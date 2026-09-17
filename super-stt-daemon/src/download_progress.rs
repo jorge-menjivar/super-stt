@@ -22,8 +22,17 @@ pub struct DownloadProgressTracker {
     pub current_file: Arc<RwLock<String>>,
     pub file_index: AtomicUsize,
     pub total_files: AtomicUsize,
+    /// Bytes of the current file accounted for so far: streamed off the
+    /// network while downloading, read off disk while verifying.
     pub bytes_downloaded: AtomicU64,
     pub total_bytes: AtomicU64,
+    /// Phase of the provisioning run, in the order a load walks them:
+    /// `verifying` (checking what is already on disk — every load starts
+    /// here), `downloading` (bytes actually coming off the network),
+    /// `loading_model` (files all present, backend loading weights), then one
+    /// of the terminal `completed` / `cancelled` / `error`. A fully cached
+    /// model never reaches `downloading`, which is what lets a client say
+    /// "checking files" instead of claiming a download that isn't happening.
     pub status: Arc<RwLock<String>>,
     /// Failure detail set by [`Self::mark_error`]; included in the
     /// `download_progress` payload so a client can show why a switch failed.
@@ -76,7 +85,11 @@ impl DownloadProgressTracker {
             total_files: AtomicUsize::new(total_files),
             bytes_downloaded: AtomicU64::new(0),
             total_bytes: AtomicU64::new(0),
-            status: Arc::new(RwLock::new("downloading".to_string())),
+            // Provisioning opens by checking the files already on disk, not by
+            // downloading — a tracker that announced "downloading" before the
+            // first `usable_existing` call is what made a fully cached load
+            // paint a download bar.
+            status: Arc::new(RwLock::new("verifying".to_string())),
             error: Arc::new(RwLock::new(None)),
             started_at: Instant::now(),
             started_at_str: Utc::now().to_rfc3339(),
@@ -112,7 +125,8 @@ impl DownloadProgressTracker {
             100.0
         } else if total_bytes > 0 {
             // Per-file progress: how much of the *current* file has
-            // arrived, matching the per-file "X.X / Y.Y MB" readout.
+            // arrived (or, in the `verifying` phase, been hashed off
+            // disk), matching the per-file "X.X / Y.Y MB" readout.
             // `bytes_downloaded`/`total_bytes` reset at each file
             // boundary (`start_file`), so the bar fills 0→100% per file
             // and the last file's final chunk fills it to the end. No
@@ -248,6 +262,25 @@ impl DownloadProgressTracker {
         self.cancelled.store(true, Ordering::Relaxed);
         *self.status.write() = "cancelled".to_string();
         warn!("Download cancelled for model: {}", self.model_name);
+    }
+
+    /// Enter the `verifying` phase: the file named by the last
+    /// [`Self::start_file`] is on disk and is being checked (size, and its
+    /// declared SHA-256) rather than fetched. `bytes_downloaded` tracks the
+    /// bytes hashed so far, so the client's bar moves through a multi-GB
+    /// checksum instead of sitting frozen on the previous file's numbers.
+    ///
+    /// Every file starts here, and a fully cached model never leaves it — that
+    /// is what keeps a cached load from claiming to download anything.
+    pub fn mark_verifying(&self) {
+        *self.status.write() = "verifying".to_string();
+    }
+
+    /// Enter the `downloading` phase: the file named by the last
+    /// [`Self::start_file`] is absent (or failed verification) and bytes are
+    /// about to come off the network.
+    pub fn mark_downloading(&self) {
+        *self.status.write() = "downloading".to_string();
     }
 
     /// Mark the file-download phase done and the (untracked) weight-load
@@ -417,7 +450,7 @@ mod tests {
         let cancelled = Arc::new(AtomicBool::new(false));
         let tracker = tracker("test-model", 1, cancelled);
 
-        // Initial broadcast — empty status → "downloading", total_bytes = 0.
+        // Initial broadcast — empty last status → "verifying", total_bytes = 0.
         tracker.broadcast_progress();
         assert_eq!(
             tracker.last_broadcast_total_bytes.load(Ordering::Relaxed),
@@ -542,6 +575,60 @@ mod tests {
 
         tracker.mark_completed();
         assert!((tracker.get_progress().percentage - 100.0).abs() < 0.01);
+    }
+
+    /// Provisioning opens in the `verifying` phase, not `downloading`: the
+    /// first thing a load does is check the files already on disk, and a
+    /// tracker that said "downloading" before that check is what made a fully
+    /// cached load paint a download bar with nothing downloading behind it.
+    #[test]
+    fn a_fresh_tracker_starts_in_the_verifying_phase() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = tracker("m", 3, cancelled);
+        assert_eq!(tracker.get_progress().status, "verifying");
+    }
+
+    /// The verify → download flip publishes even when nothing else moved: a
+    /// file that failed its existence check goes from `verifying` at 0 bytes
+    /// to `downloading` at 0 bytes, so only the status distinguishes them, and
+    /// a client that missed the transition would keep saying "checking files"
+    /// for the whole of a multi-GB download.
+    #[test]
+    fn broadcast_progress_publishes_the_verify_to_download_flip() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = tracker("m", 1, cancelled);
+        tracker.start_file("model.safetensors", 0);
+        tracker.broadcast_progress();
+        assert_eq!(*tracker.last_broadcast_status.read(), "verifying");
+
+        tracker.mark_downloading();
+        tracker.broadcast_progress();
+        assert_eq!(
+            *tracker.last_broadcast_status.read(),
+            "downloading",
+            "the phase flip must publish even with byte counters unchanged"
+        );
+    }
+
+    /// Verification reports progress the same way a download does — bytes of
+    /// the current file over its size — so a client renders one bar for both
+    /// phases and only the verb changes.
+    #[test]
+    fn verifying_reports_per_file_byte_progress() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let tracker = tracker("m", 2, cancelled);
+        tracker.start_file("model.safetensors", 1);
+        tracker.mark_verifying();
+        tracker.total_bytes.store(4000, Ordering::Relaxed);
+        tracker.bytes_downloaded.store(1000, Ordering::Relaxed);
+
+        let progress = tracker.get_progress();
+        assert_eq!(progress.status, "verifying");
+        assert!(
+            (progress.percentage - 25.0).abs() < 0.01,
+            "expected a quarter of the file hashed, got {}",
+            progress.percentage
+        );
     }
 
     /// Companion of the tests above: when nothing meaningful changes
