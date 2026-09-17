@@ -7615,11 +7615,11 @@
         "properties": {
           "download": {
             "$ref": "#/components/schemas/SwitchDownload",
-            "description": "Byte and file progress, for the `downloading` phase."
+            "description": "Byte and file progress, for the `verifying` and `downloading` phases:\nbytes hashed off disk and bytes received respectively."
           },
           "phase": {
             "type": "string",
-            "description": "Where the operation has got to: `downloading`, `loading_model`,\n`cancelled`, `completed`, or `error`."
+            "description": "Where the operation has got to: `verifying`, `downloading`,\n`loading_model`, `cancelled`, `completed`, or `error`."
           },
           "started_at": {
             "type": "string",
