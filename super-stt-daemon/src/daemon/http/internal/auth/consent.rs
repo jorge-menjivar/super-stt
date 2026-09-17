@@ -11,13 +11,58 @@ use std::time::Duration;
 /// the desktop (audit 2 Tier 3 #10).
 static CONSENT_POPUP: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
-/// Identifies the consent flow uniquely: (`exe_path`, normalized
-/// `scopes`). The user verifies a *binary*, not a self-reported display
-/// name, so the deny / dedup key is keyed on the kernel-resolved
-/// `exe_path` plus the requested scope set (sorted + deduped via
+/// Who the daemon believes is calling.
+///
+/// For an ordinary host process this is just its `/proc/<pid>/exe`. A peer
+/// inside a flatpak has its own mount namespace, so that path is resolved in
+/// *its* root and means nothing here: every such peer reads as something like
+/// `/app/bin/<name>`, a string any other sandbox can present just by naming
+/// its binary the same. Identifying a sandboxed caller by its exe path alone
+/// therefore hands one sandbox's grant to every other. The sandbox's own id
+/// is what distinguishes them, so it is carried alongside and is part of
+/// equality.
+///
+/// The id is only as trustworthy as the sandbox that wrote it, and this is
+/// not a defence against a hostile process running as the user — one of those
+/// can read the session tokens out of the keyring regardless. It is what lets
+/// the daemon name the caller correctly in the consent dialog, and keep one
+/// sandboxed app's grant from silently covering another's.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct PeerIdentity {
+    /// `/proc/<pid>/exe`, as resolved in the peer's own mount namespace.
+    pub(crate) exe_path: PathBuf,
+    /// `Some(app-id)` when the peer runs inside a flatpak sandbox.
+    pub(crate) flatpak_app_id: Option<String>,
+}
+
+impl PeerIdentity {
+    /// A host process with no sandbox of its own.
+    #[cfg(test)]
+    pub(crate) fn native(exe_path: impl Into<PathBuf>) -> Self {
+        Self {
+            exe_path: exe_path.into(),
+            flatpak_app_id: None,
+        }
+    }
+
+    /// One line naming the caller, for logs and the consent dialog. A
+    /// sandboxed peer leads with its app id, since its path is not a path
+    /// anyone can go and look at.
+    pub(crate) fn describe(&self) -> String {
+        match &self.flatpak_app_id {
+            Some(id) => format!("flatpak {id} ({})", self.exe_path.display()),
+            None => self.exe_path.display().to_string(),
+        }
+    }
+}
+
+/// Identifies the consent flow uniquely: (`identity`, normalized `scopes`).
+/// The user verifies a *binary* (or a sandboxed app), not a self-reported
+/// display name, so the deny / dedup key is keyed on the kernel-resolved
+/// [`PeerIdentity`] plus the requested scope set (sorted + deduped via
 /// [`normalize_scopes`] so request order doesn't matter). `app_name` is
 /// shown in the popup but isn't part of the identity.
-pub(crate) type ConsentKey = (PathBuf, Vec<String>);
+pub(crate) type ConsentKey = (PeerIdentity, Vec<String>);
 pub(crate) type ConsentLock = Arc<tokio::sync::Mutex<()>>;
 
 /// Sort + dedup a requested scope list so the consent key and the
@@ -97,7 +142,7 @@ async fn read_consent_decision(stdout: tokio::process::ChildStdout) -> ConsentDe
 pub(crate) async fn ask_user_for_consent(
     app_name: &str,
     scopes: &[String],
-    exe_path: &Path,
+    identity: &PeerIdentity,
 ) -> ConsentDecision {
     // `locate_consent_helper` already logs a specific reason on every
     // failure path (missing / un-canonicalizable / failed metadata check),
@@ -122,7 +167,18 @@ pub(crate) async fn ask_user_for_consent(
     let mut cmd = tokio::process::Command::new(&helper);
     cmd.env("STT_AUTH_APP_NAME", app_name)
         .env("STT_AUTH_SCOPES", scopes.join(" "))
-        .env("STT_AUTH_EXE_PATH", exe_path.to_string_lossy().as_ref())
+        .env(
+            "STT_AUTH_EXE_PATH",
+            identity.exe_path.to_string_lossy().as_ref(),
+        )
+        // Set only for a sandboxed peer, so the dialog can name the app the
+        // user actually installed instead of a path inside its sandbox.
+        .envs(
+            identity
+                .flatpak_app_id
+                .as_ref()
+                .map(|id| ("STT_AUTH_FLATPAK_APP_ID", id.clone())),
+        )
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -176,14 +232,22 @@ const OFFICIAL_CLIENT_NAMES: [&str; 3] =
 /// binaries adds no new attack surface. Returns a plain bool: failure
 /// is the common case (every third-party client) and is deliberately
 /// not logged here — the caller logs the rare success.
-pub(crate) fn is_official_client(exe_path: &Path) -> bool {
+pub(crate) fn is_official_client(identity: &PeerIdentity) -> bool {
+    // A sandboxed peer is never first-party, whatever its path says. The
+    // check below canonicalizes the path against *our* filesystem, and a
+    // sandbox is free to put its own binary at /usr/local/bin/super-stt-app;
+    // that path would then resolve to the real host binary, pass every test
+    // here, and auto-approve a stranger with no popup at all.
+    if identity.flatpak_app_id.is_some() {
+        return false;
+    }
     let Ok(daemon_exe) = std::env::current_exe() else {
         return false;
     };
     let Some(daemon_dir) = daemon_exe.parent() else {
         return false;
     };
-    is_official_client_in(daemon_dir, exe_path)
+    is_official_client_in(daemon_dir, &identity.exe_path)
 }
 
 /// Testable core of [`is_official_client`] with the daemon's own
@@ -294,41 +358,92 @@ fn verify_helper_metadata(_: &Path) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Resolve the calling process's executable path from the
-/// `axum::Extension<PeerInfo>` attached by the accept loop. Returns `Some(path)`
-/// on success and `None` when the peer can't be identified — a missing
-/// `PeerInfo`/pid (`SO_PEERCRED` unsupported, peer process gone) or a
+/// Which sandbox, if any, the peer is inside.
+///
+/// `/proc/<pid>/root` is the peer's root directory. When it is the same
+/// directory as ours, the peer shares our view of the filesystem and its exe
+/// path means what it says. When it differs, the peer has been pivoted
+/// somewhere else and the path has to be read in *that* root, so we ask the
+/// sandbox to name itself.
+///
+/// `Err(())` means the peer is in a root of its own that could not be
+/// identified. Callers fail closed on it: an unidentifiable sandbox must not
+/// be handed the identity its exe path would otherwise imply, which is
+/// whatever host binary happens to sit at the same path.
+///
+/// Note that a namespace is not by itself a flatpak — a container would land
+/// here too, and be refused for the same reason.
+fn peer_sandbox_app_id(pid: u32, context: &str) -> Result<Option<String>, ()> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let root = format!("/proc/{pid}/root");
+    let (Ok(peer_root), Ok(our_root)) = (std::fs::metadata(&root), std::fs::metadata("/")) else {
+        log::warn!("{context}: cannot stat {root}; refusing to identify peer pid {pid}");
+        return Err(());
+    };
+    if (peer_root.dev(), peer_root.ino()) == (our_root.dev(), our_root.ino()) {
+        return Ok(None);
+    }
+
+    let info_path = format!("{root}/.flatpak-info");
+    let Ok(info) = std::fs::read_to_string(&info_path) else {
+        log::warn!(
+            "{context}: peer pid {pid} runs in a mount namespace of its own but {info_path} is unreadable; cannot identify it"
+        );
+        return Err(());
+    };
+    let Some(app_id) = super_stt_shared::sandbox::app_id_from_info(&info) else {
+        log::warn!("{context}: {info_path} names no application; cannot identify peer pid {pid}");
+        return Err(());
+    };
+    Ok(Some(app_id))
+}
+
+/// Resolve who is calling from the [`PeerInfo`] the accept loop attached.
+/// Returns `None` when the peer can't be identified — a missing
+/// `PeerInfo`/pid (`SO_PEERCRED` unsupported, peer process gone), a
 /// kernel-denied `/proc/<pid>/exe` readlink (Yama `ptrace_scope`, systemd
-/// `ProtectProc=`, a sandboxed daemon, pid recycling).
+/// `ProtectProc=`, pid recycling), or a sandbox that would not name itself.
+///
+/// `context` names the caller in the log line, since both ends of a session's
+/// life resolve the peer here: `auth_request` at mint time, and the
+/// per-request authorization check on every call after it.
 ///
 /// The caller **must fail closed** on `None`: the consent model verifies a
 /// *binary*, so an unidentifiable peer must not be prompted for (a
 /// `<unknown>`-labelled dialog is meaningless to approve) nor minted a token
 /// bound to a bogus identity that the `/events` exe-watch would then spuriously
 /// revoke (audit 2 Tier 3 #9). Each failure is logged with its specific reason.
-pub(crate) fn resolve_peer_exe(peer: Option<&axum::Extension<PeerInfo>>) -> Option<PathBuf> {
+pub(crate) fn resolve_peer_identity(
+    peer: Option<&PeerInfo>,
+    context: &str,
+) -> Option<PeerIdentity> {
     let Some(peer) = peer else {
         log::warn!(
-            "auth_request: no PeerInfo extension attached — cannot identify the requesting binary"
+            "{context}: no PeerInfo extension attached — cannot identify the requesting binary"
         );
         return None;
     };
-    let Some(pid) = peer.0.pid else {
+    let Some(pid) = peer.pid else {
         log::warn!(
-            "auth_request: PeerInfo had no pid (SO_PEERCRED returned no credentials); cannot resolve exe"
+            "{context}: PeerInfo had no pid (SO_PEERCRED returned no credentials); cannot resolve exe"
         );
         return None;
     };
     let path = format!("/proc/{pid}/exe");
-    match std::fs::read_link(&path) {
-        Ok(p) => Some(p),
+    let exe_path = match std::fs::read_link(&path) {
+        Ok(p) => p,
         Err(e) => {
-            log::warn!(
-                "auth_request: read_link({path}) failed: {e}; cannot identify peer pid {pid}"
-            );
-            None
+            log::warn!("{context}: read_link({path}) failed: {e}; cannot identify peer pid {pid}");
+            return None;
         }
-    }
+    };
+    let flatpak_app_id = peer_sandbox_app_id(pid, context).ok()?;
+
+    Some(PeerIdentity {
+        exe_path,
+        flatpak_app_id,
+    })
 }
 
 #[cfg(test)]

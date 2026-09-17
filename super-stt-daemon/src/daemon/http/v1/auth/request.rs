@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::http::internal::auth::consent::{
-    ConsentDecision, ConsentKey, ask_user_for_consent, is_official_client, normalize_scopes,
-    resolve_peer_exe,
+    ConsentDecision, ConsentKey, PeerIdentity, ask_user_for_consent, is_official_client,
+    normalize_scopes, resolve_peer_identity,
 };
 use crate::daemon::http::internal::helpers::responses::{auth_err, is_known_scope, reason};
 use crate::daemon::http::state::{AppState, PeerInfo};
@@ -11,7 +11,6 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 #[derive(Deserialize, Debug, utoipa::ToSchema)]
 pub(crate) struct AuthRequestBody {
@@ -49,7 +48,7 @@ pub(crate) struct AuthOk {
 }
 
 /// `403 user_denied_cached` if the user previously clicked Deny for this exact
-/// `(exe_path, scopes)` pair in this daemon's lifetime, else `None`. Checked both
+/// `(identity, scopes)` pair in this daemon's lifetime, else `None`. Checked both
 /// up front and again under the consent lock (a concurrent caller may have been
 /// denied while we queued behind their popup); `context` labels which.
 fn cached_deny_response(
@@ -60,10 +59,10 @@ fn cached_deny_response(
     if !state.deny_cache.contains(consent_key) {
         return None;
     }
-    let (exe_path, scopes) = consent_key;
+    let (identity, scopes) = consent_key;
     log::info!(
-        "auth_request denied from cache ({context}): exe={} scopes={}",
-        exe_path.display(),
+        "auth_request denied from cache ({context}): caller={} scopes={}",
+        identity.describe(),
         scopes.join(" ")
     );
     Some(auth_err(
@@ -80,17 +79,17 @@ fn official_client_response(
     state: &AppState,
     body: &AuthRequestBody,
     scopes: &[String],
-    exe_path: &Path,
+    identity: &PeerIdentity,
     consent_key: ConsentKey,
     ok_response: &dyn Fn(String, DateTime<Utc>) -> Response,
 ) -> Option<Response> {
-    if !is_official_client(exe_path) {
+    if !is_official_client(identity) {
         return None;
     }
     log::info!(
-        "auth_request auto-approved for first-party client: app={} exe={} scopes={}",
+        "auth_request auto-approved for first-party client: app={} caller={} scopes={}",
         body.app_name,
-        exe_path.display(),
+        identity.describe(),
         scopes.join(" ")
     );
     Some(finalize_consent_decision(
@@ -98,7 +97,7 @@ fn official_client_response(
         state,
         body,
         scopes,
-        exe_path,
+        identity,
         consent_key,
         ok_response,
     ))
@@ -183,7 +182,7 @@ pub(crate) async fn auth_request(
     // closed: consent verifies a *binary*, so we refuse rather than prompt with
     // an unverifiable `<unknown>` identity or mint a token bound to it (audit 2
     // Tier 3 #9). Each failure mode is logged inside `resolve_peer_exe`.
-    let Some(exe_path) = resolve_peer_exe(peer.as_ref()) else {
+    let Some(identity) = resolve_peer_identity(peer.as_ref().map(|p| &p.0), "auth_request") else {
         log::warn!("auth_request rejected: could not verify the requesting binary (fail-closed)");
         return auth_err(
             StatusCode::FORBIDDEN,
@@ -218,7 +217,7 @@ pub(crate) async fn auth_request(
     // do so precisely because they need a fresh token, and the
     // consistent semantic is "request fresh consent".
 
-    let consent_key: ConsentKey = (exe_path.clone(), scopes.clone());
+    let consent_key: ConsentKey = (identity.clone(), scopes.clone());
 
     // First-party binaries co-located with the daemon skip the popup
     // (docs/protocol/auth.md § First-party clients); downstream is
@@ -228,7 +227,7 @@ pub(crate) async fn auth_request(
         &state,
         &body,
         &scopes,
-        &exe_path,
+        &identity,
         consent_key.clone(),
         &ok_response,
     ) {
@@ -274,11 +273,11 @@ pub(crate) async fn auth_request(
                 log::info!(
                     "{auto_approve_env}=1 set; auto-approving auth_request for {} ({})",
                     body.app_name,
-                    exe_path.display()
+                    identity.describe()
                 );
                 ConsentDecision::Allow
             } else {
-                ask_user_for_consent(&body.app_name, &scopes, &exe_path).await
+                ask_user_for_consent(&body.app_name, &scopes, &identity).await
             };
 
             finalize_consent_decision(
@@ -286,7 +285,7 @@ pub(crate) async fn auth_request(
                 &state,
                 &body,
                 &scopes,
-                &exe_path,
+                &identity,
                 consent_key.clone(),
                 &ok_response,
             )
@@ -310,13 +309,13 @@ pub(crate) fn finalize_consent_decision(
     state: &AppState,
     body: &AuthRequestBody,
     scopes: &[String],
-    exe_path: &Path,
+    identity: &PeerIdentity,
     consent_key: ConsentKey,
     ok_response: &dyn Fn(String, DateTime<Utc>) -> Response,
 ) -> Response {
     match decision {
         ConsentDecision::Allow => {
-            let (token, expires_at) = state.tokens.mint(&body.app_name, scopes, exe_path);
+            let (token, expires_at) = state.tokens.mint(&body.app_name, scopes, identity);
             log::info!(
                 "auth_request approved: app={} scopes={}",
                 body.app_name,

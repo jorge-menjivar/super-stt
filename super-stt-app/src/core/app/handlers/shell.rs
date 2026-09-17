@@ -31,6 +31,8 @@ impl AppModel {
                 Task::none()
             }
 
+            ShellMessage::CopyText(text) => cosmic::iced::clipboard::write(text),
+
             ShellMessage::LaunchUrl(url) => {
                 match open::that_detached(&url) {
                     Ok(()) => {}

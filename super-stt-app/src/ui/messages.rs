@@ -55,6 +55,10 @@ pub enum ShellMessage {
     OpenRepositoryUrl,
     ToggleContextPage(ContextPage),
     LaunchUrl(String),
+    /// Put a command on the clipboard. The app does not run these itself —
+    /// they act on the user's session, not on the app — so handing over the
+    /// exact command is the most it can usefully do.
+    CopyText(String),
 }
 
 /// Daemon connection, connection-time settings loads, and the SSE event stream.

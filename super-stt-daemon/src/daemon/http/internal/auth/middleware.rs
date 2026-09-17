@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use crate::daemon::http::internal::auth::consent::ConsentKey;
-use crate::daemon::http::internal::auth::tokens::TokenMeta;
+use crate::daemon::http::internal::auth::consent::{ConsentKey, resolve_peer_identity};
+use crate::daemon::http::internal::auth::tokens::{TokenMeta, TokenStore};
 use crate::daemon::http::internal::helpers::responses::{
     invalid_session, rate_limited, reason, scope_denied,
 };
@@ -55,6 +55,50 @@ pub(crate) struct AuthContext {
     pub(crate) token: String,
 }
 
+/// Re-verify that the caller is still the binary the token was minted
+/// for, and revoke the token when it isn't.
+///
+/// [`TokenStore::validate`] proves only that a token exists and hasn't
+/// expired, which is not what the daemon authorizes on: the user consented
+/// to a *binary*. `docs/protocol/auth.md` states the binding as a
+/// per-request property — "If that path changes (upgrade, move,
+/// replacement), the next request returns `401 invalid_session` with reason
+/// `exe_changed`" — but the only thing enforcing it was the `/events`
+/// exe-watch, which sees a client only while it holds an SSE subscription
+/// and only every 30 s. Anything else presenting a token minted for another
+/// binary was authorized for the token's full 30-day life, with no consent
+/// popup anywhere in the flow, because possession was the whole test. A
+/// token reachable from a second process — a keyring entry two installs of
+/// the same app share, a copied config — is exactly that case.
+///
+/// A resolved mismatch revokes, matching the `/events` watch rather than
+/// merely refusing this one call: the approval named a binary that is not
+/// the one calling, so the session is over, not paused.
+fn verify_peer_binding(
+    tokens: &TokenStore,
+    peer: Option<&PeerInfo>,
+    meta: &TokenMeta,
+    token: &str,
+) -> Result<(), &'static str> {
+    let Some(identity) = resolve_peer_identity(peer, "authorization") else {
+        // Fail closed: an unidentifiable caller cannot be shown to be the
+        // approved one. Deliberately not a revoke — an unreadable
+        // `/proc/<pid>/exe` is transient (a peer that exited mid-request),
+        // unlike a path that genuinely changed.
+        return Err(reason::UNKNOWN);
+    };
+    if meta.matches(&identity) {
+        return Ok(());
+    }
+    log::warn!(
+        "session token presented by a different caller: approved={} caller={}; revoking",
+        meta.describe_grantee(),
+        identity.describe(),
+    );
+    tokens.revoke(token);
+    Err(reason::EXE_CHANGED)
+}
+
 /// Validate the bearer token and require that its granted scope set
 /// contains `required`. Attaches the [`AuthContext`] on success so the
 /// handler can read the scopes/exe without re-validating.
@@ -70,6 +114,14 @@ async fn require_scope(
     };
     match state.tokens.validate(&token) {
         Ok(meta) => {
+            if let Err(reason) = verify_peer_binding(
+                &state.tokens,
+                request.extensions().get::<PeerInfo>(),
+                &meta,
+                &token,
+            ) {
+                return invalid_session(reason);
+            }
             if meta.scopes.iter().any(|s| s == required) {
                 request.extensions_mut().insert(AuthContext { meta, token });
                 next.run(request).await
@@ -130,6 +182,14 @@ pub(crate) async fn require_any_authenticated(
     };
     match state.tokens.validate(&token) {
         Ok(meta) => {
+            if let Err(reason) = verify_peer_binding(
+                &state.tokens,
+                request.extensions().get::<PeerInfo>(),
+                &meta,
+                &token,
+            ) {
+                return invalid_session(reason);
+            }
             request.extensions_mut().insert(AuthContext { meta, token });
             next.run(request).await
         }
@@ -166,18 +226,18 @@ mod tests {
     //! Deny-cache identity. The cache short-circuits `/auth/request` to
     //! `403 auth_denied (user_denied_cached)` so a binary the user
     //! already rejected can't re-trigger the consent popup. Its key is
-    //! the `(exe_path, scopes)` pair — the same identity the consent
+    //! the `(identity, scopes)` pair — the same identity the consent
     //! flow is verified against — so denial must be scoped to that exact
-    //! binary and that exact scope set, nothing broader.
+    //! caller and that exact scope set, nothing broader.
     use super::DenyCache;
-    use crate::daemon::http::internal::auth::consent::ConsentKey;
+    use crate::daemon::http::internal::auth::consent::{ConsentKey, PeerIdentity};
     use std::path::PathBuf;
 
     #[test]
     fn deny_cache_remembers_a_denied_pair() {
         let cache = DenyCache::default();
         let key: ConsentKey = (
-            PathBuf::from("/usr/bin/evil"),
+            PeerIdentity::native("/usr/bin/evil"),
             vec!["settings".to_string(), "transcribe".to_string()],
         );
         assert!(!cache.contains(&key), "a fresh cache denies nothing");
@@ -191,11 +251,14 @@ mod tests {
     #[test]
     fn deny_cache_is_scoped_to_exe_and_scope_set() {
         let cache = DenyCache::default();
-        let denied: ConsentKey = (PathBuf::from("/usr/bin/evil"), vec!["settings".to_string()]);
+        let denied: ConsentKey = (
+            PeerIdentity::native("/usr/bin/evil"),
+            vec!["settings".to_string()],
+        );
         cache.insert(denied.clone());
 
         // Same scopes, different binary → not denied (a fresh consent prompt).
-        let other_exe: ConsentKey = (PathBuf::from("/usr/bin/other"), denied.1.clone());
+        let other_exe: ConsentKey = (PeerIdentity::native("/usr/bin/other"), denied.1.clone());
         assert!(
             !cache.contains(&other_exe),
             "denial must not leak across binaries"
@@ -206,6 +269,153 @@ mod tests {
         assert!(
             !cache.contains(&other_scopes),
             "denial must not leak across scope sets"
+        );
+    }
+}
+
+#[cfg(test)]
+mod peer_binding_tests {
+    //! Per-request token-to-binary binding. `docs/protocol/auth.md` calls a
+    //! token "tied to the binary's `/proc/<pid>/exe` at issue time", and says
+    //! that when that stops matching, "the next request returns `401
+    //! invalid_session` with reason `exe_changed`" — so the check belongs on
+    //! every authorized call, not only on the `/events` exe-watch tick.
+    use super::verify_peer_binding;
+    use crate::daemon::http::internal::auth::consent::PeerIdentity;
+    use crate::daemon::http::internal::auth::tokens::TokenStore;
+    use crate::daemon::http::internal::helpers::responses::reason;
+    use crate::daemon::http::state::PeerInfo;
+    use std::path::PathBuf;
+
+    /// A peer that is this very test process — the caller and the minted
+    /// binary are then the same file by construction.
+    fn self_peer() -> PeerInfo {
+        PeerInfo {
+            pid: Some(std::process::id()),
+            uid: None,
+        }
+    }
+
+    fn own_identity() -> PeerIdentity {
+        PeerIdentity::native(
+            std::fs::read_link("/proc/self/exe").expect("read this process's own exe"),
+        )
+    }
+
+    /// The ordinary case: the binary the user approved is the one calling.
+    /// It passes, and passing must not disturb the session.
+    #[test]
+    fn caller_matching_the_minted_binary_is_accepted() {
+        let store = TokenStore::default();
+        let (token, _) = store.mint("Test App", &["status".to_string()], &own_identity());
+        let meta = store.validate(&token).expect("freshly minted token");
+
+        assert_eq!(
+            verify_peer_binding(&store, Some(&self_peer()), &meta, &token),
+            Ok(()),
+            "the binary the token was minted for must still be authorized"
+        );
+        assert!(
+            store.validate(&token).is_ok(),
+            "an accepted call must leave the token alone"
+        );
+    }
+
+    /// The case this check exists for: a token minted for one binary is
+    /// presented by a different one. That is what a keyring entry shared
+    /// between two installs of the same app produces, and possession alone
+    /// must not be enough — the daemon's answer is `exe_changed`, and the
+    /// session ends rather than merely failing this one call.
+    #[test]
+    fn a_different_binary_presenting_the_token_is_rejected_and_revoked() {
+        let store = TokenStore::default();
+        let approved = PeerIdentity::native("/usr/local/bin/super-stt-app");
+        let (token, _) = store.mint("Test App", &["secrets".to_string()], &approved);
+        let meta = store.validate(&token).expect("freshly minted token");
+
+        assert_eq!(
+            verify_peer_binding(&store, Some(&self_peer()), &meta, &token),
+            Err(reason::EXE_CHANGED),
+            "a caller that is not the approved binary must be refused"
+        );
+        assert!(
+            matches!(store.validate(&token), Err("unknown")),
+            "a mismatch must revoke the token, not just refuse the one request"
+        );
+    }
+
+    /// Two sandboxed apps present the same executable path, because each
+    /// resolves it inside its own sandbox. They must not share a session:
+    /// without the sandbox id in the identity, a grant to one would authorize
+    /// every other flatpak that ships a binary at the same path.
+    #[test]
+    fn two_flatpaks_sharing_an_exe_path_are_different_callers() {
+        let store = TokenStore::default();
+        let granted = PeerIdentity {
+            exe_path: PathBuf::from("/app/bin/super-stt-app"),
+            flatpak_app_id: Some("ai.menjivar.SuperSTT".to_string()),
+        };
+        let impostor = PeerIdentity {
+            exe_path: granted.exe_path.clone(),
+            flatpak_app_id: Some("org.example.Stranger".to_string()),
+        };
+        let (token, _) = store.mint("Test App", &["transcribe".to_string()], &granted);
+        let meta = store.validate(&token).expect("freshly minted token");
+
+        assert!(meta.matches(&granted), "the granted app still matches");
+        assert!(
+            !meta.matches(&impostor),
+            "a different flatpak must not match on the path alone"
+        );
+    }
+
+    /// A native binary and a sandboxed one at the same path are likewise
+    /// different callers — the host path is real, the sandboxed one only
+    /// looks like it.
+    #[test]
+    fn a_sandboxed_caller_never_matches_a_native_grant_at_the_same_path() {
+        let store = TokenStore::default();
+        let native = PeerIdentity::native("/usr/local/bin/super-stt-app");
+        let sandboxed = PeerIdentity {
+            exe_path: PathBuf::from("/usr/local/bin/super-stt-app"),
+            flatpak_app_id: Some("org.example.Stranger".to_string()),
+        };
+        let (token, _) = store.mint("Test App", &["settings".to_string()], &native);
+        let meta = store.validate(&token).expect("freshly minted token");
+
+        assert!(
+            !meta.matches(&sandboxed),
+            "a sandbox that puts its binary at the approved host path must not inherit the grant"
+        );
+    }
+
+    /// An unidentifiable peer fails closed, but is not treated as a
+    /// mismatch: `/proc/<pid>/exe` going unreadable is transient (the peer
+    /// exited mid-request), and destroying a live session over it would
+    /// force a consent popup the user never asked for.
+    #[test]
+    fn an_unverifiable_peer_is_refused_without_revoking() {
+        let store = TokenStore::default();
+        let (token, _) = store.mint("Test App", &["status".to_string()], &own_identity());
+        let meta = store.validate(&token).expect("freshly minted token");
+
+        assert_eq!(
+            verify_peer_binding(&store, None, &meta, &token),
+            Err(reason::UNKNOWN),
+            "no PeerInfo at all means the caller cannot be identified"
+        );
+        let pidless = PeerInfo {
+            pid: None,
+            uid: Some(1000),
+        };
+        assert_eq!(
+            verify_peer_binding(&store, Some(&pidless), &meta, &token),
+            Err(reason::UNKNOWN),
+            "credentials without a pid cannot be resolved to a binary either"
+        );
+        assert!(
+            store.validate(&token).is_ok(),
+            "an unreadable /proc entry must not destroy a live session"
         );
     }
 }

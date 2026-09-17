@@ -27,6 +27,11 @@ pub(crate) fn error_response(status: StatusCode, message: &str, reason: &str) ->
 pub(crate) mod reason {
     // invalid_session reasons
     pub(crate) const UNKNOWN: &str = "unknown";
+    /// The caller's `/proc/<pid>/exe` is no longer the binary the token was
+    /// minted for. `docs/protocol/auth.md` specifies this as a *per-request*
+    /// outcome ("the next request returns `401 invalid_session` with reason
+    /// `exe_changed`"), not just the `/events` exe-watch's 30 s tick.
+    pub(crate) const EXE_CHANGED: &str = "exe_changed";
 
     // auth_denied reasons
     pub(crate) const INVALID_BODY: &str = "invalid_body";

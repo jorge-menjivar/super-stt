@@ -12,7 +12,7 @@
 //!    — read once on first `obtain` to recover a token from a previous
 //!    process run. Best-effort write whenever a fresh token is minted.
 //!
-//! Each app gets its own keyring "user" (= [`AppId`] string) so they
+//! Each app gets its own keyring "user" (see [`keyring_account`]) so they
 //! don't overwrite each other's tokens. The storage value is just the
 //! bearer string; scope and expiry live server-side and the daemon
 //! returns `invalid_session` if the client presents a stale token.
@@ -84,10 +84,27 @@ pub fn install_mock_keyring_if_requested() {
     }
 }
 
+/// The keyring "user" this process stores its token under: the [`AppId`],
+/// plus the sandbox it is running in when there is one.
+///
+/// The bare `AppId` is shared by every build of an app, so a native install
+/// and a flatpak of the same app read and write one entry. The daemon binds
+/// each token to the caller it granted it to, so the token one of them stored
+/// is rejected for the other: with a single shared entry the two take turns
+/// invalidating each other, and every alternation costs the user a fresh
+/// consent popup. Scoping the account by install keeps them apart. A native
+/// install keeps the plain `AppId`, so nothing already stored moves.
+fn keyring_account(app_id: AppId) -> String {
+    match crate::sandbox::own_app_id() {
+        Some(sandbox_id) => format!("{}@flatpak:{sandbox_id}", app_id.0),
+        None => app_id.0.to_string(),
+    }
+}
+
 /// Read the cached token for `app_id`, or None if no token is stored.
 #[must_use]
 pub fn load(app_id: AppId) -> Option<String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, app_id.0).ok()?;
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_account(app_id)).ok()?;
     entry.get_password().ok()
 }
 
@@ -101,7 +118,7 @@ pub fn load(app_id: AppId) -> Option<String> {
 /// Returns an error if the keyring is unavailable or the write fails.
 pub fn save(app_id: AppId, token: &str) -> Result<(), String> {
     cache_set(app_id, token.to_string());
-    let entry = keyring::Entry::new(KEYRING_SERVICE, app_id.0)
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_account(app_id))
         .map_err(|e| format!("keyring access failed: {e}"))?;
     entry
         .set_password(token)
@@ -116,7 +133,7 @@ pub fn save(app_id: AppId, token: &str) -> Result<(), String> {
 /// Returns an error if the keyring is unavailable.
 pub fn forget(app_id: AppId) -> Result<(), String> {
     cache_clear(app_id);
-    let entry = keyring::Entry::new(KEYRING_SERVICE, app_id.0)
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_account(app_id))
         .map_err(|e| format!("keyring access failed: {e}"))?;
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),

@@ -279,12 +279,14 @@ async fn write_oneshot_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::daemon::http::internal::auth::consent::PeerIdentity;
 
     fn make_meta(app: &str, scope: &str, exe: &str, expires_at: DateTime<Utc>) -> TokenMeta {
         TokenMeta {
             app_name: app.to_string(),
             scopes: vec![scope.to_string()],
             exe_path: PathBuf::from(exe),
+            flatpak_app_id: None,
             issued_at: Utc::now(),
             expires_at,
         }
@@ -415,9 +417,9 @@ mod tests {
     fn deny_key(_app: &str, exe: &str, scope: &str) -> ConsentKey {
         // ConsentKey dropped `app_name` from the tuple: app_name is
         // client-controlled and untrusted, so the deny key is now
-        // `(exe_path, scopes)` only. We keep the `_app` arg in the test
+        // `(identity, scopes)` only. We keep the `_app` arg in the test
         // helper signature so we don't have to rewrite every call site.
-        (PathBuf::from(exe), vec![scope.to_string()])
+        (PeerIdentity::native(exe), vec![scope.to_string()])
     }
 
     /// Sticky deny: once `insert(key)` runs, `contains(key)` must keep

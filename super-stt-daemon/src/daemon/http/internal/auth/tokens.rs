@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::daemon::http::internal::auth::consent::PeerIdentity;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use log::{error, info, warn};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -255,8 +255,33 @@ pub(crate) struct TokenMeta {
     pub(crate) app_name: String,
     pub(crate) scopes: Vec<String>,
     pub(crate) exe_path: PathBuf,
+    /// The flatpak app the token was granted to, when the peer was sandboxed.
+    /// `#[serde(default)]` so sessions persisted before this field existed
+    /// still load: they were all native, which is exactly `None`.
+    #[serde(default)]
+    pub(crate) flatpak_app_id: Option<String>,
     pub(crate) issued_at: DateTime<Utc>,
     pub(crate) expires_at: DateTime<Utc>,
+}
+
+impl TokenMeta {
+    /// Is `identity` the caller this token was granted to?
+    ///
+    /// Both halves have to match. The path alone is not enough: every flatpak
+    /// resolves to a path inside its own sandbox, so two different sandboxed
+    /// apps can present the identical `/app/bin/<name>` and would otherwise
+    /// share each other's sessions.
+    pub(crate) fn matches(&self, identity: &PeerIdentity) -> bool {
+        self.exe_path == identity.exe_path && self.flatpak_app_id == identity.flatpak_app_id
+    }
+
+    /// One line naming the grantee, for logs.
+    pub(crate) fn describe_grantee(&self) -> String {
+        match &self.flatpak_app_id {
+            Some(id) => format!("flatpak {id} ({})", self.exe_path.display()),
+            None => self.exe_path.display().to_string(),
+        }
+    }
 }
 
 /// On-disk wrapper for the sessions map. Keyed by token so the JSON
@@ -367,7 +392,7 @@ impl TokenStore {
         Ok(store)
     }
 
-    /// Mint a fresh 30-day session token for `(app_name, scopes, exe_path)`,
+    /// Mint a fresh 30-day session token for `(app_name, scopes, identity)`,
     /// insert it into the in-memory map, and submit the updated snapshot to the
     /// persist task. The submit happens under the lock so the persist channel's
     /// order matches lock order (audit 2 Tier 1 #4). Persistence failures are
@@ -392,7 +417,7 @@ impl TokenStore {
         &self,
         app_name: &str,
         scopes: &[String],
-        exe_path: &Path,
+        identity: &PeerIdentity,
     ) -> (String, DateTime<Utc>) {
         let token = generate_token();
         let now = Utc::now();
@@ -400,7 +425,8 @@ impl TokenStore {
         let meta = TokenMeta {
             app_name: app_name.to_string(),
             scopes: scopes.to_vec(),
-            exe_path: exe_path.to_path_buf(),
+            exe_path: identity.exe_path.clone(),
+            flatpak_app_id: identity.flatpak_app_id.clone(),
             issued_at: now,
             expires_at,
         };
@@ -473,7 +499,7 @@ mod tests {
     //! here. Under `cfg!(test)` no persist task is spawned and the
     //! `SessionPersister` receiver is dropped, so mint/revoke submissions
     //! are no-ops — none of these touch the system keyring.
-    use super::{TokenMeta, TokenStore};
+    use super::{PeerIdentity, TokenMeta, TokenStore};
     use chrono::{Duration as ChronoDuration, Utc};
     use std::path::PathBuf;
 
@@ -483,6 +509,7 @@ mod tests {
     fn insert_with_expiry(store: &TokenStore, token: &str, expires_at: chrono::DateTime<Utc>) {
         let meta = TokenMeta {
             app_name: "test-app".to_string(),
+            flatpak_app_id: None,
             scopes: vec!["status".to_string()],
             exe_path: PathBuf::from("/usr/bin/test-client"),
             issued_at: Utc::now() - ChronoDuration::days(1),
@@ -498,7 +525,7 @@ mod tests {
     fn mint_then_validate_roundtrips() {
         let store = TokenStore::default();
         let scopes = vec!["transcribe".to_string(), "status".to_string()];
-        let exe = PathBuf::from("/usr/bin/super-stt-cli");
+        let exe = PeerIdentity::native("/usr/bin/super-stt-cli");
 
         let (token, expires_at) = store.mint("Super STT CLI", &scopes, &exe);
         assert_eq!(token.len(), 64, "token is 32 random bytes hex-encoded");
@@ -517,7 +544,10 @@ mod tests {
 
         let meta = store.validate(&token).expect("live token must validate");
         assert_eq!(meta.scopes, scopes, "validated scopes match minted scopes");
-        assert_eq!(meta.exe_path, exe, "validated exe matches minted exe");
+        assert!(
+            meta.matches(&exe),
+            "validated identity matches the minted one"
+        );
 
         // A second mint yields a different token.
         let (token2, _) = store.mint("Super STT CLI", &scopes, &exe);
@@ -579,7 +609,7 @@ mod tests {
         let (token, _) = store.mint(
             "widget",
             &["status".to_string()],
-            &PathBuf::from("/usr/bin/w"),
+            &PeerIdentity::native("/usr/bin/w"),
         );
         assert!(store.validate(&token).is_ok(), "token valid before revoke");
 
@@ -596,7 +626,11 @@ mod tests {
     fn revoke_is_idempotent() {
         let store = TokenStore::default();
         store.revoke("never-existed"); // must not panic
-        let (token, _) = store.mint("app", &["status".to_string()], &PathBuf::from("/bin/a"));
+        let (token, _) = store.mint(
+            "app",
+            &["status".to_string()],
+            &PeerIdentity::native("/bin/a"),
+        );
         store.revoke(&token);
         store.revoke(&token); // second revoke is still a no-op
         assert!(matches!(store.validate(&token), Err("unknown")));
