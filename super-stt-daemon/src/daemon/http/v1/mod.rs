@@ -153,7 +153,10 @@ pub(crate) fn router(state: AppState) -> Router {
 /// they add no paths — what each endpoint requires is stated in its own
 /// `security` and prose.
 pub(crate) fn openapi() -> utoipa::openapi::OpenApi {
-    let (_router, spec) = assemble(scope_groups()).split_for_parts();
+    let (_router, mut spec) = assemble(scope_groups()).split_for_parts();
+    // Has to happen here, not as an `ApiDoc` modifier: the paths only exist
+    // once the router has been assembled.
+    crate::daemon::http::openapi::annotate_scopes(&mut spec);
     spec
 }
 
