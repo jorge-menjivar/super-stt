@@ -4,10 +4,14 @@
 //!
 //! The daemon spawns this binary with env vars carrying the request details:
 //!
-//! - `STT_AUTH_APP_NAME` — declared (untrusted) app name from the request
+//! - `STT_AUTH_APP_NAME` — declared (untrusted) app name from the request.
+//!   Shown for a native caller, never for a web one — see [`Caller`].
 //! - `STT_AUTH_SCOPES`   — space-separated scope set (e.g. `transcribe status`)
 //! - `STT_AUTH_EXE_PATH` — peer `/proc/<pid>/exe` (trusted, kernel-resolved)
 //! - `STT_AUTH_FLATPAK_APP_ID` — set only when the caller is inside a flatpak
+//! - `STT_AUTH_WEB_ORIGIN` — set only when the caller reached the daemon over
+//!   its TCP listener, carrying the browser-reported origin. The daemon sets
+//!   this *or* `STT_AUTH_EXE_PATH`, never both, and this one wins.
 //!
 //! The user clicks Allow or Deny. The dialog writes one of `allow`, `deny`,
 //! or `dismissed` to stdout (newline-terminated) and exits.
@@ -102,8 +106,7 @@ struct ConsentApp {
     surface_id: SurfaceId,
     app_name: String,
     scopes: Vec<String>,
-    exe_path: String,
-    flatpak_app_id: Option<String>,
+    caller: Caller,
 }
 
 impl cosmic::Application for ConsentApp {
@@ -183,8 +186,7 @@ impl cosmic::Application for ConsentApp {
                 surface_id,
                 app_name: flags.app_name,
                 scopes: flags.scopes,
-                exe_path: flags.exe_path,
-                flatpak_app_id: flags.flatpak_app_id,
+                caller: flags.caller,
             },
             task,
         )
@@ -206,12 +208,31 @@ impl cosmic::Application for ConsentApp {
         // `widget::dialog::dialog()` gives us the proper themed
         // background, padding, and button layout — same widget the
         // cosmic-osd polkit dialog uses.
-        let request_label = if self.app_name.is_empty() {
-            "An application".to_string()
-        } else {
-            self.app_name.clone()
+        // What the user is being asked to approve, named the way each kind of
+        // caller is best named.
+        //
+        // A native caller is named by `app_name`, with its verified path on the
+        // line below — the name is self-reported, and the path is what the user
+        // is really approving.
+        //
+        // A web caller is named by its origin, and `app_name` is not shown at
+        // all. The origin is the only thing about a web caller that anything
+        // vouches for, and it is also what the user recognises: browsers say
+        // "example.com wants to use your microphone" for the same reason. Since
+        // a page could otherwise put a string of its own choosing in front of
+        // the user, leaving `app_name` out is also what stops a site from
+        // labelling itself something it is not.
+        let body_text = match &self.caller {
+            Caller::Native { .. } => {
+                let name = if self.app_name.is_empty() {
+                    "An application"
+                } else {
+                    &self.app_name
+                };
+                format!("{name} wants access to Super STT.")
+            }
+            Caller::Web { origin } => format!("{origin} wants access to Super STT."),
         };
-        let body_text = format!("{request_label} wants access to Super STT.");
 
         let permission_lines = permissions_for_scopes(&self.scopes);
 
@@ -221,20 +242,42 @@ impl cosmic::Application for ConsentApp {
             bullet_column = bullet_column.push(bullet_row(line));
         }
 
-        let control = cosmic::widget::column::with_capacity(2)
-            .push(text::body(match &self.flatpak_app_id {
+        let mut control = cosmic::widget::column::with_capacity(3).spacing(12);
+
+        // The verified identity, on its own line under the sentence. Only a
+        // native caller gets one: for a web caller the sentence already *is*
+        // the verified identity, and repeating the origin underneath would
+        // read as a second, corroborating fact when there is only one.
+        if let Caller::Native {
+            exe_path,
+            flatpak_app_id,
+        } = &self.caller
+        {
+            control = control.push(text::body(match flatpak_app_id {
                 // Name the app the user installed. Its executable path lives
                 // inside its sandbox, so it identifies nothing here.
                 Some(id) => format!("Flatpak app:  {id}"),
-                None => format!("Executable:  {}", self.exe_path),
-            }))
-            .push(
-                cosmic::widget::column::with_capacity(2)
-                    .push(text::heading("This will allow it to:"))
-                    .push(bullet_column)
-                    .spacing(6),
-            )
-            .spacing(12);
+                None => format!("Executable:  {exe_path}"),
+            }));
+        }
+
+        control = control.push(
+            cosmic::widget::column::with_capacity(2)
+                .push(text::heading("This will allow it to:"))
+                .push(bullet_column)
+                .spacing(6),
+        );
+
+        // A native caller is named by the kernel and cannot lie about it. A web
+        // caller is named by its browser, and the user should be told that
+        // before they grant anything — it is the difference between a checked
+        // identity and a reported one.
+        if matches!(self.caller, Caller::Web { .. }) {
+            control = control.push(text::caption(
+                "Your browser reports which website this is. That is a weaker check \
+                 than Super STT does for installed programs.",
+            ));
+        }
 
         let dialog_widget = dialog::dialog()
             // `Container::Dialog` only honours the theme's translucency when
@@ -491,14 +534,31 @@ fn maybe_spawn_auto_approve_timer() {
 #[cfg(not(debug_assertions))]
 fn maybe_spawn_auto_approve_timer() {}
 
+/// Who the daemon says is asking.
+///
+/// Mirrors the daemon's own `PeerIdentity`, and for the same reason: the two
+/// kinds warrant different sentences. "Allow this program" and "allow this
+/// website" are not the same question, and the second comes with a weaker
+/// guarantee behind it — so the dialog has to know which one it is asking
+/// rather than infer it from an empty field.
+enum Caller {
+    /// A program on this machine, named by the path the kernel resolved.
+    Native {
+        exe_path: String,
+        /// Set only for a sandboxed caller. Its `exe_path` is resolved inside
+        /// its own sandbox, so showing that path would name a file the user
+        /// cannot go and look at, and one that every other flatpak could
+        /// equally present.
+        flatpak_app_id: Option<String>,
+    },
+    /// A web page, named by the origin its browser reported.
+    Web { origin: String },
+}
+
 struct AuthRequestPayload {
     app_name: String,
     scopes: Vec<String>,
-    exe_path: String,
-    /// Set only for a sandboxed caller. Its `exe_path` is resolved inside its
-    /// own sandbox, so showing that path would name a file the user cannot go
-    /// and look at, and one that every other flatpak could equally present.
-    flatpak_app_id: Option<String>,
+    caller: Caller,
 }
 
 fn read_env() -> AuthRequestPayload {
@@ -510,6 +570,23 @@ fn read_env() -> AuthRequestPayload {
             .split_whitespace()
             .map(str::to_string)
             .collect(),
+        caller: read_caller(),
+    }
+}
+
+/// Which kind of caller the daemon is asking about.
+///
+/// `STT_AUTH_WEB_ORIGIN` wins when present because the daemon sets exactly one
+/// of the two — see its `ask_user_for_consent`. Reading it first means a
+/// stale `STT_AUTH_EXE_PATH` inherited from the environment can never turn a
+/// website into an executable in the sentence the user reads.
+fn read_caller() -> Caller {
+    if let Ok(origin) = std::env::var("STT_AUTH_WEB_ORIGIN")
+        && !origin.is_empty()
+    {
+        return Caller::Web { origin };
+    }
+    Caller::Native {
         exe_path: std::env::var("STT_AUTH_EXE_PATH")
             .unwrap_or_else(|_| "<unknown path>".to_string()),
         flatpak_app_id: std::env::var("STT_AUTH_FLATPAK_APP_ID")

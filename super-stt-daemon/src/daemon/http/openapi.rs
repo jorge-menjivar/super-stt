@@ -27,17 +27,26 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
     info(
         title = "Super STT daemon protocol",
         description = "\
-HTTP/1.1 + JSON over a Unix domain socket at `$XDG_RUNTIME_DIR/stt/super-stt-http.sock` \
-(override with `SUPER_STT_HTTP_SOCKET`). There is no TCP listener: the socket's \
-filesystem permissions are the first layer of access control, and the daemon reads \
-`SO_PEERCRED` on each connection to identify the calling binary.
+HTTP/1.1 + JSON on two transports that serve the identical API.
+
+**A Unix domain socket** at `$XDG_RUNTIME_DIR/stt/super-stt-http.sock` (override with \
+`SUPER_STT_HTTP_SOCKET`), which is what native clients use. Its filesystem permissions \
+are the first layer of access control, and the daemon reads `SO_PEERCRED` on each \
+connection to identify the calling binary. It is the second server below, listed by its \
+real path — dial that path directly and send whatever `Host` you like, since the daemon \
+ignores it.
+
+**A loopback TCP listener**, which is what a browser can reach, since no browser can dial \
+a Unix socket. It is the first server below, and it is a real address. There are no peer \
+credentials on TCP, so a caller there is identified by its `Origin` instead — a claim from \
+the browser rather than a fact from the kernel, which is why the consent dialog says so.
 
 Every endpoint except `POST /v1/auth/request` requires `Authorization: Bearer <token>`. \
-A token is minted only after the user approves your app in a consent popup, and is bound \
-to the approved binary — an app cannot widen its own permissions. See `docs/protocol/auth.md`.
+A token is minted only after the user approves your client in a consent dialog, and is \
+bound to whichever identity was approved — a binary or an origin, never interchangeable. \
+A client cannot widen its own permissions. See `docs/protocol/auth.md`.
 
-Because the transport is a Unix socket, the `servers` entry below is nominal; point your \
-client at the socket and use any `Host`. With curl:
+With curl, over the socket:
 
 ```
 curl --unix-socket \"$XDG_RUNTIME_DIR/stt/super-stt-http.sock\" \\
@@ -47,8 +56,11 @@ curl --unix-socket \"$XDG_RUNTIME_DIR/stt/super-stt-http.sock\" \\
         license(name = "GPL-3.0-only", identifier = "GPL-3.0-only"),
         contact(name = "Super STT", url = "https://github.com/jorge-menjivar/super-stt"),
     ),
-    servers((url = "http://stt.local", description = "Nominal host; the transport is the Unix socket")),
-    modifiers(&BearerAuth),
+    // The servers list is filled in by `LocalServers`, not here: the TCP
+    // entry's URL embeds `config::DEFAULT_TCP_PORT`, and a macro attribute
+    // takes a literal. Writing the port twice is exactly how the document
+    // comes to advertise an address the daemon is not on.
+    modifiers(&BearerAuth, &LocalServers),
     tags(
         (name = "auth", description = "Consent handshake and token probing."),
         (name = "health", description = "Liveness and what the daemon is currently running."),
@@ -63,6 +75,52 @@ curl --unix-socket \"$XDG_RUNTIME_DIR/stt/super-stt-http.sock\" \\
     ),
 )]
 pub(crate) struct ApiDoc;
+
+/// The two addresses the daemon answers on.
+///
+/// Order matters: tooling that offers to send a request uses the first server,
+/// and only one of these can actually receive one. The TCP listener is a real
+/// address a browser can reach; `stt.local` is a placeholder for the Unix
+/// socket, which has no URL at all — a generated client pointed at it resolves
+/// nothing.
+struct LocalServers;
+
+impl Modify for LocalServers {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::{ServerBuilder, ServerVariableBuilder};
+        openapi.servers = Some(vec![
+            ServerBuilder::new()
+                .url(format!(
+                    "http://127.0.0.1:{}",
+                    crate::config::DEFAULT_TCP_PORT
+                ))
+                .description(Some(
+                    "The daemon's default loopback TCP listener. Your browser can reach this.",
+                ))
+                .build(),
+            ServerBuilder::new()
+                // The socket's real path, not an invented hostname. It is what
+                // a reader has to type, and naming it here saves them going to
+                // find it. `unix://` + an absolute path is the spelling Docker
+                // and friends use, so it reads as a socket rather than a host.
+                .url("unix://{runtime_dir}/stt/super-stt-http.sock")
+                .parameter(
+                    "runtime_dir",
+                    ServerVariableBuilder::new()
+                        .default_value("/run/user/1000")
+                        .description(Some(
+                            "Your `$XDG_RUNTIME_DIR` — `/run/user/<uid>` on a systemd \
+                             host, with `/tmp/stt` as the fallback. Override the whole \
+                             socket path with `SUPER_STT_HTTP_SOCKET`.",
+                        )),
+                )
+                .description(Some(
+                    "The Unix socket native clients use. No browser can dial it. Use with curl instead.",
+                ))
+                .build(),
+        ]);
+    }
+}
 
 /// The one security scheme: the session token from `POST /v1/auth/request`,
 /// presented as a bearer token. Declared here rather than per endpoint so the
@@ -82,8 +140,10 @@ impl Modify for BearerAuth {
                 HttpBuilder::new()
                     .scheme(HttpAuthScheme::Bearer)
                     .description(Some(
-                        "Session token from `POST /v1/auth/request`. Bound to the calling \
-                         binary and valid for 30 days.",
+                        "Session token from `POST /v1/auth/request`. Valid for 30 days, and \
+                         bound to whoever the user approved: the calling binary over the \
+                         Unix socket, or the page's origin over TCP. It stops working if \
+                         that identity changes.",
                     ))
                     .build(),
             ),
@@ -97,14 +157,14 @@ impl Modify for BearerAuth {
 /// The scope is already declared, in `security` on every `#[utoipa::path]`, and
 /// that declaration is the authority — a contract test checks it against the
 /// guard the route actually sits behind. What it is not is *visible*: Swagger UI
-/// renders scopes only for `OAuth2` and `OpenID` Connect schemes, where it runs
-/// the flow itself. Ours is a plain bearer scheme, so the UI shows a padlock,
-/// drops the scope array, and leaves a reader to work out which of six scopes an
+/// renders scopes only for `OAuth2` and `OpenID` Connect schemes, where it runs the
+/// flow itself. Ours is a plain bearer scheme, so the UI shows a padlock, drops
+/// the scope array, and leaves a reader to work out which of six scopes an
 /// endpoint wants by reading prose.
 ///
 /// So this copies it into the summary, which is the line shown beside the path
 /// in the collapsed operation list — the one place you can compare endpoints
-/// without opening them. Copied rather than written by hand in 68 summaries:
+/// without opening them. Copied rather than written by hand in 66 summaries:
 /// a second hand-maintained statement of the same fact is one that goes stale,
 /// and a summary claiming the wrong scope is worse than one that omits it.
 ///

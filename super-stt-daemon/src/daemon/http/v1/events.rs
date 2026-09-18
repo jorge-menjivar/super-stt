@@ -181,10 +181,7 @@ pub(crate) async fn events(
         peer.and_then(|p| p.0.pid),
         s.tokens.clone(),
         ctx.token,
-        PeerIdentity {
-            exe_path: ctx.meta.exe_path,
-            flatpak_app_id: ctx.meta.flatpak_app_id,
-        },
+        ctx.meta.grantee,
     );
 
     // The handler's own `sse_tx` clone is dropped here. The forwarders
@@ -310,12 +307,18 @@ fn spawn_events_keepalive_and_exe_watch(
                     }
                 }
                 _ = exe_watch.tick() => {
+                    // No pid means a web subscriber, which has no binary to
+                    // watch: its identity is an origin, and an origin cannot
+                    // be swapped on disk mid-stream. What *can* change is the
+                    // user's allowlist, and this watch does not see that — a
+                    // stream opened while an origin was allowed outlives its
+                    // removal, until the client disconnects.
                     let Some(pid) = peer_pid else { continue; };
                     // Re-resolve the whole identity, not just the path: a
                     // sandboxed peer's path is one every sandbox can share, so
                     // comparing paths alone would miss a swap between them.
                     let current = resolve_peer_identity(
-                        Some(&PeerInfo { pid: Some(pid), uid: None }),
+                        Some(&PeerInfo::unix(Some(pid), None)),
                         "events exe-watch",
                     );
                     if current.as_ref().is_some_and(|c| *c == stored) {
