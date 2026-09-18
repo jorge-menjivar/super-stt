@@ -497,22 +497,20 @@ openapi:
 #
 # The Swagger view offers "Try it out", which reaches a running daemon over its
 # TCP listener — a browser cannot dial the Unix socket. Nothing to configure:
-# the listener is on by default and admits any origin, and the page's banner
-# says how to get a token.
+# the listener is on by default and admits any origin.
 #
-# The port is fixed rather than OS-chosen so this page keeps one identity: the
-# daemon binds a token to the origin that asked for it, and an origin that moved
-# every run would mean a fresh consent dialog every run. Name your own port if
-# this one is taken. The server binds before announcing, so the URL it prints is
-# always the one actually being served.
+# The port is chosen by the OS unless you name one, so this never collides with
+# whatever else is already listening. The server binds before announcing, so the
+# URL it prints is always the one actually being served. One consequence worth
+# knowing: a token is bound to the origin that asked for it, and a new port is a
+# new origin, so each run asks for consent again.
 #
 # Usage: just openapi-serve [--scalar|--swagger] [port]
 openapi-serve *args:
     #!/usr/bin/env bash
     set -euo pipefail
     page=openapi.html
-    # Fixed so the page's origin is stable across runs; see the note above.
-    port=8910
+    port=0  # 0 asks the OS for any free port
     # Flag and port in either order, both optional.
     argv=({{ args }})
     for arg in ${argv[@]+"${argv[@]}"}; do
@@ -546,9 +544,10 @@ openapi-serve *args:
     try:
         httpd = Server(("127.0.0.1", port), handler)
     except OSError as e:
+        # Only reachable for a port named on the command line; port 0 cannot
+        # collide.
         sys.exit(f"openapi-serve: cannot bind port {port}: {e}\n"
-                 f"Pass a free port instead, and put that origin in the daemon's "
-                 f"[http.tcp].allowed_origins.")
+                 f"Omit the port and one will be chosen for you.")
 
     with httpd:
         url = f"http://localhost:{httpd.server_address[1]}/{page}"
