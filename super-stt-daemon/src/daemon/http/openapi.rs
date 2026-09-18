@@ -80,9 +80,9 @@ pub(crate) struct ApiDoc;
 ///
 /// Order matters: tooling that offers to send a request uses the first server,
 /// and only one of these can actually receive one. The TCP listener is a real
-/// address a browser can reach; `stt.local` is a placeholder for the Unix
-/// socket, which has no URL at all — a generated client pointed at it resolves
-/// nothing.
+/// address a browser can reach; the second is the socket's own path, spelled
+/// `unix://`, which no HTTP client can resolve — it is there to be read, not
+/// dialed.
 struct LocalServers;
 
 impl Modify for LocalServers {
