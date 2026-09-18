@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::http::state::PeerInfo;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -13,45 +14,87 @@ static CONSENT_POPUP: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new
 
 /// Who the daemon believes is calling.
 ///
-/// For an ordinary host process this is just its `/proc/<pid>/exe`. A peer
-/// inside a flatpak has its own mount namespace, so that path is resolved in
-/// *its* root and means nothing here: every such peer reads as something like
-/// `/app/bin/<name>`, a string any other sandbox can present just by naming
-/// its binary the same. Identifying a sandboxed caller by its exe path alone
-/// therefore hands one sandbox's grant to every other. The sandbox's own id
-/// is what distinguishes them, so it is carried alongside and is part of
-/// equality.
-///
-/// The id is only as trustworthy as the sandbox that wrote it, and this is
-/// not a defence against a hostile process running as the user — one of those
-/// can read the session tokens out of the keyring regardless. It is what lets
-/// the daemon name the caller correctly in the consent dialog, and keep one
-/// sandboxed app's grant from silently covering another's.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct PeerIdentity {
-    /// `/proc/<pid>/exe`, as resolved in the peer's own mount namespace.
-    pub(crate) exe_path: PathBuf,
-    /// `Some(app-id)` when the peer runs inside a flatpak sandbox.
-    pub(crate) flatpak_app_id: Option<String>,
+/// The two variants are the two transports, and they are not the same kind of
+/// claim. [`Self::Native`] is what the kernel says about a peer on the Unix
+/// socket; [`Self::Web`] is what a browser says about the page it is running.
+/// Keeping them as separate variants rather than one struct with optional
+/// fields is what stops a check written for one from silently passing for the
+/// other — `is_official_client` reading an absent exe path as "not official"
+/// would be correct by accident, and one refactor away from not being.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(crate) enum PeerIdentity {
+    /// A process on the Unix socket, identified by `SO_PEERCRED`.
+    ///
+    /// For an ordinary host process this is just its `/proc/<pid>/exe`. A peer
+    /// inside a flatpak has its own mount namespace, so that path is resolved
+    /// in *its* root and means nothing here: every such peer reads as something
+    /// like `/app/bin/<name>`, a string any other sandbox can present just by
+    /// naming its binary the same. Identifying a sandboxed caller by its exe
+    /// path alone therefore hands one sandbox's grant to every other. The
+    /// sandbox's own id is what distinguishes them, so it is carried alongside
+    /// and is part of equality.
+    ///
+    /// The id is only as trustworthy as the sandbox that wrote it, and this is
+    /// not a defence against a hostile process running as the user — one of
+    /// those can read the session tokens out of the keyring regardless. It is
+    /// what lets the daemon name the caller correctly in the consent dialog,
+    /// and keep one sandboxed app's grant from silently covering another's.
+    Native {
+        /// `/proc/<pid>/exe`, as resolved in the peer's own mount namespace.
+        exe_path: PathBuf,
+        /// `Some(app-id)` when the peer runs inside a flatpak sandbox.
+        #[serde(default)]
+        flatpak_app_id: Option<String>,
+    },
+    /// A page on the TCP listener, identified by its `Origin`.
+    ///
+    /// **This is a weaker claim than [`Self::Native`], and deliberately so.**
+    /// The kernel vouches for an exe path; nothing vouches for an origin but
+    /// the browser that sent it. A non-browser process can put any string here.
+    /// What keeps that from mattering is that the daemon only accepts origins
+    /// the user wrote into [`TcpConfig::allowed_origins`](crate::config::TcpConfig::allowed_origins)
+    /// — so forging one gets you no further than forging an origin the user
+    /// already trusted, on a listener they already turned on.
+    ///
+    /// The consent dialog says which kind it is asking about, because "allow
+    /// this website" and "allow this program" deserve different answers.
+    Web {
+        /// The full origin as the browser sent it: scheme, host and port.
+        origin: String,
+    },
 }
 
 impl PeerIdentity {
     /// A host process with no sandbox of its own.
     #[cfg(test)]
     pub(crate) fn native(exe_path: impl Into<PathBuf>) -> Self {
-        Self {
+        Self::Native {
             exe_path: exe_path.into(),
             flatpak_app_id: None,
         }
     }
 
+    /// A browser page served from `origin`.
+    #[cfg(test)]
+    pub(crate) fn web(origin: impl Into<String>) -> Self {
+        Self::Web {
+            origin: origin.into(),
+        }
+    }
+
     /// One line naming the caller, for logs and the consent dialog. A
     /// sandboxed peer leads with its app id, since its path is not a path
-    /// anyone can go and look at.
+    /// anyone can go and look at; a web peer is named as a web peer, so a log
+    /// line can never be read as naming a binary.
     pub(crate) fn describe(&self) -> String {
-        match &self.flatpak_app_id {
-            Some(id) => format!("flatpak {id} ({})", self.exe_path.display()),
-            None => self.exe_path.display().to_string(),
+        match self {
+            Self::Native {
+                exe_path,
+                flatpak_app_id: Some(id),
+            } => format!("flatpak {id} ({})", exe_path.display()),
+            Self::Native { exe_path, .. } => exe_path.display().to_string(),
+            Self::Web { origin } => format!("web origin {origin}"),
         }
     }
 }
@@ -166,20 +209,31 @@ pub(crate) async fn ask_user_for_consent(
 
     let mut cmd = tokio::process::Command::new(&helper);
     cmd.env("STT_AUTH_APP_NAME", app_name)
-        .env("STT_AUTH_SCOPES", scopes.join(" "))
-        .env(
-            "STT_AUTH_EXE_PATH",
-            identity.exe_path.to_string_lossy().as_ref(),
-        )
-        // Set only for a sandboxed peer, so the dialog can name the app the
-        // user actually installed instead of a path inside its sandbox.
-        .envs(
-            identity
-                .flatpak_app_id
-                .as_ref()
-                .map(|id| ("STT_AUTH_FLATPAK_APP_ID", id.clone())),
-        )
-        .stdin(std::process::Stdio::null())
+        .env("STT_AUTH_SCOPES", scopes.join(" "));
+    match identity {
+        PeerIdentity::Native {
+            exe_path,
+            flatpak_app_id,
+        } => {
+            cmd.env("STT_AUTH_EXE_PATH", exe_path.to_string_lossy().as_ref())
+                // Set only for a sandboxed peer, so the dialog can name the app
+                // the user actually installed instead of a path inside its
+                // sandbox.
+                .envs(
+                    flatpak_app_id
+                        .as_ref()
+                        .map(|id| ("STT_AUTH_FLATPAK_APP_ID", id.clone())),
+                );
+        }
+        // A web peer sets the origin variable *instead of* the exe path, never
+        // alongside it. The helper decides which dialog to show by which one it
+        // was given, so sending both would leave the user reading a sentence
+        // about a binary when a website is what is asking.
+        PeerIdentity::Web { origin } => {
+            cmd.env("STT_AUTH_WEB_ORIGIN", origin);
+        }
+    }
+    cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         // The timeout below only reaps the helper while *this* request is
@@ -233,12 +287,24 @@ const OFFICIAL_CLIENT_NAMES: [&str; 3] =
 /// is the common case (every third-party client) and is deliberately
 /// not logged here — the caller logs the rare success.
 pub(crate) fn is_official_client(identity: &PeerIdentity) -> bool {
+    let PeerIdentity::Native {
+        exe_path,
+        flatpak_app_id,
+    } = identity
+    else {
+        // A web peer is never first-party. The whole check below is about a
+        // binary on this filesystem, and a page has none — there is nothing
+        // to canonicalize and no ownership to verify, so the only safe answer
+        // is the consent popup. A site calling itself `super-stt-app` must not
+        // get within reach of the short-circuit.
+        return false;
+    };
     // A sandboxed peer is never first-party, whatever its path says. The
     // check below canonicalizes the path against *our* filesystem, and a
     // sandbox is free to put its own binary at /usr/local/bin/super-stt-app;
     // that path would then resolve to the real host binary, pass every test
     // here, and auto-approve a stranger with no popup at all.
-    if identity.flatpak_app_id.is_some() {
+    if flatpak_app_id.is_some() {
         return false;
     }
     let Ok(daemon_exe) = std::env::current_exe() else {
@@ -247,7 +313,7 @@ pub(crate) fn is_official_client(identity: &PeerIdentity) -> bool {
     let Some(daemon_dir) = daemon_exe.parent() else {
         return false;
     };
-    is_official_client_in(daemon_dir, &identity.exe_path)
+    is_official_client_in(daemon_dir, exe_path)
 }
 
 /// Testable core of [`is_official_client`] with the daemon's own
@@ -409,6 +475,12 @@ fn peer_sandbox_app_id(pid: u32, context: &str) -> Result<Option<String>, ()> {
 /// life resolve the peer here: `auth_request` at mint time, and the
 /// per-request authorization check on every call after it.
 ///
+/// A peer that arrived over TCP has no kernel-attested identity at all, so it
+/// is resolved from its `Origin` instead — see [`PeerInfo::web_origin`]. That
+/// field is only ever set by the origin gate, which has already checked the
+/// value against the user's allowlist; nothing here re-derives it from a
+/// header, so there is exactly one place an origin can enter the system.
+///
 /// The caller **must fail closed** on `None`: the consent model verifies a
 /// *binary*, so an unidentifiable peer must not be prompted for (a
 /// `<unknown>`-labelled dialog is meaningless to approve) nor minted a token
@@ -424,6 +496,11 @@ pub(crate) fn resolve_peer_identity(
         );
         return None;
     };
+    if let Some(origin) = &peer.web_origin {
+        return Some(PeerIdentity::Web {
+            origin: origin.clone(),
+        });
+    }
     let Some(pid) = peer.pid else {
         log::warn!(
             "{context}: PeerInfo had no pid (SO_PEERCRED returned no credentials); cannot resolve exe"
@@ -440,7 +517,7 @@ pub(crate) fn resolve_peer_identity(
     };
     let flatpak_app_id = peer_sandbox_app_id(pid, context).ok()?;
 
-    Some(PeerIdentity {
+    Some(PeerIdentity::Native {
         exe_path,
         flatpak_app_id,
     })

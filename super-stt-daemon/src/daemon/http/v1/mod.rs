@@ -27,8 +27,8 @@ pub(crate) mod update;
 pub(crate) mod wire;
 
 use crate::daemon::http::internal::auth::middleware::{
-    require_any_authenticated, require_rate_limit, require_secrets_scope, require_settings_scope,
-    require_status_scope, require_transcribe_scope,
+    require_allowed_origin, require_any_authenticated, require_rate_limit, require_secrets_scope,
+    require_settings_scope, require_status_scope, require_transcribe_scope,
 };
 use crate::daemon::http::openapi::ApiDoc;
 use crate::daemon::http::state::AppState;
@@ -144,9 +144,20 @@ fn assemble(groups: ScopeGroups) -> OpenApiRouter<AppState> {
 }
 
 /// The live `/v1` router, guards applied and state bound.
+///
+/// The origin gate wraps everything, including `/v1/auth/request` — the one
+/// route no scope guards. That is deliberate: `auth_request` is what opens a
+/// consent dialog, so a page from an unlisted origin must be stopped before it
+/// can put a popup on the user's screen, not merely stopped from using the
+/// token it would mint.
 pub(crate) fn router(state: AppState) -> Router {
     let (router, _spec) = assemble(guarded(scope_groups(), &state)).split_for_parts();
-    router.with_state(state)
+    router
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_allowed_origin,
+        ))
+        .with_state(state)
 }
 
 /// The generated document for the same surface. The guards are omitted because

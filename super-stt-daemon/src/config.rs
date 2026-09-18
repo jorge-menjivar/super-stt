@@ -21,6 +21,8 @@ pub struct DaemonConfig {
     pub update: UpdateConfig,
     #[serde(default)]
     pub post_processor: PostProcessorConfig,
+    #[serde(default)]
+    pub http: HttpConfig,
 }
 
 /// Self-update checking. Contract: docs/protocol/endpoints/v1/update.md
@@ -157,6 +159,170 @@ impl PostProcessorConfig {
     }
 }
 
+/// The daemon's HTTP surface beyond the Unix socket it always serves.
+///
+/// Contract: `docs/protocol/transport.md`. Every field is defaulted, so a
+/// `daemon.toml` written before the section existed loads with the TCP
+/// listener off — which is the only state in which the daemon's callers are
+/// all peer-credential-verified.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct HttpConfig {
+    #[serde(default)]
+    pub tcp: TcpConfig,
+}
+
+/// The loopback TCP listener, which is what a browser can reach.
+///
+/// A browser cannot dial a Unix socket, so a web client needs this. What it
+/// costs is the identity model: `SO_PEERCRED` gives the Unix socket a caller
+/// identity the kernel vouches for, and TCP has no equivalent. A TCP caller is
+/// identified by its `Origin` header instead — asserted by the browser, not
+/// proven.
+///
+/// **What guards the surface is therefore consent, not this config.** Any page
+/// may *ask*; the dialog names the site and the user decides. That is the same
+/// bargain the Unix socket strikes with a binary, one notch weaker because the
+/// name comes from the browser rather than the kernel — which is what the
+/// dialog says, in those words.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TcpConfig {
+    /// Whether the daemon also serves the API on `127.0.0.1:{port}`.
+    ///
+    /// On by default, so a web client works without the user first finding a
+    /// config file. A port that cannot be bound is logged and skipped rather
+    /// than fatal: the Unix socket is the daemon's primary transport, and
+    /// refusing to start because something else holds this port would take the
+    /// whole daemon down for the sake of an extra.
+    #[serde(default = "default_tcp_enabled")]
+    pub enabled: bool,
+    /// The loopback port to bind.
+    ///
+    /// Fixed rather than OS-chosen because it is half of a browser client's
+    /// origin: a port that moved on every restart would invalidate the other
+    /// side's bookmarks and its stored token binding. The number itself has no
+    /// registered meaning.
+    #[serde(default = "default_tcp_port")]
+    pub port: u16,
+    /// The browser origins allowed to call the API, each a full origin such as
+    /// `http://127.0.0.1:8910` — scheme, host and port, no trailing slash.
+    /// [`ANY_ORIGIN`] anywhere in the list admits every origin, which is the
+    /// default.
+    ///
+    /// Admitting an origin is permission to *ask*, not permission to act: a
+    /// page still faces the consent dialog, and the token it gets is bound to
+    /// its own origin and useless to any other. Narrowing this list is for
+    /// deployments that want a page stopped before it can put a dialog on the
+    /// user's screen at all.
+    ///
+    /// An empty list admits nothing — the deliberate lockdown, distinct from
+    /// the default. Either way the daemon enforces this itself on every
+    /// request rather than relying on the CORS headers it also sends: CORS is a
+    /// browser-side courtesy that a non-browser client simply ignores, so it
+    /// cannot be what guards the surface.
+    #[serde(default = "default_allowed_origins")]
+    pub allowed_origins: Vec<String>,
+}
+
+/// The wildcard entry for [`TcpConfig::allowed_origins`], spelled as CORS
+/// spells it.
+pub const ANY_ORIGIN: &str = "*";
+
+/// See [`TcpConfig::enabled`].
+fn default_tcp_enabled() -> bool {
+    true
+}
+
+/// The loopback port the daemon serves on unless told otherwise.
+///
+/// Public because it is not only a default: it is the number a browser client
+/// hard-codes, the one the published `OpenAPI` document advertises as a server,
+/// and the one the protocol docs quote. Those must all move together, so they
+/// all read it from here.
+///
+/// **7300–7309 is the block reserved for the Super family**, one port per
+/// daemon: `7300` Super STT, `7301` Super TTS, the rest unused for now. A block
+/// rather than a number apiece so a sibling never has to repeat this search,
+/// and so a firewall rule or a document can name the whole family at once.
+///
+/// The band was picked for how empty it is rather than for looking nice. The
+/// 7000s has no conventional block reservation — unlike the 5000s, where VNC
+/// takes 5900–5999, and the 6000s, where X11 takes 6000–6063 — and 7284–7364
+/// is 81 consecutive ports unassigned in IANA's registry, `genstat` at 7283
+/// below and `lcm-server` at 7365 above. This block sits in the middle of that.
+/// The busy parts of the 7000s are all well outside it: 7860 is Gradio's
+/// default, which matters more than its absence from the registry suggests
+/// since it is where ML demo apps land; 7777, 7474 and 7687 are likewise taken
+/// in practice.
+///
+/// See [`TcpConfig::port`] for why a fixed number rather than an OS-chosen one.
+pub const DEFAULT_TCP_PORT: u16 = 7300;
+
+/// See [`DEFAULT_TCP_PORT`].
+fn default_tcp_port() -> u16 {
+    DEFAULT_TCP_PORT
+}
+
+/// See [`TcpConfig::allowed_origins`].
+fn default_allowed_origins() -> Vec<String> {
+    vec![ANY_ORIGIN.to_string()]
+}
+
+/// Written out rather than derived so a `TcpConfig::default()` and a config
+/// deserialized from an absent `[http.tcp]` agree on every field. The derived
+/// impl would answer `false`, `0` and `[]` — which is not merely a different
+/// default but the opposite behaviour, since `0` means "let the OS choose" to
+/// every bind call that saw it and `[]` admits nothing.
+impl Default for TcpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_tcp_enabled(),
+            port: default_tcp_port(),
+            allowed_origins: default_allowed_origins(),
+        }
+    }
+}
+
+impl TcpConfig {
+    /// The address to bind, or `None` when the listener is switched off.
+    ///
+    /// Always loopback: a listener reachable from the network would be a
+    /// different product with a different threat model, and nothing in the
+    /// consent flow is prepared for a caller on another host.
+    #[must_use]
+    pub fn bind_addr(&self) -> Option<std::net::SocketAddr> {
+        self.enabled.then(|| {
+            std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, self.port))
+        })
+    }
+
+    /// Whether `origin` is one the user has allowed.
+    ///
+    /// [`ANY_ORIGIN`] anywhere in the list admits everything. Otherwise this is
+    /// an exact, case-sensitive match: origins are compared as the opaque
+    /// strings browsers send rather than parsed and normalized, so there is no
+    /// gap between what the user wrote down and what is accepted — a prefix or
+    /// suffix match here would let `http://127.0.0.1:8910.evil.test` through.
+    ///
+    /// Note what this does *not* do: it never widens what a caller becomes. An
+    /// admitted origin is still recorded as itself, so a wildcard list grants
+    /// every page its own identity rather than a shared one.
+    #[must_use]
+    pub fn is_origin_allowed(&self, origin: &str) -> bool {
+        self.allowed_origins
+            .iter()
+            .any(|a| a == ANY_ORIGIN || a == origin)
+    }
+
+    /// Whether the list is the permissive default.
+    ///
+    /// Only used to phrase the startup log, so an operator can see which of the
+    /// two the running daemon is doing without going to read the config.
+    #[must_use]
+    pub fn admits_any_origin(&self) -> bool {
+        self.allowed_origins.iter().any(|a| a == ANY_ORIGIN)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionConfig {
     /// Whether the user has stage 1 switched on: what Load sets and Unload
@@ -290,6 +456,7 @@ impl Default for DaemonConfig {
             backends: BackendsConfig::default(),
             update: UpdateConfig::default(),
             post_processor: PostProcessorConfig::default(),
+            http: HttpConfig::default(),
         }
     }
 }
