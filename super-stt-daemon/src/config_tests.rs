@@ -885,3 +885,165 @@ fn rename_active_backend_preserves_the_model_preference() {
     assert_eq!(c.transcription.preferred_model, "voxtral-mini");
     assert_eq!(c.transcription.preferred_provider, "local_voxtral");
 }
+
+/// The `[http]` section is optional: a `daemon.toml` written before it existed
+/// loads, and gets the same listener a fresh install gets. Upgrading a config
+/// is not a way to end up with a daemon that behaves differently from a new one.
+#[test]
+fn config_without_http_section_gets_the_default_listener() {
+    let toml_str = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "classic"
+volume = 100
+
+[transcription]
+preferred_model = "whisper-tiny"
+write_mode = false
+preview_typing_enabled = false
+recording_stop_mode = "silence_and_manual"
+write_method = "auto"
+"#;
+    let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+    assert!(config.http.tcp.enabled);
+    assert!(config.http.tcp.admits_any_origin());
+    assert_eq!(
+        config.http.tcp.bind_addr(),
+        DaemonConfig::default().http.tcp.bind_addr(),
+        "an upgraded config listens exactly where a fresh one does"
+    );
+}
+
+/// The serde defaults and `Default::default()` must agree on every field. They
+/// are written in two places, and a config round-tripping through
+/// `DaemonConfig::default()` would otherwise behave differently from one read
+/// from a file with an empty section.
+#[test]
+fn tcp_defaults_are_the_same_whether_constructed_or_deserialized() {
+    let from_empty_section: DaemonConfig =
+        toml::from_str("[device]\npreferred_device = \"cpu\"\n\n[audio]\ntheme = \"classic\"\nvolume = 100\n\n[transcription]\npreferred_model = \"\"\nwrite_mode = false\npreview_typing_enabled = false\nrecording_stop_mode = \"silence_and_manual\"\nwrite_method = \"auto\"\n\n[http.tcp]\n")
+            .expect("should deserialize");
+    assert_eq!(from_empty_section.http.tcp, DaemonConfig::default().http.tcp);
+    assert_ne!(from_empty_section.http.tcp.port, 0, "0 would mean OS-chosen");
+}
+
+/// An explicitly empty list is the lockdown, and has to stay distinct from the
+/// permissive default — otherwise "I listed no origins" would read as "I listed
+/// them all", which is the wrong way round for a field to fail.
+#[test]
+fn an_enabled_listener_with_no_origins_allows_nothing() {
+    let tcp = crate::config::TcpConfig {
+        enabled: true,
+        port: crate::config::DEFAULT_TCP_PORT,
+        allowed_origins: Vec::new(),
+    };
+    assert!(tcp.bind_addr().is_some(), "the listener is on");
+    assert!(!tcp.admits_any_origin());
+    assert!(!tcp.is_origin_allowed("http://127.0.0.1:8910"));
+    assert!(!tcp.is_origin_allowed(""));
+}
+
+/// The default admits any origin. Consent, not this list, is what a page has to
+/// get past — so the wildcard is a real setting rather than a way of skipping
+/// the check.
+#[test]
+fn the_default_origin_list_admits_anything() {
+    let tcp = crate::config::TcpConfig::default();
+    assert!(tcp.admits_any_origin());
+    for origin in [
+        "http://localhost:8910",
+        "https://example.test",
+        "http://127.0.0.1:1",
+    ] {
+        assert!(tcp.is_origin_allowed(origin), "{origin} should be admitted");
+    }
+}
+
+/// A wildcard alongside named origins still admits everything. The list is read
+/// as a set of permissions, not as an ordered ruleset with overrides, so a
+/// stray `*` cannot be narrowed by the entries beside it.
+#[test]
+fn a_wildcard_beside_named_origins_still_admits_anything() {
+    let tcp = crate::config::TcpConfig {
+        enabled: true,
+        port: crate::config::DEFAULT_TCP_PORT,
+        allowed_origins: vec![
+            "http://localhost:8910".to_string(),
+            crate::config::ANY_ORIGIN.to_string(),
+        ],
+    };
+    assert!(tcp.is_origin_allowed("https://anything.test"));
+}
+
+/// Origins match exactly. A prefix or suffix test here would admit
+/// `http://127.0.0.1:8910.evil.test`, which is a different site entirely.
+#[test]
+fn origin_matching_is_exact() {
+    let tcp = crate::config::TcpConfig {
+        enabled: true,
+        port: crate::config::DEFAULT_TCP_PORT,
+        allowed_origins: vec!["http://127.0.0.1:8910".to_string()],
+    };
+    assert!(tcp.is_origin_allowed("http://127.0.0.1:8910"));
+    for near_miss in [
+        "http://127.0.0.1:8910.evil.test",
+        "http://127.0.0.1:8910/",
+        "https://127.0.0.1:8910",
+        "http://127.0.0.1:89100",
+        "http://localhost:8910",
+        "HTTP://127.0.0.1:8910",
+    ] {
+        assert!(
+            !tcp.is_origin_allowed(near_miss),
+            "{near_miss} is not the allowed origin"
+        );
+    }
+}
+
+/// The listener binds loopback whatever else is configured: nothing in the
+/// consent flow is prepared for a caller on another host.
+#[test]
+fn the_tcp_listener_binds_loopback_only() {
+    let tcp = crate::config::TcpConfig {
+        enabled: true,
+        port: crate::config::DEFAULT_TCP_PORT,
+        allowed_origins: Vec::new(),
+    };
+    let addr = tcp.bind_addr().expect("enabled");
+    assert!(addr.ip().is_loopback());
+    assert_eq!(addr.port(), crate::config::DEFAULT_TCP_PORT);
+}
+
+/// The default port stays inside the family's reserved block, and out of the
+/// ranges the system hands out on its own.
+///
+/// This is the one number that cannot be changed quietly: it is baked into
+/// every user's stored config, every browser client's allowlist, and the
+/// `servers` entry of the published protocol document. Asserting the
+/// constraints here means a change to it has to be deliberate enough to also
+/// change this test.
+#[test]
+fn the_default_port_sits_in_the_reserved_super_block() {
+    const SUPER_BLOCK: std::ops::RangeInclusive<u16> = 7300..=7309;
+    let port = crate::config::DEFAULT_TCP_PORT;
+
+    assert!(
+        SUPER_BLOCK.contains(&port),
+        "{port} is outside the Super family block {SUPER_BLOCK:?}"
+    );
+    assert!(
+        port >= 1024,
+        "{port} is a privileged port; the daemon does not run as root"
+    );
+    assert!(
+        !(30000..=32767).contains(&port),
+        "{port} is in the Kubernetes NodePort range"
+    );
+    assert!(
+        !(32768..=60999).contains(&port),
+        "{port} is in Linux's default ephemeral range, where the kernel hands \
+         the port to outgoing connections and the daemon loses the race at boot"
+    );
+}

@@ -67,22 +67,55 @@
       onerror="document.getElementById('fallback').style.display='block'"
     ></script>
     <script>
+      // The name of the security scheme in openapi.json. Swagger UI keys its
+      // auth store by this, so it has to match or the token lands nowhere.
+      const SECURITY_SCHEME = "session_token";
+
+      // Hand a freshly minted token to the Authorize box.
+      //
+      // Swagger UI does this by itself only for OAuth2 and OpenID Connect,
+      // where it runs the flow. Ours is a plain bearer scheme, so as far as
+      // Swagger is concerned `POST /v1/auth/request` is an endpoint like any
+      // other and its response is just JSON to look at — leaving the reader to
+      // copy a 64-character token by hand into a box two inches away.
+      function captureToken(response) {
+        try {
+          if (!response.ok || !/\/v1\/auth\/request$/.test(response.url)) return;
+          const token = (response.body || {}).session_token;
+          if (!token || !window.ui) return;
+          window.ui.authActions.authorize({
+            [SECURITY_SCHEME]: {
+              name: SECURITY_SCHEME,
+              schema: { type: "http", scheme: "bearer" },
+              value: token,
+            },
+          });
+        } catch (e) {
+          // Never let this break the response the reader asked for; the
+          // Authorize box still works by hand.
+          console.warn("could not capture the session token:", e);
+        }
+      }
+
       window.addEventListener("load", function () {
         if (typeof SwaggerUIBundle === "undefined") return;
         window.ui = SwaggerUIBundle({
           url: "./openapi.json",
           dom_id: "#swagger-ui",
           deepLinking: true,
-          // No "Try it out". The daemon listens on a Unix domain socket, which
-          // a browser cannot dial, so an interactive request form could only
-          // ever produce failures.
-          supportedSubmitMethods: [],
-          tryItOutEnabled: false,
           docExpansion: "list",
           defaultModelsExpandDepth: 1,
           defaultModelExpandDepth: 3,
           displayRequestDuration: false,
           filter: true,
+          // Keep the token across reloads. A session lasts 30 days and is
+          // bound to this page's origin, so re-minting one on every refresh
+          // means another consent dialog for a grant the user already gave.
+          persistAuthorization: true,
+          responseInterceptor: function (response) {
+            captureToken(response);
+            return response;
+          },
         });
       });
     </script>

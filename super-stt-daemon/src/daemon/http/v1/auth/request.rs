@@ -72,6 +72,46 @@ fn cached_deny_response(
     ))
 }
 
+/// `403 uid_mismatch` when the caller is a process belonging to another user,
+/// else `None`.
+///
+/// Checked BEFORE spawning a popup or touching consent state. Socket perms
+/// `0o660` + group `stt` mean a second user in that group can otherwise pop
+/// dialogs on the daemon owner's desktop in another app's name. `peer_cred` is
+/// `None` only on platforms without `SO_PEERCRED` — treated as fail-closed,
+/// since we expect Linux.
+///
+/// A web caller is exempt because there is no uid to compare, not because the
+/// check is optional: it has already passed the origin allowlist, which is the
+/// gate that stands in for this one on the TCP listener. The exemption keys off
+/// the request's *own* validated origin rather than a header, so a Unix peer
+/// cannot claim it by sending an `Origin`.
+fn reject_foreign_uid(peer: Option<&PeerInfo>) -> Option<Response> {
+    if peer.is_some_and(|p| p.web_origin.is_some()) {
+        return None;
+    }
+    let daemon_uid = unsafe { libc::geteuid() };
+    match peer.and_then(|p| p.uid) {
+        Some(uid) if uid == daemon_uid => None,
+        Some(uid) => {
+            log::warn!("auth_request rejected: peer uid {uid} differs from daemon uid {daemon_uid}");
+            Some(auth_err(
+                StatusCode::FORBIDDEN,
+                "auth_denied",
+                reason::UID_MISMATCH,
+            ))
+        }
+        None => {
+            log::warn!("auth_request rejected: peer uid unavailable");
+            Some(auth_err(
+                StatusCode::FORBIDDEN,
+                "auth_denied",
+                reason::UID_MISMATCH,
+            ))
+        }
+    }
+}
+
 /// First-party short-circuit for `auth_request`: a trusted co-located
 /// client binary skips the popup and mints immediately. `None` means
 /// the peer is not first-party and the normal consent flow proceeds.
@@ -155,26 +195,8 @@ pub(crate) async fn auth_request(
     }
     let scopes = normalize_scopes(&body.scopes);
 
-    // Reject same-host, different-user peers BEFORE spawning a popup
-    // or touching consent state. Socket perms 0o660 + group `stt`
-    // mean a second user in that group can otherwise pop dialogs on
-    // the daemon owner's desktop in another app's name. peer_cred is
-    // None only on platforms without SO_PEERCRED — treat that as
-    // safe-fail-closed since we expect Linux.
-    let daemon_uid = unsafe { libc::geteuid() };
-    let peer_uid = peer.as_ref().and_then(|p| p.0.uid);
-    match peer_uid {
-        Some(uid) if uid == daemon_uid => {}
-        Some(uid) => {
-            log::warn!(
-                "auth_request rejected: peer uid {uid} differs from daemon uid {daemon_uid}"
-            );
-            return auth_err(StatusCode::FORBIDDEN, "auth_denied", reason::UID_MISMATCH);
-        }
-        None => {
-            log::warn!("auth_request rejected: peer uid unavailable");
-            return auth_err(StatusCode::FORBIDDEN, "auth_denied", reason::UID_MISMATCH);
-        }
+    if let Some(rejection) = reject_foreign_uid(peer.as_ref().map(|p| &p.0)) {
+        return rejection;
     }
 
     // Resolve the calling binary via /proc/<pid>/exe. If it can't be resolved
