@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Super STT daemon protocol",
-    "description": "HTTP/1.1 + JSON over a Unix domain socket at `$XDG_RUNTIME_DIR/stt/super-stt-http.sock` (override with `SUPER_STT_HTTP_SOCKET`). There is no TCP listener: the socket's filesystem permissions are the first layer of access control, and the daemon reads `SO_PEERCRED` on each connection to identify the calling binary.\n\nEvery endpoint except `POST /v1/auth/request` requires `Authorization: Bearer <token>`. A token is minted only after the user approves your app in a consent popup, and is bound to the approved binary — an app cannot widen its own permissions. See `docs/protocol/auth.md`.\n\nBecause the transport is a Unix socket, the `servers` entry below is nominal; point your client at the socket and use any `Host`. With curl:\n\n```\ncurl --unix-socket \"$XDG_RUNTIME_DIR/stt/super-stt-http.sock\" \\\n     -H \"Authorization: Bearer $STT_TOKEN\" \\\n     http://stt.local/v1/ping\n```",
+    "description": "HTTP/1.1 + JSON on two transports that serve the identical API.\n\n**A Unix domain socket** at `$XDG_RUNTIME_DIR/stt/super-stt-http.sock` (override with `SUPER_STT_HTTP_SOCKET`), which is what native clients use. Its filesystem permissions are the first layer of access control, and the daemon reads `SO_PEERCRED` on each connection to identify the calling binary. It is the second server below, listed by its real path — dial that path directly and send whatever `Host` you like, since the daemon ignores it.\n\n**A loopback TCP listener**, which is what a browser can reach, since no browser can dial a Unix socket. It is the first server below, and it is a real address. There are no peer credentials on TCP, so a caller there is identified by its `Origin` instead — a claim from the browser rather than a fact from the kernel, which is why the consent dialog says so.\n\nEvery endpoint except `POST /v1/auth/request` requires `Authorization: Bearer <token>`. A token is minted only after the user approves your client in a consent dialog, and is bound to whichever identity was approved — a binary or an origin, never interchangeable. A client cannot widen its own permissions. See `docs/protocol/auth.md`.\n\nWith curl, over the socket:\n\n```\ncurl --unix-socket \"$XDG_RUNTIME_DIR/stt/super-stt-http.sock\" \\\n     -H \"Authorization: Bearer $STT_TOKEN\" \\\n     http://stt.local/v1/ping\n```",
     "contact": {
       "name": "Super STT",
       "url": "https://github.com/jorge-menjivar/super-stt"
@@ -15,8 +15,18 @@
   },
   "servers": [
     {
-      "url": "http://stt.local",
-      "description": "Nominal host; the transport is the Unix socket"
+      "url": "http://127.0.0.1:7300",
+      "description": "The daemon's default loopback TCP listener. Your browser can reach this."
+    },
+    {
+      "url": "unix://{runtime_dir}/stt/super-stt-http.sock",
+      "description": "The Unix socket native clients use. No browser can dial it. Use with curl instead.",
+      "variables": {
+        "runtime_dir": {
+          "default": "/run/user/1000",
+          "description": "Your `$XDG_RUNTIME_DIR` — `/run/user/<uid>` on a systemd host, with `/tmp/stt` as the fallback. Override the whole socket path with `SUPER_STT_HTTP_SOCKET`."
+        }
+      }
     }
   ],
   "paths": {
@@ -25,7 +35,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Ask the user for a session token",
+        "summary": "Ask the user for a session token (no token needed)",
         "description": "The consent handshake, and the only endpoint reachable without a token.\n\nThe daemon reads `SO_PEERCRED` on your connection, resolves `/proc/<pid>/exe`, and shows the user a popup naming that binary and the scopes you asked for. On Allow it mints a 32-byte token bound to that binary and valid for 30 days.\n\nA denial is remembered for the `(binary, scopes)` pair for the rest of the daemon's lifetime and answers `403` immediately without re-prompting — renaming your app does not clear it, since the key is the binary. Restarting the daemon does.\n\nSetting `SUPER_STT_AUTO_APPROVE=1` in the daemon's environment skips the popup entirely; it is for tests and CI, not for production.",
         "operationId": "auth_request",
         "requestBody": {
@@ -87,7 +97,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Check the held token without prompting",
+        "summary": "Check the held token without prompting (any valid token)",
         "description": "Reports what the presented token is good for, and never opens a consent popup — which is what makes it the right probe for a headless or CLI client. Reaching this handler at all means the token validated.\n\nUse it to fail fast on a token about to expire, rather than discovering it mid-operation.",
         "operationId": "auth_status",
         "responses": {
@@ -134,7 +144,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "List installed backends",
+        "summary": "List installed backends (scope: settings)",
         "description": "Every backend installed on this machine, each with the models it serves, the options it exposes, and which of its secrets are configured. Secret *values* are never returned — only whether each is set.\n\nThis is the full catalog, roles included. `GET /pipeline/{stage}/model/list` is the narrower read a stage's model picker wants; browsing what is *available to install* is `GET /registry/backend/list`.",
         "operationId": "list_backends",
         "responses": {
@@ -193,7 +203,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "Uninstall a backend",
+        "summary": "Uninstall a backend (scope: settings)",
         "description": "Removes an installed backend and its files from disk.\n\nIf the backend was filling a pipeline stage, that stage is emptied first: any loaded model is unloaded and the selection cleared, so the daemon does not end up pointing at files that no longer exist. The response says which stages were affected.\n\nRefused with `409 backend_busy` while a recording or realtime session is in flight — removing files out from under one would strand state it still depends on.",
         "operationId": "uninstall_backend",
         "parameters": [
@@ -284,7 +294,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "List a backend's options",
+        "summary": "List a backend's options (scope: settings)",
         "description": "Every option this backend declares, each with its label, type, default, and the value actually in effect. This is what a settings UI renders a form from.\n\nOptions are the backend's own configuration — an endpoint URL, a model parameter — declared in its manifest. Credentials are not options; those are secrets, at `/backend/{backend_id}/secret/list`.",
         "operationId": "list_options",
         "parameters": [
@@ -365,7 +375,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "Read one option's effective value",
+        "summary": "Read one option's effective value (scope: settings)",
         "description": "The value in effect for a single option, alongside the manifest default so a UI can show what clearing it would revert to.",
         "operationId": "get_option",
         "parameters": [
@@ -453,7 +463,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "Override an option",
+        "summary": "Override an option (scope: settings)",
         "description": "Stores a value for this option, overriding the manifest default. Answers with the option's new effective value, so a UI can render the result without a second read.\n\nA `base_url` value is canonicalized before storage, so the field reads back the endpoint that will actually be dialed — the scheme in particular, since whether a request is encrypted should not be invisible in the field the user is looking at. A value that yields no host is stored as typed rather than refused; model load rejects it by name. Every other option is stored verbatim, whitespace included, because it may carry meaning the daemon does not interpret.\n\nA loaded model does not pick this up on its own — reload the stage with `POST /pipeline/{stage}/model/reload`.",
         "operationId": "set_option",
         "parameters": [
@@ -561,7 +571,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "Clear an option override",
+        "summary": "Clear an option override (scope: settings)",
         "description": "Removes the stored value, reverting the option to the manifest default. Answers with the effective value that results, which is the default when one is declared and `null` when none is.",
         "operationId": "delete_option",
         "parameters": [
@@ -651,7 +661,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "List a backend's secrets",
+        "summary": "List a backend's secrets (scope: secrets)",
         "description": "Every credential this backend declares, with whether each is currently set. **Values are never returned** — not here, not anywhere. They live in the system keyring, and the only operations are write and clear.\n\nThis is a separate scope from `settings` precisely because it is the credential surface: a token granted `settings` cannot reach it.",
         "operationId": "list_secrets",
         "parameters": [
@@ -732,7 +742,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "Check whether one secret is set",
+        "summary": "Check whether one secret is set (scope: secrets)",
         "description": "Reports existence only. There is no endpoint that returns a stored credential.",
         "operationId": "get_secret",
         "parameters": [
@@ -820,7 +830,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "Store a secret",
+        "summary": "Store a secret (scope: secrets)",
         "description": "Writes the credential to the system keyring. It cannot be read back afterwards; only replaced or cleared.\n\nA loaded model does not pick up a new credential on its own — reload the stage with `POST /pipeline/{stage}/model/reload`.",
         "operationId": "set_secret",
         "parameters": [
@@ -938,7 +948,7 @@
         "tags": [
           "backends"
         ],
-        "summary": "Clear a secret",
+        "summary": "Clear a secret (scope: secrets)",
         "description": "Removes the stored credential from the keyring, returning the secret to unset. A backend that requires it will refuse to load until one is stored again.",
         "operationId": "delete_secret",
         "parameters": [
@@ -1038,7 +1048,7 @@
         "tags": [
           "events"
         ],
-        "summary": "Subscribe to the event stream",
+        "summary": "Subscribe to the event stream (any valid token)",
         "description": "A Server-Sent Events stream of everything the daemon publishes. The response is `text/event-stream` and stays open until the client disconnects, the daemon shuts down, or the calling binary changes on disk (which emits a final `revoked` frame and invalidates the token).\n\nThe first frame is always `subscribed`, carrying a `client_id` and the topic list that was accepted. A `: keepalive` comment is sent periodically so idle connections are not reaped by intermediaries.\n\n**Scopes are per topic, not per endpoint.** Any valid token reaches this route; the subscription is then refused whole if the token lacks the scope for *any* requested topic, so ask only for what you hold.\n\n| Topic | Scope |\n|---|---|\n| `recording_started`, `recording_stopped`, `recording_state`, `transcribing_started`, `transcribing_stopped` | `recording_events` |\n| `frequency_bands` | `audio_visualization` |\n| `partial_stt`, `final_stt` | `global_transcriptions` |\n| `daemon_status_changed`, `download_progress`, `registry_install` | `daemon_status` |\n\nUnder backpressure the daemon drops frames rather than buffering them without bound; visualization frames are what shed in practice.",
         "operationId": "events",
         "parameters": [
@@ -1113,7 +1123,7 @@
         "tags": [
           "hardware"
         ],
-        "summary": "Inventory the host's GPUs",
+        "summary": "Inventory the host's GPUs (scope: settings)",
         "description": "What the daemon can see of this machine's accelerators: one entry per detected GPU with its memory, plus the host-wide driver and runtime versions that decide which backend builds will actually run here.\n\nDetection is a live probe, so this reflects the machine now rather than a cached answer. A host with no GPU answers `200` with an empty list.",
         "operationId": "get_gpu_info",
         "responses": {
@@ -1172,7 +1182,7 @@
         "tags": [
           "health"
         ],
-        "summary": "Liveness probe",
+        "summary": "Liveness probe (any valid token)",
         "description": "Confirms the listener is reachable and the presented token is valid. Introspects no state.\n\nTo check whether the *token* is still good without risking a consent popup, prefer `GET /auth/status` — that is the dedicated probe.",
         "operationId": "ping",
         "responses": {
@@ -1233,7 +1243,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Report every pipeline stage",
+        "summary": "Report every pipeline stage (scope: settings)",
         "description": "The ordered stages a transcript passes through. Stage 1 turns audio into text; every later stage rewrites what the one before it produced.\n\nEach stage reports the backend filling it and whether the stage is switched on. What that backend is running is one level down, at `GET /pipeline/{stage}/model` — a stage is a durable selection, its model has a runtime, and reporting the two together is what once let the stages drift apart. Stages are addressed by position precisely so a third can be appended without inventing a third endpoint for it.",
         "operationId": "get_pipeline",
         "responses": {
@@ -1292,7 +1302,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Report one pipeline stage",
+        "summary": "Report one pipeline stage (scope: settings)",
         "description": "The backend filling this position, and whether the stage is switched on. The same object `GET /pipeline` carries in its array, for a client that only cares about one position — narrowed from that report rather than derived separately, so one stage and the whole list can never disagree.\n\nThe model is not here: read it at `GET /pipeline/{stage}/model`.",
         "operationId": "get_stage",
         "parameters": [
@@ -1373,7 +1383,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Select the backend filling a stage",
+        "summary": "Select the backend filling a stage (scope: settings)",
         "description": "Points a stage at an installed backend. Selecting a backend does not load a model — do that with `POST /pipeline/{stage}/model`.\n\nA backend that serves nothing this stage can run is refused: filling stage 2 with a transcription-only backend would leave the user staring at an empty model picker with no reason given.",
         "operationId": "set_stage_backend",
         "parameters": [
@@ -1474,7 +1484,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Empty a stage",
+        "summary": "Empty a stage (scope: settings)",
         "description": "Deselects the stage's backend, unloading its model first if one is up. The stage then does nothing: stage 1 empty means no transcription, stage 2 empty means transcripts pass through unrewritten.",
         "operationId": "clear_stage_backend",
         "parameters": [
@@ -1557,7 +1567,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "List the backends that can fill a stage",
+        "summary": "List the backends that can fill a stage (scope: settings)",
         "description": "The installed backends serving at least one model this stage can run, in the shape `GET /backend/list` returns them.\n\nFill a stage's backend picker from this rather than from `GET /backend/list`: a backend serving nothing this stage can run is refused by `POST /pipeline/{stage}`, and offering one hands the user an error to discover by choosing it. A backend serving both roles appears in both stages' lists.\n\nEmpty when nothing installed serves this stage — the state that should read as \"install one\" rather than as an empty dropdown.",
         "operationId": "list_stage_backends",
         "parameters": [
@@ -1640,7 +1650,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "List the devices this stage's backend can run on",
+        "summary": "List the devices this stage's backend can run on (scope: settings)",
         "description": "The devices the backend filling this stage can run on this host, without naming a model. Use it before a model is chosen; once one is, the per-model list is the narrower and more accurate answer.",
         "operationId": "list_stage_devices",
         "parameters": [
@@ -1733,7 +1743,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Report a stage's model",
+        "summary": "Report a stage's model (scope: settings)",
         "description": "What the stage is pointed at, whether it is loaded, which accelerator it runs on, and the load still in flight.\n\n`model` is the *selection*, not the running instance: it survives an unload, so a card can offer to load the same model again — onto another device, say — without the user picking it a second time. `loaded` is what says whether it is up. The two are separate at every stage; stage 1 collapsed them into one until the stages were made to behave alike.\n\n`device` carries the stored preference and what it resolved to, which is all a picker needs to render its current value. What the model *could* run on is `GET /pipeline/{stage}/model/{model}/device/list`, kept separate because that answer costs a fresh probe of the host's accelerators.",
         "operationId": "get_stage_model",
         "parameters": [
@@ -1814,7 +1824,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Run a model in a stage",
+        "summary": "Run a model in a stage (scope: settings)",
         "description": "Loads `model` into the stage, downloading it first if this machine does not have it yet. That download can be long: watch the `download_progress` event topic, or poll `GET /pipeline/{stage}/model` and read `switch`. Abandon it with `POST /pipeline/{stage}/model/cancel`.\n\nOmitting `source` uses the backend already selected for the stage.",
         "operationId": "set_stage_model",
         "parameters": [
@@ -1915,7 +1925,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Stop a stage's model",
+        "summary": "Stop a stage's model (scope: settings)",
         "description": "Unloads the model, freeing its device memory, and leaves the backend selected so a different model can be loaded without re-selecting it. To empty the stage entirely, use `DELETE /pipeline/{stage}`.",
         "operationId": "clear_stage_model",
         "parameters": [
@@ -1998,7 +2008,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Abandon a stage's in-flight load",
+        "summary": "Abandon a stage's in-flight load (scope: settings)",
         "description": "Stops the download or load this stage has in flight. Scoped to the stage: the stages provision independently, so cancelling one is not a licence to abandon another's download.\n\n`409 no_switch_in_progress` when the stage has nothing in flight.",
         "operationId": "cancel_stage_model",
         "parameters": [
@@ -2091,7 +2101,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "List the models a stage can run",
+        "summary": "List the models a stage can run (scope: settings)",
         "description": "The models the backend filling this stage serves *in this stage's role* — transcription models for stage 1, post-processors for stage 2. Fill a model picker from this.\n\nScoped twice over, and both halves matter. A model from another backend cannot load here; a model with the wrong role loads and then fails on every use, which for a post-processor picked as a transcription model means each recording fails after the user has already spoken.\n\nThe full catalog, every installed backend and every role, is `GET /backend/list`. This is the narrow read a stage's picker wants, and it is answered per stage precisely so a client does not have to re-derive roles for itself.",
         "operationId": "list_stage_models",
         "parameters": [
@@ -2174,7 +2184,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Re-instantiate a stage's model in place",
+        "summary": "Re-instantiate a stage's model in place (scope: settings)",
         "description": "Tears the model down and brings it back up so it picks up changed secrets and options — an API key set through `/backend/{backend_id}/secret/list`, say — without the client having to unload and reload by hand.\n\nNothing is re-downloaded; the files on disk are unchanged.",
         "operationId": "reload_stage_model",
         "parameters": [
@@ -2257,7 +2267,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Read a model's device preference",
+        "summary": "Read a model's device preference (scope: settings)",
         "description": "The accelerator this model is set to run on, and — when the preference is the generic `gpu` — what it actually resolved to once loaded. The preference is per model, not per stage: two models in the same stage can prefer different devices.",
         "operationId": "get_model_device",
         "parameters": [
@@ -2347,7 +2357,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Set a model's device preference",
+        "summary": "Set a model's device preference (scope: settings)",
         "description": "Chooses the accelerator this model runs on. If it is the model the stage is currently running, it is reloaded onto the new device; otherwise the preference is stored and takes effect at the next load.\n\nEvery stage reloads the same way — unload, then load on the new device — and a reload that fails puts the model back on the device it had, leaves the setting as it was, and answers `500` with the reason.\n\nList what this host can offer with `GET /pipeline/{stage}/model/{model}/device/list`.",
         "operationId": "set_model_device",
         "parameters": [
@@ -2469,7 +2479,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "List the devices a model can run on here",
+        "summary": "List the devices a model can run on here (scope: settings)",
         "description": "What this machine can actually offer this model — the intersection of the host's accelerators and the builds the model ships. Fill a device picker from this rather than from `GET /gpu_info`, which reports the hardware without regard to what the model supports.",
         "operationId": "list_model_devices",
         "parameters": [
@@ -2561,7 +2571,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Read a model's language override",
+        "summary": "Read a model's language override (scope: settings)",
         "description": "The language this specific model transcribes in, and what decided it: the per-model override, the global `/settings/language` setting, or the model's own default. Addressed by `(source, model)` rather than \"the active model\", so it can be read whether or not the model is loaded.\n\n`override` is `null` when none is set, which is what \"follows the global setting\" looks like. What the override *may* be set to is `GET /pipeline/{stage}/model/{model}/language/list`.",
         "operationId": "get_model_language",
         "parameters": [
@@ -2661,7 +2671,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Set a model's language override",
+        "summary": "Set a model's language override (scope: settings)",
         "description": "Pins this model to a language regardless of the global `/settings/language` setting. A tag the model does not serve is refused rather than silently ignored.\n\nOverridden in turn by a `language` field in a single `POST /transcribe` body.",
         "operationId": "set_model_language",
         "parameters": [
@@ -2771,7 +2781,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "Clear a model's language override",
+        "summary": "Clear a model's language override (scope: settings)",
         "description": "Removes the per-model pin, returning this model to the global `/settings/language` setting.",
         "operationId": "clear_model_language",
         "parameters": [
@@ -2873,7 +2883,7 @@
         "tags": [
           "pipeline"
         ],
-        "summary": "List the languages a model can be pinned to",
+        "summary": "List the languages a model can be pinned to (scope: settings)",
         "description": "What `POST /pipeline/{stage}/model/{model}/language` will accept for this model: the tags it serves, plus the reserved `auto` for letting it detect the language itself.\n\nFill a language picker from this rather than from a general BCP-47 list — a tag the model does not serve is refused, and offering one is an error the user only discovers by choosing it.\n\nEmpty for a monolingual model, which has nothing to choose however many tags its manifest lists. That is the same shape `GET /pipeline/{stage}/model/{model}/device/list` answers with for a model that runs remotely, and a client hides the control on an empty list rather than special-casing a status.",
         "operationId": "list_model_languages",
         "parameters": [
@@ -2975,7 +2985,7 @@
         "tags": [
           "registry"
         ],
-        "summary": "Install a backend",
+        "summary": "Install a backend (scope: settings)",
         "description": "Installs a backend from the registry, from a git repo, or from a local path — send exactly one of `source`, `repo_url`, or `local_path`.\n\nThe daemon picks the release asset matching this host's architecture and accelerators, and answers `202` as soon as that choice is made: the download itself continues in the background. Follow it on the `registry_install` event topic, keyed by the returned `install_id`. A `warning` means the install proceeded with a caveat worth showing the user.\n\nInstalling neither selects the backend nor loads a model — do that through `/pipeline/{stage}`.",
         "operationId": "install_registry_backend",
         "requestBody": {
@@ -3074,7 +3084,7 @@
         "tags": [
           "registry"
         ],
-        "summary": "Browse the published backend catalog",
+        "summary": "Browse the published backend catalog (scope: settings)",
         "description": "Every backend published to the registry, with the models each serves and whether this machine can run it. `compatible` is decided against the host's actual accelerators and this Super STT's version, so the list reflects what is installable here rather than what exists in general.\n\n`needs_client_update` separates the two ways a backend can be blocked: a host that lacks the right GPU will never run it, but a Super STT one version behind is something the user can fix in a minute. Surface those differently.\n\nThis is what is *available*; `GET /backend/list` is what is installed.",
         "operationId": "list_registry_backends",
         "parameters": [
@@ -3190,7 +3200,7 @@
         "tags": [
           "registry"
         ],
-        "summary": "Preview what a source would install",
+        "summary": "Preview what a source would install (scope: settings)",
         "description": "Resolves `source`, `repo_url`, or `local_path` exactly as `/registry/backend/install` does, then answers with the backend it found instead of installing it. Send exactly one of the three.\n\nThe backend comes back in the same shape as a `/registry/backend/list` entry, `compatibility` included, so a client can show a preview with whatever it already uses for the catalog. `warning` carries `unverified_source` for the custom-repo and local-import routes, the same as the install response.\n\nNothing is written and nothing is downloaded beyond the manifest needed to answer, so this is safe to call before every install and safe to call twice.",
         "operationId": "preview_registry_backend",
         "requestBody": {
@@ -3279,7 +3289,7 @@
         "tags": [
           "registry"
         ],
-        "summary": "Re-fetch the backend catalog",
+        "summary": "Re-fetch the backend catalog (scope: settings)",
         "description": "Pulls the published index again rather than serving what is cached, and reports how many backends it now holds. Use it after a backend is published, or to clear an `index_stale` flag.\n\n`GET /registry/backend/list` refreshes on its own schedule; this forces it now.",
         "operationId": "refresh_registry",
         "responses": {
@@ -3348,7 +3358,7 @@
         "tags": [
           "registry"
         ],
-        "summary": "Update an installed backend",
+        "summary": "Update an installed backend (scope: settings)",
         "description": "Upgrades an installed backend to the newest version the catalog offers for this host. Answers with the versions moved between; `noop` is `true` when the installed version was already current, which is a success rather than an error.\n\nLike install, the download runs in the background — follow `install_id` on the `registry_install` topic when one is returned.",
         "operationId": "update_registry_backend",
         "requestBody": {
@@ -3437,7 +3447,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read the selected audio cue theme",
+        "summary": "Read the selected audio cue theme (scope: settings)",
         "description": "Answers with the selected theme's token.",
         "operationId": "get_audio_theme",
         "responses": {
@@ -3494,7 +3504,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Select the audio cue theme",
+        "summary": "Select the audio cue theme (scope: settings)",
         "description": "Chooses which set of sounds marks the start and end of a recording. List the accepted values with `GET /settings/audio_theme/list`; set the loudness at `/settings/volume`.",
         "operationId": "set_audio_theme",
         "requestBody": {
@@ -3573,7 +3583,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "List the available audio cue themes",
+        "summary": "List the available audio cue themes (scope: settings)",
         "description": "Every theme `POST /settings/audio_theme` accepts. The set is fixed in the daemon build, not user-extensible.",
         "operationId": "list_audio_themes",
         "responses": {
@@ -3632,7 +3642,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Play the selected theme's cues",
+        "summary": "Play the selected theme's cues (scope: settings)",
         "description": "Plays the start and stop cues once, at the configured volume, so a settings UI can preview a theme without starting a recording. Changes nothing.",
         "operationId": "test_audio_theme",
         "responses": {
@@ -3691,7 +3701,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read the custom models directory",
+        "summary": "Read the custom models directory (scope: settings)",
         "description": "Answers with the configured path, or `null` when no override is set.",
         "operationId": "get_custom_models_dir",
         "responses": {
@@ -3748,7 +3758,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Point the daemon at a models directory of your own",
+        "summary": "Point the daemon at a models directory of your own (scope: settings)",
         "description": "Overrides where the daemon looks for model files. Send `null` to clear the override and fall back to the default location. Backends installed from the registry are unaffected — this is for models supplied out of band.",
         "operationId": "set_custom_models_dir",
         "requestBody": {
@@ -3827,7 +3837,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read the default transcription language",
+        "summary": "Read the default transcription language (scope: settings)",
         "description": "A BCP-47 tag, `auto`, or `null` when nothing is configured.",
         "operationId": "get_language",
         "responses": {
@@ -3884,7 +3894,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Set the default transcription language",
+        "summary": "Set the default transcription language (scope: settings)",
         "description": "Sets the language every model transcribes in unless something more specific overrides it: a per-model setting, or a `language` field in a single `POST /transcribe` body.",
         "operationId": "set_language",
         "requestBody": {
@@ -3961,7 +3971,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Clear the default transcription language",
+        "summary": "Clear the default transcription language (scope: settings)",
         "description": "Removes the global setting, returning every model to detecting the language itself. Per-model overrides are untouched.",
         "operationId": "clear_language",
         "responses": {
@@ -4020,7 +4030,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "List the languages the global setting accepts",
+        "summary": "List the languages the global setting accepts (scope: settings)",
         "description": "The tags `POST /settings/language` will take, plus the reserved `auto`.\n\nFill the global language picker from this rather than from a BCP-47 list of your own: the tags are region-qualified on purpose, and a backend is free to declare either `en` or `en-US` for its models — the daemon narrows a qualified global to whichever a model actually serves, which is a rule no client can infer.\n\nA tag for one particular model belongs on that model, at `POST /pipeline/{stage}/model/{model}/language`, whose own list may be narrower.",
         "operationId": "list_languages",
         "responses": {
@@ -4079,7 +4089,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read how failures are announced",
+        "summary": "Read how failures are announced (scope: settings)",
         "description": "Answers with the configured method. This governs only failures the user would otherwise never learn about — a transcript that could not be written to the focused window, say — not routine status, which rides on the event stream.",
         "operationId": "get_notification_method",
         "responses": {
@@ -4136,7 +4146,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Choose how failures are announced",
+        "summary": "Choose how failures are announced (scope: settings)",
         "description": "Selects how the daemon tells the user when something goes wrong — a desktop notification, or nothing at all. This is about failures the user would otherwise never see, such as a transcript that could not be written to the focused window.",
         "operationId": "set_notification_method",
         "requestBody": {
@@ -4215,7 +4225,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read whether live preview typing is on",
+        "summary": "Read whether live preview typing is on (scope: settings)",
         "description": "Answers with the current state. On means a realtime-capable model's partial transcript is typed into the focused window as it forms; off means nothing is written until the transcript is final. A model without a realtime session ignores the setting either way.",
         "operationId": "get_preview_typing",
         "responses": {
@@ -4272,7 +4282,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Turn live preview typing on or off",
+        "summary": "Turn live preview typing on or off (scope: settings)",
         "description": "When on, a realtime-capable model's incremental transcript is typed into the focused window as it forms, and corrected in place as later audio revises it. When off, nothing is written until the transcript is final.",
         "operationId": "set_preview_typing",
         "requestBody": {
@@ -4341,7 +4351,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read what currently ends a recording",
+        "summary": "Read what currently ends a recording (scope: settings)",
         "description": "Answers with the configured mode. It governs daemon-mic captures started through `POST /transcribe`; the pre-captured path has no capture to end, and a `wait: true` caller can always end one by closing the connection.",
         "operationId": "get_recording_stop_mode",
         "responses": {
@@ -4398,7 +4408,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Choose what ends a recording",
+        "summary": "Choose what ends a recording (scope: settings)",
         "description": "Sets whether a recording stops on an explicit signal, on a period of silence, or on either. This governs daemon-mic captures started through `POST /transcribe`; it has no bearing on the pre-captured path, which has no capture to end.",
         "operationId": "set_recording_stop_mode",
         "requestBody": {
@@ -4477,7 +4487,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read the update channel opt-in",
+        "summary": "Read the update channel opt-in (scope: settings)",
         "description": "Answers with the configured opt-in — whether the update check considers beta builds or stable releases only. This is about Super STT itself, not about the backends under `/registry`, which are versioned separately.",
         "operationId": "get_update_beta_optin",
         "responses": {
@@ -4534,7 +4544,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Choose whether updates include prereleases",
+        "summary": "Choose whether updates include prereleases (scope: settings)",
         "description": "Selects which release channel the update check considers. Opting in offers beta builds as they are published; opting out considers stable releases only.",
         "operationId": "set_update_beta_optin",
         "requestBody": {
@@ -4613,7 +4623,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read whether periodic update checks are on",
+        "summary": "Read whether periodic update checks are on (scope: settings)",
         "description": "Answers with the current state. Off stops the daemon checking on its own schedule; it does not disable updating, since `POST /update/check` still runs a check on demand.",
         "operationId": "get_update_check_enabled",
         "responses": {
@@ -4670,7 +4680,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Turn the periodic update check on or off",
+        "summary": "Turn the periodic update check on or off (scope: settings)",
         "description": "Controls whether the daemon checks for new Super STT releases on its own schedule. Turning it off does not disable updating — `POST /update/check` still works on demand.",
         "operationId": "set_update_check_enabled",
         "requestBody": {
@@ -4739,7 +4749,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read the audio cue volume",
+        "summary": "Read the audio cue volume (scope: settings)",
         "description": "The level rides in `message` as a bare number — `\"75\"` — not as a field of its own, so parse it back out.",
         "operationId": "get_volume",
         "responses": {
@@ -4796,7 +4806,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Set the audio cue volume",
+        "summary": "Set the audio cue volume (scope: settings)",
         "description": "Sets the loudness of the recording cues on a 0–100 scale. `0` silences them without changing which theme is selected; the theme itself is read and written at `/settings/audio_theme`.",
         "operationId": "set_volume",
         "requestBody": {
@@ -4875,7 +4885,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Read how transcripts are delivered",
+        "summary": "Read how transcripts are delivered (scope: settings)",
         "description": "Answers with the configured preference. What it actually resolves to in this session can differ — `POST /settings/write_method/test` reports both.",
         "operationId": "get_write_method",
         "responses": {
@@ -4932,7 +4942,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Choose how transcripts reach the focused window",
+        "summary": "Choose how transcripts reach the focused window (scope: settings)",
         "description": "Selects the mechanism the daemon uses to deliver a finished transcript — simulated typing, the clipboard, and so on. Which mechanisms work depends on the session: some need a compositor that permits synthetic input. Try one with `POST /settings/write_method/test` before committing a user to it.",
         "operationId": "set_write_method",
         "requestBody": {
@@ -5011,7 +5021,7 @@
         "tags": [
           "settings"
         ],
-        "summary": "Write sample text using the configured method",
+        "summary": "Write sample text using the configured method (scope: settings)",
         "description": "Delivers a short sample to the focused window exactly as a real transcript would be, so a user can confirm the method works before relying on it. Focus the window that should receive it first.\n\nThe response reports both the configured preference and what it resolved to, which is how a UI shows that a preferred mechanism silently fell back to another. Refused with `409` while a recording is in flight.",
         "operationId": "test_write_method",
         "responses": {
@@ -5070,7 +5080,7 @@
         "tags": [
           "health"
         ],
-        "summary": "Current model and device",
+        "summary": "Current model and device (scope: status)",
         "description": "A snapshot of what the daemon is running: which model is loaded, on which accelerator, and whether a recording cycle is in flight.\n\nSubscriber introspection and other operator detail are not exposed here — see `GET /pipeline/1` and `GET /pipeline/{stage}/model/{model}/device`, which need the `settings` scope.",
         "operationId": "status",
         "responses": {
@@ -5129,7 +5139,7 @@
         "tags": [
           "transcribe"
         ],
-        "summary": "Transcribe supplied audio, or start a microphone recording",
+        "summary": "Transcribe supplied audio, or start a microphone recording (scope: transcribe)",
         "description": "One endpoint with four behaviours, selected by the body:\n\n| Body | Behaviour | Response |\n|---|---|---|\n| `audio_data` present | Transcribe the supplied buffer; the microphone is never opened | `200` JSON with `transcription` |\n| no `audio_data`, `wait: false` (default) | Start recording and detach; stop it with `POST /transcribe/stop` | `202` with `message: \"Recording started\"` |\n| `wait: true` | Record, then stream the result | `200 text/event-stream`, one `done` frame |\n| `wait: true`, `stream_realtime: true` | As above, plus incremental previews | `200 text/event-stream`, `preview` frames then `done` |\n\nOn the streaming paths a daemon-side failure arrives as a single `error` frame, and closing the connection stops the recording. Frames are:\n\n| `event:` | `data:` |\n|---|---|\n| `preview` | `{ \"text\": \"hello wor…\", \"source\": \"window\" }` |\n| `done` | `{ \"transcription\": \"hello world\" }` |\n| `error` | `{ \"message\": \"…\" }` |\n\nA preview's `source` says what its text spans: `stream` is a realtime model's own running transcript, everything heard so far, and each frame extends the last; `window` is a few seconds of capture the daemon re-transcribed, and each frame replaces the last. Whether previews arrive at all is the model's call, not the request's — a batch model streams only `done` unless its manifest sets `force_preview_support`.\n\nStarting while a recording is already in flight is `409 recording_in_progress` — this endpoint only ever *starts* one. Read `busy` from `GET /status` and call `POST /transcribe/stop` to end the running capture.",
         "operationId": "transcribe",
         "requestBody": {
@@ -5233,7 +5243,7 @@
         "tags": [
           "transcribe"
         ],
-        "summary": "Open a realtime transcription session (WebSocket)",
+        "summary": "Open a realtime transcription session (WebSocket) (scope: transcribe)",
         "description": "An HTTP/1.1 upgrade to a WebSocket, bridged to the loaded model's realtime session. Send audio frames, receive transcript frames as they form.\n\nOnly realtime-capable models serve this. The daemon caps concurrent sessions and answers `503` rather than queueing beyond it; a session with no incoming frame for a minute is treated as dead and dropped.\n\nBeing a WebSocket, the frame protocol is not describable in OpenAPI — see `docs/protocol/wit/realtime.wit` for the message shapes.",
         "operationId": "realtime_ws_handler",
         "responses": {
@@ -5295,7 +5305,7 @@
         "tags": [
           "transcribe"
         ],
-        "summary": "Stop the in-flight microphone recording",
+        "summary": "Stop the in-flight microphone recording (scope: transcribe)",
         "description": "Ends a recording started by `POST /transcribe`. Idempotent: stopping when nothing is recording succeeds with `No recording in progress`.\n\n`message` says what happened — `Recording stop signal sent`, `Manual stop not enabled in current mode`, or `Transcription in progress, please wait`. The transcript itself does not come back here; it arrives on the `final_stt` event topic, or on the stream if the recording was started with `wait: true`.",
         "operationId": "transcribe_stop",
         "responses": {
@@ -5358,7 +5368,7 @@
         "tags": [
           "update"
         ],
-        "summary": "Read the last self-update check",
+        "summary": "Read the last self-update check (scope: settings)",
         "description": "Reports what the most recent check found, without performing one. `checked_at` is `null` until a check has run, and `last_check_error` says why the last attempt failed if it did.\n\nWhich channel is consulted follows `/settings/update_beta_optin`; `beta_optin_effective` reports the setting even before a check has resolved a channel of its own. To force a check now, use `POST /update/check`.",
         "operationId": "get_update",
         "responses": {
@@ -5417,7 +5427,7 @@
         "tags": [
           "update"
         ],
-        "summary": "Check for a Super STT update now",
+        "summary": "Check for a Super STT update now (scope: settings)",
         "description": "Runs the check immediately rather than waiting for the daemon's own schedule, and answers with the result — the same shape `GET /update` reports. Works whether or not the periodic check is enabled.\n\nThis only *looks*. Nothing is downloaded or installed as a result.",
         "operationId": "post_check",
         "responses": {
@@ -7935,7 +7945,7 @@
       "session_token": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Session token from `POST /v1/auth/request`. Bound to the calling binary and valid for 30 days."
+        "description": "Session token from `POST /v1/auth/request`. Valid for 30 days, and bound to whoever the user approved: the calling binary over the Unix socket, or the page's origin over TCP. It stops working if that identity changes."
       }
     }
   },
