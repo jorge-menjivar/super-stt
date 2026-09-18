@@ -290,9 +290,8 @@ impl TcpConfig {
     /// consent flow is prepared for a caller on another host.
     #[must_use]
     pub fn bind_addr(&self) -> Option<std::net::SocketAddr> {
-        self.enabled.then(|| {
-            std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, self.port))
-        })
+        self.enabled
+            .then(|| std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, self.port)))
     }
 
     /// Whether `origin` is one the user has allowed.

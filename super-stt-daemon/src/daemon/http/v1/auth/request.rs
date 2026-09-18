@@ -94,7 +94,9 @@ fn reject_foreign_uid(peer: Option<&PeerInfo>) -> Option<Response> {
     match peer.and_then(|p| p.uid) {
         Some(uid) if uid == daemon_uid => None,
         Some(uid) => {
-            log::warn!("auth_request rejected: peer uid {uid} differs from daemon uid {daemon_uid}");
+            log::warn!(
+                "auth_request rejected: peer uid {uid} differs from daemon uid {daemon_uid}"
+            );
             Some(auth_err(
                 StatusCode::FORBIDDEN,
                 "auth_denied",

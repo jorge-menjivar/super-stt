@@ -310,8 +310,12 @@ async fn serve_connection<S>(
         .await
     {
         warn!("connection rejected for {client_id}: {e}; sending 503 connection_rejected");
-        let _ = write_oneshot_response(stream, StatusCode::SERVICE_UNAVAILABLE, "connection_rejected")
-            .await;
+        let _ = write_oneshot_response(
+            stream,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "connection_rejected",
+        )
+        .await;
         return;
     }
 

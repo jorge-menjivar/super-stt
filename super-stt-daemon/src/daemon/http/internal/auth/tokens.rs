@@ -744,10 +744,7 @@ mod schema_tests {
     use std::collections::HashMap;
 
     fn v2_blob(exe: &str, flatpak: Option<&str>) -> String {
-        let flatpak_field = flatpak.map_or_else(
-            || "null".to_string(),
-            |id| format!("\"{id}\""),
-        );
+        let flatpak_field = flatpak.map_or_else(|| "null".to_string(), |id| format!("\"{id}\""));
         format!(
             r#"{{"version":2,"sessions":{{"tok":{{"app_name":"Old App","scopes":["status"],
                "exe_path":"{exe}","flatpak_app_id":{flatpak_field},
@@ -775,8 +772,9 @@ mod schema_tests {
     /// inherit each other's sessions.
     #[test]
     fn a_v2_sandboxed_grant_keeps_its_app_id() {
-        let loaded = parse_sessions_blob(&v2_blob("/app/bin/super-stt-app", Some("org.example.App")))
-            .expect("a v2 blob is readable");
+        let loaded =
+            parse_sessions_blob(&v2_blob("/app/bin/super-stt-app", Some("org.example.App")))
+                .expect("a v2 blob is readable");
         let meta = loaded.sessions.get("tok").expect("the session survives");
         assert_eq!(
             meta.grantee,
