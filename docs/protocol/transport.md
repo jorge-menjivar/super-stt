@@ -11,23 +11,30 @@ It is the protocol-wide companion to:
 - the per-scope docs under [`scopes/`](./scopes/) — what each scope unlocks
 - [`/events`](./endpoints/v1/events.md) — the SSE topic reference
 
-The wire shape is HTTP/1.1 over a Unix domain socket. A future config
-flag will let the daemon bind a TCP listener with the same HTTP API
-(see "Forward compatibility with TCP" below); the endpoints,
-headers, JSON bodies, and SSE framing all stay the same.
+The wire shape is HTTP/1.1, served on two transports that carry the
+identical API: a Unix domain socket for native clients and a loopback
+TCP listener for browsers. The endpoints, headers, JSON bodies and SSE
+framing are the same on both — only who the daemon takes you to be
+differs, which is what ["The TCP listener"](#the-tcp-listener) below is
+about.
 
 ## Where the daemon listens
 
-| Transport      | Address                                            | When                                |
-|----------------|----------------------------------------------------|-------------------------------------|
-| Unix socket    | `$XDG_RUNTIME_DIR/stt/super-stt-http.sock`         | Always (default)                    |
-| TCP            | `127.0.0.1:<configurable port>`                    | Optional, opt-in via daemon config  |
+| Transport      | Address                                            | When                                     |
+|----------------|----------------------------------------------------|------------------------------------------|
+| Unix socket    | `$XDG_RUNTIME_DIR/stt/super-stt-http.sock`         | Always                                   |
+| TCP            | `127.0.0.1:7300`                                   | On by default; `[http.tcp]` turns it off |
 
 Native Linux clients should use the Unix socket. The daemon authenticates
 peers there via `SO_PEERCRED` + `/proc/<pid>/exe`, which is what the
-consent design depends on. The TCP bind is intended for browser apps
-where `SO_PEERCRED` isn't available — see
+consent design depends on. The TCP listener is for browser clients, which
+cannot dial a Unix socket and for which `SO_PEERCRED` does not exist — see
 [auth.md](./auth.md#tcp-bound-clients).
+
+A port that cannot be bound is logged and skipped rather than fatal: the
+Unix socket is the daemon's primary transport, and refusing to start
+because something else holds the port would take dictation, the applet and
+the CLI down for the sake of an extra.
 
 The socket path can be overridden via the `SUPER_STT_HTTP_SOCKET`
 environment variable (tests use this to bind a unique socket per run).
@@ -257,29 +264,61 @@ no `error_code` and surfaces as `500`.
 > `scope_denied`) still appear there verbatim for that reason. New clients
 > should switch on `error_code`.
 
-## Forward compatibility with TCP
+## The TCP listener
 
-When the daemon's TCP listener is enabled, the same HTTP API is served
-on `127.0.0.1:<port>`. Three things change:
+The same HTTP API is served on `127.0.0.1:7300`. The endpoints, the
+`Authorization` header and the JSON bodies are identical; three things
+around them are not.
 
-1. **Auth identity.** `SO_PEERCRED` doesn't apply, so the consent
-   popup prompts for a *web origin* (the `Origin` request header)
-   rather than an exe path. Tokens issued under TCP are keyed by
-   `(app_name, web_origin)` instead of `(app_name, exe_path)`. The
-   wire shape (Authorization header, JSON bodies) is identical.
+1. **Auth identity.** `SO_PEERCRED` does not apply, so a caller here is
+   identified by its `Origin` header — a claim from the browser rather
+   than a fact from the kernel. The consent dialog names the origin, and
+   says in so many words that this is the weaker of the two checks. A
+   token is bound to the whole identity, so one minted for an origin is
+   refused to any other origin and to every binary, and the reverse.
+   `app_name` is not part of the identity: it is self-reported, and
+   renaming your app neither widens nor narrows what a token covers.
 
-2. **CORS / Private Network Access headers** are present on TCP
-   responses. Browsers enforce them; raw TCP clients ignore them.
-   These headers are emitted on the Unix socket too, where they're
-   harmlessly ignored.
+2. **An origin allowlist.** `[http.tcp].allowed_origins` in
+   `daemon.toml` says which origins may call at all. The default is
+   `["*"]` — any page may *ask*, and the consent dialog is what it has
+   to get past. An origin that is not on the list is refused with `403`
+   and `data.reason = "origin_not_allowed"`, before authentication,
+   before consent, and before any dialog can reach the user's screen.
+   An empty list admits nothing, which is the deliberate lockdown.
 
-3. **TLS.** Chrome's Private Network Access spec wants HTTPS for
-   public-site → localhost requests. The daemon presents a self-signed
-   cert for `localhost` when TCP-bound; the user accepts it once.
+   The daemon enforces this itself rather than relying on the CORS
+   headers it also sends. CORS instructs a *browser* to refuse a
+   response; a non-browser client on the same port ignores it entirely,
+   so it cannot be what guards the surface.
 
-Native Linux clients on the Unix socket get peer-credential-verified
-identity. Browser clients on TCP get origin-verified identity. Both
-hit the same endpoints.
+3. **CORS and Private Network Access headers**, on TCP responses only —
+   the Unix socket never sees them, since nothing that reaches it is
+   subject to them. `Access-Control-Allow-Origin` echoes the validated
+   origin rather than `*`, so the header can never name an origin the
+   user did not authorize. A preflight is answered directly, and a
+   preflight carrying `Access-Control-Request-Private-Network: true`
+   (Chrome's check for a public page reaching a loopback address) is
+   answered with `Access-Control-Allow-Private-Network: true`.
+
+There is no TLS. A loopback address is a [potentially trustworthy
+origin](https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy),
+so `https://page` → `http://127.0.0.1:7300` is exempt from mixed-content
+blocking and needs no certificate.
+
+Native clients on the Unix socket get peer-credential-verified identity.
+Browser clients on TCP get origin-verified identity. Both hit the same
+endpoints.
+
+### Port 7300
+
+`7300`–`7309` is the block reserved for the Super family, one port per
+daemon: `7300` Super STT, `7301` Super TTS, the rest unused for now.
+
+The port is fixed rather than OS-chosen because it is half of a browser
+client's origin: one that moved on every restart would invalidate the
+other side's bookmarks and its stored token binding. Change it with
+`[http.tcp].port` if something else on your machine wants it.
 
 ## Authoring a non-Rust client
 

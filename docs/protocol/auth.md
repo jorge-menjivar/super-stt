@@ -255,7 +255,7 @@ Content-Type: application/json
 |----------------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
 | `unknown`      | Token isn't recognized — never issued, or revoked since.                                            | Drop your cached token and re-issue `POST /auth/request`.        |
 | `expired`      | Token is older than its `expires_at` (30 days from issue).                                          | Same — drop and re-auth.                                         |
-| `exe_changed`  | Your binary's path no longer matches what the user approved (upgrade, relocation, replacement).     | Same — re-auth. The user must consent again to the new binary.   |
+| `exe_changed`  | You are no longer the caller the user approved — a changed binary path (upgrade, relocation, replacement), or a token presented from a different web origin. | Same — re-auth. The user must consent again to the new caller.   |
 
 A second class of failure is `403 scope_denied` — the token is
 valid but wasn't granted the scope this endpoint (or topic) requires:
@@ -332,10 +332,14 @@ Rules to remember:
 - **Scopes:** The set the user approved, bound at issue time. To
   change the set, request a new token (a new popup); never share a
   token across apps.
-- **Binding:** Tied to the binary's `/proc/<pid>/exe` at issue
-  time. If that path changes (upgrade, move, replacement), the
-  next request returns `401 invalid_session` with reason
-  `exe_changed`, and the user must consent again.
+- **Binding:** Tied to whoever the user approved — the binary's
+  `/proc/<pid>/exe` over the Unix socket, or the page's `Origin` over
+  TCP. The two are never interchangeable: a token granted to a binary
+  is refused to a page and the reverse. Checked on every request, not
+  only at issue time. If the identity stops matching (upgrade, move,
+  replacement; a different origin), the next request returns `401
+  invalid_session` with reason `exe_changed`, the session is revoked,
+  and the user must consent again.
 
 ## Behavior the client author should expect
 
@@ -360,20 +364,28 @@ A few non-obvious facts about how tokens behave on the wire:
 
 ## TCP-bound clients
 
-A future config flag lets the daemon bind a TCP listener with the
-same HTTP API on `127.0.0.1:<port>`. The auth flow has a few
-differences:
+The daemon also serves the same HTTP API on `127.0.0.1:7300`, which is
+what a browser can reach — see
+[transport.md](./transport.md#the-tcp-listener). The wire shape
+(endpoints, headers, JSON bodies) is identical; the auth flow differs in
+four ways:
 
-- The popup shows the **web origin** (`https://www.someapp.com`)
-  instead of an executable path, since browsers don't expose peer
-  credentials.
-- Tokens are bound to `(app_name, web_origin)` instead of
-  `(app_name, exe_path)`. Per-request validation re-checks the
-  `Origin` header.
-- The popup explicitly notes that web-origin identity is browser-
-  enforced and not as strong as binary-path verification.
-
-The wire shape (endpoints, headers, JSON bodies) is identical.
+- **A page must be on the allowlist to ask at all.**
+  `[http.tcp].allowed_origins` defaults to `["*"]`, so by default any
+  page may. One that is not on the list is refused with `403` and
+  `data.reason = "origin_not_allowed"` — before the request reaches
+  consent, so an unlisted page cannot put a dialog on the user's screen.
+- **The dialog names the origin** (`https://www.someapp.com`) instead of
+  an executable path, since browsers do not expose peer credentials.
+  `app_name` is not shown for a web caller: it is self-reported, and a
+  page that could put a string of its own choosing in front of the user
+  could label itself anything.
+- **Tokens are bound to the origin**, not to `(app_name, origin)`.
+  Renaming your app changes nothing; calling from another origin fails
+  with `exe_changed`, and that revokes the session.
+- **The dialog says the check is weaker.** An exe path is what the
+  kernel reports; an origin is what the browser reports. The user is
+  told which one they are being asked about.
 
 ## Anti-replacement
 
@@ -391,8 +403,15 @@ data: { "reason": "exe_changed" }
 
 and the connection closes. The client must re-issue
 `/auth/request` (which triggers a fresh popup) before reopening
-the subscription. For TCP-bound clients the same check runs against
-the `Origin` header instead of `/proc/<pid>/exe`.
+the subscription.
+
+This watch is for binaries only. A web subscriber has no binary to
+watch — its identity is an origin, and an origin cannot be swapped on
+disk mid-stream. What *can* change is the allowlist, and this watch does
+not see that: a stream opened while an origin was allowed outlives the
+origin's removal, until the client disconnects. Every new request from
+that origin is refused, so the exposure is bounded to streams already
+open.
 
 ## Unauthenticated requests
 

@@ -63,8 +63,9 @@ Reference:
   [Swagger UI](https://jorge-menjivar.github.io/super-stt/protocol/) and
   [Scalar](https://jorge-menjivar.github.io/super-stt/protocol/scalar.html).
   Locally, `just openapi-serve` opens the first and `just openapi-serve
-  --scalar` the second. Neither offers "Try it out": the daemon listens on a
-  Unix socket, which a browser cannot dial.
+  --scalar` the second. The Swagger view offers "Try it out", which reaches a
+  running daemon over its TCP listener — a browser cannot dial the Unix
+  socket.
 - [transport.md](./transport.md) — the wire shape: HTTP framing, SSE, error
   envelopes, connection lifecycle, and a minimal non-Rust client recipe.
 - [auth.md](./auth.md) — the consent handshake, tokens, and the full scope
