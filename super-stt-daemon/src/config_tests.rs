@@ -925,8 +925,14 @@ fn tcp_defaults_are_the_same_whether_constructed_or_deserialized() {
     let from_empty_section: DaemonConfig =
         toml::from_str("[device]\npreferred_device = \"cpu\"\n\n[audio]\ntheme = \"classic\"\nvolume = 100\n\n[transcription]\npreferred_model = \"\"\nwrite_mode = false\npreview_typing_enabled = false\nrecording_stop_mode = \"silence_and_manual\"\nwrite_method = \"auto\"\n\n[http.tcp]\n")
             .expect("should deserialize");
-    assert_eq!(from_empty_section.http.tcp, DaemonConfig::default().http.tcp);
-    assert_ne!(from_empty_section.http.tcp.port, 0, "0 would mean OS-chosen");
+    assert_eq!(
+        from_empty_section.http.tcp,
+        DaemonConfig::default().http.tcp
+    );
+    assert_ne!(
+        from_empty_section.http.tcp.port, 0,
+        "0 would mean OS-chosen"
+    );
 }
 
 /// An explicitly empty list is the lockdown, and has to stay distinct from the
