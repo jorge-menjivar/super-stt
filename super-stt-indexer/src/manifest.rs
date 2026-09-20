@@ -63,6 +63,11 @@ pub enum ManifestError {
     /// The same value appears twice in one option's `choices`.
     #[error("option `{0}` lists the choice {1:?} more than once")]
     DuplicateChoice(String, String),
+    /// An option's `default` cannot be delivered to the backend as a request
+    /// header. Refused at publication because nobody installing the backend can
+    /// work around it: the default is what they get for touching nothing.
+    #[error("option `{0}` has a default that cannot be sent to the backend: {1}")]
+    UndeliverableDefault(String, String),
 }
 
 pub fn validate(
@@ -139,6 +144,18 @@ pub fn validate(
     // default outside the list, or a duplicate entry, would be a list the user
     // can neither choose from nor return to. Caught at publication because the
     // daemon reads a manifest it cannot fix.
+    // A default is delivered exactly as a user-set value is, so it has to
+    // survive the same journey: the daemon injects it as an `x-stt-option-*`
+    // header when the user has set nothing. A default carrying a line break
+    // breaks the header for everyone who installs the backend and never touches
+    // the setting — the failure no user action could cause and none can undo.
+    for o in &m.options {
+        if let Some(default) = &o.default
+            && let Err(e) = o.permits_shape(&default.to_string())
+        {
+            return Err(ManifestError::UndeliverableDefault(o.name.clone(), e));
+        }
+    }
     for o in &m.options {
         if o.choices.is_empty() {
             continue;
@@ -253,6 +270,25 @@ mod tests {
         .expect_err("a switch does not get a list");
         assert!(
             matches!(err, ManifestError::BoolWithChoices(ref n) if n == "tidy"),
+            "got: {err}"
+        );
+    }
+
+    /// A default is what a user gets for touching nothing, so a default that
+    /// cannot be delivered is a backend that is broken on arrival and cannot be
+    /// unbroken from the settings UI.
+    #[test]
+    fn a_default_that_cannot_be_sent_as_a_header_is_refused() {
+        let err = validate_option(
+            r#"
+            name = "greeting"
+            description = "How to open."
+            default = "Hello,\nthere"
+            "#,
+        )
+        .expect_err("a line break cannot ride in a header");
+        assert!(
+            matches!(err, ManifestError::UndeliverableDefault(ref n, _) if n == "greeting"),
             "got: {err}"
         );
     }

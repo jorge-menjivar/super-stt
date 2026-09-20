@@ -115,6 +115,11 @@ headers — external clients cannot set them.
 - Secrets and options come from the backend's [configuration](./config.md),
   with values set by the user in the settings UI. The header for a secret or
   option the user has not set is omitted.
+- An option value is refused before it is stored if a header cannot carry it:
+  over 4000 characters, or containing a control character. So a backend reading
+  an option header gets a single line, always, and the daemon has already said
+  no to the user rather than handing the backend something its transport will
+  reject.
 - `x-stt-option-base_url` is the one option header the daemon normalizes. It
   carries a canonical `scheme://host[:port][/path]`: lowercase scheme, no
   userinfo, no trailing slash, no query or fragment, and a port only when the

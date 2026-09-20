@@ -1120,6 +1120,75 @@ async fn an_option_write_reconfigures_the_running_model() {
     );
 }
 
+/// A value the transports cannot carry is refused, and not stored.
+///
+/// An option value is injected as an `x-stt-option-*` request header, and a
+/// header holds no control character. Storing one and reporting success is the
+/// worst outcome available: the settings UI then shows a value the backend is
+/// not using, and every request the backend makes dies inside the transport
+/// naming a header rather than the setting the user typed. Both halves are
+/// asserted — the refusal, and that nothing was written behind it.
+#[tokio::test]
+async fn an_option_value_a_header_cannot_carry_is_refused() {
+    use super_stt_shared::models::protocol::ErrorCode;
+
+    let daemon = test_daemon().await;
+    let source = "github.com/x/opts";
+    *daemon.backends.write().await = vec![backend_with_option(source, "style")];
+
+    for bad in ["two\nlines", "a\tb", "x".repeat(4001).as_str()] {
+        let resp = daemon
+            .handle_set_backend_option(source.to_string(), "style".to_string(), bad.to_string())
+            .await;
+
+        assert_eq!(resp.status, "error", "{bad:?} should be refused");
+        assert_eq!(
+            resp.error_code,
+            Some(ErrorCode::InvalidValue),
+            "the code the endpoint already documents for a value it will not take"
+        );
+        assert!(
+            daemon
+                .config
+                .read()
+                .await
+                .backend_option(source, "style")
+                .is_none(),
+            "a refused value must not be stored: {bad:?}"
+        );
+    }
+
+    // The guard is about shape, not length alone — an ordinary value still
+    // writes.
+    let resp = daemon
+        .handle_set_backend_option(source.to_string(), "style".to_string(), "terse".to_string())
+        .await;
+    assert_eq!(resp.status, "success");
+}
+
+/// An option no installed backend declares is left alone.
+///
+/// Nothing injects it — `backend_headers` iterates the manifest's options — so
+/// there is no delivery to protect, and guarding it here would refuse a write
+/// the HTTP layer has already refused with `unknown_option` for a better
+/// reason.
+#[tokio::test]
+async fn the_shape_guard_only_speaks_for_options_a_backend_declares() {
+    let daemon = test_daemon().await;
+    let source = "github.com/x/opts";
+    *daemon.backends.write().await = vec![backend_with_option(source, "style")];
+
+    let resp = daemon
+        .handle_set_backend_option(
+            source.to_string(),
+            "undeclared".to_string(),
+            "two\nlines".to_string(),
+        )
+        .await;
+
+    assert_eq!(resp.status, "success");
+}
+
 /// Writing the value already stored is not a write.
 ///
 /// The settings UI cannot help sending these: re-picking the value already

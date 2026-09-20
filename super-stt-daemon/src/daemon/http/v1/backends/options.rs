@@ -211,7 +211,7 @@ A loaded model does not pick this up on its own — reload the stage with \
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "Stored; this is the new effective value.", body = OptionValue),
-        (status = 400, description = "The value was empty (`invalid_request`), or the option declares `choices` and the value is not one of them (`invalid_value`). Use `DELETE` to clear an override.", body = ErrorEnvelope),
+        (status = 400, description = "The value was empty (`invalid_request`), or the value is one the option will not take (`invalid_value`): not among its declared `choices`, longer than 4000 characters, or carrying a control character. An option value is injected as an `x-stt-option-<name>` request header, which can hold neither a line break nor an unbounded number of bytes, so a value that cannot be delivered is refused rather than stored. Use `DELETE` to clear an override.", body = ErrorEnvelope),
         (status = 404, description = "No such backend (`unknown_backend`) or no such option (`unknown_option`).", body = ErrorEnvelope),
         (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
         (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),

@@ -572,6 +572,64 @@ impl Opt {
     pub fn accepts(&self, value: &str) -> bool {
         self.choices.is_empty() || self.choices.iter().any(|c| c.to_string() == value)
     }
+
+    /// Whether a value's *shape* is one the declared type can be delivered in —
+    /// the check [`accepts`](Self::accepts) does not do, because `choices` say
+    /// nothing about an open-ended option.
+    ///
+    /// Two failures, both about delivery rather than meaning. An option value
+    /// becomes an `x-stt-option-*` request header, and a header value can hold
+    /// neither a control character nor an unbounded number of bytes. A value
+    /// that fails either one is worse stored than refused: the write reports
+    /// success, and then every request the backend makes dies inside the
+    /// transport, naming nothing the user set.
+    ///
+    /// Every option type declared so far holds a single line, so any control
+    /// character is refused. A type that can carry a line break would relax
+    /// this for itself rather than for everything.
+    ///
+    /// # Errors
+    /// The user-facing sentence naming what is wrong with `value`.
+    pub fn permits_shape(&self, value: &str) -> Result<(), String> {
+        let count = value.chars().count();
+        if count > MAX_OPTION_CHARS {
+            return Err(format!(
+                "This value is {count} characters; the most that can be sent to a backend is \
+                 {MAX_OPTION_CHARS}."
+            ));
+        }
+        // `char::is_control` rather than a byte test: it also covers the C1
+        // range (U+0080–U+009F), whose UTF-8 bytes are both above 0x7F and so
+        // pass the header crate's own validity check.
+        if let Some(bad) = value.chars().find(|c| c.is_control()) {
+            return Err(format!(
+                "This value contains {}. This setting holds a single line.",
+                named(bad)
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Longest option value the daemon will store, in characters.
+///
+/// The ceiling is the request header the value is injected as. 4000 characters
+/// is at most 16 000 bytes of UTF-8, which clears the smallest header limit a
+/// backend is likely to have — Python's `http.server` allows 65 536, hyper's
+/// default read buffer is 408 KiB — with room for a future type that escapes
+/// its value, and is several times longer than any option anyone writes by
+/// hand.
+pub const MAX_OPTION_CHARS: usize = 4000;
+
+/// A control character named the way a user would recognize it, for a message
+/// that has to explain why text they cannot see was refused.
+fn named(c: char) -> &'static str {
+    match c {
+        '\n' => "a line break",
+        '\r' => "a carriage return",
+        '\t' => "a tab",
+        _ => "a control character",
+    }
 }
 
 /// The input type of an option.
@@ -1882,6 +1940,48 @@ mod tests {
         // No list, no gate: every option written before this field existed.
         assert!(m.options[2].choices.is_empty());
         assert!(m.options[2].accepts("https://gateway.example.com/v1"));
+    }
+
+    /// An option value becomes an `x-stt-option-*` request header, and a header
+    /// holds neither a control character nor an unbounded number of bytes.
+    /// Refusing the write is the only way the user learns: a stored value that
+    /// cannot be delivered reports success and then fails every request the
+    /// backend makes, naming nothing they set.
+    #[test]
+    fn a_value_a_header_cannot_carry_is_refused() {
+        let opt = Opt {
+            name: "base_url".into(),
+            label: None,
+            description: "Anything goes.".into(),
+            r#type: None,
+            default: None,
+            choices: Vec::new(),
+            required: false,
+        };
+
+        assert!(opt.permits_shape("https://gateway.example.com/v1").is_ok());
+        assert!(opt.permits_shape("").is_ok());
+        // Non-ASCII is fine: it is control characters, not width, that a header
+        // refuses.
+        assert!(opt.permits_shape("señor").is_ok());
+
+        for bad in ["two\nlines", "carriage\rreturn", "a\tb", "nul\u{0}byte"] {
+            assert!(
+                opt.permits_shape(bad).is_err(),
+                "{bad:?} should not be storable"
+            );
+        }
+        // U+0085 NEXT LINE: a C1 control whose UTF-8 bytes are both above 0x7F,
+        // so a byte-level "is this ASCII control" test would wave it through
+        // and the header crate's own validity check does too.
+        assert!(opt.permits_shape("next\u{85}line").is_err());
+
+        let at_cap = "x".repeat(MAX_OPTION_CHARS);
+        assert!(opt.permits_shape(&at_cap).is_ok(), "the cap is inclusive");
+        assert!(opt.permits_shape(&format!("{at_cap}x")).is_err());
+        // Counted in characters, not bytes, so the message matches what the
+        // user typed rather than how it encodes.
+        assert!(opt.permits_shape(&"é".repeat(MAX_OPTION_CHARS)).is_ok());
     }
 
     /// Unknown fields and tables are ignored — older daemons must tolerate

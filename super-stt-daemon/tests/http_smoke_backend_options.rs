@@ -505,6 +505,46 @@ async fn set_empty_value_is_400() {
     );
 }
 
+/// A value that cannot ride in a request header is refused end to end, and the
+/// stored value is untouched.
+///
+/// The daemon injects every option as `x-stt-option-<name>`, so a line break in
+/// one would be undeliverable — and worse than undeliverable, because the write
+/// would report success and the backend would then fail every request with an
+/// error naming a header rather than the setting the user typed.
+#[tokio::test]
+async fn a_value_a_header_cannot_carry_is_400() {
+    let (_guard, sock, token) = start_daemon(&["settings"]).await;
+    let opt_path = format!("/backend/{FIXTURE_SOURCE_ENC}/option/region");
+
+    let (s, body) = post_req(
+        &sock,
+        &opt_path,
+        &token,
+        serde_json::json!({ "value": "us-east-1" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "the ordinary write still works: {body}");
+
+    for bad in ["us-east-1\nus-west-2", &"x".repeat(4001)] {
+        let (s, body) = post_req(
+            &sock,
+            &opt_path,
+            &token,
+            serde_json::json!({ "value": bad }),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "POST {bad:?}: {body}");
+        assert_eq!(body["error_code"], "invalid_value", "{body}");
+    }
+
+    // A refused write stores nothing, so the value set above is still the one
+    // in effect.
+    let (s, body) = get(&sock, &opt_path, &token).await;
+    assert_eq!(s, StatusCode::OK, "GET after refusal: {body}");
+    assert_eq!(body["value"], "us-east-1", "{body}");
+}
+
 /// GET on an unknown backend returns 404 `unknown_backend`.
 #[tokio::test]
 async fn unknown_backend_is_404() {

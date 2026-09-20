@@ -2,9 +2,9 @@
 
 use crate::daemon::types::SuperSTTDaemon;
 use log::{info, warn};
-use super_stt_registry_types::manifest::ModelRole;
+use super_stt_registry_types::manifest::{ModelRole, Opt};
 use super_stt_shared::models::backends::{BackendInfo, BackendModel, BackendOption, BackendSecret};
-use super_stt_shared::models::protocol::DaemonResponse;
+use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 
 /// Fold an optional reload-failure warning into a success message, so a failed
 /// post-write model reload is surfaced to the caller instead of swallowed.
@@ -285,6 +285,23 @@ impl SuperSTTDaemon {
         }
     }
 
+    /// The manifest declaration of one option of one installed backend, or
+    /// `None` when either is unknown here.
+    ///
+    /// Cloned rather than returned behind the guard: the caller goes on to take
+    /// a write lock on the config, and holding a read guard on the catalog
+    /// across that is how two settings writes deadlock each other.
+    async fn declared_option(&self, source: &str, name: &str) -> Option<Opt> {
+        let backends = self.backends.read().await;
+        backends
+            .iter()
+            .find(|b| b.source == source)?
+            .options
+            .iter()
+            .find(|o| o.name == name)
+            .cloned()
+    }
+
     /// Handle set backend option command — store/clear a plaintext option
     /// override in config, and hand it to the stages already running.
     ///
@@ -313,6 +330,24 @@ impl SuperSTTDaemon {
             if unchanged {
                 return DaemonResponse::success().with_message(format!("Option {name} unchanged"));
             }
+        }
+        // Refuse a value the transports cannot carry, before it is stored. An
+        // option value is injected as an `x-stt-option-*` request header, and a
+        // header holds neither a control character nor an unbounded number of
+        // bytes — so storing one reports success and then breaks every request
+        // the backend makes, naming nothing the user set.
+        //
+        // Here rather than in the HTTP handler because this is the one place
+        // every caller reaches, and the one holding the manifest the declared
+        // type comes from. An option no installed backend declares is left
+        // alone: nothing injects it (see `backend_headers`), so there is no
+        // delivery to protect, and the HTTP path has already refused that write
+        // with `unknown_option`.
+        if !value.is_empty()
+            && let Some(opt) = self.declared_option(&source, &name).await
+            && let Err(e) = opt.permits_shape(&value)
+        {
+            return DaemonResponse::error_with_code(ErrorCode::InvalidValue, &e);
         }
         {
             let mut config = self.config.write().await;
