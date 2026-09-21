@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use super_stt_shared::models::contexts::DictationContext;
 use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
 use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
@@ -21,6 +22,8 @@ pub struct DaemonConfig {
     pub update: UpdateConfig,
     #[serde(default)]
     pub post_processor: PostProcessorConfig,
+    #[serde(default)]
+    pub contexts: ContextsConfig,
     #[serde(default)]
     pub http: HttpConfig,
 }
@@ -65,6 +68,18 @@ pub struct BackendsConfig {
     /// Per-model settings: backend `source` → (model name → settings).
     #[serde(default)]
     pub models: HashMap<String, HashMap<String, ModelSettings>>,
+    /// Which dictation context a backend uses, when it is not the active one:
+    /// backend `source` → context id.
+    ///
+    /// Three states in two, deliberately. An absent entry means "follow
+    /// whichever context is active", which is what almost every backend should
+    /// do and what costs no storage. An entry naming an id pins that backend to
+    /// it. An entry holding the empty string — never a valid id, see
+    /// [`DictationContext::is_valid_id`] — means "send this backend no context
+    /// at all", which is a real choice for a backend the user would rather keep
+    /// out of.
+    #[serde(default)]
+    pub context_override: HashMap<String, String>,
 }
 
 /// Per-model configuration. A struct (not a bare value) so future per-model
@@ -157,6 +172,29 @@ impl PostProcessorConfig {
     pub fn is_active(&self) -> bool {
         self.enabled && self.selection().is_some()
     }
+}
+
+/// Dictation contexts: what the user is dictating, and which one is in force.
+///
+/// Contract: `docs/protocol/endpoints/v1/context.md`. The contexts themselves
+/// are [`DictationContext`], shared with the settings app.
+///
+/// A `Vec` rather than a map keyed by id, because the list is ordered and the
+/// user sees that order. It is also what keeps `daemon.toml` still: [`DaemonConfig::load`]
+/// rewrites the file whenever pretty-printing it differs from what is on disk,
+/// and a `HashMap`'s key order is not stable across runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ContextsConfig {
+    /// The id of the context in force, or `None` for none.
+    ///
+    /// An id naming a context that no longer exists reads as `None` — see
+    /// [`DaemonConfig::active_context`] — rather than being pruned on load, so
+    /// deleting a context and undoing it does not silently lose the selection.
+    #[serde(default)]
+    pub active: Option<String>,
+    /// Every context the user has, in the order they arranged them.
+    #[serde(default)]
+    pub items: Vec<DictationContext>,
 }
 
 /// The daemon's HTTP surface beyond the Unix socket it always serves.
@@ -455,6 +493,7 @@ impl Default for DaemonConfig {
             backends: BackendsConfig::default(),
             update: UpdateConfig::default(),
             post_processor: PostProcessorConfig::default(),
+            contexts: ContextsConfig::default(),
             http: HttpConfig::default(),
         }
     }
@@ -774,6 +813,106 @@ impl DaemonConfig {
             .get(source)
             .and_then(|opts| opts.get(name))
             .map(String::as_str)
+    }
+
+    /// Store a context, replacing one with the same id or appending it.
+    ///
+    /// Append rather than insert-sorted: the list order is the user's, and a
+    /// new context belongs at the end of it rather than wherever its id sorts.
+    pub fn upsert_context(&mut self, context: DictationContext) {
+        match self
+            .contexts
+            .items
+            .iter_mut()
+            .find(|existing| existing.id == context.id)
+        {
+            Some(existing) => *existing = context,
+            None => self.contexts.items.push(context),
+        }
+    }
+
+    /// Remove a context by id, reporting whether there was one.
+    ///
+    /// Clears the active selection when it named this one, so the daemon never
+    /// resolves to a context that no longer exists. A per-backend override
+    /// naming it is left alone — see [`Self::resolve_context`], which reads a
+    /// dangling override as "no context" without discarding what the user set,
+    /// so re-creating the context restores the pin.
+    pub fn remove_context(&mut self, id: &str) -> bool {
+        let before = self.contexts.items.len();
+        self.contexts.items.retain(|context| context.id != id);
+        if self.contexts.active.as_deref() == Some(id) {
+            self.contexts.active = None;
+        }
+        self.contexts.items.len() != before
+    }
+
+    /// One context by id.
+    #[must_use]
+    pub fn context(&self, id: &str) -> Option<&DictationContext> {
+        self.contexts.items.iter().find(|context| context.id == id)
+    }
+
+    /// Point the active selection at a context, or clear it.
+    pub fn set_active_context(&mut self, id: Option<String>) {
+        self.contexts.active = id;
+    }
+
+    /// The context in force by default, if any.
+    ///
+    /// `None` when nothing is selected *and* when the selection names a context
+    /// that is gone — a stored id is a preference, not a promise, and reading it
+    /// as nothing beats resolving to a context the user deleted.
+    #[must_use]
+    pub fn active_context(&self) -> Option<&DictationContext> {
+        self.context(self.contexts.active.as_deref()?)
+    }
+
+    /// Pin a backend to a context, follow the active one (`None`), or send it
+    /// no context at all (`Some("")`).
+    ///
+    /// The empty string is the "none" marker because it is never a valid id
+    /// (see [`DictationContext::is_valid_id`]), so it cannot collide with a
+    /// context the user made.
+    pub fn update_backend_context(&mut self, source: String, id: Option<String>) {
+        match id {
+            Some(id) => {
+                self.backends.context_override.insert(source, id);
+            }
+            None => {
+                self.backends.context_override.remove(&source);
+            }
+        }
+    }
+
+    /// What a backend was pinned to: a context id, `Some("")` for none at all,
+    /// or `None` to follow the active context.
+    #[must_use]
+    pub fn backend_context_override(&self, source: &str) -> Option<&str> {
+        self.backends
+            .context_override
+            .get(source)
+            .map(String::as_str)
+    }
+
+    /// The context a given backend should actually be sent.
+    ///
+    /// The whole resolution in one place, because it is the question every
+    /// injection site asks and the one place the three states have to agree:
+    /// an unpinned backend follows the active context, a pinned one takes what
+    /// it was pinned to, and one pinned to nothing gets nothing. A pin naming a
+    /// context that has since been deleted also gets nothing — deliberately not
+    /// falling back to the active one, since "use this specific context" and
+    /// "use whatever is active" are different instructions and silently
+    /// promoting the first to the second would send the user's coding
+    /// vocabulary to a backend they had pinned elsewhere.
+    #[must_use]
+    pub fn resolve_context(&self, source: &str) -> Option<&DictationContext> {
+        match self.backend_context_override(source) {
+            Some("") => None,
+            Some(id) => self.context(id),
+            None => self.active_context(),
+        }
     }
 
     pub fn update_primary_language(&mut self, language: Option<String>) {

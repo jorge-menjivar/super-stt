@@ -1053,3 +1053,198 @@ fn the_default_port_sits_in_the_reserved_super_block() {
          the port to outgoing connections and the daemon loses the race at boot"
     );
 }
+
+/// A context named `id`, with a term and a prompt.
+fn ctx(id: &str, name: &str) -> DictationContext {
+    DictationContext {
+        id: id.to_string(),
+        name: name.to_string(),
+        prompt: format!("I dictate {name}."),
+        vocabulary: vec!["main branch".to_string(), "rebase".to_string()],
+    }
+}
+
+/// Contexts survive the file, and survive it *in the user's order*.
+///
+/// The order is the reason this is a `Vec` and not a map: it is what the list
+/// on the Contexts page shows, and a `HashMap` would reshuffle it on every
+/// load — which `DaemonConfig::load` would then write back out, churning
+/// `daemon.toml` for no reason.
+#[test]
+fn contexts_round_trip_through_toml_in_order() {
+    let mut config = DaemonConfig::default();
+    config.upsert_context(ctx("coding", "Coding"));
+    config.upsert_context(ctx("email", "Email"));
+    config.upsert_context(ctx("standup", "Standup notes"));
+    config.set_active_context(Some("coding".to_string()));
+
+    let toml_str = toml::to_string_pretty(&config).expect("serialize");
+    let parsed: DaemonConfig = toml::from_str(&toml_str).expect("deserialize");
+
+    let ids: Vec<&str> = parsed
+        .contexts
+        .items
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect();
+    assert_eq!(ids, ["coding", "email", "standup"]);
+    assert_eq!(
+        parsed.active_context().map(|c| c.name.as_str()),
+        Some("Coding")
+    );
+    assert_eq!(
+        parsed.context("email").map(|c| c.vocabulary.len()),
+        Some(2),
+        "a context keeps its vocabulary across the file"
+    );
+}
+
+/// An upsert replaces in place rather than appending a second copy, and a new
+/// one lands at the end — where the user just added it.
+#[test]
+fn upserting_replaces_in_place_and_appends_new() {
+    let mut config = DaemonConfig::default();
+    config.upsert_context(ctx("coding", "Coding"));
+    config.upsert_context(ctx("email", "Email"));
+
+    let mut renamed = ctx("coding", "Coding");
+    renamed.name = "Programming".to_string();
+    config.upsert_context(renamed);
+
+    assert_eq!(config.contexts.items.len(), 2, "no duplicate was appended");
+    assert_eq!(
+        config.context("coding").map(|c| c.name.as_str()),
+        Some("Programming")
+    );
+    assert_eq!(config.contexts.items[0].id, "coding", "order is unchanged");
+}
+
+/// Deleting the active context clears the selection, so nothing resolves to a
+/// context that is gone.
+#[test]
+fn deleting_the_active_context_clears_the_selection() {
+    let mut config = DaemonConfig::default();
+    config.upsert_context(ctx("coding", "Coding"));
+    config.upsert_context(ctx("email", "Email"));
+    config.set_active_context(Some("coding".to_string()));
+
+    assert!(config.remove_context("coding"));
+    assert_eq!(config.contexts.active, None);
+    assert!(config.active_context().is_none());
+
+    // Deleting one that is not active leaves the selection alone.
+    config.set_active_context(Some("email".to_string()));
+    assert!(!config.remove_context("coding"), "already gone");
+    assert_eq!(
+        config.active_context().map(|c| c.id.as_str()),
+        Some("email")
+    );
+}
+
+/// A selection naming a context that no longer exists reads as nothing.
+///
+/// The id is kept in the file rather than pruned on load, so restoring the
+/// context restores the selection; what must not happen is resolving it.
+#[test]
+fn an_active_id_with_no_context_resolves_to_nothing() {
+    let mut config = DaemonConfig::default();
+    config.set_active_context(Some("ghost".to_string()));
+    assert!(config.active_context().is_none());
+    assert_eq!(
+        config.contexts.active.as_deref(),
+        Some("ghost"),
+        "kept, not pruned"
+    );
+}
+
+/// The three states a backend can be in, which is the whole point of the
+/// override being a map with a sentinel rather than a bool.
+#[test]
+fn a_backend_follows_the_active_context_unless_it_is_pinned() {
+    let mut config = DaemonConfig::default();
+    config.upsert_context(ctx("coding", "Coding"));
+    config.upsert_context(ctx("email", "Email"));
+    config.set_active_context(Some("coding".to_string()));
+    let openai = "github.com/super-stt/openai";
+
+    // Unpinned: follows the active context.
+    assert_eq!(
+        config.resolve_context(openai).map(|c| c.id.as_str()),
+        Some("coding")
+    );
+
+    // Pinned elsewhere: takes what it was pinned to, active or not.
+    config.update_backend_context(openai.to_string(), Some("email".to_string()));
+    assert_eq!(
+        config.resolve_context(openai).map(|c| c.id.as_str()),
+        Some("email")
+    );
+
+    // Pinned to nothing: gets nothing, even though a context is active.
+    config.update_backend_context(openai.to_string(), Some(String::new()));
+    assert!(config.resolve_context(openai).is_none());
+    assert!(
+        config.active_context().is_some(),
+        "the active one is untouched"
+    );
+
+    // Unpinned again: back to following.
+    config.update_backend_context(openai.to_string(), None);
+    assert_eq!(
+        config.resolve_context(openai).map(|c| c.id.as_str()),
+        Some("coding")
+    );
+    assert!(
+        config.backends.context_override.is_empty(),
+        "clearing prunes the entry"
+    );
+}
+
+/// A pin to a context that has since been deleted sends nothing, rather than
+/// quietly falling back to the active one.
+///
+/// "Use this context" and "use whatever is active" are different instructions.
+/// Promoting the first to the second would send, say, coding vocabulary to a
+/// backend the user had deliberately pointed somewhere else.
+#[test]
+fn a_pin_to_a_deleted_context_does_not_fall_back_to_the_active_one() {
+    let mut config = DaemonConfig::default();
+    config.upsert_context(ctx("coding", "Coding"));
+    config.upsert_context(ctx("medical", "Medical notes"));
+    config.set_active_context(Some("coding".to_string()));
+    let openai = "github.com/super-stt/openai";
+    config.update_backend_context(openai.to_string(), Some("medical".to_string()));
+
+    config.remove_context("medical");
+
+    assert!(config.resolve_context(openai).is_none());
+    assert_eq!(
+        config.backend_context_override(openai),
+        Some("medical"),
+        "the pin is kept, so restoring the context restores it"
+    );
+}
+
+/// A `daemon.toml` written before contexts existed still loads, with none.
+#[test]
+fn config_without_a_contexts_section_deserializes() {
+    let toml_str = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "classic"
+volume = 100
+
+[transcription]
+preferred_model = "whisper-tiny"
+write_mode = false
+preview_typing_enabled = false
+recording_stop_mode = "silence_and_manual"
+"#;
+    let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+    assert!(config.contexts.items.is_empty());
+    assert!(config.contexts.active.is_none());
+    assert!(config.active_context().is_none());
+    assert!(config.backends.context_override.is_empty());
+}
