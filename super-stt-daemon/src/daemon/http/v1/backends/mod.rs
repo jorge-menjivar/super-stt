@@ -19,6 +19,10 @@
 //! One split runs through the whole family: every path but the secrets ones is
 //! `settings`-scoped, and secrets are `secrets`-scoped. [`routes`] gathers the
 //! former; [`secrets::routes`] is wired to its own guard in [`super`].
+//!
+//! [`decode_source`] and [`find_backend`] are here because they are about a
+//! `{backend_id}` path segment, which is this family's; the JSON envelope
+//! helpers that used to sit beside them are not, and live in [`super::wire`].
 pub(crate) mod options;
 pub(crate) mod secrets;
 
@@ -49,39 +53,6 @@ pub(crate) async fn find_backend(s: &AppState, source: &str) -> Option<Discovere
         .iter()
         .find(|b| b.source == source)
         .cloned()
-}
-
-/// House-style JSON error envelope at a given status. `error_code` is the stable
-/// machine-readable `snake_case` identifier clients switch on (per `transport.md`,
-/// "present on every error"); it is also mirrored into `message` since these
-/// backend endpoints carry no separate human-readable text (audit 2 Tier 2 #6).
-pub(crate) fn json_error(code: StatusCode, error_code: &str) -> Response {
-    json_error_msg(code, error_code, error_code)
-}
-
-/// [`json_error`] with a distinct human-readable `message` (the machine
-/// identifier still rides in `error_code`).
-pub(crate) fn json_error_msg(code: StatusCode, error_code: &str, message: &str) -> Response {
-    (
-        code,
-        [("content-type", "application/json")],
-        serde_json::json!({ "status": "error", "error_code": error_code, "message": message })
-            .to_string(),
-    )
-        .into_response()
-}
-
-/// House-style JSON success response with status 200.
-///
-/// Generic over the body so each endpoint hands it the narrow type it publishes
-/// in the `OpenAPI` document, rather than a `Value` that has forgotten its shape.
-pub(crate) fn ok<T: serde::Serialize>(v: &T) -> Response {
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        serde_json::to_string(v).unwrap_or_else(|_| String::from(r#"{"status":"error"}"#)),
-    )
-        .into_response()
 }
 
 #[utoipa::path(

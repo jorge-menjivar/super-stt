@@ -10,8 +10,16 @@
 //! handler makes. A response carrying its value in `message` rather than in a
 //! field of its own is marked as such, because a client has to parse it back
 //! out.
+//!
+//! The three envelope helpers at the bottom are the other half of the same
+//! job: the hand-written endpoints — the ones addressing a resource by a path
+//! parameter, which the settings macros cannot generate — build their responses
+//! through them, so the wrapper around a narrow body is written once rather
+//! than per family.
 
 use crate::daemon::http::wire::Ack;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use super_stt_shared::models::backends::BackendInfo;
 use super_stt_shared::models::protocol::{
@@ -569,4 +577,37 @@ impl FromDaemon for ModelLanguageState {
                 }),
         }
     }
+}
+
+/// House-style JSON error envelope at a given status. `error_code` is the stable
+/// machine-readable `snake_case` identifier clients switch on (per `transport.md`,
+/// "present on every error"); it is also mirrored into `message` since the
+/// endpoints using it carry no separate human-readable text (audit 2 Tier 2 #6).
+pub(crate) fn json_error(code: StatusCode, error_code: &str) -> Response {
+    json_error_msg(code, error_code, error_code)
+}
+
+/// [`json_error`] with a distinct human-readable `message` (the machine
+/// identifier still rides in `error_code`).
+pub(crate) fn json_error_msg(code: StatusCode, error_code: &str, message: &str) -> Response {
+    (
+        code,
+        [("content-type", "application/json")],
+        serde_json::json!({ "status": "error", "error_code": error_code, "message": message })
+            .to_string(),
+    )
+        .into_response()
+}
+
+/// House-style JSON success response with status 200.
+///
+/// Generic over the body so each endpoint hands it the narrow type it publishes
+/// in the `OpenAPI` document, rather than a `Value` that has forgotten its shape.
+pub(crate) fn ok<T: serde::Serialize>(v: &T) -> Response {
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        serde_json::to_string(v).unwrap_or_else(|_| String::from(r#"{"status":"error"}"#)),
+    )
+        .into_response()
 }

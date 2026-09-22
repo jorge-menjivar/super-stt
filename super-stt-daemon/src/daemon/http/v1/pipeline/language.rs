@@ -20,7 +20,7 @@
 use super::{Stage, unknown_stage};
 use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, narrowed};
 use crate::daemon::http::state::AppState;
-use crate::daemon::http::v1::backends::json_error;
+use crate::daemon::http::v1::wire::json_error;
 use crate::daemon::http::v1::wire::{FromDaemon, LanguageList, ModelLanguageState};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 use axum::extract::{Path, State};

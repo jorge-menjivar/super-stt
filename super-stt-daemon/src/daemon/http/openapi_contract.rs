@@ -412,8 +412,8 @@ async fn documented_error_shapes_match_the_envelopes_the_daemon_builds() {
         invalid_session, model_not_loaded_response, rate_limited, reason,
         recording_in_progress_response, scope_denied,
     };
-    use super::v1::backends::{json_error, json_error_msg};
     use super::v1::registry::{registry_error, registry_error_msg};
+    use super::v1::wire::{json_error, json_error_msg};
     use axum::http::StatusCode;
 
     async fn keys_of(resp: axum::response::Response) -> Vec<String> {
