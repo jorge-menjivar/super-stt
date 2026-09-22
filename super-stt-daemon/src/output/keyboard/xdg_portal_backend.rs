@@ -2,8 +2,9 @@
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 const PORTAL_BUS: &str = "org.freedesktop.portal.Desktop";
@@ -81,10 +82,12 @@ impl XdgPortalBackend {
         // Step 1: CreateSession
         let session_token = format!("superstt_s{}", std::process::id());
 
+        let token = next_handle_token();
         let mut opts = HashMap::<&str, Value<'_>>::new();
+        opts.insert("handle_token", Value::from(token.as_str()));
         opts.insert("session_handle_token", Value::from(session_token.as_str()));
 
-        let results = portal_call(conn, &portal, "CreateSession", &(opts,), 10).await?;
+        let results = portal_call(conn, &portal, "CreateSession", &token, &(opts,), 10).await?;
 
         let session_path: OwnedObjectPath = results
             .get("session_handle")
@@ -95,13 +98,16 @@ impl XdgPortalBackend {
         debug!("Portal session created: {session_path}");
 
         // Step 2: SelectDevices  (type 1 = keyboard)
+        let token = next_handle_token();
         let mut opts = HashMap::<&str, Value<'_>>::new();
+        opts.insert("handle_token", Value::from(token.as_str()));
         opts.insert("types", Value::U32(1));
 
         portal_call(
             conn,
             &portal,
             "SelectDevices",
+            &token,
             &(session_path.as_ref(), opts),
             10,
         )
@@ -110,12 +116,15 @@ impl XdgPortalBackend {
         debug!("Portal keyboard device selected");
 
         // Step 3: Start (may show authorization dialog)
-        let opts = HashMap::<&str, Value<'_>>::new();
+        let token = next_handle_token();
+        let mut opts = HashMap::<&str, Value<'_>>::new();
+        opts.insert("handle_token", Value::from(token.as_str()));
 
         portal_call(
             conn,
             &portal,
             "Start",
+            &token,
             &(session_path.as_ref(), "", opts),
             30,
         )
@@ -166,14 +175,51 @@ impl XdgPortalBackend {
     }
 }
 
-/// Call a portal method and wait for the Response signal.
+/// A `handle_token` no other request from this process is using.
+fn next_handle_token() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!("superstt_r{}", NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The object path the portal gives a request that `unique_name` made with
+/// `handle_token`, per the `org.freedesktop.portal.Request` naming scheme.
+fn request_path(unique_name: &str, handle_token: &str) -> String {
+    let sender = unique_name.trim_start_matches(':').replace('.', "_");
+    format!("{PORTAL_PATH}/request/{sender}/{handle_token}")
+}
+
+/// Start listening for `Response` on one request path.
+async fn subscribe_response(
+    conn: &zbus::Connection,
+    path: String,
+) -> Result<zbus::proxy::SignalStream<'static>> {
+    let proxy = zbus::Proxy::new(conn, PORTAL_BUS, path, REQUEST_IFACE).await?;
+    Ok(proxy.receive_signal("Response").await?)
+}
+
+/// Call a portal method and wait for its Response signal.
+///
+/// Subscribes before calling. The portal can answer before the call has even
+/// returned: on COSMIC, `Response` arrived 0.2 ms after the reply carrying the
+/// request path, and a subscription made after that reply landed 0.7 ms too
+/// late. The answer was lost and every step timed out, so the dialog at
+/// `Start` almost never came up. The portal documents this race and its fix:
+/// the caller sends `handle_token` in the method's options, which makes the
+/// request path predictable before the call.
 async fn portal_call(
     conn: &zbus::Connection,
     portal: &zbus::Proxy<'_>,
     method: &str,
+    handle_token: &str,
     body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
     timeout_secs: u64,
 ) -> Result<HashMap<String, OwnedValue>> {
+    let unique_name = conn
+        .unique_name()
+        .context("Session bus connection has no unique name")?;
+    let expected = request_path(unique_name.as_str(), handle_token);
+    let mut signals = subscribe_response(conn, expected.clone()).await?;
+
     let request_path: OwnedObjectPath = portal
         .call(method, body)
         .await
@@ -181,10 +227,13 @@ async fn portal_call(
 
     debug!("Portal {method}: request path = {request_path}");
 
-    let req_proxy: zbus::Proxy<'_> =
-        zbus::Proxy::new(conn, PORTAL_BUS, request_path.as_str(), REQUEST_IFACE).await?;
-
-    let mut signals = req_proxy.receive_signal("Response").await?;
+    if request_path.as_str() != expected {
+        // A portal older than 0.9 ignores `handle_token` and picks its own
+        // path. Listening there now reopens the race, but it is all such a
+        // portal allows.
+        warn!("Portal {method}: request path {request_path} is not the predicted {expected}");
+        signals = subscribe_response(conn, request_path.to_string()).await?;
+    }
 
     let signal = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), signals.next())
         .await
@@ -259,4 +308,32 @@ fn char_to_keysym(ch: char) -> (bool, i32) {
         _ => i32::try_from(0x0100_0000_u32 | cp).unwrap_or(i32::MAX),
     };
     (false, keysym)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The portal names a request after its sender and `handle_token`. A path
+    /// predicted wrong is a subscription on the wrong object, which is the race
+    /// again: every step would wait out its timeout.
+    #[test]
+    fn request_path_follows_the_portal_naming_scheme() {
+        assert_eq!(
+            request_path(":1.676039", "superstt_r0"),
+            "/org/freedesktop/portal/desktop/request/1_676039/superstt_r0"
+        );
+    }
+
+    #[test]
+    fn handle_tokens_are_not_reused() {
+        let first = next_handle_token();
+        let second = next_handle_token();
+        assert_ne!(first, second);
+        // The portal accepts only [A-Za-z0-9_] in a token.
+        assert!(
+            first.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "{first}"
+        );
+    }
 }
