@@ -69,7 +69,9 @@ const NOTICE_KEY_RELEASE_DELAY: std::time::Duration = std::time::Duration::from_
 
 /// Types previews and the final transcript into the focused window.
 pub struct Typer {
-    keyboard_simulator: Simulator,
+    // `None` for a recording that types nothing. Every keystroke path is gated
+    // on write mode, so such a recording never reaches for the keyboard.
+    keyboard_simulator: Option<Simulator>,
     state: State,
 }
 
@@ -77,20 +79,47 @@ impl Typer {
     #[must_use]
     pub fn new(keyboard_simulator: Simulator) -> Self {
         Self {
-            keyboard_simulator,
+            keyboard_simulator: Some(keyboard_simulator),
+            state: State::default(),
+        }
+    }
+
+    /// A typer for a recording that types nothing. Building a keyboard is not
+    /// free: the portal backend asks the user for permission and waits for the
+    /// answer.
+    #[must_use]
+    pub fn without_keyboard() -> Self {
+        Self {
+            keyboard_simulator: None,
             state: State::default(),
         }
     }
 
     #[must_use]
     pub fn write_method_name(&self) -> &'static str {
-        self.keyboard_simulator.name()
+        self.keyboard_simulator
+            .as_ref()
+            .map_or("none", Simulator::name)
     }
 
     /// Extract the simulator so it can be cached for reuse.
     #[must_use]
-    pub fn take_simulator(self) -> Simulator {
+    pub fn take_simulator(self) -> Option<Simulator> {
         self.keyboard_simulator
+    }
+
+    async fn type_text(&mut self, text: &str) -> anyhow::Result<()> {
+        match self.keyboard_simulator.as_mut() {
+            Some(keyboard) => keyboard.type_text(text).await,
+            None => Err(anyhow::anyhow!("this recording has no keyboard")),
+        }
+    }
+
+    async fn backspace_n(&mut self, n: usize) -> anyhow::Result<()> {
+        match self.keyboard_simulator.as_mut() {
+            Some(keyboard) => keyboard.backspace_n(n).await,
+            None => Err(anyhow::anyhow!("this recording has no keyboard")),
+        }
     }
 
     /// Drive the screen from `old_text` to `new_text`: backspace to the first
@@ -117,12 +146,12 @@ impl Typer {
         // A refused keystroke is the only sign that the screen and the mirror
         // may now disagree; it has to be visible in the log.
         if chars_to_delete > 0
-            && let Err(e) = self.keyboard_simulator.backspace_n(chars_to_delete).await
+            && let Err(e) = self.backspace_n(chars_to_delete).await
         {
             warn!("Failed to backspace preview text: {e}");
         }
         if !text_to_type.is_empty()
-            && let Err(e) = self.keyboard_simulator.type_text(&text_to_type).await
+            && let Err(e) = self.type_text(&text_to_type).await
         {
             warn!("Failed to type preview text: {e}");
         }
@@ -177,7 +206,7 @@ impl Typer {
         }
 
         let final_text = format!("{processed_text} ");
-        if let Err(e) = self.keyboard_simulator.type_text(&final_text).await {
+        if let Err(e) = self.type_text(&final_text).await {
             warn!("Failed to type final transcription: {e}");
         } else {
             info!("Final transcript typed");
@@ -223,7 +252,7 @@ impl Typer {
         tokio::time::sleep(NOTICE_KEY_RELEASE_DELAY).await;
 
         let sanitized = sanitize_for_typing(notice);
-        if let Err(e) = self.keyboard_simulator.type_text(&sanitized).await {
+        if let Err(e) = self.type_text(&sanitized).await {
             warn!("Failed to type notice: {e}");
         } else {
             info!("Typed failure notice: {sanitized}");
@@ -255,7 +284,7 @@ impl Typer {
             debug!("No preview on screen to clear");
         } else {
             info!("Clearing the {chars_to_delete}-character preview");
-            if let Err(e) = self.keyboard_simulator.backspace_n(chars_to_delete).await {
+            if let Err(e) = self.backspace_n(chars_to_delete).await {
                 warn!("Failed to backspace preview text: {e}");
             }
         }

@@ -2574,3 +2574,28 @@ async fn write_method_test_refuses_while_recording() {
         "nothing may be typed while a recording holds the keyboard"
     );
 }
+
+/// A recording that types nothing builds no keyboard. Building one is not free:
+/// the portal backend puts a permission dialog up and waits for it, which held
+/// every such request for 10 s.
+///
+/// The configured method is ydotool, not the default `auto`, so a regression
+/// fails fast and harmlessly instead of reaching the live desktop. Its
+/// availability probe types an empty string. Either way the old code shows:
+/// ydotool missing fails the request with "Keyboard simulator failed" instead
+/// of `model_not_loaded`, and ydotool present leaves a simulator in the cache.
+#[tokio::test]
+async fn a_recording_without_write_mode_builds_no_keyboard() {
+    let daemon = test_daemon().await;
+    daemon.config.write().await.transcription.write_method =
+        super_stt_shared::models::write_method::WriteMethod::Ydotool;
+
+    let request = make_record_request(Some(serde_json::json!({ "write_mode": false })));
+    let resp = daemon.handle_command(request).await;
+
+    assert_eq!(resp.error_code, Some(ErrorCode::ModelNotLoaded), "{resp:?}");
+    assert!(
+        daemon.simulator.read().await.is_none(),
+        "a recording that types nothing must not build a keyboard"
+    );
+}

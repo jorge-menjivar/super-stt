@@ -175,25 +175,31 @@ impl SuperSTTDaemon {
             return DaemonResponse::success()
                 .with_message(DaemonResponse::RECORDING_STOP_SIGNAL_MSG.to_string());
         }
-        // Take the cached simulator, or create a new one.
-        let simulator = {
-            let mut guard = self.simulator.write().await;
-            guard.take()
-        };
-        let simulator = if let Some(s) = simulator {
-            s
-        } else {
-            let write_method = {
-                let config = self.config.read().await;
-                config.transcription.write_method
-            };
-            match Simulator::new(write_method).await {
-                Ok(s) => s,
-                Err(e) => {
-                    log::error!("Failed to create keyboard simulator: {e}");
-                    return DaemonResponse::error(&format!("Keyboard simulator failed: {e}"));
+        // Only a write-mode recording types: previews, the final transcript and
+        // failure notices are all gated on it. Any other recording skips the
+        // keyboard entirely, because building one is not free. With the portal
+        // backend it puts a permission dialog in front of the user and waits
+        // for the answer, which stalled every such request by 10 s and threw
+        // the dialog at a user who had asked for nothing to be typed.
+        let simulator = if write_mode {
+            let cached = self.simulator.write().await.take();
+            if let Some(s) = cached {
+                Some(s)
+            } else {
+                let write_method = {
+                    let config = self.config.read().await;
+                    config.transcription.write_method
+                };
+                match Simulator::new(write_method).await {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        log::error!("Failed to create keyboard simulator: {e}");
+                        return DaemonResponse::error(&format!("Keyboard simulator failed: {e}"));
+                    }
                 }
             }
+        } else {
+            None
         };
         // The per-request override applies to this recording only. It used to
         // be written into the daemon-wide flag for the recording's duration and
@@ -204,7 +210,7 @@ impl SuperSTTDaemon {
                 .load(std::sync::atomic::Ordering::Relaxed)
         });
 
-        let mut typer = Typer::new(simulator);
+        let mut typer = simulator.map_or_else(Typer::without_keyboard, Typer::new);
         let response = self
             .handle_record_internal(
                 &mut typer,
@@ -217,8 +223,9 @@ impl SuperSTTDaemon {
         // Return the simulator to the cache for reuse, unless this backend
         // goes stale while idle (see `Simulator::is_cacheable`) — in which
         // case it is dropped here and the next recording builds a fresh one.
-        let simulator = typer.take_simulator();
-        if simulator.is_cacheable() {
+        if let Some(simulator) = typer.take_simulator()
+            && simulator.is_cacheable()
+        {
             *self.simulator.write().await = Some(simulator);
         }
         response
