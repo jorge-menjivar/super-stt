@@ -142,6 +142,7 @@ when a capture is already in progress.
 | HTTP | `message`                          | Meaning                                                                |
 |------|------------------------------------|------------------------------------------------------------------------|
 | 400  | `stream_realtime_with_audio_data`  | Request carried both `audio_data` and `stream_realtime: true`           |
+| 400  | (names the field)                  | A microphone option had an invalid value, such as an unknown `stop_mode`. Refused before capture, whatever `wait` is |
 | 401  | `invalid_session`                  | Token unknown / expired / `exe_changed` — re-auth and retry             |
 | 403  | `scope_denied`                     | Token lacks the `transcribe` scope                                      |
 | 409  | `model_not_loaded`                 | No model is loaded, so no transcription is possible; load one via `POST /pipeline/1/model` and retry |
