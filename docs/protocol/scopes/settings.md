@@ -32,7 +32,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 |-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
 | `/pipeline/{stage}/model`, `/pipeline/{stage}/model/{model}/device` (when it reloads) | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled). Both carry the `stage` they are about: every stage reports its own model lifecycle. |
 | `/pipeline/1` (backend selection)                                                                                               | Yes — `daemon_status_changed` (`active_backend_changed` variant)                                      |
-| `/settings/update_check_enabled`, `/settings/update_beta_optin`, `/pipeline/{stage}` (post-processing stages)                                     | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
+| `/settings/update_check_enabled`, `/settings/update_beta_optin`, `/pipeline/{stage}` (post-processing stages), every write under `/context` and `/backend/{backend_id}/context`                                     | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
 | `/settings/audio_theme`, `/settings/volume`, `/settings/write_method`, `/settings/notification_method`, `/settings/recording_stop_mode`, `/settings/preview_typing`, `/settings/custom_models_dir` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
 
 ## Endpoint reference
@@ -62,6 +62,10 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/settings/custom_models_dir`](../endpoints/v1/settings/custom_models_dir.md) | POST, GET | Where to scan for user-supplied models                                                                |
 | [`/backend/list`](../endpoints/v1/backend/list.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |
 | [`/backend/{backend_id}/option/list`](../endpoints/v1/backends/options.md) | GET, POST, DELETE | List / read / set / reset a backend's non-sensitive options                          |
+| [`/context/list`](../endpoints/v1/context.md)                       | GET        | The dictation contexts the user has, and which is active                                      |
+| [`/context/{id}`](../endpoints/v1/context.md)                       | GET, POST, DELETE | Read / create / replace / delete one dictation context                                 |
+| [`/context/active`](../endpoints/v1/context.md)                     | GET, POST  | Which context is in force by default                                                          |
+| [`/backend/{backend_id}/context`](../endpoints/v1/context.md)       | GET, POST, DELETE | Point one backend at a context of its own, at none, or back at the active one          |
 | [`/gpu_info`](../endpoints/v1/gpu_info.md)                  | GET        | GPU / VRAM information                                                                                 |
 | [`/registry/backend/list`](../endpoints/v1/registry/backend/list.md) | GET      | List backends available in the registry                                                               |
 | [`/registry/backend/refresh`](../endpoints/v1/registry/refresh.md) | POST | Refresh the registry index                                                                            |

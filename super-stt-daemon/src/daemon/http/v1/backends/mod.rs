@@ -5,8 +5,9 @@
 //!
 //! The catalog and one backend's removal are here, at the paths they answer on;
 //! the sub-resources each get their own module — [`options`] for
-//! `/backend/{backend_id}/option/list` and [`secrets`] for
-//! `/backend/{backend_id}/secret/list`.
+//! `/backend/{backend_id}/option/list`, [`secrets`] for
+//! `/backend/{backend_id}/secret/list`, and [`context`] for
+//! `/backend/{backend_id}/context`.
 //!
 //! A model's language override is not here. It is a per-`(source, model)`
 //! preference like its device, and both are addressed through the stage that
@@ -23,6 +24,7 @@
 //! [`decode_source`] and [`find_backend`] are here because they are about a
 //! `{backend_id}` path segment, which is this family's; the JSON envelope
 //! helpers that used to sit beside them are not, and live in [`super::wire`].
+pub(crate) mod context;
 pub(crate) mod options;
 pub(crate) mod secrets;
 
@@ -203,5 +205,6 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_backends))
         .routes(routes!(uninstall_backend))
+        .merge(context::routes())
         .merge(options::routes())
 }
