@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::{ContextPage, DaemonStatus, Page};
-use crate::ui::messages::{LanguageMessage, Message, ModelsPageMessage, ShellMessage};
+use crate::ui::messages::{
+    ContextsMessage, LanguageMessage, Message, ModelsPageMessage, ShellMessage,
+};
 use crate::ui::views;
 use cosmic::app::context_drawer;
 use cosmic::prelude::*;
@@ -129,6 +131,9 @@ impl AppModel {
                     .title(title),
                 )
             }
+            // The context editor, scoped to the Contexts page and to a draft
+            // actually being open.
+            ContextPage::EditContext => self.context_editor_drawer(),
             // Per-backend configuration sheet — reachable from the active card
             // (Models) and from each installed card (Library), so it's scoped to
             // either page, and only when a backend is selected for configuration.
@@ -152,6 +157,34 @@ impl AppModel {
                 })
             }
         }
+    }
+
+    /// The context editor drawer, or nothing when it does not apply.
+    ///
+    /// Two conditions, and both are load-bearing. The page, because the sheet
+    /// edits a row of a list that is only on the Contexts page — navigating
+    /// away should dismiss it, and scoping it here is what does that without
+    /// extra bookkeeping. The draft, because the draft *is* what the sheet
+    /// edits: without one there is nothing to draw.
+    fn context_editor_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Message>> {
+        let on_contexts_page = self.daemon_status == DaemonStatus::Connected
+            && matches!(
+                self.nav.data::<Page>(self.nav.active()),
+                Some(Page::Contexts)
+            );
+        if !on_contexts_page {
+            return None;
+        }
+        let title = self
+            .contexts
+            .draft
+            .as_ref()
+            .map_or_else(|| "Edit context".to_string(), views::contexts::editor_title);
+        let body = views::contexts::editor_sheet(self)?;
+        Some(
+            context_drawer::context_drawer(body, Message::Contexts(ContextsMessage::CancelEdit))
+                .title(title),
+        )
     }
 
     /// Describes the interface based on the current state of the application model.
@@ -202,6 +235,7 @@ impl AppModel {
             ),
             Page::Models => views::models::page(self),
             Page::Library => views::models::library_page(self),
+            Page::Contexts => views::contexts::page(self),
             Page::Updates => views::updates::page(&self.update),
             Page::Connection => views::connection::page(
                 &self.daemon_status,

@@ -28,6 +28,11 @@ fn build_nav() -> nav_bar::Model {
         .icon(icons::phosphor(icons::BOOKS));
 
     nav.insert()
+        .text("Contexts")
+        .data::<crate::state::Page>(crate::state::Page::Contexts)
+        .icon(icons::phosphor(icons::CARDS));
+
+    nav.insert()
         .text("Customization")
         .data::<crate::state::Page>(crate::state::Page::Customization)
         .icon(icons::phosphor(icons::GEAR));
@@ -93,6 +98,7 @@ impl AppModel {
         let mut app = AppModel {
             core,
             context_page: ContextPage::default(),
+            contexts: crate::state::contexts::ContextsState::default(),
             nav,
             // Initialize Super STT state using proper socket path
             socket_path: super_stt_shared::validation::get_http_socket_path(),

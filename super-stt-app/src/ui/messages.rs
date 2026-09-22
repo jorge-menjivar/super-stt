@@ -15,6 +15,8 @@ use super_stt_shared::models::write_method::WriteMethod;
 
 use cosmic::widget::segmented_button;
 
+use super_stt_shared::models::contexts::DictationContext;
+
 use crate::daemon::backends::BackendInfo;
 use crate::state::{AudioTheme, ContextPage};
 
@@ -35,6 +37,8 @@ pub enum Message {
     WriteMethod(WriteMethodMessage),
     NotificationMethod(NotificationMethodMessage),
     Backend(BackendMessage),
+    /// The Contexts page: the dictation contexts, and which one is in force.
+    Contexts(ContextsMessage),
     Language(LanguageMessage),
     Recording(RecordingMessage),
     Update(UpdateMessage),
@@ -646,6 +650,83 @@ pub enum UpdateMessage {
     DismissRun,
 }
 
+/// The Contexts page: the list, the editor over it, and the per-backend pick.
+///
+/// Every write follows the confirm-then-apply rule at the top of this module —
+/// a `*Changed` arm only moves what the user is typing, and the list is not
+/// touched until the daemon has answered.
+#[derive(Debug, Clone)]
+pub enum ContextsMessage {
+    /// Fetch the list. Sent on connect and whenever the page is opened, since
+    /// contexts are global and another app may have changed them.
+    Reload,
+    Loaded {
+        active: Option<String>,
+        contexts: Vec<DictationContext>,
+    },
+    /// The list could not be fetched. Distinct from [`Self::SaveFailed`], which
+    /// is about one form and belongs inside the editor.
+    LoadFailed(String),
+
+    /// Put a context in force, or (`None`) leave none active.
+    Activate(Option<String>),
+
+    /// Open the editor over an existing context.
+    Edit(String),
+    /// Open the editor over a context that does not exist yet.
+    Create,
+    /// Close the editor, discarding whatever was typed.
+    CancelEdit,
+
+    NameChanged(String),
+    /// A keystroke in the multi-line prompt editor. Carries the widget's own
+    /// action rather than a `String`, because the editor owns the cursor.
+    PromptAction(cosmic::widget::text_editor::Action),
+    /// A vocabulary row's text changed. A pasted multi-line blob splits across
+    /// rows rather than landing as one term with newlines in it.
+    TermChanged {
+        index: usize,
+        value: String,
+    },
+    /// Enter in a vocabulary row: insert one below and focus it.
+    TermSubmitted(usize),
+    /// The clear button on a vocabulary row.
+    TermRemoved(usize),
+
+    /// Save the open editor.
+    Save,
+    /// The daemon stored it, and this is what it stored — blanks dropped,
+    /// terms trimmed.
+    Saved(DictationContext),
+    /// The daemon refused the save. Shown in the editor, not as a page banner:
+    /// it is about this form.
+    SaveFailed(String),
+
+    /// First press of Delete: arms the confirmation. A second press on the same
+    /// row is what actually deletes, because a vocabulary is worth more than
+    /// the click it takes to rebuild.
+    DeleteRequested(String),
+    /// Abandon a pending delete.
+    DeleteCancelled,
+    /// Second press: do it.
+    DeleteConfirmed(String),
+
+    /// Point one backend at a context of its own, or at none. `None` means "no
+    /// context at all"; going back to following the active one is
+    /// [`Self::BackendFollowsActive`].
+    BackendPinned {
+        source: String,
+        id: Option<String>,
+    },
+    /// Put one backend back on the active context.
+    BackendFollowsActive(String),
+    /// What a backend uses now, as the daemon reports it.
+    BackendContextLoaded {
+        source: String,
+        state: crate::daemon::client::BackendContext,
+    },
+}
+
 macro_rules! message_from {
     ($($variant:ident => $ty:ident),+ $(,)?) => {
         $(
@@ -671,6 +752,7 @@ message_from! {
     WriteMethod => WriteMethodMessage,
     NotificationMethod => NotificationMethodMessage,
     Backend => BackendMessage,
+    Contexts => ContextsMessage,
     Language => LanguageMessage,
     Recording => RecordingMessage,
     Update => UpdateMessage,

@@ -73,6 +73,20 @@ pub struct BackendInfo {
     pub secrets: Vec<BackendSecret>,
     /// Non-sensitive options stored in the daemon config.
     pub options: Vec<BackendOption>,
+    /// Whether this backend declared `[capabilities] context = true`, and so is
+    /// handed the user's [dictation context](crate::models::contexts).
+    ///
+    /// Published so a settings UI can say which installed backends will
+    /// actually hear a vocabulary the user typed. Without it the page can only
+    /// list contexts and hope; a backend that ignores the headers has no way to
+    /// say so at runtime, and the user would have no way to tell the difference
+    /// between "this did nothing" and "this is not working".
+    ///
+    /// `default` so a payload from a daemon older than the field still
+    /// deserializes, reading as "does not accept one" — which is what such a
+    /// daemon would do anyway, since it sends the headers to nobody.
+    #[serde(default)]
+    pub accepts_context: bool,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

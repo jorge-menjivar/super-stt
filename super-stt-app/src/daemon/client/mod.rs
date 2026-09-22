@@ -17,6 +17,10 @@ pub(crate) mod v1;
 pub use v1::backends::list_backends;
 pub use v1::backends::options::{clear_backend_option, set_backend_option};
 pub use v1::backends::secrets::{clear_backend_secret, list_backend_secrets, set_backend_secret};
+// Only the two types cross a module boundary — the Contexts page's messages
+// and state name them. Every call goes through `v1::contexts` directly, the way
+// the handler that makes it does.
+pub use v1::contexts::backend::{BackendContext, ContextMode};
 pub use v1::gpu_info::get_gpu_info;
 pub use v1::ping::{ping_daemon, test_daemon_connection};
 pub use v1::transcribe::{RecordEvent, record_command_stream, stop_record_command};

@@ -118,6 +118,13 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
             }
         }),
         load_post_processor(),
+        // Contexts are global and the daemon owns them, so a restart under an
+        // open Contexts page would otherwise leave the list showing whatever
+        // the previous daemon had. The `settings_changed` topic covers a live
+        // edit; this covers the reconnect, which that topic cannot.
+        Task::done(cosmic::Action::App(Message::Contexts(
+            crate::ui::messages::ContextsMessage::Reload,
+        ))),
         Task::perform(get_preview_typing(), |result| match result {
             Ok(enabled) => cosmic::Action::App(Message::PreviewTyping(
                 PreviewTypingMessage::SettingLoaded(enabled),

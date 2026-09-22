@@ -31,6 +31,7 @@ pub const PLAY: &[u8] = include_bytes!("../../resources/icons/phosphor/play.svg"
 pub const STOP: &[u8] = include_bytes!("../../resources/icons/phosphor/stop.svg");
 pub const GIT_BRANCH: &[u8] = include_bytes!("../../resources/icons/phosphor/git-branch.svg");
 pub const BOOKS: &[u8] = include_bytes!("../../resources/icons/phosphor/books.svg");
+pub const CARDS: &[u8] = include_bytes!("../../resources/icons/phosphor/cards.svg");
 pub const X: &[u8] = include_bytes!("../../resources/icons/phosphor/x.svg");
 pub const CIRCLE_NOTCH: &[u8] = include_bytes!("../../resources/icons/phosphor/circle-notch.svg");
 

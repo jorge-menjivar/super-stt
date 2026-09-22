@@ -97,13 +97,27 @@ impl AppModel {
                 // Open the per-backend configuration as a right-side sheet over
                 // the current list (active card or Installed tab), instead of a
                 // full-page takeover. Also closes the card's overflow menu.
-                self.models_page.configure_backend = Some(source);
+                self.models_page.configure_backend = Some(source.clone());
                 self.context_page = ContextPage::ConfigureBackend;
                 self.core.window.show_context = true;
                 self.models_page.installed_menu_open = None;
                 // Start the sheet without a stale save-error banner.
                 self.action_error = None;
-                Task::none()
+                // The sheet's context picker needs two things the catalog does
+                // not carry: what this backend is pointed at, and the list to
+                // offer. Both are read on open rather than published with every
+                // `GET /backend/list`, which two pages fetch and neither shows.
+                let mut tasks = vec![Task::done(cosmic::Action::App(Message::Contexts(
+                    crate::ui::messages::ContextsMessage::Reload,
+                )))];
+                if self
+                    .backends
+                    .iter()
+                    .any(|b| b.source == source && b.accepts_context)
+                {
+                    tasks.push(Self::fetch_backend_context(source));
+                }
+                Task::batch(tasks)
             }
 
             ModelsPageMessage::CloseBackendConfig => {

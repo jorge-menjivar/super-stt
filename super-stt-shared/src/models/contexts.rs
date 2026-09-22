@@ -89,6 +89,22 @@ impl DictationContext {
         self.prompt.trim().is_empty() && self.vocabulary.is_empty()
     }
 
+    /// What to call this context in a list.
+    ///
+    /// Falls back to the id when the name is blank. A stored context always has
+    /// a name — [`check`](Self::check) refuses one without — but a draft being
+    /// typed does not yet, and a picker rendering an empty string would show a
+    /// row the user cannot see or click.
+    #[must_use]
+    pub fn display_name(&self) -> String {
+        let name = self.name.trim();
+        if name.is_empty() {
+            self.id.clone()
+        } else {
+            name.to_string()
+        }
+    }
+
     /// The vocabulary with blank entries dropped and each term trimmed.
     ///
     /// The settings UI edits the vocabulary as one input per term and keeps a
