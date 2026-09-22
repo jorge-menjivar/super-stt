@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+use crate::models::contexts::DictationContext;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::write_method::WriteMethod;
 
@@ -241,4 +242,32 @@ pub enum Command {
     ClearActiveBackend,
     /// Read-only GPU inventory + memory. See `docs/protocol/endpoints/v1/gpu_info.md`.
     GetGpuInfo,
+    /// Store a dictation context, replacing one of the same id or adding it.
+    ///
+    /// Upsert rather than a create/update pair because the id is the client's
+    /// to choose — there is no minting step for the two verbs to straddle, and
+    /// a settings UI saving an editor it opened on either a new or an existing
+    /// context would have to know which it was for no benefit.
+    SetContext {
+        context: DictationContext,
+    },
+    /// Remove a dictation context. Clears the active selection when it named
+    /// this one; a per-backend pin to it is left alone.
+    DeleteContext {
+        id: String,
+    },
+    /// Choose the context in force by default, or clear it (`None`).
+    SetActiveContext {
+        id: Option<String>,
+    },
+    /// Point one backend at a context of its own.
+    ///
+    /// Three states, and the `Option` is only two of them: `None` clears the
+    /// override so the backend follows the active context, `Some(id)` pins it,
+    /// and `Some("")` — an id no context can have — means send this backend no
+    /// context at all. See `DaemonConfig::resolve_context`.
+    SetBackendContext {
+        source: String,
+        id: Option<String>,
+    },
 }

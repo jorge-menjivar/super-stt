@@ -44,6 +44,18 @@ pub const MAX_VOCABULARY_TERMS: usize = 200;
 /// Longest a context's vocabulary may be in total, in characters.
 pub const MAX_VOCABULARY_CHARS: usize = 4000;
 
+/// Ids a context may not take, because a path already means something by them.
+///
+/// Contexts are addressed at `/v1/context/{id}`, and that namespace holds two
+/// fixed siblings — `/v1/context/list` and `/v1/context/active`. A router
+/// prefers the literal, so a context called `active` would be stored fine and
+/// then be unreachable: every read of it would answer with the active
+/// selection instead. Refusing the two ids costs the user nothing, since the
+/// id is a slug they never see, while the alternative — renaming the fixed
+/// paths to something no id could collide with — would make the whole
+/// namespace read worse to buy back two words.
+pub const RESERVED_IDS: [&str; 2] = ["active", "list"];
+
 /// One named dictation context.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -110,6 +122,14 @@ impl DictationContext {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
     }
 
+    /// Whether `value` is an id the context namespace has already spoken for.
+    ///
+    /// See [`RESERVED_IDS`].
+    #[must_use]
+    pub fn is_reserved_id(value: &str) -> bool {
+        RESERVED_IDS.contains(&value)
+    }
+
     /// Whether this context's fields are within the limits the daemon stores.
     ///
     /// # Errors
@@ -120,6 +140,13 @@ impl DictationContext {
                 "A context id is 1 to 64 characters of lowercase letters, digits, - and _."
                     .to_string(),
             );
+        }
+        if Self::is_reserved_id(&self.id) {
+            return Err(format!(
+                "`{}` is a reserved context id; the endpoint that addresses contexts already \
+                 uses it.",
+                self.id
+            ));
         }
         if self.name.trim().is_empty() {
             return Err("A context needs a name.".to_string());
@@ -151,7 +178,10 @@ impl DictationContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{DictationContext, MAX_PROMPT_CHARS, MAX_VOCABULARY_CHARS, MAX_VOCABULARY_TERMS};
+    use super::{
+        DictationContext, MAX_PROMPT_CHARS, MAX_VOCABULARY_CHARS, MAX_VOCABULARY_TERMS,
+        RESERVED_IDS,
+    };
 
     fn ctx(id: &str) -> DictationContext {
         DictationContext {
@@ -216,6 +246,27 @@ mod tests {
         }
         assert!(DictationContext::is_valid_id(&"a".repeat(64)));
         assert!(!DictationContext::is_valid_id(&"a".repeat(65)));
+    }
+
+    /// A context named after one of its own endpoints would be stored and then
+    /// be unreachable, because the router prefers the literal path.
+    #[test]
+    fn the_ids_the_namespace_uses_are_refused() {
+        for reserved in RESERVED_IDS {
+            assert!(
+                DictationContext::is_valid_id(reserved),
+                "{reserved} is a well-formed slug — refusing it is the point"
+            );
+            let mut taken = ctx(reserved);
+            assert!(
+                taken.check().is_err(),
+                "{reserved} is a path of its own and cannot also be a context"
+            );
+            // Nothing else about the id rules changed: a longer id containing
+            // one is fine.
+            taken.id = format!("{reserved}-notes");
+            assert!(taken.check().is_ok());
+        }
     }
 
     #[test]

@@ -137,6 +137,12 @@ impl SuperSTTDaemon {
             Command::GetActiveBackend => self.handle_get_active_backend().await,
             Command::GetGpuInfo => Self::handle_get_gpu_info().await,
             Command::ClearActiveBackend => self.handle_clear_active_backend().await,
+            Command::SetContext { context } => self.handle_set_context(context).await,
+            Command::DeleteContext { id } => self.handle_delete_context(id).await,
+            Command::SetActiveContext { id } => self.handle_set_active_context(id).await,
+            Command::SetBackendContext { source, id } => {
+                self.handle_set_backend_context(source, id).await
+            }
         }
     }
 
