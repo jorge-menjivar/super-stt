@@ -370,3 +370,40 @@ async fn second_transcribe_during_active_recording_surfaces_recording_in_progres
         }
     }
 }
+
+/// A recording that types nothing answers without building a keyboard. This
+/// daemon's `XDG_RUNTIME_DIR` hides the compositor, so a keyboard here would
+/// come from the portal, which puts a permission dialog on the developer's
+/// screen and holds the request for 10 s waiting on it.
+#[tokio::test]
+async fn a_recording_without_write_mode_does_not_wait_on_a_keyboard() {
+    let (_guard, http_socket) = start_daemon().await;
+    let token = http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
+        .await
+        .expect("auth_request should succeed")
+        .session_token;
+
+    let started = Instant::now();
+    let result = http_client::transcribe(
+        http_socket.clone(),
+        &token,
+        TranscribeOptions {
+            wait: false,
+            write_mode: false,
+            stop_mode: Some("manual_only".to_string()),
+            stream_realtime: false,
+        },
+    )
+    .await;
+    let elapsed = started.elapsed();
+
+    let err = result.expect_err("no model is loaded");
+    assert!(
+        err.to_string().contains("model_not_loaded"),
+        "expected model_not_loaded, got: {err}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "took {elapsed:?}: the daemon built a keyboard for a recording that types nothing"
+    );
+}
