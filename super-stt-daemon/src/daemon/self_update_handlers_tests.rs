@@ -234,9 +234,12 @@ async fn failed_check_publishes_no_event_and_notifies_nobody() {
         .expect("event");
     assert_eq!(sent.lock().unwrap().len(), 1);
 
-    // Now the server is gone: the next check fails but (same channel)
-    // preserves the stale candidate.
-    drop(s);
+    // Now point the daemon at a dead endpoint: the next check fails but
+    // (same channel) preserves the stale candidate. Re-pointing rather than
+    // dropping `s` — see `self_update::UNREACHABLE_ENDPOINT` for why freeing
+    // the port makes this test race every other one in the binary. Both
+    // guards remove the same variable on drop, so overlapping them is safe.
+    let _dead_api_base = GithubApiBaseGuard::set(crate::self_update::UNREACHABLE_ENDPOINT);
     let status2 = daemon.run_self_update_check_and_notify().await;
     assert!(status2.last_check_error.is_some());
     assert_eq!(status2.latest_version.as_deref(), Some("v81.0.0"));
@@ -297,7 +300,7 @@ async fn assert_method_notifies(method: NotificationMethod, tag: &str) {
 
 #[tokio::test]
 async fn dbus_method_sends_a_notification() {
-    assert_method_notifies(NotificationMethod::Dbus, "v82.0.0").await;
+    assert_method_notifies(NotificationMethod::Desktop, "v82.0.0").await;
 }
 
 #[tokio::test]

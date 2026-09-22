@@ -249,6 +249,15 @@ fn score(host: &Host, a: &IndexSubprocessAsset) -> Option<(u8, u32, u8, u8)> {
         }
     }
 
+    // Metal has no discriminator to compare — an asset either declares it or
+    // does not, and the host either has it or does not (see
+    // `host_detect::MetalHost`). Ranked `RANK_NATIVE` alongside CUDA and
+    // ROCm, and for the same reason: on the hardware it targets it is the
+    // vendor's own path to the GPU, not a portable abstraction over one.
+    if declares("metal") && host.metal.is_some() {
+        return Some((RANK_NATIVE, 0, 0, 0));
+    }
+
     if declares("cpu") {
         return Some((RANK_CPU, 0, 0, 0));
     }
@@ -288,6 +297,9 @@ fn incompatible_reason(host: &Host, candidates: &[(usize, &IndexSubprocessAsset)
     }
     if let Some(v) = &host.vulkan {
         caps.push(format!("vulkan {}", v.api_version));
+    }
+    if host.metal.is_some() {
+        caps.push("metal".into());
     }
     if caps.is_empty() {
         caps.push("cpu only".into());
@@ -451,6 +463,7 @@ mod tests {
                 version: None,
             }),
             vulkan: None,
+            metal: None,
         }
     }
 
@@ -464,6 +477,17 @@ mod tests {
             }),
             rocm: None,
             vulkan: None,
+            metal: None,
+        }
+    }
+
+    fn host_metal() -> Host {
+        Host {
+            target_triple: "aarch64-apple-darwin".into(),
+            cuda: None,
+            rocm: None,
+            vulkan: None,
+            metal: Some(crate::registry::host_detect::MetalHost),
         }
     }
 
@@ -473,6 +497,7 @@ mod tests {
             cuda: None,
             rocm: None,
             vulkan: None,
+            metal: None,
         }
     }
 
@@ -1014,5 +1039,74 @@ mod tests {
             .expect("still blocked without a stamp")
             .to_string();
         assert!(reason.contains("newer Super STT"), "{reason}");
+    }
+
+    /// A Mac offered both a Metal and a CPU build of the same backend must
+    /// get the Metal one. Metal outranks the CPU for the same reason CUDA
+    /// and ROCm do — it is the vendor's own path to the GPU — and without an
+    /// arm in `score` it scores `None`, leaving every Mac on the CPU build
+    /// with nothing in the logs to say why.
+    #[test]
+    fn a_mac_prefers_the_metal_asset_over_the_cpu_one() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("aarch64-apple-darwin", "cpu", None, None, false),
+                sp("aarch64-apple-darwin", "metal", None, None, false),
+            ],
+        );
+        assert_eq!(
+            select(&host_metal(), &e),
+            Selection::Subprocess { index: 1 }
+        );
+    }
+
+    /// A Metal build on a host without Metal is not installable, and the
+    /// CPU build beside it is what the host gets instead.
+    #[test]
+    fn a_host_without_metal_falls_back_to_the_cpu_asset() {
+        let e = entry(
+            "subprocess",
+            vec![
+                sp("x86_64-unknown-linux-gnu", "metal", None, None, false),
+                sp("x86_64-unknown-linux-gnu", "cpu", None, None, false),
+            ],
+        );
+        assert_eq!(select(&host_cpu(), &e), Selection::Subprocess { index: 1 });
+    }
+
+    /// With only a Metal asset published and no Metal on the host, the entry
+    /// is incompatible — and the reason names the target, since a Linux host
+    /// reaching a darwin-only backend is the likely way to get here.
+    #[test]
+    fn a_metal_only_backend_is_incompatible_without_metal() {
+        let e = entry(
+            "subprocess",
+            vec![sp("aarch64-apple-darwin", "metal", None, None, false)],
+        );
+        let sel = select(&host_cpu(), &e);
+        let reason = sel.reason().expect("incompatible entries carry a reason");
+        assert!(
+            reason.contains("no asset for target"),
+            "unexpected reason: {reason}"
+        );
+    }
+
+    /// The incompatibility message has to say the host *has* Metal, or a
+    /// backend author debugging why their darwin asset was refused is told
+    /// only "cpu only" about a machine with a GPU.
+    #[test]
+    fn the_reason_reports_metal_among_the_hosts_capabilities() {
+        let e = entry(
+            "subprocess",
+            vec![sp("aarch64-apple-darwin", "rocm", None, None, false)],
+        );
+        let sel = select(&host_metal(), &e);
+        let reason = sel.reason().expect("incompatible entries carry a reason");
+        assert!(reason.contains("metal"), "unexpected reason: {reason}");
+        assert!(
+            !reason.contains("cpu only"),
+            "a Metal host is not cpu only: {reason}"
+        );
     }
 }

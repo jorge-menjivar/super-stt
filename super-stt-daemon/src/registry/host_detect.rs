@@ -2,8 +2,8 @@
 //! Detect the host's target triple and its accelerator capability — CUDA
 //! compute capability, runtime CUDA major version and cuDNN presence; the AMD
 //! architecture targets and `ROCm` userspace release; the Vulkan runtime's API
-//! version. Used by `compat::select` to pick a compatible asset, and surfaced
-//! in the install failure error path.
+//! version; whether Metal is available. Used by `compat::select` to pick a
+//! compatible asset, and surfaced in the install failure error path.
 
 #[derive(Debug, Clone)]
 pub struct Host {
@@ -11,6 +11,7 @@ pub struct Host {
     pub cuda: Option<CudaHost>,
     pub rocm: Option<RocmHost>,
     pub vulkan: Option<VulkanHost>,
+    pub metal: Option<MetalHost>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,18 @@ pub struct VulkanHost {
     pub api_version: gpu_probe::VulkanVersion,
 }
 
+/// The host's Metal capability.
+///
+/// Deliberately carries nothing. Unlike the three above, Metal has no
+/// version or architecture that gates an asset: the manifest vocabulary has
+/// no `metal_*` discriminator to match against (see
+/// `super_stt_registry_types::manifest::SubprocessAsset`), because a Metal
+/// build targets the framework rather than a device generation. The only
+/// question an asset can ask is whether Metal is there at all, so presence is
+/// the whole type.
+#[derive(Debug, Clone)]
+pub struct MetalHost;
+
 #[must_use]
 pub fn detect() -> Host {
     let gpus = gpu_probe::detect();
@@ -54,7 +67,44 @@ pub fn detect() -> Host {
         cuda: detect_cuda(),
         rocm: rocm_capability(&gfx_targets, gpu_probe::rocm_host().map(|h| h.version)),
         vulkan: vulkan_capability(gpus.len(), gpu_probe::vulkan_host().map(|h| h.api_version)),
+        metal: detect_metal(),
     }
+}
+
+/// Whether this host can run a Metal build.
+///
+/// Answered from the target rather than by probing, and that is a claim worth
+/// justifying rather than a shortcut. Metal is not an optional runtime that
+/// may or may not be installed the way CUDA and `ROCm` are — it is part of
+/// macOS, and the framework is present on every install. The remaining
+/// question is whether there is a GPU behind it, and for every Mac this
+/// daemon can run on there is: Apple Silicon integrates one into the `SoC`, and
+/// the oldest Intel Mac that runs a macOS release still receiving updates is
+/// years newer than the 2012 cutoff for Metal support. So there is no
+/// negative case to detect among real hosts, and a probe would be machinery
+/// that only ever returns the same answer.
+///
+/// The one exception is a virtual machine given no graphics device. Apple's
+/// own Virtualization.framework provides a paravirtualized Metal device, so
+/// this is not the common VM case; where it does happen, a Metal backend
+/// fails at model load with the driver's own error rather than being
+/// mis-selected into. That is a worse diagnostic than refusing the install,
+/// and the cost of not having a probe — but refusing every Mac a Metal asset
+/// to spare a GPU-less VM a confusing error is the worse trade.
+#[cfg(target_os = "macos")]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Option is the Host field's type, and the non-macOS arm returns None"
+)]
+const fn detect_metal() -> Option<MetalHost> {
+    Some(MetalHost)
+}
+
+/// See the macOS [`detect_metal`]. Metal is an Apple framework; there is no
+/// implementation of it to find anywhere else.
+#[cfg(not(target_os = "macos"))]
+const fn detect_metal() -> Option<MetalHost> {
+    None
 }
 
 /// Assemble the AMD capability record from the two independent facts about it.
@@ -132,6 +182,16 @@ fn target_triple() -> &'static str {
 #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
 fn target_triple() -> &'static str {
     "aarch64-unknown-linux-gnu"
+}
+
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+fn target_triple() -> &'static str {
+    "aarch64-apple-darwin"
+}
+
+#[cfg(all(target_arch = "x86_64", target_os = "macos"))]
+fn target_triple() -> &'static str {
+    "x86_64-apple-darwin"
 }
 
 /// CUDA properties come from `gpu-probe`, which owns the single process-wide

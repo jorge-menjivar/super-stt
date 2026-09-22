@@ -29,12 +29,14 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
         description = "\
 HTTP/1.1 + JSON on two transports that serve the identical API.
 
-**A Unix domain socket** at `$XDG_RUNTIME_DIR/stt/super-stt-http.sock` (override with \
-`SUPER_STT_HTTP_SOCKET`), which is what native clients use. Its filesystem permissions \
-are the first layer of access control, and the daemon reads `SO_PEERCRED` on each \
-connection to identify the calling binary. It is the second server below, listed by its \
-real path — dial that path directly and send whatever `Host` you like, since the daemon \
-ignores it.
+**A Unix domain socket** under the per-user runtime directory at \
+`<runtime dir>/stt/super-stt-http.sock` (override with `SUPER_STT_HTTP_SOCKET`), which is \
+what native clients use. The runtime directory is `$XDG_RUNTIME_DIR` on Linux and the \
+Darwin per-user temp directory on macOS — ask the daemon rather than assuming, or read \
+the `runtime_dir` server variable below. Its filesystem permissions are the first layer \
+of access control, and the daemon reads the peer credentials on each connection to \
+identify the calling binary. It is the second server below, listed by its real path — \
+dial that path directly and send whatever `Host` you like, since the daemon ignores it.
 
 **A loopback TCP listener**, which is what a browser can reach, since no browser can dial \
 a Unix socket. It is the first server below, and it is a real address. There are no peer \
@@ -49,7 +51,7 @@ A client cannot widen its own permissions. See `docs/protocol/auth.md`.
 With curl, over the socket:
 
 ```
-curl --unix-socket \"$XDG_RUNTIME_DIR/stt/super-stt-http.sock\" \\
+curl --unix-socket \"${XDG_RUNTIME_DIR:-$TMPDIR}/stt/super-stt-http.sock\" \\
      -H \"Authorization: Bearer $STT_TOKEN\" \\
      http://stt.local/v1/ping
 ```",
@@ -86,6 +88,19 @@ pub(crate) struct ApiDoc;
 /// dialed.
 struct LocalServers;
 
+/// The example runtime directory shown for the `runtime_dir` server variable.
+///
+/// Per-platform because the two do not look remotely alike, and a reader on
+/// the wrong one would take `/run/user/1000` for a path to try. It is an
+/// illustration either way — the real value is this user's own — so the
+/// macOS form keeps a placeholder where the per-user hash goes rather than
+/// printing a directory that belongs to whoever generated the document.
+#[cfg(target_os = "linux")]
+const DEFAULT_RUNTIME_DIR: &str = "/run/user/1000";
+/// See [`DEFAULT_RUNTIME_DIR`].
+#[cfg(target_os = "macos")]
+const DEFAULT_RUNTIME_DIR: &str = "/var/folders/xx/xxxxxxxxxxxxxxxxxxxxxxxxxxxx/T";
+
 impl Modify for LocalServers {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         use utoipa::openapi::{ServerBuilder, ServerVariableBuilder};
@@ -108,11 +123,14 @@ impl Modify for LocalServers {
                 .parameter(
                     "runtime_dir",
                     ServerVariableBuilder::new()
-                        .default_value("/run/user/1000")
+                        .default_value(DEFAULT_RUNTIME_DIR)
                         .description(Some(
-                            "Your `$XDG_RUNTIME_DIR` — `/run/user/<uid>` on a systemd \
-                             host, with `/tmp/stt` as the fallback. Override the whole \
-                             socket path with `SUPER_STT_HTTP_SOCKET`.",
+                            "Your per-user runtime directory: `$XDG_RUNTIME_DIR` \
+                             (`/run/user/<uid>`) on a systemd host, or the Darwin \
+                             per-user temp directory (`/var/folders/<xx>/<hash>/T`, what \
+                             `getconf DARWIN_USER_TEMP_DIR` prints) on macOS. `/tmp/stt` \
+                             is the fallback on both. Override the whole socket path with \
+                             `SUPER_STT_HTTP_SOCKET`.",
                         )),
                 )
                 .description(Some(

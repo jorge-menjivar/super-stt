@@ -21,15 +21,22 @@ Based on comprehensive security reviews completed in August 2025, Super STT demo
 ## Socket Access Control
 
 The daemon listens on a Unix domain socket at
-`$XDG_RUNTIME_DIR/stt/super-stt-http.sock`. Access is restricted to the user
+`<runtime dir>/stt/super-stt-http.sock`. Access is restricted to the user
 running the daemon — there is **no** shared `stt` group and no group membership
 to configure. Two independent layers enforce this:
 
-1. **Per-user runtime directory.** `$XDG_RUNTIME_DIR` (typically
-   `/run/user/<uid>`) is created by the system with `0700` permissions, so no
-   other local user can even traverse into it to reach the socket.
+1. **Per-user runtime directory.** The directory is created by the system with
+   `0700` permissions, so no other local user can even traverse into it to
+   reach the socket. On Linux that is `$XDG_RUNTIME_DIR` (typically
+   `/run/user/<uid>`); on macOS it is the Darwin per-user temp directory
+   (`/var/folders/<xx>/<hash>/T`, what `getconf DARWIN_USER_TEMP_DIR` prints),
+   which the OS likewise creates `0700` and owned by the user. The daemon
+   reads the macOS one from `confstr(_CS_DARWIN_USER_TEMP_DIR)` rather than
+   `$TMPDIR` so an inherited or overridden environment variable cannot move
+   where it binds.
 2. **Same-UID peer check.** Every request is checked against the connecting
-   peer's UID (`SO_PEERCRED`); a peer whose UID differs from the daemon's is
+   peer's UID, which the kernel supplies (`SO_PEERCRED` on Linux,
+   `LOCAL_PEERCRED` on macOS); a peer whose UID differs from the daemon's is
    rejected. A process that somehow reached the socket still cannot use it
    unless it runs as the same user.
 
@@ -48,9 +55,19 @@ carrying user-approved scopes, minted through a one-time consent prompt and
 bound to the client's executable path. See
 [`protocol/auth.md`](protocol/auth.md) for the token and scope model.
 
+The executable path itself comes from the kernel, not from the caller:
+`/proc/<pid>/exe` on Linux, `proc_pidpath` on macOS. **One guarantee is
+weaker on macOS.** Linux renders a replaced-on-disk binary as
+`/path/to/exe (deleted)`, so a token bound to it stops matching and is
+revoked; `proc_pidpath` reports only the path, and a path whose file was
+swapped still resolves. Swapping it requires write access to the install
+directory — the same access needed to replace the daemon itself — so this
+opens no new door, but the exe-change revocation is a Linux-only additional
+check rather than a cross-platform one.
+
 ### Verification
 ```bash
-ls -la "$XDG_RUNTIME_DIR/stt/super-stt-http.sock"
+ls -la "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock"
 # srw-rw---- ... <you> <your-primary-group> ... super-stt-http.sock
 ```
 
@@ -58,19 +75,19 @@ ls -la "$XDG_RUNTIME_DIR/stt/super-stt-http.sock"
 
 ### 1. Keyboard Input Protection
 - **Consent-gated authorization**: Auto-typing is the per-request `write_mode` flag on `POST /transcribe` (or the daemon's configured write mode). Reaching that endpoint at all requires a consent-minted session token with the `transcribe` scope — so a client can only type after the user approved it through the one-time consent prompt. There is no separate keyboard/write scope; it is the same `transcribe` scope dictation uses. See [Authorization](#authorization) and [`protocol/auth.md`](protocol/auth.md)
-- **Peer identity for the prompt**: `SO_PEERCRED` + `/proc/<pid>/exe` tell the consent prompt *which binary* is asking and reject cross-UID peers; this identifies the caller, it is not by itself the authorization
+- **Peer identity for the prompt**: the kernel's peer credentials plus its record of the peer's executable (`SO_PEERCRED` + `/proc/<pid>/exe` on Linux, `LOCAL_PEERCRED` + `proc_pidpath` on macOS) tell the consent prompt *which binary* is asking and reject cross-UID peers; this identifies the caller, it is not by itself the authorization
 - **Debug-only test bypass**: The consent auto-approval used by tests/CI (`SUPER_STT_AUTO_APPROVE`) is compiled out of release builds
 - **Output sanitization**: Backend transcription output is untrusted, so before it is typed the daemon strips non-whitespace control codes (ESC/BEL/NUL/backspace), Unicode bidi overrides, and zero-width characters — a terminal escape sequence or a bidi spoof in a transcript can't reach the focused window
 - **Limited scope**: Only types actual transcription results
 
 ### 2. Network Isolation
-- **No inbound network surface**: The daemon listens only on a per-user Unix domain socket under `$XDG_RUNTIME_DIR/stt/` — there is no TCP or UDP listener, so no host on the network can connect to it
+- **No inbound network surface**: The daemon listens only on a per-user Unix domain socket under the runtime directory's `stt/` — there is no TCP or UDP listener, so no host on the network can connect to it
 - **Local visualization**: Audio-visualization frames are delivered as Server-Sent Events over that same Unix socket, not broadcast on the network
 - **Outbound only for backend installs**: The daemon reaches the network solely to fetch backends over HTTPS from the registry / GitHub — see [Daemon outbound network surface](#daemon-outbound-network-surface) below
 
 ### 3. Consent &amp; Peer Identity
 - **Session tokens + scopes**: Every request other than `/auth/request` requires a `Bearer` session token; each token carries the user-approved scopes that gate what it may do (`transcribe`, `settings`, `secrets`, `status`, and the event-topic scopes — see [`protocol/auth.md`](protocol/auth.md) for the full catalog)
-- **One-time consent**: Tokens are minted by the `super-stt-consent` helper — a popup naming the requesting binary (resolved via `SO_PEERCRED`) and the scopes it asks for, which the user approves or denies
+- **One-time consent**: Tokens are minted only after a popup naming the requesting binary (resolved from the kernel's peer credentials) and the scopes it asks for, which the user approves or denies. The popup is the `super-stt-consent` helper on Linux and an `osascript` dialog on macOS, where the helper's Wayland layer-shell surface has no counterpart; both render the same scope descriptions, from `super_stt_shared::consent`
 - **Same-UID only**: A peer whose UID differs from the daemon's is rejected before any prompt
 - See [`protocol/auth.md`](protocol/auth.md) for the full token, scope, and consent contract
 
@@ -92,9 +109,9 @@ ls -la "$XDG_RUNTIME_DIR/stt/super-stt-http.sock"
 
 ### 6. Process Isolation
 - **User service**: Runs under user account, not root
-- **Per-user socket**: Owner-only `$XDG_RUNTIME_DIR` plus a same-UID peer check — no cross-user access, no shared group
+- **Per-user socket**: An owner-only runtime directory plus a same-UID peer check — no cross-user access, no shared group
 - **Socket permissions**: Enforced at filesystem level
-- **Peer identity**: `SO_PEERCRED` resolves the peer UID (same-UID enforced) and exe path (shown in the consent prompt) — the authorization itself is the consent-minted session token and its scopes
+- **Peer identity**: The kernel resolves the peer UID (same-UID enforced) and exe path (shown in the consent prompt) — the authorization itself is the consent-minted session token and its scopes
 
 ## Daemon outbound network surface
 
@@ -130,8 +147,8 @@ just install-daemon
 ```
 
 ### For Multi-User Systems
-The daemon is strictly per-user: its socket lives in the owner's
-`$XDG_RUNTIME_DIR` and every request is rejected unless the peer's UID matches
+The daemon is strictly per-user: its socket lives in the owner's runtime
+directory and every request is rejected unless the peer's UID matches
 the daemon's. Each user runs their own daemon instance — there is no shared
 access to configure and no `stt` group.
 
@@ -229,7 +246,7 @@ cargo audit
 
 ### Production Deployment Requirements
 - [ ] Use release builds (`cargo build --release`)
-- [ ] Verify the socket is same-user (owner-only `$XDG_RUNTIME_DIR`, mode 0660)
+- [ ] Verify the socket is same-user (owner-only runtime directory, mode 0660)
 - [ ] Review systemd service hardening settings
 - [ ] Monitor logs for authentication failures
 

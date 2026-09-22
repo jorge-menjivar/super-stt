@@ -143,12 +143,26 @@ pub(super) fn download_toolbar<'a>(
         .spacing(spacing.space_xs)
         .on_toggle(|x| Message::ModelsPage(ModelsPageMessage::RegistryIncludeIncompatible(x)));
 
-    // Runs-on and Kind chips on the left; the incompatible toggle pushed to the
-    // right edge.
-    let filter_row = row![runs_on, kind, horizontal_space(), show_incompat]
+    // Runs-on chips, Kind chips, then the incompatible toggle, wrapping onto a
+    // second line when all three will not fit.
+    //
+    // `.wrap()` rather than a plain row: a row squeezes its children when the
+    // window is too narrow for their natural width, and these children have
+    // nothing to give — the labels clip mid-word instead ("Post-processing"
+    // breaking inside its own chip, the toggle sliding off the edge). How
+    // narrow "too narrow" is depends on the platform's font metrics, so this
+    // is not a fixed breakpoint to tune: macOS renders the same labels wider
+    // than Linux does and hit it at a window size Linux was fine at.
+    //
+    // The toggle used to be pushed to the right edge with a `horizontal_space`
+    // spacer. A wrapping row cannot do that — a fill-width spacer would eat
+    // the rest of the line and force a wrap at every width — so the toggle now
+    // follows the chips directly.
+    let filter_row = row![runs_on, kind, show_incompat]
         .spacing(spacing.space_m)
         .align_y(Alignment::Center)
-        .width(Length::Fill);
+        .wrap()
+        .vertical_spacing(spacing.space_xs);
 
     // The result count gets its own short, left-aligned row sitting tight above
     // the filter chips; the search row keeps the normal gap below it.

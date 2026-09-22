@@ -11,7 +11,7 @@ pub use inputs::{
     validate_limit, validate_optional_string, validate_required_string, validate_sample_rate,
     validate_string,
 };
-pub use paths::{get_http_socket_path, secure_runtime_path};
+pub use paths::{SUN_PATH_MAX, get_http_socket_path, secure_runtime_path};
 
 /// Validation errors for better error reporting
 #[derive(Debug, thiserror::Error)]

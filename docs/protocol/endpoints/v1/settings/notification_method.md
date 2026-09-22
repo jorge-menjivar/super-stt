@@ -8,16 +8,29 @@ caller regardless of this setting: as the direct error response (e.g. `409
 model_not_loaded`) or, once an SSE stream has started, via the `error` event.
 This setting controls the additional, human-facing notice.
 
-| Method  | Notes                                                                                          |
-|---------|------------------------------------------------------------------------------------------------|
-| `auto`  | Send a desktop notification; if it cannot be delivered, type the notice instead (the default). |
-| `dbus`  | Send a desktop notification only. If it cannot be delivered, the failure is logged and nothing is shown. |
-| `typed` | Type a fixed notice into the focused window.                                                   |
-| `off`   | Log the failure only; never surface it.                                                        |
+| Method    | Notes                                                                                          |
+|-----------|------------------------------------------------------------------------------------------------|
+| `auto`    | Send a desktop notification; if it cannot be delivered, type the notice instead (the default). |
+| `desktop` | Send a desktop notification only. If it cannot be delivered, the failure is logged and nothing is shown. |
+| `typed`   | Type a fixed notice into the focused window.                                                   |
+| `off`     | Log the failure only; never surface it.                                                        |
+
+`desktop` was called `dbus` before macOS support; the name now describes what
+the user sees rather than one platform's transport for it. The old token is
+not accepted — a stored `dbus` falls back to `auto`, which prefers the same
+channel.
 
 Desktop notifications use the freedesktop Desktop Notifications interface
-(`org.freedesktop.Notifications`) on the session bus, so they work on any
-desktop that provides a notification server.
+(`org.freedesktop.Notifications`) on the session bus on Linux, so they work on
+any desktop that provides a notification server, and Notification Center on
+macOS.
+
+**Two caveats on macOS.** A banner carries no action buttons, so the "Open
+Super STT" action on an update notice is absent there. And the daemon cannot
+tell whether a banner was actually shown — if notifications are muted for the
+posting application, or Do Not Disturb is on, the post still reports success,
+so `auto` will *not* fall back to typing. Both follow from the daemon being a
+plain binary rather than a bundled, signed `.app`.
 
 Typing requires a `POST /transcribe` with `write_mode: true`. For a recording
 that is not in write mode, `typed` — and `auto` once notification delivery has
@@ -77,13 +90,13 @@ Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
 {
-  "method": "dbus"
+  "method": "desktop"
 }
 ```
 
 | Field    | Type   | Required | Notes                                          |
 |----------|--------|----------|--------------------------------------------------|
-| `method` | string | yes      | One of `auto`, `dbus`, `typed`, `off`          |
+| `method` | string | yes      | One of `auto`, `desktop`, `typed`, `off`       |
 
 **Response (200):**
 
@@ -93,7 +106,7 @@ Content-Type: application/json
 
 {
   "status":              "success",
-  "notification_method": "dbus"
+  "notification_method": "desktop"
 }
 ```
 

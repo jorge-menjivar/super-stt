@@ -58,13 +58,16 @@
     # ` think  am  at ` (jorge-menjivar/super-stt#432). The branch types
     # capitals as Shift plus the real key and binds off-layout characters to
     # keys the keymap already has.
+    # `features` are deliberately absent: the backend enigo drives is
+    # per-platform. Linux needs `wayland`, whose optional deps enigo itself
+    # gates to `cfg(all(unix, not(target_os = "macos")))`; macOS drives
+    # CoreGraphics with no feature at all. Naming `wayland` here would enable
+    # it for every target, so the daemon opts in from its own
+    # `cfg(target_os = "linux")` dependency table instead.
     enigo             = {
       git              = "https://github.com/jorge-menjivar/enigo",
       branch           = "fix-shifted-characters-drop",
       default-features = false,
-      features         = [
-        "wayland",
-      ]
     }
     env_logger        = "0.11.8"
     futures-util      = "0.3.31"
@@ -78,7 +81,20 @@
       ]
     }
     i18n-embed-fl     = "0.10.0"
-    keyring           = { version = "3", features = ["sync-secret-service"] }
+    # Both native backends are named because the daemon builds for both
+    # platforms. Neither costs the other anything: keyring puts
+    # `dbus-secret-service` behind `cfg(target_os = "linux")` and
+    # `security-framework` behind `cfg(target_os = "macos")`, so each feature
+    # pulls a dependency only on the target that uses it. Without
+    # `apple-native` keyring falls back to its *mock* store on macOS, which
+    # would silently drop every session token and backend secret at exit.
+    keyring           = {
+      version  = "3",
+      features = [
+        "apple-native",
+        "sync-secret-service",
+      ]
+    }
     # System calls (for client singleton)
     libc              = "0.2"
     # Cosmic specific. The lib target is `cosmic`, so this is `use cosmic::`

@@ -46,7 +46,7 @@ async fn each_generated_setter_posts_the_key_its_endpoint_reads() {
     write_method::set_write_method("ydotool".to_string())
         .await
         .expect("write method set");
-    notification_method::set_notification_method("dbus".to_string())
+    notification_method::set_notification_method("desktop".to_string())
         .await
         .expect("notification method set");
     recording_stop_mode::set_recording_stop_mode("manual_only".to_string())
@@ -73,7 +73,7 @@ async fn each_generated_setter_posts_the_key_its_endpoint_reads() {
             ),
             (
                 "/settings/notification_method".to_string(),
-                json!({ "method": "dbus" })
+                json!({ "method": "desktop" })
             ),
             (
                 "/settings/recording_stop_mode".to_string(),

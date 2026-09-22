@@ -88,6 +88,20 @@ impl SuperSTTDaemon {
             .await;
     }
 
+    /// Tell the user the keyboard could not be set up. See
+    /// [`crate::output::notification::deliver_without_keyboard`] for why this
+    /// cannot go through [`Self::surface_failure`].
+    pub(crate) async fn surface_keyboard_unavailable(&self, detail: &str) {
+        let method = self.config.read().await.transcription.notification_method;
+        let mut notifier = self.notifier.lock().await;
+        crate::output::notification::deliver_without_keyboard(
+            method,
+            &mut notifier,
+            &notice::Failure::keyboard_unavailable(detail),
+        )
+        .await;
+    }
+
     /// Internal record handling implementation
     pub async fn handle_record_internal(
         &self,

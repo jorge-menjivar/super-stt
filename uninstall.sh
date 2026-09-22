@@ -70,6 +70,18 @@ CONFIG_DIR="$HOME/.config/super-stt"
 COSMIC_SHORTCUTS="$HOME/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom"
 SERVICE_NAME="super-stt"
 
+# This script undoes what install.sh did, and install.sh only installs on
+# Linux (see its `detect_triple`). Running it on a Mac would walk a tree of
+# paths that do not exist there and shell out to a `systemctl` that is not
+# there either — a wall of harmless errors that reads like a broken
+# uninstall. Say what to run instead.
+if [ "$(uname -s)" = "Darwin" ]; then
+    print_error "This uninstaller is for Linux installs made by install.sh."
+    print_error "On macOS the daemon is installed from source, so uninstall it the same way:"
+    print_error "  cd /path/to/super-stt && just uninstall-daemon"
+    exit 1
+fi
+
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"

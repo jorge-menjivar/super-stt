@@ -41,7 +41,10 @@ impl SuperSTTDaemon {
                 && self.self_update.should_notify(&tag).await
             {
                 let method = self.config.read().await.transcription.notification_method;
-                if matches!(method, NotificationMethod::Dbus | NotificationMethod::Auto) {
+                if matches!(
+                    method,
+                    NotificationMethod::Desktop | NotificationMethod::Auto
+                ) {
                     let mut notifier = self.notifier.lock().await;
                     let sent = notifier
                         .send_with_actions(
@@ -53,6 +56,11 @@ impl SuperSTTDaemon {
                             )],
                         )
                         .await;
+                    // The click-to-open affordance is D-Bus-only: macOS
+                    // banners carry no actions, so there is nothing to wait
+                    // for and `send_with_actions` already dropped them. See
+                    // `output::notification::Inner`.
+                    #[cfg(target_os = "linux")]
                     let conn = notifier.connection();
                     drop(notifier);
                     if let Ok(id) = sent {
@@ -62,11 +70,15 @@ impl SuperSTTDaemon {
                         // bind the default action) should bring the app up.
                         // Spawned so the check path isn't blocked waiting on
                         // a click that may never come.
+                        #[cfg(target_os = "linux")]
                         if let Some(conn) = conn {
                             tokio::spawn(async move {
                                 Self::wait_for_update_notification_click(conn, id).await;
                             });
                         }
+                        // No click to wait for: macOS banners carry no actions.
+                        #[cfg(not(target_os = "linux"))]
+                        let _ = id;
                     }
                 } else {
                     // Off/Typed: typing an update notice into the focused
@@ -84,6 +96,7 @@ impl SuperSTTDaemon {
     /// (its `org.freedesktop.DbusActivation` interface), so launching it
     /// while it is already running activates and focuses the existing window
     /// instead of opening a second one.
+    #[cfg(target_os = "linux")]
     async fn wait_for_update_notification_click(conn: zbus::Connection, id: u32) {
         let Some(key) = crate::output::notification::Notifier::wait_for_action(&conn, id).await
         else {

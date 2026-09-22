@@ -5,15 +5,22 @@ Read and set the keyboard simulation method used when a
 true` and needs to type the final transcription into the focused
 window.
 
-| Method               | Notes                                                                                                                    |
-|----------------------|--------------------------------------------------------------------------------------------------------------------------|
-| `auto`               | Try `wayland_protocol`, then `xdg_desktop_portal`, then `ydotool`, and use the first the session supports (the default). |
-| `xdg_desktop_portal` | Use the portal's `RemoteDesktop` interface; requires a portal exporting it on the session bus.                            |
-| `ydotool`            | Use the `ydotool` daemon if present; works without a portal on most Wayland sessions.                                    |
-| `wayland_protocol`   | Use a direct Wayland protocol path; requires a compositor exposing `zwp_virtual_keyboard_manager_v1`.                     |
+| Method               | Platform    | Notes                                                                                                                        |
+|----------------------|-------------|------------------------------------------------------------------------------------------------------------------------------|
+| `auto`               | all         | Use the first method the session supports (the default). Linux walks `built_in` → `xdg_desktop_portal` → `ydotool`; macOS has only `built_in`. |
+| `built_in`           | all         | The daemon types the text itself, with no helper process to install. On Linux this needs a compositor exposing `zwp_virtual_keyboard_manager_v1`; on macOS it posts CoreGraphics key events and needs the Accessibility permission. |
+| `xdg_desktop_portal` | Linux only  | Use the portal's `RemoteDesktop` interface; requires a portal exporting it on the session bus.                                |
+| `ydotool`            | Linux only  | Use the `ydotool` daemon if present; works without a portal on most Wayland sessions.                                        |
+
+`built_in` was called `wayland_protocol` before macOS support; the name now
+describes what the user is choosing rather than one platform's mechanism for
+it. The old token is not accepted — a stored `wayland_protocol` falls back to
+`auto`, which resolves to the same backend on Linux.
 
 A specific method is used as given: when it is unavailable the request that
-needs it fails rather than falling back. Only `auto` walks the chain.
+needs it fails rather than falling back. Only `auto` walks the chain. Asking
+for a Linux-only method on macOS is rejected outright rather than reported as
+temporarily unavailable.
 
 The new method takes effect on the next `/transcribe` request. To
 check that the configured method can actually type — and, for `auto`,
@@ -43,7 +50,7 @@ Content-Type: application/json
 
 | Field    | Type   | Required | Notes                                                                          |
 |----------|--------|----------|--------------------------------------------------------------------------------|
-| `method` | string | yes      | One of `auto`, `xdg_desktop_portal`, `ydotool`, `wayland_protocol`             |
+| `method` | string | yes      | One of `auto`, `built_in`, `xdg_desktop_portal`, `ydotool`                     |
 
 **Response (200):**
 

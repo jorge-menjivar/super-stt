@@ -54,18 +54,38 @@ if command -v jq >/dev/null 2>&1; then
     HAVE_JQ=1
 fi
 
-echo "== arch detection (detect_triple) =="
-assert_eq "x86_64 maps to the gnu triple" \
-    "x86_64-unknown-linux-gnu" "$(detect_triple x86_64)"
-assert_eq "aarch64 maps to the gnu triple" \
-    "aarch64-unknown-linux-gnu" "$(detect_triple aarch64)"
-assert_eq "arm64 maps to the same triple as aarch64" \
-    "aarch64-unknown-linux-gnu" "$(detect_triple arm64)"
-if detect_triple riscv64 >/dev/null 2>&1; then
+echo "== platform detection (detect_triple) =="
+assert_eq "linux x86_64 maps to the gnu triple" \
+    "x86_64-unknown-linux-gnu" "$(detect_triple Linux x86_64)"
+assert_eq "linux aarch64 maps to the gnu triple" \
+    "aarch64-unknown-linux-gnu" "$(detect_triple Linux aarch64)"
+assert_eq "linux arm64 maps to the same triple as aarch64" \
+    "aarch64-unknown-linux-gnu" "$(detect_triple Linux arm64)"
+assert_eq "apple silicon maps to the darwin triple" \
+    "aarch64-apple-darwin" "$(detect_triple Darwin arm64)"
+assert_eq "intel mac maps to the darwin triple" \
+    "x86_64-apple-darwin" "$(detect_triple Darwin x86_64)"
+# The regression this signature exists to prevent: `uname -m` on Apple
+# Silicon is `arm64`, so matching on the machine alone handed a Mac the
+# Linux installer — a real asset with a real checksum, so nothing downstream
+# noticed.
+if [ "$(detect_triple Darwin arm64)" = "$(detect_triple Linux arm64)" ]; then
+    fail "a Mac and a Linux arm64 host must not resolve to the same triple" \
+        "different triples" "both $(detect_triple Darwin arm64)"
+else
+    pass "a Mac and a Linux arm64 host resolve to different triples"
+fi
+if detect_triple Linux riscv64 >/dev/null 2>&1; then
     fail "an unsupported machine value errors" "non-zero exit" "0"
 else
     assert_eq "an unsupported machine value prints nothing" \
-        "" "$(detect_triple riscv64 2>/dev/null)"
+        "" "$(detect_triple Linux riscv64 2>/dev/null)"
+fi
+if detect_triple FreeBSD x86_64 >/dev/null 2>&1; then
+    fail "an unsupported OS errors" "non-zero exit" "0"
+else
+    assert_eq "an unsupported OS prints nothing" \
+        "" "$(detect_triple FreeBSD x86_64 2>/dev/null)"
 fi
 
 echo "== channel validation (validate_channel) =="

@@ -480,10 +480,22 @@ mod peer_binding_tests {
         PeerInfo::unix(Some(std::process::id()), None)
     }
 
+    /// This process's identity, resolved the way the daemon resolves a
+    /// caller's.
+    ///
+    /// Through `resolve_peer_identity` rather than by reading the exe path
+    /// directly, because *which* syscall names a process's binary is
+    /// per-platform (`/proc/<pid>/exe` on Linux, `proc_pidpath` on macOS) and
+    /// restating one of them here made these tests Linux-only. It is also the
+    /// more faithful fixture: what is under test is the binding — whether a
+    /// token minted for one identity still matches the caller — not how an
+    /// executable is looked up, which `consent`'s own tests cover.
     fn own_identity() -> PeerIdentity {
-        PeerIdentity::native(
-            std::fs::read_link("/proc/self/exe").expect("read this process's own exe"),
+        crate::daemon::http::internal::auth::consent::resolve_peer_identity(
+            Some(&self_peer()),
+            "peer_binding_tests",
         )
+        .expect("this process must be able to identify itself")
     }
 
     /// The ordinary case: the binary the user approved is the one calling.

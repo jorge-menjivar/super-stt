@@ -8,6 +8,9 @@ mod ui;
 /// No CLI flags; the type exists only to satisfy `run_single_instance`'s
 /// `CosmicFlags` bound. `action()` stays `None`, so a second launch
 /// activates the running window rather than routing an action to it.
+///
+/// Still the model's `Flags` type where single-instance is off, so the
+/// impl below stays unconditional even though nothing reads it there.
 #[derive(Debug, Clone)]
 pub struct Flags;
 
@@ -40,5 +43,13 @@ fn main() -> cosmic::iced::Result {
     // Run as a single-instance D-Bus-activated app. A second launch (e.g.
     // from the update notification's "Open Super STT" action) activates
     // and focuses the existing window instead of opening a duplicate.
-    cosmic::app::run_single_instance::<core::AppModel>(settings, Flags)
+    #[cfg(target_os = "linux")]
+    return cosmic::app::run_single_instance::<core::AppModel>(settings, Flags);
+
+    // libcosmic builds single-instance activation on zbus, so the feature is
+    // off where there is no D-Bus (see this crate's Cargo.toml). Nothing
+    // replaces it: a second launch opens a second window rather than
+    // focusing the first.
+    #[cfg(not(target_os = "linux"))]
+    return cosmic::app::run::<core::AppModel>(settings, Flags);
 }

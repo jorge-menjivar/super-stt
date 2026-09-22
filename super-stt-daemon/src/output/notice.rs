@@ -29,12 +29,18 @@ pub(crate) const RECORDING_FAILED: &str = "[Super STT: recording failed]";
 /// Audio was captured but the model failed to transcribe it.
 pub(crate) const TRANSCRIPTION_FAILED: &str = "[Super STT: transcription failed]";
 
+/// The keyboard could not be set up. Never actually typed — the keyboard is
+/// what failed — but every [`Failure`] carries a typed form, and this one is
+/// held to the same catalogue and invariants as the rest.
+pub(crate) const KEYBOARD_UNAVAILABLE: &str = "[Super STT: cannot type]";
+
 #[cfg(test)]
 pub(crate) const ALL: &[&str] = &[
     NO_MODEL_LOADED,
     COULD_NOT_START_RECORDING,
     RECORDING_FAILED,
     TRANSCRIPTION_FAILED,
+    KEYBOARD_UNAVAILABLE,
 ];
 
 /// Who authored a failure's detail, which decides how the notification body
@@ -110,6 +116,18 @@ impl Failure {
             body: body(origin, detail, "The recording could not be transcribed."),
         }
     }
+
+    /// The keyboard could not be set up, so nothing can be typed. On macOS
+    /// this is almost always a missing or stale Accessibility grant, and the
+    /// detail names the exact binary to add — the one part of the fix the
+    /// user cannot work out for themselves, which is why it is carried whole.
+    pub(crate) fn keyboard_unavailable(detail: &str) -> Self {
+        Self {
+            typed: KEYBOARD_UNAVAILABLE,
+            summary: "Cannot type",
+            body: body(Origin::Daemon, detail, "The keyboard could not be set up."),
+        }
+    }
 }
 
 /// Render a reason into a notification body: labelled by origin, or replaced by
@@ -134,9 +152,9 @@ fn body(origin: Origin, detail: &str, fallback: &str) -> String {
 ///   lines, and cannot smuggle terminal escapes into a server that logs it.
 /// - The result is clamped to [`MAX_DETAIL`] characters, marked with an ellipsis
 ///   so the user can tell it was cut.
-/// - `&`, `<`, and `>` are escaped last, so a clamp can never sever an entity.
-///   Servers that advertise `body-markup` render the body as markup, and some
-///   render anchors: unescaped, a backend could put a clickable link of its
+/// - On Linux, `&`, `<`, and `>` are escaped last, so a clamp can never sever
+///   an entity. Servers that advertise `body-markup` render the body as
+///   markup, and some render anchors: unescaped, a backend could put a clickable link of its
 ///   choosing inside a notification wearing this daemon's name and icon. The
 ///   cost is that a literal `&` in a URL shows as `&amp;` on the servers that
 ///   do not render markup, which is the cheaper of the two failures.
@@ -152,10 +170,27 @@ fn sanitize(detail: &str) -> String {
         one_line.push('…');
     }
 
-    one_line
-        .replace('&', "&amp;")
+    escape_markup(&one_line)
+}
+
+/// Escape the three markup characters — on Linux only.
+///
+/// freedesktop servers that advertise `body-markup` render the body as markup,
+/// and some render anchors. macOS Notification Center renders none, and the
+/// body reaches `display notification` as an `argv` item rather than being
+/// spliced into a script, so there is nothing there to defend against, and
+/// escaping would only garble the text: the Accessibility notice would send
+/// the user looking for "Privacy &amp; Security".
+#[cfg(target_os = "linux")]
+fn escape_markup(s: &str) -> String {
+    s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+#[cfg(not(target_os = "linux"))]
+fn escape_markup(s: &str) -> String {
+    s.to_string()
 }
 
 #[cfg(test)]
@@ -171,7 +206,22 @@ mod tests {
             Failure::recording_failed("d"),
             Failure::transcription_failed(Origin::Daemon, "d"),
             Failure::transcription_failed(Origin::Backend, "d"),
+            Failure::keyboard_unavailable("d"),
         ]
+    }
+
+    /// The remedy is the point of this notice: it names the exact binary to
+    /// add, and how to restart. It has to arrive whole, because the HTTP
+    /// response cannot carry it — release builds cut error messages at the
+    /// first colon to keep local detail off the loopback listener.
+    #[test]
+    fn a_keyboard_failure_carries_its_remedy_whole() {
+        let remedy = "Super STT is not allowed to control your keyboard. Add \
+                      /usr/local/bin/super-stt-daemon under Accessibility, then restart \
+                      it: launchctl kickstart -k gui/501/ai.menjivar.super-stt.";
+        let f = Failure::keyboard_unavailable(remedy);
+        assert_eq!(f.summary, "Cannot type");
+        assert_eq!(f.body, remedy);
     }
 
     /// The reason the user reported: a backend failure the log had in full
@@ -284,11 +334,23 @@ mod tests {
 
     /// The three markup characters are escaped, so a `body-markup` server
     /// renders a backend's text as text — not as a link of its choosing.
+    #[cfg(target_os = "linux")]
     #[test]
     fn markup_is_escaped() {
         assert_eq!(
             sanitize("<a href=\"http://evil.test\">Click to fix</a> & wait"),
             "&lt;a href=\"http://evil.test\"&gt;Click to fix&lt;/a&gt; &amp; wait"
+        );
+    }
+
+    /// Nothing on macOS renders markup, so escaping there would only garble
+    /// the text a user is meant to follow.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn markup_is_left_alone_where_nothing_renders_it() {
+        assert_eq!(
+            sanitize("System Settings › Privacy & Security <Accessibility>"),
+            "System Settings › Privacy & Security <Accessibility>"
         );
     }
 
@@ -301,9 +363,14 @@ mod tests {
             s.ends_with('…'),
             "a cut reason must show that it was cut: {s}"
         );
+        let unit = if cfg!(target_os = "linux") {
+            "&amp;"
+        } else {
+            "&"
+        };
         assert_eq!(
             s.trim_end_matches('…'),
-            "&amp;".repeat(MAX_DETAIL - 1),
+            unit.repeat(MAX_DETAIL - 1),
             "the clamp left a partial entity behind"
         );
     }

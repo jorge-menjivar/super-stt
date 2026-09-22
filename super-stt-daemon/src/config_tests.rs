@@ -705,12 +705,12 @@ volume = 100
 
 [transcription]
 preferred_model = "whisper"
-notification_method = "dbus"
+notification_method = "desktop"
 "#;
     let cfg: DaemonConfig = toml::from_str(toml).unwrap();
     assert_eq!(
         cfg.transcription.notification_method,
-        NotificationMethod::Dbus
+        NotificationMethod::Desktop
     );
 }
 

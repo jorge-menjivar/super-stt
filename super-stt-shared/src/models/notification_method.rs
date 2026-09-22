@@ -13,7 +13,11 @@ pub enum NotificationMethod {
     #[default]
     Auto,
     /// Desktop notification only; log if it cannot be delivered.
-    Dbus,
+    ///
+    /// Named for what the user sees rather than for the transport, which is
+    /// not the same on every platform: a freedesktop notification server over
+    /// the session bus on Linux, Notification Center on macOS.
+    Desktop,
     /// Type a fixed notice into the focused window.
     Typed,
     /// Log only; never surface.
@@ -22,7 +26,7 @@ pub enum NotificationMethod {
 
 wire_enum_strings!(NotificationMethod {
     Auto => "auto",
-    Dbus => "dbus",
+    Desktop => "desktop",
     Typed => "typed",
     Off => "off",
 });
@@ -32,7 +36,7 @@ impl NotificationMethod {
     pub fn pretty_name(self) -> &'static str {
         match self {
             Self::Auto => "Auto (recommended)",
-            Self::Dbus => "Desktop notification",
+            Self::Desktop => "Desktop notification",
             Self::Typed => "Type into window",
             Self::Off => "Off",
         }
@@ -52,7 +56,7 @@ mod tests {
     fn display_roundtrip() {
         for method in [
             NotificationMethod::Auto,
-            NotificationMethod::Dbus,
+            NotificationMethod::Desktop,
             NotificationMethod::Typed,
             NotificationMethod::Off,
         ] {
@@ -65,7 +69,7 @@ mod tests {
     #[test]
     fn wire_tokens_are_snake_case() {
         assert_eq!(NotificationMethod::Auto.to_string(), "auto");
-        assert_eq!(NotificationMethod::Dbus.to_string(), "dbus");
+        assert_eq!(NotificationMethod::Desktop.to_string(), "desktop");
         assert_eq!(NotificationMethod::Typed.to_string(), "typed");
         assert_eq!(NotificationMethod::Off.to_string(), "off");
     }
@@ -82,6 +86,11 @@ mod tests {
             "none",
             "disabled",
             "Auto",
+            // `Desktop`'s former token. A stored `dbus` degrades to the
+            // `Auto` default via `deserialize_or_default` on the config
+            // field, and `Auto` prefers the same channel — so the rename
+            // costs an existing config nothing but the explicit pin.
+            "dbus",
         ] {
             assert!(
                 dropped.parse::<NotificationMethod>().is_err(),
@@ -92,9 +101,9 @@ mod tests {
 
     #[test]
     fn serde_roundtrip() {
-        let method = NotificationMethod::Dbus;
+        let method = NotificationMethod::Desktop;
         let json = serde_json::to_string(&method).unwrap();
-        assert_eq!(json, "\"dbus\"");
+        assert_eq!(json, "\"desktop\"");
         let parsed: NotificationMethod = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, method);
     }
@@ -103,7 +112,7 @@ mod tests {
     fn wire_variants_lists_every_token() {
         assert_eq!(
             NotificationMethod::WIRE_VARIANTS,
-            &["auto", "dbus", "typed", "off"]
+            &["auto", "desktop", "typed", "off"]
         );
     }
 }

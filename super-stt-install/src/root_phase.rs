@@ -362,8 +362,21 @@ mod tests {
     /// counter so parallel tests in this binary never collide).
     fn test_dir() -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("sstt-install-root-{}-{n}", std::process::id()));
+        // Canonicalized, because `apply_manifest` refuses a destination whose
+        // ancestors are not already canonical — that is the symlinked-ancestor
+        // guard doing its job, and it fires on the *fixture* here rather than
+        // on anything under test. On Linux `std::env::temp_dir()` is `/tmp`,
+        // which is its own canonical form, so the two are the same path and
+        // nothing noticed. On macOS it is `/var/folders/…`, and `/var` is a
+        // symlink to `/private/var`, so every destination built from it
+        // resolves elsewhere and every such test failed.
+        //
+        // Canonicalizing the *parent* and then joining is deliberate: the
+        // directory itself must not exist yet for `remove_dir_all` below to
+        // mean what it says.
+        let base = std::env::temp_dir();
+        let base = std::fs::canonicalize(&base).unwrap_or(base);
+        let dir = base.join(format!("sstt-install-root-{}-{n}", std::process::id()));
         // F6: clear a pre-existing directory first — the pid+counter name
         // is only unique within one process run, so PID reuse across
         // separate test-binary invocations could otherwise leak files from

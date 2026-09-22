@@ -203,6 +203,13 @@ impl SuperSTTDaemon {
                     Ok(s) => Some(s),
                     Err(e) => {
                         log::error!("Failed to create keyboard simulator: {e}");
+                        // The response cannot tell the user how to fix this:
+                        // release builds cut it to "Keyboard simulator failed",
+                        // keeping local detail off the loopback listener, and a
+                        // recording started from a global shortcut has no
+                        // caller reading it anyway. So the reason, remedy
+                        // included, goes to the user directly.
+                        self.surface_keyboard_unavailable(&format!("{e:#}")).await;
                         return DaemonResponse::error(&format!("Keyboard simulator failed: {e}"));
                     }
                 }

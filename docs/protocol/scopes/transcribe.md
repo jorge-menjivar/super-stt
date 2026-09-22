@@ -18,7 +18,7 @@ and stop. Scopes are composable — request the set you need in a single
 [`POST /auth/request`](../endpoints/v1/auth/request.md); see [auth.md](../auth.md).
 
 All traffic is HTTP/1.1 over the Unix domain socket at
-`$XDG_RUNTIME_DIR/stt/super-stt-http.sock`. See [transport.md](../transport.md)
+`<runtime dir>/stt/super-stt-http.sock`. See [transport.md](../transport.md)
 for the wire-level details (HTTP framing, SSE mechanics, example client code).
 
 ## Endpoint reference
