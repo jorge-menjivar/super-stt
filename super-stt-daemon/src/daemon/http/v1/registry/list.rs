@@ -310,6 +310,7 @@ mod tests {
             allowed_hosts: Vec::new(),
             secrets: Vec::new(),
             options: Vec::new(),
+            capabilities: Default::default(),
             models: Vec::new(),
         }
     }

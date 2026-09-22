@@ -191,6 +191,60 @@ description = "Test backend."
         assert!(!m.capabilities.websocket);
     }
 
+    /// The context capability is not transport-restricted, unlike `websocket`
+    /// beside it — both headers ride the ordinary request every backend
+    /// receives, so a subprocess backend reads them the same way. That is a
+    /// deliberate deviation from the precedent next door, so it is pinned.
+    #[test]
+    fn capabilities_context_parses_on_either_transport() {
+        for kind in ["wasm", "subprocess"] {
+            let entrypoint = if kind == "wasm" { "tidy.wasm" } else { "tidy" };
+            let toml_src = format!(
+                r#"
+[backend]
+source = "github.com/super-stt/tidy"
+name = "Tidy"
+version = "0.2.0"
+kind = "{kind}"
+entrypoint = "{entrypoint}"
+contract = "v1"
+description = "Test backend."
+
+[capabilities]
+context = true
+"#
+            );
+            let m = Manifest::parse(&toml_src).unwrap_or_else(|e| panic!("parse {kind}: {e}"));
+            assert!(m.capabilities.context);
+            assert!(
+                !m.capabilities.websocket,
+                "one flag does not imply the other"
+            );
+            validate_runtime(&m).unwrap_or_else(|e| {
+                panic!("a {kind} backend may declare the context capability: {e}")
+            });
+        }
+    }
+
+    #[test]
+    fn capabilities_context_defaults_false_when_absent() {
+        let toml_src = r#"
+[backend]
+source = "github.com/super-stt/openai"
+name = "OpenAI"
+version = "0.1.0"
+kind = "wasm"
+entrypoint = "openai.wasm"
+contract = "v1"
+description = "Test backend."
+"#;
+        let m = Manifest::parse(toml_src).expect("parse");
+        assert!(
+            !m.capabilities.context,
+            "absent means no context headers are sent"
+        );
+    }
+
     #[test]
     fn model_realtime_parses_when_set() {
         let toml_src = r#"

@@ -6,7 +6,15 @@
 //! states a write lands in. The route wrappers are covered by the HTTP smoke
 //! tests; the resolution rule itself by `config_tests`.
 
-use crate::daemon::types::test_daemon;
+use crate::daemon::types::{LoadedModel, SuperSTTDaemon, test_daemon};
+use crate::stt_models::ModelDefinition;
+use crate::stt_models::backends::DiscoveredBackend;
+use crate::stt_models::transcribe::{
+    BackendContext, ModelInfo, ModelInfoData, ModelState, Transcribe,
+};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use super_stt_registry_types::manifest::{Capabilities, Device, ModelRole};
 use super_stt_shared::models::contexts::{DictationContext, MAX_PROMPT_CHARS};
 use super_stt_shared::models::protocol::ErrorCode;
 
@@ -277,4 +285,271 @@ async fn clearing_the_active_selection_leaves_the_contexts_alone() {
     let config = daemon.config.read().await;
     assert!(config.active_context().is_none());
     assert_eq!(config.contexts.items.len(), 1);
+}
+
+// ---------- a loaded stage that records what it is handed ------------------
+
+/// The contexts one seeded stage has been handed, newest last.
+type SeenContexts = Arc<Mutex<Vec<BackendContext>>>;
+
+struct RecordingStage {
+    info: ModelInfoData,
+    reconfigured: SeenContexts,
+}
+
+impl ModelInfo for RecordingStage {
+    fn info(&self) -> &ModelInfoData {
+        &self.info
+    }
+}
+impl ModelState for RecordingStage {
+    fn device(&self) -> String {
+        "cpu".to_string()
+    }
+}
+#[async_trait::async_trait]
+impl Transcribe for RecordingStage {
+    async fn transcribe_audio(
+        &mut self,
+        _audio: &[f32],
+        _sample_rate: u32,
+        _language: Option<&str>,
+    ) -> anyhow::Result<String> {
+        Ok(String::new())
+    }
+
+    fn reconfigure(&self, context: BackendContext) {
+        self.reconfigured.lock().unwrap().push(context);
+    }
+}
+
+/// A discovered backend that declares it can be handed a context, and nothing
+/// else — no secrets to reach the keyring for, no options to resolve.
+fn context_capable(source: &str) -> DiscoveredBackend {
+    DiscoveredBackend {
+        description: String::new(),
+        dir: std::path::PathBuf::from("/tmp").join(source.replace('/', "-")),
+        source: source.to_string(),
+        id: None,
+        name: source.to_string(),
+        version: "1.0.0".to_string(),
+        kind: "wasm".to_string(),
+        entrypoint: "x.wasm".to_string(),
+        allowed_hosts: Vec::new(),
+        secrets: Vec::new(),
+        options: Vec::new(),
+        capabilities: Capabilities {
+            websocket: false,
+            context: true,
+        },
+        models: Vec::new(),
+    }
+}
+
+fn definition(name: &str, source: &str, role: ModelRole) -> ModelDefinition {
+    ModelDefinition {
+        name: name.to_string(),
+        source: source.to_string(),
+        is_multilingual: true,
+        primary_language: "en".to_string(),
+        supported_languages: vec!["en".to_string()],
+        estimated_vram_bytes: 0,
+        processing_interval: Duration::from_secs(1),
+        supported_devices: vec![Device::None],
+        realtime: false,
+        force_preview_support: true,
+        role,
+        provider: None,
+    }
+}
+
+fn stage(name: &str, source: &str, role: ModelRole) -> (LoadedModel, SeenContexts) {
+    let reconfigured: SeenContexts = Arc::new(Mutex::new(Vec::new()));
+    let loaded = LoadedModel {
+        definition: definition(name, source, role),
+        instance: Box::new(RecordingStage {
+            info: ModelInfoData::new(name, source, true, true, Duration::from_secs(1)),
+            reconfigured: Arc::clone(&reconfigured),
+        }),
+    };
+    (loaded, reconfigured)
+}
+
+/// The prompt header one stage was handed on its most recent reconfigure, or
+/// `None` when it has not been reconfigured or was handed no prompt.
+fn last_prompt(seen: &SeenContexts) -> Option<String> {
+    let seen = seen.lock().unwrap();
+    let context = seen.last()?;
+    context
+        .headers
+        .iter()
+        .find(|(k, _)| k == "x-stt-prompt")
+        .map(|(_, v)| v.clone())
+}
+
+/// Seed both stages from *different* backends and put a context in force.
+async fn two_stages_on_two_backends(
+    daemon: &SuperSTTDaemon,
+) -> (&'static str, &'static str, SeenContexts, SeenContexts) {
+    let transcription = "github.com/x/whisper";
+    let processor = "github.com/x/tidy";
+    *daemon.backends.write().await =
+        vec![context_capable(transcription), context_capable(processor)];
+
+    let (stage1, seen1) = stage("whisper-1", transcription, ModelRole::Transcription);
+    let (stage2, seen2) = stage("tidy", processor, ModelRole::PostProcessor);
+    *daemon.model.write().await = Some(stage1);
+    *daemon.post_processor.write().await = Some(stage2);
+
+    (transcription, processor, seen1, seen2)
+}
+
+/// The case the `source`-keyed reconfigure helper gets wrong.
+///
+/// It takes one `source`, resolves one `BackendContext` from it, and hands that
+/// same object to both slots — so it only ever does the right thing because it
+/// returns early unless the source it was given is loaded. A context switch is
+/// global and the two stages may run different backends, which is exactly the
+/// shape that helper cannot express.
+#[tokio::test]
+async fn switching_the_active_context_reaches_both_stages_on_different_backends() {
+    let daemon = test_daemon().await;
+    let (_t, _p, seen1, seen2) = two_stages_on_two_backends(&daemon).await;
+    daemon
+        .handle_set_context(DictationContext {
+            id: "coding".to_string(),
+            name: "Coding".to_string(),
+            prompt: "I dictate code.".to_string(),
+            vocabulary: vec!["kubectl".to_string()],
+        })
+        .await;
+
+    let resp = daemon
+        .handle_set_active_context(Some("coding".to_string()))
+        .await;
+
+    assert_eq!(resp.status, "success");
+    let message = resp.message.unwrap_or_default();
+    assert!(
+        !message.contains("kept the old value"),
+        "both stages were reachable, so nothing should be warned about: {message}"
+    );
+    assert_eq!(
+        last_prompt(&seen1).as_deref(),
+        Some(r#""I dictate code.""#),
+        "stage 1 was not handed the new context"
+    );
+    assert_eq!(
+        last_prompt(&seen2).as_deref(),
+        Some(r#""I dictate code.""#),
+        "stage 2 runs a different backend and was left behind"
+    );
+}
+
+/// Editing a context in place is a change to what both stages are sent, the
+/// same as switching to another one.
+#[tokio::test]
+async fn editing_the_active_context_reaches_both_stages() {
+    let daemon = test_daemon().await;
+    let (_t, _p, seen1, seen2) = two_stages_on_two_backends(&daemon).await;
+    let mut context = DictationContext {
+        id: "coding".to_string(),
+        name: "Coding".to_string(),
+        prompt: "I dictate code.".to_string(),
+        vocabulary: Vec::new(),
+    };
+    daemon.handle_set_context(context.clone()).await;
+    daemon
+        .handle_set_active_context(Some("coding".to_string()))
+        .await;
+
+    context.prompt = "I dictate prose.".to_string();
+    daemon.handle_set_context(context).await;
+
+    for (stage, seen) in [("stage 1", &seen1), ("stage 2", &seen2)] {
+        assert_eq!(
+            last_prompt(seen).as_deref(),
+            Some(r#""I dictate prose.""#),
+            "{stage} is still on the old text"
+        );
+    }
+}
+
+/// A pin moves one backend and leaves the other where it was. Both stages are
+/// running, so a helper that reconfigured everything on every write would pass
+/// the first assertion and fail the second.
+#[tokio::test]
+async fn pinning_one_backend_leaves_the_other_stage_alone() {
+    let daemon = test_daemon().await;
+    let (transcription, _p, seen1, seen2) = two_stages_on_two_backends(&daemon).await;
+    daemon
+        .handle_set_context(DictationContext {
+            id: "coding".to_string(),
+            name: "Coding".to_string(),
+            prompt: "I dictate code.".to_string(),
+            vocabulary: Vec::new(),
+        })
+        .await;
+    daemon
+        .handle_set_context(DictationContext {
+            id: "email".to_string(),
+            name: "Email".to_string(),
+            prompt: "I dictate email.".to_string(),
+            vocabulary: Vec::new(),
+        })
+        .await;
+    daemon
+        .handle_set_active_context(Some("coding".to_string()))
+        .await;
+    let before = seen2.lock().unwrap().len();
+
+    daemon
+        .handle_set_backend_context(transcription.to_string(), Some("email".to_string()))
+        .await;
+
+    assert_eq!(
+        last_prompt(&seen1).as_deref(),
+        Some(r#""I dictate email.""#),
+        "the pinned backend takes what it was pinned to"
+    );
+    assert_eq!(
+        seen2.lock().unwrap().len(),
+        before,
+        "the other stage was not pinned and should not have been touched"
+    );
+    assert_eq!(
+        last_prompt(&seen2).as_deref(),
+        Some(r#""I dictate code.""#),
+        "and still follows the active context"
+    );
+}
+
+/// Pinning a backend to no context takes the headers away, rather than leaving
+/// the last one in place.
+#[tokio::test]
+async fn sending_a_backend_no_context_clears_what_it_was_given() {
+    let daemon = test_daemon().await;
+    let (transcription, _p, seen1, _seen2) = two_stages_on_two_backends(&daemon).await;
+    daemon
+        .handle_set_context(DictationContext {
+            id: "coding".to_string(),
+            name: "Coding".to_string(),
+            prompt: "I dictate code.".to_string(),
+            vocabulary: Vec::new(),
+        })
+        .await;
+    daemon
+        .handle_set_active_context(Some("coding".to_string()))
+        .await;
+    assert!(last_prompt(&seen1).is_some());
+
+    daemon
+        .handle_set_backend_context(transcription.to_string(), Some(String::new()))
+        .await;
+
+    assert_eq!(
+        last_prompt(&seen1),
+        None,
+        "a backend sent no context is handed no prompt header at all"
+    );
 }

@@ -6,12 +6,22 @@
 //! which context a given backend is actually sent — is
 //! [`DaemonConfig::resolve_context`](crate::config::DaemonConfig::resolve_context).
 //!
-//! Every write here goes through the same three steps: refuse what cannot be
-//! stored, mutate and persist under [`set_config_field`], then tell subscribers
-//! the set moved. The third step is what a second settings window depends on:
-//! contexts are global, so one app renaming one is something every other app
-//! showing the list needs to hear about.
+//! Every write here goes through the same four steps: refuse what cannot be
+//! stored, mutate and persist under [`set_config_field`], hand the running
+//! stages their new headers, then tell subscribers the set moved.
+//!
+//! The third step is [`reconfigure_active_stages`](SuperSTTDaemon::reconfigure_active_stages)
+//! rather than the `source`-keyed helper the option writes use, because a
+//! context is not a property of one backend: switching it moves both stages at
+//! once, and the two may be running different ones. Nothing reloads — a
+//! context is delivered as request headers, so changing one is a matter of
+//! changing what the running instance injects.
+//!
+//! The fourth is what a second settings window depends on: contexts are global,
+//! so one app renaming one is something every other app showing the list needs
+//! to hear about.
 
+use crate::daemon::backend_config_handlers::with_apply_warning;
 use crate::daemon::types::SuperSTTDaemon;
 use log::info;
 use super_stt_shared::models::contexts::DictationContext;
@@ -48,11 +58,12 @@ impl SuperSTTDaemon {
         let persist = self
             .set_config_field(move |config| config.upsert_context(context))
             .await;
+        let warning = self.reconfigure_active_stages().await;
         self.publish_settings_changed(Self::CONTEXTS_TOPIC);
         info!("Stored dictation context {id}");
         Self::settings_saved(
             DaemonResponse::success(),
-            format!("Context {name} saved"),
+            with_apply_warning(format!("Context {name} saved"), warning),
             persist,
         )
     }
@@ -80,11 +91,12 @@ impl SuperSTTDaemon {
                 config.remove_context(&removing);
             })
             .await;
+        let warning = self.reconfigure_active_stages().await;
         self.publish_settings_changed(Self::CONTEXTS_TOPIC);
         info!("Deleted dictation context {id}");
         Self::settings_saved(
             DaemonResponse::success(),
-            format!("Context {id} deleted"),
+            with_apply_warning(format!("Context {id} deleted"), warning),
             persist,
         )
     }
@@ -103,6 +115,7 @@ impl SuperSTTDaemon {
         let persist = self
             .set_config_field(move |config| config.set_active_context(chosen))
             .await;
+        let warning = self.reconfigure_active_stages().await;
         self.publish_settings_changed(Self::CONTEXTS_TOPIC);
         let message = if let Some(id) = id {
             info!("Active dictation context is now {id}");
@@ -111,7 +124,11 @@ impl SuperSTTDaemon {
             info!("Cleared the active dictation context");
             "No context is active".to_string()
         };
-        Self::settings_saved(DaemonResponse::success(), message, persist)
+        Self::settings_saved(
+            DaemonResponse::success(),
+            with_apply_warning(message, warning),
+            persist,
+        )
     }
 
     /// Point one backend at a context of its own, or put it back on the active
@@ -145,6 +162,10 @@ impl SuperSTTDaemon {
         let persist = self
             .set_config_field(move |config| config.update_backend_context(pinned, chosen))
             .await;
+        // Only this backend moved, so only the stages running it need new
+        // headers — the `source`-keyed helper is the right one here, unlike on
+        // the three writes above.
+        let warning = self.reconfigure_if_source_active(&source).await;
         self.publish_settings_changed(Self::CONTEXTS_TOPIC);
         let message = match id.as_deref() {
             None => format!("{source} follows the active context"),
@@ -152,7 +173,11 @@ impl SuperSTTDaemon {
             Some(id) => format!("{source} uses context {id}"),
         };
         info!("{message}");
-        Self::settings_saved(DaemonResponse::success(), message, persist)
+        Self::settings_saved(
+            DaemonResponse::success(),
+            with_apply_warning(message, warning),
+            persist,
+        )
     }
 }
 

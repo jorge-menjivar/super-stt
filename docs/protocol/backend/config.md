@@ -508,11 +508,13 @@ contract. All fields default to `false` and may be omitted entirely.
 ```toml
 [capabilities]
 websocket = true
+context   = true
 ```
 
 | Field       | Type | Required | Notes                                                                              |
 |-------------|------|----------|------------------------------------------------------------------------------------|
 | `websocket` | bool | no       | Opt into the `super-stt:realtime/ws` import and the `super-stt:realtime/ws-server` export (see [wasm.md — Realtime](./wasm.md#realtime-websocket)). When `true`, the daemon wires those interfaces into the WASM component for every session on a realtime model. **wasm-only** — a `subprocess` backend declaring `websocket = true` is rejected at discovery. Default `false`. |
+| `context`   | bool | no       | Opt into being handed the user's [dictation context](../endpoints/v1/context.md): an `x-stt-prompt` and an `x-stt-vocabulary` header on every `/v1` request (see [contract.md — Request headers](./contract.md#request-headers)). Unlike `websocket` this is **not** transport-restricted — both headers ride the ordinary request, so a `subprocess` backend reads them exactly as a `wasm` one does. Declare it only if the backend actually reads them: a settings UI uses the flag to tell the user which backends will hear a vocabulary they typed. Default `false`, which means neither header is sent. |
 
 ## `[[models]]`
 
