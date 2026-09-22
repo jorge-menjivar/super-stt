@@ -66,9 +66,20 @@ To stop an in-flight daemon-mic capture, see
 
   // Per-request override for the preview_typing config flag (on-screen
   // typing of incremental preview text).
-  "preview":         true
+  "preview":         true,
+
+  // Per-request override for the start and stop cues. Absent follows the
+  // configured audio theme; false plays none; true plays them even when the
+  // theme is "silent", using the default theme's. The configured volume
+  // still applies. Anything but a boolean is a 400.
+  "audio_cues":      false
 }
 ```
+
+`audio_cues` changes this recording only. It never writes the configured
+theme, so a client that wants a silent take does not need the `settings`
+scope, and a crash mid-take leaves nothing to restore. See
+[`/settings/audio_theme`](./settings/audio_theme.md).
 
 **Response shapes** (per use case):
 
@@ -142,7 +153,7 @@ when a capture is already in progress.
 | HTTP | `message`                          | Meaning                                                                |
 |------|------------------------------------|------------------------------------------------------------------------|
 | 400  | `stream_realtime_with_audio_data`  | Request carried both `audio_data` and `stream_realtime: true`           |
-| 400  | (names the field)                  | A microphone option had an invalid value, such as an unknown `stop_mode`. Refused before capture, whatever `wait` is |
+| 400  | (names the field)                  | A microphone option had an invalid value, such as an unknown `stop_mode` or a non-boolean `audio_cues`. Refused before capture, whatever `wait` is |
 | 401  | `invalid_session`                  | Token unknown / expired / `exe_changed` — re-auth and retry             |
 | 403  | `scope_denied`                     | Token lacks the `transcribe` scope                                      |
 | 409  | `model_not_loaded`                 | No model is loaded, so no transcription is possible; load one via `POST /pipeline/1/model` and retry |

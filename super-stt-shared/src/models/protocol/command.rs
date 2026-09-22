@@ -24,6 +24,10 @@ pub enum Command {
         /// Optional per-request language override (BCP-47 or `"auto"`). `None`
         /// falls back to the active model's configured language.
         language: Option<String>,
+        /// Optional per-request override for the start and stop cues. `None`
+        /// follows the configured audio theme; `Some(false)` plays none;
+        /// `Some(true)` plays them even when the theme is `silent`.
+        audio_cues: Option<bool>,
     },
     SetAudioTheme {
         theme: String,

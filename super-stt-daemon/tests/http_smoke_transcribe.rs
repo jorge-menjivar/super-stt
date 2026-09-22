@@ -394,16 +394,27 @@ async fn an_invalid_microphone_option_is_a_bad_request() {
     };
     let (_guard, sock, token) = start_daemon(&component).await;
 
-    for wait in [false, true] {
-        let (status, body) = post(
-            &sock,
-            "/transcribe",
-            &token,
-            serde_json::json!({ "stop_mode": "not_a_real_mode", "wait": wait }),
-        )
-        .await;
+    // A string `"false"` for `audio_cues` matters most: dropped to "absent",
+    // it would play the cues the caller asked to silence.
+    let bad_options = [
+        serde_json::json!({ "stop_mode": "not_a_real_mode" }),
+        serde_json::json!({ "audio_cues": "false" }),
+    ];
+    for option in bad_options {
+        for wait in [false, true] {
+            let mut request = option.clone();
+            request["wait"] = serde_json::json!(wait);
+            let (status, body) = post(&sock, "/transcribe", &token, request).await;
 
-        assert_eq!(status, StatusCode::BAD_REQUEST, "wait: {wait}: {body}");
-        assert_eq!(body["error_code"], "invalid_value", "wait: {wait}: {body}");
+            assert_eq!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "{option}, wait: {wait}: {body}"
+            );
+            assert_eq!(
+                body["error_code"], "invalid_value",
+                "{option}, wait: {wait}: {body}"
+            );
+        }
     }
 }

@@ -11,6 +11,11 @@ Themes are named strings. The current set is `classic`, `gentle`,
 canonical list at any moment is what
 [`GET /settings/audio_theme/list`](./audio_theme/list.md) returns.
 
+To silence one recording, or play cues for one recording under `silent`,
+send `audio_cues` with [`POST /transcribe`](../transcribe.md) instead of
+changing the theme. That needs only the `transcribe` scope and leaves this
+setting untouched.
+
 ## Auth
 
 - **Required scope:** `settings`.

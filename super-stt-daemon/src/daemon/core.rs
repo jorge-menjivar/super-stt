@@ -2,6 +2,7 @@
 
 use crate::{daemon::types::SuperSTTDaemon, output::keyboard::Simulator, output::typer::Typer};
 use super_stt_shared::models::protocol::{Command, DaemonRequest, DaemonResponse};
+use super_stt_shared::theme::AudioTheme;
 
 impl SuperSTTDaemon {
     /// Main command handler - routes commands to appropriate handlers
@@ -33,9 +34,10 @@ impl SuperSTTDaemon {
                 stop_mode,
                 preview,
                 language,
+                audio_cues,
                 ..
             } => {
-                self.handle_record_command(write_mode, stop_mode, preview, language)
+                self.handle_record_command(write_mode, stop_mode, preview, language, audio_cues)
                     .await
             }
             Command::SetAudioTheme { theme } => self.handle_set_audio_theme(theme),
@@ -145,6 +147,7 @@ impl SuperSTTDaemon {
         stop_mode: Option<super_stt_shared::models::recording_stop_mode::RecordingStopMode>,
         preview: Option<bool>,
         language: Option<String>,
+        audio_cues: Option<bool>,
     ) -> DaemonResponse {
         // Resolve effective mode: per-request override or daemon config default
         let effective_mode = if let Some(mode) = stop_mode {
@@ -209,6 +212,9 @@ impl SuperSTTDaemon {
             self.preview_typing_enabled
                 .load(std::sync::atomic::Ordering::Relaxed)
         });
+        // Same discipline: the override picks this take's cues without
+        // touching the configured theme.
+        let cue_theme = take_cue_theme(self.get_audio_theme(), audio_cues);
 
         let mut typer = simulator.map_or_else(Typer::without_keyboard, Typer::new);
         let response = self
@@ -217,6 +223,7 @@ impl SuperSTTDaemon {
                 write_mode,
                 effective_mode,
                 preview_typing,
+                cue_theme,
                 language.as_deref(),
             )
             .await;
@@ -229,6 +236,17 @@ impl SuperSTTDaemon {
             *self.simulator.write().await = Some(simulator);
         }
         response
+    }
+}
+
+/// The theme whose cues play around one take: the configured one, unless the
+/// request's `audio_cues` overrides it. `silent` has no cues of its own, so
+/// asking for them under it plays the default theme's.
+fn take_cue_theme(configured: AudioTheme, audio_cues: Option<bool>) -> AudioTheme {
+    match audio_cues {
+        Some(false) => AudioTheme::Silent,
+        Some(true) if configured == AudioTheme::Silent => AudioTheme::default(),
+        None | Some(true) => configured,
     }
 }
 

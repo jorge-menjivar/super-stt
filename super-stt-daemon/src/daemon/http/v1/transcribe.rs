@@ -306,6 +306,12 @@ pub(crate) struct TranscribeBody {
     /// `audio_data`, which has nothing to stream.
     #[serde(default)]
     pub(crate) stream_realtime: Option<bool>,
+    /// Microphone paths only: the start and stop cues for this recording.
+    /// Absent follows the configured audio theme; `false` plays none; `true`
+    /// plays them even when the theme is `silent`, using the default theme's.
+    /// The configured volume still applies. Anything but a boolean is a `400`.
+    #[serde(default)]
+    pub(crate) audio_cues: Option<bool>,
 }
 
 /// A one-shot transcription result, for the pre-captured path.

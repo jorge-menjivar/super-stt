@@ -3,6 +3,7 @@ use super::*;
 use crate::daemon::types::test_daemon;
 use super_stt_shared::models::protocol::ErrorCode;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::theme::AudioTheme;
 use tokio::time::{Duration, timeout};
 
 fn make_request(command: &str) -> DaemonRequest {
@@ -2483,7 +2484,14 @@ async fn record_with_no_model_types_a_notice_in_write_mode() {
     let mut typer = crate::output::typer::Typer::new(sim);
 
     let resp = daemon
-        .handle_record_internal(&mut typer, true, RecordingStopMode::ManualOnly, false, None)
+        .handle_record_internal(
+            &mut typer,
+            true,
+            RecordingStopMode::ManualOnly,
+            false,
+            AudioTheme::Silent,
+            None,
+        )
         .await;
 
     assert_eq!(resp.status, "error");
@@ -2512,6 +2520,7 @@ async fn record_with_no_model_types_nothing_without_write_mode() {
             false,
             RecordingStopMode::ManualOnly,
             false,
+            AudioTheme::Silent,
             None,
         )
         .await;
@@ -2597,5 +2606,33 @@ async fn a_recording_without_write_mode_builds_no_keyboard() {
     assert!(
         daemon.simulator.read().await.is_none(),
         "a recording that types nothing must not build a keyboard"
+    );
+}
+
+/// A request's `audio_cues` picks the take's cues without touching the
+/// configured theme: absent follows it, `false` silences the take, and `true`
+/// under `silent` falls back to the default theme, which has cues to play.
+#[test]
+fn a_take_cue_theme_follows_the_request_override() {
+    use AudioTheme::{Classic, Gentle, Silent};
+    let cases = [
+        (Gentle, None, Gentle),
+        (Silent, None, Silent),
+        (Gentle, Some(false), Silent),
+        (Silent, Some(false), Silent),
+        (Gentle, Some(true), Gentle),
+        (Silent, Some(true), Classic),
+    ];
+    for (configured, audio_cues, expected) in cases {
+        assert_eq!(
+            super::take_cue_theme(configured, audio_cues),
+            expected,
+            "configured {configured}, audio_cues {audio_cues:?}"
+        );
+    }
+    assert_ne!(
+        AudioTheme::default(),
+        Silent,
+        "the fallback for `audio_cues: true` must have cues to play"
     );
 }
