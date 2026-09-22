@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-22T00:21:55Z",
+  "generated_at": "2026-09-22T06:14:17Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -457,12 +457,6 @@
             "sha256": "7a89fefa61a12b8a01ebc0e0045aa60032040a70d858eaf20b6ac23e44bcad61"
           }
         ]
-      },
-      "index_stale": {
-        "latest_attempted": "0.1.0",
-        "tag": "v0.1.0",
-        "error": "HTTP status server error (500 Internal Server Error) for url (https://github.com/jorge-menjivar/super-stt-s1-mini/releases/download/v0.1.0/s1-mini-x86_64-unknown-linux-gnu-cpu.tar.gz)",
-        "since": "2026-09-22T00:21:55Z"
       },
       "manifest": {
         "url": "https://github.com/jorge-menjivar/super-stt-s1-mini/releases/download/v0.1.0/backend.toml",
