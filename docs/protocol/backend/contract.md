@@ -161,7 +161,10 @@ headers — external clients cannot set them.
   vocabulary.
 - Neither header requires a reload to change. They are re-injected on the
   running instance when the user edits a context, so the next request carries
-  the new value.
+  the new value. A realtime session is the exception, and only because of when
+  it reads them: `ws-server.handle` is handed the headers once, at the start of
+  the session, so a context edited mid-recording applies to the next session
+  rather than the one in flight.
 
 ### `POST /v1/load`
 

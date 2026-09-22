@@ -163,7 +163,8 @@ Content-Type: application/json
 
 A running backend picks this up on its **next request**. There is no model
 reload to do: a context is delivered as headers, so changing one is a matter of
-changing what the running instance injects.
+changing what the running instance injects. A realtime session reads its headers
+once when it opens, so an edit made mid-recording applies to the next one.
 
 ## `DELETE /context/{id}`
 
