@@ -83,7 +83,7 @@ impl SuperSTTDaemon {
                 .map_or((std::time::Duration::from_secs(2), false), |loaded| {
                     (
                         loaded.definition.processing_interval,
-                        loaded.definition.force_preview_support,
+                        loaded.definition.product.force_preview_support,
                     )
                 })
         };

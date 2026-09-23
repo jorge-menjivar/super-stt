@@ -357,8 +357,10 @@ fn definition(name: &str, source: &str, role: ModelRole) -> ModelDefinition {
         processing_interval: Duration::from_secs(1),
         supported_devices: vec![Device::None],
         realtime: false,
-        force_preview_support: true,
-        role,
+        product: super_stt_registry_types::manifest::SttModel {
+            force_preview_support: true,
+            role: role,
+        },
         provider: None,
     }
 }

@@ -102,7 +102,7 @@ impl SuperSTTDaemon {
                         supported_languages: m.supported_languages.clone(),
                         primary_language: m.primary_language.clone(),
                         realtime: m.realtime,
-                        role: m.role.to_string(),
+                        role: m.product.role.to_string(),
                     })
                     .collect();
                 let secrets = b
