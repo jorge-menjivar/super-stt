@@ -15,12 +15,11 @@ mod url_surface_contract;
 mod v1;
 mod wire;
 
-/// Re-exported so the daemon's shutdown path can drain queued session-store
-/// writes before `process::exit` (audit 2 Tier 1 #5) without reaching into the
-/// private `internal` module tree.
-pub(crate) use internal::auth::tokens::flush_persisted_sessions;
 pub use server::AUTO_APPROVE_ENV;
 pub use server::start_http_server;
+/// Re-exported so the daemon's shutdown path can drain queued session-store
+/// writes before `process::exit` (audit 2 Tier 1 #5).
+pub(crate) use super_engine_daemon::auth::tokens::flush_persisted_sessions;
 
 /// The generated `OpenAPI` document for the `/v1` surface. Built from the same
 /// route registrations the live router uses, so it needs no daemon and no

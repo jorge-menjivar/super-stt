@@ -45,7 +45,6 @@
         version = "0.1",
         features = ["http1", "server", "server-auto", "tokio"]
     }
-    keyring.workspace = true
     libc.workspace = true
     log.workspace = true
     parking_lot.workspace = true
@@ -63,6 +62,7 @@
     serde_json.workspace = true
     strum.workspace = true
     strum_macros.workspace = true
+    super-engine-daemon.workspace = true
     super-engine-forge.workspace = true
     super-stt-registry-types = { path = "../super-stt-registry-types" }
     # Shared crate

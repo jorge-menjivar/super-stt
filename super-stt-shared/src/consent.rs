@@ -15,6 +15,12 @@
 //! change what the user is told they're approving — keep each entry
 //! concise (≤ one wrapped line on a typical screen) and user-meaningful.
 //! These are what the user reads in the dialog, not a developer reference.
+//!
+//! How the daemon hands the request to the Linux dialog, and how the dialog
+//! answers, is [`contract`]: the variable names and the three answers, shared
+//! with Super TTS.
+
+pub use super_engine_protocol::consent as contract;
 
 /// Bullets for the `transcribe` scope.
 pub const TRANSCRIBE_PERMISSIONS: &[&str] = &[

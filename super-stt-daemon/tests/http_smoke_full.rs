@@ -7,10 +7,10 @@
 //! full chain:
 //!
 //! 1. Daemon starts WITHOUT `SUPER_STT_AUTO_APPROVE`, but WITH
-//!    `STT_AUTH_AUTO_APPROVE_AFTER_MS=2000` in its environment.
+//!    `SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS=2000` in its environment.
 //! 2. A test client calls `POST /auth/request`.
 //! 3. The daemon spawns the real `super-stt-consent` helper, which
-//!    inherits `STT_AUTH_AUTO_APPROVE_AFTER_MS` from the daemon's env.
+//!    inherits `SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS` from the daemon's env.
 //! 4. The helper renders the libcosmic layer-shell dialog (visible for
 //!    ~5 seconds during the test), then writes `allow` to stdout via a
 //!    background timer.
@@ -128,7 +128,7 @@ async fn start_daemon_with_auto_approve_timer() -> (DaemonGuard, PathBuf) {
         // doesn't hang waiting for human input.
         .env_remove("SUPER_STT_AUTO_APPROVE")
         .env(
-            "STT_AUTH_AUTO_APPROVE_AFTER_MS",
+            "SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS",
             AUTO_APPROVE_MS.to_string(),
         )
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)

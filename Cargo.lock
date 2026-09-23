@@ -6868,7 +6868,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "super-engine-client"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=3e448b8bbb49d126d7addf4d421f184189174402#3e448b8bbb49d126d7addf4d421f184189174402"
+source = "git+https://github.com/super-libre/super-engine?rev=10cf45d3c2c951fcf3df1929bd413bd8152cbead#10cf45d3c2c951fcf3df1929bd413bd8152cbead"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -6885,9 +6885,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "super-engine-daemon"
+version = "0.1.0"
+source = "git+https://github.com/super-libre/super-engine?rev=10cf45d3c2c951fcf3df1929bd413bd8152cbead#10cf45d3c2c951fcf3df1929bd413bd8152cbead"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "keyring",
+ "libc",
+ "log",
+ "ring",
+ "serde",
+ "serde_json",
+ "super-engine-protocol",
+ "thiserror 2.0.18",
+ "tokio",
+ "utoipa",
+]
+
+[[package]]
 name = "super-engine-forge"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=3e448b8bbb49d126d7addf4d421f184189174402#3e448b8bbb49d126d7addf4d421f184189174402"
+source = "git+https://github.com/super-libre/super-engine?rev=10cf45d3c2c951fcf3df1929bd413bd8152cbead#10cf45d3c2c951fcf3df1929bd413bd8152cbead"
 dependencies = [
  "async-trait",
  "log",
@@ -6901,7 +6924,7 @@ dependencies = [
 [[package]]
 name = "super-engine-protocol"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=3e448b8bbb49d126d7addf4d421f184189174402#3e448b8bbb49d126d7addf4d421f184189174402"
+source = "git+https://github.com/super-libre/super-engine?rev=10cf45d3c2c951fcf3df1929bd413bd8152cbead#10cf45d3c2c951fcf3df1929bd413bd8152cbead"
 dependencies = [
  "dirs",
  "env_logger",
@@ -6917,7 +6940,7 @@ dependencies = [
 [[package]]
 name = "super-engine-spec"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=3e448b8bbb49d126d7addf4d421f184189174402#3e448b8bbb49d126d7addf4d421f184189174402"
+source = "git+https://github.com/super-libre/super-engine?rev=10cf45d3c2c951fcf3df1929bd413bd8152cbead#10cf45d3c2c951fcf3df1929bd413bd8152cbead"
 dependencies = [
  "hex",
  "ring",
@@ -7058,6 +7081,7 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros",
+ "super-engine-daemon",
  "super-engine-forge",
  "super-stt-registry-types",
  "super-stt-shared",

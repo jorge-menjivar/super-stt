@@ -2,16 +2,17 @@
 //! Super STT consent dialog — a small floating libcosmic window that the
 //! daemon spawns when an app asks to authenticate.
 //!
-//! The daemon spawns this binary with env vars carrying the request details:
+//! The daemon spawns this binary with env vars carrying the request details
+//! (the names are [`contract`]'s, shared with Super TTS):
 //!
-//! - `STT_AUTH_APP_NAME` — declared (untrusted) app name from the request.
-//!   Shown for a native caller, never for a web one — see [`Caller`].
-//! - `STT_AUTH_SCOPES`   — space-separated scope set (e.g. `transcribe status`)
-//! - `STT_AUTH_EXE_PATH` — peer `/proc/<pid>/exe` (trusted, kernel-resolved)
-//! - `STT_AUTH_FLATPAK_APP_ID` — set only when the caller is inside a flatpak
-//! - `STT_AUTH_WEB_ORIGIN` — set only when the caller reached the daemon over
-//!   its TCP listener, carrying the browser-reported origin. The daemon sets
-//!   this *or* `STT_AUTH_EXE_PATH`, never both, and this one wins.
+//! - `SUPER_STT_AUTH_APP_NAME` — declared (untrusted) app name from the
+//!   request. Shown for a native caller, never for a web one — see [`Caller`].
+//! - `SUPER_STT_AUTH_SCOPES`   — space-separated scope set (e.g. `transcribe status`)
+//! - `SUPER_STT_AUTH_EXE_PATH` — peer `/proc/<pid>/exe` (trusted, kernel-resolved)
+//! - `SUPER_STT_AUTH_FLATPAK_APP_ID` — set only when the caller is inside a flatpak
+//! - `SUPER_STT_AUTH_WEB_ORIGIN` — set only when the caller reached the daemon
+//!   over its TCP listener, carrying the browser-reported origin. The daemon
+//!   sets this *or* `SUPER_STT_AUTH_EXE_PATH`, never both, and this one wins.
 //!
 //! The user clicks Allow or Deny. The dialog writes one of `allow`, `deny`,
 //! or `dismissed` to stdout (newline-terminated) and exits.
@@ -45,6 +46,10 @@ use cosmic::widget::{button, dialog, icon, text};
 use std::io::Write;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use super_stt_shared::SUPER_STT;
+use super_stt_shared::consent::contract;
+// The decision payloads written to stdout right before exit.
+use contract::{ALLOW, DENY, DISMISSED};
 
 const APP_ID: &str = "ai.menjivar.super-stt-consent";
 
@@ -69,10 +74,11 @@ const SQUARE_CORNERS: CornerRadius = CornerRadius {
 static AUTOSIZE_ID: LazyLock<cosmic::widget::Id> =
     LazyLock::new(|| cosmic::widget::Id::new("super-stt-consent-autosize"));
 
-/// Decision payload written to stdout right before exit.
-const ALLOW: &str = "allow";
-const DENY: &str = "deny";
-const DISMISSED: &str = "dismissed";
+/// The value of the request variable `name` (one of [`contract`]'s), under
+/// Super STT's prefix.
+fn request_var(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(SUPER_STT.env(name))
+}
 
 /// Set the moment the user picks Allow or Deny. Used by the
 /// signal handler to skip an extra "dismissed" line if the user
@@ -459,7 +465,7 @@ fn spawn_dismiss_timer() {
     });
 }
 
-/// If `STT_AUTH_AUTO_APPROVE_AFTER_MS` is set to a parseable u64,
+/// If `SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS` is set to a parseable u64,
 /// spawn a background thread that sleeps for that many milliseconds
 /// and then writes "allow\n" to stdout + `_exit(0)`. Lets you (or a
 /// test runner) actually see the dialog render for that long before
@@ -472,14 +478,15 @@ fn spawn_dismiss_timer() {
 /// builds with `debug_assertions` on, so the smoke tests keep working.
 #[cfg(debug_assertions)]
 fn maybe_spawn_auto_approve_timer() {
-    let Ok(raw) = std::env::var("STT_AUTH_AUTO_APPROVE_AFTER_MS") else {
+    let var = SUPER_STT.env(contract::AUTO_APPROVE_AFTER_MS);
+    let Ok(raw) = std::env::var(&var) else {
         return;
     };
     let Ok(ms) = raw.parse::<u64>() else {
-        log::warn!("STT_AUTH_AUTO_APPROVE_AFTER_MS={raw:?} is not a valid u64; ignoring");
+        log::warn!("{var}={raw:?} is not a valid u64; ignoring");
         return;
     };
-    log::info!("STT_AUTH_AUTO_APPROVE_AFTER_MS={ms}; auto-approving after {ms}ms");
+    log::info!("{var}={ms}; auto-approving after {ms}ms");
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(ms));
         // Mark decided so the SIGTERM/atexit paths don't also write
@@ -528,9 +535,8 @@ struct AuthRequestPayload {
 
 fn read_env() -> AuthRequestPayload {
     AuthRequestPayload {
-        app_name: std::env::var("STT_AUTH_APP_NAME")
-            .unwrap_or_else(|_| "<unknown app>".to_string()),
-        scopes: std::env::var("STT_AUTH_SCOPES")
+        app_name: request_var(contract::APP_NAME).unwrap_or_else(|_| "<unknown app>".to_string()),
+        scopes: request_var(contract::SCOPES)
             .unwrap_or_default()
             .split_whitespace()
             .map(str::to_string)
@@ -541,20 +547,19 @@ fn read_env() -> AuthRequestPayload {
 
 /// Which kind of caller the daemon is asking about.
 ///
-/// `STT_AUTH_WEB_ORIGIN` wins when present because the daemon sets exactly one
-/// of the two — see its `ask_user_for_consent`. Reading it first means a
-/// stale `STT_AUTH_EXE_PATH` inherited from the environment can never turn a
-/// website into an executable in the sentence the user reads.
+/// `SUPER_STT_AUTH_WEB_ORIGIN` wins when present because the daemon sets
+/// exactly one of the two — see its `ask_user_for_consent`. Reading it first
+/// means a stale `SUPER_STT_AUTH_EXE_PATH` inherited from the environment can
+/// never turn a website into an executable in the sentence the user reads.
 fn read_caller() -> Caller {
-    if let Ok(origin) = std::env::var("STT_AUTH_WEB_ORIGIN")
+    if let Ok(origin) = request_var(contract::WEB_ORIGIN)
         && !origin.is_empty()
     {
         return Caller::Web { origin };
     }
     Caller::Native {
-        exe_path: std::env::var("STT_AUTH_EXE_PATH")
-            .unwrap_or_else(|_| "<unknown path>".to_string()),
-        flatpak_app_id: std::env::var("STT_AUTH_FLATPAK_APP_ID")
+        exe_path: request_var(contract::EXE_PATH).unwrap_or_else(|_| "<unknown path>".to_string()),
+        flatpak_app_id: request_var(contract::FLATPAK_APP_ID)
             .ok()
             .filter(|id| !id.is_empty()),
     }
