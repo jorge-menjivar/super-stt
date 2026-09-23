@@ -86,10 +86,8 @@ mod tests {
             "none",
             "disabled",
             "Auto",
-            // `Desktop`'s former token. A stored `dbus` degrades to the
-            // `Auto` default via `deserialize_or_default` on the config
-            // field, and `Auto` prefers the same channel — so the rename
-            // costs an existing config nothing but the explicit pin.
+            // `Desktop`'s former token. Only the daemon's config loader
+            // still reads it, so a choice stored before the rename survives.
             "dbus",
         ] {
             assert!(

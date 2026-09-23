@@ -714,6 +714,42 @@ notification_method = "desktop"
     );
 }
 
+/// A choice stored under the name a v0.2.x release wrote keeps its meaning,
+/// and the canonical rewrite `load()` does stores it under the current name.
+#[test]
+fn daemon_config_keeps_methods_stored_under_their_former_names() {
+    let toml = r#"
+[device]
+preferred_device = "cpu"
+
+[audio]
+theme = "classic"
+volume = 100
+
+[transcription]
+preferred_model = "whisper"
+write_method = "wayland_protocol"
+notification_method = "dbus"
+"#;
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(toml);
+    assert!(!was_reset);
+    assert_eq!(cfg.transcription.write_method, WriteMethod::BuiltIn);
+    assert_eq!(
+        cfg.transcription.notification_method,
+        NotificationMethod::Desktop
+    );
+
+    let written = toml::to_string_pretty(&cfg).unwrap();
+    assert!(
+        written.contains(r#"write_method = "built_in""#),
+        "{written}"
+    );
+    assert!(
+        written.contains(r#"notification_method = "desktop""#),
+        "{written}"
+    );
+}
+
 /// Config-load resilience: an unknown stored value degrades to the default
 /// instead of failing the whole parse. (The wire setter, by contrast, rejects
 /// it — see the endpoint doc.)

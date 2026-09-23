@@ -117,10 +117,8 @@ mod tests {
             "wayland",
             "xdg-desktop-portal",
             "wayland-protocol",
-            // `BuiltIn`'s former name. A stored `wayland_protocol` degrades to
-            // the `Auto` default via `deserialize_or_default` on the config
-            // field, and `Auto` resolves to `BuiltIn` first on Linux — so the
-            // rename costs an existing config nothing but the explicit pin.
+            // `BuiltIn`'s former name. Only the daemon's config loader still
+            // reads it, so a choice stored before the rename survives.
             "wayland_protocol",
         ] {
             assert!(

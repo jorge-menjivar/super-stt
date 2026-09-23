@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use log::{debug, error, warn};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -128,6 +128,47 @@ fn default_volume() -> u8 {
 /// struct's own default.
 fn default_migrated_enabled() -> bool {
     true
+}
+
+/// Read `write_method`, keeping a choice stored under its former name.
+///
+/// Releases through v0.2.4 wrote [`WriteMethod::BuiltIn`] as
+/// `wayland_protocol`. Read as `auto`, a user who picked it would lose the
+/// pin: `auto` falls through to the portal or ydotool where the pin failed
+/// instead.
+fn deserialize_write_method<'de, D: Deserializer<'de>>(d: D) -> Result<WriteMethod, D::Error> {
+    deserialize_renamed(d, "wayland_protocol", WriteMethod::BuiltIn)
+}
+
+/// Read `notification_method`, keeping a choice stored under its former name.
+///
+/// Releases through v0.2.4 wrote [`NotificationMethod::Desktop`] as `dbus`.
+/// Read as `auto`, a user who picked it would get the notice typed into the
+/// focused window whenever a notification cannot be shown, which is what
+/// that choice rules out.
+fn deserialize_notification_method<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<NotificationMethod, D::Error> {
+    deserialize_renamed(d, "dbus", NotificationMethod::Desktop)
+}
+
+/// A settings enum whose stored value may be `former`, a token an earlier
+/// release wrote for `variant`.
+///
+/// Only the config file reads the old token. The wire keeps one token per
+/// variant, and [`DaemonConfig::load`] rewrites the file under the new one.
+/// Any other value goes through `deserialize_or_default`.
+fn deserialize_renamed<'de, D, T>(d: D, former: &str, variant: T) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + serde::de::DeserializeOwned,
+{
+    let raw = serde_json::Value::deserialize(d)?;
+    if raw.as_str() == Some(former) {
+        return Ok(variant);
+    }
+    super_stt_shared::utils::serde_helpers::deserialize_or_default(raw)
+        .map_err(serde::de::Error::custom)
 }
 
 /// The transcript post-processor: a second model, selected independently of
@@ -403,17 +444,11 @@ pub struct TranscriptionConfig {
         deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub recording_stop_mode: RecordingStopMode,
-    #[serde(
-        default,
-        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
-    )]
+    #[serde(default, deserialize_with = "deserialize_write_method")]
     pub write_method: WriteMethod,
     /// How a recording failure is surfaced to the user. An unparseable stored
     /// value degrades to the default rather than failing the whole config load.
-    #[serde(
-        default,
-        deserialize_with = "super_stt_shared::utils::serde_helpers::deserialize_or_default"
-    )]
+    #[serde(default, deserialize_with = "deserialize_notification_method")]
     pub notification_method: NotificationMethod,
     /// Vestigial: retained for config compatibility. Custom models are now
     /// provided as backends discovered under [`backends_dir`].
