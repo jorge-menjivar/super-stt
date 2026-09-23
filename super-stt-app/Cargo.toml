@@ -82,6 +82,56 @@
         "winit",
     ]
 
+# The native window frame and menu bar on macOS (src/core/app/macos/): the
+# NSWindow is reached through the raw window handle iced hands out, since
+# libcosmic passes none of iced's macOS window options through. objc2 and
+# objc2-app-kit are the versions libcosmic's own stack already builds, and the
+# ones muda (the menu bar) is built on.
+[target.'cfg(target_os = "macos")'.dependencies]
+    objc2-app-kit.version = "0.3"
+    objc2-app-kit.default-features = false
+    objc2-app-kit.features = [
+        "std",
+        "block2",
+        "objc2-core-foundation",
+        "objc2-quartz-core",
+        "NSAccessibility",
+        "NSAppearance",
+        "NSApplication",
+        "NSButton",
+        "NSColor",
+        "NSColorSpace",
+        "NSControl",
+        "NSGraphics",
+        "NSResponder",
+        "NSToolbar",
+        "NSView",
+        "NSVisualEffectView",
+        "NSWindow",
+        "NSWorkspace",
+    ]
+    objc2 = "0.6"
+    objc2-foundation.version = "0.3"
+    objc2-foundation.default-features = false
+    objc2-foundation.features = [
+        "std",
+        "block2",
+        "NSArray",
+        "NSDictionary",
+        "NSKeyValueObserving",
+        "NSNotification",
+        "NSOperation",
+        "NSString",
+        "NSUserDefaults",
+    ]
+    block2 = "0.6"
+    objc2-quartz-core.version = "0.3"
+    objc2-quartz-core.default-features = false
+    objc2-quartz-core.features = ["std", "objc2-core-foundation", "CALayer"]
+    muda.version = "0.20"
+    muda.default-features = false
+    raw-window-handle = "0.6"
+
 [build-dependencies]
     vergen.workspace = true
 

@@ -174,7 +174,29 @@ impl AppModel {
 
             // No pending scoped action error at startup.
             action_error: None,
+
+            // Measured once the window opens.
+            #[cfg(target_os = "macos")]
+            title_bar: super::macos::TitleBar::default(),
+
+            // The look `main` gave the app its theme from.
+            #[cfg(target_os = "macos")]
+            look: super::macos::appearance::launch_look(),
         };
+
+        // On macOS the native frame and the app's own toolbar replace
+        // libcosmic's header bar; see `macos`.
+        //
+        // libcosmic also draws a window edge — a 1px border, rounded corners,
+        // and a transparent backdrop outside them — for compositors that
+        // leave that to the client. It skips all three for a maximized
+        // window, so the app tells it the window is maximized: the native
+        // frame draws the edge. Only Wayland ever resets the flag.
+        #[cfg(target_os = "macos")]
+        {
+            app.core.window.show_headerbar = false;
+            app.core.window.is_maximized = true;
+        }
 
         // Create startup commands
         let title_command = app.update_title();

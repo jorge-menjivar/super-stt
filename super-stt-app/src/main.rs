@@ -33,12 +33,30 @@ fn main() -> cosmic::iced::Result {
     // Enable localizations to be applied.
     i18n::init(&requested_languages);
 
+    // Text in the system font on macOS; before the settings read the font.
+    #[cfg(target_os = "macos")]
+    core::app::macos::font::use_system_font();
+
     // Settings for configuring the application window and iced runtime.
     let settings = cosmic::app::Settings::default().size_limits(
         cosmic::iced::Limits::NONE
             .min_width(360.0)
             .min_height(180.0),
     );
+
+    // A Mac window keeps its native frame, traffic lights included; the app
+    // draws its toolbar under the transparent title bar (see `core::app::macos`).
+    // Left to libcosmic, the window is borderless and has no buttons at all.
+    // It is also see-through, for frosted glass (see
+    // `core::app::macos::appearance`); with frosting off, the theme draws it
+    // opaque.
+    #[cfg(target_os = "macos")]
+    let settings = settings.client_decorations(false).transparent(true);
+
+    // Open in the appearance and accent color macOS has; see
+    // `core::app::macos::appearance`.
+    #[cfg(target_os = "macos")]
+    let settings = settings.theme(core::app::macos::appearance::launch_look().theme());
 
     // Run as a single-instance D-Bus-activated app. A second launch (e.g.
     // from the update notification's "Open Super STT" action) activates

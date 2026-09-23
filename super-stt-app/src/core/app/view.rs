@@ -192,6 +192,21 @@ impl AppModel {
     /// Application events will be processed through the view. Any messages emitted by
     /// events received by widgets will be passed to the update method.
     pub(super) fn view_impl(&self) -> Element<'_, Message> {
+        #[cfg(target_os = "macos")]
+        {
+            cosmic::widget::column::with_capacity(2)
+                .push(self.macos_toolbar())
+                .push(self.page_view())
+                .into()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.page_view()
+        }
+    }
+
+    /// The active page, or the connection page while disconnected.
+    fn page_view(&self) -> Element<'_, Message> {
         // Force Connection page when daemon is not connected
         if self.daemon_status != DaemonStatus::Connected {
             return views::connection::page(
