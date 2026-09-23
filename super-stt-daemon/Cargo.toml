@@ -63,7 +63,7 @@
     serde_json.workspace = true
     strum.workspace = true
     strum_macros.workspace = true
-    super-stt-forge = { path = "../super-stt-forge" }
+    super-engine-forge.workspace = true
     super-stt-registry-types = { path = "../super-stt-registry-types" }
     # Shared crate
     super-stt-shared = {

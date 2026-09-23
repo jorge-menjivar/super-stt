@@ -14,6 +14,13 @@ use super_engine_spec::product::{SchemaNames, generation_from_str};
 #[derive(Debug, Clone, Copy)]
 pub enum Stt {}
 
+impl Stt {
+    /// What Super STT sends as its `User-Agent` to forges and download hosts,
+    /// version-stamped so their logs and rate limiters can tell which release
+    /// made a request.
+    pub const USER_AGENT: &str = concat!("super-stt/", env!("CARGO_PKG_VERSION"));
+}
+
 /// Backend-protocol contract version: the one thing a manifest declares about
 /// what it implements.
 ///

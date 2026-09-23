@@ -20,7 +20,8 @@ on:
       - uninstall.sh
       - scripts/**
       - super-stt-install/**
-      - super-stt-forge/**
+      # Pins super-engine-forge, which the installer downloads with.
+      - Cargo.toml
       - .github/workflows/install-e2e.yml
   push:
     branches: [main]
@@ -29,7 +30,8 @@ on:
       - uninstall.sh
       - scripts/**
       - super-stt-install/**
-      - super-stt-forge/**
+      # Pins super-engine-forge, which the installer downloads with.
+      - Cargo.toml
       - .github/workflows/install-e2e.yml
   workflow_dispatch:
 
@@ -84,6 +86,6 @@ jobs:
           # api.github.com allows 60 unauthenticated requests/hour per source
           # IP and runners share addresses. The token lifts that for all three
           # readers of it: the harness's own release resolution, install.sh,
-          # and the installer itself (super_stt_forge::Github::from_env).
+          # and the installer itself (super_engine_forge::Github::from_env).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/test-install-e2e.sh ${{ matrix.channel }}

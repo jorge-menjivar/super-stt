@@ -12,9 +12,9 @@ pub mod installed;
 pub mod local_dir;
 pub mod reconcile;
 
-/// Re-export the shared operator-base-URL gate from `super-stt-forge` so the
+/// Re-export the shared operator-base-URL gate from `super-engine-forge` so the
 /// registry client and the forge adapters apply one identical rule.
-pub(crate) use super_stt_forge::accept_base_url;
+pub(crate) use super_engine_forge::accept_base_url;
 
 /// The directory name a backend installs into.
 ///

@@ -4,7 +4,7 @@
 use semver::Version;
 use thiserror::Error;
 
-use super_stt_forge::{ForgeClient, Release, RepoRef};
+use super_engine_forge::{ForgeClient, Release, RepoRef};
 
 use crate::registry_toml::Entry;
 
@@ -24,7 +24,7 @@ pub enum ReleaseResolveError {
     #[error("tag `{tag}` does not parse as semver after stripping prefix `{prefix:?}`")]
     BadSemver { tag: String, prefix: Option<String> },
     #[error(transparent)]
-    Forge(#[from] super_stt_forge::ForgeError),
+    Forge(#[from] super_engine_forge::ForgeError),
 }
 
 pub async fn resolve(
@@ -104,7 +104,7 @@ fn parse_semver(s: &str) -> Result<Version, String> {
 mod tests {
     use super::*;
     use crate::registry_toml::Entry;
-    use super_stt_forge::{Release, ReleaseKind};
+    use super_engine_forge::{Release, ReleaseKind};
 
     fn rel(tag: &str) -> Release {
         Release {

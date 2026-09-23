@@ -391,7 +391,8 @@ pub async fn download_files(
 ) -> Result<()> {
     // The provider is installed once in `main` before any download runs, so no
     // redundant install here (Tier 2 #8).
-    let client = super_stt_forge::http::download_client();
+    let client =
+        super_engine_forge::http::download_client(super_stt_registry_types::Stt::USER_AGENT);
 
     for (offset, item) in items.iter().enumerate() {
         if let Some(t) = tracker
@@ -526,7 +527,7 @@ mod tests {
     /// daemon installs one in `main`, so a test standing in for it does too.
     /// Idempotent, so every test can call it.
     fn install_crypto_provider() {
-        super_stt_forge::http::install_crypto_provider();
+        super_engine_forge::http::install_crypto_provider();
     }
 
     /// Write `contents` at `dir/name` and return the item that declares it,

@@ -55,7 +55,7 @@ impl Client {
     pub fn new(url: impl Into<String>, cache_path: PathBuf, ttl: Duration) -> Self {
         Self {
             url: url.into(),
-            http: super_stt_forge::http::short_client(),
+            http: super_engine_forge::http::short_client(super_stt_registry_types::Stt::USER_AGENT),
             cache_path,
             ttl,
             state: Arc::default(),

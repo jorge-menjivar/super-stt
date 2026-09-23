@@ -251,7 +251,6 @@ Super STT is a Rust workspace:
 | `super-stt-consent`        | Consent-popup helper for the auth handshake                      |
 | `super-stt-shared`         | Common types, protocol definitions, validation                   |
 | `super-stt-registry-types` | Super STT's backend contract, on `super-engine-spec`             |
-| `super-stt-forge`          | Git-forge release sourcing for the registry                      |
 | `super-stt-indexer`        | CI tool that builds the published registry `index.json`          |
 
 The code Super STT shares with Super TTS lives in

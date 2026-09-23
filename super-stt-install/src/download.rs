@@ -23,7 +23,7 @@ const PROGRESS_THROTTLE_BYTES: u64 = 256 * 1024;
 /// otherwise stay `0` for the whole transfer, so `bytes_done == bytes_total`
 /// never triggers): that guaranteed final event reports the actual bytes
 /// downloaded as `bytes_total` too, so it always reads as "done" rather than
-/// an unknown/zero total. Uses [`super_stt_forge::http::download_client`]'s
+/// an unknown/zero total. Uses [`super_engine_forge::http::download_client`]'s
 /// 1 h timeout, appropriate for a multi-hundred-MB release tarball.
 ///
 /// # Errors
@@ -34,7 +34,8 @@ pub async fn download_to_file(
     dest: &Path,
     mut on_progress: impl FnMut(u64, u64),
 ) -> Result<(), InstallError> {
-    let client = super_stt_forge::http::download_client();
+    let client =
+        super_engine_forge::http::download_client(super_stt_registry_types::Stt::USER_AGENT);
     let mut resp = client
         .get(url)
         .send()
@@ -96,7 +97,8 @@ pub async fn download_to_file(
 /// [`InstallError::DownloadFailed`] on a network failure, a non-2xx response,
 /// a body over `max_bytes`, or invalid UTF-8.
 pub async fn download_string(url: &str, max_bytes: u64) -> Result<String, InstallError> {
-    let client = super_stt_forge::http::download_client();
+    let client =
+        super_engine_forge::http::download_client(super_stt_registry_types::Stt::USER_AGENT);
     let mut resp = client
         .get(url)
         .send()
@@ -125,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_to_file_streams_and_reports() {
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let mut s = mockito::Server::new_async().await;
         s.mock("GET", "/blob")
             .with_status(200)
@@ -156,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_to_file_throttles_progress_on_a_large_body() {
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let size: usize = 3 * 256 * 1024; // several times PROGRESS_THROTTLE_BYTES
         let mut s = mockito::Server::new_async().await;
         s.mock("GET", "/blob")
@@ -204,7 +206,7 @@ mod tests {
         // would silently emit NOTHING. There must always be at least one
         // final emission, reporting the real byte count actually
         // downloaded (not 0) as the total.
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let mut s = mockito::Server::new_async().await;
         s.mock("GET", "/blob")
             // A chunked body (rather than `with_body`) is what actually
@@ -237,7 +239,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_to_file_maps_a_404_to_download_failed() {
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let mut s = mockito::Server::new_async().await;
         s.mock("GET", "/missing")
             .with_status(404)
@@ -254,7 +256,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_to_file_maps_a_connection_refused_to_download_failed() {
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         // A loopback port nothing is listening on: `TcpListener::bind(0)`
         // then dropping it immediately frees the OS-assigned port while
         // keeping the attempt realistic (rather than a hardcoded port that
@@ -275,7 +277,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_string_returns_body_within_cap() {
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let mut s = mockito::Server::new_async().await;
         s.mock("GET", "/sums")
             .with_status(200)
@@ -293,7 +295,7 @@ mod tests {
         // A body larger than `max_bytes` must error rather than silently
         // truncating — a truncated `SHA256SUMS` could otherwise drop the
         // one line the caller actually needed to verify.
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let mut s = mockito::Server::new_async().await;
         s.mock("GET", "/big")
             .with_status(200)

@@ -6866,9 +6866,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "super-engine-forge"
+version = "0.1.0"
+source = "git+https://github.com/super-libre/super-engine?rev=5cc0eeaef7ae5ea75f15471d9b16c0c269822daa#5cc0eeaef7ae5ea75f15471d9b16c0c269822daa"
+dependencies = [
+ "async-trait",
+ "log",
+ "reqwest",
+ "rustls",
+ "serde",
+ "super-engine-spec",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "super-engine-spec"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=0359cdb256d8447626ab42697679d6c2c2104c1e#0359cdb256d8447626ab42697679d6c2c2104c1e"
+source = "git+https://github.com/super-libre/super-engine?rev=5cc0eeaef7ae5ea75f15471d9b16c0c269822daa#5cc0eeaef7ae5ea75f15471d9b16c0c269822daa"
 dependencies = [
  "hex",
  "ring",
@@ -6916,8 +6930,8 @@ dependencies = [
  "slotmap",
  "strum",
  "strum_macros",
+ "super-engine-forge",
  "super-stt-daemon",
- "super-stt-forge",
  "super-stt-registry-types",
  "super-stt-shared",
  "tokio",
@@ -7009,7 +7023,7 @@ dependencies = [
  "serde_json",
  "strum",
  "strum_macros",
- "super-stt-forge",
+ "super-engine-forge",
  "super-stt-registry-types",
  "super-stt-shared",
  "tar",
@@ -7033,21 +7047,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-stt-forge"
-version = "0.2.4"
-dependencies = [
- "async-trait",
- "log",
- "mockito",
- "reqwest",
- "rustls",
- "serde",
- "super-stt-registry-types",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
 name = "super-stt-indexer"
 version = "0.0.0"
 dependencies = [
@@ -7065,7 +7064,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "super-stt-forge",
+ "super-engine-forge",
  "super-stt-registry-types",
  "tar",
  "tempfile",
@@ -7091,7 +7090,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
- "super-stt-forge",
+ "super-engine-forge",
  "super-stt-registry-types",
  "tar",
  "thiserror 2.0.18",

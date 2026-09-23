@@ -88,7 +88,7 @@ service_dst := systemd_unit_dir / service_file
 # Named as a list rather than reached with `--workspace --exclude` so the
 # macOS gates say what they cover, and so a new portable crate has to be added
 # deliberately rather than silently skipped.
-macos_members := '-p super-stt-daemon -p super-stt-cli -p super-stt-shared -p super-stt-registry-types -p super-stt-forge -p super-stt-install -p super-stt-app'
+macos_members := '-p super-stt-daemon -p super-stt-cli -p super-stt-shared -p super-stt-registry-types -p super-stt-install -p super-stt-app'
 
 # macOS ships as one app bundle, `Super STT.app`: the settings app is its
 # executable, and the daemon and the CLI sit beside it in Contents/MacOS. The

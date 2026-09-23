@@ -19,7 +19,7 @@
     semver = "1"
     serde.workspace = true
     serde_json.workspace = true
-    super-stt-forge = { path = "../super-stt-forge" }
+    super-engine-forge.workspace = true
     super-stt-registry-types = { path = "../super-stt-registry-types" }
     tar = "0.4"
     thiserror.workspace = true

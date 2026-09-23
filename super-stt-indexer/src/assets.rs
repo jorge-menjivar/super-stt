@@ -45,7 +45,7 @@ pub enum AssetError {
 /// or larger than [`MAX_ASSET_BYTES`].
 pub fn resolve_url(
     file: &str,
-    release_assets: &[super_stt_forge::ReleaseAsset],
+    release_assets: &[super_engine_forge::ReleaseAsset],
 ) -> Result<(String, u64), AssetError> {
     let a = release_assets
         .iter()

@@ -18,14 +18,14 @@ use thiserror::Error;
 use crate::registry::index_schema::{
     IndexAsset, IndexAssets, IndexBackend, IndexSubprocessAsset, id_from_source,
 };
-use super_stt_forge::{ForgeClient, ReleaseAsset, RepoRef};
+use super_engine_forge::{ForgeClient, ReleaseAsset, RepoRef};
 
 #[derive(Debug, Error)]
 pub enum ResolveError {
     #[error("repo URL `{0}` is not a <host>/<owner>/<repo> reference")]
     BadRepoUrl(String),
     #[error("forge: {0}")]
-    Forge(#[from] super_stt_forge::ForgeError),
+    Forge(#[from] super_engine_forge::ForgeError),
     #[error(
         "No published release at {repo}. The repo may be private, missing, or have no release yet. A fork does not inherit the upstream's releases"
     )]
@@ -97,8 +97,8 @@ pub async fn resolve(
         .download(&manifest_url, MAX_MANIFEST_BYTES)
         .await
         .map_err(|e| match e {
-            super_stt_forge::ForgeError::TooLarge { .. } => ResolveError::ManifestTooLarge,
-            e @ super_stt_forge::ForgeError::Http(_) => ResolveError::Forge(e),
+            super_engine_forge::ForgeError::TooLarge { .. } => ResolveError::ManifestTooLarge,
+            e @ super_engine_forge::ForgeError::Http(_) => ResolveError::Forge(e),
         })?;
     let manifest_text = String::from_utf8(manifest_bytes)?;
     // Parse through the canonical manifest so a custom-repo install is validated
@@ -239,7 +239,7 @@ fn synthesize_assets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super_stt_forge::RepoRef;
+    use super_engine_forge::RepoRef;
 
     #[test]
     fn source_matching_repo_or_namespaced_under_it_is_accepted() {
@@ -267,14 +267,18 @@ mod tests {
     /// names neither what they pasted nor anything to do about it.
     #[tokio::test]
     async fn a_repo_with_no_published_release_names_the_repo_not_the_api_url() {
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let mut server = mockito::Server::new_async().await;
         server
             .mock("GET", "/repos/o/b/releases/latest")
             .with_status(404)
             .create_async()
             .await;
-        let gh = super_stt_forge::Github::new(server.url(), None);
+        let gh = super_engine_forge::Github::new(
+            server.url(),
+            None,
+            super_stt_registry_types::Stt::USER_AGENT,
+        );
 
         let err = resolve(&gh, "https://github.com/o/b")
             .await

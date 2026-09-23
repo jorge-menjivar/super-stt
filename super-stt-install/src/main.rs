@@ -182,9 +182,9 @@ async fn run(cli: &cli::Cli, reporter: Reporter) -> Result<(), InstallError> {
         message: "resolving release",
     });
     let triple = resolve::target_triple()?;
-    let repo = super_stt_forge::RepoRef::parse(resolve::REPO)
+    let repo = super_engine_forge::RepoRef::parse(resolve::REPO)
         .expect("REPO is a valid host/owner/repo reference");
-    let client = super_stt_forge::Github::from_env();
+    let client = super_engine_forge::Github::from_env(super_stt_registry_types::Stt::USER_AGENT);
     let target =
         resolve::resolve_target(&client, &repo, cli.version.as_deref(), cli.beta, triple).await?;
 
@@ -294,7 +294,7 @@ async fn run(cli: &cli::Cli, reporter: Reporter) -> Result<(), InstallError> {
 }
 
 fn main() -> std::process::ExitCode {
-    super_stt_forge::install_crypto_provider();
+    super_engine_forge::install_crypto_provider();
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)
         .init();
