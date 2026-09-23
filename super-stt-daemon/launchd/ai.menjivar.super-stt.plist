@@ -10,16 +10,12 @@
   the consent dialog on anyone's screen. Everything the daemon does that is
   not transcription needs the user's GUI session.
 
-  Two placeholders are substituted at install time by `just install-daemon`,
-  because launchd expands neither `$HOME` nor `~` in a plist and every path
-  here has to be absolute:
-
-    __DAEMON_BIN__  the installed daemon binary
-    __LOG_DIR__     a per-user directory for the daemon's stderr
-
-  That is the other real difference from the systemd unit, which gets to say
-  `ExecStart=super-stt-daemon` as a bare name and let systemd resolve it
-  against a fixed search path. launchd has no search path.
+  It ships inside the app bundle, at
+  Super STT.app/Contents/Library/LaunchAgents/, and is never copied out:
+  the app registers it with SMAppService (super-stt-shared/src/launch_agents.rs),
+  which has launchd load it from there. So this file is the same for every
+  user and every install location, and says nothing that depends on either —
+  `just bundle-macos` copies it into the bundle as it is.
 -->
 <plist version="1.0">
 <dict>
@@ -27,18 +23,26 @@
     <string>ai.menjivar.super-stt</string>
 
     <!--
-      No arguments, and there must never be any: the daemon takes no
-      configuration on its command line (the model, its device, and the audio
-      theme are all config / `POST /v1` state), clap rejects an unknown
-      argument and exits 2 before the listener binds, and `KeepAlive` below
-      turns that into a permanent crash loop with no socket for the app or the
-      CLI to reach. `every_shipped_execstart_parses`
+      Relative to the bundle, so the app can be moved after it is installed.
+      launchd has no search path, and SMAppService resolves this key against
+      wherever the bundle is now.
+    -->
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/super-stt-daemon</string>
+
+    <!--
+      Only argv[0], and there must never be anything after it: the daemon
+      takes no configuration on its command line (the model, its device, and
+      the audio theme are all config / `POST /v1` state), clap rejects an
+      unknown argument and exits 2 before the listener binds, and `KeepAlive`
+      below turns that into a permanent crash loop with no socket for the app
+      or the CLI to reach. `every_shipped_program_arguments_parses`
       (super-stt-daemon/src/cli_tests.rs) reads this file and fails if one is
       reintroduced.
     -->
     <key>ProgramArguments</key>
     <array>
-        <string>__DAEMON_BIN__</string>
+        <string>super-stt-daemon</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -66,19 +70,20 @@
     <key>ProcessType</key>
     <string>Interactive</string>
 
-    <!--
-      There is no journal here, so the daemon's stderr goes to a file.
-      `just logs-daemon` tails it.
-    -->
-    <key>StandardOutPath</key>
-    <string>__LOG_DIR__/daemon.log</string>
-    <key>StandardErrorPath</key>
-    <string>__LOG_DIR__/daemon.log</string>
-
     <key>EnvironmentVariables</key>
     <dict>
         <key>RUST_LOG</key>
         <string>info</string>
+        <!--
+          There is no journal here, so the daemon's output goes to a file,
+          which `just logs-daemon` tails. Not `StandardErrorPath`: that needs
+          an absolute path, launchd expands neither `~` nor `$HOME`, and a
+          plist inside a signed bundle cannot be edited per user. The daemon
+          resolves this against `$HOME` itself; see
+          super-stt-shared/src/logging.rs.
+        -->
+        <key>SUPER_STT_LOG_FILE</key>
+        <string>Library/Logs/super-stt/daemon.log</string>
     </dict>
 </dict>
 </plist>

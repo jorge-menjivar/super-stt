@@ -24,6 +24,8 @@ use super_stt_shared::validation::get_http_socket_path;
 
 #[cfg(target_os = "macos")]
 mod hotkey;
+#[cfg(target_os = "macos")]
+mod service;
 
 const APP_ID: AppId = AppId("super-stt-cli");
 const APP_NAME: &str = "Super STT CLI";
@@ -58,6 +60,11 @@ fn main() -> Result<()> {
             return hotkey::check(binding);
         }
         return hotkey::run(socket_path, binding);
+    }
+    // Talks to launchd rather than the daemon, and needs no runtime.
+    #[cfg(target_os = "macos")]
+    if let Some(("service", sub)) = matches.subcommand() {
+        return service::run(sub);
     }
 
     tokio::runtime::Builder::new_multi_thread()
@@ -158,10 +165,11 @@ fn build_cli() -> Command {
 #[cfg(target_os = "macos")]
 fn platform_subcommands(cli: Command) -> Command {
     cli.subcommand(hotkey::command())
+        .subcommand(service::command())
 }
 
 /// Nothing to add on Linux: the desktop environment binds the shortcut there
-/// and runs `stt record --write` itself.
+/// and runs `stt record --write` itself, and systemd runs the daemon.
 #[cfg(not(target_os = "macos"))]
 fn platform_subcommands(cli: Command) -> Command {
     cli
@@ -175,7 +183,21 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = super_stt_shared::daemon::http_client::HttpResult<T>>,
 {
-    session::with_token(socket_path, APP_ID, APP_NAME, SCOPES, op)
+    run_with_token_as(APP_ID, APP_NAME, socket_path, op).await
+}
+
+/// [`run_with_token`] under another app identity. See `hotkey::APP_ID`.
+async fn run_with_token_as<F, Fut, T>(
+    app_id: AppId,
+    app_name: &str,
+    socket_path: PathBuf,
+    op: F,
+) -> Result<T>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = super_stt_shared::daemon::http_client::HttpResult<T>>,
+{
+    session::with_token(socket_path, app_id, app_name, SCOPES, op)
         .await
         .map_err(|e| anyhow!(e))
 }
@@ -329,10 +351,7 @@ mod tests {
             .split("<string>")
             .skip(1)
             .filter_map(|s| s.split("</string>").next())
-            .map(|s| {
-                s.replace("__CLI_BIN__", "super-stt-cli")
-                    .replace("__BINDING__", super::hotkey::DEFAULT_BINDING)
-            })
+            .map(|s| s.replace("__BINDING__", super::hotkey::DEFAULT_BINDING))
             .collect();
 
         assert_eq!(args.get(1).map(String::as_str), Some("hotkey"));

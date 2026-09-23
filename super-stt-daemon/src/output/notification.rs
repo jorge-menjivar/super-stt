@@ -7,8 +7,10 @@
 //! standalone servers used on bare compositors (mako, dunst, swaync). One code
 //! path covers all of them; nothing there is desktop-specific.
 //!
-//! On macOS it is Notification Center, reached through `osascript`. See
-//! [`Inner`] for what that costs relative to the Linux path.
+//! On macOS it is Notification Center: through `UNUserNotificationCenter` when
+//! the daemon runs from inside `Super STT.app`, and through `osascript` when it
+//! is a bare binary. See [`Inner`] for what each costs relative to the Linux
+//! path.
 //!
 //! What a bubble says is decided in [`crate::output::notice`], including how
 //! backend-authored text is made safe to put in a body; this module only carries
@@ -64,9 +66,8 @@ pub struct Notifier {
     /// failures replace the previous bubble instead of stacking. The spec
     /// treats 0 as "do not replace".
     ///
-    /// A freedesktop concept with no macOS counterpart: Notification Center
-    /// returns no handle and offers no replace-in-place, so repeated failures
-    /// there stack as separate banners.
+    /// Linux only. Notification Center replaces by request identifier
+    /// instead, and `notification_center` posts every banner under one.
     #[cfg(target_os = "linux")]
     last_id: u32,
 }
@@ -80,15 +81,28 @@ enum Inner {
     /// Session-bus connection, established on first send and cached.
     #[cfg(target_os = "linux")]
     Dbus(Option<Connection>),
-    /// macOS Notification Center, via `osascript`.
+    /// macOS Notification Center, for a daemon inside `Super STT.app`, posted
+    /// by the app's executable at this path; see `notification_center`. The
+    /// banner carries the app's name and icon, and a post the user has not
+    /// allowed is reported as a failure.
+    ///
+    /// No buttons: clicking the banner opens the app, which is all the
+    /// "Open Super STT" action on an update bubble asks for, so
+    /// [`Notifier::send_with_actions`] drops the actions it is given.
+    #[cfg(target_os = "macos")]
+    NotificationCenter(std::path::PathBuf),
+    /// macOS Notification Center, via `osascript`, for a bare daemon binary,
+    /// which has no app to post through.
     ///
     /// Stateless — there is no connection to cache, because each notification
-    /// is a fresh short-lived process. Two things are genuinely weaker here
-    /// than on the D-Bus path, and callers should know which:
+    /// is a fresh short-lived process. Three things are genuinely weaker here
+    /// than on the other two paths, and callers should know which:
     ///
+    /// - **Not Super STT's banner.** macOS titles it with the posting
+    ///   process, which reads "Script Editor"; see [`NOTIFY_APPLESCRIPT`].
     /// - **No actions.** `display notification` posts a banner and nothing
-    ///   else; there are no buttons and no `ActionInvoked` to wait on. The
-    ///   "Open Super STT" action on an update bubble is simply absent, so
+    ///   else, and a click opens Script Editor. The "Open Super STT" action on
+    ///   an update bubble is simply absent, so
     ///   [`Notifier::send_with_actions`] drops what it is given rather than
     ///   pretending a click can arrive.
     /// - **No delivery confirmation.** `osascript` exits 0 once it has handed
@@ -97,12 +111,8 @@ enum Inner {
     ///   banner is dropped silently and this still reports success — so
     ///   [`NotificationMethod::Auto`] will not fall back to typing in that
     ///   case, because nothing told it to.
-    ///
-    /// Both follow from the daemon being a plain binary rather than a bundled,
-    /// signed `.app`: `UNUserNotificationCenter` — which has actions and
-    /// reports authorization — is only available to one of those.
     #[cfg(target_os = "macos")]
-    UserNotification,
+    AppleScript,
     #[cfg(test)]
     Fake { fail: bool, sent: Sent },
 }
@@ -115,7 +125,8 @@ impl Notifier {
             #[cfg(target_os = "linux")]
             inner: Inner::Dbus(None),
             #[cfg(target_os = "macos")]
-            inner: Inner::UserNotification,
+            inner: crate::output::notification_center::notifier()
+                .map_or(Inner::AppleScript, Inner::NotificationCenter),
             #[cfg(target_os = "linux")]
             last_id: 0,
         }
@@ -199,20 +210,23 @@ impl Notifier {
                 Ok(id)
             }
             #[cfg(target_os = "macos")]
-            Inner::UserNotification => {
+            inner @ (Inner::NotificationCenter(_) | Inner::AppleScript) => {
                 if !actions.is_empty() {
                     debug!(
                         "dropping {} notification action(s): macOS banners carry none",
                         actions.len()
                     );
                 }
-                post_user_notification(summary, body).await?;
-                // Notification Center hands back no identifier, and nothing
-                // on this platform consumes one: there is no `replaces_id` to
-                // feed and no action click to correlate. Reporting 0 — the
-                // freedesktop "no replacement" value — keeps the signature
-                // honest rather than inventing a handle that addresses
-                // nothing.
+                if let Inner::NotificationCenter(notifier) = inner {
+                    crate::output::notification_center::post(notifier, summary, body).await?;
+                } else {
+                    post_with_osascript(summary, body).await?;
+                }
+                // Nothing on this platform consumes an id: there is no
+                // `replaces_id` to feed and no action click to correlate.
+                // Reporting 0 — the freedesktop "no replacement" value — keeps
+                // the signature honest rather than inventing a handle that
+                // addresses nothing.
                 debug!("Delivered failure notification to Notification Center");
                 Ok(0)
             }
@@ -325,9 +339,9 @@ const NOTIFY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// # Errors
 /// When `osascript` cannot be spawned, exits non-zero, or outlives
 /// [`NOTIFY_TIMEOUT`]. A banner the user has muted is *not* an error — see
-/// [`Inner::UserNotification`] for what this can and cannot detect.
+/// [`Inner::AppleScript`] for what this can and cannot detect.
 #[cfg(target_os = "macos")]
-async fn post_user_notification(summary: &str, body: &str) -> Result<()> {
+async fn post_with_osascript(summary: &str, body: &str) -> Result<()> {
     use tokio::io::AsyncWriteExt as _;
 
     let mut child = tokio::process::Command::new(OSASCRIPT)

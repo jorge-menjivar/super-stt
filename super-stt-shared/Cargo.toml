@@ -40,6 +40,20 @@
     utoipa = { workspace = true, optional = true }
     uuid.workspace = true
 
+# `launch_agents`: registering the app bundle's LaunchAgents with launchd.
+[target.'cfg(target_os = "macos")'.dependencies]
+    objc2 = "0.6"
+    objc2-foundation = {
+        version = "0.3",
+        default-features = false,
+        features = ["std", "NSBundle", "NSError", "NSString"],
+    }
+    objc2-service-management = {
+        version = "0.3",
+        default-features = false,
+        features = ["std", "SMAppService", "SMErrors", "objc2", "objc2-foundation"],
+    }
+
 [features]
     default = []
     analysis = ["spectrum-analyzer"]

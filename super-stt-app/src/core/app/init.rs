@@ -182,6 +182,9 @@ impl AppModel {
             // The look `main` gave the app its theme from.
             #[cfg(target_os = "macos")]
             look: super::macos::appearance::launch_look(),
+
+            #[cfg(target_os = "macos")]
+            daemon_agent: None,
         };
 
         // On macOS the native frame and the app's own toolbar replace
@@ -196,6 +199,14 @@ impl AppModel {
         {
             app.core.window.show_headerbar = false;
             app.core.window.is_maximized = true;
+        }
+
+        // Opened from `Super STT.app`, the app is what installs the daemon;
+        // see `macos::bundle`.
+        #[cfg(target_os = "macos")]
+        if super::macos::bundle::in_bundle() {
+            super::macos::bundle::request_notification_permission();
+            std::thread::spawn(super::macos::bundle::register_agents);
         }
 
         // Create startup commands

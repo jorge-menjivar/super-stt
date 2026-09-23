@@ -130,6 +130,13 @@
     # features and version enigo itself builds.
     objc2-core-graphics.version = "0.3"
     objc2-core-graphics.features = ["CGEventTypes", "CGRemoteOperation"]
+    # Finding the app bundle's executable, which posts notifications for the
+    # daemon (output::notification_center).
+    objc2-foundation = {
+        version = "0.3",
+        default-features = false,
+        features = ["std", "NSBundle", "NSString"],
+    }
 
 [dev-dependencies]
     futures-util.workspace = true

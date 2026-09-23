@@ -209,10 +209,7 @@ impl AppModel {
     fn page_view(&self) -> Element<'_, Message> {
         // Force Connection page when daemon is not connected
         if self.daemon_status != DaemonStatus::Connected {
-            return views::connection::page(
-                &self.daemon_status,
-                self.socket_path.to_string_lossy().to_string(),
-            );
+            return views::connection::page(self);
         }
 
         // When connected, show normal navigation
@@ -252,10 +249,7 @@ impl AppModel {
             Page::Library => views::models::library_page(self),
             Page::Contexts => views::contexts::page(self),
             Page::Updates => views::updates::page(&self.update),
-            Page::Connection => views::connection::page(
-                &self.daemon_status,
-                self.socket_path.to_string_lossy().to_string(),
-            ),
+            Page::Connection => views::connection::page(self),
         }
     }
 }

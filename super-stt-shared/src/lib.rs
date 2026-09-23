@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 pub mod consent;
 pub mod daemon;
+#[cfg(target_os = "macos")]
+pub mod launch_agents;
 pub mod logging;
 pub mod models;
 pub mod paths;

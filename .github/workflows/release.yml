@@ -75,17 +75,18 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-22.04-arm
           # No `*-apple-darwin` entry yet, and that is a decision rather than
-          # an oversight. The daemon and the CLI build and run on macOS (CI
-          # gates them — see the `macos` job in ci.yml), and everything needed
-          # to package them is in the tree: a LaunchAgent at
-          # super-stt-daemon/launchd/, and `just install-daemon` to place it.
+          # an oversight. The app, the daemon and the CLI build and run on
+          # macOS (CI gates them — see the `macos` job in ci.yml), and
+          # everything needed to package them is in the tree: `just
+          # bundle-macos` builds Super STT.app, with the daemon's and the
+          # shortcut's LaunchAgents inside it.
           #
           # What is missing is the release half, and it is not just a matrix
           # row:
           #   * The steps below build five binaries and tar up systemd units
-          #     and COSMIC resources. A darwin entry ships three binaries
-          #     (daemon, CLI, installer) and the plist instead, so the build
-          #     and tarball steps need to branch on the target.
+          #     and COSMIC resources. A darwin entry ships the app bundle
+          #     instead, so the build and packaging steps need to branch on
+          #     the target.
           #   * `super-stt-install` — the binary this workflow publishes as
           #     the one-line installer — writes a systemd unit and runs
           #     `systemctl --user`. It needs a launchd path before a darwin

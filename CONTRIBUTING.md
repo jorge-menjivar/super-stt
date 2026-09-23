@@ -61,7 +61,7 @@ by design — use the platform-scoped recipes, which select the members that do
 build:
 
 ```bash
-just install-daemon     # daemon + CLI, installed as a LaunchAgent
+just install            # Super STT.app into /Applications; see below
 just check-macos        # clippy over the members that build here
 just test-macos         # their tests
 just doctest-macos      # their doctests
@@ -73,16 +73,69 @@ whole-workspace (Linux) gates. CI runs both sets, so a change that builds on
 one platform and not the other is caught before merge.
 
 The recipes that build a COSMIC shell component stop with an explanation here
-rather than failing deep inside a Wayland dependency's build script, and
-`just install-app` stops separately because the app builds but has no `.app`
-bundle to install into. Recipes that cover both platforms — `just
-run-daemon`, `just install` — quietly do the right thing instead: they skip
-the parts that have no macOS counterpart.
+rather than failing deep inside a Wayland dependency's build script. Recipes
+that cover both platforms — `just run-daemon`, `just install` — quietly do the
+right thing instead: they skip the parts that have no macOS counterpart.
+
+##### The app bundle
+
+On macOS Super STT installs as one bundle, `Super STT.app`. `just
+bundle-macos` builds it into `target/release/`, and `just install` (or
+`install-daemon`, `install-app`, `install-cli`: the bundle carries all of
+them) puts it in `/Applications`:
+
+```
+Super STT.app/Contents/
+  Info.plist                      super-stt-app/resources/macos/Info.plist
+  MacOS/super-stt-app             the settings app, the bundle's executable
+  MacOS/super-stt-daemon
+  MacOS/super-stt-cli             `stt` on the PATH is a wrapper around this
+  Helpers/super-stt-cli           the same CLI, which the shortcut agent runs
+  Library/LaunchAgents/           the daemon's and the shortcut's agents
+  Resources/AppIcon.icns          rendered from the app's SVG
+```
+
+The daemon and the CLI sit beside the app for two reasons. The daemon trusts
+a first-party client only when it is in the daemon's own directory. And an
+executable in `Contents/MacOS` has the app as its main bundle, which is how
+`stt service` finds the agents and how the daemon finds the app.
+
+A main bundle is not enough for notifications, though: Notification Center
+serves only the bundle's own executable, and every request the daemon makes
+fails as "not allowed" whatever the user has chosen. So the daemon runs
+`super-stt-app --notify <title> <body>`, which sets up a windowless
+`NSApplication`, posts as Super STT and exits
+(`super-stt-app/src/core/app/macos/notifier.rs`). A bare daemon falls back
+to `osascript`, whose banners read "Script Editor".
+
+The main bundle is also why the shortcut listener runs from the copy in
+`Contents/Helpers` instead. It runs an AppKit event loop, and a process that
+does so from `Contents/MacOS` registers with macOS as the app: opening Super
+STT then activates the invisible listener rather than launching the settings
+window. The daemon trusts first-party binaries in its own bundle's
+`Contents/Helpers` as it does those beside it, and the listener signs in to
+the daemon under a name of its own, since the daemon binds a session to the
+path that obtained it.
+
+The agents are never copied into `~/Library/LaunchAgents`. They are
+registered with `SMAppService` (`super-stt-shared/src/launch_agents.rs`),
+which has launchd load them from the bundle and lists them under System
+Settings › General › Login Items. The app registers them whenever it opens
+and finds them unregistered, which is all a drag-and-drop install needs;
+`stt service register|unregister|status` does the same from a terminal, and
+the `start-`, `enable-` and `disable-daemon` recipes use it. It has to run as
+the CLI inside the bundle, since `SMAppService` finds the agents through the
+caller's bundle, and `launchctl bootstrap` cannot stand in for it: launchd
+refuses a plist that names its program with `BundleProgram`.
+
+`just run-app` and `just run-daemon` still run bare binaries from `target/`.
+Nothing about the bundle applies to them: no agents to register, and
+notifications through `osascript`.
 
 ##### The global shortcut
 
 `stt hotkey` (`super-stt-cli/src/hotkey.rs`) is the macOS stand-in for a
-desktop environment's custom shortcut, and `just install-daemon` runs it as a
+desktop environment's custom shortcut, and the app bundle runs it as a
 second LaunchAgent. To try a change without reinstalling:
 
 ```bash
@@ -132,8 +185,8 @@ granted. What you actually see:
 None of that is a bug in Super STT, and none of it is fixable in code.
 
 With the variable set, every `just run-daemon`, `just run-app`, `just
-run-cli` and `just build-*` re-signs its output with a stable identity, and
-grants stick across rebuilds. Leave it unset and nothing changes — the step
+run-cli`, `just build-*` and `just bundle-macos` re-signs its output with a
+stable identity, and grants stick across rebuilds. Leave it unset and nothing changes — the step
 is a no-op off macOS and when it is empty, so Linux and CI are unaffected.
 
 Why it works, in one comparison. `codesign -d --requirements -` on the same

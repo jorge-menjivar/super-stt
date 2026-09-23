@@ -89,6 +89,16 @@ pub enum ShellMessage {
     /// The toolbar's sidebar button, standing in for libcosmic's header toggle.
     #[cfg(target_os = "macos")]
     ToggleSidebar,
+    /// Where the bundle's daemon agent stands, looked up while the daemon is
+    /// unreachable. See `core::app::macos::bundle`.
+    #[cfg(target_os = "macos")]
+    DaemonAgent(super_stt_shared::launch_agents::Status),
+    /// Register the bundle's agents, for a daemon agent that is not.
+    #[cfg(target_os = "macos")]
+    RegisterAgents,
+    /// Open Login Items, where a daemon agent the user switched off goes back on.
+    #[cfg(target_os = "macos")]
+    OpenLoginItems,
 }
 
 /// Daemon connection, connection-time settings loads, and the SSE event stream.

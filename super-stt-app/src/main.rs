@@ -20,6 +20,15 @@ impl cosmic::app::CosmicFlags for Flags {
 }
 
 fn main() -> cosmic::iced::Result {
+    // The daemon runs this executable to post a banner, which only the
+    // bundle's own executable may do; see `core::app::macos::notifier`.
+    // First, before logging: the daemon's environment names its own log
+    // file, and the reason for a failure has to reach the daemon on stderr.
+    #[cfg(target_os = "macos")]
+    if core::app::macos::notifier::requested() {
+        core::app::macos::notifier::run();
+    }
+
     super_stt_shared::logging::init();
 
     // Install the rustls crypto provider before any HTTP client is built —

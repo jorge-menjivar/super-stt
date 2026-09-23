@@ -56,9 +56,10 @@ impl SuperSTTDaemon {
                             )],
                         )
                         .await;
-                    // The click-to-open affordance is D-Bus-only: macOS
-                    // banners carry no actions, so there is nothing to wait
-                    // for and `send_with_actions` already dropped them. See
+                    // Waiting for the click is D-Bus-only. A macOS banner
+                    // carries no actions, and clicking one from the app
+                    // bundle opens the app with no help from here, so
+                    // `send_with_actions` already dropped them. See
                     // `output::notification::Inner`.
                     #[cfg(target_os = "linux")]
                     let conn = notifier.connection();
@@ -76,7 +77,7 @@ impl SuperSTTDaemon {
                                 Self::wait_for_update_notification_click(conn, id).await;
                             });
                         }
-                        // No click to wait for: macOS banners carry no actions.
+                        // No click to wait for: macOS opens the app itself.
                         #[cfg(not(target_os = "linux"))]
                         let _ = id;
                     }

@@ -90,20 +90,35 @@ service_dst := systemd_unit_dir / service_file
 # deliberately rather than silently skipped.
 macos_members := '-p super-stt-daemon -p super-stt-cli -p super-stt-shared -p super-stt-registry-types -p super-stt-forge -p super-stt-install -p super-stt-app'
 
+# macOS ships as one app bundle, `Super STT.app`: the settings app is its
+# executable, and the daemon and the CLI sit beside it in Contents/MacOS. The
+# daemon and the global shortcut run as the bundle's two LaunchAgents. See
+# `bundle-macos`.
+macos_bundle_name := 'Super STT.app'
+macos_bundle_src := 'target' / 'release' / macos_bundle_name
+macos_bundle_dst := '/Applications' / macos_bundle_name
+# The CLI inside the installed bundle. `stt service` has to run as this copy:
+# ServiceManagement finds the agents through the caller's bundle.
+macos_bundle_cli := macos_bundle_dst / 'Contents' / 'MacOS' / cli_name
+macos_resources := 'super-stt-app' / 'resources' / 'macos'
+
 # macOS launchd agent (the counterpart to the systemd user unit above).
-# A per-user LaunchAgent under $HOME, not a root-owned LaunchDaemon: the
-# daemon needs the user's GUI session to type, notify, and prompt for consent.
-# See super-stt-daemon/launchd/ for why, and for the two placeholders the
-# install recipe substitutes.
+# A per-user LaunchAgent, not a root-owned LaunchDaemon: the daemon needs the
+# user's GUI session to type, notify, and prompt for consent. It ships inside
+# the bundle, and launchd loads it from there once it is registered; see
+# super-stt-daemon/launchd/.
 launchd_label := 'ai.menjivar.super-stt'
 
 # Code-signing identifier prefix for local macOS builds. See `codesign-macos`.
 macos_sign_prefix := 'ai.menjivar.super-stt'
 launchd_plist_file := launchd_label + '.plist'
 launchd_plist_src := 'super-stt-daemon' / 'launchd' / launchd_plist_file
+# Where the agents were installed before the bundle existed, as loose plists
+# pointing at /usr/local/bin. Only `install-macos` and `uninstall-macos` still
+# look here, to retire them.
 launchd_agent_dir := home_dir / 'Library' / 'LaunchAgents'
 launchd_plist_dst := launchd_agent_dir / launchd_plist_file
-# launchd has no journal, so the agent's stdio goes to a file here.
+# launchd has no journal, so the agents write their output to files here.
 macos_log_dir := home_dir / 'Library' / 'Logs' / 'super-stt'
 # `launchctl` addresses a LaunchAgent by domain target, not by label alone.
 launchd_domain := 'gui/' + shell('id -u')
@@ -348,22 +363,108 @@ linux-only-gui:
         exit 1
     fi
 
-# Stop `install-app` on macOS, where the binary builds but has nowhere to go.
+# Build Super STT.app into target/release: the settings app, the daemon and
+# the CLI; the two LaunchAgents that run the daemon and the global shortcut;
+# and an icon rendered from the app's SVG. `just install` puts it in
+# /Applications.
 #
-# Installing the app means a .desktop entry, a hicolor icon and an XDG
-# autostart-adjacent layout under /usr/local/share — none of which macOS
-# reads. The macOS equivalent is a signed .app bundle in /Applications, which
-# does not exist yet. `just run-app` runs the same binary from the target dir
-# in the meantime.
-[private]
-macos-no-app-bundle:
+# Signed as a whole, inside out. The daemon and the CLI go first, each with
+# the identifier `build-daemon` and `build-cli` give them, so macOS goes on
+# recognising them for the grants they hold; then the bundle, which signs the
+# app and seals everything else. With SUPER_STT_SIGN_IDENTITY unset the
+# signature is ad hoc: enough to run on this Mac, and nothing more. See
+# `codesign-macos`. Notarizing for other Macs is not done here.
+#
+# SUPER_STT_HOTKEY picks the shortcut (default ctrl+alt+space). It is written
+# into the shortcut agent's plist before signing, since nothing inside a
+# signed bundle can be changed afterwards.
+#
+# Usage: just bundle-macos
+bundle-macos:
     #!/usr/bin/env bash
-    if [ "$(uname -s)" = "Darwin" ]; then
-        echo "The settings app builds on macOS but cannot be installed yet: there is" >&2
-        echo "no .app bundle, and a .desktop file plus hicolor icons mean nothing to" >&2
-        echo "macOS. Use 'just run-app' to run it from the target directory." >&2
+    set -euo pipefail
+
+    if [ "$(uname -s)" != "Darwin" ]; then
+        echo "bundle-macos builds a macOS app bundle; run it on a Mac." >&2
         exit 1
     fi
+
+    # One build per binary; the package selection is explained above `run-app`.
+    cargo build --release {{ app_select }}
+    cargo build --release {{ daemon_select }}
+    cargo build --release {{ cli_select }}
+
+    # Checked with the listener's own parser before it goes anywhere. Written
+    # into the agent unchecked, a binding it rejects would have launchd
+    # restart it every few seconds, failing identically, and the only symptom
+    # would be a key that does nothing.
+    binding="${SUPER_STT_HOTKEY:-ctrl+alt+space}"
+    if ! target/release/{{ cli_name }} hotkey --key "$binding" --check; then
+        echo "❌ SUPER_STT_HOTKEY='$binding' is not a shortcut the listener accepts" >&2
+        exit 1
+    fi
+
+    bundle="{{ macos_bundle_src }}"
+    contents="$bundle/Contents"
+    rm -rf "$bundle"
+    mkdir -p "$contents/MacOS" "$contents/Helpers" "$contents/Resources" \
+        "$contents/Library/LaunchAgents"
+
+    version=$(cargo pkgid -p {{ app_name }} | sed 's/.*[#@]//')
+    sed -e "s|__VERSION__|$version|g" -e "s|__BUILD__|${version%%-*}|g" \
+        {{ macos_resources }}/Info.plist > "$contents/Info.plist"
+
+    # Copies, not links: signing rewrites them, and the originals are cargo's.
+    cp target/release/{{ app_name }} target/release/{{ daemon_bin_name }} \
+        target/release/{{ cli_name }} "$contents/MacOS/"
+    # A second CLI for the shortcut agent, which must not run from
+    # Contents/MacOS; see super-stt-cli/launchd/.
+    cp target/release/{{ cli_name }} "$contents/Helpers/"
+
+    cp {{ launchd_plist_src }} "$contents/Library/LaunchAgents/"
+    sed "s|__BINDING__|$binding|g" {{ hotkey_plist_src }} \
+        > "$contents/Library/LaunchAgents/{{ hotkey_plist_file }}"
+    # launchd rejects a malformed plist with a bare "Input/output error", so
+    # lint here, where the message can still say what is wrong.
+    plutil -lint -s "$contents/Info.plist" "$contents"/Library/LaunchAgents/*.plist
+
+    just macos-icon "$contents/Resources/AppIcon.icns"
+
+    identity="${SUPER_STT_SIGN_IDENTITY:-}"
+    if [ -z "$identity" ]; then
+        echo "codesign: SUPER_STT_SIGN_IDENTITY unset, signing the bundle ad hoc." >&2
+        echo "          macOS drops its Accessibility/Keychain grants on every rebuild." >&2
+        echo "          See CONTRIBUTING.md, \"Sign your local builds\"." >&2
+        identity="-"
+    fi
+    codesign --force --sign "$identity" --identifier {{ macos_sign_prefix }}-daemon \
+        "$contents/MacOS/{{ daemon_bin_name }}"
+    for cli in "$contents/MacOS/{{ cli_name }}" "$contents/Helpers/{{ cli_name }}"; do
+        codesign --force --sign "$identity" --identifier {{ macos_sign_prefix }}-cli "$cli"
+    done
+    codesign --force --sign "$identity" "$bundle"
+    codesign --verify --strict "$bundle"
+
+    echo "✓ Built $bundle ($version)"
+
+# Render the macOS app icon into an .icns at `out`, from the SVG the Linux
+# desktop entry uses. See super-stt-app/resources/macos/app-icon.swift.
+[private]
+macos-icon out:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    swift {{ macos_resources }}/app-icon.swift {{ app_icon_src }} "$work/icon.png"
+    iconset="$work/AppIcon.iconset"
+    mkdir "$iconset"
+    for size in 16 32 128 256 512; do
+        sips -z "$size" "$size" "$work/icon.png" \
+            --out "$iconset/icon_${size}x${size}.png" >/dev/null
+        sips -z "$((size * 2))" "$((size * 2))" "$work/icon.png" \
+            --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+    done
+    iconutil -c icns "$iconset" -o "{{ out }}"
 
 # Re-sign a freshly built binary with a stable local code-signing identity.
 #
@@ -425,39 +526,6 @@ codesign-macos bin identifier:
         echo "  security find-identity -v -p codesigning" >&2
         exit 1
     fi
-
-# Load a LaunchAgent into the user's GUI domain and start it, replacing any copy
-# already loaded.
-#
-# `bootstrap` refuses a label that is already loaded, so this boots it out
-# first. And it retries. The first install with the shortcut agent failed at
-# exactly this step with launchd's bare "Bootstrap failed: 5: Input/output
-# error", then the identical bootstrap succeeded by hand seconds later. launchd
-# logged nothing about it and an immediate bootout/bootstrap would not reproduce
-# it, so what is handled here is the observed fact — a transient refusal — not
-# a guessed mechanism.
-[private]
-launchd-load target plist:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    launchctl bootout {{ target }} 2>/dev/null || true
-    # If the old job is still on its way out, let it finish going.
-    for _ in $(seq 1 50); do
-        launchctl print {{ target }} >/dev/null 2>&1 || break
-        sleep 0.1
-    done
-    err=""
-    for attempt in 1 2 3 4 5; do
-        if err=$(launchctl bootstrap {{ launchd_domain }} "{{ plist }}" 2>&1); then
-            launchctl enable {{ target }}
-            launchctl kickstart -k {{ target }} >/dev/null
-            exit 0
-        fi
-        [ "$attempt" -lt 5 ] && sleep "$attempt"
-    done
-    echo "❌ launchd would not load {{ target }}: $err" >&2
-    echo "   Retry by hand: launchctl bootstrap {{ launchd_domain }} \"{{ plist }}\"" >&2
-    exit 1
 
 # `-p` is load-bearing on macOS, and left off on Linux.
 #
@@ -889,9 +957,13 @@ openapi-serve *args:
             print()
     PYEOF
 
-# Install the app (system installation under /usr/local)
-install-app: macos-no-app-bundle
+# Install the app (system installation under /usr/local; on macOS, the whole
+# app bundle — see `install-macos`)
+install-app:
     #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        exec just install-macos
+    fi
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the build can outlast sudo's credential cache, and a
     # password prompt buried in build output is easy to miss.
@@ -1009,114 +1081,124 @@ install-applet: linux-only-gui
     echo "-- COSMIC Settings > Desktop > Panel > Configure panel applets > Add Applet"
 
 
-# Install the daemon on macOS (/usr/local/bin + a per-user LaunchAgent).
-# Called by `just install-daemon` on Darwin; run it directly to skip the
-# platform check.
-# Usage: just install-daemon-macos
-install-daemon-macos:
+# Install Super STT on macOS: the app bundle into /Applications, its two
+# LaunchAgents registered with launchd, and `stt` on the PATH. Called by
+# `just install`, `install-daemon` and `install-app` on Darwin, since the
+# bundle carries all three.
+#
+# Usage: just install-macos
+install-macos:
     #!/usr/bin/env bash
     set -euo pipefail
 
     # Ask for sudo up front and keep the timestamp alive in the background:
-    # the builds can outlast sudo's credential cache, and a password prompt
-    # buried in build output is easy to miss. Only the copies into
-    # {{ bin_dir }} need it — the LaunchAgent is per-user.
+    # the build can outlast sudo's credential cache, and a password prompt
+    # buried in build output is easy to miss. Only {{ bin_dir }} needs it —
+    # /Applications is writable by an administrator, and the agents are
+    # per-user.
     sudo -v
     ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
     sudo_keepalive=$!
     trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
 
-    echo "Building daemon..."
-    just build-daemon
-    echo "Building CLI..."
-    just build-cli
+    just bundle-macos
 
-    # The shortcut, checked with the listener's own parser before anything is
-    # installed. Written into the LaunchAgent unchecked, a binding it rejects
-    # would have launchd restart it every few seconds, failing identically,
-    # and the only symptom would be a key that does nothing.
-    binding="${SUPER_STT_HOTKEY:-ctrl+alt+space}"
-    if ! target/release/{{ cli_name }} hotkey --key "$binding" --check; then
-        echo "❌ SUPER_STT_HOTKEY='$binding' is not a shortcut the listener accepts" >&2
-        exit 1
+    # Retire an install from before the bundle: loose plists in
+    # ~/Library/LaunchAgents pointing at /usr/local/bin. They use the same
+    # labels as the bundle's agents, and launchd will not load two jobs under
+    # one label.
+    for target in {{ hotkey_target }} {{ launchd_target }}; do
+        if [ -f "{{ launchd_agent_dir }}/${target##*/}.plist" ]; then
+            echo "Removing the old LaunchAgent ${target##*/}..."
+            launchctl bootout "$target" 2>/dev/null || true
+            rm -f "{{ launchd_agent_dir }}/${target##*/}.plist"
+        fi
+    done
+    sudo rm -f {{ daemon_dst }} {{ cli_dst }}
+
+    # Unregister what an earlier install registered, with that install's own
+    # CLI. launchd keeps the job definition it loaded, so restarting the
+    # agents would go on running the old plists — the old program path, the
+    # old shortcut — whatever the new bundle says. Registering afresh below is
+    # what loads the new ones.
+    if [ -x "{{ macos_bundle_cli }}" ]; then
+        "{{ macos_bundle_cli }}" service unregister || true
+        # Unregistering does not wait for the jobs to go, and launchd will not
+        # load a label it is still tearing down.
+        for _ in $(seq 1 50); do
+            launchctl print {{ launchd_target }} >/dev/null 2>&1 \
+                || launchctl print {{ hotkey_target }} >/dev/null 2>&1 \
+                || break
+            sleep 0.1
+        done
     fi
 
-    # No consent helper is built here, and none is missing: it is a libcosmic
-    # application, which does not build on macOS. The daemon puts the same
-    # question up through osascript instead — see
-    # daemon/http/internal/auth/consent.rs.
-
-    echo "Installing binaries into {{ bin_dir }}..."
-    sudo install -d -m0755 {{ bin_dir }}
-    sudo install -m0755 target/release/{{ daemon_bin_name }} {{ daemon_dst }}
-    sudo install -m0755 target/release/{{ cli_name }} {{ cli_dst }}
+    # Replaced whole rather than copied over: files a newer build dropped
+    # must not linger inside a signed bundle, where they break its seal.
+    echo "Installing {{ macos_bundle_dst }}..."
+    rm -rf "{{ macos_bundle_dst }}"
+    ditto "{{ macos_bundle_src }}" "{{ macos_bundle_dst }}"
 
     echo "Creating wrapper script at {{ wrapper_dst }}"
     wrapper_tmp=$(mktemp)
     echo '#!/bin/bash' > "$wrapper_tmp"
-    echo '# Super STT convenience wrapper — invokes super-stt-cli directly.' >> "$wrapper_tmp"
+    echo '# Super STT convenience wrapper — runs the CLI inside the app bundle.' >> "$wrapper_tmp"
     echo '' >> "$wrapper_tmp"
-    echo 'exec {{ cli_dst }} "$@"' >> "$wrapper_tmp"
+    echo 'exec "{{ macos_bundle_cli }}" "$@"' >> "$wrapper_tmp"
+    sudo install -d -m0755 {{ bin_dir }}
     sudo install -m755 "$wrapper_tmp" {{ wrapper_dst }}
     rm -f "$wrapper_tmp"
 
-    mkdir -p "{{ macos_log_dir }}"
-    mkdir -p "{{ launchd_agent_dir }}"
+    # Loads both agents from the new bundle and starts them.
+    "{{ macos_bundle_cli }}" service register
 
-    # Substitute the two placeholders launchd cannot expand for itself.
-    echo "Installing LaunchAgent {{ launchd_plist_dst }}..."
-    sed -e "s|__DAEMON_BIN__|{{ daemon_dst }}|g" \
-        -e "s|__LOG_DIR__|{{ macos_log_dir }}|g" \
-        {{ launchd_plist_src }} > "{{ launchd_plist_dst }}"
-    # A malformed plist is rejected by launchd with a bare "Input/output
-    # error"; lint it here where the message can still say what is wrong.
-    plutil -lint "{{ launchd_plist_dst }}"
+    # Registration reports success from what macOS records about an agent,
+    # and that record has been seen to say "enabled" with nothing loaded. So
+    # ask launchd itself, rather than announce a daemon that is not there.
+    for target in {{ launchd_target }} {{ hotkey_target }}; do
+        if ! launchctl print "$target" >/dev/null 2>&1; then
+            echo "❌ launchd has not loaded $target." >&2
+            echo "   \"{{ macos_bundle_cli }}\" service status" >&2
+            echo "   says what macOS has recorded for it." >&2
+            exit 1
+        fi
+    done
 
-    # Replaces a copy already loaded, so a reinstall picks up the new plist.
-    just launchd-load {{ launchd_target }} "{{ launchd_plist_dst }}"
-
-    echo "Installing LaunchAgent {{ hotkey_plist_dst }}..."
-    sed -e "s|__CLI_BIN__|{{ cli_dst }}|g" \
-        -e "s|__BINDING__|$binding|g" \
-        -e "s|__LOG_DIR__|{{ macos_log_dir }}|g" \
-        {{ hotkey_plist_src }} > "{{ hotkey_plist_dst }}"
-    plutil -lint "{{ hotkey_plist_dst }}"
-    just launchd-load {{ hotkey_target }} "{{ hotkey_plist_dst }}"
-
+    binding="${SUPER_STT_HOTKEY:-ctrl+alt+space}"
     echo ""
-    echo "✓ Super STT daemon installed and running as {{ launchd_label }}"
-    echo "✓ Shortcut: $binding starts and stops a recording ({{ hotkey_label }})"
-    echo "  Change it with SUPER_STT_HOTKEY=... just install-daemon"
+    echo "✓ Super STT installed: {{ macos_bundle_dst }}"
+    echo "✓ The daemon and the shortcut run in the background, and at every login."
+    echo "  They are listed under System Settings › General › Login Items."
+    echo "✓ Shortcut: $binding starts and stops a recording"
+    echo "  Change it with SUPER_STT_HOTKEY=... just install"
     echo ""
-    echo "Two macOS permissions are needed, and neither can be granted from here:"
+    echo "Open Super STT once, and allow its notifications when asked. Two more"
+    echo "macOS permissions are needed, and neither can be granted from here:"
     echo ""
-    echo "  • Accessibility — System Settings › Privacy & Security › Accessibility"
-    echo "    Add {{ daemon_dst }}. Without it the daemon's synthesized"
-    echo "    keystrokes are discarded by the window server, silently: a"
+    echo "  • Accessibility — macOS asks when the daemon starts. If not, add"
+    echo "    {{ macos_bundle_dst }}/Contents/MacOS/{{ daemon_bin_name }}"
+    echo "    under System Settings › Privacy & Security › Accessibility."
+    echo "    Without it the daemon's keystrokes are discarded silently: a"
     echo "    recording will transcribe and then type nothing."
     echo ""
-    echo "  • Microphone — System Settings › Privacy & Security › Microphone"
-    echo "    macOS prompts on the first recording; if the daemon is not"
-    echo "    running in your logged-in session the prompt never appears."
-    echo ""
-    echo "The shortcut needs neither: it registers through Carbon, which asks"
-    echo "for no permission."
+    echo "  • Microphone — macOS asks on the first recording."
     echo ""
     echo "Logs: just logs-daemon    (file: {{ macos_log_dir }}/daemon.log)"
     echo "      shortcut listener:   {{ macos_log_dir }}/hotkey.log"
 
 # Install the daemon (system installation under /usr/local; runs as a
-# systemd --user service on Linux, a LaunchAgent on macOS)
+# systemd --user service on Linux. On macOS it is a LaunchAgent inside the
+# app bundle, so this installs the bundle.)
 # Usage: just install-daemon
 install-daemon:
     #!/usr/bin/env bash
     # The two platforms share the binaries and nothing else: different
     # service manager, different unit format, different set of components
     # (the libcosmic consent helper and the COSMIC shortcut have no macOS
-    # equivalent). Dispatching beats threading `uname` checks through a
-    # recipe this long.
+    # equivalent), and on macOS the daemon ships inside the app bundle.
+    # Dispatching beats threading `uname` checks through a recipe this long.
     if [ "$(uname -s)" = "Darwin" ]; then
-        exec just install-daemon-macos
+        exec just install-macos
     fi
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the builds (daemon, consent, CLI) can outlast sudo's
@@ -1284,28 +1366,18 @@ install-daemon:
 
 # Install daemon, settings app, and CLI
 #
-# On macOS the settings app is skipped, not failed. It builds there, but
-# installing it means a .desktop entry and hicolor icons, which macOS does
-# not read; the .app bundle that would replace them does not exist yet (see
-# `macos-no-app-bundle`). `just run-app` runs it from the target directory.
+# On macOS all three are one app bundle; see `install-macos`.
 #
 # Usage: just install
 install:
     #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        exec just install-macos
+    fi
+
     if ! just install-daemon; then
         echo "❌ Daemon installation failed"
         exit 1
-    fi
-
-    if [ "$(uname -s)" = "Darwin" ]; then
-        echo ""
-        echo "Skipping the settings app: it builds on macOS but has no .app"
-        echo "bundle yet. Run it with 'just run-app', or configure the daemon by"
-        echo "editing"
-        echo "  ~/Library/Application Support/super-stt/daemon.toml"
-        echo "or through the HTTP API (see docs/protocol/). The CLI covers"
-        echo "recording and status only, not settings."
-        exit 0
     fi
 
     if ! just install-app; then
@@ -1432,6 +1504,9 @@ install-all:
 # Uninstall the app
 uninstall-app:
     #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        exec just uninstall-macos
+    fi
     echo "Uninstalling Super STT App..."
     sudo rm -f {{ app_dst }}
     sudo rm -f {{ app_desktop_file_dst }}
@@ -1480,7 +1555,7 @@ uninstall-applet:
 uninstall-daemon:
     #!/usr/bin/env bash
     if [ "$(uname -s)" = "Darwin" ]; then
-        exec just uninstall-daemon-macos
+        exec just uninstall-macos
     fi
     echo "Uninstalling Super STT daemon user service..."
 
@@ -1511,32 +1586,36 @@ uninstall-daemon:
 
     echo "✓ Super STT Daemon user service uninstalled"
 
-# Uninstall the daemon on macOS. Called by `just uninstall-daemon` on Darwin.
-# Usage: just uninstall-daemon-macos
-uninstall-daemon-macos:
+# Uninstall Super STT on macOS: the agents, the app bundle, and `stt`.
+# Called by `just uninstall`, `uninstall-daemon` and `uninstall-app` on Darwin.
+# Usage: just uninstall-macos
+uninstall-macos:
     #!/usr/bin/env bash
-    echo "Uninstalling Super STT daemon LaunchAgent..."
+    echo "Uninstalling Super STT..."
 
-    # `bootout` both stops the agent and removes it from the domain, so there
-    # is no separate disable step the way there is with systemd.
+    # Unregistering stops the agents and drops them from Login Items. It has
+    # to be asked of the CLI inside the bundle, so before the bundle goes.
+    if [ -x "{{ macos_bundle_cli }}" ]; then
+        "{{ macos_bundle_cli }}" service unregister || true
+    fi
+    rm -rf "{{ macos_bundle_dst }}"
+
+    # An install from before the bundle, if one is still here.
     launchctl bootout {{ hotkey_target }} 2>/dev/null || true
     rm -f "{{ hotkey_plist_dst }}"
     launchctl bootout {{ launchd_target }} 2>/dev/null || true
     rm -f "{{ launchd_plist_dst }}"
+    sudo rm -f {{ daemon_dst }} {{ cli_dst }}
 
-    sudo rm -f {{ daemon_dst }}
-    sudo rm -f {{ cli_dst }}
     sudo rm -f {{ wrapper_dst }}
-
-    # No consent helper to remove: none is installed on macOS.
 
     echo "Log directory {{ macos_log_dir }} preserved"
     echo ""
-    echo "✓ Super STT daemon uninstalled"
+    echo "✓ Super STT uninstalled"
     echo ""
-    echo "macOS keeps its own record of the Accessibility grant. Remove the"
-    echo "stale entry in System Settings › Privacy & Security › Accessibility"
-    echo "if you are not reinstalling."
+    echo "macOS keeps its own record of the Accessibility and Microphone grants."
+    echo "Remove the stale entries in System Settings › Privacy & Security if"
+    echo "you are not reinstalling."
 
 # Install just the consent helper (normally bundled with install-daemon)
 install-consent: linux-only-gui
@@ -1571,6 +1650,12 @@ uninstall-consent:
 # Install the CLI binary (system installation under /usr/local)
 install-cli:
     #!/usr/bin/env bash
+    # On macOS the CLI ships inside the app bundle, beside the daemon: that
+    # is where `stt service` has to run from, and where the daemon trusts it
+    # without asking.
+    if [ "$(uname -s)" = "Darwin" ]; then
+        exec just install-macos
+    fi
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the build can outlast sudo's credential cache, and a
     # password prompt buried in build output is easy to miss.
@@ -1607,7 +1692,14 @@ uninstall-cli:
     echo "✓ Super STT CLI uninstalled"
 
 # Uninstall daemon, app, applet, CLI, and consent helper
-uninstall: uninstall-daemon uninstall-app uninstall-applet uninstall-cli uninstall-consent
+uninstall:
+    #!/usr/bin/env bash
+    # On macOS they are one app bundle, and the applet and the consent helper
+    # were never there.
+    if [ "$(uname -s)" = "Darwin" ]; then
+        exec just uninstall-macos
+    fi
+    just uninstall-daemon uninstall-app uninstall-applet uninstall-cli uninstall-consent
 
 # Start the daemon user service
 #
@@ -1619,10 +1711,13 @@ start-daemon:
     #!/usr/bin/env bash
     if [ "$(uname -s)" = "Darwin" ]; then
         # `stop-daemon` boots the agent out of launchd entirely (a plain stop
-        # would be undone by KeepAlive), which leaves nothing to kickstart —
-        # so load it first when it is not there.
+        # would be undone by KeepAlive), which leaves nothing to kickstart.
+        # Only ServiceManagement can load it back: `launchctl bootstrap`
+        # refuses a plist that names its program with `BundleProgram`, as the
+        # bundle's do. Registering again is what loads it.
         if ! launchctl print {{ launchd_target }} >/dev/null 2>&1; then
-            exec just launchd-load {{ launchd_target }} "{{ launchd_plist_dst }}"
+            "{{ macos_bundle_cli }}" service unregister
+            exec "{{ macos_bundle_cli }}" service register
         fi
         # `kickstart` rather than `launchctl start`: it works whether or not
         # the agent is currently running, which is what "start" should mean.
@@ -1637,7 +1732,8 @@ stop-daemon:
         # `bootout`, not `launchctl stop`: the agent sets `KeepAlive`, so a
         # plain stop is undone by launchd within `ThrottleInterval`. This
         # removes the agent from the domain until the next login or
-        # `just start-daemon`, which loads it back.
+        # `just start-daemon`, which loads it back. `disable-daemon` is the
+        # one that lasts past a login.
         exec launchctl bootout {{ launchd_target }}
     fi
     systemctl --user stop {{ service_name }}
@@ -1646,11 +1742,9 @@ stop-daemon:
 enable-daemon:
     #!/usr/bin/env bash
     if [ "$(uname -s)" = "Darwin" ]; then
-        launchctl enable {{ launchd_target }}
-        # `enable` only clears the disabled flag; the agent still has to be
-        # in the domain to run at login.
-        launchctl bootstrap {{ launchd_domain }} "{{ launchd_plist_dst }}" 2>/dev/null || true
-        exit 0
+        # Registering is what runs the bundle's agents at login, and starts
+        # them now. The Login Items switch in System Settings does the same.
+        exec "{{ macos_bundle_cli }}" service register
     fi
     systemctl --user enable {{ service_name }}
 
@@ -1658,8 +1752,10 @@ enable-daemon:
 disable-daemon:
     #!/usr/bin/env bash
     if [ "$(uname -s)" = "Darwin" ]; then
-        # Survives a reboot, unlike `bootout` alone.
-        exec launchctl disable {{ launchd_target }}
+        # Stops both agents and keeps them from starting at login, which
+        # survives a reboot, unlike `stop-daemon`. Opening the app registers
+        # them again.
+        exec "{{ macos_bundle_cli }}" service unregister
     fi
     systemctl --user disable {{ service_name }}
 
@@ -1667,8 +1763,10 @@ disable-daemon:
 status-daemon:
     #!/usr/bin/env bash
     if [ "$(uname -s)" = "Darwin" ]; then
-        # `print` is the closest thing launchd has to `systemctl status`: it
-        # reports the pid, last exit status, and the resolved program path.
+        # Whether the agents are registered, then `print`, the closest thing
+        # launchd has to `systemctl status`: the pid, last exit status, and
+        # the resolved program path.
+        "{{ macos_bundle_cli }}" service status || true
         exec launchctl print {{ launchd_target }}
     fi
     systemctl --user status {{ service_name }}

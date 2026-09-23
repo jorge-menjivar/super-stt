@@ -209,6 +209,11 @@ pub struct AppModel {
     /// The system look the theme was built from; see `macos::appearance`.
     #[cfg(target_os = "macos")]
     look: macos::appearance::Look,
+    /// Where the bundle's daemon agent stands, while the daemon is
+    /// unreachable; see `macos::bundle`. `None` outside the bundle, and until
+    /// first looked up.
+    #[cfg(target_os = "macos")]
+    pub(crate) daemon_agent: Option<super_stt_shared::launch_agents::Status>,
 }
 
 impl AppModel {
@@ -403,6 +408,10 @@ impl cosmic::Application for AppModel {
             );
             subs.push(Subscription::run(macos::menu_bar::events));
             subs.push(Subscription::run(macos::appearance::changes));
+            // For the connection page, which says what to do about it.
+            if self.daemon_status != DaemonStatus::Connected && macos::bundle::in_bundle() {
+                subs.push(Subscription::run(macos::bundle::daemon_agent));
+            }
         }
 
         Subscription::batch(subs)

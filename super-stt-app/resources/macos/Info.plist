@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Info.plist for Super STT.app, which `just bundle-macos` assembles. It holds
+  the settings app (the bundle's executable), the daemon and the CLI, and the
+  LaunchAgents that run the latter two.
+
+  Two placeholders are substituted when the bundle is built:
+
+    __VERSION__   the workspace version, as the version users see
+    __BUILD__     the same without any pre-release suffix (0.2.2-beta.3 ->
+                  0.2.2), since LaunchServices compares this one as numbers
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Super STT</string>
+    <key>CFBundleName</key>
+    <string>Super STT</string>
+    <key>CFBundleExecutable</key>
+    <string>super-stt-app</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <!--
+      The identifier `just run-app` signs the bare app binary with. The
+      Keychain grants access by code signature, and a signature's identifier
+      is part of it: with the same one, the bundled app and a development run
+      share the session token the app keeps there, instead of each asking to
+      be let in whenever the other has run.
+    -->
+    <key>CFBundleIdentifier</key>
+    <string>ai.menjivar.super-stt-app</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__BUILD__</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+
+    <!-- SMAppService, which registers the LaunchAgents, arrived in macOS 13. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!--
+      Shown when macOS asks whether Super STT may use the microphone. The
+      daemon records, but it runs from this bundle, so this is the text it is
+      asked with.
+    -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Super STT listens while you dictate and turns what you say into text.</string>
+</dict>
+</plist>
