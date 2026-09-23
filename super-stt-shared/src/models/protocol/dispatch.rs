@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::command::Command;
 use super::request::DaemonRequest;
+use crate::models::contexts::DictationContext;
 use crate::models::recording_stop_mode::RecordingStopMode;
 use crate::models::write_method::WriteMethod;
 use crate::validation::{self, Validate};
@@ -86,6 +87,10 @@ impl TryFrom<DaemonRequest> for Command {
             "get_active_backend" => Ok(Command::GetActiveBackend),
             "clear_active_backend" => Ok(Command::ClearActiveBackend),
             "get_gpu_info" => Ok(Command::GetGpuInfo),
+            "set_context" => cmd_set_context(&request),
+            "delete_context" => cmd_delete_context(&request),
+            "set_active_context" => Ok(cmd_set_active_context(&request)),
+            "set_backend_context" => cmd_set_backend_context(&request),
             _ => Err(format!("Unknown command: {}", request.command)),
         }
     }
@@ -447,6 +452,76 @@ fn cmd_set_backend_option(request: &DaemonRequest) -> Result<Command, String> {
         name,
         value,
     })
+}
+
+/// `set_context` — the whole context object arrives under `data.context`.
+///
+/// The first command here whose payload is a struct rather than a scalar, so
+/// it is the first to hand the field to `serde` instead of picking strings out
+/// of the `Value` by hand. That is the right trade at this shape: the manual
+/// style would have to spell out four fields including an array, and would
+/// silently accept a vocabulary of numbers by dropping it.
+///
+/// Storage limits are not checked here. This is the parse; whether the context
+/// is one the daemon will keep is `DictationContext::check`, run by the handler
+/// that stores it, so a client reaching the daemon by any route meets the same
+/// answer.
+fn cmd_set_context(request: &DaemonRequest) -> Result<Command, String> {
+    let value = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("context"))
+        .ok_or("Missing context for set_context")?
+        .clone();
+    let context: DictationContext = serde_json::from_value(value)
+        .map_err(|e| format!("Invalid context for set_context: {e}"))?;
+    Ok(Command::SetContext { context })
+}
+
+fn cmd_delete_context(request: &DaemonRequest) -> Result<Command, String> {
+    let id = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("id"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing id for delete_context")?
+        .to_string();
+    Ok(Command::DeleteContext { id })
+}
+
+/// `set_active_context` — an absent or null `id` clears the selection, which
+/// is why this one cannot fail: there is no missing-field case to report.
+fn cmd_set_active_context(request: &DaemonRequest) -> Command {
+    let id = request
+        .data
+        .as_ref()
+        .and_then(|d| d.get("id"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    Command::SetActiveContext { id }
+}
+
+/// `set_backend_context` — `id` carries three states, so absent and null are
+/// not the same thing here as they are in `set_active_context`.
+///
+/// Absent (or null) clears the override and the backend follows the active
+/// context; a string pins it, and the empty string pins it to no context at
+/// all. The distinction is the reason this reads `id` as a `Value` first: an
+/// `as_str()` chain would fold `""` and null together and lose the ability to
+/// say "this backend gets nothing".
+fn cmd_set_backend_context(request: &DaemonRequest) -> Result<Command, String> {
+    let data = request.data.as_ref();
+    let source = data
+        .and_then(|d| d.get("source"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing source for set_backend_context")?
+        .to_string();
+    let id = match data.and_then(|d| d.get("id")) {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(s)) => Some(s.clone()),
+        Some(other) => return Err(format!("Invalid id for set_backend_context: {other}")),
+    };
+    Ok(Command::SetBackendContext { source, id })
 }
 
 fn cmd_set_active_backend(request: &DaemonRequest) -> Result<Command, String> {

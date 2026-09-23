@@ -101,6 +101,7 @@ mod tests {
             models,
             secrets: Vec::new(),
             options: Vec::new(),
+            accepts_context: false,
         }
     }
 

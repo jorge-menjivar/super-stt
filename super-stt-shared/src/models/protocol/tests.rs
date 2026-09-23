@@ -333,6 +333,130 @@ fn set_backend_option_missing_source_fails() {
     assert!(Command::try_from(request).is_err());
 }
 
+/// The first command whose payload is a struct, so this is the one that
+/// checks the whole object survives the trip rather than a field or two.
+#[test]
+fn set_context_parses_the_whole_object() {
+    let request = make_request(
+        "set_context",
+        Some(json!({
+            "context": {
+                "id": "coding",
+                "name": "Coding",
+                "prompt": "I dictate code.",
+                "vocabulary": ["main branch", "Menjivar, Jorge"],
+            }
+        })),
+    );
+    let command = Command::try_from(request).expect("command should parse");
+    match command {
+        Command::SetContext { context } => {
+            assert_eq!(context.id, "coding");
+            assert_eq!(context.name, "Coding");
+            assert_eq!(context.prompt, "I dictate code.");
+            assert_eq!(
+                context.vocabulary,
+                vec!["main branch".to_string(), "Menjivar, Jorge".to_string()],
+                "a term holding a comma is one term — that is why this is an array"
+            );
+        }
+        _ => panic!("expected Command::SetContext"),
+    }
+}
+
+/// Every field but the id defaults, so a client that knows less than the
+/// current shape still parses.
+#[test]
+fn set_context_fills_in_what_a_client_omits() {
+    let request = make_request(
+        "set_context",
+        Some(json!({ "context": { "id": "coding" } })),
+    );
+    let command = Command::try_from(request).expect("command should parse");
+    match command {
+        Command::SetContext { context } => {
+            assert!(context.name.is_empty());
+            assert!(context.vocabulary.is_empty());
+        }
+        _ => panic!("expected Command::SetContext"),
+    }
+}
+
+/// A vocabulary of the wrong type is a parse failure, not a silently dropped
+/// field — which is what picking the strings out of the `Value` by hand would
+/// have given.
+#[test]
+fn set_context_refuses_a_malformed_object() {
+    let bad_shape = make_request(
+        "set_context",
+        Some(json!({ "context": { "id": "coding", "vocabulary": [1, 2] } })),
+    );
+    assert!(Command::try_from(bad_shape).is_err());
+
+    let missing = make_request("set_context", Some(json!({})));
+    assert!(Command::try_from(missing).is_err());
+}
+
+#[test]
+fn delete_context_needs_an_id() {
+    let request = make_request("delete_context", Some(json!({ "id": "coding" })));
+    match Command::try_from(request).expect("command should parse") {
+        Command::DeleteContext { id } => assert_eq!(id, "coding"),
+        _ => panic!("expected Command::DeleteContext"),
+    }
+    assert!(Command::try_from(make_request("delete_context", None)).is_err());
+}
+
+#[test]
+fn set_active_context_takes_an_id_or_clears() {
+    let chosen = make_request("set_active_context", Some(json!({ "id": "coding" })));
+    match Command::try_from(chosen).expect("command should parse") {
+        Command::SetActiveContext { id } => assert_eq!(id.as_deref(), Some("coding")),
+        _ => panic!("expected Command::SetActiveContext"),
+    }
+
+    for cleared in [
+        make_request("set_active_context", Some(json!({ "id": null }))),
+        make_request("set_active_context", None),
+    ] {
+        match Command::try_from(cleared).expect("command should parse") {
+            Command::SetActiveContext { id } => assert_eq!(id, None),
+            _ => panic!("expected Command::SetActiveContext"),
+        }
+    }
+}
+
+/// The per-backend override has three states, and this is the command that has
+/// to keep the two that look alike apart: null clears the override, `""` pins
+/// the backend to no context at all.
+#[test]
+fn set_backend_context_keeps_absent_and_empty_apart() {
+    let cases = [
+        (json!({ "source": "s", "id": "coding" }), Some("coding")),
+        (json!({ "source": "s", "id": "" }), Some("")),
+        (json!({ "source": "s", "id": null }), None),
+        (json!({ "source": "s" }), None),
+    ];
+    for (data, want) in cases {
+        let request = make_request("set_backend_context", Some(data.clone()));
+        match Command::try_from(request).expect("command should parse") {
+            Command::SetBackendContext { source, id } => {
+                assert_eq!(source, "s");
+                assert_eq!(id.as_deref(), want, "for {data}");
+            }
+            _ => panic!("expected Command::SetBackendContext"),
+        }
+    }
+
+    let no_source = make_request("set_backend_context", Some(json!({ "id": "coding" })));
+    assert!(Command::try_from(no_source).is_err());
+    let wrong_type = make_request(
+        "set_backend_context",
+        Some(json!({ "source": "s", "id": 7 })),
+    );
+    assert!(Command::try_from(wrong_type).is_err());
+}
+
 #[test]
 fn response_with_backends_serializes() {
     let response =

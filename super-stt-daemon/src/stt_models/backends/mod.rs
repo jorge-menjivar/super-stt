@@ -17,7 +17,7 @@ use log::{error, info, warn};
 
 use crate::stt_models::ModelDefinition;
 
-use manifest::{Device, Manifest, ModelEntry, Opt, Secret};
+use manifest::{Capabilities, Device, Manifest, ModelEntry, Opt, Secret};
 
 /// A backend discovered on disk, with the models it serves resolved into
 /// [`ModelDefinition`]s keyed by `(name, source)`.
@@ -55,6 +55,13 @@ pub struct DiscoveredBackend {
     pub secrets: Vec<Secret>,
     /// Declared options the backend accepts as `x-stt-option-*` headers.
     pub options: Vec<Opt>,
+    /// `[capabilities]` — the transport extensions this backend opted into.
+    ///
+    /// Carried through discovery rather than re-read from `backend.toml` where
+    /// it is needed. The one older consumer does re-read it, at model load,
+    /// which was affordable there; header injection asks the same question on
+    /// every settings write, and a disk read per write is not.
+    pub capabilities: Capabilities,
     /// Models this backend serves.
     pub models: Vec<ModelDefinition>,
 }
@@ -251,6 +258,7 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
         allowed_hosts: m.network.allowed_hosts,
         secrets: m.secrets,
         options: m.options,
+        capabilities: m.capabilities,
         models,
     })
 }

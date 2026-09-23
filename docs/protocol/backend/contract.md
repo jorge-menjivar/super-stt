@@ -106,6 +106,8 @@ headers — external clients cannot set them.
 | `x-stt-model`         | The active model name, e.g. `whisper-1`.                 |
 | `x-stt-secret-<name>` | One declared secret, e.g. `x-stt-secret-OPENAI_API_KEY`. |
 | `x-stt-option-<name>` | One declared option, e.g. `x-stt-option-base_url`.       |
+| `x-stt-prompt`        | The user's dictation prompt, as a JSON string.           |
+| `x-stt-vocabulary`    | The user's vocabulary terms, as a JSON array of strings. |
 
 - `x-stt-model` names the model to transcribe with. The daemon also calls
   [`POST /v1/load`](#post-v1load) with the model before routing, but a
@@ -133,6 +135,36 @@ headers — external clients cannot set them.
   `x-stt-secret-OPENAI_API_KEY` and sets its own `Authorization: Bearer`
   header on the request to `api.openai.com`.
 - Option values are not sensitive and are stored as plaintext.
+- `x-stt-prompt` and `x-stt-vocabulary` carry the
+  [dictation context](../endpoints/v1/context.md) the user has in force for this
+  backend: what they are dictating, so the model can hear it. They are sent
+  **only** to a backend declaring `[capabilities] context = true`, and each is
+  omitted when its half is empty — a backend using one and not the other never
+  has to tell "absent" from "empty". The user can point one backend at a
+  different context, or at none, so two backends may receive different values on
+  the same request.
+- Both are **JSON**, and both are escaped to pure ASCII. A prompt holds line
+  breaks and a vocabulary is a list, and a header value can carry neither as
+  itself. Decode with the JSON parser you already have:
+  `x-stt-prompt` is a string, `x-stt-vocabulary` an array of strings. Non-ASCII
+  characters arrive as `\uXXXX` escapes and come back out of that parser as
+  themselves, so nothing extra is needed to read a prompt written in Spanish.
+- The vocabulary is an **array** because every model wants it differently —
+  Deepgram takes one `keyterm=` per term, `whisper-1` takes them joined — and a
+  term containing whatever delimiter a flat string chose, like
+  `Menjivar, Jorge`, would be ambiguous. Join or iterate as your upstream needs;
+  the daemon has already split it.
+- Each upstream has its own ceiling (`whisper-1` 224 tokens, Deepgram 500) that
+  the daemon does not know. A backend that cares should truncate rather than let
+  the request fail. The daemon's own limits only stop a runaway value from being
+  stored: 4000 characters for the prompt, 200 terms or 4000 characters for the
+  vocabulary.
+- Neither header requires a reload to change. They are re-injected on the
+  running instance when the user edits a context, so the next request carries
+  the new value. A realtime session is the exception, and only because of when
+  it reads them: `ws-server.handle` is handed the headers once, at the start of
+  the session, so a context edited mid-recording applies to the next session
+  rather than the one in flight.
 
 ### `POST /v1/load`
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub mod backend_config_handlers;
+pub mod context_handlers;
 pub mod core;
 pub mod device_management;
 pub mod download_handlers;

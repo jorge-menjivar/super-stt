@@ -67,13 +67,16 @@ link-local addresses — the metadata endpoint `169.254.169.254` among them — 
 the unspecified and broadcast addresses stay refused no matter who named them.
 Manifest `allowed_hosts` entries remain fully SSRF-guarded.
 
-## Secrets and options
+## Secrets, options and the dictation context
 
-The active model (`x-stt-model`) and the secrets and options a backend
-declares in its [configuration](./config.md) arrive as request headers on
-every `/v1` request (see [request headers](./contract.md#request-headers)).
-The component reads them from the incoming request's headers; it never sees
-the keyring, and it needs no `wasi:config` import.
+The active model (`x-stt-model`), the secrets and options a backend declares in
+its [configuration](./config.md), and — for a backend declaring
+`[capabilities] context = true` — the user's
+[dictation context](../endpoints/v1/context.md) as `x-stt-prompt` and
+`x-stt-vocabulary`, all arrive as request headers on every `/v1` request (see
+[request headers](./contract.md#request-headers)). The component reads them from
+the incoming request's headers; it never sees the keyring, and it needs no
+`wasi:config` import.
 
 For an OpenAI backend declaring `OPENAI_API_KEY`, each `/v1/transcribe`
 arrives with `x-stt-model` and `x-stt-secret-OPENAI_API_KEY`; the component
@@ -151,8 +154,8 @@ handle: func(
 ```
 
 The daemon invokes `handle` once per consumer realtime session. `headers`
-carries the daemon-injected `x-stt-*` context (model name, secrets, options)
-as UTF-8 key/value pairs. `consumer` is the host-owned consumer WebSocket.
+carries the daemon-injected `x-stt-*` context (model name, secrets, options, and
+the dictation context when the backend declares it) as UTF-8 key/value pairs. `consumer` is the host-owned consumer WebSocket.
 The component pumps frames between `consumer` and any upstream connection
 it opens, returning when the session ends.
 
@@ -197,6 +200,11 @@ resource. A guest must still call `recv` to take it.
 - Read secrets and options from the injected `x-stt-secret-*` and
   `x-stt-option-*` request headers; use a secret only to authenticate
   outbound calls, and never forward it upstream.
+- To bias recognition toward what the user is actually dictating, declare
+  `[capabilities] context = true` and read `x-stt-prompt` (a JSON string) and
+  `x-stt-vocabulary` (a JSON array of strings), shaping them however your
+  upstream wants them. Both are escaped to pure ASCII, so an ordinary JSON
+  parse is the whole decode.
 - For a cloud backend, report `state: "ready"` from `GET /v1/status` as soon
   as the component is instantiated — there are no weights to load.
 - For a realtime backend: declare `[capabilities] websocket = true` and

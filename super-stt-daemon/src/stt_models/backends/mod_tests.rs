@@ -315,6 +315,7 @@ fn dir_name_returns_final_component() {
             allowed_hosts: Vec::new(),
             secrets: Vec::new(),
             options: Vec::new(),
+            capabilities: Default::default(),
             models: Vec::<ModelDefinition>::new(),
         }
     }
@@ -534,6 +535,7 @@ fn dedup_sources_falls_back_to_lexicographic_order() {
             allowed_hosts: Vec::new(),
             secrets: Vec::new(),
             options: Vec::new(),
+            capabilities: Default::default(),
             models: Vec::<ModelDefinition>::new(),
         }
     }
@@ -575,6 +577,7 @@ fn an_empty_source_resolves_nothing() {
             allowed_hosts: Vec::new(),
             secrets: Vec::new(),
             options: Vec::new(),
+            capabilities: Default::default(),
             models: vec![ModelDefinition {
                 name: model.to_string(),
                 source: source.to_string(),
@@ -715,6 +718,7 @@ fn at(dir: &str, source: &str, version: &str, id: Option<&str>) -> DiscoveredBac
         allowed_hosts: Vec::new(),
         secrets: Vec::new(),
         options: Vec::new(),
+        capabilities: Default::default(),
         models: Vec::<ModelDefinition>::new(),
         id: id.map(str::to_string),
     }

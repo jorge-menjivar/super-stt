@@ -28,6 +28,7 @@ impl AppModel {
             Message::WriteMethod(m) => self.handle_write_method_messages(m),
             Message::NotificationMethod(m) => self.handle_notification_method_messages(m),
             Message::Backend(m) => self.handle_backend_messages(m),
+            Message::Contexts(m) => self.handle_contexts_messages(m),
             Message::Language(m) => self.handle_language_messages(m),
             Message::Recording(m) => self.handle_recording_messages(m),
             Message::Update(m) => self.handle_update_messages(m),

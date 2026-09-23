@@ -358,6 +358,20 @@ pub struct Capabilities {
     /// Required for any model with `realtime = true`. Default `false`.
     #[serde(default)]
     pub websocket: bool,
+    /// Opt into being handed the user's dictation context: an `x-stt-prompt`
+    /// header and an `x-stt-vocabulary` header, on every `/v1` request.
+    /// Default `false`, which means neither header is sent.
+    ///
+    /// Unlike `websocket` this is not transport-restricted, and the deviation
+    /// is deliberate: both headers ride the ordinary request every backend
+    /// already receives, so a `subprocess` backend can use them exactly as a
+    /// `wasm` one does. The flag exists to keep the headers off backends that
+    /// would not know what to do with them, not to gate a transport.
+    ///
+    /// Declared per backend rather than per model, because it describes what
+    /// the code reading the request does, and that code is the backend's.
+    #[serde(default)]
+    pub context: bool,
 }
 
 /// `[assets]` — binary artifacts a release publishes, so the registry indexer

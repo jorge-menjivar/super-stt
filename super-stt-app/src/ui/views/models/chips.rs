@@ -763,6 +763,7 @@ mod capability_tests {
                 .collect(),
             secrets: Vec::new(),
             options: Vec::new(),
+            accepts_context: false,
         }
     }
 

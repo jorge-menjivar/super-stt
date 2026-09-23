@@ -33,6 +33,7 @@ fn discovered(dir: &str, source: &str) -> DiscoveredBackend {
         allowed_hosts: Vec::new(),
         secrets: Vec::new(),
         options: Vec::new(),
+        capabilities: Default::default(),
         models: Vec::new(),
     }
 }

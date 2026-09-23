@@ -715,6 +715,7 @@ fn fixture_backend_devices(
         allowed_hosts: Vec::new(),
         secrets: Vec::new(),
         options: Vec::new(),
+        capabilities: Default::default(),
         models: vec![ModelDefinition {
             name: model_name.to_string(),
             source: source.to_string(),

@@ -72,6 +72,7 @@ curl --unix-socket \"$XDG_RUNTIME_DIR/stt/super-stt-http.sock\" \\
         (name = "update", description = "Whether a newer daemon exists, and asking it to look now."),
         (name = "backends", description = "Installed backends: their models, options and secrets."),
         (name = "registry", description = "The published backend catalog: browse, install, update, uninstall."),
+        (name = "contexts", description = "Named dictation contexts \u{2014} what the user is dictating, as a prompt for a model that follows instructions and a vocabulary of terms for one that does not. One is active at a time, and a backend may be pointed at another or at none."),
     ),
 )]
 pub(crate) struct ApiDoc;

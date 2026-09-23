@@ -61,12 +61,12 @@ impl SuperSTTDaemon {
             def.processing_interval,
         );
         // Websocket capability is a per-backend flag (every model the backend
-        // serves shares it). Read it from the manifest so a ws-capable
-        // component is linked against the realtime world.
-        let websocket_capability =
-            crate::stt_models::backends::manifest::Manifest::load(&backend.dir)?
-                .capabilities
-                .websocket;
+        // serves shares it), carried through discovery so a ws-capable
+        // component is linked against the realtime world. It used to be read
+        // back off `backend.toml` here; discovery already parsed the manifest,
+        // and the header path below asks the same object a question on every
+        // settings write, where a disk read would not be affordable.
+        let websocket_capability = backend.capabilities.websocket;
         // Egress = the manifest-pinned `allowed_hosts` (fully SSRF-guarded) plus
         // what the user authorized via the `base_url` option, whose `host:port`
         // may be local or private.
@@ -265,6 +265,39 @@ impl SuperSTTDaemon {
         for opt in &backend.options {
             if let Some(v) = resolved_backend_option(overrides, opt) {
                 headers.push((format!("x-stt-option-{}", opt.name), v));
+            }
+        }
+        // The user's dictation context, for a backend that said it can use one.
+        // Read last and in a scope of its own: no await may happen under the
+        // config guard, and everything above this either awaits the keyring or
+        // works from the `overrides` snapshot it was handed.
+        //
+        // Gated on the capability rather than sent to everyone, because a
+        // backend that does not read these headers has no way to say so and
+        // would silently ignore a vocabulary the user watched themselves type.
+        // With the flag, a settings UI can tell them which backends will
+        // actually hear it.
+        if backend.capabilities.context {
+            let context = self
+                .config
+                .read()
+                .await
+                .resolve_context(&backend.source)
+                .filter(|c| !c.is_empty())
+                .cloned();
+            if let Some(context) = context {
+                // Each half is sent only when it has something in it. A
+                // backend reading one and not the other should not have to
+                // distinguish "absent" from "empty".
+                if !context.prompt.trim().is_empty() {
+                    headers.push(("x-stt-prompt".to_string(), json_ascii(&context.prompt)));
+                }
+                if !context.vocabulary.is_empty() {
+                    headers.push((
+                        "x-stt-vocabulary".to_string(),
+                        json_ascii_array(&context.vocabulary),
+                    ));
+                }
             }
         }
         Ok(headers)
@@ -657,6 +690,80 @@ fn resolved_backend_option(
         .or_else(|| opt.default.as_ref().map(ToString::to_string))
 }
 
+/// One JSON string, escaped so every byte of it is printable ASCII.
+///
+/// Both context headers are JSON because a prompt holds line breaks and a
+/// vocabulary is a list, and a header value can carry neither as itself. JSON
+/// is already the encoding every backend has a parser for, so the far side is
+/// `serde_json::from_str` and nothing else.
+///
+/// Written by hand rather than through `serde_json::to_string` for one reason:
+/// serde emits non-ASCII characters as themselves, and
+/// [`HeaderValue`](axum::http::HeaderValue) is asymmetric about those. It
+/// *accepts* any byte from `0x80` up at construction, and then refuses the same
+/// bytes in `to_str`. So a Spanish prompt builds a header the daemon considers
+/// valid and the backend cannot read back — a failure that shows up as a
+/// context silently going missing for some users and not others. Escaping to
+/// `\uXXXX` keeps the value inside the visible-ASCII range `to_str` will
+/// return.
+#[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
+fn json_ascii(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for c in value.chars() {
+        escape_ascii_into(c, &mut out);
+    }
+    out.push('"');
+    out
+}
+
+/// A JSON array of strings, each escaped by [`json_ascii`]'s rules.
+///
+/// The vocabulary rides as an array rather than a joined string because every
+/// consumer splits it differently and a term containing the delimiter —
+/// `"Menjivar, Jorge"` — would be ambiguous in a flat one. Sharing the escaper
+/// with [`json_ascii`] is what keeps the two headers decodable the same way.
+#[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
+fn json_ascii_array(values: &[String]) -> String {
+    let mut out = String::with_capacity(values.iter().map(|v| v.len() + 3).sum::<usize>() + 2);
+    out.push('[');
+    for (i, value) in values.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&json_ascii(value));
+    }
+    out.push(']');
+    out
+}
+
+/// Append one character in its JSON form, using only printable ASCII.
+///
+/// Anything outside `0x20..=0x7e` goes out as `\uXXXX`, astral characters as
+/// the surrogate pair JSON spells them with — which is what `encode_utf16`
+/// produces, so the two agree without a special case.
+#[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
+fn escape_ascii_into(c: char, out: &mut String) {
+    use std::fmt::Write as _;
+    match c {
+        '"' => out.push_str("\\\""),
+        '\\' => out.push_str("\\\\"),
+        '\n' => out.push_str("\\n"),
+        '\r' => out.push_str("\\r"),
+        '\t' => out.push_str("\\t"),
+        '\u{8}' => out.push_str("\\b"),
+        '\u{c}' => out.push_str("\\f"),
+        c if c.is_ascii_graphic() || c == ' ' => out.push(c),
+        c => {
+            let mut buf = [0u16; 2];
+            for unit in c.encode_utf16(&mut buf) {
+                // Writing to a String is infallible.
+                let _ = write!(out, "\\u{unit:04x}");
+            }
+        }
+    }
+}
+
 #[cfg(all(test, feature = "wasm-backends"))]
 mod tests {
     use super::SuperSTTDaemon;
@@ -924,5 +1031,230 @@ mod tests {
         let egress = SuperSTTDaemon::base_url_egress_hosts(&backend, &overrides);
         assert_eq!(injected, "http://10.0.0.5:8080");
         assert_eq!(egress, vec!["10.0.0.5:8080", "10.0.0.5"]);
+    }
+
+    /// A backend that did not ask for a context is not handed one.
+    ///
+    /// The gate is not tidiness: a backend that ignores these headers has no
+    /// way to say so, and the user would watch themselves type a vocabulary
+    /// that reached nothing. The flag is what lets a settings UI tell them
+    /// which backends will actually hear it.
+    #[tokio::test]
+    async fn a_context_reaches_only_a_backend_that_declared_it() {
+        use crate::daemon::test_fixtures::openai_backend;
+        use crate::daemon::types::test_daemon;
+        use crate::stt_models::backends::DiscoveredBackend;
+        use super_stt_shared::models::contexts::DictationContext;
+
+        let daemon = test_daemon().await;
+        let source = "github.com/super-stt/openai";
+        let backend = DiscoveredBackend {
+            secrets: Vec::new(),
+            options: Vec::new(),
+            ..openai_backend(source, Vec::new(), None)
+        };
+        daemon
+            .handle_set_context(DictationContext {
+                id: "coding".to_string(),
+                name: "Coding".to_string(),
+                prompt: "I dictate code.".to_string(),
+                vocabulary: vec!["kubectl".to_string()],
+            })
+            .await;
+        daemon
+            .handle_set_active_context(Some("coding".to_string()))
+            .await;
+
+        let without = daemon
+            .backend_headers(&backend, &std::collections::HashMap::new())
+            .await
+            .expect("headers");
+        assert!(
+            !without
+                .iter()
+                .any(|(k, _)| k.starts_with("x-stt-prompt") || k.starts_with("x-stt-vocabulary")),
+            "no capability, no context headers: {without:?}"
+        );
+
+        let opted_in = DiscoveredBackend {
+            capabilities: super_stt_registry_types::manifest::Capabilities {
+                websocket: false,
+                context: true,
+            },
+            ..backend
+        };
+        let with = daemon
+            .backend_headers(&opted_in, &std::collections::HashMap::new())
+            .await
+            .expect("headers");
+        assert_eq!(
+            with.iter()
+                .find(|(k, _)| k == "x-stt-prompt")
+                .map(|(_, v)| v.as_str()),
+            Some(r#""I dictate code.""#)
+        );
+        assert_eq!(
+            with.iter()
+                .find(|(k, _)| k == "x-stt-vocabulary")
+                .map(|(_, v)| v.as_str()),
+            Some(r#"["kubectl"]"#)
+        );
+    }
+
+    /// Both headers must survive the round trip a backend actually makes:
+    /// built into a `HeaderValue`, read back out with `to_str`, and decoded.
+    ///
+    /// This is the test that catches the naive encoder. `HeaderValue` is
+    /// asymmetric — it accepts any byte from `0x80` up at construction and then
+    /// refuses those same bytes in `to_str` — so `serde_json::to_string`, which
+    /// emits non-ASCII as itself, produces a header the daemon considers valid
+    /// and the backend cannot read. The symptom is a context that silently goes
+    /// missing for the users whose words have accents in them.
+    #[tokio::test]
+    async fn a_context_survives_the_header_round_trip_in_any_language() {
+        use crate::daemon::test_fixtures::openai_backend;
+        use crate::daemon::types::test_daemon;
+        use crate::stt_models::backends::DiscoveredBackend;
+        use axum::http::HeaderValue;
+        use super_stt_shared::models::contexts::DictationContext;
+
+        let daemon = test_daemon().await;
+        let source = "github.com/super-stt/openai";
+        let backend = DiscoveredBackend {
+            secrets: Vec::new(),
+            options: Vec::new(),
+            capabilities: super_stt_registry_types::manifest::Capabilities {
+                websocket: false,
+                context: true,
+            },
+            ..openai_backend(source, Vec::new(), None)
+        };
+
+        let prompt = "Dicto código.\nPrefiere términos de programación — \"main branch\".";
+        let vocabulary = vec![
+            "Menjivar, Jorge".to_string(),
+            "café".to_string(),
+            "\u{1f680} deploy".to_string(),
+            "back\\slash".to_string(),
+        ];
+        daemon
+            .handle_set_context(DictationContext {
+                id: "coding".to_string(),
+                name: "Coding".to_string(),
+                prompt: prompt.to_string(),
+                vocabulary: vocabulary.clone(),
+            })
+            .await;
+        daemon
+            .handle_set_active_context(Some("coding".to_string()))
+            .await;
+
+        let headers = daemon
+            .backend_headers(&backend, &std::collections::HashMap::new())
+            .await
+            .expect("headers");
+
+        for (name, raw) in &headers {
+            assert!(
+                raw.is_ascii(),
+                "{name} is not pure ASCII, so `to_str` will refuse it: {raw}"
+            );
+            let value = HeaderValue::from_str(raw)
+                .unwrap_or_else(|e| panic!("{name} is not a valid header value: {e}"));
+            value
+                .to_str()
+                .unwrap_or_else(|e| panic!("{name} built but cannot be read back: {e}"));
+        }
+
+        let read_back = |name: &str| -> String {
+            let raw = headers
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_else(|| panic!("{name} is missing"));
+            HeaderValue::from_str(&raw)
+                .expect("valid header")
+                .to_str()
+                .expect("readable header")
+                .to_string()
+        };
+
+        assert_eq!(
+            serde_json::from_str::<String>(&read_back("x-stt-prompt")).expect("decodes"),
+            prompt,
+            "the prompt comes back exactly as the user typed it, newline and all"
+        );
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&read_back("x-stt-vocabulary")).expect("decodes"),
+            vocabulary,
+            "a term holding a comma stays one term — that is why this is an array"
+        );
+    }
+
+    /// Half a context is a context. A backend reading one field and not the
+    /// other should never have to tell "absent" from "empty".
+    #[tokio::test]
+    async fn each_half_of_a_context_is_sent_only_when_it_has_something_in_it() {
+        use crate::daemon::test_fixtures::openai_backend;
+        use crate::daemon::types::test_daemon;
+        use crate::stt_models::backends::DiscoveredBackend;
+        use super_stt_shared::models::contexts::DictationContext;
+
+        let daemon = test_daemon().await;
+        let source = "github.com/super-stt/openai";
+        let backend = DiscoveredBackend {
+            secrets: Vec::new(),
+            options: Vec::new(),
+            capabilities: super_stt_registry_types::manifest::Capabilities {
+                websocket: false,
+                context: true,
+            },
+            ..openai_backend(source, Vec::new(), None)
+        };
+
+        let cases = [
+            (
+                "terms-only",
+                String::new(),
+                vec!["kubectl".to_string()],
+                false,
+                true,
+            ),
+            (
+                "prompt-only",
+                "Be terse.".to_string(),
+                Vec::new(),
+                true,
+                false,
+            ),
+            // Stored, but with nothing in either half: no headers at all.
+            ("empty", "   ".to_string(), Vec::new(), false, false),
+        ];
+        for (id, prompt, vocabulary, wants_prompt, wants_terms) in cases {
+            daemon
+                .handle_set_context(DictationContext {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    prompt,
+                    vocabulary,
+                })
+                .await;
+            daemon.handle_set_active_context(Some(id.to_string())).await;
+
+            let headers = daemon
+                .backend_headers(&backend, &std::collections::HashMap::new())
+                .await
+                .expect("headers");
+            assert_eq!(
+                headers.iter().any(|(k, _)| k == "x-stt-prompt"),
+                wants_prompt,
+                "x-stt-prompt for {id}: {headers:?}"
+            );
+            assert_eq!(
+                headers.iter().any(|(k, _)| k == "x-stt-vocabulary"),
+                wants_terms,
+                "x-stt-vocabulary for {id}: {headers:?}"
+            );
+        }
     }
 }

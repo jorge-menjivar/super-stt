@@ -174,6 +174,10 @@ pub struct AppModel {
     // Transcription language state (global Primary Language + per-model picker).
     pub language: crate::state::language::LanguageState,
 
+    /// The dictation contexts the daemon owns, the editor open over them, and
+    /// what each backend is pointed at.
+    pub contexts: crate::state::contexts::ContextsState,
+
     // Installed-backend catalog and per-backend configuration state.
     /// Backends discovered by the daemon, with the models/secrets/options
     /// each declares. Drives the per-backend sections on the Models page.
@@ -390,6 +394,16 @@ impl cosmic::Application for AppModel {
             // client may have changed the beta-opt-in setting.
             Some(crate::state::Page::Updates) => Task::batch([
                 handlers::tasks::refresh_update_status(),
+                self.update_title(),
+            ]),
+            // Contexts are global and the daemon owns them, so another app may
+            // have edited the list since it was last read. The arm matters:
+            // this `match` has a `_`, so leaving it out compiles silently and
+            // shows stale rows.
+            Some(crate::state::Page::Contexts) => Task::batch([
+                Task::done(cosmic::Action::App(Message::Contexts(
+                    crate::ui::messages::ContextsMessage::Reload,
+                ))),
                 self.update_title(),
             ]),
             _ => self.update_title(),

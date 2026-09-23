@@ -173,6 +173,14 @@ impl AppModel {
                     "post_processor" => {
                         Some(crate::core::app::handlers::tasks::load_post_processor())
                     }
+                    // A context was added, edited, deleted, or put in force.
+                    // One topic covers the whole family because the answer to
+                    // any of them is the same: re-read the list. The open
+                    // editor is deliberately untouched — see
+                    // `ContextsState::replace`.
+                    "contexts" => Some(Task::done(cosmic::Action::App(Message::Contexts(
+                        crate::ui::messages::ContextsMessage::Reload,
+                    )))),
                     // Both self-update settings need something beyond a plain
                     // `SettingsChanged` no-op, but *what* they need differs —
                     // see `self_update_setting_route`'s doc comment for why

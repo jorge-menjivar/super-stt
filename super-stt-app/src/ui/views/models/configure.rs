@@ -6,7 +6,9 @@ use cosmic::widget::{self, settings, text};
 
 use crate::core::app::AppModel;
 use crate::daemon::backends::{BackendInfo, BackendOption, BackendSecret};
-use crate::ui::messages::{BackendMessage, Message};
+use crate::daemon::client::ContextMode;
+use crate::ui::messages::{BackendMessage, ContextsMessage, Message};
+use super_stt_shared::models::contexts::DictationContext;
 
 use super::surface::muted_text_color;
 
@@ -25,8 +27,23 @@ pub fn configure_sheet<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Eleme
         body.push(crate::ui::views::common::error_banner(message));
     }
 
+    // The dictation context comes first: it is the one setting here that is
+    // not the backend's own, and the one most likely to be changed twice in a
+    // sitting. Only for a backend that declared it can use one — on any other,
+    // the row would offer a choice with no effect.
+    if backend.accepts_context {
+        body.push(context_row(backend, app));
+    }
+
     if backend.secrets.is_empty() && backend.options.is_empty() {
-        body.push(text::body("This backend has nothing to configure.").into());
+        body.push(
+            text::body(if backend.accepts_context {
+                "This backend has no other settings."
+            } else {
+                "This backend has nothing to configure."
+            })
+            .into(),
+        );
     } else {
         let mut section = settings::section();
         for secret in &backend.secrets {
@@ -71,6 +88,78 @@ pub fn configure_sheet<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Eleme
     column(body)
         .spacing(spacing.space_m)
         .width(Length::Fill)
+        .into()
+}
+
+/// Which dictation context this backend uses: the active one, a specific one,
+/// or none.
+///
+/// A dropdown rather than the three buttons the API has, because the three
+/// states are mutually exclusive and one line of a settings sheet is not the
+/// place for a row of verbs. "Follow the active context" is first and is the
+/// default; "No context" is last, because it is the one a user picks
+/// deliberately and rarely.
+fn context_row<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
+    let source = backend.source.clone();
+    let state = app.contexts.backend_contexts.get(&backend.source);
+
+    // Index 0 is "follow", index 1 is "none", and the rest are the contexts in
+    // the order the page lists them — so an index maps back to a choice without
+    // a second lookup.
+    let contexts = app.contexts.choices();
+    let mut labels: Vec<String> = Vec::with_capacity(contexts.len() + 2);
+    labels.push(match app.contexts.active.as_deref() {
+        Some(id) => format!(
+            "Follow the active context ({})",
+            app.contexts
+                .get(id)
+                .map_or_else(|| id.to_string(), DictationContext::display_name)
+        ),
+        None => "Follow the active context (none right now)".to_string(),
+    });
+    labels.push("No context".to_string());
+    labels.extend(contexts.iter().map(|(_, name)| name.clone()));
+
+    let selected = match state.map(|s| s.mode) {
+        None | Some(ContextMode::Active) => Some(0),
+        Some(ContextMode::Nothing) => Some(1),
+        Some(ContextMode::Pinned) => state
+            .and_then(|s| s.id.as_deref())
+            .and_then(|id| contexts.iter().position(|(cid, _)| cid == id))
+            .map(|i| i + 2)
+            // Pinned to a context that has since been deleted. The daemon keeps
+            // the pin, so this reads back as pinned with an id nothing matches;
+            // showing "follow" would be a lie about what the backend receives.
+            .or(Some(1)),
+    };
+
+    let ids: Vec<String> = contexts.into_iter().map(|(id, _)| id).collect();
+    let dropdown = widget::dropdown(labels, selected, move |index| match index {
+        0 => Message::Contexts(ContextsMessage::BackendFollowsActive(source.clone())),
+        1 => Message::Contexts(ContextsMessage::BackendPinned {
+            source: source.clone(),
+            id: None,
+        }),
+        n => Message::Contexts(ContextsMessage::BackendPinned {
+            source: source.clone(),
+            id: ids.get(n - 2).cloned(),
+        }),
+    });
+
+    let hint = state.and_then(|s| s.context.as_ref()).map_or_else(
+        || "Nothing is sent to this backend right now.".to_string(),
+        |context| format!("Sending {}.", context.display_name()),
+    );
+
+    widget::column::with_capacity(2)
+        .spacing(spacing.space_xxs)
+        .push(config_label(
+            "Dictation context".to_string(),
+            Some(hint),
+            false,
+        ))
+        .push(dropdown)
         .into()
 }
 

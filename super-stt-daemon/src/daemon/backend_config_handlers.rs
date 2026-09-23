@@ -20,7 +20,7 @@ fn with_reload_warning(base: String, reload_warning: Option<String>) -> String {
 /// The value is stored either way; what failed is getting it to a model already
 /// running. The user has to be told, because the settings UI will show the new
 /// value while the backend goes on using the old one.
-fn with_apply_warning(base: String, warning: Option<String>) -> String {
+pub(in crate::daemon) fn with_apply_warning(base: String, warning: Option<String>) -> String {
     match warning {
         Some(w) => format!("{base} (but the running backend kept the old value: {w})"),
         None => base,
@@ -168,6 +168,7 @@ impl SuperSTTDaemon {
                     models,
                     secrets,
                     options,
+                    accepts_context: b.capabilities.context,
                 }
             })
             .collect();
@@ -232,7 +233,10 @@ impl SuperSTTDaemon {
     /// Returns a warning if the new context could not be resolved. The stages
     /// keep running on the old one, and the caller has to surface that: the
     /// value is stored, so nothing else would tell the user it is not in use.
-    async fn reconfigure_if_source_active(&self, source: &str) -> Option<String> {
+    pub(in crate::daemon) async fn reconfigure_if_source_active(
+        &self,
+        source: &str,
+    ) -> Option<String> {
         #[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
         {
             let transcription = self
@@ -283,6 +287,51 @@ impl SuperSTTDaemon {
             let _ = source;
             None
         }
+    }
+
+    /// Hand *every* running stage a freshly resolved
+    /// [`BackendContext`](crate::stt_models::transcribe::BackendContext),
+    /// whatever backend each one runs.
+    ///
+    /// The sibling of [`reconfigure_if_source_active`](Self::reconfigure_if_source_active),
+    /// for a change that is not about one backend. A dictation context is
+    /// global: switching it moves both stages at once, and the two stages may
+    /// run different backends — which is the case the `source`-keyed helper
+    /// gets wrong, since it resolves one context and hands the same one to both
+    /// slots. It only ever does the right thing there because it returns early
+    /// unless the source it was given is the one loaded.
+    ///
+    /// Resolved once per *distinct* source, so the ordinary case of both stages
+    /// on one backend costs one resolution rather than two, and delegated per
+    /// source so the re-check-under-the-guard discipline is written once.
+    ///
+    /// Returns a warning naming what could not be re-resolved. The stages keep
+    /// running on what they had, and the caller has to surface it: the change
+    /// is stored, so nothing else would tell the user it is not in use.
+    pub(in crate::daemon) async fn reconfigure_active_stages(&self) -> Option<String> {
+        let mut sources: Vec<String> = Vec::new();
+        if let Some(source) = self
+            .model
+            .read()
+            .await
+            .as_ref()
+            .map(|l| l.definition.source.clone())
+        {
+            sources.push(source);
+        }
+        if let Some(source) = self.post_processor_source().await
+            && !sources.contains(&source)
+        {
+            sources.push(source);
+        }
+
+        let mut warnings = Vec::new();
+        for source in sources {
+            if let Some(warning) = self.reconfigure_if_source_active(&source).await {
+                warnings.push(warning);
+            }
+        }
+        (!warnings.is_empty()).then(|| warnings.join("; "))
     }
 
     /// The manifest declaration of one option of one installed backend, or

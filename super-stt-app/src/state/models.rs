@@ -47,6 +47,9 @@ pub enum Page {
     /// Self-update: current/latest version, automatic-check and beta-opt-in
     /// settings, and the apply flow.
     Updates,
+    /// Named dictation contexts: what the user is dictating, as a prompt and a
+    /// vocabulary, and which one is in force.
+    Contexts,
 }
 
 /// The context page to display in the context drawer
@@ -75,6 +78,11 @@ pub enum ContextPage {
     /// [`Self::SelectBackend`], listing only backends that serve a
     /// `post_processor` model; also Models-scoped.
     SelectPostProcessor,
+    /// Right-side sheet for editing one dictation context: its name, its
+    /// prompt, and its vocabulary. The context being edited is carried by
+    /// `ContextsState::draft`, which is also what makes an open editor survive
+    /// a refetch landing under it. Scoped to the Contexts page.
+    EditContext,
 }
 
 /// Where a transient action error belongs, so a failed save surfaces as an
@@ -97,6 +105,10 @@ pub enum ErrorScope {
     /// The Models page's Post-processing section: post-processor toggle and
     /// model selection saves.
     PostProcessing,
+    /// The Contexts page: a failed list fetch, activate, or delete. A failed
+    /// *save* is not here — it belongs in the editor that caused it, beside the
+    /// field the user has to fix.
+    Contexts,
 }
 
 /// A scope-tagged, transient action failure rendered as an inline banner on the

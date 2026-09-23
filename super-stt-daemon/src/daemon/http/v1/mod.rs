@@ -15,6 +15,7 @@ mod macros;
 
 pub(crate) mod auth;
 pub(crate) mod backends;
+pub(crate) mod contexts;
 pub(crate) mod events;
 pub(crate) mod gpu_info;
 pub(crate) mod ping;
@@ -97,6 +98,7 @@ fn settings_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(update::post_check))
         .merge(settings::routes())
         .merge(backends::routes())
+        .merge(contexts::routes())
         .merge(pipeline::routes())
         .merge(registry::routes())
 }

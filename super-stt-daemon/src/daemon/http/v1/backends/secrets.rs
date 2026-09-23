@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::{decode_source, find_backend, json_error, json_error_msg, ok};
+use super::{decode_source, find_backend};
 use crate::daemon::http::state::AppState;
+use crate::daemon::http::v1::wire::{json_error, json_error_msg, ok};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;

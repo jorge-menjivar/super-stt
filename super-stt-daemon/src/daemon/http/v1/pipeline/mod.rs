@@ -24,7 +24,7 @@ pub(crate) mod stage;
 
 use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, narrowed};
 use crate::daemon::http::state::AppState;
-use crate::daemon::http::v1::backends::json_error_msg;
+use crate::daemon::http::v1::wire::json_error_msg;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;

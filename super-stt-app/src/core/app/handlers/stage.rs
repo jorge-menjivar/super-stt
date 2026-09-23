@@ -712,6 +712,7 @@ mod tests {
             }],
             secrets: Vec::new(),
             options: Vec::new(),
+            accepts_context: false,
         }
     }
 

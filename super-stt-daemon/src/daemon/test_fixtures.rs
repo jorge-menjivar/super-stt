@@ -50,6 +50,7 @@ pub(crate) fn openai_backend(
             choices: Vec::new(),
             required: false,
         }],
+        capabilities: Default::default(),
         models,
     }
 }

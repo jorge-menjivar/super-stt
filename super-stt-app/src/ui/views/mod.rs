@@ -2,6 +2,7 @@
 pub mod about;
 pub mod common;
 pub mod connection;
+pub mod contexts;
 pub mod customization;
 pub mod input_simulation;
 pub mod language_picker;
