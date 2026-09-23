@@ -15,6 +15,7 @@
 //! - every operation is addressable by an id no other operation shares;
 //! - every path parameter a URL contains is the one the operation describes;
 //! - every guarded endpoint documents the failures a client will actually hit.
+//! - every schema a reference names is one the document defines.
 //!
 //! They iterate the whole document, so adding an endpoint adds nothing here —
 //! the new endpoint is simply held to the same standard as the rest.
@@ -339,6 +340,20 @@ fn every_response_names_a_real_shape() {
 /// recoverable, and a client that has not been told about them handles neither.
 /// The scope-less group is exempt from `403`: a guard that checks no scope
 /// cannot deny one.
+/// A reference to a schema the document does not define is a type a client
+/// generator cannot produce. utoipa registers only what some route or the
+/// `ApiDoc` reaches by name, so a type reached another way — flattened into
+/// its parent, or through a type parameter, as the shared registry types are
+/// — is referenced without being defined unless something lists it.
+#[test]
+fn every_schema_reference_resolves() {
+    let dangling = super_engine_daemon::openapi::dangling_refs(&super::openapi_document());
+    assert!(
+        dangling.is_empty(),
+        "referenced but never defined: {dangling:?}; list them in `ApiDoc`'s components"
+    );
+}
+
 #[test]
 fn every_guarded_endpoint_documents_its_auth_failures() {
     let doc = document();

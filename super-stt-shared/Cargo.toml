@@ -23,6 +23,7 @@
     spectrum-analyzer = { workspace = true, optional = true }
     super-engine-client.workspace = true
     super-engine-protocol.workspace = true
+    super-engine-spec.workspace = true
     super-stt-registry-types = { path = "../super-stt-registry-types" }
     thiserror.workspace = true
     tokio = {
