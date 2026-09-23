@@ -36,7 +36,7 @@ impl SuperSTTDaemon {
     #[must_use]
     pub fn handle_get_download_status(&self, stage: PipelineStage) -> DaemonResponse {
         if let Some(tracker) = self.download_manager.get_download(stage.position()) {
-            let progress = tracker.get_progress();
+            let progress = crate::download_progress::report(tracker.get_progress());
             DaemonResponse::success().with_download_progress(progress)
         } else {
             DaemonResponse::success().with_message("No download in progress".to_string())

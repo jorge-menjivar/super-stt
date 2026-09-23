@@ -1901,8 +1901,10 @@ async fn a_stage_reports_only_its_own_download() {
     let daemon = test_daemon().await;
     let tracker = Arc::new(DownloadProgressTracker::new(
         "s1-mini-q4_k_m".to_string(),
-        "github.com/super-stt/s1-mini".to_string(),
-        POST_PROCESSOR_STAGE,
+        crate::download_progress::StageSlot {
+            source: "github.com/super-stt/s1-mini".to_string(),
+            stage: POST_PROCESSOR_STAGE,
+        },
         2,
         Arc::new(AtomicBool::new(false)),
     ));
@@ -2121,8 +2123,10 @@ async fn cancel_abandons_only_the_addressed_stages_download() {
     let daemon = test_daemon().await;
     let stage_two = Arc::new(DownloadProgressTracker::new(
         "s1-mini-q4_k_m".to_string(),
-        "github.com/super-stt/s1-mini".to_string(),
-        POST_PROCESSOR_STAGE,
+        crate::download_progress::StageSlot {
+            source: "github.com/super-stt/s1-mini".to_string(),
+            stage: POST_PROCESSOR_STAGE,
+        },
         2,
         Arc::new(AtomicBool::new(false)),
     ));

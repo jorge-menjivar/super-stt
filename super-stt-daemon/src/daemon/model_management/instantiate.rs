@@ -126,8 +126,10 @@ impl SuperSTTDaemon {
             let t = std::sync::Arc::new(
                 crate::download_progress::DownloadProgressTracker::new(
                     name.to_string(),
-                    backend.source.clone(),
-                    stage.position(),
+                    crate::download_progress::StageSlot {
+                        source: backend.source.clone(),
+                        stage: stage.position(),
+                    },
                     total_files,
                     cancelled,
                 )
