@@ -33,7 +33,6 @@
     cpal.workspace = true
     dashmap.workspace = true
     dirs.workspace = true
-    flate2 = "1.1.9"
     futures = "0.3"
     gpu-probe = "0.1.1"
     hex = "0.4.3"
@@ -75,7 +74,6 @@
             "openapi",
         ]
     }
-    tar = "0.4.46"
     thiserror.workspace = true
     tokio = {
         workspace = true,
