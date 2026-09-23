@@ -335,15 +335,15 @@ async fn set_notification_method_round_trips_through_set_and_get() {
     let daemon = test_daemon().await;
 
     let mut set_request = make_request("set_notification_method");
-    set_request.data = Some(serde_json::json!({ "method": "dbus" }));
+    set_request.data = Some(serde_json::json!({ "method": "desktop" }));
     let set_response = daemon.handle_command(set_request).await;
     assert_eq!(set_response.status, "success");
-    assert_eq!(set_response.notification_method.as_deref(), Some("dbus"));
+    assert_eq!(set_response.notification_method.as_deref(), Some("desktop"));
 
     let get_response = daemon
         .handle_command(make_request("get_notification_method"))
         .await;
-    assert_eq!(get_response.notification_method.as_deref(), Some("dbus"));
+    assert_eq!(get_response.notification_method.as_deref(), Some("desktop"));
 }
 
 /// `get_update_check_enabled` reflects the config default before any write.

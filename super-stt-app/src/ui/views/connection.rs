@@ -12,7 +12,41 @@ use cosmic::{
 /// What fixes a daemon that is installed but not running — which is the only
 /// way this page has anything to say, since the app and the daemon install
 /// together.
-const START_DAEMON: &str = "systemctl --user start super-stt";
+///
+/// Built at call time rather than held in a `const`, because the launchd form
+/// needs the caller's uid: `launchctl` addresses a user agent by domain
+/// target (`gui/<uid>/<label>`), never by label alone.
+fn start_daemon_command() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        "systemctl --user start super-stt".to_string()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        format!("launchctl kickstart {}", launchd_target())
+    }
+}
+
+/// The same, for a daemon that is running and needs replacing. `-k` kills the
+/// current process first; plain `kickstart` on a running agent is a no-op,
+/// which would leave the deny cache the message is telling them to clear.
+fn restart_daemon_command() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        "systemctl --user restart super-stt".to_string()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        format!("launchctl kickstart -k {}", launchd_target())
+    }
+}
+
+/// The `LaunchAgent`'s domain target. Matches the label in
+/// `super-stt-daemon/launchd/` and the `launchd_target` the justfile builds.
+#[cfg(not(target_os = "linux"))]
+fn launchd_target() -> String {
+    format!("gui/{}/ai.menjivar.super-stt", unsafe { libc::getuid() })
+}
 
 /// Settings page view using cosmic-settings style
 pub fn page(daemon_status: &DaemonStatus, socket_path: String) -> Element<'_, Message> {
@@ -36,6 +70,7 @@ pub fn page(daemon_status: &DaemonStatus, socket_path: String) -> Element<'_, Me
         daemon_status,
         DaemonStatus::Disconnected | DaemonStatus::Error(_)
     ) {
+        let start_command = start_daemon_command();
         connection_section = connection_section
             .add(settings::item(
                 "No daemon",
@@ -44,10 +79,9 @@ pub fn page(daemon_status: &DaemonStatus, socket_path: String) -> Element<'_, Me
             .add(settings::item(
                 "Start it",
                 row![
-                    text::body(START_DAEMON),
-                    button::standard("Copy").on_press(Message::Shell(ShellMessage::CopyText(
-                        START_DAEMON.to_string()
-                    ))),
+                    text::body(start_command.clone()),
+                    button::standard("Copy")
+                        .on_press(Message::Shell(ShellMessage::CopyText(start_command))),
                 ]
                 .spacing(cosmic::theme::spacing().space_xs)
                 .align_y(Alignment::Center),
@@ -58,11 +92,11 @@ pub fn page(daemon_status: &DaemonStatus, socket_path: String) -> Element<'_, Me
         connection_section = connection_section
             .add(settings::item(
                 "Action required",
-                text::body(
+                text::body(format!(
                     "Authorization was denied. Restart the daemon to clear the deny \
-                     cache (systemctl --user restart super-stt), then click Retry to \
-                     request access again.",
-                ),
+                     cache ({}), then click Retry to request access again.",
+                    restart_daemon_command()
+                )),
             ))
             .add(settings::item(
                 "",

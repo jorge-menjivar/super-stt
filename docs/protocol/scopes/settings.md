@@ -56,9 +56,9 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | [`/pipeline/{stage}/model/{model}/device`](../endpoints/v1/pipeline/device.md#get-pipelinestagemodelmodeldevice) | GET, POST | Read / set the device one of a stage's models runs on (cpu / gpu)                    |
 | [`/pipeline/{stage}/model/{model}/device/list`](../endpoints/v1/pipeline/device.md#get-pipelinestagemodelmodeldevicelist) | GET | The devices this install can run one of a stage's models on                     |
 | [`/pipeline/{stage}/device/list`](../endpoints/v1/pipeline/device.md#get-pipelinestagedevicelist) | GET | The devices this install can run a stage's backend on                                 |
-| [`/settings/write_method`](../endpoints/v1/settings/write_method.md)          | POST, GET  | Keyboard simulation method (auto / xdg_desktop_portal / ydotool / wayland_protocol)                   |
+| [`/settings/write_method`](../endpoints/v1/settings/write_method.md)          | POST, GET  | Keyboard simulation method (auto / built_in / xdg_desktop_portal / ydotool)                   |
 | [`/settings/write_method/test`](../endpoints/v1/settings/write_method/test.md) | POST      | Type a test string with the configured method; reports the backend it resolved to                     |
-| [`/settings/notification_method`](../endpoints/v1/settings/notification_method.md) | POST, GET  | How recording failures are surfaced (auto / dbus / typed / off)                                       |
+| [`/settings/notification_method`](../endpoints/v1/settings/notification_method.md) | POST, GET  | How recording failures are surfaced (auto / desktop / typed / off)                                    |
 | [`/settings/custom_models_dir`](../endpoints/v1/settings/custom_models_dir.md) | POST, GET | Where to scan for user-supplied models                                                                |
 | [`/backend/list`](../endpoints/v1/backend/list.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |
 | [`/backend/{backend_id}/option/list`](../endpoints/v1/backends/options.md) | GET, POST, DELETE | List / read / set / reset a backend's non-sensitive options                          |

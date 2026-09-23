@@ -79,6 +79,12 @@ pub async fn run() -> Result<()> {
     #[cfg(feature = "subprocess-backends")]
     crate::stt_models::subprocess::cleanup_orphan_units().await;
 
+    // Find out now, not mid-recording, whether macOS will let the daemon
+    // type — and let the system prompt appear while nothing is in flight.
+    // Advisory: a refusal is logged, never fatal. See the function's docs.
+    #[cfg(target_os = "macos")]
+    crate::output::keyboard::probe_accessibility_permission();
+
     // Set up Ctrl+C handler
     let shutdown_tx = daemon.shutdown_tx.clone();
     tokio::spawn(async move {

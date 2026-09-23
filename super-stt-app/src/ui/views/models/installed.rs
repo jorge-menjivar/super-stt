@@ -2,7 +2,7 @@
 use cosmic::Element;
 use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{self, button, space::horizontal as horizontal_space, text};
+use cosmic::widget::{self, button, text};
 
 use crate::core::app::AppModel;
 use crate::daemon::backends::BackendInfo;
@@ -98,10 +98,16 @@ fn installed_toolbar<'a>(
         super::surface::muted_text_color(),
     ));
 
-    row![runs_on, kind, horizontal_space(), count]
+    // Wraps rather than squeezes, for the reason given on the Browse tab's
+    // toolbar (`download_toolbar`): a plain row that runs out of width clips
+    // its chips mid-word. The count follows the chips instead of being pushed
+    // to the right edge, because a fill-width spacer in a wrapping row would
+    // take a whole line to itself.
+    row![runs_on, kind, count]
         .spacing(spacing.space_m)
         .align_y(Alignment::Center)
-        .width(Length::Fill)
+        .wrap()
+        .vertical_spacing(spacing.space_xs)
         .into()
 }
 

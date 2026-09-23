@@ -606,11 +606,11 @@ mod tests {
         );
 
         let json = serde_json::to_string(
-            &DaemonResponse::success().with_resolved_write_method("wayland_protocol".to_string()),
+            &DaemonResponse::success().with_resolved_write_method("built_in".to_string()),
         )
         .expect("serialize");
         assert!(
-            json.contains(r#""resolved_write_method":"wayland_protocol""#),
+            json.contains(r#""resolved_write_method":"built_in""#),
             "resolved backend must reach the wire verbatim: {json}"
         );
     }

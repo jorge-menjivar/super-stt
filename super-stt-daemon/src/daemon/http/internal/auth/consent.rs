@@ -26,7 +26,8 @@ static CONSENT_POPUP: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new
 pub(crate) enum PeerIdentity {
     /// A process on the Unix socket, identified by `SO_PEERCRED`.
     ///
-    /// For an ordinary host process this is just its `/proc/<pid>/exe`. A peer
+    /// For an ordinary host process this is just the path the kernel says it
+    /// is running — `/proc/<pid>/exe` on Linux, `proc_pidpath` on macOS. A peer
     /// inside a flatpak has its own mount namespace, so that path is resolved
     /// in *its* root and means nothing here: every such peer reads as something
     /// like `/app/bin/<name>`, a string any other sandbox can present just by
@@ -41,7 +42,8 @@ pub(crate) enum PeerIdentity {
     /// what lets the daemon name the caller correctly in the consent dialog,
     /// and keep one sandboxed app's grant from silently covering another's.
     Native {
-        /// `/proc/<pid>/exe`, as resolved in the peer's own mount namespace.
+        /// The peer's executable path, as resolved in its own mount namespace
+        /// on Linux (where a namespace is possible) — see [`peer_exe_path`].
         exe_path: PathBuf,
         /// `Some(app-id)` when the peer runs inside a flatpak sandbox.
         #[serde(default)]
@@ -182,30 +184,32 @@ async fn read_consent_decision(stdout: tokio::process::ChildStdout) -> ConsentDe
     }
 }
 
-pub(crate) async fn ask_user_for_consent(
+/// Put the consent question on screen and hand back the running dialog.
+///
+/// The caller owns the policy around it — the one-popup-at-a-time permit, the
+/// 60-second deadline, and the reap — so all this does is start a process that
+/// will print one of `allow` / `deny` / `dismissed` to stdout. `None` means no
+/// dialog could be shown at all, which the caller reports as
+/// [`ConsentDecision::PopupFailed`]: distinct from a denial, because the user
+/// was never asked.
+///
+/// Linux spawns the libcosmic `super-stt-consent` helper installed beside the
+/// daemon; see `locate_consent_helper` for why it is only ever looked for
+/// there.
+#[cfg(target_os = "linux")]
+#[expect(
+    clippy::unused_async,
+    reason = "shares a signature with the macOS arm, which awaits writing its script to osascript"
+)]
+async fn spawn_consent_dialog(
     app_name: &str,
     scopes: &[String],
     identity: &PeerIdentity,
-) -> ConsentDecision {
+) -> Option<tokio::process::Child> {
     // `locate_consent_helper` already logs a specific reason on every
     // failure path (missing / un-canonicalizable / failed metadata check),
     // so we don't emit a second, redundant warning here.
-    let Some(helper) = locate_consent_helper() else {
-        return ConsentDecision::PopupFailed;
-    };
-
-    // Serialize popups globally: at most one consent dialog on screen at a time
-    // (audit 2 Tier 3 #10). `/auth/request` is unauthenticated and outside the
-    // rate limiter, and the 8 scopes yield 255 distinct `(exe, scopes)` consent
-    // keys — each bypassing the per-key dedup — so without this cap a same-uid
-    // process could stack hundreds of concurrent exclusive-keyboard overlays and
-    // lock the desktop. Excess requests wait for the permit rather than opening
-    // in parallel. Acquired before the spawn and held while the dialog is on
-    // screen; released before the untimed reap below so a wedged helper can't
-    // wedge all consent.
-    let Ok(popup_permit) = CONSENT_POPUP.acquire().await else {
-        return ConsentDecision::PopupFailed; // semaphore closed (never in practice)
-    };
+    let helper = locate_consent_helper()?;
 
     let mut cmd = tokio::process::Command::new(&helper);
     cmd.env("STT_AUTH_APP_NAME", app_name)
@@ -236,8 +240,8 @@ pub(crate) async fn ask_user_for_consent(
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        // The timeout below only reaps the helper while *this* request is
-        // still running. A client that exits mid-consent cancels it, which
+        // The timeout in the caller only reaps the helper while *that* request
+        // is still running. A client that exits mid-consent cancels it, which
         // drops the future and this `Child` with it — and a dropped
         // `tokio::process::Child` leaves the process alone unless asked not
         // to. Without this the dialog is orphaned for the life of the
@@ -245,12 +249,225 @@ pub(crate) async fn ask_user_for_consent(
         // that nothing is left to kill.
         .kill_on_drop(true);
 
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
+    match cmd.spawn() {
+        Ok(c) => Some(c),
         Err(e) => {
             log::warn!("failed to spawn super-stt-consent: {e}");
-            return ConsentDecision::PopupFailed;
+            None
         }
+    }
+}
+
+/// The `AppleScript` behind the macOS consent dialog.
+///
+/// It builds no strings: both the message and the title arrive as `argv`
+/// items, so nothing a caller can put in an app name is ever parsed as
+/// `AppleScript`. The two-step — compose in Rust, display in `AppleScript` — is
+/// the whole reason this is `osascript -` with arguments rather than
+/// `osascript -e` with the text interpolated in.
+///
+/// `giving up after 55` sits just inside the caller's 60-second deadline so
+/// an abandoned dialog reports itself as dismissed and exits, instead of
+/// being killed with the question still on screen.
+///
+/// There is deliberately no `cancel button`: naming one would make Escape and
+/// a Deny click raise the same `-128`, and the daemon would lose the
+/// difference between "the user refused" (sticky) and "the user walked away"
+/// (not sticky).
+#[cfg(target_os = "macos")]
+const CONSENT_APPLESCRIPT: &str = r#"on run argv
+	set dialogText to item 1 of argv
+	set dialogTitle to item 2 of argv
+	try
+		set answer to display dialog dialogText with title dialogTitle buttons {"Deny", "Allow"} default button "Deny" with icon caution giving up after 55
+	on error number -128
+		return "dismissed"
+	end try
+	if gave up of answer then return "dismissed"
+	if button returned of answer is "Allow" then return "allow"
+	return "deny"
+end run
+"#;
+
+/// Absolute path to the system `AppleScript` interpreter.
+///
+/// Absolute, never `osascript` off `PATH`, for the reason
+/// the Linux helper lookup spells out: anyone who can prepend a writable
+/// directory to the daemon's `PATH` could otherwise answer the consent
+/// question on the user's behalf. `/usr/bin` is on the signed system volume,
+/// which is read-only and cryptographically sealed.
+#[cfg(target_os = "macos")]
+const OSASCRIPT: &str = "/usr/bin/osascript";
+
+/// See the Linux [`spawn_consent_dialog`].
+///
+/// macOS has no `super-stt-consent` binary to spawn — the helper is a
+/// libcosmic application and libcosmic does not build here — so the question
+/// goes up through `osascript` instead. The user-visible sentences come from
+/// [`super_stt_shared::consent`], which is also what the Linux helper renders,
+/// so the two platforms describe a grant identically.
+#[cfg(target_os = "macos")]
+async fn spawn_consent_dialog(
+    app_name: &str,
+    scopes: &[String],
+    identity: &PeerIdentity,
+) -> Option<tokio::process::Child> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let message = consent_dialog_text(app_name, scopes, identity);
+
+    let mut child = match tokio::process::Command::new(OSASCRIPT)
+        // `-` reads the script from stdin; everything after it is `argv`.
+        .arg("-")
+        .arg(&message)
+        .arg("Allow access to Super STT?")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        // See the Linux arm: a cancelled request drops the `Child`, and a
+        // dropped child is not killed unless asked.
+        .kill_on_drop(true)
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("failed to spawn {OSASCRIPT} for the consent dialog: {e}");
+            return None;
+        }
+    };
+
+    // Hand over the script and close the pipe — `osascript -` reads stdin to
+    // EOF before it will run anything, so the dialog does not appear until
+    // this drop happens.
+    let Some(mut stdin) = child.stdin.take() else {
+        log::warn!("osascript child had no stdin pipe; cannot deliver the consent script");
+        return None;
+    };
+    if let Err(e) = stdin.write_all(CONSENT_APPLESCRIPT.as_bytes()).await {
+        log::warn!("failed to write the consent script to osascript: {e}");
+        return None;
+    }
+    drop(stdin);
+
+    Some(child)
+}
+
+/// Compose what the macOS dialog says.
+///
+/// Mirrors the structure of the libcosmic helper's dialog: who is asking, how
+/// they were identified, and the union of what the requested scopes grant.
+///
+/// `app_name` is the one part of this the *caller* chose, and the dialog is a
+/// single text field rather than a set of labelled widgets — so an app name
+/// carrying newlines could otherwise forge the `Executable:` line beneath it
+/// and take credit for a binary the user trusts. [`sanitize_display_name`]
+/// is what stops that, and is the reason this is assembled here rather than
+/// inline at the call site.
+#[cfg(target_os = "macos")]
+fn consent_dialog_text(app_name: &str, scopes: &[String], identity: &PeerIdentity) -> String {
+    use std::fmt::Write as _;
+
+    let mut text = String::new();
+    match identity {
+        PeerIdentity::Native {
+            exe_path,
+            flatpak_app_id: _,
+        } => {
+            let name = sanitize_display_name(app_name);
+            let name = if name.is_empty() {
+                "An application".to_string()
+            } else {
+                name
+            };
+            let _ = writeln!(text, "{name} wants access to Super STT.");
+            let _ = writeln!(text);
+            // Not sanitized, and does not need to be: this is the path the
+            // kernel reported for the calling process, not anything the
+            // caller wrote.
+            let _ = writeln!(text, "Executable:  {}", exe_path.display());
+        }
+        PeerIdentity::Web { origin } => {
+            // The origin has already been matched against the user's
+            // allowlist by the origin gate, so it is one of a small set of
+            // strings the user typed themselves.
+            let _ = writeln!(text, "{origin} wants access to Super STT.");
+            let _ = writeln!(text);
+            let _ = writeln!(
+                text,
+                "Your browser reports which website this is. That is a weaker check than \
+                 Super STT does for installed programs."
+            );
+        }
+    }
+
+    let _ = writeln!(text);
+    let _ = writeln!(text, "This will allow it to:");
+    for line in super_stt_shared::consent::permissions_for_scopes(scopes) {
+        let _ = writeln!(text, "  •  {line}");
+    }
+    text
+}
+
+/// Longest app name the dialog will show, in characters.
+///
+/// Long enough for any real product name; short enough that a name cannot
+/// push the `Executable:` line and the permission list off the bottom of the
+/// dialog, which would leave the user approving a question they cannot see
+/// the whole of.
+#[cfg(target_os = "macos")]
+const MAX_DISPLAY_NAME: usize = 64;
+
+/// Flatten a caller-supplied app name to one line of printable text.
+///
+/// Control characters — newlines above all — become spaces rather than being
+/// dropped, so `"Foo\nExecutable:  /usr/bin/trusted"` reads as one visibly odd
+/// name instead of silently becoming two convincing lines. Runs of whitespace
+/// collapse for the same reason: spaces are as good as newlines for pushing
+/// text around once the font is proportional.
+#[cfg(target_os = "macos")]
+fn sanitize_display_name(name: &str) -> String {
+    let flattened: String = name
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let mut out = String::new();
+    for word in flattened.split_whitespace() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
+        if out.chars().count() >= MAX_DISPLAY_NAME {
+            break;
+        }
+    }
+    if out.chars().count() > MAX_DISPLAY_NAME {
+        out = out.chars().take(MAX_DISPLAY_NAME - 1).collect();
+        out.push('…');
+    }
+    out
+}
+
+pub(crate) async fn ask_user_for_consent(
+    app_name: &str,
+    scopes: &[String],
+    identity: &PeerIdentity,
+) -> ConsentDecision {
+    // Serialize popups globally: at most one consent dialog on screen at a time
+    // (audit 2 Tier 3 #10). `/auth/request` is unauthenticated and outside the
+    // rate limiter, and the 8 scopes yield 255 distinct `(exe, scopes)` consent
+    // keys — each bypassing the per-key dedup — so without this cap a same-uid
+    // process could stack hundreds of concurrent exclusive-keyboard overlays and
+    // lock the desktop. Excess requests wait for the permit rather than opening
+    // in parallel. Acquired before the spawn and held while the dialog is on
+    // screen; released before the untimed reap below so a wedged helper can't
+    // wedge all consent.
+    let Ok(popup_permit) = CONSENT_POPUP.acquire().await else {
+        return ConsentDecision::PopupFailed; // semaphore closed (never in practice)
+    };
+
+    let Some(mut child) = spawn_consent_dialog(app_name, scopes, identity).await else {
+        drop(popup_permit);
+        return ConsentDecision::PopupFailed;
     };
 
     let Some(stdout) = child.stdout.take() else {
@@ -279,7 +496,7 @@ const OFFICIAL_CLIENT_NAMES: [&str; 3] =
 /// First-party trust check: does `exe_path` denote one of our own
 /// client binaries, installed alongside the daemon binary itself?
 ///
-/// Mirrors the [`locate_consent_helper`] security model — co-location
+/// Mirrors the consent-helper security model — co-location
 /// with the daemon binary plus the same ownership/permission
 /// verification. Writing to the daemon's install directory is already
 /// sufficient to replace the daemon, so trusting exact-named sibling
@@ -356,6 +573,7 @@ fn is_official_client_in(daemon_dir: &Path, exe_path: &Path) -> bool {
 ///   effective uid (catches "another local user dropped a helper they
 ///   own into the install dir").
 /// - We verify it isn't world-writable.
+#[cfg(target_os = "linux")]
 pub(crate) fn locate_consent_helper() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
@@ -439,6 +657,7 @@ fn verify_helper_metadata(_: &Path) -> Result<(), &'static str> {
 ///
 /// Note that a namespace is not by itself a flatpak — a container would land
 /// here too, and be refused for the same reason.
+#[cfg(target_os = "linux")]
 fn peer_sandbox_app_id(pid: u32, context: &str) -> Result<Option<String>, ()> {
     use std::os::unix::fs::MetadataExt as _;
 
@@ -465,11 +684,103 @@ fn peer_sandbox_app_id(pid: u32, context: &str) -> Result<Option<String>, ()> {
     Ok(Some(app_id))
 }
 
+/// See the Linux [`peer_sandbox_app_id`]. Always `Ok(None)` on macOS.
+///
+/// Not a stub that gives something up. The Linux version exists because a
+/// flatpak peer is pivoted into a root of its own, which makes its exe path
+/// a claim about a filesystem this daemon cannot see. macOS has no such
+/// pivot: the App Sandbox confines what a process may *open*, but leaves it
+/// in the one system root, so `proc_pidpath` returns a path that means here
+/// what it means there. There is no second namespace for an identity to be
+/// ambiguous across, so there is nothing to disambiguate — and no
+/// unidentifiable-sandbox case to fail closed on.
+#[cfg(target_os = "macos")]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "signature is shared with the Linux arm, which genuinely fails"
+)]
+fn peer_sandbox_app_id(_pid: u32, _context: &str) -> Result<Option<String>, ()> {
+    Ok(None)
+}
+
+/// The path of the binary running as `pid`, as the kernel reports it.
+///
+/// `/proc/<pid>/exe` is a kernel-maintained symlink to the executable the
+/// process is running, which is what makes it an identity the daemon can
+/// trust rather than something the peer told it.
+///
+/// `None` (logged with its reason) when the link cannot be read: Yama
+/// `ptrace_scope`, systemd `ProtectProc=`, or the peer having exited and its
+/// pid been recycled. Callers fail closed.
+#[cfg(target_os = "linux")]
+fn peer_exe_path(pid: u32, context: &str) -> Option<PathBuf> {
+    let path = format!("/proc/{pid}/exe");
+    match std::fs::read_link(&path) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            log::warn!("{context}: read_link({path}) failed: {e}; cannot identify peer pid {pid}");
+            None
+        }
+    }
+}
+
+/// See the Linux [`peer_exe_path`]. macOS has no `/proc`, so the same fact
+/// comes from `proc_pidpath`, which the kernel answers from the process's own
+/// `p_textvp` — the vnode it was executed from. Same provenance as the Linux
+/// symlink: the peer does not get a say in it.
+///
+/// `None` when `proc_pidpath` fails, which is the peer having exited (ESRCH)
+/// or this daemon lacking the privilege to ask about it (EPERM — another
+/// user's process, which the `SO_PEERCRED` uid check upstream already
+/// refuses).
+///
+/// **One guarantee is weaker here than on Linux.** When a binary is replaced
+/// on disk while running, Linux renders the link as `/path/to/exe (deleted)`,
+/// so the daemon sees that the file behind a minted token is no longer the
+/// one it approved. `proc_pidpath` reports only the path, and a path whose
+/// file was swapped still resolves. A token stays bound to the path across
+/// such a swap rather than being invalidated by it. The swap still requires
+/// write access to the install directory — the same access needed to replace
+/// the daemon itself — so it does not open a new door, but it does mean the
+/// exe-change revocation is a Linux-only belt on top of that braces.
+#[cfg(target_os = "macos")]
+fn peer_exe_path(pid: u32, context: &str) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let Ok(pid) = i32::try_from(pid) else {
+        log::warn!("{context}: peer pid {pid} does not fit in a pid_t; cannot identify it");
+        return None;
+    };
+    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: `buf` is a live allocation of exactly the length passed, and
+    // `proc_pidpath` writes at most that many bytes into it.
+    let written = unsafe {
+        libc::proc_pidpath(
+            pid,
+            buf.as_mut_ptr().cast::<libc::c_void>(),
+            u32::try_from(buf.len()).unwrap_or(u32::MAX),
+        )
+    };
+    if written <= 0 {
+        let err = std::io::Error::last_os_error();
+        log::warn!("{context}: proc_pidpath({pid}) failed: {err}; cannot identify peer pid {pid}");
+        return None;
+    }
+    // `proc_pidpath` returns the byte length written, terminator excluded.
+    // `written` is positive here — the `<= 0` branch above returned.
+    let Ok(len) = usize::try_from(written) else {
+        return None;
+    };
+    buf.truncate(len);
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(&buf)))
+}
+
 /// Resolve who is calling from the [`PeerInfo`] the accept loop attached.
 /// Returns `None` when the peer can't be identified — a missing
 /// `PeerInfo`/pid (`SO_PEERCRED` unsupported, peer process gone), a
-/// kernel-denied `/proc/<pid>/exe` readlink (Yama `ptrace_scope`, systemd
-/// `ProtectProc=`, pid recycling), or a sandbox that would not name itself.
+/// kernel-denied executable lookup (Yama `ptrace_scope`, systemd
+/// `ProtectProc=`, pid recycling — see [`peer_exe_path`]), or a sandbox that
+/// would not name itself.
 ///
 /// `context` names the caller in the log line, since both ends of a session's
 /// life resolve the peer here: `auth_request` at mint time, and the
@@ -507,14 +818,7 @@ pub(crate) fn resolve_peer_identity(
         );
         return None;
     };
-    let path = format!("/proc/{pid}/exe");
-    let exe_path = match std::fs::read_link(&path) {
-        Ok(p) => p,
-        Err(e) => {
-            log::warn!("{context}: read_link({path}) failed: {e}; cannot identify peer pid {pid}");
-            return None;
-        }
-    };
+    let exe_path = peer_exe_path(pid, context)?;
     let flatpak_app_id = peer_sandbox_app_id(pid, context).ok()?;
 
     Some(PeerIdentity::Native {
@@ -526,6 +830,103 @@ pub(crate) fn resolve_peer_identity(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The macOS dialog is one text field, so the app name — the one part of
+    /// it the *caller* chooses — is the only place a forged line could come
+    /// from. These pin the flattening that prevents it.
+    #[cfg(target_os = "macos")]
+    mod display_name {
+        use super::super::PeerIdentity;
+        use super::super::{MAX_DISPLAY_NAME, consent_dialog_text, sanitize_display_name};
+        use std::path::PathBuf;
+
+        /// The attack this function exists for: an app name carrying a
+        /// newline and a plausible `Executable:` line, which in a plain text
+        /// field would read as the daemon's own attestation about the
+        /// caller's binary.
+        #[test]
+        fn a_newline_cannot_forge_a_second_line() {
+            let forged = sanitize_display_name("Evil\nExecutable:  /usr/local/bin/super-stt-app");
+            assert!(!forged.contains('\n'), "{forged:?} still spans two lines");
+            assert_eq!(
+                forged, "Evil Executable: /usr/local/bin/super-stt-app",
+                "the text should survive, visibly, on one line"
+            );
+        }
+
+        /// Every control character, not just `\n`. A carriage return alone
+        /// repositions the cursor in some renderers, and a vertical tab is a
+        /// line break in others.
+        #[test]
+        fn every_control_character_is_flattened() {
+            for c in ['\n', '\r', '\t', '\u{000b}', '\u{000c}', '\u{0085}'] {
+                let out = sanitize_display_name(&format!("a{c}b"));
+                assert_eq!(out, "a b", "control character {c:?} survived");
+            }
+        }
+
+        /// A name long enough to push the rest of the dialog off screen is
+        /// cut, and marked as cut.
+        #[test]
+        fn an_over_long_name_is_truncated() {
+            let out = sanitize_display_name(&"x".repeat(MAX_DISPLAY_NAME * 3));
+            assert!(out.chars().count() <= MAX_DISPLAY_NAME, "{out:?}");
+            assert!(out.ends_with('…'), "truncation should be visible: {out:?}");
+        }
+
+        /// An empty or blank name yields an empty string rather than
+        /// whitespace, so the caller's "An application" fallback triggers.
+        #[test]
+        fn a_blank_name_is_empty() {
+            assert_eq!(sanitize_display_name(""), "");
+            assert_eq!(sanitize_display_name("   \n\t "), "");
+        }
+
+        /// End to end: the composed dialog must name the kernel-reported
+        /// executable exactly once, however hard the app name tries to add
+        /// another.
+        #[test]
+        fn the_dialog_carries_one_executable_line() {
+            let identity = PeerIdentity::Native {
+                exe_path: PathBuf::from("/usr/bin/curl"),
+                flatpak_app_id: None,
+            };
+            let text = consent_dialog_text(
+                "Evil\nExecutable:  /usr/local/bin/super-stt-app",
+                &["status".to_string()],
+                &identity,
+            );
+            assert_eq!(
+                text.lines()
+                    .filter(|l| l.starts_with("Executable:"))
+                    .count(),
+                1,
+                "exactly one line may claim to be the executable:\n{text}"
+            );
+            assert!(text.contains("Executable:  /usr/bin/curl"), "{text}");
+            // And the scope's real description is present, from the shared
+            // table the Linux helper renders from.
+            assert!(
+                text.contains("Read which speech-to-text model and device are currently active"),
+                "{text}"
+            );
+        }
+
+        /// A blank name falls back to a neutral label rather than leaving the
+        /// sentence starting with "wants access".
+        #[test]
+        fn a_blank_name_becomes_a_neutral_label() {
+            let identity = PeerIdentity::Native {
+                exe_path: PathBuf::from("/usr/bin/curl"),
+                flatpak_app_id: None,
+            };
+            let text = consent_dialog_text("  ", &["status".to_string()], &identity);
+            assert!(
+                text.starts_with("An application wants access to Super STT."),
+                "{text}"
+            );
+        }
+    }
 
     /// `check_helper_metadata`: the ownership/permission gate shared by
     /// the consent-helper lookup and the official-client trust check.

@@ -24,12 +24,10 @@ pub fn page<'a>(
     countdown: Option<u8>,
     action_error: Option<&'a str>,
 ) -> Element<'a, Message> {
-    let methods = [
-        WriteMethod::Auto,
-        WriteMethod::XdgDesktopPortal,
-        WriteMethod::Ydotool,
-        WriteMethod::WaylandProtocol,
-    ];
+    // Not a fixed list: `xdg_desktop_portal` and `ydotool` are Linux session
+    // technologies, and offering a method the daemon has no backend for would
+    // be offering a setting that cannot work.
+    let methods = WriteMethod::supported_on_this_platform();
     let method_names: Vec<String> = methods
         .iter()
         .map(|m| m.pretty_name().to_string())

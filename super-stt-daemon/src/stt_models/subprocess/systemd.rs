@@ -75,18 +75,115 @@ pub async fn cleanup_orphan_units() {
     }
 }
 
+/// A running backend, as a `systemd --user` transient unit.
+///
+/// The Linux half of the two-platform supervisor handle; see
+/// [`super::sandbox_exec::Sandboxed`] for the macOS half and for why the two
+/// are shaped differently. systemd owns the process, so all this holds is the
+/// unit's name — everything is done by asking systemd about that name.
+pub(super) struct Unit {
+    name: String,
+    /// Set once the unit has been stopped, so the synchronous `Drop` after an
+    /// awaited [`Self::stop`] does not spend a `systemctl` round-trip
+    /// stopping something already gone.
+    stopped: bool,
+}
+
+impl Unit {
+    /// The unit name, for log lines and error messages.
+    pub(super) fn label(&self) -> &str {
+        &self.name
+    }
+
+    /// Recent backend output, for a diagnostic.
+    pub(super) fn logs(&self) -> String {
+        std::process::Command::new("journalctl")
+            .args(["--user", "-u", &self.name, "--no-pager", "-n", "30"])
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
+    }
+
+    /// Stop the unit, awaiting its exit.
+    pub(super) async fn stop(&mut self) {
+        if self.stopped {
+            return;
+        }
+        self.stopped = true;
+        match tokio::process::Command::new("systemctl")
+            .args(["--user", "stop", &self.name])
+            .status()
+            .await
+        {
+            Ok(status) if status.success() => info!("stopped backend unit {}", self.name),
+            Ok(status) => warn!(
+                "systemctl --user stop {} exited with {status}; subprocess may still be running",
+                self.name,
+            ),
+            Err(e) => warn!("failed to invoke systemctl to stop {}: {e}", self.name),
+        }
+    }
+
+    /// Stop the unit from a synchronous context (`Drop`).
+    ///
+    /// Blocks the calling thread while `systemctl --user stop` waits for the
+    /// unit to exit (usually under a second). Surfaces the result so a
+    /// failure doesn't silently leave the subprocess running — a bare
+    /// `let _ = …` here made the "backend not stopping" failure mode
+    /// invisible.
+    pub(super) fn stop_blocking(&mut self) {
+        if self.stopped {
+            return;
+        }
+        self.stopped = true;
+        match std::process::Command::new("systemctl")
+            .args(["--user", "stop", &self.name])
+            .status()
+        {
+            Ok(status) if status.success() => {
+                info!("stopped backend unit {}", self.name);
+            }
+            Ok(status) => {
+                warn!(
+                    "systemctl --user stop {} exited with {}; subprocess may still be running",
+                    self.name, status,
+                );
+            }
+            Err(e) => {
+                warn!("failed to invoke systemctl to stop {}: {e}", self.name);
+            }
+        }
+    }
+}
+
+impl Drop for Unit {
+    fn drop(&mut self) {
+        self.stop_blocking();
+    }
+}
+
 /// Spawn the backend binary in a hardened `systemd-run --user` transient unit.
 ///
 /// `devices` is the model's declared `supported_devices`; it decides whether
 /// this unit is granted the GPU device nodes. See [`needs_gpu_access`].
-pub(super) async fn spawn_systemd_unit(
-    unit: &str,
+///
+/// The unit name is derived from `label` here rather than by the caller: the
+/// `super-stt-backend-` prefix is load-bearing (it is what
+/// [`cleanup_orphan_units`] sweeps by) and the spawning daemon's pid is what
+/// keeps two daemons' units distinct, so both belong next to the sweep that
+/// depends on them.
+pub(super) async fn spawn_sandboxed(
+    label: &str,
     binary: &Path,
     backend_dir: &Path,
     socket_dir: &Path,
     socket: &Path,
     devices: &[Device],
-) -> Result<()> {
+) -> Result<Unit> {
+    // Keyed the same way as the socket, for the same reason — `systemd-run
+    // --unit=` fails outright when the name is already taken.
+    let unit = format!("super-stt-backend-{label}-{}", std::process::id());
     let mut cmd = tokio::process::Command::new("systemd-run");
     cmd.arg("--user")
         .arg(format!("--unit={unit}"))
@@ -115,7 +212,10 @@ pub(super) async fn spawn_systemd_unit(
         );
     }
     warn!("spawned sandboxed backend unit {unit}");
-    Ok(())
+    Ok(Unit {
+        name: unit,
+        stopped: false,
+    })
 }
 
 /// Whether a model that declares `devices` is granted the GPU device nodes.

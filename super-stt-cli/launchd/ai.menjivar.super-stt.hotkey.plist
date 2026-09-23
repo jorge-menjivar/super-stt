@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The global shortcut: `stt hotkey`, from login.
+
+  This is the macOS stand-in for a desktop environment's custom shortcut. On
+  Linux the DE runs `stt record --write` when the key is pressed; macOS has no
+  such place to bind a key to a command, so this keeps a small client alive
+  that owns the key and does the same thing on each press. See
+  super-stt-cli/src/hotkey.rs.
+
+  Its own agent rather than a thread in the daemon: the daemon stays headless
+  and knows nothing about input, and the shortcut can be stopped, rebound or
+  left uninstalled without touching transcription.
+
+  It needs no Accessibility or Input Monitoring grant — ordinary shortcuts are
+  registered through Carbon's RegisterEventHotKey, which asks for neither.
+
+  Three placeholders are substituted by `just install-daemon`, because launchd
+  expands nothing in a plist:
+
+    __CLI_BIN__   the installed super-stt-cli
+    __BINDING__   the shortcut: $SUPER_STT_HOTKEY, else ctrl+alt+space. The
+                  installer validates it with the listener's own check mode
+                  before writing this file, since a binding the listener
+                  rejects would otherwise be restarted every ThrottleInterval,
+                  failing the same way each time.
+    __LOG_DIR__   the per-user log directory
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.menjivar.super-stt.hotkey</string>
+
+    <!--
+      `super-stt-cli/src/main.rs` parses these in a test
+      (`hotkey_launch_agent_arguments_parse`), so a rename in the CLI cannot
+      leave this agent passing arguments clap rejects.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__CLI_BIN__</string>
+        <string>hotkey</string>
+        <string>--key</string>
+        <string>__BINDING__</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+      Restarted if it exits. The daemon being down is not a reason to exit: a
+      press that cannot reach it is logged, and the next press tries again.
+    -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!-- A press should start the recording now, not when App Nap gets round to it. -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/hotkey.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/hotkey.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUST_LOG</key>
+        <string>info</string>
+    </dict>
+</dict>
+</plist>

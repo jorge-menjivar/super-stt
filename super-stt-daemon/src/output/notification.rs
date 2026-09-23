@@ -1,38 +1,51 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Desktop notification delivery for recording failures.
 //!
-//! Uses the freedesktop Desktop Notifications interface
+//! On Linux this is the freedesktop Desktop Notifications interface
 //! (`org.freedesktop.Notifications`), which every mainstream desktop provides —
 //! GNOME, KDE Plasma, COSMIC, XFCE, MATE, Cinnamon, `LXQt` — as do the
 //! standalone servers used on bare compositors (mako, dunst, swaync). One code
-//! path covers all of them; nothing here is desktop-specific.
+//! path covers all of them; nothing there is desktop-specific.
+//!
+//! On macOS it is Notification Center, reached through `osascript`. See
+//! [`Inner`] for what that costs relative to the Linux path.
 //!
 //! What a bubble says is decided in [`crate::output::notice`], including how
 //! backend-authored text is made safe to put in a body; this module only carries
-//! it to the bus.
+//! it to the notification service.
 
 use crate::output::notice::Failure;
 use crate::output::typer::Typer;
 use anyhow::{Context, Result};
+#[cfg(target_os = "linux")]
 use futures::StreamExt;
 use log::{debug, info, warn};
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
 use super_stt_shared::models::notification_method::NotificationMethod;
+#[cfg(target_os = "linux")]
 use zbus::Connection;
+#[cfg(target_os = "linux")]
 use zbus::zvariant::Value;
 
+#[cfg(target_os = "linux")]
 const NOTIFY_BUS: &str = "org.freedesktop.Notifications";
+#[cfg(target_os = "linux")]
 const NOTIFY_PATH: &str = "/org/freedesktop/Notifications";
+#[cfg(target_os = "linux")]
 const NOTIFY_IFACE: &str = "org.freedesktop.Notifications";
 
 /// Sent as the notification's `app_name`, which is where the user learns who
 /// this bubble is from. The summary is free to name the failure instead.
 const APP_NAME: &str = "Super STT";
 /// Installed into `share/icons/hicolor/scalable/apps` by the justfile.
+#[cfg(target_os = "linux")]
 const APP_ICON: &str = "super-stt-app";
 /// 0 = low, 1 = normal, 2 = critical.
+#[cfg(target_os = "linux")]
 const URGENCY_NORMAL: u8 = 1;
 /// Let the notification server pick the timeout.
+#[cfg(target_os = "linux")]
 const EXPIRE_DEFAULT: i32 = -1;
 
 /// The action key offered on update-available bubbles. The spec's
@@ -50,6 +63,11 @@ pub struct Notifier {
     /// Id of the last notification sent, passed as `replaces_id` so repeated
     /// failures replace the previous bubble instead of stacking. The spec
     /// treats 0 as "do not replace".
+    ///
+    /// A freedesktop concept with no macOS counterpart: Notification Center
+    /// returns no handle and offers no replace-in-place, so repeated failures
+    /// there stack as separate banners.
+    #[cfg(target_os = "linux")]
     last_id: u32,
 }
 
@@ -57,18 +75,48 @@ pub struct Notifier {
 #[cfg(test)]
 type Sent = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
 
+/// Where a notification actually goes.
 enum Inner {
     /// Session-bus connection, established on first send and cached.
+    #[cfg(target_os = "linux")]
     Dbus(Option<Connection>),
+    /// macOS Notification Center, via `osascript`.
+    ///
+    /// Stateless — there is no connection to cache, because each notification
+    /// is a fresh short-lived process. Two things are genuinely weaker here
+    /// than on the D-Bus path, and callers should know which:
+    ///
+    /// - **No actions.** `display notification` posts a banner and nothing
+    ///   else; there are no buttons and no `ActionInvoked` to wait on. The
+    ///   "Open Super STT" action on an update bubble is simply absent, so
+    ///   [`Notifier::send_with_actions`] drops what it is given rather than
+    ///   pretending a click can arrive.
+    /// - **No delivery confirmation.** `osascript` exits 0 once it has handed
+    ///   the banner to Notification Center. If the user has notifications
+    ///   turned off for the posting application, or Do Not Disturb is on, the
+    ///   banner is dropped silently and this still reports success — so
+    ///   [`NotificationMethod::Auto`] will not fall back to typing in that
+    ///   case, because nothing told it to.
+    ///
+    /// Both follow from the daemon being a plain binary rather than a bundled,
+    /// signed `.app`: `UNUserNotificationCenter` — which has actions and
+    /// reports authorization — is only available to one of those.
+    #[cfg(target_os = "macos")]
+    UserNotification,
     #[cfg(test)]
     Fake { fail: bool, sent: Sent },
 }
 
 impl Notifier {
+    /// A notifier that posts to this platform's desktop notification service.
     #[must_use]
-    pub fn dbus() -> Self {
+    pub fn desktop() -> Self {
         Self {
+            #[cfg(target_os = "linux")]
             inner: Inner::Dbus(None),
+            #[cfg(target_os = "macos")]
+            inner: Inner::UserNotification,
+            #[cfg(target_os = "linux")]
             last_id: 0,
         }
     }
@@ -106,6 +154,7 @@ impl Notifier {
         actions: &[(&str, &str)],
     ) -> Result<u32> {
         match &mut self.inner {
+            #[cfg(target_os = "linux")]
             Inner::Dbus(slot) => {
                 if slot.is_none() {
                     *slot = Some(
@@ -149,6 +198,24 @@ impl Notifier {
                 debug!("Delivered failure notification (id {id})");
                 Ok(id)
             }
+            #[cfg(target_os = "macos")]
+            Inner::UserNotification => {
+                if !actions.is_empty() {
+                    debug!(
+                        "dropping {} notification action(s): macOS banners carry none",
+                        actions.len()
+                    );
+                }
+                post_user_notification(summary, body).await?;
+                // Notification Center hands back no identifier, and nothing
+                // on this platform consumes one: there is no `replaces_id` to
+                // feed and no action click to correlate. Reporting 0 — the
+                // freedesktop "no replacement" value — keeps the signature
+                // honest rather than inventing a handle that addresses
+                // nothing.
+                debug!("Delivered failure notification to Notification Center");
+                Ok(0)
+            }
             #[cfg(test)]
             Inner::Fake { fail, sent } => {
                 if *fail {
@@ -173,6 +240,7 @@ impl Notifier {
                     fail,
                     sent: std::sync::Arc::clone(&sent),
                 },
+                #[cfg(target_os = "linux")]
                 last_id: 0,
             },
             sent,
@@ -192,6 +260,7 @@ impl Notifier {
     /// # Errors
     /// Never: every failure path resolves `None` rather than erroring, since
     /// a missed click is not worth surfacing.
+    #[cfg(target_os = "linux")]
     pub async fn wait_for_action(conn: &Connection, id: u32) -> Option<String> {
         let proxy = zbus::Proxy::new(conn, NOTIFY_BUS, NOTIFY_PATH, NOTIFY_IFACE)
             .await
@@ -205,6 +274,7 @@ impl Notifier {
     /// A clone of the cached session-bus connection, if one has been
     /// established by a prior send. Used by callers that must wait for an
     /// `ActionInvoked` without holding the notifier's mutex across the wait.
+    #[cfg(target_os = "linux")]
     #[must_use]
     pub fn connection(&self) -> Option<Connection> {
         match &self.inner {
@@ -213,6 +283,90 @@ impl Notifier {
             Inner::Fake { .. } => None,
         }
     }
+}
+
+/// The `AppleScript` that posts one banner.
+///
+/// Same argv discipline as the consent dialog: the script builds no strings,
+/// so a notification body cannot become `AppleScript`. That matters more here
+/// than it looks — a failure body can carry text a *backend* wrote
+/// (`crate::output::notice` makes it safe to display, which is a different
+/// question from safe to evaluate).
+///
+/// The three arguments are [`APP_NAME`], the summary, and the body, in that
+/// order. Note that the summary lands in the *subtitle*: a macOS banner
+/// titles itself with the posting process, which here is `osascript` and
+/// reads "Script Editor", so the product name has to occupy the title for the
+/// banner to be identifiable at all. On the freedesktop side that name is a
+/// field of its own (`app_name`) and the summary is the title, which is why
+/// the two platforms lay the same three strings out differently.
+#[cfg(target_os = "macos")]
+const NOTIFY_APPLESCRIPT: &str = r"on run argv
+	display notification (item 3 of argv) with title (item 1 of argv) subtitle (item 2 of argv)
+end run
+";
+
+/// Absolute path to the system `AppleScript` interpreter — see the consent
+/// module for why this is never resolved through `PATH`.
+#[cfg(target_os = "macos")]
+const OSASCRIPT: &str = "/usr/bin/osascript";
+
+/// How long to wait for `osascript` to hand the banner over before giving up.
+///
+/// Posting is a fast local call; a wait this long past it means something is
+/// wrong with the process rather than slow. Bounded at all because this is
+/// awaited on the recording path, and a notification that cannot be posted
+/// must not hold up telling the user by other means.
+#[cfg(target_os = "macos")]
+const NOTIFY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Post `summary`/`body` to Notification Center.
+///
+/// # Errors
+/// When `osascript` cannot be spawned, exits non-zero, or outlives
+/// [`NOTIFY_TIMEOUT`]. A banner the user has muted is *not* an error — see
+/// [`Inner::UserNotification`] for what this can and cannot detect.
+#[cfg(target_os = "macos")]
+async fn post_user_notification(summary: &str, body: &str) -> Result<()> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let mut child = tokio::process::Command::new(OSASCRIPT)
+        // `-` reads the script from stdin; the rest becomes `argv`.
+        .arg("-")
+        .arg(APP_NAME)
+        .arg(summary)
+        .arg(body)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .context("could not run osascript to post a notification")?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .context("osascript child had no stdin pipe")?;
+    stdin
+        .write_all(NOTIFY_APPLESCRIPT.as_bytes())
+        .await
+        .context("could not hand the notification script to osascript")?;
+    // `osascript -` runs nothing until stdin reaches EOF.
+    drop(stdin);
+
+    let output = match tokio::time::timeout(NOTIFY_TIMEOUT, child.wait_with_output()).await {
+        Ok(result) => result.context("osascript failed while posting a notification")?,
+        Err(_) => {
+            anyhow::bail!("osascript did not post the notification within {NOTIFY_TIMEOUT:?}")
+        }
+    };
+    anyhow::ensure!(
+        output.status.success(),
+        "osascript exited with {}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim(),
+    );
+    Ok(())
 }
 
 /// Route a failure notice to the user through the configured channel.
@@ -235,7 +389,7 @@ pub(crate) async fn deliver(
             );
         }
         NotificationMethod::Typed => type_or_log(typer, failure.typed, write_mode).await,
-        NotificationMethod::Dbus => {
+        NotificationMethod::Desktop => {
             if let Err(e) = notifier.send(failure.summary, &failure.body).await {
                 warn!(
                     "Could not deliver failure notification ({}): {e}",
@@ -249,6 +403,35 @@ pub(crate) async fn deliver(
                 type_or_log(typer, failure.typed, write_mode).await;
             }
         }
+    }
+}
+
+/// Route a failure that happened because the keyboard itself could not be set
+/// up.
+///
+/// [`deliver`] cannot carry this one: its typed channel needs the very keyboard
+/// that failed. So every method except `off` sends a notification — `typed`
+/// included, because typing is exactly what cannot happen, and a user who chose
+/// it still needs to learn why nothing appeared. Before this existed the
+/// failure was logged and nothing else, so a recording started from a global
+/// shortcut failed with no sign at all.
+pub(crate) async fn deliver_without_keyboard(
+    method: NotificationMethod,
+    notifier: &mut Notifier,
+    failure: &Failure,
+) {
+    if matches!(method, NotificationMethod::Off) {
+        info!(
+            "Recording failure: {} — {} (surfacing disabled)",
+            failure.summary, failure.body
+        );
+        return;
+    }
+    if let Err(e) = notifier.send(failure.summary, &failure.body).await {
+        warn!(
+            "Could not deliver failure notification ({}): {e}",
+            failure.summary
+        );
     }
 }
 
@@ -345,7 +528,7 @@ mod tests {
         let (mut t, typed) = typer();
 
         deliver(
-            NotificationMethod::Dbus,
+            NotificationMethod::Desktop,
             &mut n,
             &mut t,
             &Failure::recording_failed("Audio device disappeared mid-take"),
@@ -371,7 +554,7 @@ mod tests {
         let (mut t, _typed) = typer();
 
         deliver(
-            NotificationMethod::Dbus,
+            NotificationMethod::Desktop,
             &mut n,
             &mut t,
             &backend_failure(),
@@ -392,6 +575,45 @@ mod tests {
         );
     }
 
+    /// With no keyboard there is no typed channel, so even `typed` notifies —
+    /// otherwise a user who chose it would learn nothing at all.
+    #[tokio::test(start_paused = true)]
+    async fn a_keyboard_failure_notifies_under_every_method_but_off() {
+        for method in [
+            NotificationMethod::Auto,
+            NotificationMethod::Desktop,
+            NotificationMethod::Typed,
+        ] {
+            let (mut n, sent) = Notifier::fake(false);
+            deliver_without_keyboard(
+                method,
+                &mut n,
+                &Failure::keyboard_unavailable("Add the daemon under Accessibility"),
+            )
+            .await;
+            assert_eq!(
+                *sent.lock().unwrap(),
+                vec![(
+                    "Cannot type".to_string(),
+                    "Add the daemon under Accessibility".to_string()
+                )],
+                "{method:?}"
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_keyboard_failure_stays_silent_when_surfacing_is_off() {
+        let (mut n, sent) = Notifier::fake(false);
+        deliver_without_keyboard(
+            NotificationMethod::Off,
+            &mut n,
+            &Failure::keyboard_unavailable("d"),
+        )
+        .await;
+        assert!(sent.lock().unwrap().is_empty());
+    }
+
     /// `dbus` is the deliberate "notification or nothing" choice — a failed
     /// delivery must NOT fall back to typing.
     #[tokio::test(start_paused = true)]
@@ -400,7 +622,7 @@ mod tests {
         let (mut t, typed) = typer();
 
         deliver(
-            NotificationMethod::Dbus,
+            NotificationMethod::Desktop,
             &mut n,
             &mut t,
             &Failure::recording_failed("d"),

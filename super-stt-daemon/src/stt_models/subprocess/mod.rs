@@ -3,11 +3,17 @@
 //! (experimental — gated behind the `subprocess-backends` feature).
 //!
 //! [`SubprocessBackend`] provisions a backend's model files (downloading from
-//! `HuggingFace` into the per-backend directory), spawns the backend binary in a
-//! hardened `systemd-run --user` transient unit, drives the `/v1` contract
-//! over a pathname Unix socket, and presents the result through the daemon's
-//! [`Transcribe`] trait. The backend itself is fully self-contained and shares
-//! no code with the daemon.
+//! `HuggingFace` into the per-backend directory), spawns the backend binary
+//! into a sandbox, drives the `/v1` contract over a pathname Unix socket, and
+//! presents the result through the daemon's [`Transcribe`] trait. The backend
+//! itself is fully self-contained and shares no code with the daemon.
+//!
+//! The sandbox is the one genuinely per-platform part: a hardened
+//! `systemd-run --user` transient unit on Linux ([`systemd`]), a
+//! `sandbox-exec` profile on macOS ([`sandbox_exec`]). Both expose the same
+//! handle — spawn, label, logs, stop — so everything below this line is the
+//! same code on both. Their module docs set out what each confines, and
+//! where macOS is weaker.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,7 +24,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper_util::rt::TokioIo;
-use log::{info, warn};
+use log::info;
 use tokio::net::UnixStream;
 
 use super_stt_shared::utils::audio::{ResampleQuality, resample};
@@ -26,15 +32,30 @@ use super_stt_shared::utils::audio::{ResampleQuality, resample};
 use crate::stt_models::backends::manifest::Manifest;
 use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
 
+#[cfg(target_os = "macos")]
+mod sandbox_exec;
+#[cfg(target_os = "linux")]
 mod systemd;
-pub use systemd::cleanup_orphan_units;
+
+#[cfg(target_os = "macos")]
+use sandbox_exec::Sandboxed as Supervisor;
+/// The platform's handle to a running, sandboxed backend.
+#[cfg(target_os = "linux")]
+use systemd::Unit as Supervisor;
+
+#[cfg(target_os = "macos")]
+use sandbox_exec::spawn_sandboxed;
+#[cfg(target_os = "linux")]
+use systemd::spawn_sandboxed;
 
 const SAMPLE_RATE: u32 = 16000;
 
 /// A running, sandboxed subprocess backend usable as a [`Transcribe`] model.
 pub struct SubprocessBackend {
     socket: PathBuf,
-    unit: String,
+    /// Handle to the sandbox the backend runs in. Dropping it stops the
+    /// backend, which is why teardown needs no `Drop` impl of its own here.
+    supervisor: Supervisor,
     model_id: String,
     info: ModelInfoData,
     /// Device label reported by the backend's `/v1/status` (e.g. `"cuda"`).
@@ -124,14 +145,17 @@ impl SubprocessBackend {
         // same model name. Keyed by model alone, the second spawn's
         // `remove_file` below would unlink the live instance's socket and
         // either teardown would take out the other's.
-        let instance = instance_key(backend_dir, model_name);
-        let socket =
-            super_stt_shared::validation::secure_runtime_path(&format!("backends/{instance}.sock"));
-        let socket_dir = socket.parent().map_or_else(
-            || PathBuf::from("/tmp/stt/backend/list"),
-            std::path::Path::to_path_buf,
-        );
+        let socket_dir = super_stt_shared::validation::secure_runtime_path("backends");
         std::fs::create_dir_all(&socket_dir)?;
+        // Canonicalize now that the directory exists. The runtime dir is
+        // reached through a symlink on macOS (`/var` -> `/private/var`), and
+        // the eight bytes that adds are eight bytes of the `sun_path` budget
+        // below — budgeting against the pre-canonical spelling would mint a
+        // name the kernel then refuses to bind.
+        let socket_dir = std::fs::canonicalize(&socket_dir).unwrap_or(socket_dir);
+
+        let instance = instance_key(backend_dir, model_name, max_instance_key(&socket_dir)?);
+        let socket = socket_dir.join(format!("{instance}.sock"));
         let _ = std::fs::remove_file(&socket);
 
         let binary = backend_dir.join(&manifest.backend.entrypoint);
@@ -141,14 +165,8 @@ impl SubprocessBackend {
             binary.display()
         );
 
-        // Same key as the socket, for the same reason — `systemd-run --unit=`
-        // fails outright when the name is already taken. The
-        // `super-stt-backend-` prefix is load-bearing: `cleanup_orphan_units`
-        // sweeps by it at daemon startup.
-        let unit = format!("super-stt-backend-{instance}-{}", std::process::id());
-
-        systemd::spawn_systemd_unit(
-            &unit,
+        let supervisor = spawn_sandboxed(
+            &instance,
             &binary,
             backend_dir,
             &socket_dir,
@@ -170,7 +188,7 @@ impl SubprocessBackend {
 
         let mut backend = Self {
             socket,
-            unit,
+            supervisor,
             model_id: model_name.to_string(),
             info,
             device: "unknown".to_string(),
@@ -193,7 +211,8 @@ impl SubprocessBackend {
             }
             if std::time::Instant::now() >= deadline {
                 bail!(
-                    "backend did not start within {timeout:?}.\n{}",
+                    "backend {} did not start within {timeout:?}.\n{}",
+                    self.supervisor.label(),
                     self.unit_logs()
                 );
             }
@@ -288,44 +307,18 @@ impl SubprocessBackend {
         Ok((status, bytes))
     }
 
-    /// Capture recent unit logs for diagnostics.
+    /// Capture recent backend logs for diagnostics.
     fn unit_logs(&self) -> String {
-        std::process::Command::new("journalctl")
-            .args(["--user", "-u", &self.unit, "--no-pager", "-n", "30"])
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-            .unwrap_or_default()
+        self.supervisor.logs()
     }
 }
 
 impl Drop for SubprocessBackend {
     fn drop(&mut self) {
-        // Best-effort: stop the transient unit (SIGTERM) and remove the socket.
-        //
-        // `Drop` is synchronous, so we call `std::process::Command` directly;
-        // it blocks the runtime worker thread while `systemctl --user stop`
-        // waits for the unit to exit (usually under a second). Surfaces the
-        // result so a failure doesn't silently leave the subprocess running
-        // — the previous `let _ = …` swallowed every error, which made the
-        // "backend not stopping" failure mode invisible.
-        match std::process::Command::new("systemctl")
-            .args(["--user", "stop", &self.unit])
-            .status()
-        {
-            Ok(status) if status.success() => {
-                info!("stopped backend unit {}", self.unit);
-            }
-            Ok(status) => {
-                warn!(
-                    "systemctl --user stop {} exited with {}; subprocess may still be running",
-                    self.unit, status,
-                );
-            }
-            Err(e) => {
-                warn!("failed to invoke systemctl to stop {}: {e}", self.unit);
-            }
-        }
+        // Stopping the backend is the supervisor's own `Drop`, which runs
+        // when the field below is dropped — synchronously, and idempotently
+        // after an awaited `shutdown`. All that is left here is the socket
+        // file, which neither supervisor knows about.
         let _ = std::fs::remove_file(&self.socket);
     }
 }
@@ -358,26 +351,14 @@ impl Transcribe for SubprocessBackend {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = context.headers;
     }
 
-    /// Stop the `systemd-run --user` transient unit asynchronously and
-    /// remove the socket file. Called by the daemon before the
+    /// Stop the sandboxed backend asynchronously and remove the socket file.
+    /// Called by the daemon before the
     /// [`LoadedModel`](crate::daemon::types::LoadedModel) is dropped — gives
     /// us a real `.await` instead of blocking the runtime in `Drop`. After
-    /// this returns, the synchronous `Drop` impl is effectively a no-op
-    /// (the unit is already stopped) and stays for crash paths and tests.
+    /// this returns, the synchronous `Drop` path is a no-op (the supervisor
+    /// records that it already stopped) and stays for crash paths and tests.
     async fn shutdown(&mut self) -> Result<()> {
-        let status = tokio::process::Command::new("systemctl")
-            .args(["--user", "stop", &self.unit])
-            .status()
-            .await
-            .with_context(|| format!("invoke systemctl to stop {}", self.unit))?;
-        if status.success() {
-            info!("stopped backend unit {}", self.unit);
-        } else {
-            warn!(
-                "systemctl --user stop {} exited with {status}; subprocess may still be running",
-                self.unit,
-            );
-        }
+        self.supervisor.stop().await;
         let _ = std::fs::remove_file(&self.socket);
         Ok(())
     }
@@ -433,41 +414,95 @@ fn load_body(name: &str, provider: Option<&str>, device_pref: &str) -> serde_jso
     load
 }
 
-/// Longest instance key that still leaves room for the socket path.
+/// Hex digits in the disambiguating hash appended to a truncated key.
+const DIGEST_LEN: usize = 16;
+
+/// Shortest instance key worth minting: a one-character head, a separator,
+/// and the full digest. Below this the key is all hash and the truncation
+/// carries no hint of what it names, so a socket directory this deep is
+/// reported as an error rather than papered over.
+const MIN_INSTANCE_KEY: usize = DIGEST_LEN + 2;
+
+/// Upper bound on an instance key regardless of how much room the socket
+/// path leaves.
 ///
-/// A pathname Unix socket must fit in `sun_path` — 108 bytes on Linux,
-/// including the terminator. The prefix is
-/// `$XDG_RUNTIME_DIR/stt/backends/` (about 30 bytes for the usual
-/// `/run/user/<uid>`) and the suffix is `.sock`, so 64 leaves comfortable
-/// headroom. Keys are almost always far shorter; this bounds the tail case,
-/// since a backend `id` — which names the install directory — may be up to
-/// 255 bytes on its own.
+/// Keys are almost always far shorter; this bounds the tail case, since a
+/// backend `id` — which names the install directory — may be up to 255 bytes
+/// on its own, and a 255-byte file name is unreadable in a log line whether
+/// or not it fits.
 const MAX_INSTANCE_KEY: usize = 64;
 
+/// Longest instance key that still leaves room for the socket path in
+/// `socket_dir`.
+///
+/// A pathname Unix socket must fit in `sun_path`, terminator included — 108
+/// bytes on Linux, **104 on macOS**. Computed from the real directory rather
+/// than assumed, because the room left over differs by platform by more than
+/// those four bytes: Linux binds under `/run/user/<uid>/stt/backends/`, about
+/// 30 bytes, while the macOS per-user runtime directory is
+/// `/private/var/folders/<xx>/<28-char hash>/T/stt/backends/` — around 70,
+/// leaving less than half as much for the name.
+///
+/// # Errors
+/// When the directory is so deep that not even [`MIN_INSTANCE_KEY`] fits.
+/// That is a misconfigured runtime directory, and failing here names it,
+/// where binding would fail later with `EINVAL` and name nothing.
+fn max_instance_key(socket_dir: &Path) -> Result<usize> {
+    const SUFFIX: usize = ".sock".len();
+    const SEPARATOR: usize = 1; // the `/` between the directory and the name
+    let budget = super_stt_shared::validation::SUN_PATH_MAX
+        .saturating_sub(socket_dir.as_os_str().len() + SEPARATOR + SUFFIX + 1);
+    if budget < MIN_INSTANCE_KEY {
+        bail!(
+            "backend socket directory {} is too deep: it leaves {budget} bytes for a socket \
+             name, and the shortest usable one is {MIN_INSTANCE_KEY}",
+            socket_dir.display()
+        );
+    }
+    Ok(budget.min(MAX_INSTANCE_KEY))
+}
+
 /// The name that identifies one running backend instance — its socket file and
-/// its systemd unit. Derived from the backend's install directory and the model
+/// its sandbox. Derived from the backend's install directory and the model
 /// it serves, so the daemon's two concurrent instances (transcription model and
 /// post-processor) never collide, including when two backends serve the same
 /// model name.
 ///
-/// A key over [`MAX_INSTANCE_KEY`] is truncated with a hash of the full value
-/// appended, so an over-long backend id yields a short name that is still
-/// unique and still the same on every spawn — rather than a socket path the
-/// kernel refuses to bind.
-fn instance_key(backend_dir: &Path, model_name: &str) -> String {
+/// A key over `max_len` is truncated with a hash of the full value appended,
+/// so an over-long backend id yields a short name that is still unique and
+/// still the same on every spawn — rather than a socket path the kernel
+/// refuses to bind. `max_len` comes from [`max_instance_key`].
+fn instance_key(backend_dir: &Path, model_name: &str, max_len: usize) -> String {
     let dir = backend_dir
         .file_name()
         .map_or_else(String::new, |n| sanitize(&n.to_string_lossy()));
     let key = format!("{dir}-{}", sanitize(model_name));
-    if key.len() <= MAX_INSTANCE_KEY {
+    if key.len() <= max_len {
         return key;
     }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     std::hash::Hash::hash(&key, &mut hasher);
-    let digest = format!("{:016x}", std::hash::Hasher::finish(&hasher));
-    // `MAX_INSTANCE_KEY` total: the truncated head, a separator, and the digest.
-    let head = &key[..MAX_INSTANCE_KEY - digest.len() - 1];
+    let digest = format!("{:0DIGEST_LEN$x}", std::hash::Hasher::finish(&hasher));
+    // `max_len` total: the truncated head, a separator, and the digest.
+    let head = &key[..max_len - digest.len() - 1];
     format!("{head}-{digest}")
+}
+
+/// Stop backend processes left behind by a previous daemon run.
+///
+/// Called at daemon startup as defense against a previous daemon that exited
+/// without running `Transcribe::shutdown()` (SIGKILL / panic /
+/// `std::process::exit` skipping `Drop`). What "left behind" means, and how
+/// one is found again, is per-platform — see
+/// [`systemd::cleanup_orphan_units`] and [`sandbox_exec::sweep_orphans`].
+pub async fn cleanup_orphan_units() {
+    #[cfg(target_os = "linux")]
+    systemd::cleanup_orphan_units().await;
+    #[cfg(target_os = "macos")]
+    sandbox_exec::sweep_orphans(&super_stt_shared::validation::secure_runtime_path(
+        "backends",
+    ))
+    .await;
 }
 
 fn sanitize(s: &str) -> String {

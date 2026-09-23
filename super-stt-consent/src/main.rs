@@ -30,8 +30,6 @@
 //! to a regular window. On X11 tiling WMs you'd add a per-class float
 //! rule using the `WM_CLASS` `super-stt-consent`.
 
-mod constants;
-
 use cosmic::iced::event::{self, listen_with};
 use cosmic::iced::platform_specific::shell::commands::corner_radius::corner_radius;
 use cosmic::iced::platform_specific::shell::commands::layer_surface::{
@@ -234,7 +232,7 @@ impl cosmic::Application for ConsentApp {
             Caller::Web { origin } => format!("{origin} wants access to Super STT."),
         };
 
-        let permission_lines = permissions_for_scopes(&self.scopes);
+        let permission_lines = super_stt_shared::consent::permissions_for_scopes(&self.scopes);
 
         let mut bullet_column =
             cosmic::widget::column::with_capacity(permission_lines.len()).spacing(6);
@@ -374,39 +372,6 @@ impl ConsentApp {
         )
         .discard()
     }
-}
-
-fn permissions_for_scope(scope: &str) -> &'static [&'static str] {
-    match scope {
-        "transcribe" => constants::TRANSCRIBE_PERMISSIONS,
-        "status" => constants::STATUS_PERMISSIONS,
-        "settings" => constants::SETTINGS_PERMISSIONS,
-        "recording_events" => constants::RECORDING_EVENTS_PERMISSIONS,
-        "audio_visualization" => constants::AUDIO_VISUALIZATION_PERMISSIONS,
-        "global_transcriptions" => constants::GLOBAL_TRANSCRIPTIONS_PERMISSIONS,
-        "daemon_status" => constants::DAEMON_STATUS_PERMISSIONS,
-        "secrets" => constants::SECRETS_PERMISSIONS,
-        _ => constants::UNKNOWN_SCOPE_PERMISSIONS,
-    }
-}
-
-/// Union of the per-scope bullet lists for every scope the app asked
-/// for, de-duplicated and order-preserving. Falls back to the unknown
-/// bullet if the set is empty.
-fn permissions_for_scopes(scopes: &[String]) -> Vec<&'static str> {
-    let mut lines: Vec<&'static str> = Vec::new();
-    if scopes.is_empty() {
-        lines.extend_from_slice(constants::UNKNOWN_SCOPE_PERMISSIONS);
-        return lines;
-    }
-    for scope in scopes {
-        for &line in permissions_for_scope(scope) {
-            if !lines.contains(&line) {
-                lines.push(line);
-            }
-        }
-    }
-    lines
 }
 
 /// Render one bullet line. Uses a Row so wrapped text hangs under
@@ -621,26 +586,4 @@ fn main() -> cosmic::iced::Result {
     }
 
     result
-}
-
-#[cfg(test)]
-mod scope_conformance {
-    use super::{constants, permissions_for_scope};
-
-    /// Every scope the daemon accepts must have a specific consent description.
-    /// A daemon scope that falls through to `UNKNOWN_SCOPE_PERMISSIONS` would
-    /// render the "unknown scope — deny is safe" warning on a legitimate prompt,
-    /// so this pins the two lists together (Tier 2 #8).
-    #[test]
-    fn every_known_scope_has_specific_permissions() {
-        for scope in super_stt_shared::daemon::scopes::KNOWN_SCOPES {
-            assert!(
-                !std::ptr::eq(
-                    permissions_for_scope(scope),
-                    constants::UNKNOWN_SCOPE_PERMISSIONS
-                ),
-                "scope `{scope}` has no specific consent description; add an arm to permissions_for_scope"
-            );
-        }
-    }
 }

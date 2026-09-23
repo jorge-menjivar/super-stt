@@ -53,7 +53,7 @@ fn settings_section(
 fn notifications_section(notification_method: NotificationMethod) -> Element<'static, Message> {
     let methods = [
         NotificationMethod::Auto,
-        NotificationMethod::Dbus,
+        NotificationMethod::Desktop,
         NotificationMethod::Typed,
         NotificationMethod::Off,
     ];

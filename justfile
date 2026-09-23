@@ -21,7 +21,11 @@ install_prefix := '/usr/local'
 bin_dir := install_prefix / 'bin'
 # systemd *user* unit, but installed root-owned.
 systemd_unit_dir := '/usr/lib/systemd/user'
-run_dir := env('XDG_RUNTIME_DIR') / 'stt'
+# Linux runtime dir. Defaulted rather than required, so evaluating this on a
+# platform that sets no XDG_RUNTIME_DIR (macOS) does not abort the recipe that
+# happens to mention it. The daemon resolves its own socket path; this is only
+# for the install/uninstall recipes.
+run_dir := env('XDG_RUNTIME_DIR', '/run/user/' + shell('id -u')) / 'stt'
 log_dir := home_dir / '.local' / 'share' / 'stt' / 'logs'
 desktop_dir := install_prefix / 'share' / 'applications'
 icons_dir := install_prefix / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
@@ -72,6 +76,47 @@ applet_icon_dst := icons_dir / 'super-stt-cosmic-applet.svg'
 service_file := service_name + '.service'
 service_dst := systemd_unit_dir / service_file
 
+# Workspace members that build on macOS.
+#
+# Everything except the two COSMIC shell components (the panel applet and the
+# consent helper) and the CI-only indexer. The settings app is here: libcosmic
+# itself is portable — its vendored iced fork gates every Wayland crate behind
+# `not(target_vendor = "apple")` — so the app builds once its libcosmic
+# feature list drops `applet` and the Wayland/D-Bus features. See
+# super-stt-app/Cargo.toml.
+#
+# Named as a list rather than reached with `--workspace --exclude` so the
+# macOS gates say what they cover, and so a new portable crate has to be added
+# deliberately rather than silently skipped.
+macos_members := '-p super-stt-daemon -p super-stt-cli -p super-stt-shared -p super-stt-registry-types -p super-stt-forge -p super-stt-install -p super-stt-app'
+
+# macOS launchd agent (the counterpart to the systemd user unit above).
+# A per-user LaunchAgent under $HOME, not a root-owned LaunchDaemon: the
+# daemon needs the user's GUI session to type, notify, and prompt for consent.
+# See super-stt-daemon/launchd/ for why, and for the two placeholders the
+# install recipe substitutes.
+launchd_label := 'ai.menjivar.super-stt'
+
+# Code-signing identifier prefix for local macOS builds. See `codesign-macos`.
+macos_sign_prefix := 'ai.menjivar.super-stt'
+launchd_plist_file := launchd_label + '.plist'
+launchd_plist_src := 'super-stt-daemon' / 'launchd' / launchd_plist_file
+launchd_agent_dir := home_dir / 'Library' / 'LaunchAgents'
+launchd_plist_dst := launchd_agent_dir / launchd_plist_file
+# launchd has no journal, so the agent's stdio goes to a file here.
+macos_log_dir := home_dir / 'Library' / 'Logs' / 'super-stt'
+# `launchctl` addresses a LaunchAgent by domain target, not by label alone.
+launchd_domain := 'gui/' + shell('id -u')
+launchd_target := launchd_domain + '/' + launchd_label
+
+# The global-shortcut listener (`stt hotkey`), a second LaunchAgent beside the
+# daemon's. See super-stt-cli/launchd/.
+hotkey_label := launchd_label + '.hotkey'
+hotkey_plist_file := hotkey_label + '.plist'
+hotkey_plist_src := 'super-stt-cli' / 'launchd' / hotkey_plist_file
+hotkey_plist_dst := launchd_agent_dir / hotkey_plist_file
+hotkey_target := launchd_domain + '/' + hotkey_label
+
 # Default recipe which runs `just build-release`
 default: build-release
 
@@ -108,6 +153,20 @@ check *args:
 # Runs a clippy check with JSON message format
 check-json: (check '--message-format=json')
 
+# Clippy over the members that build on macOS.
+#
+# The whole-workspace `just check` cannot run here: it lints the libcosmic
+# GUI crates, and libcosmic is Linux-only. This is the macOS gate, held to
+# the same `-D warnings` standard.
+[doc("Clippy over the workspace members that build on macOS")]
+check-macos *args:
+    cargo clippy --all-features {{ macos_members }} {{ args }} -- -W clippy::pedantic -D warnings -D unused_must_use
+
+# Test the members that build on macOS. See `check-macos`.
+[doc("Test the workspace members that build on macOS")]
+test-macos *args:
+    cargo test {{ macos_members }} {{ args }}
+
 # Verify the daemon compiles under every backend-transport feature combination.
 # The `check`/`test` gates use `--all-features` (both transports on), so a `#[cfg]`
 # slip that only breaks a single-transport or no-backend build slips through
@@ -143,7 +202,7 @@ test *args:
 # kills the client mid-handshake and turns every consent prompt into a silent
 # denial). Run them after touching any surface setup. Usage: just test-gui
 [doc("Run the GUI smoke tests against the live compositor (needs a desktop session)")]
-test-gui *args:
+test-gui *args: linux-only-gui
     cargo test -p super-stt-consent --test gui_smoke -- --ignored --nocapture {{ args }}
 
 # Unit-test install.sh's pure logic (arch detection, channel validation, tag
@@ -172,6 +231,14 @@ config-compat *args:
 # Run doctests
 doctest *args:
     cargo test --doc {{ args }}
+
+# Doctests over the members that build on macOS. See `check-macos`.
+#
+# `doctest` is whole-workspace, so on macOS it drags in the libcosmic crates
+# and fails before running a single doctest.
+[doc("Run doctests for the workspace members that build on macOS")]
+doctest-macos *args:
+    cargo test --doc {{ macos_members }} {{ args }}
 
 # Verify the generated TOML schemas are current
 schema-check:
@@ -238,22 +305,271 @@ coverage-badge:
 # tests, doctests, schemas
 ci: fmt-check check check-features test test-install doctest schema-check
 
+# The macOS counterpart to `ci`, mirroring the macOS job in
+# .github/workflows/ci.yml.
+#
+# Same gates, with the three whole-workspace ones swapped for their
+# `-macos` variants — the libcosmic crates cannot be linted, tested or
+# doctested here. `check-features`, `test-install`, `fmt-check` and
+# `schema-check` are platform-independent and run unchanged.
+[doc("Full local CI gate for macOS (see `ci` for the Linux one)")]
+ci-macos: fmt-check check-macos check-features test-macos test-install doctest-macos schema-check
+
+# Stop a recipe that builds a COSMIC-shell component before cargo does.
+#
+# Not everything on libcosmic: super-stt-app builds and runs on macOS (see
+# `macos_members`). These are the two components that are Linux shell
+# integration by nature, for two different reasons:
+#
+#   The panel applet takes libcosmic's `applet` feature, which reaches
+#   cosmic-panel-config -> smithay-client-toolkit -> xkbcommon via
+#   pkg-config. cosmic-panel-config is the one crate in that chain with no
+#   `target_vendor = "apple"` gate, so it has no macOS build at all. Left to
+#   cargo it surfaces forty lines of pkg-config panic from a transitive
+#   dependency, reading like a missing Homebrew package rather than a recipe
+#   that was never going to work here.
+#
+#   The consent helper takes `wayland`, and is a layer-shell overlay surface
+#   holding an exclusive keyboard grab — a Wayland construct with no macOS
+#   counterpart. The daemon does not spawn it there; it puts the same
+#   question up through osascript itself. Whether it would still compile on
+#   macOS is untested and moot.
+[private]
+linux-only-gui:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo "This recipe builds a Linux shell component: the COSMIC panel applet" >&2
+        echo "(which needs cosmic-panel-config, a crate with no macOS build) or the" >&2
+        echo "consent helper (a Wayland layer-shell overlay)." >&2
+        echo "" >&2
+        echo "The settings app is NOT in this category — 'just run-app' works here." >&2
+        echo "The consent dialog is not a separate binary on macOS; the daemon shows" >&2
+        echo "it itself through osascript." >&2
+        exit 1
+    fi
+
+# Stop `install-app` on macOS, where the binary builds but has nowhere to go.
+#
+# Installing the app means a .desktop entry, a hicolor icon and an XDG
+# autostart-adjacent layout under /usr/local/share — none of which macOS
+# reads. The macOS equivalent is a signed .app bundle in /Applications, which
+# does not exist yet. `just run-app` runs the same binary from the target dir
+# in the meantime.
+[private]
+macos-no-app-bundle:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo "The settings app builds on macOS but cannot be installed yet: there is" >&2
+        echo "no .app bundle, and a .desktop file plus hicolor icons mean nothing to" >&2
+        echo "macOS. Use 'just run-app' to run it from the target directory." >&2
+        exit 1
+    fi
+
+# Re-sign a freshly built binary with a stable local code-signing identity.
+#
+# macOS ties TCC grants (Accessibility, Microphone) and Keychain ACLs to a
+# binary's *designated requirement*. For the ad-hoc signature the Rust linker
+# applies by default, that requirement is the content hash — so every rebuild
+# is, to macOS, a different program than the one you granted. The symptom is
+# confusing rather than obvious: the Accessibility pane keeps listing the
+# binary with its switch on while the check keeps failing, the Keychain
+# re-prompts however many times you click Always Allow, and the daemon's own
+# `exe_changed` session revocation fires on every build.
+#
+# Signing with a stable certificate makes the requirement "this identifier,
+# signed by this leaf certificate", which does not move when the bytes do.
+#
+# Opt in by exporting the name of a code-signing certificate in your keychain:
+#
+#   export SUPER_STT_SIGN_IDENTITY="Super STT Dev"
+#
+# Create that certificate once — Keychain Access -> Certificate Assistant ->
+# Create a Certificate, any name, type "Code Signing", self-signed is fine.
+# `security find-identity -v -p codesigning` lists what you have.
+#
+# This is a development-loop fix and nothing more: a self-signed certificate
+# is meaningless to Gatekeeper and to anyone else's machine. Shipping needs a
+# Developer ID and notarization, which this deliberately does not stand in for.
+#
+# Unset, or off macOS, it is a no-op — Linux and CI never see it.
+[private]
+codesign-macos bin identifier:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    [ "$(uname -s)" = "Darwin" ] || exit 0
+
+    # Say so rather than doing nothing quietly. An unset identity is a fine
+    # choice, but silence here is indistinguishable from signing that worked,
+    # and the symptom only shows up later as a permission that stopped
+    # applying — by which point nobody suspects the build.
+    identity="${SUPER_STT_SIGN_IDENTITY:-}"
+    if [ -z "$identity" ]; then
+        echo "codesign: SUPER_STT_SIGN_IDENTITY unset, leaving {{ bin }} ad-hoc." >&2
+        echo "          macOS drops its Accessibility/Keychain grants on every rebuild." >&2
+        echo "          See CONTRIBUTING.md, \"Sign your local builds\"." >&2
+        exit 0
+    fi
+
+    if [ ! -f "{{ bin }}" ]; then
+        echo "codesign: {{ bin }} is missing; nothing to sign" >&2
+        exit 0
+    fi
+
+    # --force replaces the linker's ad-hoc signature instead of refusing
+    # because one is already there.
+    if ! codesign --force --sign "$identity" --identifier "{{ identifier }}" "{{ bin }}"; then
+        echo "" >&2
+        echo "codesign: could not sign {{ bin }} as '$identity'." >&2
+        echo "SUPER_STT_SIGN_IDENTITY must name a code-signing certificate you hold:" >&2
+        echo "  security find-identity -v -p codesigning" >&2
+        exit 1
+    fi
+
+# Load a LaunchAgent into the user's GUI domain and start it, replacing any copy
+# already loaded.
+#
+# `bootstrap` refuses a label that is already loaded, so this boots it out
+# first. And it retries. The first install with the shortcut agent failed at
+# exactly this step with launchd's bare "Bootstrap failed: 5: Input/output
+# error", then the identical bootstrap succeeded by hand seconds later. launchd
+# logged nothing about it and an immediate bootout/bootstrap would not reproduce
+# it, so what is handled here is the observed fact — a transient refusal — not
+# a guessed mechanism.
+[private]
+launchd-load target plist:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    launchctl bootout {{ target }} 2>/dev/null || true
+    # If the old job is still on its way out, let it finish going.
+    for _ in $(seq 1 50); do
+        launchctl print {{ target }} >/dev/null 2>&1 || break
+        sleep 0.1
+    done
+    err=""
+    for attempt in 1 2 3 4 5; do
+        if err=$(launchctl bootstrap {{ launchd_domain }} "{{ plist }}" 2>&1); then
+            launchctl enable {{ target }}
+            launchctl kickstart -k {{ target }} >/dev/null
+            exit 0
+        fi
+        [ "$attempt" -lt 5 ] && sleep "$attempt"
+    done
+    echo "❌ launchd would not load {{ target }}: $err" >&2
+    echo "   Retry by hand: launchctl bootstrap {{ launchd_domain }} \"{{ plist }}\"" >&2
+    exit 1
+
+# `-p` is load-bearing on macOS, and left off on Linux.
+#
+# A bare `cargo build --bin X` resolves features across every default member,
+# so Cargo builds ONE libcosmic unit carrying the union of every member's
+# features. The COSMIC applet asks
+# for `applet`, so that union always contains it — and `applet` reaches
+# cosmic-panel-config -> smithay-client-toolkit -> xkbcommon via pkg-config,
+# which has no macOS build. The app then fails to build on macOS even though
+# its own feature list is clean. `-p` narrows the selection to one package,
+# so only that package's features are resolved.
+#
+# This is also why `just run-daemon` used to fail here: it built the consent
+# helper and the daemon in one invocation, and the app's `applet` came along
+# for the ride.
+#
+# On Linux that union is what ships: the release workflow builds every binary
+# in one invocation. Narrowing it there changes the binary, not just the
+# build. The daemon built with `-p` gets zbus without its tokio executor and
+# a different Wayland client backend. So Linux keeps `--bin` alone, and a
+# binary built here is the one that ships.
+app_select := if os() == "macos" { "-p " + app_name + " --bin " + app_name } else { "--bin " + app_name }
+daemon_select := if os() == "macos" { "-p " + daemon_bin_name + " --bin " + daemon_bin_name } else { "--bin " + daemon_bin_name }
+cli_select := if os() == "macos" { "-p " + cli_name + " --bin " + cli_name } else { "--bin " + cli_name }
+
 # Run the app for testing purposes
 run-app *args:
-    env RUST_BACKTRACE=full RUST_LOG=super_stt_app=debug,super_stt_shared=debug cargo run --bin {{ app_name }} {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-# Run the daemon for testing purposes. Also builds super-stt-consent into
-# the same target dir, since the daemon only looks for the consent helper
-# alongside its own binary (auth_request popups fail without it).
+    # Built, signed, then run as a separate step: `cargo run` would produce the
+    # binary and exec it in one go, leaving no point at which to re-sign.
+    # Cargo reports where it put the binary, which follows `--release`,
+    # `--profile` and `CARGO_TARGET_DIR`.
+    exe=$(cargo build {{ app_select }} {{ args }} --message-format=json-render-diagnostics \
+        | sed -n 's|.*"executable":"\([^"]*/{{ app_name }}\)".*|\1|p')
+    just codesign-macos "$exe" {{ macos_sign_prefix }}-app
+
+    # Run the built binary directly instead of via `cargo run`, because
+    # signing has to be the last thing that touches it. Cargo keeps the real
+    # artifact in target/debug/deps/ and hardlinks it to target/debug/<bin>;
+    # `codesign` replaces the file rather than editing in place, which breaks
+    # that link, so the next cargo invocation re-uplifts from deps/ and the
+    # signature is gone. `cargo run` would do exactly that, one line after we
+    # signed — the binary reverts to ad-hoc, with its mtime rolled back to
+    # the deps artifact's, and macOS quietly drops every grant again.
+
+    exec env RUST_BACKTRACE=full RUST_LOG=super_stt_app=debug,super_stt_shared=debug \
+        "$exe"
+
+# Run the daemon for testing purposes.
+#
+# On Linux this also builds super-stt-consent into the same target dir, since
+# the daemon only looks for the consent helper alongside its own binary
+# (auth_request popups fail without it).
+#
+# On macOS there is no helper to build: the daemon puts the consent question
+# up itself through osascript. Building it anyway would not merely be wasted
+# work — super-stt-consent is a libcosmic application, and libcosmic's
+# Wayland stack does not compile on macOS, so the build fails before the
+# daemon is reached.
+#
 # Usage: just run-daemon [cargo flags, e.g. --release]
 run-daemon *args:
-    cargo build --bin {{ consent_name }} --bin {{ daemon_bin_name }} {{ args }}
-    env RUST_BACKTRACE=full RUST_LOG=super_stt_daemon=debug cargo run --bin {{ daemon_bin_name }} -v {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Cargo reports where it put the daemon, which follows `--release`,
+    # `--profile` and `CARGO_TARGET_DIR`.
+    if [ "$(uname -s)" = "Darwin" ]; then
+        exe=$(cargo build -p {{ daemon_bin_name }} --bin {{ daemon_bin_name }} {{ args }} --message-format=json-render-diagnostics \
+            | sed -n 's|.*"executable":"\([^"]*/{{ daemon_bin_name }}\)".*|\1|p')
+        just codesign-macos "$exe" {{ macos_sign_prefix }}-daemon
+    else
+        exe=$(cargo build --bin {{ consent_name }} --bin {{ daemon_bin_name }} {{ args }} --message-format=json-render-diagnostics \
+            | sed -n 's|.*"executable":"\([^"]*/{{ daemon_bin_name }}\)".*|\1|p')
+    fi
+
+    # Run the built binary directly instead of via `cargo run`, because
+    # signing has to be the last thing that touches it. Cargo keeps the real
+    # artifact in target/debug/deps/ and hardlinks it to target/debug/<bin>;
+    # `codesign` replaces the file rather than editing in place, which breaks
+    # that link, so the next cargo invocation re-uplifts from deps/ and the
+    # signature is gone. `cargo run` would do exactly that, one line after we
+    # signed — the binary reverts to ad-hoc, with its mtime rolled back to
+    # the deps artifact's, and macOS quietly drops every grant again.
+
+    exec env RUST_BACKTRACE=full RUST_LOG=super_stt_daemon=debug \
+        "$exe" -v
 
 # Run the CLI for testing purposes (talks to the running daemon over the HTTP socket)
 # Usage: just run-cli [ping|status|record|stop|logout] [args]
 run-cli *args:
-    env RUST_BACKTRACE=full RUST_LOG=super_stt_cli=debug,super_stt_shared=debug cargo run --bin {{ cli_name }} -- {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Cargo reports where it put the binary, which follows `CARGO_TARGET_DIR`.
+    exe=$(cargo build {{ cli_select }} --message-format=json-render-diagnostics \
+        | sed -n 's|.*"executable":"\([^"]*/{{ cli_name }}\)".*|\1|p')
+    just codesign-macos "$exe" {{ macos_sign_prefix }}-cli
+
+    # Run the built binary directly instead of via `cargo run`, because
+    # signing has to be the last thing that touches it. Cargo keeps the real
+    # artifact in target/debug/deps/ and hardlinks it to target/debug/<bin>;
+    # `codesign` replaces the file rather than editing in place, which breaks
+    # that link, so the next cargo invocation re-uplifts from deps/ and the
+    # signature is gone. `cargo run` would do exactly that, one line after we
+    # signed — the binary reverts to ad-hoc, with its mtime rolled back to
+    # the deps artifact's, and macOS quietly drops every grant again.
+
+    exec env RUST_BACKTRACE=full RUST_LOG=super_stt_cli=debug,super_stt_shared=debug \
+        "$exe" {{ args }}
 
 # Run the consent dialog on its own, without the daemon. The dialog is
 # env-driven rather than argument-driven, so this fills in a plausible request;
@@ -273,7 +589,7 @@ run-cli *args:
 #   just run-consent transcribe settings secrets
 #   STT_AUTH_AUTO_APPROVE_AFTER_MS=4000 just run-consent
 [doc("Run the consent dialog standalone. Usage: just run-consent [scope...]")]
-run-consent *scopes:
+run-consent *scopes: linux-only-gui
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -296,7 +612,7 @@ audit:
     cargo audit
 
 # Run the cosmic applet in the cosmic panel for testing purposes
-run-applet *args:
+run-applet *args: linux-only-gui
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -330,7 +646,7 @@ run-applet *args:
 
     cosmic-panel
 
-run-applet-windowed *args:
+run-applet-windowed *args: linux-only-gui
     env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }}
 
 # Run the cosmic applet in the cosmic panel for testing purposes
@@ -382,28 +698,40 @@ run-applet-right *args:
 run-applet-full *args:
     env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }} -- --side full
 
-# Build only the app
+# Build only the app. The package selection is explained above `run-app`.
 build-app *args:
-    cargo build --release --bin {{ app_name }} {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release {{ app_select }} {{ args }}
+    just codesign-macos target/release/{{ app_name }} {{ macos_sign_prefix }}-app
 
-# Build only the daemon
+# Build only the daemon.
+#
+# The signing step is last on purpose: any later cargo invocation re-uplifts
+# the binary from target/*/deps/ and drops the signature. See `run-daemon`.
 build-daemon *args:
-    cargo build --release --bin {{ daemon_bin_name }} {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release {{ daemon_select }} {{ args }}
+    just codesign-macos target/release/{{ daemon_bin_name }} {{ macos_sign_prefix }}-daemon
 
 # Build only the CLI
 build-cli *args:
-    cargo build --release --bin {{ cli_name }} {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release {{ cli_select }} {{ args }}
+    just codesign-macos target/release/{{ cli_name }} {{ macos_sign_prefix }}-cli
 
 # Build only the installer/self-updater
 build-install:
     cargo build --release --bin super-stt-install
 
 # Build only the consent helper (co-located with the daemon binary)
-build-consent:
+build-consent: linux-only-gui
     cargo build --release --bin {{ consent_name }}
 
 # Build only the cosmic applet, on its own so it doesn't inherit wgpu
-build-applet:
+build-applet: linux-only-gui
     #!/usr/bin/env bash
     set -euo pipefail
     # `-p` and not `--bin`: `--bin` still selects every default workspace
@@ -414,7 +742,7 @@ build-applet:
     just check-applet-renderer
 
 # Fail if the applet binary carries the wgpu renderer
-check-applet-renderer:
+check-applet-renderer: linux-only-gui
     #!/usr/bin/env bash
     set -euo pipefail
     # The feature that puts it there is enabled by another crate in the
@@ -562,7 +890,7 @@ openapi-serve *args:
     PYEOF
 
 # Install the app (system installation under /usr/local)
-install-app:
+install-app: macos-no-app-bundle
     #!/usr/bin/env bash
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the build can outlast sudo's credential cache, and a
@@ -618,7 +946,7 @@ install-app:
     echo "✓ App icon installed: {{ app_icon_dst }}"
 
 # Install the cosmic applet (system installation under /usr/local)
-install-applet:
+install-applet: linux-only-gui
     #!/usr/bin/env bash
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the build can outlast sudo's credential cache, and a
@@ -680,11 +1008,116 @@ install-applet:
     echo "🚀 Ready to use! The applet can now be added to your COSMIC panel through:"
     echo "-- COSMIC Settings > Desktop > Panel > Configure panel applets > Add Applet"
 
+
+# Install the daemon on macOS (/usr/local/bin + a per-user LaunchAgent).
+# Called by `just install-daemon` on Darwin; run it directly to skip the
+# platform check.
+# Usage: just install-daemon-macos
+install-daemon-macos:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Ask for sudo up front and keep the timestamp alive in the background:
+    # the builds can outlast sudo's credential cache, and a password prompt
+    # buried in build output is easy to miss. Only the copies into
+    # {{ bin_dir }} need it — the LaunchAgent is per-user.
+    sudo -v
+    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
+    sudo_keepalive=$!
+    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
+
+    echo "Building daemon..."
+    just build-daemon
+    echo "Building CLI..."
+    just build-cli
+
+    # The shortcut, checked with the listener's own parser before anything is
+    # installed. Written into the LaunchAgent unchecked, a binding it rejects
+    # would have launchd restart it every few seconds, failing identically,
+    # and the only symptom would be a key that does nothing.
+    binding="${SUPER_STT_HOTKEY:-ctrl+alt+space}"
+    if ! target/release/{{ cli_name }} hotkey --key "$binding" --check; then
+        echo "❌ SUPER_STT_HOTKEY='$binding' is not a shortcut the listener accepts" >&2
+        exit 1
+    fi
+
+    # No consent helper is built here, and none is missing: it is a libcosmic
+    # application, which does not build on macOS. The daemon puts the same
+    # question up through osascript instead — see
+    # daemon/http/internal/auth/consent.rs.
+
+    echo "Installing binaries into {{ bin_dir }}..."
+    sudo install -d -m0755 {{ bin_dir }}
+    sudo install -m0755 target/release/{{ daemon_bin_name }} {{ daemon_dst }}
+    sudo install -m0755 target/release/{{ cli_name }} {{ cli_dst }}
+
+    echo "Creating wrapper script at {{ wrapper_dst }}"
+    wrapper_tmp=$(mktemp)
+    echo '#!/bin/bash' > "$wrapper_tmp"
+    echo '# Super STT convenience wrapper — invokes super-stt-cli directly.' >> "$wrapper_tmp"
+    echo '' >> "$wrapper_tmp"
+    echo 'exec {{ cli_dst }} "$@"' >> "$wrapper_tmp"
+    sudo install -m755 "$wrapper_tmp" {{ wrapper_dst }}
+    rm -f "$wrapper_tmp"
+
+    mkdir -p "{{ macos_log_dir }}"
+    mkdir -p "{{ launchd_agent_dir }}"
+
+    # Substitute the two placeholders launchd cannot expand for itself.
+    echo "Installing LaunchAgent {{ launchd_plist_dst }}..."
+    sed -e "s|__DAEMON_BIN__|{{ daemon_dst }}|g" \
+        -e "s|__LOG_DIR__|{{ macos_log_dir }}|g" \
+        {{ launchd_plist_src }} > "{{ launchd_plist_dst }}"
+    # A malformed plist is rejected by launchd with a bare "Input/output
+    # error"; lint it here where the message can still say what is wrong.
+    plutil -lint "{{ launchd_plist_dst }}"
+
+    # Replaces a copy already loaded, so a reinstall picks up the new plist.
+    just launchd-load {{ launchd_target }} "{{ launchd_plist_dst }}"
+
+    echo "Installing LaunchAgent {{ hotkey_plist_dst }}..."
+    sed -e "s|__CLI_BIN__|{{ cli_dst }}|g" \
+        -e "s|__BINDING__|$binding|g" \
+        -e "s|__LOG_DIR__|{{ macos_log_dir }}|g" \
+        {{ hotkey_plist_src }} > "{{ hotkey_plist_dst }}"
+    plutil -lint "{{ hotkey_plist_dst }}"
+    just launchd-load {{ hotkey_target }} "{{ hotkey_plist_dst }}"
+
+    echo ""
+    echo "✓ Super STT daemon installed and running as {{ launchd_label }}"
+    echo "✓ Shortcut: $binding starts and stops a recording ({{ hotkey_label }})"
+    echo "  Change it with SUPER_STT_HOTKEY=... just install-daemon"
+    echo ""
+    echo "Two macOS permissions are needed, and neither can be granted from here:"
+    echo ""
+    echo "  • Accessibility — System Settings › Privacy & Security › Accessibility"
+    echo "    Add {{ daemon_dst }}. Without it the daemon's synthesized"
+    echo "    keystrokes are discarded by the window server, silently: a"
+    echo "    recording will transcribe and then type nothing."
+    echo ""
+    echo "  • Microphone — System Settings › Privacy & Security › Microphone"
+    echo "    macOS prompts on the first recording; if the daemon is not"
+    echo "    running in your logged-in session the prompt never appears."
+    echo ""
+    echo "The shortcut needs neither: it registers through Carbon, which asks"
+    echo "for no permission."
+    echo ""
+    echo "Logs: just logs-daemon    (file: {{ macos_log_dir }}/daemon.log)"
+    echo "      shortcut listener:   {{ macos_log_dir }}/hotkey.log"
+
 # Install the daemon (system installation under /usr/local; runs as a
-# systemd --user service)
+# systemd --user service on Linux, a LaunchAgent on macOS)
 # Usage: just install-daemon
 install-daemon:
     #!/usr/bin/env bash
+    # The two platforms share the binaries and nothing else: different
+    # service manager, different unit format, different set of components
+    # (the libcosmic consent helper and the COSMIC shortcut have no macOS
+    # equivalent). Dispatching beats threading `uname` checks through a
+    # recipe this long.
+    if [ "$(uname -s)" = "Darwin" ]; then
+        exec just install-daemon-macos
+    fi
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the builds (daemon, consent, CLI) can outlast sudo's
     # credential cache, and a password prompt buried in build output is
@@ -850,12 +1283,29 @@ install-daemon:
     systemctl --user enable {{ service_name }}
 
 # Install daemon, settings app, and CLI
+#
+# On macOS the settings app is skipped, not failed. It builds there, but
+# installing it means a .desktop entry and hicolor icons, which macOS does
+# not read; the .app bundle that would replace them does not exist yet (see
+# `macos-no-app-bundle`). `just run-app` runs it from the target directory.
+#
 # Usage: just install
 install:
     #!/usr/bin/env bash
     if ! just install-daemon; then
         echo "❌ Daemon installation failed"
         exit 1
+    fi
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo ""
+        echo "Skipping the settings app: it builds on macOS but has no .app"
+        echo "bundle yet. Run it with 'just run-app', or configure the daemon by"
+        echo "editing"
+        echo "  ~/Library/Application Support/super-stt/daemon.toml"
+        echo "or through the HTTP API (see docs/protocol/). The CLI covers"
+        echo "recording and status only, not settings."
+        exit 0
     fi
 
     if ! just install-app; then
@@ -1029,6 +1479,9 @@ uninstall-applet:
 # Uninstall the daemon
 uninstall-daemon:
     #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        exec just uninstall-daemon-macos
+    fi
     echo "Uninstalling Super STT daemon user service..."
 
     # Stop and disable user service
@@ -1058,8 +1511,35 @@ uninstall-daemon:
 
     echo "✓ Super STT Daemon user service uninstalled"
 
+# Uninstall the daemon on macOS. Called by `just uninstall-daemon` on Darwin.
+# Usage: just uninstall-daemon-macos
+uninstall-daemon-macos:
+    #!/usr/bin/env bash
+    echo "Uninstalling Super STT daemon LaunchAgent..."
+
+    # `bootout` both stops the agent and removes it from the domain, so there
+    # is no separate disable step the way there is with systemd.
+    launchctl bootout {{ hotkey_target }} 2>/dev/null || true
+    rm -f "{{ hotkey_plist_dst }}"
+    launchctl bootout {{ launchd_target }} 2>/dev/null || true
+    rm -f "{{ launchd_plist_dst }}"
+
+    sudo rm -f {{ daemon_dst }}
+    sudo rm -f {{ cli_dst }}
+    sudo rm -f {{ wrapper_dst }}
+
+    # No consent helper to remove: none is installed on macOS.
+
+    echo "Log directory {{ macos_log_dir }} preserved"
+    echo ""
+    echo "✓ Super STT daemon uninstalled"
+    echo ""
+    echo "macOS keeps its own record of the Accessibility grant. Remove the"
+    echo "stale entry in System Settings › Privacy & Security › Accessibility"
+    echo "if you are not reinstalling."
+
 # Install just the consent helper (normally bundled with install-daemon)
-install-consent:
+install-consent: linux-only-gui
     #!/usr/bin/env bash
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the build can outlast sudo's credential cache, and a
@@ -1130,23 +1610,67 @@ uninstall-cli:
 uninstall: uninstall-daemon uninstall-app uninstall-applet uninstall-cli uninstall-consent
 
 # Start the daemon user service
+#
+# These six recipes each wrap one service-manager verb. They dispatch on the
+# platform rather than existing twice because the verb is what the caller
+# means — `just start-daemon` should start the daemon, on whichever of the
+# two service managers is actually supervising it.
 start-daemon:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        # `stop-daemon` boots the agent out of launchd entirely (a plain stop
+        # would be undone by KeepAlive), which leaves nothing to kickstart —
+        # so load it first when it is not there.
+        if ! launchctl print {{ launchd_target }} >/dev/null 2>&1; then
+            exec just launchd-load {{ launchd_target }} "{{ launchd_plist_dst }}"
+        fi
+        # `kickstart` rather than `launchctl start`: it works whether or not
+        # the agent is currently running, which is what "start" should mean.
+        exec launchctl kickstart {{ launchd_target }}
+    fi
     systemctl --user start {{ service_name }}
 
 # Stop the daemon user service
 stop-daemon:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        # `bootout`, not `launchctl stop`: the agent sets `KeepAlive`, so a
+        # plain stop is undone by launchd within `ThrottleInterval`. This
+        # removes the agent from the domain until the next login or
+        # `just start-daemon`, which loads it back.
+        exec launchctl bootout {{ launchd_target }}
+    fi
     systemctl --user stop {{ service_name }}
 
 # Enable daemon to start with user session
 enable-daemon:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        launchctl enable {{ launchd_target }}
+        # `enable` only clears the disabled flag; the agent still has to be
+        # in the domain to run at login.
+        launchctl bootstrap {{ launchd_domain }} "{{ launchd_plist_dst }}" 2>/dev/null || true
+        exit 0
+    fi
     systemctl --user enable {{ service_name }}
 
 # Disable daemon from starting with user session
 disable-daemon:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        # Survives a reboot, unlike `bootout` alone.
+        exec launchctl disable {{ launchd_target }}
+    fi
     systemctl --user disable {{ service_name }}
 
 # Check daemon status
 status-daemon:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        # `print` is the closest thing launchd has to `systemctl status`: it
+        # reports the pid, last exit status, and the resolved program path.
+        exec launchctl print {{ launchd_target }}
+    fi
     systemctl --user status {{ service_name }}
 
 # Show overall system status and test connectivity
@@ -1189,14 +1713,29 @@ status: status-daemon
 
 # View daemon logs
 logs-daemon:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        # launchd has no journal; the agent's stdio is redirected to a file.
+        exec tail -f "{{ macos_log_dir }}/daemon.log"
+    fi
     journalctl --user -u {{ service_name }} -f
 
 # View recent daemon logs
 logs-daemon-recent:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        exec tail -n 50 "{{ macos_log_dir }}/daemon.log"
+    fi
     journalctl --user -u {{ service_name }} -n 50
 
 # Restart the daemon user service
 restart-daemon:
+    #!/usr/bin/env bash
+    if [ "$(uname -s)" = "Darwin" ]; then
+        # `-k` kills the running instance first, so this is a restart rather
+        # than a no-op on an already-running agent.
+        exec launchctl kickstart -k {{ launchd_target }}
+    fi
     systemctl --user restart {{ service_name }}
 
 # Vendor dependencies locally

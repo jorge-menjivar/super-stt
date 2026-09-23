@@ -16,18 +16,20 @@
 //! auto-approves.
 
 use anyhow::{Context, Result, anyhow};
-use clap::{Arg, ArgAction, Command, value_parser};
+use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use std::path::PathBuf;
 use super_stt_shared::daemon::http_client::{self, TranscribeOptions};
 use super_stt_shared::daemon::session::{self, AppId};
 use super_stt_shared::validation::get_http_socket_path;
 
+#[cfg(target_os = "macos")]
+mod hotkey;
+
 const APP_ID: AppId = AppId("super-stt-cli");
 const APP_NAME: &str = "Super STT CLI";
 const SCOPES: &[&str] = &["transcribe", "status"];
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     // The CLI previously had no logging at all; initialize it like the other
     // binaries (RUST_LOG wins, else Info) (Tier 2 #6).
     super_stt_shared::logging::init();
@@ -37,7 +39,74 @@ async fn main() -> Result<()> {
     // the system secret service. No-op when the env var is unset.
     session::install_mock_keyring_if_requested();
 
-    let matches = Command::new("super-stt-cli")
+    let matches = build_cli().get_matches();
+
+    let socket_path = matches
+        .get_one::<PathBuf>("socket")
+        .cloned()
+        .unwrap_or_else(get_http_socket_path);
+
+    // `hotkey` runs AppKit's event loop, which has to own the main thread, so
+    // it is dispatched before any runtime exists and builds its own on worker
+    // threads. Every other subcommand is one request and out.
+    #[cfg(target_os = "macos")]
+    if let Some(("hotkey", sub)) = matches.subcommand() {
+        let binding = sub
+            .get_one::<String>("key")
+            .map_or(hotkey::DEFAULT_BINDING, String::as_str);
+        if sub.get_flag("check") {
+            return hotkey::check(binding);
+        }
+        return hotkey::run(socket_path, binding);
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("could not start the async runtime")?
+        .block_on(dispatch(&matches, socket_path))
+}
+
+async fn dispatch(matches: &ArgMatches, socket_path: PathBuf) -> Result<()> {
+    match matches.subcommand() {
+        Some(("ping", _)) => {
+            run_with_token(socket_path.clone(), |t| cmd_ping(socket_path.clone(), t))
+                .await
+                .context("ping failed")
+        }
+        Some(("status", _)) => {
+            run_with_token(socket_path.clone(), |t| cmd_status(socket_path.clone(), t))
+                .await
+                .context("status failed")
+        }
+        Some(("record", sub)) => {
+            let write = sub.get_flag("write");
+            let wait = sub.get_flag("wait");
+            let stop_mode = sub.get_one::<String>("stop-mode").cloned();
+            run_with_token(socket_path.clone(), |t| {
+                cmd_record(socket_path.clone(), t, write, wait, stop_mode.clone())
+            })
+            .await
+            .context("record failed")
+        }
+        Some(("stop", _)) => {
+            run_with_token(socket_path.clone(), |t| cmd_stop(socket_path.clone(), t))
+                .await
+                .context("stop failed")
+        }
+        Some(("logout", _)) => cmd_logout(),
+        _ => {
+            println!("Run with --help for usage.");
+            Ok(())
+        }
+    }
+}
+
+/// The command-line interface. A function rather than inline in `main` so the
+/// tests can parse the arguments the hotkey `LaunchAgent` is installed with.
+fn build_cli() -> Command {
+    platform_subcommands(
+        Command::new("super-stt-cli")
         .version(env!("CARGO_PKG_VERSION"))
         .about("Super STT command-line client (HTTP protocol)")
         .arg(
@@ -82,46 +151,20 @@ async fn main() -> Result<()> {
         .subcommand(
             Command::new("logout")
                 .about("Forget the cached session token (forces re-consent next call)"),
-        )
-        .get_matches();
+        ),
+    )
+}
 
-    let socket_path = matches
-        .get_one::<PathBuf>("socket")
-        .cloned()
-        .unwrap_or_else(get_http_socket_path);
+#[cfg(target_os = "macos")]
+fn platform_subcommands(cli: Command) -> Command {
+    cli.subcommand(hotkey::command())
+}
 
-    match matches.subcommand() {
-        Some(("ping", _)) => {
-            run_with_token(socket_path.clone(), |t| cmd_ping(socket_path.clone(), t))
-                .await
-                .context("ping failed")
-        }
-        Some(("status", _)) => {
-            run_with_token(socket_path.clone(), |t| cmd_status(socket_path.clone(), t))
-                .await
-                .context("status failed")
-        }
-        Some(("record", sub)) => {
-            let write = sub.get_flag("write");
-            let wait = sub.get_flag("wait");
-            let stop_mode = sub.get_one::<String>("stop-mode").cloned();
-            run_with_token(socket_path.clone(), |t| {
-                cmd_record(socket_path.clone(), t, write, wait, stop_mode.clone())
-            })
-            .await
-            .context("record failed")
-        }
-        Some(("stop", _)) => {
-            run_with_token(socket_path.clone(), |t| cmd_stop(socket_path.clone(), t))
-                .await
-                .context("stop failed")
-        }
-        Some(("logout", _)) => cmd_logout(),
-        _ => {
-            println!("Run with --help for usage.");
-            Ok(())
-        }
-    }
+/// Nothing to add on Linux: the desktop environment binds the shortcut there
+/// and runs `stt record --write` itself.
+#[cfg(not(target_os = "macos"))]
+fn platform_subcommands(cli: Command) -> Command {
+    cli
 }
 
 /// Thin wrapper over `session::with_token` that adapts its
@@ -266,5 +309,38 @@ mod tests {
                 "CLI requests scope `{scope}` that is not in scopes::KNOWN_SCOPES"
             );
         }
+    }
+
+    /// The hotkey `LaunchAgent`'s arguments must parse. launchd restarts the
+    /// listener whenever it exits, so arguments clap rejects would become a
+    /// restart every few seconds with nothing listening — and the only symptom
+    /// would be a shortcut that silently does nothing. Mirrors the daemon's
+    /// `every_shipped_execstart_parses`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn hotkey_launch_agent_arguments_parse() {
+        let plist = include_str!("../launchd/ai.menjivar.super-stt.hotkey.plist");
+        let array = plist
+            .split("<key>ProgramArguments</key>")
+            .nth(1)
+            .and_then(|rest| rest.split("</array>").next())
+            .expect("the plist has a ProgramArguments array");
+        let args: Vec<String> = array
+            .split("<string>")
+            .skip(1)
+            .filter_map(|s| s.split("</string>").next())
+            .map(|s| {
+                s.replace("__CLI_BIN__", "super-stt-cli")
+                    .replace("__BINDING__", super::hotkey::DEFAULT_BINDING)
+            })
+            .collect();
+
+        assert_eq!(args.get(1).map(String::as_str), Some("hotkey"));
+        let matches = super::build_cli()
+            .try_get_matches_from(&args)
+            .expect("the hotkey LaunchAgent's arguments must parse");
+        let (_, sub) = matches.subcommand().expect("a subcommand");
+        let binding = sub.get_one::<String>("key").expect("--key has a value");
+        super::hotkey::check(binding).expect("the default binding must be valid");
     }
 }

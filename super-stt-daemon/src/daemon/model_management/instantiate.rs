@@ -492,6 +492,7 @@ fn host_can_run(host: &Host, accel: &str) -> bool {
         "cuda" => host.cuda.is_some(),
         "rocm" => host.rocm.is_some(),
         "vulkan" => host.vulkan.is_some(),
+        "metal" => host.metal.is_some(),
         _ => false,
     }
 }
@@ -511,6 +512,7 @@ mod resolve_accel_tests {
             }),
             rocm: None,
             vulkan: None,
+            metal: None,
         }
     }
 
@@ -523,7 +525,48 @@ mod resolve_accel_tests {
                 version: None,
             }),
             vulkan: None,
+            metal: None,
         }
+    }
+
+    fn metal_host() -> Host {
+        Host {
+            target_triple: "aarch64-apple-darwin".into(),
+            cuda: None,
+            rocm: None,
+            vulkan: None,
+            metal: Some(crate::registry::host_detect::MetalHost),
+        }
+    }
+
+    /// An asset declaring `["metal", "cpu"]` on a Mac must resolve to metal,
+    /// not fall through to the cpu entry. `host_can_run` is what decides
+    /// that, and a missing arm there is invisible: the function returns
+    /// `false`, the `find` skips metal, and the model silently loads on the
+    /// CPU on every Mac.
+    #[test]
+    fn a_mac_resolves_a_metal_asset_to_metal() {
+        let installed = vec!["metal".to_string(), "cpu".to_string()];
+        assert_eq!(
+            resolve_accel("gpu", &installed, Some(&metal_host())),
+            "metal"
+        );
+        // An explicit CPU preference still wins — the same rule every other
+        // accelerator follows.
+        assert_eq!(resolve_accel("cpu", &installed, Some(&metal_host())), "cpu");
+    }
+
+    /// The converse: a metal asset on a host without Metal must not resolve
+    /// to it.
+    #[test]
+    fn a_non_mac_does_not_resolve_metal() {
+        let installed = vec!["metal".to_string(), "cpu".to_string()];
+        assert_eq!(
+            resolve_accel("gpu", &installed, Some(&nvidia_host())),
+            "metal",
+            "with no host-runnable accel the first non-cpu entry is the fallback"
+        );
+        assert!(!super::host_can_run(&nvidia_host(), "metal"));
     }
 
     fn vulkan_only_host() -> Host {
@@ -534,6 +577,7 @@ mod resolve_accel_tests {
             vulkan: Some(VulkanHost {
                 api_version: gpu_probe::VulkanVersion::new(1, 3, 0),
             }),
+            metal: None,
         }
     }
 

@@ -53,10 +53,7 @@ mod tests {
 
     #[test]
     fn parses_the_three_concrete_backends() {
-        assert_eq!(
-            parse_resolved(Some("wayland_protocol")),
-            Some(WriteMethod::WaylandProtocol)
-        );
+        assert_eq!(parse_resolved(Some("built_in")), Some(WriteMethod::BuiltIn));
         assert_eq!(
             parse_resolved(Some("xdg_desktop_portal")),
             Some(WriteMethod::XdgDesktopPortal)

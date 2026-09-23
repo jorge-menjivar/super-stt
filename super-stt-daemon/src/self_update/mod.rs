@@ -6,12 +6,43 @@ use super_stt_shared::models::self_update::{InstallerAsset, SelfUpdateStatus};
 use super_stt_shared::models::update_beta_optin::UpdateBetaOptIn;
 
 pub(crate) const REPO: &str = "github.com/jorge-menjivar/super-stt";
+
+/// An endpoint that always refuses a connection, for tests that need to
+/// exercise the network-failure path.
+///
+/// Port 1 on loopback: privileged, so nothing in an unprivileged test process
+/// can bind it, and a connect there fails immediately with `ECONNREFUSED`.
+///
+/// This exists because the obvious way to simulate a dead server — dropping
+/// the `mockito::Server` and reusing its URL — is unsound in a test binary
+/// that runs tests in parallel. Dropping it *frees the port*, and the OS can
+/// hand that same port to a `mockito::Server` starting up in another test a
+/// moment later; the request this test expects to fail then succeeds against
+/// a stranger's mock. That is not hypothetical — it is what made the
+/// `self_update` tests fail intermittently, always in whichever test happened
+/// to lose the race rather than in one consistent place.
+#[cfg(test)]
+pub(crate) const UNREACHABLE_ENDPOINT: &str = "http://127.0.0.1:1";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The Rust target triple this daemon was built for, naming the installer
+/// asset to offer on the update path.
+///
+/// `None` on a target the release workflow publishes no installer for, which
+/// makes the update notice fall back to its curl caption — see
+/// [`resolve_installer_asset`].
+///
+/// Reads both halves of the triple. Matching on the architecture alone was
+/// correct while Linux was the only platform and is silently wrong now: an
+/// Apple Silicon Mac is `aarch64`, so it would be handed the
+/// `aarch64-unknown-linux-gnu` installer — an asset that exists, downloads,
+/// verifies against `SHA256SUMS`, and cannot run.
 pub(crate) fn target_triple() -> Option<&'static str> {
-    match std::env::consts::ARCH {
-        "x86_64" => Some("x86_64-unknown-linux-gnu"),
-        "aarch64" => Some("aarch64-unknown-linux-gnu"),
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
+        ("linux", "aarch64") => Some("aarch64-unknown-linux-gnu"),
+        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
+        ("macos", "x86_64") => Some("x86_64-apple-darwin"),
         _ => None,
     }
 }
@@ -723,7 +754,8 @@ mod tests {
         assert!(st.last_check_error.is_none());
 
         // Network failure: previous result survives, error recorded.
-        drop(s); // server gone -> request fails
+        // `s` is deliberately kept alive — see `UNREACHABLE_ENDPOINT`.
+        let gh = super_stt_forge::Github::new(UNREACHABLE_ENDPOINT.to_string(), None);
         let (st2, did_check2) = checker.run_check(&gh, UpdateBetaOptIn::Disabled).await;
         assert!(did_check2, "uncontended call must perform its own check");
         assert_eq!(st2.latest_version.as_deref(), Some("v99.0.0"));
@@ -741,24 +773,30 @@ mod tests {
     async fn run_check_populates_installer_asset_end_to_end() {
         crate::install_crypto_provider();
         let digest = "c".repeat(64);
+        // Named for the platform the test is running on, not for Linux: the
+        // asset lookup matches on `target_triple()`, so a hardcoded triple
+        // makes this pass only where it happens to agree with the host.
+        let triple = target_triple().expect("this platform publishes an installer");
+        let asset_name = format!("super-stt-install-{triple}");
         let mut s = mockito::Server::new_async().await;
         let sums_url = format!("{}/sums", s.url());
         s.mock("GET", "/sums")
             .with_status(200)
-            .with_body(format!(
-                "{digest}  super-stt-install-x86_64-unknown-linux-gnu\n"
-            ))
+            .with_body(format!("{digest}  {asset_name}\n"))
             .create_async()
             .await;
-        s.mock("GET", "/repos/jorge-menjivar/super-stt/releases?per_page=100")
-            .with_status(200)
-            .with_body(format!(
-                r#"[{{"tag_name":"v100.0.0","prerelease":false,"assets":[
-                {{"name":"super-stt-install-x86_64-unknown-linux-gnu","browser_download_url":"https://dl/i","size":42}},
+        s.mock(
+            "GET",
+            "/repos/jorge-menjivar/super-stt/releases?per_page=100",
+        )
+        .with_status(200)
+        .with_body(format!(
+            r#"[{{"tag_name":"v100.0.0","prerelease":false,"assets":[
+                {{"name":"{asset_name}","browser_download_url":"https://dl/i","size":42}},
                 {{"name":"SHA256SUMS","browser_download_url":"{sums_url}","size":10}}]}}]"#
-            ))
-            .create_async()
-            .await;
+        ))
+        .create_async()
+        .await;
         let gh = super_stt_forge::Github::new(s.url(), None);
         let checker = SelfUpdateChecker::new();
         let (st, did_check) = checker.run_check(&gh, UpdateBetaOptIn::Disabled).await;
@@ -767,7 +805,7 @@ mod tests {
         let asset = st
             .installer_asset
             .expect("installer_asset must be populated end-to-end");
-        assert_eq!(asset.name, "super-stt-install-x86_64-unknown-linux-gnu");
+        assert_eq!(asset.name, asset_name);
         assert_eq!(asset.url, "https://dl/i");
         assert_eq!(asset.size, 42);
         assert_eq!(asset.sha256, digest);
@@ -802,10 +840,10 @@ mod tests {
         assert!(st1.update_available);
         assert!(st1.beta_optin_effective);
 
-        // Server gone (network failure) AND the caller now passes beta OFF
-        // — the channel the cached candidate was resolved under no longer
-        // matches this call's.
-        drop(s);
+        // Network failure AND the caller now passes beta OFF — the channel
+        // the cached candidate was resolved under no longer matches this
+        // call's. `s` is deliberately kept alive; see `UNREACHABLE_ENDPOINT`.
+        let gh = super_stt_forge::Github::new(UNREACHABLE_ENDPOINT.to_string(), None);
         let (st2, did_check2) = checker.run_check(&gh, UpdateBetaOptIn::Disabled).await;
         assert!(did_check2);
         assert!(
@@ -941,5 +979,30 @@ mod tests {
         // A fresh checker is a daemon restart: the same version is due again.
         let restarted = SelfUpdateChecker::new();
         assert!(restarted.should_notify("v0.3.0").await);
+    }
+}
+
+#[cfg(test)]
+mod target_triple_tests {
+    use super::target_triple;
+
+    /// The triple must name this build's *platform*, not just its
+    /// architecture. Both Linux aarch64 and Apple Silicon report `aarch64`,
+    /// so an arch-only match hands a Mac the Linux installer — which is a
+    /// real asset with a real checksum, so nothing downstream catches it.
+    #[test]
+    fn the_triple_names_this_platform() {
+        let triple = target_triple().expect("this platform publishes an installer");
+        #[cfg(target_os = "linux")]
+        assert!(
+            triple.ends_with("-unknown-linux-gnu"),
+            "a Linux build must not claim a non-Linux triple: {triple}"
+        );
+        #[cfg(target_os = "macos")]
+        assert!(
+            triple.ends_with("-apple-darwin"),
+            "a macOS build must not claim a non-macOS triple: {triple}"
+        );
+        assert!(triple.starts_with(std::env::consts::ARCH));
     }
 }

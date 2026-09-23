@@ -94,10 +94,11 @@ pub(super) fn download_split(app: &AppModel) -> (Element<'_, Message>, Element<'
     (toolbar, list)
 }
 
-/// Search + filter toolbar for the Browse tab. Top row: a prominent search
-/// field (with a built-in clear button) plus the Add-backend and Refresh
-/// actions. Bottom row: the "Runs on" and "Kind" segmented filters, the
-/// incompatible toggle, and — pushed to the right — the live result count.
+/// Search + filter toolbar for the Browse tab. Top to bottom: the live result
+/// count; a prominent search field (with a built-in clear button) beside the
+/// overflow menu that holds Add backend and Refresh; then the "Runs on" and
+/// "Kind" segmented filters and the incompatible toggle, which wrap onto a
+/// second line when they do not fit.
 pub(super) fn download_toolbar<'a>(
     app: &'a AppModel,
     count: Element<'a, Message>,
@@ -143,15 +144,29 @@ pub(super) fn download_toolbar<'a>(
         .spacing(spacing.space_xs)
         .on_toggle(|x| Message::ModelsPage(ModelsPageMessage::RegistryIncludeIncompatible(x)));
 
-    // Runs-on and Kind chips on the left; the incompatible toggle pushed to the
-    // right edge.
-    let filter_row = row![runs_on, kind, horizontal_space(), show_incompat]
+    // Runs-on chips, Kind chips, then the incompatible toggle, wrapping onto a
+    // second line when all three will not fit.
+    //
+    // `.wrap()` rather than a plain row: a row squeezes its children when the
+    // window is too narrow for their natural width, and these children have
+    // nothing to give — the labels clip mid-word instead ("Post-processing"
+    // breaking inside its own chip, the toggle sliding off the edge). How
+    // narrow "too narrow" is depends on the platform's font metrics, so this
+    // is not a fixed breakpoint to tune: macOS renders the same labels wider
+    // than Linux does and hit it at a window size Linux was fine at.
+    //
+    // The toggle used to be pushed to the right edge with a `horizontal_space`
+    // spacer. A wrapping row cannot do that — a fill-width spacer would eat
+    // the rest of the line and force a wrap at every width — so the toggle now
+    // follows the chips directly.
+    let filter_row = row![runs_on, kind, show_incompat]
         .spacing(spacing.space_m)
         .align_y(Alignment::Center)
-        .width(Length::Fill);
+        .wrap()
+        .vertical_spacing(spacing.space_xs);
 
     // The result count gets its own short, left-aligned row sitting tight above
-    // the filter chips; the search row keeps the normal gap below it.
+    // the search row; the filter chips keep the normal gap below that.
     column![
         column![count, search_row]
             .spacing(spacing.space_xxxs)

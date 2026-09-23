@@ -39,13 +39,33 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # ---- Pure helpers (network-free, fixture-testable) -----------------------
 
-# $1: `uname -m` output. Echoes the matching Rust target triple on stdout;
-# returns non-zero with nothing printed for an unrecognized machine type
-# (the caller decides how to report that).
+# $1: `uname -s` output. $2: `uname -m` output. Echoes the matching Rust
+# target triple on stdout; returns non-zero with nothing printed for a
+# platform this installer publishes no assets for (the caller decides how to
+# report that).
+#
+# The OS half is not optional. `uname -m` on Apple Silicon is `arm64`, which
+# this function used to map to `aarch64-unknown-linux-gnu` — so a Mac running
+# the install script downloaded the Linux installer, verified it against the
+# release's real SHA256SUMS, installed it, and only then failed to execute.
+# Every check between download and exec passes, because the asset is a
+# genuine asset; it is simply the wrong one.
 detect_triple() {
     case "$1" in
-        x86_64) echo "x86_64-unknown-linux-gnu" ;;
-        aarch64 | arm64) echo "aarch64-unknown-linux-gnu" ;;
+        Linux)
+            case "$2" in
+                x86_64) echo "x86_64-unknown-linux-gnu" ;;
+                aarch64 | arm64) echo "aarch64-unknown-linux-gnu" ;;
+                *) return 1 ;;
+            esac
+            ;;
+        Darwin)
+            case "$2" in
+                arm64 | aarch64) echo "aarch64-apple-darwin" ;;
+                x86_64) echo "x86_64-apple-darwin" ;;
+                *) return 1 ;;
+            esac
+            ;;
         *) return 1 ;;
     esac
 }
@@ -160,8 +180,8 @@ main() {
         exit 1
     fi
 
-    if ! TRIPLE=$(detect_triple "$(uname -m)"); then
-        print_error "Unsupported architecture: $(uname -m)"
+    if ! TRIPLE=$(detect_triple "$(uname -s)" "$(uname -m)"); then
+        print_error "Unsupported platform: $(uname -s) $(uname -m)"
         exit 1
     fi
 
@@ -214,7 +234,22 @@ main() {
     # message names the cause the user can act on.
     if [ "$HTTP_CODE" = "404" ]; then
         print_error "Release $VERSION ships no installer binary for $TRIPLE."
-        print_error "Installing requires v0.2.2-beta.3 or newer — drop --version= to take the latest $CHANNEL release."
+        # The cause differs by platform, and so does the remedy. On Linux a
+        # 404 means the pinned release predates the installer. On macOS it
+        # means the release ships no darwin assets at all, and no newer
+        # release will either until the release workflow builds them — so
+        # pointing the user at a different --version would waste their time.
+        case "$TRIPLE" in
+            *-apple-darwin)
+                print_error "Pre-built macOS binaries are not published yet. Build from source instead:"
+                print_error "  git clone https://github.com/$GITHUB_REPO.git && cd super-stt && just install-daemon"
+                print_error "That installs the daemon and the stt CLI as a LaunchAgent. The desktop app and"
+                print_error "COSMIC applet are Linux-only."
+                ;;
+            *)
+                print_error "Installing requires v0.2.2-beta.3 or newer — drop --version= to take the latest $CHANNEL release."
+                ;;
+        esac
         exit 1
     fi
 

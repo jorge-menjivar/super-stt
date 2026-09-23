@@ -10,6 +10,9 @@ pub(crate) mod updater;
 mod view;
 use subscription::{UdpSubscriptionId, audio_events_subscription};
 
+#[cfg(target_os = "macos")]
+pub(crate) mod macos;
+
 use crate::daemon::backends::BackendInfo;
 use crate::state::{AudioTheme, ContextPage, DaemonStatus, MenuAction, RecordingStatus};
 use crate::ui::messages::{DaemonMessage, Message, ModelsPageMessage, ShellMessage};
@@ -200,6 +203,12 @@ pub struct AppModel {
     /// on the owning page instead of hijacking the UI (Tier 1 #13) or being
     /// dropped to the log (Tier 1 #15). `None` when there is no pending error.
     pub action_error: Option<crate::state::ActionError>,
+    /// Where the native title bar put the traffic lights; see `macos`.
+    #[cfg(target_os = "macos")]
+    title_bar: macos::TitleBar,
+    /// The system look the theme was built from; see `macos::appearance`.
+    #[cfg(target_os = "macos")]
+    look: macos::appearance::Look,
 }
 
 impl AppModel {
@@ -302,6 +311,29 @@ impl cosmic::Application for AppModel {
         self.nav_model_impl()
     }
 
+    /// A clear window behind frosted glass, so that the only translucency is
+    /// the theme's own: libcosmic otherwise fills the window with the theme's
+    /// background, and a translucent one drawn twice is all but opaque.
+    #[cfg(target_os = "macos")]
+    fn style(&self) -> Option<cosmic::iced::theme::Style> {
+        self.shown_look().frosted().then(|| {
+            let theme = cosmic::theme::active();
+            let on_background = theme.cosmic().on_bg_color().into();
+            cosmic::iced::theme::Style {
+                background_color: cosmic::iced::Color::TRANSPARENT,
+                text_color: on_background,
+                icon_color: on_background,
+            }
+        })
+    }
+
+    /// The sidebar with the toggle above it, beside the traffic lights (see
+    /// `macos`).
+    #[cfg(target_os = "macos")]
+    fn nav_bar(&self) -> Option<Element<'_, cosmic::Action<Self::Message>>> {
+        self.macos_sidebar()
+    }
+
     /// Display a context drawer if the context page is requested.
     fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Self::Message>> {
         self.context_drawer_impl()
@@ -355,6 +387,22 @@ impl cosmic::Application for AppModel {
                 cosmic::iced::time::every(crate::ui::icons::SPINNER_FRAME)
                     .map(|_| Message::ModelsPage(ModelsPageMessage::AddPreviewSpin)),
             );
+        }
+
+        // Style the NSWindow once it exists, answer the menu bar, and follow
+        // the system appearance; see `macos`.
+        #[cfg(target_os = "macos")]
+        {
+            subs.push(
+                cosmic::iced::window::open_events()
+                    .map(|id| Message::Shell(ShellMessage::WindowOpened(id))),
+            );
+            subs.push(
+                cosmic::iced::window::resize_events()
+                    .map(|(id, _)| Message::Shell(ShellMessage::WindowResized(id))),
+            );
+            subs.push(Subscription::run(macos::menu_bar::events));
+            subs.push(Subscription::run(macos::appearance::changes));
         }
 
         Subscription::batch(subs)

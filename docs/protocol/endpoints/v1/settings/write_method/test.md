@@ -51,16 +51,16 @@ Content-Type: application/json
 
 {
   "status":                "success",
-  "message":               "Typed test text via Wayland protocol",
+  "message":               "Typed test text via Built-in",
   "write_method":          "auto",
-  "resolved_write_method": "wayland_protocol"
+  "resolved_write_method": "built_in"
 }
 ```
 
 | Field                   | Type   | Notes                                                                                                   |
 |-------------------------|--------|---------------------------------------------------------------------------------------------------------|
 | `write_method`          | string | The configured method, exactly as [`GET /settings/write_method`](../write_method.md) reports it.                 |
-| `resolved_write_method` | string | The backend that typed: `xdg_desktop_portal`, `ydotool`, or `wayland_protocol` — never `auto`.          |
+| `resolved_write_method` | string | The backend that typed: `built_in`, `xdg_desktop_portal`, or `ydotool` — never `auto`.                  |
 
 `resolved_write_method` is the useful half when `write_method` is
 `auto`: it names the rung the auto chain settled on, which is

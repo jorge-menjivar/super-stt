@@ -34,7 +34,6 @@
     cpal.workspace = true
     dashmap.workspace = true
     dirs.workspace = true
-    enigo.workspace = true
     flate2 = "1.1.9"
     futures = "0.3"
     gpu-probe = "0.1.1"
@@ -108,7 +107,29 @@
     wasmtime = { version = "45.0.0", features = ["async"], optional = true }
     wasmtime-wasi = { version = "45.0.0", optional = true }
     wasmtime-wasi-http = { version = "45.0.0", optional = true }
+
+# Linux-only dependencies.
+#
+# `zbus` is the session bus: the D-Bus event service, the freedesktop
+# notification bubbles, and the XDG portal write method all speak it, and
+# macOS has no session bus for any of them. `enigo` builds on both platforms
+# but reaches the keyboard differently — see the workspace entry for why the
+# `wayland` feature is named here rather than there.
+[target.'cfg(target_os = "linux")'.dependencies]
+    enigo = { workspace = true, features = ["wayland"] }
     zbus.workspace = true
+
+# macOS dependencies.
+#
+# enigo with no features: on macOS it types through CoreGraphics
+# (`CGEventCreateKeyboardEvent`), which needs no feature and no display
+# server — only the Accessibility permission, which the user grants once.
+[target.'cfg(target_os = "macos")'.dependencies]
+    enigo.workspace = true
+    # Typing a character at a time (output::keyboard::enigo_backend), with the
+    # features and version enigo itself builds.
+    objc2-core-graphics.version = "0.3"
+    objc2-core-graphics.features = ["CGEventTypes", "CGRemoteOperation"]
 
 [dev-dependencies]
     futures-util.workspace = true

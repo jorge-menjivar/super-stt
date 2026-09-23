@@ -137,6 +137,65 @@ jobs:
       - name: Check backend-feature combinations
         run: just check-features
 
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: taiki-e/install-action@v2.87.11
+        with:
+          tool: just
+
+      # No system dependencies to install: CoreAudio, CoreGraphics and the
+      # Security framework ship with the OS, and the SDK is preinstalled on
+      # the runner.
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-macos-${{ hashFiles('**/Cargo.lock') }}
+
+      # Scoped to the members that build here rather than the whole
+      # workspace: the COSMIC panel applet and the consent helper need
+      # libcosmic's `applet` feature, which reaches cosmic-panel-config —
+      # the one crate in that chain with no macOS build. The settings app
+      # is included; libcosmic itself is portable. `just check-macos` owns
+      # that list, so it stays in one place.
+      - name: Run clippy
+        run: just check-macos
+
+      - name: Run tests
+        run: just test-macos
+
+      # Scoped like the two steps above, and for the same reason: the plain
+      # `just doctest` is whole-workspace.
+      - name: Run doctests
+        run: just doctest-macos --verbose
+
+      # Same reason as the Linux job: the `--all-features` gates above see
+      # both backend transports, so a `#[cfg]` slip in a single-transport
+      # build is invisible to them. The subprocess transport is the one
+      # carrying the platform split (systemd-run vs. sandbox-exec), which
+      # makes this more load-bearing here than on Linux.
+      - name: Check backend-feature combinations
+        run: just check-features
+
+      - name: Run install.sh tests
+        # `detect_triple` reads `uname -s` as well as `uname -m` precisely so
+        # that a Mac is not handed the Linux installer. Running the script's
+        # tests on a Mac is what keeps that honest.
+        run: just test-install
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest

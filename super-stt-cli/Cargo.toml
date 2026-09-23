@@ -20,5 +20,19 @@
         features = ["io-util", "macros", "net", "rt-multi-thread"]
     }
 
+# `stt hotkey` (src/hotkey.rs). macOS only: on Linux the desktop environment
+# owns global shortcuts, and these crates would have nothing to register with.
+# objc2 / objc2-app-kit are the versions global-hotkey already pulls in, named
+# here only for NSApplication, whose event loop delivers the shortcut.
+[target.'cfg(target_os = "macos")'.dependencies]
+    global-hotkey = "0.8"
+    log.workspace = true
+    objc2 = "0.6"
+    objc2-app-kit = {
+        version = "0.3",
+        default-features = false,
+        features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"],
+    }
+
 [lints]
     workspace = true

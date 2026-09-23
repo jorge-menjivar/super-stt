@@ -31,6 +31,17 @@ struct DaemonComponents {
 impl DaemonComponents {
     /// Instantiate all subsystem handles that do not depend on configuration
     /// values (those come from `SuperSTTDaemon::load_and_persist_config`).
+    // `allow`, not `expect`: clippy 1.98 files these under `unused_async_trait_impl`
+    // and later releases under `unused_async`, so either `expect` goes unfulfilled
+    // on some toolchain.
+    #[cfg_attr(
+        target_os = "macos",
+        allow(
+            clippy::unused_async,
+            clippy::unused_async_trait_impl,
+            reason = "async for the Linux arm's session-bus connect, which macOS has no counterpart to"
+        )
+    )]
     async fn init() -> Self {
         let (shutdown_tx, _) = broadcast::channel(1);
         let audio_processor = Arc::new(AudioProcessor::new());
@@ -47,6 +58,7 @@ impl DaemonComponents {
         };
 
         // D-Bus is optional; absence is non-fatal.
+        #[cfg(target_os = "linux")]
         let dbus_manager = match DBusManager::new().await {
             Ok(mgr) => Some(Arc::new(mgr)),
             Err(e) => {
@@ -54,6 +66,11 @@ impl DaemonComponents {
                 None
             }
         };
+        // No session bus on macOS, so there is nothing to fail and nothing to
+        // warn about — see `services::dbus`. Clients get the same events from
+        // `GET /v1/events`.
+        #[cfg(target_os = "macos")]
+        let dbus_manager: Option<Arc<DBusManager>> = None;
 
         Self {
             shutdown_tx,
@@ -107,7 +124,7 @@ impl SuperSTTDaemon {
             backends: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             active_backend: Arc::new(tokio::sync::RwLock::new(active_backend)),
             notifier: Arc::new(tokio::sync::Mutex::new(
-                crate::output::notification::Notifier::dbus(),
+                crate::output::notification::Notifier::desktop(),
             )),
             self_update: Arc::new(crate::self_update::SelfUpdateChecker::new()),
         };

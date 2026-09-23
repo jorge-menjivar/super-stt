@@ -63,6 +63,32 @@ pub enum ShellMessage {
     /// they act on the user's session, not on the app — so handing over the
     /// exact command is the most it can usefully do.
     CopyText(String),
+    /// A window finished opening, so its `NSWindow` can be given the native
+    /// frame. See `core::app::macos`.
+    #[cfg(target_os = "macos")]
+    WindowOpened(cosmic::iced::window::Id),
+    /// Where the native title bar put the traffic lights, so the toolbar can
+    /// line up with them.
+    #[cfg(target_os = "macos")]
+    TitleBarMeasured(crate::core::app::macos::TitleBar),
+    /// A window was resized, perhaps into or out of full screen.
+    #[cfg(target_os = "macos")]
+    WindowResized(cosmic::iced::window::Id),
+    /// Whether the window is in full screen, checked after a resize.
+    #[cfg(target_os = "macos")]
+    FullScreenChecked(bool),
+    /// The system's look changed: light or dark, or the accent color.
+    #[cfg(target_os = "macos")]
+    SystemLook(crate::core::app::macos::appearance::Look),
+    /// The title bar was pressed: move the window.
+    #[cfg(target_os = "macos")]
+    DragWindow,
+    /// The title bar was double-clicked: zoom the window.
+    #[cfg(target_os = "macos")]
+    ZoomWindow,
+    /// The toolbar's sidebar button, standing in for libcosmic's header toggle.
+    #[cfg(target_os = "macos")]
+    ToggleSidebar,
 }
 
 /// Daemon connection, connection-time settings loads, and the SSE event stream.

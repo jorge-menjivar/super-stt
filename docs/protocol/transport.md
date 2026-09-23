@@ -22,14 +22,33 @@ about.
 
 | Transport      | Address                                            | When                                     |
 |----------------|----------------------------------------------------|------------------------------------------|
-| Unix socket    | `$XDG_RUNTIME_DIR/stt/super-stt-http.sock`         | Always                                   |
+| Unix socket    | `<runtime dir>/stt/super-stt-http.sock`            | Always                                   |
 | TCP            | `127.0.0.1:7300`                                   | On by default; `[http.tcp]` turns it off |
 
-Native Linux clients should use the Unix socket. The daemon authenticates
-peers there via `SO_PEERCRED` + `/proc/<pid>/exe`, which is what the
-consent design depends on. The TCP listener is for browser clients, which
-cannot dial a Unix socket and for which `SO_PEERCRED` does not exist — see
-[auth.md](./auth.md#tcp-bound-clients).
+The runtime directory is the per-user, owner-only directory the platform
+provides:
+
+| Platform | Runtime directory                                        | How to print it                    |
+|----------|----------------------------------------------------------|------------------------------------|
+| Linux    | `$XDG_RUNTIME_DIR`, i.e. `/run/user/<uid>`                | `echo "$XDG_RUNTIME_DIR"`          |
+| macOS    | the Darwin per-user temp dir, `/var/folders/<xx>/<hash>/T` | `getconf DARWIN_USER_TEMP_DIR`     |
+
+`/tmp/stt` is the fallback on both if the directory above is unusable. The
+daemon reads the macOS one from `confstr(_CS_DARWIN_USER_TEMP_DIR)` rather
+than `$TMPDIR`, so that a daemon started from a shell with `TMPDIR`
+overridden — or by launchd, which supplies a different environment — still
+binds where its clients look.
+
+Note that `sun_path` is four bytes shorter on macOS (104 vs 108) *and* the
+runtime directory is around 40 bytes longer, so a socket name that fits on
+Linux may not fit there.
+
+Native clients should use the Unix socket. The daemon authenticates peers
+there from the kernel's own record of the calling process — `SO_PEERCRED`
+plus `/proc/<pid>/exe` on Linux, `LOCAL_PEERCRED` plus `proc_pidpath` on
+macOS — which is what the consent design depends on. The TCP listener is for
+browser clients, which cannot dial a Unix socket and for which there are no
+peer credentials at all — see [auth.md](./auth.md#tcp-bound-clients).
 
 A port that cannot be bound is logged and skipped rather than fatal: the
 Unix socket is the daemon's primary transport, and refusing to start
@@ -326,7 +345,7 @@ The minimal recipe for a fresh client of any scope:
 
 1. Use any HTTP client your language has. Examples:
    ```bash
-   curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt-http.sock" \
+   curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock" \
         -X POST http://stt.local/auth/request \
         -H 'Content-Type: application/json' \
         -d '{"app_name":"My App","scopes":["transcribe","status"],"version":"0.1"}'
@@ -353,7 +372,7 @@ The minimal recipe for a fresh client of any scope:
 
 3. For commands, send `Authorization: Bearer <token>` on every request:
    ```bash
-   curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt-http.sock" \
+   curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock" \
         -X POST http://stt.local/transcribe \
         -H "Authorization: Bearer $STT_TOKEN" \
         -H 'Content-Type: application/json' \
@@ -363,7 +382,7 @@ The minimal recipe for a fresh client of any scope:
 4. For event streams, use any HTTP client that supports SSE (or just
    read line-by-line):
    ```bash
-   curl --unix-socket "$XDG_RUNTIME_DIR/stt/super-stt-http.sock" \
+   curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock" \
         -N \
         "http://stt.local/events?topics=recording_state,daemon_status_changed,download_progress" \
         -H "Authorization: Bearer $STT_TOKEN"

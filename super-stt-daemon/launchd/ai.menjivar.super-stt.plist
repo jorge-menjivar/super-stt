@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The macOS counterpart to systemd/super-stt.service.
+
+  A LaunchAgent, not a LaunchDaemon, and that is not a packaging preference:
+  a LaunchDaemon runs in the system context with no window server and no
+  logged-in user, where the daemon cannot post CoreGraphics key events (its
+  only write method here), cannot reach Notification Center, and cannot put
+  the consent dialog on anyone's screen. Everything the daemon does that is
+  not transcription needs the user's GUI session.
+
+  Two placeholders are substituted at install time by `just install-daemon`,
+  because launchd expands neither `$HOME` nor `~` in a plist and every path
+  here has to be absolute:
+
+    __DAEMON_BIN__  the installed daemon binary
+    __LOG_DIR__     a per-user directory for the daemon's stderr
+
+  That is the other real difference from the systemd unit, which gets to say
+  `ExecStart=super-stt-daemon` as a bare name and let systemd resolve it
+  against a fixed search path. launchd has no search path.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.menjivar.super-stt</string>
+
+    <!--
+      No arguments, and there must never be any: the daemon takes no
+      configuration on its command line (the model, its device, and the audio
+      theme are all config / `POST /v1` state), clap rejects an unknown
+      argument and exits 2 before the listener binds, and `KeepAlive` below
+      turns that into a permanent crash loop with no socket for the app or the
+      CLI to reach. `every_shipped_execstart_parses`
+      (super-stt-daemon/src/cli_tests.rs) reads this file and fails if one is
+      reintroduced.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__DAEMON_BIN__</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+      The analogue of the unit's `Restart=always`. Plain `true` rather than a
+      `SuccessfulExit=false` dictionary: a clean exit should still come back,
+      the same way it does under systemd, and the explicit way to stop the
+      daemon is `launchctl bootout` (what `just stop-daemon` runs), which
+      overrides KeepAlive.
+    -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- `RestartSec=5`. -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!--
+      Keeps the daemon off the efficiency-core/throttled tier App Nap would
+      otherwise put a background agent on. It holds a model in memory and is
+      expected to answer a keypress immediately.
+    -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <!--
+      There is no journal here, so the daemon's stderr goes to a file.
+      `just logs-daemon` tails it.
+    -->
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/daemon.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUST_LOG</key>
+        <string>info</string>
+    </dict>
+</dict>
+</plist>
