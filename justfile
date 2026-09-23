@@ -481,8 +481,11 @@ run-app *args:
 
     # Built, signed, then run as a separate step: `cargo run` would produce the
     # binary and exec it in one go, leaving no point at which to re-sign.
-    cargo build -p {{ app_name }} --bin {{ app_name }} {{ args }}
-    just codesign-macos target/debug/{{ app_name }} {{ macos_sign_prefix }}-app
+    # Cargo reports where it put the binary, which follows `--release`,
+    # `--profile` and `CARGO_TARGET_DIR`.
+    exe=$(cargo build -p {{ app_name }} --bin {{ app_name }} {{ args }} --message-format=json-render-diagnostics \
+        | sed -n 's|.*"executable":"\([^"]*/{{ app_name }}\)".*|\1|p')
+    just codesign-macos "$exe" {{ macos_sign_prefix }}-app
 
     # Run the built binary directly instead of via `cargo run`, because
     # signing has to be the last thing that touches it. Cargo keeps the real
@@ -494,7 +497,7 @@ run-app *args:
     # the deps artifact's, and macOS quietly drops every grant again.
 
     exec env RUST_BACKTRACE=full RUST_LOG=super_stt_app=debug,super_stt_shared=debug \
-        ./target/debug/{{ app_name }}
+        "$exe"
 
 # Run the daemon for testing purposes.
 #
@@ -513,11 +516,15 @@ run-daemon *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    # Cargo reports where it put the daemon, which follows `--release`,
+    # `--profile` and `CARGO_TARGET_DIR`.
     if [ "$(uname -s)" = "Darwin" ]; then
-        cargo build -p {{ daemon_bin_name }} --bin {{ daemon_bin_name }} {{ args }}
-        just codesign-macos target/debug/{{ daemon_bin_name }} {{ macos_sign_prefix }}-daemon
+        exe=$(cargo build -p {{ daemon_bin_name }} --bin {{ daemon_bin_name }} {{ args }} --message-format=json-render-diagnostics \
+            | sed -n 's|.*"executable":"\([^"]*/{{ daemon_bin_name }}\)".*|\1|p')
+        just codesign-macos "$exe" {{ macos_sign_prefix }}-daemon
     else
-        cargo build --bin {{ consent_name }} --bin {{ daemon_bin_name }} {{ args }}
+        exe=$(cargo build --bin {{ consent_name }} --bin {{ daemon_bin_name }} {{ args }} --message-format=json-render-diagnostics \
+            | sed -n 's|.*"executable":"\([^"]*/{{ daemon_bin_name }}\)".*|\1|p')
     fi
 
     # Run the built binary directly instead of via `cargo run`, because
@@ -530,7 +537,7 @@ run-daemon *args:
     # the deps artifact's, and macOS quietly drops every grant again.
 
     exec env RUST_BACKTRACE=full RUST_LOG=super_stt_daemon=debug \
-        ./target/debug/{{ daemon_bin_name }} -v
+        "$exe" -v
 
 # Run the CLI for testing purposes (talks to the running daemon over the HTTP socket)
 # Usage: just run-cli [ping|status|record|stop|logout] [args]
@@ -538,8 +545,10 @@ run-cli *args:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    cargo build -p {{ cli_name }} --bin {{ cli_name }}
-    just codesign-macos target/debug/{{ cli_name }} {{ macos_sign_prefix }}-cli
+    # Cargo reports where it put the binary, which follows `CARGO_TARGET_DIR`.
+    exe=$(cargo build -p {{ cli_name }} --bin {{ cli_name }} --message-format=json-render-diagnostics \
+        | sed -n 's|.*"executable":"\([^"]*/{{ cli_name }}\)".*|\1|p')
+    just codesign-macos "$exe" {{ macos_sign_prefix }}-cli
 
     # Run the built binary directly instead of via `cargo run`, because
     # signing has to be the last thing that touches it. Cargo keeps the real
@@ -551,7 +560,7 @@ run-cli *args:
     # the deps artifact's, and macOS quietly drops every grant again.
 
     exec env RUST_BACKTRACE=full RUST_LOG=super_stt_cli=debug,super_stt_shared=debug \
-        ./target/debug/{{ cli_name }} {{ args }}
+        "$exe" {{ args }}
 
 # Run the consent dialog on its own, without the daemon. The dialog is
 # env-driven rather than argument-driven, so this fills in a plausible request;
