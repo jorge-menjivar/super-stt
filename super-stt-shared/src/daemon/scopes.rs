@@ -1,43 +1,50 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The auth scope catalog, shared so the daemon (which validates
-//! `/auth/request`) and the consent dialog (which describes each scope to the
-//! user) can't drift. When they drift, a scope the daemon accepts but the
-//! consent binary doesn't recognize renders the "unknown scope — deny is safe"
-//! warning on a legitimate prompt, teaching users to distrust real requests.
+//! Super STT's auth scope catalog: the scopes every daemon understands
+//! ([`super_engine_protocol::scopes::CORE_SCOPES`]) plus Super STT's own.
+//! Shared so the daemon (which validates `/auth/request`) and the consent
+//! dialog (which describes each scope to the user) can't drift. When they
+//! drift, a scope the daemon accepts but the consent binary doesn't recognize
+//! renders the "unknown scope — deny is safe" warning on a legitimate prompt,
+//! teaching users to distrust real requests.
 
-/// The complete set of scope tokens the daemon understands, in wire
-/// (`snake_case`) form. A token may be granted any non-empty subset. Source of
-/// truth for `/auth/request` validation and the consent dialog; mirrors the
-/// scope catalog in `docs/protocol/auth.md`.
-pub const KNOWN_SCOPES: &[&str] = &[
-    "transcribe",
-    "settings",
-    "secrets",
-    "status",
-    "recording_events",
-    "audio_visualization",
-    "global_transcriptions",
-    "daemon_status",
-];
+use super_engine_protocol::{SUPER_STT, scopes};
+
+/// Every scope token the daemon understands, in wire (`snake_case`) form. A
+/// token may be granted any non-empty subset. Source of truth for
+/// `/auth/request` validation and the consent dialog; mirrors the scope
+/// catalog in `docs/protocol/auth.md`.
+pub fn known_scopes() -> impl Iterator<Item = &'static str> {
+    scopes::known_scopes(&SUPER_STT)
+}
 
 /// True if `s` is a recognized scope token.
 #[must_use]
 pub fn is_known_scope(s: &str) -> bool {
-    KNOWN_SCOPES.contains(&s)
+    scopes::is_known_scope(&SUPER_STT, s)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{KNOWN_SCOPES, is_known_scope};
+    use super::{is_known_scope, known_scopes};
 
+    /// The catalog is the one Super STT shipped before it shared the
+    /// definition, so no client's token loses or gains a scope.
     #[test]
-    fn known_scopes_are_recognized() {
-        for s in KNOWN_SCOPES {
-            assert!(is_known_scope(s), "{s} should be a known scope");
-        }
-        assert!(
-            is_known_scope("secrets"),
-            "secrets must be an accepted scope"
+    fn the_catalog_is_the_one_super_stt_shipped() {
+        let mut known: Vec<&str> = known_scopes().collect();
+        known.sort_unstable();
+        assert_eq!(
+            known,
+            [
+                "audio_visualization",
+                "daemon_status",
+                "global_transcriptions",
+                "recording_events",
+                "secrets",
+                "settings",
+                "status",
+                "transcribe",
+            ]
         );
     }
 

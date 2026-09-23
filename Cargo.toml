@@ -149,6 +149,10 @@
       git = "https://github.com/super-libre/super-engine",
       rev = "5cc0eeaef7ae5ea75f15471d9b16c0c269822daa",
     }
+    super-engine-protocol = {
+      git = "https://github.com/super-libre/super-engine",
+      rev = "5cc0eeaef7ae5ea75f15471d9b16c0c269822daa",
+    }
     super-engine-spec = {
       git = "https://github.com/super-libre/super-engine",
       rev = "5cc0eeaef7ae5ea75f15471d9b16c0c269822daa",

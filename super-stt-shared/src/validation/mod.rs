@@ -4,14 +4,28 @@ use anyhow::Result;
 
 mod inputs;
 pub mod limits;
-mod paths;
 
 pub use inputs::{
     validate_audio_data, validate_command, validate_event_types, validate_json_value,
     validate_limit, validate_optional_string, validate_required_string, validate_sample_rate,
     validate_string,
 };
-pub use paths::{SUN_PATH_MAX, get_http_socket_path, secure_runtime_path};
+pub use super_engine_protocol::runtime::SUN_PATH_MAX;
+
+/// Super STT's runtime path `<runtime dir>/stt/<relative>`, validated as
+/// [`super_engine_protocol::runtime::secure_runtime_path`] describes.
+#[must_use]
+pub fn secure_runtime_path(relative: &str) -> std::path::PathBuf {
+    super_engine_protocol::runtime::secure_runtime_path(&super_engine_protocol::SUPER_STT, relative)
+}
+
+/// The daemon's HTTP socket, `super-stt-http.sock`, or
+/// `SUPER_STT_HTTP_SOCKET` when set. See
+/// [`super_engine_protocol::runtime::get_http_socket_path`].
+#[must_use]
+pub fn get_http_socket_path() -> std::path::PathBuf {
+    super_engine_protocol::runtime::get_http_socket_path(&super_engine_protocol::SUPER_STT)
+}
 
 /// Validation errors for better error reporting
 #[derive(Debug, thiserror::Error)]

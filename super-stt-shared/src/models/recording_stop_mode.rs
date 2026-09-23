@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use super::wire_enum::wire_enum_strings;
+use super_engine_protocol::wire_enum_strings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RecordingStopMode {

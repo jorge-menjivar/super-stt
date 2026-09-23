@@ -64,7 +64,7 @@ pub const UNKNOWN_SCOPE_PERMISSIONS: &[&str] = &[
 /// The bullet list for one scope, or [`UNKNOWN_SCOPE_PERMISSIONS`] when the
 /// scope is not one this build knows.
 ///
-/// Every scope in [`crate::daemon::scopes::KNOWN_SCOPES`] must have an arm
+/// Every scope in [`crate::daemon::scopes::known_scopes`] must have an arm
 /// here; the fallback is a warning shown to the user, not a default.
 #[must_use]
 pub fn permissions_for_scope(scope: &str) -> &'static [&'static str] {
@@ -111,7 +111,7 @@ mod tests {
     /// so this pins the two lists together (Tier 2 #8).
     #[test]
     fn every_known_scope_has_specific_permissions() {
-        for scope in crate::daemon::scopes::KNOWN_SCOPES {
+        for scope in crate::daemon::scopes::known_scopes() {
             assert!(
                 !std::ptr::eq(permissions_for_scope(scope), UNKNOWN_SCOPE_PERMISSIONS),
                 "scope `{scope}` has no specific consent description; add an arm to permissions_for_scope"
