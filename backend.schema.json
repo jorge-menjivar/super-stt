@@ -434,6 +434,11 @@
       "additionalProperties": false,
       "description": "`[capabilities]` — transport extensions beyond the base `/v1` contract.",
       "properties": {
+        "context": {
+          "default": false,
+          "description": "Opt into being handed the user's dictation context: an `x-stt-prompt`\nheader and an `x-stt-vocabulary` header, on every `/v1` request.\nDefault `false`, which means neither header is sent.\n\nUnlike `websocket` this is not transport-restricted, and the deviation\nis deliberate: both headers ride the ordinary request every backend\nalready receives, so a `subprocess` backend can use them exactly as a\n`wasm` one does. The flag exists to keep the headers off backends that\nwould not know what to do with them, not to gate a transport.\n\nDeclared per backend rather than per model, because it describes what\nthe code reading the request does, and that code is the backend's.",
+          "type": "boolean"
+        },
         "websocket": {
           "default": false,
           "description": "Opt into the realtime WebSocket import/export. wasm-only — a\n`subprocess` backend declaring this is rejected at discovery.\nRequired for any model with `realtime = true`. Default `false`.",
