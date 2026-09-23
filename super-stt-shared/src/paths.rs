@@ -88,7 +88,8 @@ mod tests {
     use super::{cache_dir, config_dir, data_dir};
 
     /// Every base has to be redirectable by its XDG variable, on every
-    /// platform.
+    /// platform, and has to land somewhere absolute under the user's own tree
+    /// without it.
     ///
     /// This is the property the daemon's integration tests rest on: they
     /// spawn a real daemon with these variables pointed at a tempdir. Where
@@ -97,8 +98,9 @@ mod tests {
     /// `xdg_override` existed, because `dirs` reads `~/Library/…` and ignores
     /// the environment.
     ///
-    /// One test rather than three: they share the process environment, so
-    /// separate tests setting and unsetting these would race each other.
+    /// One test for all three bases and their defaults: they share the process
+    /// environment, so separate tests setting and unsetting these would race
+    /// each other.
     #[test]
     fn every_base_dir_honors_its_xdg_override() {
         let root = std::env::temp_dir().join("super-stt-paths-test");
@@ -127,24 +129,21 @@ mod tests {
                 "{var} accepted a relative path"
             );
 
+            // Unset, the base falls back to the platform default, whatever it
+            // is.
             unsafe {
                 std::env::remove_var(var);
             }
-        }
-    }
-
-    /// With nothing set, each base must still land somewhere absolute under
-    /// the user's own tree — the platform default, whatever it is.
-    #[test]
-    fn defaults_are_absolute_and_named_for_the_app() {
-        for var in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"] {
-            unsafe {
-                std::env::remove_var(var);
-            }
-        }
-        for dir in [config_dir(), data_dir(), cache_dir()] {
-            assert!(dir.is_absolute(), "{} is not absolute", dir.display());
-            assert_eq!(dir.file_name().and_then(|n| n.to_str()), Some("super-stt"));
+            let default = dir();
+            assert!(
+                default.is_absolute(),
+                "{var} unset: {} is not absolute",
+                default.display()
+            );
+            assert_eq!(
+                default.file_name().and_then(|n| n.to_str()),
+                Some("super-stt")
+            );
         }
     }
 }
