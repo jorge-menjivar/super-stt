@@ -5179,7 +5179,7 @@
             }
           },
           "400": {
-            "description": "`audio_data` was not an array of numbers, or `stream_realtime` was sent with it.",
+            "description": "`audio_data` was not an array of numbers, `stream_realtime` was sent with it, or a microphone option such as `stop_mode` had an invalid value.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7710,6 +7710,13 @@
         "type": "object",
         "description": "Pre-captured one-shot: transcribe a supplied `audio_data` buffer without\ntouching the microphone and return a single JSON `{ transcription }` (or a\ncoded error). Rejects `stream_realtime` combined with `audio_data` per the\ncontract.\nThe body of `POST /transcribe`. Every field is optional; which combination\nyou send selects one of the four behaviours the endpoint documents.\n\nDeclared, not deserialized. The handler reads the body as raw JSON so it can\n*move* a large `audio_data` buffer out of it rather than copying it into a\nsecond owned `Vec`; this type is what that body's shape is, published in the\n`OpenAPI` document and kept beside the handler that parses it.",
         "properties": {
+          "audio_cues": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Microphone paths only: the start and stop cues for this recording.\nAbsent follows the configured audio theme; `false` plays none; `true`\nplays them even when the theme is `silent`, using the default theme's.\nThe configured volume still applies. Anything but a boolean is a `400`."
+          },
           "audio_data": {
             "type": [
               "array",
