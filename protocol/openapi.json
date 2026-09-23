@@ -289,6 +289,255 @@
         ]
       }
     },
+    "/v1/backend/{backend_id}/context": {
+      "get": {
+        "tags": [
+          "contexts"
+        ],
+        "summary": "Read a backend's dictation context (scope: settings)",
+        "description": "Which context this backend uses, and the one that resolves for it.\n\n`mode` says which of three: `active` means it follows the context in force (`GET /context/active`), which is the default and what almost every backend should be; `pinned` means it uses `id` whatever is active; `none` means it is sent no context.\n\n`context` is what it will actually be sent, already resolved — a client showing what a backend will hear should read that rather than re-derive it.",
+        "operationId": "get_backend_context",
+        "parameters": [
+          {
+            "name": "backend_id",
+            "in": "path",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "github.com%2Facme%2Fwhisper"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What this backend uses.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackendContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No installed backend has that `source` (`unknown_backend`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "contexts"
+        ],
+        "summary": "Point a backend at a dictation context (scope: settings)",
+        "description": "Pins this backend to `id`, or — with `id` as `null` — stops sending it any context at all. Either way it stops following the active one; `DELETE` is how it goes back to that.\n\nThe pin is what makes one backend differ from the rest: a cloud transcriber that bills per token can be given a short vocabulary while everything else follows the context the user picked, without either choice disturbing the other.\n\nTakes effect on the backend's next request, not on a reload.",
+        "operationId": "set_backend_context",
+        "parameters": [
+          {
+            "name": "backend_id",
+            "in": "path",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "github.com%2Facme%2Fwhisper"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackendContextWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored; this is what the backend uses now.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackendContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No installed backend has that `source` (`unknown_backend`), or no context has that id (`not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "contexts"
+        ],
+        "summary": "Put a backend back on the active context (scope: settings)",
+        "description": "Clears the override, so this backend follows whichever context is active — the default for every backend that has never been pointed elsewhere.\n\nDistinct from `POST {\"id\": null}`, which pins it to *no* context and keeps it there while the active one changes around it.",
+        "operationId": "delete_backend_context",
+        "parameters": [
+          {
+            "name": "backend_id",
+            "in": "path",
+            "description": "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "github.com%2Facme%2Fwhisper"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cleared; this backend now follows the active context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackendContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No installed backend has that `source` (`unknown_backend`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
     "/v1/backend/{backend_id}/option/list": {
       "get": {
         "tags": [
@@ -1038,6 +1287,450 @@
           {
             "session_token": [
               "secrets"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/context/active": {
+      "get": {
+        "tags": [
+          "contexts"
+        ],
+        "summary": "Read the active dictation context (scope: settings)",
+        "description": "The context in force by default, as both its id and the object itself, so a picker can render the current choice in one request.\n\nDefault, not universal: a backend pointed somewhere else by `POST /backend/{backend_id}/context` ignores this.",
+        "operationId": "get_active_context",
+        "responses": {
+          "200": {
+            "description": "The active selection; `id` is `null` when none is active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "contexts"
+        ],
+        "summary": "Choose the active dictation context (scope: settings)",
+        "description": "Puts a context in force by default, or — with `id` as `null` — leaves none active.\n\nEvery backend that has not been pointed elsewhere follows this, and picks it up on its next request rather than on a reload.",
+        "operationId": "set_active_context",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Chosen; this is the selection now in force.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No context has that id (`not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/context/list": {
+      "get": {
+        "tags": [
+          "contexts"
+        ],
+        "summary": "List dictation contexts (scope: settings)",
+        "description": "Every context the user has, in the order they arranged them, plus the id of the one in force.\n\nA context describes what is being dictated rather than how one backend is configured: a `prompt` for a model that follows instructions, and a `vocabulary` of terms to bias recognition toward for one that does not — which is most transcription models. The daemon delivers whichever context resolves for a backend to that backend, if its manifest says it can use one.\n\n`active` is the id of the context in force by default. A backend may be pointed at a different one, or at none — see `GET /backend/{backend_id}/context`.",
+        "operationId": "list_contexts",
+        "responses": {
+          "200": {
+            "description": "The contexts and the active selection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextCatalog"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/context/{id}": {
+      "get": {
+        "tags": [
+          "contexts"
+        ],
+        "summary": "Read one dictation context (scope: settings)",
+        "description": "One context by id: its name, its prompt, and its vocabulary as an ordered list of terms.\n\nThe vocabulary is a list rather than one blob of text because every consumer splits it differently — Deepgram wants one `keyterm` per term, `whisper-1` wants them joined — and a term holding whatever delimiter a blob chose, like `Menjivar, Jorge`, would be ambiguous. The daemon splits once so nobody downstream guesses.",
+        "operationId": "get_context",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The context's id, as `GET /context/list` reports it.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "coding"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OneContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No context has that id (`unknown_context`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "contexts"
+        ],
+        "summary": "Create or replace a dictation context (scope: settings)",
+        "description": "Stores this context under `id`, replacing one already there. Answers with the context as stored, so a client can render the result without a second read.\n\nUpsert rather than a create/update pair, because `id` is the client's to choose — there is no id-minting step for two verbs to straddle. An existing context keeps its place in the list; a new one is appended.\n\n`id` is a slug: 1 to 64 characters of lowercase letters, digits, `-` and `_`. `active` and `list` are refused, since both are paths in this namespace and a context taking either would be stored and then be unreachable.\n\nBlank vocabulary terms are dropped and each term is trimmed. The stored prompt is at most 4000 characters and the vocabulary at most 200 terms or 4000 characters, because a context is delivered to a backend as request headers and one that cannot be sent is better refused than stored.\n\nA running backend picks this up on its next request — there is no reload to do.",
+        "operationId": "set_context",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The id to store it under. A new one creates a context; an existing one replaces it.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "coding"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored; this is the context as saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OneContext"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The id is not a slug, is reserved, the name is empty, or the prompt or vocabulary is longer than can be delivered (`invalid_value`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "contexts"
+        ],
+        "summary": "Delete a dictation context (scope: settings)",
+        "description": "Removes the context. If it was the active one, nothing is active afterwards.\n\nA backend *pinned* to it keeps its pin, and resolves to no context until the id exists again — deleting a context is not the same as undoing the choice to pin a backend to it, and re-creating it restores what the user set.",
+        "operationId": "delete_context",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The context's id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "coding"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ack"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token unknown, expired, or its binary changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks the `settings` scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No context has that id (`not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Per-client rate limit hit; back off and retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_token": [
+              "settings"
             ]
           }
         ]
@@ -5528,6 +6221,50 @@
           }
         }
       },
+      "ActiveContext": {
+        "type": "object",
+        "description": "Which context is in force by default.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "context": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DictationContext",
+                "description": "The context that id names, so a picker can render the current choice\nwithout a second request. `null` whenever `id` is."
+              }
+            ]
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The id in force, or `null` when none is."
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
+      "ActiveWrite": {
+        "type": "object",
+        "description": "Which context to put in force.",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The id to activate, or `null` to leave no context active."
+          }
+        }
+      },
       "AudioTheme": {
         "type": "string",
         "enum": [
@@ -5710,6 +6447,56 @@
           }
         }
       },
+      "BackendContext": {
+        "type": "object",
+        "description": "Which context a backend uses, and the one it resolves to.",
+        "required": [
+          "status",
+          "mode"
+        ],
+        "properties": {
+          "context": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DictationContext",
+                "description": "The context this backend will actually be sent, resolved. `null` when\nnothing resolves — including when it is pinned to a context that has\nsince been deleted, which falls back to nothing rather than to the\nactive one."
+              }
+            ]
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The id this backend is pinned to. Only meaningful when `mode` is\n`pinned`, and `null` otherwise."
+          },
+          "mode": {
+            "type": "string",
+            "description": "Which of the three this backend is in: `active` (it follows the active\ncontext, the default), `pinned` (it uses `id`), or `none` (it is sent no\ncontext at all).",
+            "example": "active"
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
+      "BackendContextWrite": {
+        "type": "object",
+        "description": "Which context to point a backend at.",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The context id to pin this backend to, or `null` to send it no context\nat all. To put it back on the active context, `DELETE` instead."
+          }
+        }
+      },
       "BackendInfo": {
         "type": "object",
         "description": "A single installed backend and everything the settings UI needs to render\nits section.",
@@ -5721,6 +6508,10 @@
           "options"
         ],
         "properties": {
+          "accepts_context": {
+            "type": "boolean",
+            "description": "Whether this backend declared `[capabilities] context = true`, and so is\nhanded the user's [dictation context](crate::models::contexts).\n\nPublished so a settings UI can say which installed backends will\nactually hear a vocabulary the user typed. Without it the page can only\nlist contexts and hope; a backend that ignores the headers has no way to\nsay so at runtime, and the user would have no way to tell the difference\nbetween \"this did nothing\" and \"this is not working\".\n\n`default` so a payload from a daemon older than the field still\ndeserializes, reading as \"does not accept one\" — which is what such a\ndaemon would do anyway, since it sends the headers to nobody."
+          },
           "allowed_hosts": {
             "type": "array",
             "items": {
@@ -6006,6 +6797,55 @@
           }
         }
       },
+      "ContextCatalog": {
+        "type": "object",
+        "description": "Every context, and which one is in force.",
+        "required": [
+          "status",
+          "contexts"
+        ],
+        "properties": {
+          "active": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The id of the context in force, or `null` when none is."
+          },
+          "contexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DictationContext"
+            },
+            "description": "In the order the user arranged them, which is the order to render."
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
+      "ContextWrite": {
+        "type": "object",
+        "description": "The context to store. Its id comes from the path.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "What the user calls it. Required — a context with no name cannot be\npicked out of a list."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Instructions for a model that follows them. Empty is normal."
+          },
+          "vocabulary": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Terms to bias recognition toward, in the order to send them. Blank\nentries are dropped rather than refused: a settings UI editing one\ninput per term keeps an empty row for the next one."
+          }
+        }
+      },
       "CudaHostInfo": {
         "type": "object",
         "description": "The installed NVIDIA driver's CUDA version, e.g. `\"13.3\"`.",
@@ -6117,6 +6957,34 @@
           "status": {
             "type": "string",
             "example": "success"
+          }
+        }
+      },
+      "DictationContext": {
+        "type": "object",
+        "description": "One named dictation context.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable identifier, chosen by the client that created it. Used in every\npath that addresses this context and in the active selection, so it\nnever changes — renaming edits [`name`](Self::name) alone."
+          },
+          "name": {
+            "type": "string",
+            "description": "What the user calls it: \"Coding\", \"Email\". Free text, and the only\nfield a rename touches."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Instructions for a model that follows them. Empty is normal and\ncommon — a context that is only a vocabulary is a perfectly good\ncontext."
+          },
+          "vocabulary": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Terms to bias recognition toward, in the order the user wrote them."
           }
         }
       },
@@ -6688,6 +7556,23 @@
         "properties": {
           "notification_method": {
             "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          }
+        }
+      },
+      "OneContext": {
+        "type": "object",
+        "description": "One context.",
+        "required": [
+          "status",
+          "context"
+        ],
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/DictationContext"
           },
           "status": {
             "type": "string",
@@ -7996,6 +8881,10 @@
     {
       "name": "registry",
       "description": "The published backend catalog: browse, install, update, uninstall."
+    },
+    {
+      "name": "contexts",
+      "description": "Named dictation contexts — what the user is dictating, as a prompt for a model that follows instructions and a vocabulary of terms for one that does not. One is active at a time, and a backend may be pointed at another or at none."
     }
   ]
 }
