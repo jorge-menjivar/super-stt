@@ -6868,7 +6868,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "super-engine-client"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=73db25295a7bcac5252bfc3d63be244327ed9728#73db25295a7bcac5252bfc3d63be244327ed9728"
+source = "git+https://github.com/super-libre/super-engine?rev=dd6d97f4addf17c78e4d89a51da9e2112b972b97#dd6d97f4addf17c78e4d89a51da9e2112b972b97"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -6887,13 +6887,14 @@ dependencies = [
 [[package]]
 name = "super-engine-daemon"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=73db25295a7bcac5252bfc3d63be244327ed9728#73db25295a7bcac5252bfc3d63be244327ed9728"
+source = "git+https://github.com/super-libre/super-engine?rev=dd6d97f4addf17c78e4d89a51da9e2112b972b97#dd6d97f4addf17c78e4d89a51da9e2112b972b97"
 dependencies = [
  "anyhow",
  "axum",
  "base64",
  "chrono",
  "futures-util",
+ "gpu-probe",
  "hex",
  "http-body-util",
  "hyper",
@@ -6901,8 +6902,10 @@ dependencies = [
  "keyring",
  "libc",
  "log",
+ "parking_lot",
  "reqwest",
  "ring",
+ "semver",
  "serde",
  "serde_json",
  "super-engine-forge",
@@ -6919,7 +6922,7 @@ dependencies = [
 [[package]]
 name = "super-engine-forge"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=73db25295a7bcac5252bfc3d63be244327ed9728#73db25295a7bcac5252bfc3d63be244327ed9728"
+source = "git+https://github.com/super-libre/super-engine?rev=dd6d97f4addf17c78e4d89a51da9e2112b972b97#dd6d97f4addf17c78e4d89a51da9e2112b972b97"
 dependencies = [
  "async-trait",
  "log",
@@ -6933,7 +6936,7 @@ dependencies = [
 [[package]]
 name = "super-engine-protocol"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=73db25295a7bcac5252bfc3d63be244327ed9728#73db25295a7bcac5252bfc3d63be244327ed9728"
+source = "git+https://github.com/super-libre/super-engine?rev=dd6d97f4addf17c78e4d89a51da9e2112b972b97#dd6d97f4addf17c78e4d89a51da9e2112b972b97"
 dependencies = [
  "dirs",
  "env_logger",
@@ -6949,7 +6952,7 @@ dependencies = [
 [[package]]
 name = "super-engine-spec"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=73db25295a7bcac5252bfc3d63be244327ed9728#73db25295a7bcac5252bfc3d63be244327ed9728"
+source = "git+https://github.com/super-libre/super-engine?rev=dd6d97f4addf17c78e4d89a51da9e2112b972b97#dd6d97f4addf17c78e4d89a51da9e2112b972b97"
 dependencies = [
  "hex",
  "ring",

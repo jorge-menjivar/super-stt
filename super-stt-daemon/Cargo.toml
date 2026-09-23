@@ -56,7 +56,6 @@
         default-features = false,
         features = ["ring", "std", "tls12"]
     }
-    semver = "1.0.28"
     serde.workspace = true
     serde_json.workspace = true
     strum.workspace = true
@@ -150,6 +149,8 @@
     hyper-util = { version = "0.1", features = ["tokio"] }
     libc.workspace = true
     mockito = "1.7.2"
+    # The daemon's own version must parse, for the index `min_client` check.
+    semver = "1.0.28"
     tempfile = "3.27.0"
     # `test-util` enables `#[tokio::test(start_paused = true)]`, so tests covering
     # the notice key-release delay assert it without spending it in wall-clock time.

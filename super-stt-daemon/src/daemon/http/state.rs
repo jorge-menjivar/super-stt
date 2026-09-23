@@ -29,7 +29,9 @@ impl AppState {
         Self {
             daemon,
             auth,
-            registry_client: Arc::new(crate::registry::client::Client::from_env()),
+            registry_client: Arc::new(crate::registry::client::Client::from_env(
+                crate::registry::DAEMON,
+            )),
             install_inflight: Arc::new(ParkingRwLock::new(HashSet::new())),
         }
     }
