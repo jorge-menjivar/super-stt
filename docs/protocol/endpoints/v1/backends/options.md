@@ -136,6 +136,15 @@ running backend kept the old value. No stage is left with nothing loaded.
 `base_url` is validated here rather than at the next load: a value no host can
 be read from is refused with `400 invalid_value`, and nothing is stored.
 
+Every option value is checked against what a request header can carry, because
+that is how it is delivered: the daemon injects it as `x-stt-option-<name>` on
+every `/v1` call. A value longer than 4000 characters, or carrying a control
+character, is refused with `400 invalid_value` and nothing is stored. Refusing
+the write is the only point at which the user learns — a stored value that
+cannot be delivered reports success, shows in the settings UI, and then fails
+every request the backend makes with an error naming a header rather than the
+setting they typed.
+
 **Request:**
 
 ```http
@@ -192,7 +201,7 @@ Authorization: Bearer stt_…64hex…
 | HTTP | `message`         | Meaning                                              |
 |------|-------------------|------------------------------------------------------|
 | 400  | `invalid_request` | Malformed body, or an empty `value`.                 |
-| 400  | `invalid_value`   | The option declares `choices` and the posted value is not one of them. The `message` names the values on offer. |
+| 400  | `invalid_value`   | The option declares `choices` and the posted value is not one of them (the `message` names the values on offer); or the value is one a request header cannot carry — over 4000 characters, or containing a control character. |
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`.             |
 | 403  | `scope_denied`    | Token lacks the `settings` scope.                    |
 | 404  | `unknown_backend` | No installed backend has that `source`.             |

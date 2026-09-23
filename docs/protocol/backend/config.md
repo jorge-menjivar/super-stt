@@ -253,6 +253,14 @@ contract and not only a hint: `POST /backend/{id}/option/{name}` answers
 switch over the two values its type names — and the `default`, when there is
 one, has to be on the list. Both are refused at publication.
 
+An option value is delivered as an `x-stt-option-<name>` request header, which
+sets the shape a value may take: at most 4000 characters, and no control
+characters. The daemon refuses a user's write of anything else with
+`400 invalid_value`, and a `default` that breaks the same rule is refused at
+publication — a default is what a user gets for touching nothing, so one that
+cannot be delivered would break the backend for everyone who installs it and
+could not be undone from the settings UI.
+
 | Field         | Type           | Required | Notes                                                  |
 |---------------|----------------|----------|--------------------------------------------------------|
 | `name`        | string         | yes      | snake_case identifier the backend reads the value by. `[a-z][a-z0-9_]*`, unique within the table. |
