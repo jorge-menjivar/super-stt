@@ -459,11 +459,11 @@ launchd-load target plist:
     echo "   Retry by hand: launchctl bootstrap {{ launchd_domain }} \"{{ plist }}\"" >&2
     exit 1
 
-# `-p` is load-bearing, not decoration.
+# `-p` is load-bearing on macOS, and left off on Linux.
 #
-# A bare `cargo run --bin X` selects every workspace member for feature
-# resolution (there is no `default-members`), so Cargo builds ONE libcosmic
-# unit carrying the union of every member's features. The COSMIC applet asks
+# A bare `cargo build --bin X` resolves features across every default member,
+# so Cargo builds ONE libcosmic unit carrying the union of every member's
+# features. The COSMIC applet asks
 # for `applet`, so that union always contains it — and `applet` reaches
 # cosmic-panel-config -> smithay-client-toolkit -> xkbcommon via pkg-config,
 # which has no macOS build. The app then fails to build on macOS even though
@@ -473,6 +473,15 @@ launchd-load target plist:
 # This is also why `just run-daemon` used to fail here: it built the consent
 # helper and the daemon in one invocation, and the app's `applet` came along
 # for the ride.
+#
+# On Linux that union is what ships: the release workflow builds every binary
+# in one invocation. Narrowing it there changes the binary, not just the
+# build. The daemon built with `-p` gets zbus without its tokio executor and
+# a different Wayland client backend. So Linux keeps `--bin` alone, and a
+# binary built here is the one that ships.
+app_select := if os() == "macos" { "-p " + app_name + " --bin " + app_name } else { "--bin " + app_name }
+daemon_select := if os() == "macos" { "-p " + daemon_bin_name + " --bin " + daemon_bin_name } else { "--bin " + daemon_bin_name }
+cli_select := if os() == "macos" { "-p " + cli_name + " --bin " + cli_name } else { "--bin " + cli_name }
 
 # Run the app for testing purposes
 run-app *args:
@@ -483,7 +492,7 @@ run-app *args:
     # binary and exec it in one go, leaving no point at which to re-sign.
     # Cargo reports where it put the binary, which follows `--release`,
     # `--profile` and `CARGO_TARGET_DIR`.
-    exe=$(cargo build -p {{ app_name }} --bin {{ app_name }} {{ args }} --message-format=json-render-diagnostics \
+    exe=$(cargo build {{ app_select }} {{ args }} --message-format=json-render-diagnostics \
         | sed -n 's|.*"executable":"\([^"]*/{{ app_name }}\)".*|\1|p')
     just codesign-macos "$exe" {{ macos_sign_prefix }}-app
 
@@ -546,7 +555,7 @@ run-cli *args:
     set -euo pipefail
 
     # Cargo reports where it put the binary, which follows `CARGO_TARGET_DIR`.
-    exe=$(cargo build -p {{ cli_name }} --bin {{ cli_name }} --message-format=json-render-diagnostics \
+    exe=$(cargo build {{ cli_select }} --message-format=json-render-diagnostics \
         | sed -n 's|.*"executable":"\([^"]*/{{ cli_name }}\)".*|\1|p')
     just codesign-macos "$exe" {{ macos_sign_prefix }}-cli
 
@@ -689,11 +698,11 @@ run-applet-right *args:
 run-applet-full *args:
     env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }} -- --side full
 
-# Build only the app. `-p` for the reason given above `run-app`.
+# Build only the app. The package selection is explained above `run-app`.
 build-app *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build --release -p {{ app_name }} --bin {{ app_name }} {{ args }}
+    cargo build --release {{ app_select }} {{ args }}
     just codesign-macos target/release/{{ app_name }} {{ macos_sign_prefix }}-app
 
 # Build only the daemon.
@@ -703,14 +712,14 @@ build-app *args:
 build-daemon *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build --release -p {{ daemon_bin_name }} --bin {{ daemon_bin_name }} {{ args }}
+    cargo build --release {{ daemon_select }} {{ args }}
     just codesign-macos target/release/{{ daemon_bin_name }} {{ macos_sign_prefix }}-daemon
 
 # Build only the CLI
 build-cli *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build --release -p {{ cli_name }} --bin {{ cli_name }} {{ args }}
+    cargo build --release {{ cli_select }} {{ args }}
     just codesign-macos target/release/{{ cli_name }} {{ macos_sign_prefix }}-cli
 
 # Build only the installer/self-updater
