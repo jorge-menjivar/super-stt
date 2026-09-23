@@ -94,10 +94,11 @@ pub(super) fn download_split(app: &AppModel) -> (Element<'_, Message>, Element<'
     (toolbar, list)
 }
 
-/// Search + filter toolbar for the Browse tab. Top row: a prominent search
-/// field (with a built-in clear button) plus the Add-backend and Refresh
-/// actions. Bottom row: the "Runs on" and "Kind" segmented filters, the
-/// incompatible toggle, and — pushed to the right — the live result count.
+/// Search + filter toolbar for the Browse tab. Top to bottom: the live result
+/// count; a prominent search field (with a built-in clear button) beside the
+/// overflow menu that holds Add backend and Refresh; then the "Runs on" and
+/// "Kind" segmented filters and the incompatible toggle, which wrap onto a
+/// second line when they do not fit.
 pub(super) fn download_toolbar<'a>(
     app: &'a AppModel,
     count: Element<'a, Message>,
@@ -165,7 +166,7 @@ pub(super) fn download_toolbar<'a>(
         .vertical_spacing(spacing.space_xs);
 
     // The result count gets its own short, left-aligned row sitting tight above
-    // the filter chips; the search row keeps the normal gap below it.
+    // the search row; the filter chips keep the normal gap below that.
     column![
         column![count, search_row]
             .spacing(spacing.space_xxxs)
