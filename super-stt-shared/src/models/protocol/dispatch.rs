@@ -144,12 +144,28 @@ fn cmd_record(request: &DaemonRequest) -> Result<Command, String> {
         .as_ref()
         .and_then(|data| data.get("preview"))
         .and_then(serde_json::Value::as_bool);
+    // Strict for the same reason as `stop_mode`: a mistyped `"false"` dropped
+    // to `None` would play the cues the caller asked to silence.
+    let audio_cues = match request
+        .data
+        .as_ref()
+        .and_then(|data| data.get("audio_cues"))
+    {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Bool(on)) => Some(*on),
+        Some(other) => {
+            return Err(format!(
+                "Invalid audio_cues: expected true or false, got {other}"
+            ));
+        }
+    };
     Ok(Command::Record {
         write_mode,
         stop_mode,
         wait,
         preview,
         language: request.language.clone(),
+        audio_cues,
     })
 }
 

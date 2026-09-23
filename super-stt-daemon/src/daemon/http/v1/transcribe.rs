@@ -17,7 +17,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use std::sync::Arc;
-use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_stt_shared::models::protocol::{Command, DaemonResponse, ErrorCode};
 
 /// Abort a realtime session whose consumer has sent no frame for this long.
 /// During an active session the client streams audio continuously, so an idle
@@ -306,6 +306,12 @@ pub(crate) struct TranscribeBody {
     /// `audio_data`, which has nothing to stream.
     #[serde(default)]
     pub(crate) stream_realtime: Option<bool>,
+    /// Microphone paths only: the start and stop cues for this recording.
+    /// Absent follows the configured audio theme; `false` plays none; `true`
+    /// plays them even when the theme is `silent`, using the default theme's.
+    /// The configured volume still applies. Anything but a boolean is a `400`.
+    #[serde(default)]
+    pub(crate) audio_cues: Option<bool>,
 }
 
 /// A one-shot transcription result, for the pre-captured path.
@@ -391,7 +397,7 @@ this endpoint only ever *starts* one. Read `busy` from `GET /status` and call \
         (status = 200, description = "Pre-captured audio: the finished transcription.", body = Transcription),
         (status = 202, description = "Microphone recording started and detached.", body = Ack,
          example = json!({ "status": "success", "message": "Recording started" })),
-        (status = 400, description = "`audio_data` was not an array of numbers, or `stream_realtime` was sent with it.", body = ErrorEnvelope),
+        (status = 400, description = "`audio_data` was not an array of numbers, `stream_realtime` was sent with it, or a microphone option such as `stop_mode` had an invalid value.", body = ErrorEnvelope),
         (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
         (status = 403, description = "The token lacks the `transcribe` scope.", body = ErrorEnvelope),
         (status = 409, description = "A recording is already in flight (`recording_in_progress`), or no model is loaded (`model_not_loaded`).", body = ErrorEnvelope),
@@ -437,6 +443,19 @@ async fn transcribe_mic(s: AppState, data: Option<serde_json::Value>) -> axum::r
         .as_ref()
         .is_some_and(|b| body_flag(b, "stream_realtime", false));
     let req = build_request("record", data);
+
+    // Parse the options before anything commits to a response shape. After
+    // this point a bad option could only fail inside the detached recording,
+    // as a log line behind a `202` or an SSE `error` frame behind a `200`,
+    // never as the `400` a malformed request is. `handle_command` parses the
+    // command again; only the error matters here.
+    if let Err(e) = Command::try_from(req.clone()) {
+        return json_response(&DaemonResponse::error_with_code(
+            ErrorCode::InvalidValue,
+            &e,
+        ))
+        .into_response();
+    }
 
     // Reject with `409 recording_in_progress` if a cycle is already
     // in progress. `/v1/transcribe` is "start a fresh recording" only —

@@ -101,6 +101,40 @@ fn record_command_invalid_stop_mode_is_rejected() {
     assert!(Command::try_from(request).is_err());
 }
 
+fn record_audio_cues(data: Value) -> Result<Option<bool>, String> {
+    match Command::try_from(make_request("record", Some(data)))? {
+        Command::Record { audio_cues, .. } => Ok(audio_cues),
+        _ => panic!("expected Command::Record"),
+    }
+}
+
+#[test]
+fn record_command_reads_audio_cues() {
+    assert_eq!(
+        record_audio_cues(json!({ "audio_cues": false })),
+        Ok(Some(false))
+    );
+    assert_eq!(
+        record_audio_cues(json!({ "audio_cues": true })),
+        Ok(Some(true))
+    );
+    // Absent and null both leave the choice to the configured theme.
+    assert_eq!(record_audio_cues(json!({})), Ok(None));
+    assert_eq!(record_audio_cues(json!({ "audio_cues": null })), Ok(None));
+}
+
+#[test]
+fn record_command_invalid_audio_cues_is_rejected() {
+    // Dropping `"false"` to `None` would play the cues the caller asked to
+    // silence, so anything but a boolean is a bad request.
+    for bad in [json!("false"), json!(0), json!({})] {
+        assert!(
+            record_audio_cues(json!({ "audio_cues": bad })).is_err(),
+            "audio_cues {bad} must be rejected"
+        );
+    }
+}
+
 #[test]
 fn set_recording_stop_mode_invalid_is_rejected() {
     // Tier 1 #26: an unknown mode returns an error and leaves the stored

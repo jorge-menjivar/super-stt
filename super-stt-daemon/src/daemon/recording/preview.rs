@@ -54,6 +54,7 @@ impl SuperSTTDaemon {
         write_mode: bool,
         stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
         preview_typing: bool,
+        cue_theme: super_stt_shared::theme::AudioTheme,
     ) -> Result<RecordingSession> {
         let silence_detection_disabled = !stop_mode.silence_detection_enabled();
         info!("🎛️ Recording mode: {stop_mode}");
@@ -65,7 +66,7 @@ impl SuperSTTDaemon {
         // recording with no stop channel (unstoppable until the 1-minute
         // timeout) (audit 2 Tier 3 #6). A losing racer now returns here via `?`
         // without ever touching `manual_stop_tx`.
-        let mut recorder = self.setup_recording_session(write_mode).await?;
+        let mut recorder = self.setup_recording_session(write_mode, cue_theme).await?;
 
         // Create a broadcast channel so this recording can be stopped externally.
         let (stop_tx, stop_rx) = tokio::sync::broadcast::channel(1);

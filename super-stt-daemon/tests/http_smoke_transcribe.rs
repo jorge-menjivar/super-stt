@@ -378,3 +378,43 @@ async fn precaptured_audio_with_no_model_loaded_is_an_error() {
     );
     assert_eq!(body["status"], "error", "{body}");
 }
+
+/// A malformed microphone option is a `400` whatever `wait` says. The check has
+/// to run before the handler commits to a shape: past that point the command
+/// only fails inside the detached recording, which a fire-and-forget caller
+/// sees as `202 Recording started` for a recording that never started.
+///
+/// No model is loaded, so a regression answers `409 model_not_loaded` rather
+/// than opening the microphone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_invalid_microphone_option_is_a_bad_request() {
+    let Some(component) = common::mock_component() else {
+        eprintln!("skipping: mock component not built (run `just build-mock-wasm-backend`)");
+        return;
+    };
+    let (_guard, sock, token) = start_daemon(&component).await;
+
+    // A string `"false"` for `audio_cues` matters most: dropped to "absent",
+    // it would play the cues the caller asked to silence.
+    let bad_options = [
+        serde_json::json!({ "stop_mode": "not_a_real_mode" }),
+        serde_json::json!({ "audio_cues": "false" }),
+    ];
+    for option in bad_options {
+        for wait in [false, true] {
+            let mut request = option.clone();
+            request["wait"] = serde_json::json!(wait);
+            let (status, body) = post(&sock, "/transcribe", &token, request).await;
+
+            assert_eq!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "{option}, wait: {wait}: {body}"
+            );
+            assert_eq!(
+                body["error_code"], "invalid_value",
+                "{option}, wait: {wait}: {body}"
+            );
+        }
+    }
+}

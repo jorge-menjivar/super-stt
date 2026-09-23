@@ -16,6 +16,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
+use super_stt_shared::theme::AudioTheme;
 use tokio::time::Instant;
 
 /// `client_id` reported on every daemon-mic lifecycle event.
@@ -94,6 +95,7 @@ impl SuperSTTDaemon {
         write_mode: bool,
         stop_mode: RecordingStopMode,
         preview_typing: bool,
+        cue_theme: AudioTheme,
         request_language: Option<&str>,
     ) -> DaemonResponse {
         // Check if already busy - prevent multiple simultaneous recordings
@@ -129,6 +131,7 @@ impl SuperSTTDaemon {
                 write_mode,
                 stop_mode,
                 preview_typing,
+                cue_theme,
                 request_language,
             )
             .await
@@ -196,13 +199,14 @@ impl SuperSTTDaemon {
         write_mode: bool,
         stop_mode: RecordingStopMode,
         preview_typing: bool,
+        cue_theme: AudioTheme,
         request_language: Option<&str>,
     ) -> Result<Result<String, String>> {
         info!("Starting direct audio recording in daemon with simplified architecture");
 
         // Phase 1: spawn the recorder. `busy` is set inside setup.
         let session = self
-            .spawn_recorder(write_mode, stop_mode, preview_typing)
+            .spawn_recorder(write_mode, stop_mode, preview_typing, cue_theme)
             .await?;
         // Capture is starting — announce it now that the recorder exists.
         self.emit_recording_started(write_mode).await;
@@ -339,6 +343,7 @@ impl SuperSTTDaemon {
     pub(super) async fn setup_recording_session(
         &self,
         _write_mode: bool,
+        cue_theme: AudioTheme,
     ) -> Result<DaemonAudioRecorder> {
         // Double-check busy state and set atomically
         {
@@ -351,16 +356,16 @@ impl SuperSTTDaemon {
             *busy_guard = true;
         }
 
-        // Create audio recorder with current theme and volume. Construction runs
-        // the cpal cold-start (default host/output device/config) and a
-        // `std::thread::sleep` device-verification spin — up to ~1.6s of real
-        // blocking on a cold start. Run it on a blocking thread so it doesn't
-        // park a runtime worker and stall concurrent SSE/event/status handling
-        // exactly when the user starts talking (audit 2 Tier 1 #3).
-        let current_theme = self.get_audio_theme();
+        // Create audio recorder with this take's cue theme and the current
+        // volume. Construction runs the cpal cold-start (default host/output
+        // device/config) and a `std::thread::sleep` device-verification spin —
+        // up to ~1.6s of real blocking on a cold start. Run it on a blocking
+        // thread so it doesn't park a runtime worker and stall concurrent
+        // SSE/event/status handling exactly when the user starts talking
+        // (audit 2 Tier 1 #3).
         let current_volume = self.get_volume_f32();
         let mut recorder = tokio::task::spawn_blocking(move || {
-            DaemonAudioRecorder::new_with_theme(current_theme, current_volume)
+            DaemonAudioRecorder::new_with_theme(cue_theme, current_volume)
         })
         .await
         .context("Audio recorder construction task panicked")?
