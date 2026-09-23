@@ -51,7 +51,7 @@ Content-Type: application/json
 
 {
   "status":                "success",
-  "message":               "Typed test text via Wayland protocol",
+  "message":               "Typed test text via Built-in",
   "write_method":          "auto",
   "resolved_write_method": "built_in"
 }
