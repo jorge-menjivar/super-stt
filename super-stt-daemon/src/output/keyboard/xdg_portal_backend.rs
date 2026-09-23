@@ -16,7 +16,7 @@ const XKB_KEY_BACKSPACE: i32 = 0xFF08;
 
 pub struct XdgPortalBackend {
     /// The `RemoteDesktop` portal proxy, built once and reused for every keysym
-    /// press/release (audit 2 Tier 3 #1). `type_text` issues 2–4 keysym calls per
+    /// press/release (audit 2 Tier 3 #1). `type_text` issues 2 keysym calls per
     /// char and the preview loop re-types the growing transcript each tick, so
     /// rebuilding the proxy per call meant constant D-Bus match-rule churn on the
     /// interactive path. The proxy holds its own clone of the async connection, so
@@ -151,17 +151,18 @@ impl XdgPortalBackend {
             .map_err(|e| anyhow::anyhow!("NotifyKeyboardKeysym failed: {e}"))
     }
 
+    /// Type each character as its own keysym, with no modifier around it.
+    ///
+    /// The compositor chooses the key and the level. GNOME and KDE press Shift
+    /// for a keysym on a shifted level, and COSMIC commits a printable keysym
+    /// as text. Holding Shift ourselves does not work everywhere: COSMIC
+    /// treats each keysym as a tap and releases it at once, so the Shift was
+    /// gone before the letter arrived and every capital came out lowercase.
     pub async fn type_text(&mut self, text: &str) -> Result<()> {
         for ch in text.chars() {
-            let (needs_shift, keysym) = char_to_keysym(ch);
-            if needs_shift {
-                self.notify_keysym(XKB_KEY_SHIFT_L, 1).await?;
-            }
+            let keysym = char_to_keysym(ch);
             self.notify_keysym(keysym, 1).await?;
             self.notify_keysym(keysym, 0).await?;
-            if needs_shift {
-                self.notify_keysym(XKB_KEY_SHIFT_L, 0).await?;
-            }
         }
         Ok(())
     }
@@ -256,58 +257,21 @@ async fn portal_call(
     Ok(results)
 }
 
-const XKB_KEY_SHIFT_L: i32 = 0xFFE1;
-
-/// Whether a character requires Shift and what keysym to send.
-/// Returns `(needs_shift, keysym)`.
-fn char_to_keysym(ch: char) -> (bool, i32) {
-    // Uppercase letters → Shift + lowercase keysym. ASCII lowercase is always ≤ 0x7A < i32::MAX.
-    if ch.is_ascii_uppercase() {
-        return (true, i32::from(ch.to_ascii_lowercase() as u8));
-    }
-
-    // Characters that are Shift+<base key> on a US layout
-    let shifted = match ch {
-        '!' => Some(0x31), // 1
-        '@' => Some(0x32), // 2
-        '#' => Some(0x33), // 3
-        '$' => Some(0x34), // 4
-        '%' => Some(0x35), // 5
-        '^' => Some(0x36), // 6
-        '&' => Some(0x37), // 7
-        '*' => Some(0x38), // 8
-        '(' => Some(0x39), // 9
-        ')' => Some(0x30), // 0
-        '_' => Some(0x2D), // -
-        '+' => Some(0x3D), // =
-        '{' => Some(0x5B), // [
-        '}' => Some(0x5D), // ]
-        '|' => Some(0x5C), // backslash
-        ':' => Some(0x3B), // ;
-        '"' => Some(0x27), // '
-        '<' => Some(0x2C), // ,
-        '>' => Some(0x2E), // .
-        '?' => Some(0x2F), // /
-        '~' => Some(0x60), // `
-        _ => None,
-    };
-
-    if let Some(base) = shifted {
-        return (true, base);
-    }
-
+/// The keysym that produces `ch`: `S` for `S` and `!` for `!`, never the
+/// unshifted key under it. That also keeps a character correct on a layout
+/// other than US, where it may sit on a different key or level.
+fn char_to_keysym(ch: char) -> i32 {
     let cp = ch as u32;
     // cp ≤ 0x10_FFFF (Unicode max). For the direct-map range (≤ 0xFF) and
     // the high-keysym range (0x0100_0000 | cp ≤ 0x011F_FFFF) the result
     // fits in i32; TryFrom with saturating fallback preserves behavior for
     // any realistic Unicode code point.
-    let keysym = match cp {
+    match cp {
         0x20..=0x7E | 0xA0..=0xFF => i32::try_from(cp).unwrap_or(i32::MAX),
         0x0A => 0xFF0D,
         0x09 => 0xFF09,
         _ => i32::try_from(0x0100_0000_u32 | cp).unwrap_or(i32::MAX),
-    };
-    (false, keysym)
+    }
 }
 
 #[cfg(test)]
@@ -323,6 +287,26 @@ mod tests {
             request_path(":1.676039", "superstt_r0"),
             "/org/freedesktop/portal/desktop/request/1_676039/superstt_r0"
         );
+    }
+
+    /// A shifted character is sent as itself. Sent as Shift plus the key
+    /// under it, COSMIC typed `super stt` for `Super STT` and `1` for `!`.
+    #[test]
+    fn a_character_is_sent_as_its_own_keysym() {
+        let cases = [
+            ('a', 0x61),
+            ('S', 0x53),
+            ('!', 0x21),
+            ('"', 0x22),
+            ('~', 0x7E),
+            ('é', 0xE9),
+            ('€', 0x0100_20AC),
+            ('\n', 0xFF0D),
+            ('\t', 0xFF09),
+        ];
+        for (ch, keysym) in cases {
+            assert_eq!(char_to_keysym(ch), keysym, "{ch:?}");
+        }
     }
 
     #[test]
