@@ -6944,6 +6944,7 @@ dependencies = [
  "libc",
  "log",
  "mockito",
+ "objc2-core-graphics",
  "parking_lot",
  "reqwest",
  "ring",

@@ -126,6 +126,10 @@
 # server — only the Accessibility permission, which the user grants once.
 [target.'cfg(target_os = "macos")'.dependencies]
     enigo.workspace = true
+    # Typing a character at a time (output::keyboard::enigo_backend), with the
+    # features and version enigo itself builds.
+    objc2-core-graphics.version = "0.3"
+    objc2-core-graphics.features = ["CGEventTypes", "CGRemoteOperation"]
 
 [dev-dependencies]
     futures-util.workspace = true

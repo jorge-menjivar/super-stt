@@ -64,16 +64,19 @@ impl EnigoBackend {
     /// channel from the backspaces that later erase it. Key events keep
     /// everything on one channel and are never a paste.
     ///
-    /// **macOS: `enigo.text()`, because per-character key events lose Shift.**
-    /// For `Key::Unicode(c)` the macOS backend searches the keyboard layout for
-    /// a keycode that produces `c` with no modifier *or* with Shift, returns
-    /// only the keycode, and posts it with no Shift flag. So `I` arrives as
-    /// `i`, `?` as `/`, `!` as `1`, `:` as `;` — every shifted character
-    /// loses its Shift — and a character the layout reaches only through ⌥ or
-    /// a dead key (`é`, `¿`) is not found at all. `text()` on macOS attaches
-    /// the literal string to the event (`CGEventKeyboardSetUnicodeString`)
-    /// and needs no layout lookup. Neither Linux objection applies: it is an
-    /// ordinary keyboard event posted to the same HID event tap as the
+    /// **macOS: one key event per character, carrying the character itself.**
+    /// enigo's `Key::Unicode(c)` loses Shift: the macOS backend searches the
+    /// keyboard layout for a keycode that produces `c` with no modifier *or*
+    /// with Shift, returns only the keycode, and posts it with no Shift flag.
+    /// So `I` arrives as `i`, `?` as `/`, `!` as `1`, `:` as `;`, and a
+    /// character the layout reaches only through ⌥ or a dead key (`é`, `¿`)
+    /// is not found at all. An event with the character attached
+    /// (`CGEventKeyboardSetUnicodeString`) needs no layout lookup; see
+    /// `type_character`. enigo's `text()` attaches strings too, but packs up
+    /// to 20 characters into each event: a native text field inserts them
+    /// all, while iced's — the settings app's own typing test — inserts the
+    /// first of each and drops the rest. Neither Linux objection applies: it
+    /// is an ordinary keyboard event posted to the same HID event tap as the
     /// backspaces, not an input-method commit, and no terminal treats it as a
     /// paste.
     ///
@@ -85,11 +88,22 @@ impl EnigoBackend {
         let chars: Vec<char> = text.chars().collect();
         for chunk in chars.chunks(self.typing_chunk) {
             #[cfg(target_os = "macos")]
-            {
-                let chunk: String = chunk.iter().collect();
+            for &c in chunk {
+                // Line breaks and tabs go as the keys themselves: a string
+                // event that starts with one is dropped (enigo#260).
+                let key = match c {
+                    '\n' => Key::Return,
+                    '\t' => Key::Tab,
+                    // The line feed after it types the line break.
+                    '\r' => continue,
+                    c => {
+                        type_character(c)?;
+                        continue;
+                    }
+                };
                 self.enigo
-                    .text(&chunk)
-                    .map_err(|e| anyhow::anyhow!("Failed to type {chunk:?}: {e}"))?;
+                    .key(key, Direction::Click)
+                    .map_err(|e| anyhow::anyhow!("Failed to type {c:?}: {e}"))?;
             }
             #[cfg(not(target_os = "macos"))]
             for &c in chunk {
@@ -123,6 +137,36 @@ impl EnigoBackend {
         }
         Ok(())
     }
+}
+
+/// Type `c` as one key press carrying the character itself, on macOS.
+///
+/// The event has no event source. enigo's events come from one it owns, and
+/// because events still on their way are discarded if their source is
+/// released, its handle sleeps 20 ms for every event it posted when it is
+/// dropped. Posted a character at a time, from a handle rebuilt for each
+/// recording, that would hold each recording up for seconds after its text
+/// was typed. A sourceless event has nothing to be released.
+#[cfg(target_os = "macos")]
+fn type_character(c: char) -> Result<()> {
+    use objc2_core_graphics::{CGEvent, CGEventFlags, CGEventTapLocation};
+
+    let mut buffer = [0u16; 2];
+    let units = c.encode_utf16(&mut buffer);
+    for key_down in [true, false] {
+        // The keycode is a placeholder: the attached string is what is typed.
+        let event = CGEvent::new_keyboard_event(None, 0, key_down)
+            .ok_or_else(|| anyhow::anyhow!("Failed to type {c:?}: no key event"))?;
+        // SAFETY: `units` holds the `units.len()` UTF-16 units passed, and
+        // outlives the call, which copies them into the event.
+        unsafe {
+            CGEvent::keyboard_set_unicode_string(Some(&event), units.len() as _, units.as_ptr());
+        }
+        // Typed as is, whatever modifier keys the user is holding.
+        CGEvent::set_flags(Some(&event), CGEventFlags::empty());
+        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+    }
+    Ok(())
 }
 
 /// Turn enigo's connection error into something the user can act on.
