@@ -601,7 +601,8 @@ reads the same `[[options]]` and `[[secrets]]`.
 
 A post-processor cannot set `realtime = true`: realtime is a property of
 streaming audio in, and a post-processor is handed a finished transcript. A
-manifest declaring both is rejected at discovery, and refused at publication.
+manifest declaring both is refused wherever it is read: at publication, at
+install, and at discovery.
 
 ```toml
 [backend]

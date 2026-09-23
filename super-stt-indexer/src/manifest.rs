@@ -40,13 +40,6 @@ pub enum ManifestError {
          override."
     )]
     BaseUrlDefault,
-    /// A model declared both the post-processing role and the realtime path.
-    #[error(
-        "model `{0}` declares `role = \"post_processor\"` with `realtime = true`: \
-         post-processors are driven over `POST /v1/process`, which has no \
-         realtime path"
-    )]
-    PostProcessorRealtime(String),
     /// An option's `default` is not one of the values its `choices` allow.
     #[error(
         "option `{0}` declares `default = {1:?}` but its `choices` do not offer \
@@ -179,15 +172,6 @@ pub fn validate(
                 default.to_string(),
             ));
         }
-    }
-    // Mirrors the daemon's discovery-time rule, so a contradiction is caught at
-    // publication rather than skipping the backend on every user's machine.
-    if let Some(model) = m
-        .models
-        .iter()
-        .find(|md| md.realtime && md.product.role.is_post_processor())
-    {
-        return Err(ManifestError::PostProcessorRealtime(model.name.clone()));
     }
     crate::license::check(m.backend.license.as_deref())?;
     Ok(())

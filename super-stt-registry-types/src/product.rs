@@ -278,6 +278,22 @@ impl Product for Stt {
                     .into(),
                 ));
             }
+            // Realtime is a property of streaming audio in; a post-processor is
+            // handed a finished transcript over `POST /v1/process` and never
+            // sees the WebSocket path. Declaring both is a manifest
+            // contradiction, so it is refused rather than silently ignored at
+            // load.
+            if model.realtime && model.product.role.is_post_processor() {
+                return Err(ManifestError::Product(
+                    format!(
+                        "model `{}` has role = post_processor but realtime = true; \
+                         post-processors are driven over POST /v1/process, not the \
+                         realtime path",
+                        model.name
+                    )
+                    .into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -390,6 +406,26 @@ mod tests {
             Err(ManifestError::Product(e)) => assert!(e.to_string().contains("`w.bin`"), "{e}"),
             other => panic!("a file variant must be refused, got {other:?}"),
         }
+    }
+
+    /// A post-processor is handed a finished transcript, so it cannot also be
+    /// a realtime model; a manifest declaring both is refused where it is
+    /// parsed, which is also where the indexer reads it.
+    #[test]
+    fn a_realtime_post_processor_is_refused() {
+        let model = "role = \"post_processor\"\nrealtime = true";
+        let tail = "[capabilities]\nwebsocket = true";
+        match Manifest::parse(&manifest("v2", "id = \"com.example.y\"", model, tail)) {
+            Err(ManifestError::Product(e)) => {
+                assert!(e.to_string().contains("post_processor"), "{e}");
+            }
+            other => panic!("a realtime post-processor must be refused, got {other:?}"),
+        }
+        let transcriber = "realtime = true";
+        assert!(
+            Manifest::parse(&manifest("v2", "id = \"com.example.y\"", transcriber, tail)).is_ok(),
+            "a realtime transcription model is fine"
+        );
     }
 
     /// `[capabilities] context` is Super STT's, read beside the shared

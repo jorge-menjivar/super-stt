@@ -44,8 +44,9 @@ fn check_addressable_name(kind: &str, name: &str) -> Result<()> {
 /// segment (see [`RESERVED_SEGMENTS`]), if a model's `primary_language` is
 /// absent from its `supported_languages`, if a non-multilingual model's
 /// `supported_languages` is not exactly `[primary_language]`, if a model sets
-/// `realtime` without the `websocket` capability, or if a post-processor model
-/// sets `realtime`.
+/// `realtime` without the `websocket` capability. That a post-processor model
+/// may not set `realtime` is a manifest rule, checked at parse by
+/// `Stt::validate`.
 pub fn validate_runtime(m: &Manifest) -> Result<()> {
     if m.backend.kind == Kind::Subprocess && m.capabilities.websocket {
         anyhow::bail!(
@@ -82,17 +83,6 @@ pub fn validate_runtime(m: &Manifest) -> Result<()> {
         if model.realtime && !m.capabilities.websocket {
             anyhow::bail!(
                 "model `{}` has realtime = true but capabilities.websocket is not set",
-                model.name
-            );
-        }
-        // Realtime is a property of streaming audio in; a post-processor is
-        // handed a finished transcript over `POST /v1/process` and never sees
-        // the WebSocket path. Declaring both is a manifest contradiction, so
-        // it is refused here rather than silently ignored at load.
-        if model.realtime && model.product.role.is_post_processor() {
-            anyhow::bail!(
-                "model `{}` has role = post_processor but realtime = true; \
-                 post-processors are driven over POST /v1/process, not the realtime path",
                 model.name
             );
         }
@@ -600,41 +590,6 @@ supported_languages = ["en"]
 supported_devices = ["none"]
 "#;
         assert!(Manifest::parse(toml_src).is_err());
-    }
-
-    /// A post-processor is handed a finished transcript over `POST /v1/process`
-    /// and never sees the realtime path, so declaring both is a contradiction
-    /// the daemon refuses at discovery.
-    #[test]
-    fn a_realtime_post_processor_is_rejected() {
-        let toml_src = r#"
-[backend]
-source = "github.com/x/y"
-name = "Y"
-version = "0.1.0"
-kind = "wasm"
-entrypoint = "y.wasm"
-contract = "v2"
-id = "app.super-stt.openai"
-description = "Test backend."
-
-[capabilities]
-websocket = true
-
-[[models]]
-name = "cleanup"
-role = "post_processor"
-realtime = true
-primary_language = "en"
-supported_languages = ["en"]
-supported_devices = ["none"]
-"#;
-        let m = Manifest::parse(toml_src).expect("parses; the rule is a runtime one");
-        let err = validate_runtime(&m).expect_err("a realtime post-processor is refused");
-        assert!(
-            err.to_string().contains("post_processor"),
-            "the message should name the contradiction: {err}"
-        );
     }
 
     /// An option named after the collection's own route segment is refused at
