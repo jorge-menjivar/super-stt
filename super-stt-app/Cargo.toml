@@ -117,7 +117,9 @@
         "std",
         "block2",
         "NSArray",
+        "NSBundle",
         "NSDictionary",
+        "NSError",
         "NSKeyValueObserving",
         "NSNotification",
         "NSOperation",
@@ -128,6 +130,19 @@
     objc2-quartz-core.version = "0.3"
     objc2-quartz-core.default-features = false
     objc2-quartz-core.features = ["std", "objc2-core-foundation", "CALayer"]
+    # Notifications: asking to show them (core::app::macos::bundle), and
+    # posting them for the daemon (core::app::macos::notifier).
+    objc2-user-notifications.version = "0.3"
+    objc2-user-notifications.default-features = false
+    objc2-user-notifications.features = [
+        "std",
+        "block2",
+        "UNNotificationContent",
+        "UNNotificationRequest",
+        "UNNotificationSettings",
+        "UNNotificationTrigger",
+        "UNUserNotificationCenter",
+    ]
     muda.version = "0.20"
     muda.default-features = false
     raw-window-handle = "0.6"

@@ -24,6 +24,18 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use std::path::PathBuf;
+use super_stt_shared::daemon::session::AppId;
+
+/// The listener's own identity to the daemon, apart from `stt`'s.
+///
+/// In the macOS app bundle the two are copies of one binary at different
+/// paths: `stt` in `Contents/MacOS`, and the listener in `Contents/Helpers`,
+/// since beside the settings app its event loop would register with macOS
+/// as the app itself. The daemon binds each session to the path that
+/// obtained it, so sharing `stt`'s keychain entry would have each revoke the
+/// other's session every time it was used.
+const APP_ID: AppId = AppId("super-stt-hotkey");
+const APP_NAME: &str = "Super STT Shortcut";
 
 /// ⌃⌥Space. The obvious candidates are taken: ⌘Space is Spotlight, ⌃Space
 /// switches input sources, and ⌥Space is the `ChatGPT` app's default.
@@ -36,7 +48,7 @@ pub fn command() -> Command {
             "Listen for a global shortcut that starts and stops recording.\n\n\
              Runs until stopped. Each press does what `stt record --write` does: \
              starts a recording, or stops the one in progress and types the result \
-             into the focused window. `just install-daemon` runs this as a \
+             into the focused window. The Super STT app runs this as a \
              LaunchAgent so it is available from login.",
         )
         .arg(
@@ -114,9 +126,12 @@ pub fn run(socket_path: PathBuf, binding: &str) -> Result<()> {
                     continue;
                 }
                 log::debug!("{label} pressed");
-                let result = handle.block_on(crate::run_with_token(socket_path.clone(), |token| {
-                    crate::cmd_record(socket_path.clone(), token, true, false, None)
-                }));
+                let result = handle.block_on(crate::run_with_token_as(
+                    APP_ID,
+                    APP_NAME,
+                    socket_path.clone(),
+                    |token| crate::cmd_record(socket_path.clone(), token, true, false, None),
+                ));
                 if let Err(e) = result {
                     // Logged, not fatal: the daemon being down or restarting is
                     // no reason to stop listening for the next press.

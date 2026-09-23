@@ -494,7 +494,9 @@ const OFFICIAL_CLIENT_NAMES: [&str; 3] =
     ["super-stt-app", "super-stt-cli", "super-stt-cosmic-applet"];
 
 /// First-party trust check: does `exe_path` denote one of our own
-/// client binaries, installed alongside the daemon binary itself?
+/// client binaries, installed alongside the daemon binary itself — or, in
+/// the macOS app bundle, in the bundle's helper directory (see
+/// [`bundle_helpers_dir`])?
 ///
 /// Mirrors the consent-helper security model — co-location
 /// with the daemon binary plus the same ownership/permission
@@ -549,10 +551,31 @@ fn is_official_client_in(daemon_dir: &Path, exe_path: &Path) -> bool {
     if !OFFICIAL_CLIENT_NAMES.contains(&name) {
         return false;
     }
-    if resolved.parent() != Some(daemon_dir.as_path()) {
+    let parent = resolved.parent();
+    if parent != Some(daemon_dir.as_path()) && parent != bundle_helpers_dir(&daemon_dir).as_deref()
+    {
         return false;
     }
     verify_helper_metadata(&resolved).is_ok()
+}
+
+/// `Contents/Helpers` of the app bundle the daemon runs from, when
+/// `daemon_dir` is a bundle's `Contents/MacOS`.
+///
+/// The macOS bundle keeps a copy of the CLI there for the shortcut listener.
+/// Beside the daemon in `Contents/MacOS`, the listener's event loop would
+/// register it with macOS as the app itself, and opening Super STT would
+/// activate the listener instead of launching the settings app. The same
+/// install writes both directories, and anyone able to write to either can
+/// already replace the daemon, so trusting this one adds nothing that
+/// co-location did not. The name and metadata checks apply unchanged.
+fn bundle_helpers_dir(daemon_dir: &Path) -> Option<PathBuf> {
+    let contents = daemon_dir.parent()?;
+    let bundle = contents.parent()?;
+    let is_bundle = daemon_dir.file_name()? == "MacOS"
+        && contents.file_name()? == "Contents"
+        && bundle.extension()? == "app";
+    is_bundle.then(|| contents.join("Helpers"))
 }
 
 /// Find the consent helper.
@@ -1034,6 +1057,52 @@ mod tests {
                 !is_official_client_in(dir.path(), &dir.path().join("super-stt-app")),
                 "a nonexistent (e.g. replaced-on-disk) exe must fail closed"
             );
+        }
+
+        /// A daemon in `<name>.app/Contents/MacOS`, and that bundle's
+        /// `Contents/Helpers`, under a fresh temp dir.
+        fn app_bundle(root: &Path, name: &str) -> (PathBuf, PathBuf) {
+            let contents = root.join(name).join("Contents");
+            let (macos, helpers) = (contents.join("MacOS"), contents.join("Helpers"));
+            std::fs::create_dir_all(&macos).unwrap();
+            std::fs::create_dir_all(&helpers).unwrap();
+            (macos, helpers)
+        }
+
+        #[test]
+        fn official_name_in_the_daemons_bundle_helpers_is_trusted() {
+            let root = tempfile::tempdir().unwrap();
+            let (macos, helpers) = app_bundle(root.path(), "Super STT.app");
+            let cli = write_executable(&helpers, "super-stt-cli", 0o755);
+            assert!(is_official_client_in(&macos, &cli));
+        }
+
+        #[test]
+        fn helpers_of_a_directory_that_is_not_an_app_bundle_are_rejected() {
+            let root = tempfile::tempdir().unwrap();
+            let (macos, helpers) = app_bundle(root.path(), "Super STT");
+            let cli = write_executable(&helpers, "super-stt-cli", 0o755);
+            assert!(
+                !is_official_client_in(&macos, &cli),
+                "only an app bundle's own Contents/Helpers is trusted"
+            );
+        }
+
+        #[test]
+        fn helpers_of_another_app_bundle_are_rejected() {
+            let root = tempfile::tempdir().unwrap();
+            let (macos, _) = app_bundle(root.path(), "Super STT.app");
+            let (_, other_helpers) = app_bundle(root.path(), "Other.app");
+            let cli = write_executable(&other_helpers, "super-stt-cli", 0o755);
+            assert!(!is_official_client_in(&macos, &cli));
+        }
+
+        #[test]
+        fn world_writable_binary_in_bundle_helpers_is_rejected() {
+            let root = tempfile::tempdir().unwrap();
+            let (macos, helpers) = app_bundle(root.path(), "Super STT.app");
+            let cli = write_executable(&helpers, "super-stt-cli", 0o757);
+            assert!(!is_official_client_in(&macos, &cli));
         }
 
         #[test]

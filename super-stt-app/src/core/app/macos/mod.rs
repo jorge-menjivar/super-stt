@@ -52,8 +52,10 @@ use super::AppModel;
 use crate::ui::messages::{Message, ShellMessage};
 
 pub(crate) mod appearance;
+pub(crate) mod bundle;
 pub(crate) mod font;
 pub(crate) mod menu_bar;
+pub(crate) mod notifier;
 
 /// Where the title bar's controls are, as `AppKit` laid them out. Measured
 /// when the window opens: the traffic lights move between macOS releases.

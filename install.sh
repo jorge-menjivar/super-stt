@@ -242,9 +242,9 @@ main() {
         case "$TRIPLE" in
             *-apple-darwin)
                 print_error "Pre-built macOS binaries are not published yet. Build from source instead:"
-                print_error "  git clone https://github.com/$GITHUB_REPO.git && cd super-stt && just install-daemon"
-                print_error "That installs the daemon and the stt CLI as a LaunchAgent. The desktop app and"
-                print_error "COSMIC applet are Linux-only."
+                print_error "  git clone https://github.com/$GITHUB_REPO.git && cd super-stt && just install"
+                print_error "That installs Super STT.app — the settings app, the daemon and the stt CLI — in"
+                print_error "/Applications. The COSMIC applet is Linux-only."
                 ;;
             *)
                 print_error "Installing requires v0.2.2-beta.3 or newer — drop --version= to take the latest $CHANNEL release."

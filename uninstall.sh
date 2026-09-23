@@ -77,8 +77,8 @@ SERVICE_NAME="super-stt"
 # uninstall. Say what to run instead.
 if [ "$(uname -s)" = "Darwin" ]; then
     print_error "This uninstaller is for Linux installs made by install.sh."
-    print_error "On macOS the daemon is installed from source, so uninstall it the same way:"
-    print_error "  cd /path/to/super-stt && just uninstall-daemon"
+    print_error "On macOS Super STT is installed from source, so uninstall it the same way:"
+    print_error "  cd /path/to/super-stt && just uninstall"
     exit 1
 fi
 

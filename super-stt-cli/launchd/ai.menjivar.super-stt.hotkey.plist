@@ -16,21 +16,33 @@
   It needs no Accessibility or Input Monitoring grant — ordinary shortcuts are
   registered through Carbon's RegisterEventHotKey, which asks for neither.
 
-  Three placeholders are substituted by `just install-daemon`, because launchd
-  expands nothing in a plist:
+  Like the daemon's agent it ships inside the app bundle and is registered
+  with SMAppService; see super-stt-daemon/launchd/ for what that means for
+  this file. One placeholder is substituted by `just bundle-macos` before the
+  bundle is signed:
 
-    __CLI_BIN__   the installed super-stt-cli
     __BINDING__   the shortcut: $SUPER_STT_HOTKEY, else ctrl+alt+space. The
-                  installer validates it with the listener's own check mode
-                  before writing this file, since a binding the listener
-                  rejects would otherwise be restarted every ThrottleInterval,
-                  failing the same way each time.
-    __LOG_DIR__   the per-user log directory
+                  recipe validates it with the listener's own check mode
+                  first, since a binding the listener rejects would otherwise
+                  be restarted every ThrottleInterval, failing the same way
+                  each time.
 -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>ai.menjivar.super-stt.hotkey</string>
+
+    <!--
+      A copy of the CLI in Contents/Helpers, not the one in Contents/MacOS.
+      The listener runs an AppKit event loop, and any process that does so
+      from Contents/MacOS registers with macOS as the app itself: opening
+      Super STT then activates this invisible listener instead of launching
+      the settings app. From Contents/Helpers it is a process of its own.
+      The daemon trusts first-party binaries there as it does beside itself;
+      see `bundle_helpers_dir` in super-stt-daemon's auth/consent.rs.
+    -->
+    <key>BundleProgram</key>
+    <string>Contents/Helpers/super-stt-cli</string>
 
     <!--
       `super-stt-cli/src/main.rs` parses these in a test
@@ -39,7 +51,7 @@
     -->
     <key>ProgramArguments</key>
     <array>
-        <string>__CLI_BIN__</string>
+        <string>super-stt-cli</string>
         <string>hotkey</string>
         <string>--key</string>
         <string>__BINDING__</string>
@@ -61,15 +73,13 @@
     <key>ProcessType</key>
     <string>Interactive</string>
 
-    <key>StandardOutPath</key>
-    <string>__LOG_DIR__/hotkey.log</string>
-    <key>StandardErrorPath</key>
-    <string>__LOG_DIR__/hotkey.log</string>
-
     <key>EnvironmentVariables</key>
     <dict>
         <key>RUST_LOG</key>
         <string>info</string>
+        <!-- See the daemon's agent for why this is not StandardErrorPath. -->
+        <key>SUPER_STT_LOG_FILE</key>
+        <string>Library/Logs/super-stt/hotkey.log</string>
     </dict>
 </dict>
 </plist>

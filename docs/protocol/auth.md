@@ -211,7 +211,9 @@ hold for its kernel-resolved executable (`/proc/<pid>/exe`,
 canonicalized):
 
 - Its basename is one of the three names above.
-- It resides in the same directory as the daemon's own binary.
+- It resides in the same directory as the daemon's own binary, or —
+  when the daemon runs from a macOS app bundle's `Contents/MacOS` —
+  in that bundle's `Contents/Helpers`.
 - It is owned by the daemon's effective uid and is not
   world-writable.
 
@@ -222,7 +224,11 @@ the normal consent flow instead.
 
 Writing to the daemon's install directory is already sufficient to
 replace the daemon itself, so trusting exact-named sibling binaries
-does not lower the bar an attacker must clear.
+does not lower the bar an attacker must clear. The same holds for the
+bundle's `Contents/Helpers`, which the same install writes. The macOS
+bundle runs its shortcut listener from there because a helper in
+`Contents/MacOS` that starts an event loop registers with macOS as the
+app itself.
 
 Everything besides the skipped popup is unchanged: the token carries
 exactly the requested scopes, expires after 30 days, is bound to the
