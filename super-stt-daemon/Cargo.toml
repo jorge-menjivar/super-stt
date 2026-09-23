@@ -106,7 +106,7 @@
     utoipa-axum.workspace = true
     uuid.workspace = true
     wasmtime = { version = "45.0.0", features = ["async"], optional = true }
-    wasmtime-wasi = { version = "45.0.0", optional = true }
+    wasmtime-wasi = { version = "46.0.2", optional = true }
     wasmtime-wasi-http = { version = "45.0.0", optional = true }
     zbus.workspace = true
 
