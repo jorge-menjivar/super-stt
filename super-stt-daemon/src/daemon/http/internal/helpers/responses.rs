@@ -2,12 +2,13 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
-// The error bodies every daemon's guards answer with are the engine's.
-// `rate_limited` is re-exported for the envelope contract tests, which hold
-// every error shape the daemon sends against the ones it documents.
+// The error bodies the guards and `/events` answer with are the engine's,
+// re-exported for the envelope contract tests, which hold every error shape
+// the daemon sends against the ones it documents.
 #[cfg(test)]
-pub(crate) use super_engine_daemon::http::responses::rate_limited;
-pub(crate) use super_engine_daemon::http::responses::{invalid_session, reason, scope_denied};
+pub(crate) use super_engine_daemon::http::responses::{
+    invalid_session, rate_limited, reason, scope_denied,
+};
 
 /// Pre-built `409 recording_in_progress` JSON response for the
 /// `/v1/transcribe` handler. Clients should check `GET /v1/status`

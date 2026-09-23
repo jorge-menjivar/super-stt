@@ -126,7 +126,7 @@ impl SuperSTTDaemon {
             notifier: Arc::new(tokio::sync::Mutex::new(
                 crate::output::notification::Notifier::desktop(),
             )),
-            self_update: Arc::new(crate::self_update::SelfUpdateChecker::new()),
+            self_update: Arc::new(crate::self_update::checker()),
         };
 
         daemon.post_init().await;
