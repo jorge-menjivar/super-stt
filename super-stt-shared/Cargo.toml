@@ -21,6 +21,7 @@
     serde.workspace = true
     serde_json.workspace = true
     spectrum-analyzer = { workspace = true, optional = true }
+    super-engine-client.workspace = true
     super-engine-protocol.workspace = true
     super-stt-registry-types = { path = "../super-stt-registry-types" }
     thiserror.workspace = true

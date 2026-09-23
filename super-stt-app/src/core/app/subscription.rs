@@ -16,7 +16,7 @@ pub(super) struct UdpSubscriptionId(pub(super) u64);
 /// cached for normal config calls — [`SETTINGS_SCOPES`] grants the
 /// recording / visualization / daemon-status topics below.
 pub(super) const SETTINGS_APP_ID: super_stt_shared::daemon::session::AppId =
-    super_stt_shared::daemon::session::AppId("super-stt-app");
+    super_stt_shared::daemon::session::app_id("super-stt-app");
 const SETTINGS_APP_NAME: &str = "Super STT Settings App";
 /// Topics the settings app subscribes to over `GET /events`.
 ///

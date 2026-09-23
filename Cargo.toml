@@ -145,17 +145,21 @@
     # The code Super STT shares with Super TTS. Pinned by rev, like
     # libcosmic, so a change there reaches this workspace only when the rev
     # is bumped here. Every super-engine crate names the same rev.
+    super-engine-client = {
+      git = "https://github.com/super-libre/super-engine",
+      rev = "3e448b8bbb49d126d7addf4d421f184189174402",
+    }
     super-engine-forge = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "5cc0eeaef7ae5ea75f15471d9b16c0c269822daa",
+      rev = "3e448b8bbb49d126d7addf4d421f184189174402",
     }
     super-engine-protocol = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "5cc0eeaef7ae5ea75f15471d9b16c0c269822daa",
+      rev = "3e448b8bbb49d126d7addf4d421f184189174402",
     }
     super-engine-spec = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "5cc0eeaef7ae5ea75f15471d9b16c0c269822daa",
+      rev = "3e448b8bbb49d126d7addf4d421f184189174402",
     }
     thiserror         = "2.0"
     tokio             = {

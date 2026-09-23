@@ -27,7 +27,7 @@ mod hotkey;
 #[cfg(target_os = "macos")]
 mod service;
 
-const APP_ID: AppId = AppId("super-stt-cli");
+const APP_ID: AppId = super_stt_shared::daemon::session::app_id("super-stt-cli");
 const APP_NAME: &str = "Super STT CLI";
 const SCOPES: &[&str] = &["transcribe", "status"];
 
