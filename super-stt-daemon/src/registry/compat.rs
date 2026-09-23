@@ -382,6 +382,7 @@ mod tests {
     use super::*;
     use crate::registry::host_detect::{CudaHost, Host};
     use crate::registry::index_schema::*;
+    use super_stt_registry_types::product::Generation;
 
     fn entry(kind: &str, subprocess: Vec<IndexSubprocessAsset>) -> IndexBackend {
         IndexBackend {

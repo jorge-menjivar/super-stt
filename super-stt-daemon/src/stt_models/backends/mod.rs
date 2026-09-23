@@ -240,8 +240,8 @@ fn load_backend(dir: &Path) -> anyhow::Result<DiscoveredBackend> {
             processing_interval: interval,
             supported_devices,
             realtime: entry.realtime,
-            force_preview_support: entry.force_preview_support,
-            role: entry.role,
+            force_preview_support: entry.product.force_preview_support,
+            role: entry.product.role,
             provider: entry.provider.clone(),
         });
     }

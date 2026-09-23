@@ -57,7 +57,7 @@ pub(super) fn download_split(app: &AppModel) -> (Element<'_, Message>, Element<'
         }
         if !filters
             .role
-            .admits(entry.models.iter().map(|m| m.role.as_str()))
+            .admits(entry.models.iter().map(|m| m.product.role.as_str()))
         {
             continue;
         }
@@ -268,7 +268,7 @@ pub(super) fn download_card<'a>(
         entry
             .models
             .iter()
-            .map(|m| (m.name.as_str(), m.role.as_str())),
+            .map(|m| (m.name.as_str(), m.product.role.as_str())),
     );
     if let Some(line) = models_line(&groups) {
         card = card.push(line);

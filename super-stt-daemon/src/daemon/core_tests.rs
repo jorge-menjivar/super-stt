@@ -1069,6 +1069,9 @@ fn backend_with_option(
         r#type: Some(OptionType::String),
         default: None,
         choices: Vec::new(),
+        min: None,
+        max: None,
+        step: None,
         required: false,
     }];
     backend

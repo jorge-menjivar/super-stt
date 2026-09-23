@@ -144,6 +144,13 @@
     spectrum-analyzer = "1.7.0"
     strum             = { version = "0.28.0", features = ["derive"] }
     strum_macros      = "0.28"
+    # The backend contract Super STT shares with Super TTS. Pinned by rev,
+    # like libcosmic, so a change there reaches this workspace only when the
+    # rev is bumped here.
+    super-engine-spec = {
+      git = "https://github.com/super-libre/super-engine",
+      rev = "0359cdb256d8447626ab42697679d6c2c2104c1e",
+    }
     thiserror         = "2.0"
     tokio             = {
       version  = "1.49.0",

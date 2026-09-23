@@ -168,7 +168,7 @@ impl SuperSTTDaemon {
                     models,
                     secrets,
                     options,
-                    accepts_context: b.capabilities.context,
+                    accepts_context: b.capabilities.product.context,
                 }
             })
             .collect();

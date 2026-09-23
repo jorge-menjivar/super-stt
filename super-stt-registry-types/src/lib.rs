@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Canonical types for the Super STT registry contract: a backend's
-//! `backend.toml` manifest and the maintainer-facing `registry.toml`.
-//! See `docs/protocol/backend/config.md`.
+//! Super STT's side of the backend contract: its contract generations and the
+//! fields its manifests and index add ([`product`]), on top of the contract it
+//! shares with Super TTS in `super-engine-spec`.
+//!
+//! The modules mirror `super-engine-spec`'s, with every type that carries
+//! product fields bound to [`Stt`], so the rest of the workspace never names
+//! the product. See `docs/protocol/backend/config.md`.
 
-pub mod arch;
-pub mod backend_id;
-pub mod entry;
-pub mod forge;
-pub mod fs;
 pub mod index;
-pub mod license;
 pub mod manifest;
-mod safe_path;
+pub mod product;
 #[cfg(feature = "schema")]
 pub mod schema;
-pub mod verify;
-pub mod version;
 
-pub use safe_path::{is_safe_component, is_safe_relative_path};
+pub use product::Stt;
+pub use super_engine_spec::{
+    arch, backend_id, entry, forge, fs, is_safe_component, is_safe_relative_path, license, verify,
+    version,
+};

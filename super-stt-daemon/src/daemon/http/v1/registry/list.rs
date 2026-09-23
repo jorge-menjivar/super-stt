@@ -134,7 +134,7 @@ pub(super) fn map_entry(
                 // through v0.2.0 require the key to parse this response.
                 provider: String::new(),
                 supported_devices: m.supported_devices.clone(),
-                role: m.role.clone(),
+                product: m.product.clone(),
             })
             .collect(),
         secrets: entry

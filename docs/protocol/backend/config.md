@@ -11,9 +11,11 @@ This document is part of the [backend protocol](./contract.md); see also
 [wasm.md](./wasm.md) and [subprocess.md](./subprocess.md) for how the
 configuration's fields are honored per transport.
 
-A JSON Schema for this file is generated from the canonical manifest types in
-`super-stt-registry-types` and published to GitHub Pages by CI (it is not
-committed to the repo). Backends in other repositories reference it at
+A JSON Schema for this file is generated from the manifest types Super STT
+shares with Super TTS in
+[`super-engine-spec`](https://github.com/super-libre/super-engine), plus Super
+STT's own fields in `super-stt-registry-types`, and published to GitHub Pages
+by CI (it is not committed to the repo). Backends in other repositories reference it at
 `https://jorge-menjivar.github.io/super-stt/backend.schema.json`.
 Add that URL as a `#:schema` comment line at the top of a `backend.toml` to get
 autocomplete and validation in taplo-based editors. Generate it locally with
@@ -253,6 +255,16 @@ contract and not only a hint: `POST /backend/{id}/option/{name}` answers
 switch over the two values its type names — and the `default`, when there is
 one, has to be on the list. Both are refused at publication.
 
+`type` is also a contract. The daemon stores every value as text, and refuses
+a write whose text is not of the declared type with `400 invalid_value`:
+`integer` takes a 64-bit signed integer, `float` a finite number, and `bool`
+exactly `true` or `false`. `string`, the default, takes anything.
+
+A numeric option can declare `min` and `max`, both inclusive, and the daemon
+refuses a write outside them the same way. `step` is the increment a control
+moves in. The daemon does not enforce it, and the settings app does not use it
+yet.
+
 An option value is delivered as an `x-stt-option-<name>` request header, which
 sets the shape a value may take: at most 4000 characters, and no control
 characters. The daemon refuses a user's write of anything else with
@@ -266,9 +278,12 @@ could not be undone from the settings UI.
 | `name`        | string         | yes      | snake_case identifier the backend reads the value by. `[a-z][a-z0-9_]*`, unique within the table. |
 | `label`       | string         | no       | Human-readable label shown in the settings UI. Falls back to `name` when absent. |
 | `description` | string         | yes      | Help text shown beside the input in the settings UI.   |
-| `type`        | string         | no       | `string`, `integer`, or `bool`. Drives the input the UI renders: `bool` gets a switch that writes on the flip, everything else a text field the user saves. Default `string`. |
+| `type`        | string         | no       | `string`, `integer`, `float`, or `bool`. Drives the input the UI renders: `bool` gets a switch that writes on the flip, everything else a text field the user saves. The daemon refuses a value that is not of this type. Default `string`. |
 | `default`     | matches `type` | no       | Value used when the user sets none. Forbidden on `base_url` — see below. When `choices` is present, must be one of them. |
 | `choices`     | array of `type` | no      | The values this option accepts. Renders a dropdown, and the daemon refuses to store anything else. Omit it for an open-ended option. Entries must be unique, and a `bool` must not declare any. |
+| `min`         | number         | no       | Lowest value accepted, inclusive. `integer` and `float` only. |
+| `max`         | number         | no       | Highest value accepted, inclusive. `integer` and `float` only. |
+| `step`        | number         | no       | The increment a control moves in. Not enforced. |
 | `required`    | bool           | no       | Whether a value must be set before the backend can load. Default `false`. |
 
 #### `base_url` and egress
@@ -647,6 +662,11 @@ destination = "models/whisper-tiny/config.json"
 
 `destination` must be a relative path that stays inside the backend directory:
 absolute paths, `..` traversal, and backslashes are rejected.
+
+The published schema also lists `accel`, `cuda_major`, `cuda_sm`, `gfx`,
+`vulkan_api` and `optional` on a file. Super TTS uses them to ship one variant
+of a file per GPU. Super STT refuses a manifest that sets `accel` on a file,
+because its daemon does not choose between variants yet.
 
 ## Example: local backend (subprocess)
 

@@ -185,7 +185,7 @@ pub fn validate(
     if let Some(model) = m
         .models
         .iter()
-        .find(|md| md.realtime && md.role.is_post_processor())
+        .find(|md| md.realtime && md.product.role.is_post_processor())
     {
         return Err(ManifestError::PostProcessorRealtime(model.name.clone()));
     }

@@ -6866,6 +6866,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "super-engine-spec"
+version = "0.1.0"
+source = "git+https://github.com/super-libre/super-engine?rev=0359cdb256d8447626ab42697679d6c2c2104c1e#0359cdb256d8447626ab42697679d6c2c2104c1e"
+dependencies = [
+ "hex",
+ "ring",
+ "schemars",
+ "semver",
+ "serde",
+ "serde_json",
+ "spdx",
+ "thiserror 2.0.18",
+ "toml 1.1.0+spec-1.1.0",
+ "utoipa",
+]
+
+[[package]]
 name = "super-stt-app"
 version = "0.2.4"
 dependencies = [
@@ -7085,15 +7102,11 @@ dependencies = [
 name = "super-stt-registry-types"
 version = "0.2.4"
 dependencies = [
- "hex",
  "jsonschema",
- "ring",
  "schemars",
- "semver",
  "serde",
  "serde_json",
- "spdx",
- "thiserror 2.0.18",
+ "super-engine-spec",
  "toml 1.1.0+spec-1.1.0",
  "utoipa",
 ]

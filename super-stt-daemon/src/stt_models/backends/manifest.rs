@@ -89,7 +89,7 @@ pub fn validate_runtime(m: &Manifest) -> Result<()> {
         // handed a finished transcript over `POST /v1/process` and never sees
         // the WebSocket path. Declaring both is a manifest contradiction, so
         // it is refused here rather than silently ignored at load.
-        if model.realtime && model.role.is_post_processor() {
+        if model.realtime && model.product.role.is_post_processor() {
             anyhow::bail!(
                 "model `{}` has role = post_processor but realtime = true; \
                  post-processors are driven over POST /v1/process, not the realtime path",
@@ -215,7 +215,7 @@ context = true
 "#
             );
             let m = Manifest::parse(&toml_src).unwrap_or_else(|e| panic!("parse {kind}: {e}"));
-            assert!(m.capabilities.context);
+            assert!(m.capabilities.product.context);
             assert!(
                 !m.capabilities.websocket,
                 "one flag does not imply the other"
@@ -240,7 +240,7 @@ description = "Test backend."
 "#;
         let m = Manifest::parse(toml_src).expect("parse");
         assert!(
-            !m.capabilities.context,
+            !m.capabilities.product.context,
             "absent means no context headers are sent"
         );
     }
@@ -548,8 +548,8 @@ supported_languages = ["en"]
 supported_devices = ["none"]
 "#;
         let m = Manifest::parse(toml_src).expect("parse");
-        assert_eq!(m.models[0].role, ModelRole::Transcription);
-        assert!(!m.models[0].role.is_post_processor());
+        assert_eq!(m.models[0].product.role, ModelRole::Transcription);
+        assert!(!m.models[0].product.role.is_post_processor());
     }
 
     #[test]
@@ -573,8 +573,8 @@ supported_languages = ["en"]
 supported_devices = ["none"]
 "#;
         let m = Manifest::parse(toml_src).expect("parse");
-        assert!(m.models[0].role.is_post_processor());
-        assert_eq!(m.models[0].role.to_string(), "post_processor");
+        assert!(m.models[0].product.role.is_post_processor());
+        assert_eq!(m.models[0].product.role.to_string(), "post_processor");
     }
 
     /// An unknown spelling is refused at parse rather than silently read as the

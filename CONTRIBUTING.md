@@ -250,9 +250,14 @@ Super STT is a Rust workspace:
 | `super-stt-cosmic-applet`  | COSMIC panel applet with visualizations                          |
 | `super-stt-consent`        | Consent-popup helper for the auth handshake                      |
 | `super-stt-shared`         | Common types, protocol definitions, validation                   |
-| `super-stt-registry-types` | Shared backend registry / manifest types                         |
+| `super-stt-registry-types` | Super STT's backend contract, on `super-engine-spec`             |
 | `super-stt-forge`          | Git-forge release sourcing for the registry                      |
 | `super-stt-indexer`        | CI tool that builds the published registry `index.json`          |
+
+The code Super STT shares with Super TTS lives in
+[super-engine](https://github.com/super-libre/super-engine), pinned by rev in
+the root `Cargo.toml`. A fix to the backend manifest types, for example, goes
+there, and reaches this workspace when the pin is bumped.
 
 The protocol and backend contract that clients and backend authors build
 against live in [`docs/protocol/`](./docs/protocol/).
