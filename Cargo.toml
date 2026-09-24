@@ -143,7 +143,9 @@
     strum_macros      = "0.28"
     # The code Super STT shares with Super TTS. Pinned by rev, like
     # libcosmic, so a change there reaches this workspace only when the rev
-    # is bumped here. Every super-engine crate names the same rev.
+    # is bumped here. Every super-engine crate names the same rev, and so do
+    # the shared CI jobs in .github/workflows: bump them all with
+    # `just pin-engine <rev>`.
     super-engine-client = {
       git = "https://github.com/super-libre/super-engine",
       rev = "7010eed104753005ef402c7fa5af24b2b9c47a8f",

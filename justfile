@@ -1848,6 +1848,60 @@ restart-daemon:
     fi
     systemctl --user restart {{ service_name }}
 
+# Pin super-engine at one commit: every super-engine crate in Cargo.toml, and
+# the shared CI jobs the workflows in .github/workflows run from it, so the
+# installer and the script that tests it come from the same engine commit.
+# Then updates Cargo.lock. `rev` is anything GitHub resolves to a commit (a
+# full or short hash, or `main`). It must be pushed: CI fetches the jobs from
+# GitHub.
+# Usage: just pin-engine <rev>
+[doc("Pin super-engine's crates and shared CI jobs at one commit")]
+pin-engine rev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sha=$(curl -fsSL -H 'Accept: application/vnd.github.sha' \
+      "https://api.github.com/repos/super-libre/super-engine/commits/{{ rev }}") || {
+      echo "pin-engine: GitHub has no super-engine commit '{{ rev }}'. Push it first." >&2
+      exit 1
+    }
+    python3 - "$sha" <<'PYEOF'
+    import glob
+    import re
+    import sys
+
+    sha = sys.argv[1]
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        sys.exit(f"pin-engine: GitHub answered {sha!r}, not a commit hash")
+    git = r'git\s*=\s*"https://github\.com/super-libre/super-engine"'
+    crate = re.compile(rf'({git},\s*rev\s*=\s*")[^"]*')
+    job = re.compile(r"(super-libre/super-engine/\.github/[\w./-]+@)[^\s#]+")
+
+    def pinned(path, pattern):
+        with open(path) as f:
+            return pattern.subn(lambda m: m.group(1) + sha, f.read())
+
+    # Every file is checked before any is written, so a refusal changes nothing.
+    manifest, crates = pinned("Cargo.toml", crate)
+    engine_deps = len(re.findall(git, manifest))
+    if crates == 0 or crates != engine_deps:
+        sys.exit(
+            f"pin-engine: found a rev on {crates} of the {engine_deps} super-engine "
+            "crates in Cargo.toml. Each one needs `git = ...` followed by `rev = ...`."
+        )
+    workflows = {p: pinned(p, job) for p in sorted(glob.glob(".github/workflows/*.yml"))}
+
+    def write(path, text):
+        with open(path, "w") as f:
+            f.write(text)
+
+    write("Cargo.toml", manifest)
+    for path, (text, _) in workflows.items():
+        write(path, text)
+    jobs = sum(count for _, count in workflows.values())
+    print(f"Pinned {crates} crates and {jobs} CI jobs at {sha}")
+    PYEOF
+    cargo metadata --format-version 1 > /dev/null
+
 # Vendor dependencies locally
 vendor:
     #!/usr/bin/env bash
