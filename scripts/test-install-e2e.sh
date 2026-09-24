@@ -126,7 +126,7 @@ note() { echo "  note  - $1"; }
 # ---- The complete installed tree ------------------------------------------
 
 # Every file `--components=all` installs, as `mode:path`, mirroring
-# super-stt-install/src/stage.rs::build_manifest. `stt` has no source in the
+# super-engine-installer's stage::build_manifest. `stt` has no source in the
 # tarball — build_manifest generates the wrapper — and `super-stt-install` is
 # the installer copying its own binary into place; both are as much a part of
 # a complete install as anything unpacked from the release.

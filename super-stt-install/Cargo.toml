@@ -8,25 +8,21 @@
     license = "GPL-3.0-only"
 
 [dependencies]
-    anyhow.workspace = true
-    clap.workspace = true
     dirs.workspace = true
-    env_logger.workspace = true
-    flate2 = "1.1.9"
     log.workspace = true
-    reqwest.workspace = true
-    serde.workspace = true
-    serde_json.workspace = true
-    super-engine-forge.workspace = true
+    super-engine-installer.workspace = true
     super-stt-registry-types = { path = "../super-stt-registry-types" }
-    tar = "0.4.46"
-    thiserror.workspace = true
-    tokio.workspace = true
 
+# The end-to-end test builds a release tarball and serves it from a mocked
+# GitHub.
 [dev-dependencies]
+    flate2 = "1.1.9"
     hex = "0.4.3"
     mockito = "1"
     ring = "0.17.14"
+    serde_json.workspace = true
+    tar = "0.4.46"
+    tokio.workspace = true
 
 [lints]
     workspace = true

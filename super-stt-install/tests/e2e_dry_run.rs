@@ -40,7 +40,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// A minimal, valid gzip'd tar covering every file `--components=all`
-/// requires (`super-stt-install/src/stage.rs::build_manifest`): the three
+/// requires (super-engine-installer's `stage::build_manifest`): the three
 /// daemon binaries, the systemd unit, the app binary + desktop + icon, and
 /// the applet binary + desktop file + icon. At least one
 /// `super-stt-cosmic-applet-*.desktop` file is required whenever the applet
