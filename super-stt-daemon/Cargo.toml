@@ -27,7 +27,6 @@
         default-features = false,
         features = ["json", "query", "tokio", "ws"]
     }
-    bytes = { version = "1.11.1", optional = true }
     chrono.workspace = true
     clap.workspace = true
     cpal.workspace = true
@@ -158,7 +157,7 @@
     # has cuda/cudnn/flash-attn features.
     default = ["subprocess-backends", "wasm-backends"]
     # Spawn STT backends as sandboxed native subprocesses.
-    subprocess-backends = ["dep:bytes", "hyper/client"]
+    subprocess-backends = ["super-engine-daemon/subprocess"]
     # Build the mock_backend test fixture binary (used by tests/subprocess_mock.rs).
     test-fixtures = ["hyper-util/service"]
     # Load STT backends as sandboxed WASM components.

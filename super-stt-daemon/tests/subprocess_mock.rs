@@ -25,10 +25,20 @@ fn install_crypto_provider() {
 
 /// Removes the per-test backend dir on scope exit — including panic unwinds, so a
 /// failed assertion doesn't leak `~/.cache/super-stt-mock-test-<pid>`.
+///
+/// Also the cache dir the daemon grants that backend, which is named after the
+/// backend dir and lives under the real `~/.cache/super-stt/backends`, so each
+/// run would otherwise leave one behind per test.
 struct CleanupDir(std::path::PathBuf);
 impl Drop for CleanupDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+        if let Some(name) = self.0.file_name() {
+            let cache = super_stt_shared::paths::cache_dir()
+                .join("backends")
+                .join(name);
+            let _ = std::fs::remove_dir_all(cache);
+        }
     }
 }
 
@@ -168,19 +178,19 @@ async fn two_backends_from_one_directory_run_concurrently() {
 }
 
 /// The reported bug, at the level it bites: reloading the *same* model in
-/// place. An instance owns its `systemd-run --unit=` name and its socket, both
-/// keyed on (backend, model), so a second instance of one model cannot be built
-/// while the first still holds them — `systemd-run` refuses the duplicate unit
-/// outright.
+/// place. An instance owns its sandbox's name and its socket, both keyed on
+/// (backend, model), so a second instance of one model cannot be built while
+/// the first still holds them. That is why "build the replacement, keep the
+/// old one if it fails" was never a policy a subprocess backend could honor —
+/// and why every load path releases its instance before building the
+/// replacement. Stage 2 loaded first, so every in-place reload it was asked
+/// for — a device switch, an option change — failed while the card went on
+/// showing the model it had just broken.
 ///
-/// Worse, the attempt is not free: the spawn unlinks the socket path before it
-/// reaches systemd, so the failed second spawn leaves the *first* instance
-/// running but unreachable. That is why "build the replacement, keep the old
-/// one if it fails" was never a policy a subprocess backend could honor — and
-/// why every load path releases its instance before building the replacement.
-/// Stage 2 loaded first, so every in-place reload it was asked for — a device
-/// switch, an option change — failed with an opaque systemd error while the
-/// card went on showing the model it had just broken.
+/// The attempt used to cost the running instance too: the spawn unlinked the
+/// socket path before `systemd-run` refused the duplicate unit, leaving the
+/// first instance running but unreachable. It is refused before it touches
+/// anything now, so the running instance keeps serving.
 #[tokio::test]
 async fn a_model_reloads_only_once_its_instance_is_released() {
     if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
@@ -200,19 +210,16 @@ async fn a_model_reloads_only_once_its_instance_is_released() {
         .err()
         .expect("a second instance of one model must not spawn");
     assert!(
-        error.to_string().contains("systemd-run failed"),
-        "expected the duplicate unit name to be refused: {error}"
+        error.to_string().contains("already running"),
+        "expected the running instance to be named as the reason: {error}"
     );
 
-    // And the attempt took the running instance's socket with it.
-    assert!(
-        running
-            .process_text("um so hello", Some("en"))
-            .await
-            .is_err(),
-        "the failed spawn unlinked the live instance's socket, so keeping it \
-         was never an option"
-    );
+    // And the refused attempt left the running instance alone.
+    let processed = running
+        .process_text("um so hello", Some("en"))
+        .await
+        .expect("a refused spawn must not take the running instance's socket");
+    assert_eq!(processed, "processed: um so hello");
 
     // Released first, the same model comes straight back up — which is what
     // makes unload-then-load the only order that reloads anything.
