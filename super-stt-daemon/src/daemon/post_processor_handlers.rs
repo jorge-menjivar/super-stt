@@ -62,7 +62,7 @@ impl SuperSTTDaemon {
                 ),
             );
         };
-        if !definition.is_post_processor() {
+        if !definition.product.role.is_post_processor() {
             return DaemonResponse::error_with_code(
                 ErrorCode::InvalidModel,
                 &format!(

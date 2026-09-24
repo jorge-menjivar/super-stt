@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! End-to-end test for the `super-stt-indexer local` subcommand — the
-//! offline index generator that builds an `index.json` from locally-staged
-//! `backend.toml` files (no GitHub, no Pages). It backs the daemon's
-//! download/install pipeline tests and replaced the old Python offline
-//! generator.
+//! The `super-stt-indexer` binary, end to end: that it is wired to
+//! `super_engine_indexer` and indexes a staged backend.
 //!
-//! `local`'s building blocks are unit-tested in `src/local.rs`; this is the
-//! binary-level counterpart to `tests/integration.rs` (which covers the
-//! GitHub-backed `build` path). It drives the real binary end to end:
-//! staging assets, hashing them, multi-manifest output, the
-//! `--allow-missing-assets` placeholder path, and the hard-error path when
-//! a required asset isn't staged.
+//! What the indexer does is `super-engine-indexer`'s, and tested there; this
+//! is only that Super STT's binary runs it.
 
 use std::process::Command;
 
@@ -47,9 +40,8 @@ supported_devices = ["none"]
     )
 }
 
-/// Happy path: a real staged `.wasm` is hashed and given a URL under the
-/// `--base-url`, and `<out>/index.json` matches the published `build`
-/// shape (id from the source's last segment, `vX.Y.Z` tag, real sha256).
+/// A real staged `.wasm` is hashed and given a URL under the `--base-url`,
+/// and `<out>/index.json` has the published shape.
 #[test]
 fn local_indexes_a_staged_wasm_backend() {
     let dir = tempfile::tempdir().unwrap();
@@ -100,115 +92,4 @@ fn local_indexes_a_staged_wasm_backend() {
     assert_eq!(wasm["url"], "http://localhost:8787/dummy.wasm");
     assert_eq!(wasm["size"], WASM_BYTES.len());
     assert_eq!(wasm["sha256"], WASM_SHA256);
-}
-
-/// `--allow-missing-assets` lets listing/read tests build an index without
-/// staging artifacts: the missing asset gets a zeroed placeholder sha and
-/// `size: 0`, but the entry is otherwise complete.
-#[test]
-fn local_emits_placeholder_for_missing_asset() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path();
-    let manifest_path = dir.path().join("backend.toml");
-    std::fs::write(
-        &manifest_path,
-        manifest("github.com/x/ghost", "Ghost", "0.1.0", "ghost.wasm"),
-    )
-    .unwrap();
-
-    let status = Command::new(BIN)
-        .arg("local")
-        .arg("--out")
-        .arg(out)
-        .arg("--allow-missing-assets")
-        .arg(&manifest_path)
-        .status()
-        .expect("run indexer local --allow-missing-assets");
-    assert!(status.success(), "indexer local with placeholder failed");
-
-    let text = std::fs::read_to_string(out.join("index.json")).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-    let wasm = &v["backends"][0]["assets"]["wasm"];
-    assert_eq!(wasm["size"], 0, "missing asset → placeholder size 0");
-    assert_eq!(
-        wasm["sha256"], "0000000000000000000000000000000000000000000000000000000000000000",
-        "missing asset → all-zero placeholder sha"
-    );
-    // The URL is still derived from the (default) base-url + declared file.
-    assert_eq!(wasm["url"], "http://localhost:8787/ghost.wasm");
-}
-
-/// Without `--allow-missing-assets`, a declared-but-unstaged wasm asset is
-/// a hard error: the binary exits non-zero and writes no index.
-#[test]
-fn local_errors_on_unstaged_asset_without_flag() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path();
-    let manifest_path = dir.path().join("backend.toml");
-    std::fs::write(
-        &manifest_path,
-        manifest("github.com/x/ghost", "Ghost", "0.1.0", "ghost.wasm"),
-    )
-    .unwrap();
-
-    let output = Command::new(BIN)
-        .arg("local")
-        .arg("--out")
-        .arg(out)
-        .arg(&manifest_path)
-        .output()
-        .expect("run indexer local (missing asset)");
-    assert!(
-        !output.status.success(),
-        "a missing required asset must fail the build"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("ghost.wasm") || stderr.to_lowercase().contains("not found"),
-        "error should name the missing asset; stderr=`{stderr}`"
-    );
-    assert!(
-        !out.join("index.json").exists(),
-        "no index.json should be written when a required asset is missing"
-    );
-}
-
-/// Multiple `backend.toml` paths produce one index entry each, in order.
-#[test]
-fn local_indexes_multiple_manifests() {
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path();
-    std::fs::write(out.join("a.wasm"), WASM_BYTES).unwrap();
-    std::fs::write(out.join("b.wasm"), WASM_BYTES).unwrap();
-
-    let m_a = dir.path().join("a.toml");
-    let m_b = dir.path().join("b.toml");
-    std::fs::write(
-        &m_a,
-        manifest("github.com/x/alpha", "Alpha", "1.0.0", "a.wasm"),
-    )
-    .unwrap();
-    std::fs::write(
-        &m_b,
-        manifest("github.com/x/bravo", "Bravo", "2.0.0", "b.wasm"),
-    )
-    .unwrap();
-
-    let status = Command::new(BIN)
-        .arg("local")
-        .arg("--out")
-        .arg(out)
-        .arg(&m_a)
-        .arg(&m_b)
-        .status()
-        .expect("run indexer local (multi)");
-    assert!(status.success(), "indexer local multi-manifest failed");
-
-    let text = std::fs::read_to_string(out.join("index.json")).unwrap();
-    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
-    let backends = v["backends"].as_array().expect("backends array");
-    assert_eq!(backends.len(), 2, "one entry per manifest");
-    let ids: Vec<&str> = backends.iter().filter_map(|b| b["id"].as_str()).collect();
-    assert!(ids.contains(&"alpha"), "alpha indexed: {ids:?}");
-    assert!(ids.contains(&"bravo"), "bravo indexed: {ids:?}");
 }

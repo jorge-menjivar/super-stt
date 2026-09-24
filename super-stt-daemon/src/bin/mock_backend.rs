@@ -5,7 +5,7 @@
 //! feature.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -19,6 +19,9 @@ use tokio::net::UnixListener;
 
 struct AppState {
     loaded: AtomicBool,
+    /// Status polls left before a [`BUILDS_KERNELS`] load is ready; zero when
+    /// no such load is under way.
+    kernel_polls_left: AtomicU32,
 }
 
 #[tokio::main]
@@ -26,6 +29,7 @@ async fn main() {
     let socket = std::env::var("SUPER_STT_BACKEND_SOCKET").expect("SUPER_STT_BACKEND_SOCKET");
     let state = Arc::new(AppState {
         loaded: AtomicBool::new(false),
+        kernel_polls_left: AtomicU32::new(0),
     });
     let app = Router::new()
         .route(
@@ -62,7 +66,28 @@ async fn main() {
     }
 }
 
+/// Polls a [`BUILDS_KERNELS`] load reports progress for before it is ready.
+const KERNEL_POLLS: u32 = 4;
+
 async fn status(State(s): State<Arc<AppState>>) -> Json<Value> {
+    // A first load building its kernels: a quarter further on each poll, the
+    // way a backend reports its tuning results, then ready.
+    let left = s.kernel_polls_left.load(Ordering::SeqCst);
+    if left > 0 {
+        s.kernel_polls_left.store(left - 1, Ordering::SeqCst);
+        if left == 1 {
+            s.loaded.store(true, Ordering::SeqCst);
+        } else {
+            let done = KERNEL_POLLS - left;
+            return Json(json!({
+                "status": "success",
+                "state": "loading",
+                "phase": "initial_setup",
+                "step": "building_kernels",
+                "progress": f64::from(done) / f64::from(KERNEL_POLLS),
+            }));
+        }
+    }
     if s.loaded.load(Ordering::SeqCst) {
         Json(json!({
             "status": "success",
@@ -75,8 +100,30 @@ async fn status(State(s): State<Arc<AppState>>) -> Json<Value> {
     }
 }
 
-async fn load(State(s): State<Arc<AppState>>, _body: String) -> impl IntoResponse {
-    s.loaded.store(true, Ordering::SeqCst);
+/// The model a test loads to have the backend die partway through its load.
+const DIES_ON_LOAD: &str = "mock-dies-on-load";
+
+/// The model a test loads to have the backend report building its kernels.
+const BUILDS_KERNELS: &str = "mock-builds-kernels";
+
+async fn load(State(s): State<Arc<AppState>>, body: String) -> impl IntoResponse {
+    let name = serde_json::from_str::<Value>(&body)
+        .ok()
+        .and_then(|v| v.get("name").and_then(Value::as_str).map(str::to_string));
+    if name.as_deref() == Some(BUILDS_KERNELS) {
+        s.kernel_polls_left.store(KERNEL_POLLS, Ordering::SeqCst);
+    } else if name.as_deref() == Some(DIES_ON_LOAD) {
+        // Accept the load, say why it is failing, and exit: the daemon's poll
+        // then finds nobody answering, and the line below is what it should
+        // hand back. Exiting after a moment, so the 202 reaches the daemon.
+        eprintln!("mock: the model thread panicked while loading");
+        tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            std::process::exit(101);
+        });
+    } else {
+        s.loaded.store(true, Ordering::SeqCst);
+    }
     (
         StatusCode::ACCEPTED,
         Json(json!({ "status": "success", "message": "Loading started" })),

@@ -169,12 +169,12 @@ fn install_forge(
     // for its own use. The failure routes through the same mapping it would
     // have, so a malformed URL answers identically whether or not `forge` was
     // declared.
-    let repo = super_stt_forge::RepoRef::parse(repo_url).map_err(|_| {
+    let repo = super_engine_forge::RepoRef::parse(repo_url).map_err(|_| {
         let e = crate::registry::custom_repo::ResolveError::BadRepoUrl(repo_url.to_owned());
         let (status, error) = custom_repo_error_response(&e);
         (status, error, e.to_string())
     })?;
-    super_stt_forge::forge_for_host(&repo.host).ok_or_else(|| {
+    super_engine_forge::forge_for_host(&repo.host).ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,
             "unsupported_forge",
@@ -213,7 +213,7 @@ pub(super) async fn resolve_install_entry(
         let forge = install_forge(body.forge, repo_url).map_err(|(status, error, msg)| {
             Box::new(super::registry_error_msg(status, error, &msg))
         })?;
-        let client = super_stt_forge::client(forge);
+        let client = super_engine_forge::client(forge, super_stt_registry_types::Stt::USER_AGENT);
         match crate::registry::custom_repo::resolve(client.as_ref(), repo_url).await {
             Ok(entry) => Ok(entry),
             Err(e) => {

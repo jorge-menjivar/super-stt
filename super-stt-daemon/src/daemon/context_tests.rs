@@ -14,7 +14,7 @@ use crate::stt_models::transcribe::{
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use super_stt_registry_types::manifest::{Capabilities, Device, ModelRole};
+use super_stt_registry_types::manifest::{Capabilities, Device, ModelRole, SttCapabilities};
 use super_stt_shared::models::contexts::{DictationContext, MAX_PROMPT_CHARS};
 use super_stt_shared::models::protocol::ErrorCode;
 
@@ -340,7 +340,7 @@ fn context_capable(source: &str) -> DiscoveredBackend {
         options: Vec::new(),
         capabilities: Capabilities {
             websocket: false,
-            context: true,
+            product: SttCapabilities { context: true },
         },
         models: Vec::new(),
     }
@@ -357,8 +357,10 @@ fn definition(name: &str, source: &str, role: ModelRole) -> ModelDefinition {
         processing_interval: Duration::from_secs(1),
         supported_devices: vec![Device::None],
         realtime: false,
-        force_preview_support: true,
-        role,
+        product: super_stt_registry_types::manifest::SttModel {
+            force_preview_support: true,
+            role: role,
+        },
         provider: None,
     }
 }

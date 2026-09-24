@@ -142,7 +142,7 @@ async fn every_daemon_run_announces_a_waiting_update_exactly_once() {
     );
 
     // Restart: a fresh checker, the same version still waiting.
-    daemon.self_update = std::sync::Arc::new(crate::self_update::SelfUpdateChecker::new());
+    daemon.self_update = std::sync::Arc::new(crate::self_update::checker());
     daemon.run_self_update_check_and_notify().await;
     assert_eq!(
         sent.lock().unwrap().len(),

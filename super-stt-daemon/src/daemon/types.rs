@@ -163,7 +163,7 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         notifier: Arc::new(tokio::sync::Mutex::new(
             crate::output::notification::Notifier::fake(true).0,
         )),
-        self_update: Arc::new(crate::self_update::SelfUpdateChecker::new()),
+        self_update: Arc::new(crate::self_update::checker()),
     }
 }
 

@@ -106,7 +106,9 @@ A wasm backend that proxies an upstream realtime API (for example, a
 streaming WebSocket transcription service) opts into a second interface pair
 beyond `wasi:http`. The interface definitions are in
 `docs/protocol/wit/realtime.wit`; the canonical package name is
-`super-stt:realtime@0.1.0`.
+`super-engine:realtime@0.1.0`.
+A backend built against the earlier `super-stt:realtime@0.1.0` still
+loads: the daemon offers the same interfaces under that name.
 
 ### Opt-in
 
@@ -124,13 +126,13 @@ The `realtime-backend` world the component must implement:
 world realtime-backend {
     import wasi:http/outgoing-handler@0.2.0;
     import wasi:io/poll@0.2.0;
-    import ws;            // super-stt:realtime/ws
+    import ws;            // super-engine:realtime/ws
     export wasi:http/incoming-handler@0.2.0;
-    export ws-server;     // super-stt:realtime/ws-server
+    export ws-server;     // super-engine:realtime/ws-server
 }
 ```
 
-**Imported: `super-stt:realtime/ws`**
+**Imported: `super-engine:realtime/ws`**
 
 Provides `connect(url, headers) -> ws-stream` for opening an outgoing
 WebSocket to an upstream service. Returns the host-owned `ws-stream`
@@ -144,7 +146,7 @@ are rejected.
 The `consumer-stream` resource (host-owned, handed in by `ws-server.handle`)
 provides the same five methods for communicating with the consumer.
 
-**Exported: `super-stt:realtime/ws-server`**
+**Exported: `super-engine:realtime/ws-server`**
 
 ```wit
 handle: func(
@@ -209,6 +211,6 @@ resource. A guest must still call `recv` to take it.
   as the component is instantiated — there are no weights to load.
 - For a realtime backend: declare `[capabilities] websocket = true` and
   `realtime = true` on each realtime model; implement the `realtime-backend`
-  world (import `super-stt:realtime/ws`, export `super-stt:realtime/ws-server`);
+  world (import `super-engine:realtime/ws`, export `super-engine:realtime/ws-server`);
   and multiplex the consumer and the upstream with `subscribe` +
   `wasi:io/poll` rather than reading them in sequence.

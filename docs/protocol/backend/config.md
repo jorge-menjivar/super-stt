@@ -11,9 +11,11 @@ This document is part of the [backend protocol](./contract.md); see also
 [wasm.md](./wasm.md) and [subprocess.md](./subprocess.md) for how the
 configuration's fields are honored per transport.
 
-A JSON Schema for this file is generated from the canonical manifest types in
-`super-stt-registry-types` and published to GitHub Pages by CI (it is not
-committed to the repo). Backends in other repositories reference it at
+A JSON Schema for this file is generated from the manifest types Super STT
+shares with Super TTS in
+[`super-engine-spec`](https://github.com/super-libre/super-engine), plus Super
+STT's own fields in `super-stt-registry-types`, and published to GitHub Pages
+by CI (it is not committed to the repo). Backends in other repositories reference it at
 `https://jorge-menjivar.github.io/super-stt/backend.schema.json`.
 Add that URL as a `#:schema` comment line at the top of a `backend.toml` to get
 autocomplete and validation in taplo-based editors. Generate it locally with
@@ -66,7 +68,7 @@ description = "Local Whisper speech-to-text."
 | `version`    | string | yes             | Backend version (semver).                                            |
 | `kind`       | string | yes             | `subprocess` or `wasm` — selects the transport.                       |
 | `entrypoint` | string | yes             | Path, relative to the backend directory, to the executable (`subprocess`) or the `.wasm` component (`wasm`). |
-| `contract`   | string | yes             | The [contract generation](#contract-generations) the backend implements: `v1` or `v2`. Declare the lowest generation whose fields you use. Unknown values are rejected. |
+| `contract`   | string | yes             | The [contract generation](#contract-generations) the backend implements: `v1`, `v2` or `v3`. Declare the lowest generation whose fields you use. Unknown values are rejected. |
 | `license`    | string | for publication | SPDX identifier of a current OSI-approved or FSF Free/Libre license (e.g. `Apache-2.0`, `MIT`, `GPL-3.0-only`), or the literal `other` for a license outside that set. Required for registry publication; optional for locally installed backends. |
 | `description`| string | yes             | One-line, human-readable summary shown in the registry/Browse listing. |
 
@@ -106,6 +108,7 @@ is.
 |------------|------------------------------------------------------------------------------|--------------------|
 | `v1`       | The base contract: transcription over `POST /v1/transcribe`.                 | Super STT 0.2.0    |
 | `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors; [`[[models]].force_preview_support`](#models) — live previews for a model that has none of its own. Also **requires** [`[backend].id`](#backend). | Super STT 0.2.4    |
+| `v3`       | No manifest field. The daemon grants a subprocess backend a [cache directory](./subprocess.md) that survives the process, and reads the [load progress](./contract.md#get-v1status) (`phase`, `step`, `progress`) of `GET /v1/status`. Declare it when a load builds GPU kernels: an older daemon rebuilds them on every load and cuts a slow one off at its flat load limit. | Super STT 0.2.5    |
 
 Extending the contract does not oblige a backend to serve all of it. Which
 routes a backend must implement is decided by the models it declares, not by
@@ -253,6 +256,16 @@ contract and not only a hint: `POST /backend/{id}/option/{name}` answers
 switch over the two values its type names — and the `default`, when there is
 one, has to be on the list. Both are refused at publication.
 
+`type` is also a contract. The daemon stores every value as text, and refuses
+a write whose text is not of the declared type with `400 invalid_value`:
+`integer` takes a 64-bit signed integer, `float` a finite number, and `bool`
+exactly `true` or `false`. `string`, the default, takes anything.
+
+A numeric option can declare `min` and `max`, both inclusive, and the daemon
+refuses a write outside them the same way. `step` is the increment a control
+moves in. The daemon does not enforce it, and the settings app does not use it
+yet.
+
 An option value is delivered as an `x-stt-option-<name>` request header, which
 sets the shape a value may take: at most 4000 characters, and no control
 characters. The daemon refuses a user's write of anything else with
@@ -266,9 +279,12 @@ could not be undone from the settings UI.
 | `name`        | string         | yes      | snake_case identifier the backend reads the value by. `[a-z][a-z0-9_]*`, unique within the table. |
 | `label`       | string         | no       | Human-readable label shown in the settings UI. Falls back to `name` when absent. |
 | `description` | string         | yes      | Help text shown beside the input in the settings UI.   |
-| `type`        | string         | no       | `string`, `integer`, or `bool`. Drives the input the UI renders: `bool` gets a switch that writes on the flip, everything else a text field the user saves. Default `string`. |
+| `type`        | string         | no       | `string`, `integer`, `float`, or `bool`. Drives the input the UI renders: `bool` gets a switch that writes on the flip, everything else a text field the user saves. The daemon refuses a value that is not of this type. Default `string`. |
 | `default`     | matches `type` | no       | Value used when the user sets none. Forbidden on `base_url` — see below. When `choices` is present, must be one of them. |
 | `choices`     | array of `type` | no      | The values this option accepts. Renders a dropdown, and the daemon refuses to store anything else. Omit it for an open-ended option. Entries must be unique, and a `bool` must not declare any. |
+| `min`         | number         | no       | Lowest value accepted, inclusive. `integer` and `float` only. |
+| `max`         | number         | no       | Highest value accepted, inclusive. `integer` and `float` only. |
+| `step`        | number         | no       | The increment a control moves in. Not enforced. |
 | `required`    | bool           | no       | Whether a value must be set before the backend can load. Default `false`. |
 
 #### `base_url` and egress
@@ -513,7 +529,7 @@ context   = true
 
 | Field       | Type | Required | Notes                                                                              |
 |-------------|------|----------|------------------------------------------------------------------------------------|
-| `websocket` | bool | no       | Opt into the `super-stt:realtime/ws` import and the `super-stt:realtime/ws-server` export (see [wasm.md — Realtime](./wasm.md#realtime-websocket)). When `true`, the daemon wires those interfaces into the WASM component for every session on a realtime model. **wasm-only** — a `subprocess` backend declaring `websocket = true` is rejected at discovery. Default `false`. |
+| `websocket` | bool | no       | Opt into the `super-engine:realtime/ws` import and the `super-engine:realtime/ws-server` export (see [wasm.md — Realtime](./wasm.md#realtime-websocket)). When `true`, the daemon wires those interfaces into the WASM component for every session on a realtime model. **wasm-only** — a `subprocess` backend declaring `websocket = true` is rejected at discovery. Default `false`. |
 | `context`   | bool | no       | Opt into being handed the user's [dictation context](../endpoints/v1/context.md): an `x-stt-prompt` and an `x-stt-vocabulary` header on every `/v1` request (see [contract.md — Request headers](./contract.md#request-headers)). Unlike `websocket` this is **not** transport-restricted — both headers ride the ordinary request, so a `subprocess` backend reads them exactly as a `wasm` one does. Declare it only if the backend actually reads them: a settings UI uses the flag to tell the user which backends will hear a vocabulary they typed. Default `false`, which means neither header is sent. |
 
 ## `[[models]]`
@@ -586,7 +602,8 @@ reads the same `[[options]]` and `[[secrets]]`.
 
 A post-processor cannot set `realtime = true`: realtime is a property of
 streaming audio in, and a post-processor is handed a finished transcript. A
-manifest declaring both is rejected at discovery, and refused at publication.
+manifest declaring both is refused wherever it is read: at publication, at
+install, and at discovery.
 
 ```toml
 [backend]
@@ -647,6 +664,11 @@ destination = "models/whisper-tiny/config.json"
 
 `destination` must be a relative path that stays inside the backend directory:
 absolute paths, `..` traversal, and backslashes are rejected.
+
+The published schema also lists `accel`, `cuda_major`, `cuda_sm`, `gfx`,
+`vulkan_api` and `optional` on a file. Super TTS uses them to ship one variant
+of a file per GPU. Super STT refuses a manifest that sets `accel` on a file,
+because its daemon does not choose between variants yet.
 
 ## Example: local backend (subprocess)
 

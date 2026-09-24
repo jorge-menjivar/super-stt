@@ -2,86 +2,13 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
-/// Canonical error response builder for the `{ "status": "error",
-/// "message": <message>, "data": { "reason": <reason> } }` shape.
-///
-/// All error responses that carry a `data.reason` field route through
-/// this function so the JSON shape is defined in exactly one place.
-pub(crate) fn error_response(status: StatusCode, message: &str, reason: &str) -> Response {
-    let body = serde_json::json!({
-        "status":  "error",
-        "message": message,
-        "data":    { "reason": reason }
-    });
-    (
-        status,
-        [("content-type", "application/json")],
-        body.to_string(),
-    )
-        .into_response()
-}
-
-/// Wire-level `reason` string constants used in `data.reason` fields.
-/// Values are the exact `snake_case` strings the protocol specifies;
-/// callers MUST use these rather than inline literals.
-pub(crate) mod reason {
-    // invalid_session reasons
-    pub(crate) const UNKNOWN: &str = "unknown";
-    /// The caller's `/proc/<pid>/exe` is no longer the binary the token was
-    /// minted for. `docs/protocol/auth.md` specifies this as a *per-request*
-    /// outcome ("the next request returns `401 invalid_session` with reason
-    /// `exe_changed`"), not just the `/events` exe-watch's 30 s tick.
-    pub(crate) const EXE_CHANGED: &str = "exe_changed";
-
-    // auth_denied reasons
-    pub(crate) const INVALID_BODY: &str = "invalid_body";
-    pub(crate) const INVALID_SCOPE: &str = "invalid_scope";
-    pub(crate) const UID_MISMATCH: &str = "uid_mismatch";
-    pub(crate) const USER_DENIED_CACHED: &str = "user_denied_cached";
-    pub(crate) const USER_DENIED: &str = "user_denied";
-    pub(crate) const USER_DISMISSED: &str = "user_dismissed";
-    pub(crate) const POPUP_FAILED: &str = "popup_failed";
-    /// The daemon could not resolve the peer's executable (`SO_PEERCRED`/pid
-    /// missing, or `/proc/<pid>/exe` unreadable), so it can't verify *which*
-    /// binary is asking — consent requires a verifiable binary, so it fails
-    /// closed (audit 2 Tier 3 #9).
-    pub(crate) const PEER_UNVERIFIABLE: &str = "peer_unverifiable";
-    /// A request on the TCP listener sent no `Origin`, or sent one the user has
-    /// not put in `[http.tcp].allowed_origins`. It is the TCP counterpart of
-    /// [`UID_MISMATCH`]: on the Unix socket the kernel says who is calling, and
-    /// here the allowlist is the only thing that does.
-    pub(crate) const ORIGIN_NOT_ALLOWED: &str = "origin_not_allowed";
-}
-
-pub(crate) fn invalid_session(reason: &'static str) -> Response {
-    error_response(StatusCode::UNAUTHORIZED, "invalid_session", reason)
-}
-
-pub(crate) fn scope_denied() -> Response {
-    let body = serde_json::json!({
-        "status":  "error",
-        "message": "scope_denied",
-    });
-    (
-        StatusCode::FORBIDDEN,
-        [("content-type", "application/json")],
-        body.to_string(),
-    )
-        .into_response()
-}
-
-pub(crate) fn rate_limited() -> Response {
-    let body = serde_json::json!({
-        "status":  "error",
-        "message": "rate_limited",
-    });
-    (
-        StatusCode::TOO_MANY_REQUESTS,
-        [("content-type", "application/json")],
-        body.to_string(),
-    )
-        .into_response()
-}
+// The error bodies the guards and `/events` answer with are the engine's,
+// re-exported for the envelope contract tests, which hold every error shape
+// the daemon sends against the ones it documents.
+#[cfg(test)]
+pub(crate) use super_engine_daemon::http::responses::{
+    invalid_session, rate_limited, reason, scope_denied,
+};
 
 /// Pre-built `409 recording_in_progress` JSON response for the
 /// `/v1/transcribe` handler. Clients should check `GET /v1/status`
@@ -126,13 +53,3 @@ pub(crate) fn model_not_loaded_response() -> Response {
     )
         .into_response()
 }
-
-pub(crate) fn auth_err(status: StatusCode, message: &str, reason: &str) -> Response {
-    error_response(status, message, reason)
-}
-
-/// The auth scope catalog now lives in `super-stt-shared` so the daemon and the
-/// consent dialog share one list (Tier 2 #8). Re-exported for the existing
-/// `/auth/request` validation call site; the catalog's own tests live in
-/// `super_stt_shared::daemon::scopes`.
-pub(crate) use super_stt_shared::daemon::scopes::is_known_scope;

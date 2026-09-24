@@ -7,28 +7,12 @@
 
 [dependencies]
     anyhow.workspace = true
-    chrono.workspace = true
-    clap.workspace = true
-    env_logger.workspace = true
-    flate2 = "1"
-    futures = "0.3"
-    hex = "0.4"
-    log.workspace = true
-    reqwest.workspace = true
-    ring = "0.17"
-    semver = "1"
-    serde.workspace = true
-    serde_json.workspace = true
-    super-stt-forge = { path = "../super-stt-forge" }
+    super-engine-indexer.workspace = true
     super-stt-registry-types = { path = "../super-stt-registry-types" }
-    tar = "0.4"
-    thiserror.workspace = true
     tokio.workspace = true
-    toml.workspace = true
-    url = "2"
 
 [dev-dependencies]
-    mockito = "1"
+    serde_json.workspace = true
     tempfile = "3"
 
 [lints]

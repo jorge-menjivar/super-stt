@@ -279,7 +279,7 @@ pub enum DeviceMessage {
 pub enum DownloadMessage {
     /// A progress snapshot, from a `download_progress` event or a poll. The
     /// stage it belongs to travels inside it.
-    DownloadProgressUpdate(super_stt_shared::models::protocol::DownloadProgress),
+    DownloadProgressUpdate(Box<super_stt_shared::models::protocol::DownloadProgress>),
     /// Abandon the download the named stage has in flight. Every variant below
     /// that settles a stage's card carries its stage for the same reason: the
     /// two stages download independently, so an outcome that did not say whose

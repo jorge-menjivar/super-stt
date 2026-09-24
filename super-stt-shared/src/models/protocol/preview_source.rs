@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Where a preview transcript came from, and so how a client should read it.
 
-use crate::models::wire_enum::wire_enum_strings;
+use super_engine_protocol::wire_enum_strings;
 
 /// Where the text of a `preview` frame, or a `partial_stt` event, came from.
 ///

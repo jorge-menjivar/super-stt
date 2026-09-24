@@ -6,10 +6,13 @@ pub mod launch_agents;
 pub mod logging;
 pub mod models;
 pub mod paths;
+pub mod product;
 pub mod registry;
-pub mod sandbox;
 pub mod utils;
 pub mod validation;
+
+pub use product::SUPER_STT;
+pub use super_engine_protocol::sandbox;
 
 pub mod audio;
 

@@ -34,12 +34,15 @@ pub enum ModelOperationState {
     /// thing the card's wording depends on.
     Provisioning {
         target_model: String,
-        progress: super_stt_shared::models::protocol::DownloadProgress,
+        progress: Box<super_stt_shared::models::protocol::DownloadProgress>,
     },
     /// Loading the model into memory, after any download finished.
     Loading {
         target_model: String,
         status_message: String,
+        /// What the backend reports of its load — a first-time setup, the
+        /// step it is on, how far through — once it reports anything.
+        load: Option<super_stt_shared::models::protocol::LoadProgress>,
     },
     /// The operation failed, with the daemon's reason.
     Error { message: String },
@@ -86,6 +89,7 @@ impl ModelOperations {
             ModelOperationState::Loading {
                 target_model: String::new(),
                 status_message,
+                load: None,
             },
         );
         ops
@@ -198,6 +202,7 @@ mod tests {
         ModelOperationState::Loading {
             target_model: model.to_string(),
             status_message: "Loading model...".to_string(),
+            load: None,
         }
     }
 

@@ -2,7 +2,7 @@
 //! Release resolution: pick the release to install (pin, stable, or beta) and
 //! locate its tarball + `SHA256SUMS` assets for this host's target triple.
 
-use super_stt_forge::{ForgeClient, Release, ReleaseKind, RepoRef};
+use super_engine_forge::{ForgeClient, Release, ReleaseKind, RepoRef};
 use super_stt_registry_types::version::parse_version;
 
 use crate::errors::InstallError;
@@ -148,7 +148,7 @@ pub async fn resolve_target(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super_stt_forge::{Release, ReleaseKind};
+    use super_engine_forge::{Release, ReleaseKind};
 
     fn rel(tag: &str, kind: ReleaseKind) -> Release {
         Release {
@@ -218,7 +218,7 @@ mod tests {
             kind,
             assets: assets
                 .iter()
-                .map(|name| super_stt_forge::ReleaseAsset {
+                .map(|name| super_engine_forge::ReleaseAsset {
                     name: (*name).to_string(),
                     download_url: format!("https://example.invalid/{name}"),
                     size: 0,
@@ -306,7 +306,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_target_happy_path_returns_both_urls() {
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let mut s = mockito::Server::new_async().await;
         let base = s.url();
         let releases_json = serde_json::json!([{
@@ -338,8 +338,12 @@ mod tests {
             .create_async()
             .await;
 
-        let repo = super_stt_forge::RepoRef::parse(REPO).unwrap();
-        let client = super_stt_forge::Github::new(base.clone(), None);
+        let repo = super_engine_forge::RepoRef::parse(REPO).unwrap();
+        let client = super_engine_forge::Github::new(
+            base.clone(),
+            None,
+            super_stt_registry_types::Stt::USER_AGENT,
+        );
         let target = resolve_target(&client, &repo, None, true, "x86_64-unknown-linux-gnu")
             .await
             .unwrap();
@@ -354,7 +358,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_target_errors_when_release_is_missing_sha256sums() {
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let mut s = mockito::Server::new_async().await;
         let base = s.url();
         let releases_json = serde_json::json!([{
@@ -381,8 +385,12 @@ mod tests {
             .create_async()
             .await;
 
-        let repo = super_stt_forge::RepoRef::parse(REPO).unwrap();
-        let client = super_stt_forge::Github::new(base.clone(), None);
+        let repo = super_engine_forge::RepoRef::parse(REPO).unwrap();
+        let client = super_engine_forge::Github::new(
+            base.clone(),
+            None,
+            super_stt_registry_types::Stt::USER_AGENT,
+        );
         let err = resolve_target(&client, &repo, None, false, "x86_64-unknown-linux-gnu")
             .await
             .unwrap_err();
@@ -394,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_target_errors_when_release_is_missing_the_arch_tarball() {
-        super_stt_forge::install_crypto_provider();
+        super_engine_forge::install_crypto_provider();
         let mut s = mockito::Server::new_async().await;
         let base = s.url();
         let releases_json = serde_json::json!([{
@@ -421,8 +429,12 @@ mod tests {
             .create_async()
             .await;
 
-        let repo = super_stt_forge::RepoRef::parse(REPO).unwrap();
-        let client = super_stt_forge::Github::new(base.clone(), None);
+        let repo = super_engine_forge::RepoRef::parse(REPO).unwrap();
+        let client = super_engine_forge::Github::new(
+            base.clone(),
+            None,
+            super_stt_registry_types::Stt::USER_AGENT,
+        );
         let err = resolve_target(&client, &repo, None, false, "x86_64-unknown-linux-gnu")
             .await
             .unwrap_err();

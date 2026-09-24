@@ -126,8 +126,10 @@ impl SuperSTTDaemon {
             let t = std::sync::Arc::new(
                 crate::download_progress::DownloadProgressTracker::new(
                     name.to_string(),
-                    backend.source.clone(),
-                    stage.position(),
+                    crate::download_progress::StageSlot {
+                        source: backend.source.clone(),
+                        stage: stage.position(),
+                    },
                     total_files,
                     cancelled,
                 )
@@ -277,7 +279,7 @@ impl SuperSTTDaemon {
         // would silently ignore a vocabulary the user watched themselves type.
         // With the flag, a settings UI can tell them which backends will
         // actually hear it.
-        if backend.capabilities.context {
+        if backend.capabilities.product.context {
             let context = self
                 .config
                 .read()
@@ -1123,7 +1125,7 @@ mod tests {
         let opted_in = DiscoveredBackend {
             capabilities: super_stt_registry_types::manifest::Capabilities {
                 websocket: false,
-                context: true,
+                product: super_stt_registry_types::manifest::SttCapabilities { context: true },
             },
             ..backend
         };
@@ -1169,7 +1171,7 @@ mod tests {
             options: Vec::new(),
             capabilities: super_stt_registry_types::manifest::Capabilities {
                 websocket: false,
-                context: true,
+                product: super_stt_registry_types::manifest::SttCapabilities { context: true },
             },
             ..openai_backend(source, Vec::new(), None)
         };
@@ -1251,7 +1253,7 @@ mod tests {
             options: Vec::new(),
             capabilities: super_stt_registry_types::manifest::Capabilities {
                 websocket: false,
-                context: true,
+                product: super_stt_registry_types::manifest::SttCapabilities { context: true },
             },
             ..openai_backend(source, Vec::new(), None)
         };

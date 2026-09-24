@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use super::wire_enum::wire_enum_strings;
+use super_engine_protocol::wire_enum_strings;
 
 /// How the daemon surfaces a recording failure to the user.
 ///

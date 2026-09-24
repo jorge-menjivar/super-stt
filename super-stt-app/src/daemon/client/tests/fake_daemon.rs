@@ -29,7 +29,7 @@ use hyper::body::Bytes;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 
-use crate::daemon::client::internal::session::{APP_ID_NAME, test_socket};
+use crate::daemon::client::internal::session::{APP_ID_NAME, SETTINGS_SCOPES, test_socket};
 
 /// The bearer token every wrapper presents while a fake daemon is up.
 pub(crate) const TOKEN: &str = "fake-daemon-token";
@@ -138,9 +138,12 @@ impl FakeDaemon {
         let only_one = ONLY_ONE.lock().await;
         install_mock_keyring();
         // Seed the in-memory token cache: `obtain` returns from it before any
-        // keyring read or consent popup. `save` writes through to the keyring
-        // on its way, which is why the mock has to be installed first.
-        let _ = super_stt_shared::daemon::session::save(APP_ID_NAME, TOKEN);
+        // keyring read or consent popup, as long as the token was requested
+        // with the scopes it now asks for. `save` writes through to the
+        // keyring on its way, which is why the mock has to be installed first.
+        let granted: Vec<String> = SETTINGS_SCOPES.iter().map(|s| (*s).to_string()).collect();
+        let _ =
+            super_stt_shared::daemon::session::save(APP_ID_NAME, TOKEN, SETTINGS_SCOPES, &granted);
 
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let dir = std::env::temp_dir().join(format!(

@@ -204,7 +204,7 @@ impl SuperSTTDaemon {
                 (
                     b.source.clone(),
                     backends::dir_name(b),
-                    d.is_post_processor(),
+                    d.product.role.is_post_processor(),
                 )
             })
         };

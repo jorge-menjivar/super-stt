@@ -8,8 +8,6 @@
 [dependencies]
     anyhow.workspace = true
     async-stream = "0.3.6"
-    dirs.workspace = true
-    env_logger.workspace = true
     futures-util.workspace = true
     http-body-util = "0.1"
     hyper = { version = "1", features = ["client", "http1"] }
@@ -18,14 +16,14 @@
         features = ["client", "client-legacy", "http1", "tokio"]
     }
     keyring.workspace = true
-    libc.workspace = true
     log.workspace = true
     rubato = { workspace = true, optional = true }
     serde.workspace = true
     serde_json.workspace = true
     spectrum-analyzer = { workspace = true, optional = true }
-    strum.workspace = true
-    strum_macros.workspace = true
+    super-engine-client.workspace = true
+    super-engine-protocol.workspace = true
+    super-engine-spec.workspace = true
     super-stt-registry-types = { path = "../super-stt-registry-types" }
     thiserror.workspace = true
     tokio = {
@@ -61,7 +59,11 @@
     # Derive `utoipa::ToSchema` on the protocol types the daemon publishes in its
     # OpenAPI document. Off by default: only the daemon (and the spec generator)
     # needs it, so the app, applet and CLI don't pay to compile utoipa's derive.
-    openapi = ["dep:utoipa", "super-stt-registry-types/openapi"]
+    openapi = [
+        "dep:utoipa",
+        "super-engine-protocol/openapi",
+        "super-stt-registry-types/openapi",
+    ]
 
 [lints]
     workspace = true

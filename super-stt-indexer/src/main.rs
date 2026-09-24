@@ -1,468 +1,62 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `super-stt-indexer` — top-level orchestration.
+//! `super-stt-indexer`: builds Super STT's backend registry index. The
+//! indexer is `super_engine_indexer`'s; what is here is what makes it Super
+//! STT's.
 
-use std::path::PathBuf;
+use super_engine_indexer::Indexer;
+use super_stt_registry_types::Stt;
 
-use anyhow::Context;
-use clap::Parser;
-use log::{error, info, warn};
+/// Entries that predate the `id` requirement, and the migration backlog.
+///
+/// `registry.schema.json` requires an `id` of *every* entry, so an editor
+/// already flags these six. They are tolerated here so the scheduled index
+/// build keeps publishing a catalog while they are fixed one at a time —
+/// removing a name without fixing its backend would take every user's Browse
+/// listing down with it.
+///
+/// Fixing one is not a `registry.toml` edit. An entry that declares an `id`
+/// pins the release to it, so the order is: add `[backend].id` to that
+/// backend's own `backend.toml`, cut a release, *then* add the same id here
+/// and delete the name below. Adding the id here first earns an `IdMismatch`.
+const GRANDFATHERED: &[&str] = &[
+    "deepgram",
+    "mistral",
+    "openai",
+    "qwen3_asr",
+    "voxtral",
+    "whisper",
+];
 
-use super_stt_forge::{ForgeClient, RepoRef};
-
-mod assets;
-mod carryforward;
-mod index_json;
-mod license;
-mod local;
-mod manifest;
-mod registry_toml;
-mod resolve;
-
-#[derive(Parser, Debug)]
-#[command(version, about)]
-struct Args {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(clap::Subcommand, Debug)]
-enum Command {
-    /// Build the published index from `registry.toml` + GitHub releases.
-    Build(BuildArgs),
-    /// Build a local index from staged backends — offline, no GitHub. For
-    /// testing the daemon's download/install pipeline against a localhost
-    /// static server.
-    Local(local::LocalArgs),
-}
-
-#[derive(clap::Args, Debug)]
-struct BuildArgs {
-    /// Path to `registry.toml` to read.
-    #[arg(long, default_value = "registry/registry.toml")]
-    registry: PathBuf,
-    /// Path to the previously-published `index.json` (for carry-forward). If
-    /// missing, falls through cleanly — bootstrap mode.
-    #[arg(long)]
-    prior_index: Option<PathBuf>,
-    /// Where to write the new `index.json`.
-    #[arg(long, default_value = "index.json")]
-    out: PathBuf,
-}
-
-pub struct BuildFailure {
-    pub error: String,
-    pub attempted_version: Option<String>,
-    pub attempted_tag: Option<String>,
-}
+const INDEXER: Indexer = Indexer {
+    name: "super-stt-indexer",
+    user_agent: Stt::USER_AGENT,
+    grandfathered: GRANDFATHERED,
+};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
-    // Workspace reqwest uses rustls without a bundled provider; install one.
-    super_stt_forge::install_crypto_provider();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    match Args::parse().command {
-        Command::Build(args) => run_build(args).await,
-        Command::Local(args) => local::run(&args),
-    }
-}
-
-/// Build the published index from `registry.toml` + GitHub releases.
-async fn run_build(args: BuildArgs) -> anyhow::Result<()> {
-    let registry_text = std::fs::read_to_string(&args.registry)
-        .with_context(|| format!("reading {}", args.registry.display()))?;
-    let registry = registry_toml::Registry::parse(&registry_text)?;
-
-    let prior = match args.prior_index.as_ref() {
-        Some(p) if p.exists() => {
-            let text = std::fs::read_to_string(p)?;
-            Some(serde_json::from_str::<index_json::Index>(&text)?)
-        }
-        _ => None,
-    };
-
-    // Downloads release assets (subprocess bundles can be multi-GB) — use the
-    // shared download client, not a timeout-less `Client::new()` that could hang
-    // forever on a stalled connection.
-    let http = super_stt_forge::http::download_client();
-    let now_iso = chrono_now_iso();
-
-    let mut out_backends: Vec<index_json::IndexBackend> = Vec::new();
-
-    for (id, entry) in &registry.0 {
-        if entry.removed {
-            info!("skip `{id}` — removed");
-            continue;
-        }
-        let client = super_stt_forge::client(entry.forge);
-        // A malformed `repo` string must not abort the whole build — route it
-        // through the same per-entry carry-forward path every other failure uses
-        // (Tier 1 #28), instead of `?`-propagating out of the loop.
-        let built = match RepoRef::parse(&entry.repo) {
-            Ok(repo) => build_entry(client.as_ref(), &http, id, entry, &repo).await,
-            Err(e) => Err(BuildFailure {
-                error: format!("invalid repo `{}`: {e}", entry.repo),
-                attempted_version: None,
-                attempted_tag: None,
-            }),
-        };
-        match built {
-            Ok(b) => out_backends.push(b),
-            Err(failure) => {
-                error!("entry `{id}` failed: {}", failure.error);
-                let prior_entry = prior
-                    .as_ref()
-                    .and_then(|p| p.backends.iter().find(|b| b.id == *id));
-                if let Some(carried) = carryforward::maybe_carry_forward(
-                    id,
-                    prior_entry,
-                    &failure.error,
-                    failure.attempted_version.as_deref().unwrap_or(""),
-                    failure.attempted_tag.as_deref().unwrap_or(""),
-                    &now_iso,
-                    carryforward::MAX_STALENESS_DAYS,
-                ) {
-                    warn!(
-                        "entry `{id}` — carrying forward last-known-good (v{})",
-                        carried.version
-                    );
-                    out_backends.push(carried);
-                }
-            }
-        }
-    }
-
-    ensure_unique_sources(&out_backends)?;
-    ensure_unique_backend_ids(&out_backends)?;
-
-    let index = index_json::Index {
-        schema_version: index_json::SCHEMA_VERSION,
-        generated_at: now_iso,
-        min_client: index_json::MIN_CLIENT.into(),
-        backends: out_backends,
-    };
-    let text = serde_json::to_string_pretty(&index)? + "\n";
-    super_stt_registry_types::fs::write_atomic(&args.out, text.as_bytes())
-        .with_context(|| format!("writing {}", args.out.display()))?;
-    info!(
-        "wrote {} ({} backends)",
-        args.out.display(),
-        index.backends.len()
-    );
-    Ok(())
-}
-
-async fn build_entry(
-    client: &dyn ForgeClient,
-    http: &reqwest::Client,
-    id: &str,
-    entry: &registry_toml::Entry,
-    repo: &RepoRef,
-) -> Result<index_json::IndexBackend, BuildFailure> {
-    let resolved = resolve::resolve(client, repo, entry)
-        .await
-        .map_err(|e| BuildFailure {
-            error: format!("{e:#}"),
-            attempted_version: None,
-            attempted_tag: None,
-        })?;
-    // From here the version + tag are known; record them on every later failure
-    // so the carry-forward path can report what it tried to build.
-    let attempted_version = Some(resolved.version.to_string());
-    let attempted_tag = Some(resolved.tag.clone());
-    let fail = |e: &dyn std::fmt::Display| BuildFailure {
-        error: format!("{e:#}"),
-        attempted_version: attempted_version.clone(),
-        attempted_tag: attempted_tag.clone(),
-    };
-
-    // The manifest is the `backend.toml` release asset: parse + validate the
-    // exact bytes that get hashed, so reviewed == pinned == installed. A release
-    // without the asset is not installable (no synthesize fallback) — fail the
-    // entry.
-    let (url, _declared_size) =
-        assets::resolve_url("backend.toml", &resolved.release.assets).map_err(|e| fail(&e))?;
-    let (bytes, sha256) = assets::fetch_manifest_asset(http, &url)
-        .await
-        .map_err(|e| fail(&e))?;
-    let size = bytes.len() as u64;
-    let text = String::from_utf8(bytes).map_err(|e| fail(&e))?;
-    let m = manifest::Manifest::parse(&text).map_err(|e| fail(&e))?;
-    let manifest_pin = Some(index_json::IndexAsset { url, size, sha256 });
-    manifest::validate(&m, &resolved.version, &entry.repo, entry.id.as_deref())
-        .map_err(|e| fail(&e))?;
-    let idx_assets = resolve_index_assets(http, &m, &resolved.release.assets)
-        .await
-        .map_err(|e| fail(&e))?;
-
-    Ok(into_index_backend(
-        id,
-        m,
-        resolved.version.to_string(),
-        resolved.tag,
-        idx_assets,
-        manifest_pin,
-    ))
-}
-
-/// A unique temp path for staging one downloaded asset part during validation.
-fn temp_part_path() -> std::path::PathBuf {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static N: AtomicU64 = AtomicU64::new(0);
-    let n = N.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("stt-idx-{}-{n}.part", std::process::id()))
-}
-
-/// RAII owner of the downloaded part files: removes them all on drop, so a
-/// mid-loop download/validation error can't leak the (possibly multi-GB) parts
-/// already fetched (Tier 1 #29). A path is registered *before* its download so
-/// even a partially-written part is cleaned up.
-struct TempParts(Vec<std::path::PathBuf>);
-
-impl TempParts {
-    fn new() -> Self {
-        Self(Vec::new())
-    }
-    fn register(&mut self, path: std::path::PathBuf) {
-        self.0.push(path);
-    }
-    fn paths(&self) -> &[std::path::PathBuf] {
-        &self.0
-    }
-}
-
-impl Drop for TempParts {
-    fn drop(&mut self) {
-        for p in &self.0 {
-            let _ = std::fs::remove_file(p);
-        }
-    }
-}
-
-/// Build the index entry for one subprocess variant from its downloaded part
-/// pins: a single-file pin (`url`/`size`/`sha256`) or a multi-part pin.
-fn subprocess_index_entry(
-    sa: &manifest::SubprocessAsset,
-    mut pins: Vec<index_json::IndexAsset>,
-) -> index_json::IndexSubprocessAsset {
-    let (url, size, sha256, parts) = if sa.is_multipart() {
-        (None, None, None, pins)
-    } else {
-        let p = pins.remove(0);
-        (Some(p.url), Some(p.size), Some(p.sha256), Vec::new())
-    };
-    index_json::IndexSubprocessAsset {
-        target: sa.target.clone(),
-        accel: sa.accel.iter().map(ToString::to_string).collect(),
-        cuda_major: sa.cuda_major,
-        cuda_sm: sa.cuda_sm,
-        cudnn: sa.cudnn,
-        gfx: sa.gfx.iter().map(ToString::to_string).collect(),
-        vulkan_api: sa.vulkan_api.map(|v| v.to_string()),
-        url,
-        size,
-        sha256,
-        parts,
-    }
-}
-
-/// Resolve and hash the binary artifacts a release declares — the wasm
-/// component or each subprocess variant — into the index's asset block.
-async fn resolve_index_assets(
-    http: &reqwest::Client,
-    m: &manifest::Manifest,
-    release_assets: &[super_stt_forge::ReleaseAsset],
-) -> anyhow::Result<index_json::IndexAssets> {
-    let mut idx_assets = index_json::IndexAssets::default();
-    if let Some(wasm) = &m.assets.wasm {
-        let (url, size) = assets::resolve_url(wasm, release_assets)?;
-        let sha = assets::fetch_wasm_and_hash(http, &url, wasm).await?;
-        idx_assets.wasm = Some(index_json::IndexAsset {
-            url,
-            size,
-            sha256: sha,
-        });
-    }
-    for sa in &m.assets.subprocess {
-        // Download each part (a single-file variant has one) to a temp file,
-        // hashing it, then validate the reassembled archive before pinning.
-        // `TempParts` removes every downloaded part on scope exit — including on
-        // an early `?` from `resolve_url`/`download_to_file`/validation — so a
-        // mid-loop error can't leak multi-GB temp files (Tier 1 #29).
-        let files = sa.release_files();
-        let mut tmp = TempParts::new();
-        let mut pins: Vec<index_json::IndexAsset> = Vec::with_capacity(files.len());
-        for f in &files {
-            let (url, _) = assets::resolve_url(f, release_assets)?;
-            let dest = temp_part_path();
-            tmp.register(dest.clone());
-            let (size, sha256) = assets::download_to_file(http, &url, f, &dest).await?;
-            pins.push(index_json::IndexAsset { url, size, sha256 });
-        }
-        assets::validate_subprocess_parts(tmp.paths(), &sa.label(), &m.backend.entrypoint)?;
-        idx_assets.subprocess.push(subprocess_index_entry(sa, pins));
-        // `tmp` drops here (validation done), removing the parts.
-    }
-    Ok(idx_assets)
-}
-
-/// Assemble the published `IndexBackend` from a validated manifest, its
-/// resolved `version` + `tag`, and the hashed assets. Thin wrapper over the
-/// canonical [`index_json::IndexBackend::from_manifest`] synthesis (shared with
-/// the daemon's Custom-repo and local-dir install paths) — the indexer supplies
-/// the maintainer-declared `id` rather than deriving it from `source`.
-pub(crate) fn into_index_backend(
-    id: &str,
-    m: manifest::Manifest,
-    version: String,
-    tag: String,
-    assets: index_json::IndexAssets,
-    manifest: Option<index_json::IndexAsset>,
-) -> index_json::IndexBackend {
-    index_json::IndexBackend::from_manifest(id.to_string(), m, version, tag, assets, manifest)
-}
-
-/// A backend's `source` is its unique identity. Two distinct entries that
-/// collide on `source` would be indistinguishable to every daemon — one of
-/// the two install directories is picked as the winner and the other is
-/// removed from disk — so a collision must never be published: fail the build
-/// instead.
-fn ensure_unique_sources(backends: &[index_json::IndexBackend]) -> anyhow::Result<()> {
-    let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
-    for b in backends {
-        if let Some(prev_id) = seen.insert(b.source.as_str(), b.id.as_str()) {
-            anyhow::bail!(
-                "duplicate source `{}` shared by entries `{}` and `{}`; each backend must have a distinct source",
-                b.source,
-                prev_id,
-                b.id,
-            );
-        }
-    }
-    Ok(())
-}
-
-/// A backend's `backend_id` names the directory it is installed into, so two
-/// entries publishing the same one would install over each other — the second
-/// install replaces the first, taking its downloaded model files with it.
-///
-/// Per-entry validation cannot see this: each release's manifest declares its
-/// own `id` in isolation, and both are individually well-formed. Like
-/// [`ensure_unique_sources`], the collision is only visible across the
-/// assembled index, so it is checked here and fails the build.
-///
-/// An entry without a `backend_id` installs under its registry key, which
-/// [`ensure_unique_sources`]' own key space already keeps distinct, so those
-/// entries are skipped rather than grouped together under a shared absence.
-fn ensure_unique_backend_ids(backends: &[index_json::IndexBackend]) -> anyhow::Result<()> {
-    let mut seen: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
-    for b in backends {
-        let Some(backend_id) = b.backend_id.as_deref() else {
-            continue;
-        };
-        if let Some(prev_id) = seen.insert(backend_id, b.id.as_str()) {
-            anyhow::bail!(
-                "duplicate backend id `{}` shared by entries `{}` and `{}`; each backend must declare a distinct [backend].id",
-                backend_id,
-                prev_id,
-                b.id,
-            );
-        }
-    }
-    Ok(())
-}
-
-fn chrono_now_iso() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    super_engine_indexer::main::<Stt>(&INDEXER).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::GRANDFATHERED;
+    use super_engine_indexer::registry_toml::Registry;
 
-    fn backend(id: &str, source: &str) -> index_json::IndexBackend {
-        index_json::IndexBackend {
-            id: id.into(),
-            backend_id: None,
-            source: source.into(),
-            version: "1.0.0".into(),
-            tag: "v1.0.0".into(),
-            name: id.into(),
-            description: None,
-            license: "Apache-2.0".into(),
-            kind: "wasm".into(),
-            contract: "v1".into(),
-            min_client: None,
-            entrypoint: format!("{id}.wasm"),
-            allowed_hosts: Vec::new(),
-            online: false,
-            supports_gpu: false,
-            supports_cpu: true,
-            models: Vec::new(),
-            secrets: Vec::new(),
-            options: Vec::new(),
-            assets: index_json::IndexAssets::default(),
-            index_stale: None,
-            manifest: None,
-        }
+    /// The shipped file must keep parsing as the `id` requirement lands.
+    #[test]
+    fn the_in_repo_registry_parses() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
+        let text = std::fs::read_to_string(root.join("registry/registry.toml")).unwrap();
+        Registry::parse(&text, GRANDFATHERED).expect("registry.toml parses");
     }
 
+    /// The entries still being migrated keep publishing without an `id`.
     #[test]
-    fn unique_sources_pass() {
-        let backends = vec![
-            backend("mistral", "github.com/x/y/mistral"),
-            backend("openai", "github.com/x/y/openai"),
-        ];
-        ensure_unique_sources(&backends).unwrap();
-    }
-
-    #[test]
-    fn duplicate_sources_are_rejected() {
-        let backends = vec![
-            backend("mistral", "github.com/x/y"),
-            backend("openai", "github.com/x/y"),
-        ];
-        let err = ensure_unique_sources(&backends).unwrap_err();
-        assert!(err.to_string().contains("duplicate source"));
-    }
-
-    /// `backend_id` names the install directory, so publishing two entries
-    /// that share one would have the second install replace the first —
-    /// including the model files under it. Each entry's own manifest is
-    /// perfectly valid, so only this cross-entry check can catch it.
-    #[test]
-    fn duplicate_backend_ids_are_rejected() {
-        let mut a = backend("mistral", "github.com/x/mistral");
-        a.backend_id = Some("app.super-stt.voxtral".into());
-        let mut b = backend("voxtral", "github.com/x/voxtral");
-        b.backend_id = Some("app.super-stt.voxtral".into());
-
-        let err = ensure_unique_backend_ids(&[a, b]).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("duplicate backend id"), "{msg}");
-        assert!(msg.contains("app.super-stt.voxtral"), "{msg}");
-        assert!(msg.contains("mistral") && msg.contains("voxtral"), "{msg}");
-    }
-
-    #[test]
-    fn distinct_backend_ids_pass() {
-        let mut a = backend("mistral", "github.com/x/mistral");
-        a.backend_id = Some("app.super-stt.mistral".into());
-        let mut b = backend("voxtral", "github.com/x/voxtral");
-        b.backend_id = Some("app.super-stt.voxtral".into());
-
-        ensure_unique_backend_ids(&[a, b]).unwrap();
-    }
-
-    /// Entries that predate `[backend].id` install under their registry key,
-    /// which is already unique. Several of them sharing a `None` must not be
-    /// mistaken for a collision.
-    #[test]
-    fn entries_without_a_backend_id_never_collide() {
-        let backends = vec![
-            backend("mistral", "github.com/x/mistral"),
-            backend("voxtral", "github.com/x/voxtral"),
-        ];
-        assert!(backends.iter().all(|b| b.backend_id.is_none()));
-        ensure_unique_backend_ids(&backends).unwrap();
+    fn accepts_a_grandfathered_entry_without_an_id() {
+        let text = "[voxtral]\n    repo = \"github.com/jorge-menjivar/super-stt-voxtral\"\n    forge = \"github\"\n";
+        Registry::parse(text, GRANDFATHERED).expect("existing entries are exempt");
     }
 }

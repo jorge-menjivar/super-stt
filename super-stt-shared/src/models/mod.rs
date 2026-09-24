@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-pub mod audio_level;
 pub mod backends;
 pub mod contexts;
 pub mod notification_method;
 pub mod protocol;
 pub mod recording_stop_mode;
-pub mod self_update;
-pub mod theme;
-pub mod update_beta_optin;
+#[cfg(test)]
 mod wire_enum;
 pub mod write_method;
+
+pub use super_engine_protocol::models::{audio_level, self_update, theme, update_beta_optin};

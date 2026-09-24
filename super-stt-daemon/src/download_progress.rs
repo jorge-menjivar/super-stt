@@ -1,775 +1,106 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use chrono::Utc;
-use log::{info, warn};
-use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+//! What a model load reports as it provisions the model's files:
+//! `super_engine_daemon::download_progress`, shared with Super TTS. A Super
+//! STT load is keyed by the pipeline stage it provisions, which a
+//! post-processor and a transcription model do independently.
+
+use serde::Serialize;
+use super_engine_daemon::download_progress as engine;
 use super_stt_shared::models::protocol::DownloadProgress;
 
-use crate::daemon::events::EventBus;
+pub use super_engine_daemon::download_progress::{Progress, status};
 
-/// Progress tracker for model downloads that implements the hf-hub Progress trait
-pub struct DownloadProgressTracker {
-    pub model_name: String,
-    /// The backend serving the model, and the `/pipeline/{stage}` position
-    /// provisioning it. Reported on every tick so a client can put the
-    /// progress on the card that started it: the model name alone does not say
-    /// whose download it is, and both stages download through this tracker.
+/// Which load a tracker is for: the backend serving the model, and the
+/// `/pipeline/{stage}` position provisioning it. Reported on every tick so a
+/// client can put the progress on the card that started it: the model name
+/// alone does not say whose download it is, and both stages download through
+/// the same tracker.
+#[derive(Clone, Debug, Serialize)]
+pub struct StageSlot {
     pub source: String,
     pub stage: u32,
-    pub current_file: Arc<RwLock<String>>,
-    pub file_index: AtomicUsize,
-    pub total_files: AtomicUsize,
-    /// Bytes of the current file accounted for so far: streamed off the
-    /// network while downloading, read off disk while verifying.
-    pub bytes_downloaded: AtomicU64,
-    pub total_bytes: AtomicU64,
-    /// Phase of the provisioning run, in the order a load walks them:
-    /// `verifying` (checking what is already on disk — every load starts
-    /// here), `downloading` (bytes actually coming off the network),
-    /// `loading_model` (files all present, backend loading weights), then one
-    /// of the terminal `completed` / `cancelled` / `error`. A fully cached
-    /// model never reaches `downloading`, which is what lets a client say
-    /// "checking files" instead of claiming a download that isn't happening.
-    pub status: Arc<RwLock<String>>,
-    /// Failure detail set by [`Self::mark_error`]; included in the
-    /// `download_progress` payload so a client can show why a switch failed.
-    pub error: Arc<RwLock<Option<String>>>,
-    pub started_at: Instant,
-    pub started_at_str: String,
-    pub cancelled: Arc<AtomicBool>,
-    /// Optional event bus the tracker publishes `download_progress`
-    /// SSE events into. Set via [`Self::with_event_bus`]; when `None`
-    /// the HTTP `/events` channel sees nothing.
-    pub events: Option<Arc<EventBus>>,
-    last_broadcast_percentage: AtomicU64, // Store as fixed point (percentage * 100)
-    /// The `status` string we most recently broadcast. Used so that
-    /// transitions to "completed" / "cancelled" / "error" are emitted
-    /// even when the 1%-increment percentage gate would otherwise
-    /// suppress them.
-    last_broadcast_status: Arc<RwLock<String>>,
-    /// The `total_bytes` value we most recently broadcast. A change
-    /// here (typically 0 → file size, once we resolve it from
-    /// `X-Linked-Size` / `Content-Length` / HEAD) must publish even
-    /// when neither percentage nor status changed — otherwise the UI's
-    /// "x.x / y.y MB" line stays at "0.0 / 0.0 MB" until enough bytes
-    /// stream for the percentage to cross a 1% boundary, which for a
-    /// multi-GB file can be several seconds of frozen UI.
-    last_broadcast_total_bytes: AtomicU64,
-    /// The `file_index` we most recently broadcast. File transitions
-    /// (per-file `total_bytes`/`bytes_downloaded` reset, percentage
-    /// dropping from ~90% back to 0%) must publish even when the new
-    /// file happens to be the same size as the previous one — the
-    /// percentage drop alone is *not* caught by `percentage_crossed`
-    /// (which only fires on increases). Initialized to `usize::MAX`
-    /// so the very first broadcast also fires.
-    last_broadcast_file_index: AtomicUsize,
 }
 
-impl DownloadProgressTracker {
-    pub fn new(
-        model_name: String,
-        source: String,
-        stage: u32,
-        total_files: usize,
-        cancelled: Arc<AtomicBool>,
-    ) -> Self {
-        Self {
-            model_name,
-            source,
-            stage,
-            current_file: Arc::new(RwLock::new(String::new())),
-            file_index: AtomicUsize::new(0),
-            total_files: AtomicUsize::new(total_files),
-            bytes_downloaded: AtomicU64::new(0),
-            total_bytes: AtomicU64::new(0),
-            // Provisioning opens by checking the files already on disk, not by
-            // downloading — a tracker that announced "downloading" before the
-            // first `usable_existing` call is what made a fully cached load
-            // paint a download bar.
-            status: Arc::new(RwLock::new("verifying".to_string())),
-            error: Arc::new(RwLock::new(None)),
-            started_at: Instant::now(),
-            started_at_str: Utc::now().to_rfc3339(),
-            cancelled,
-            events: None,
-            last_broadcast_percentage: AtomicU64::new(0),
-            last_broadcast_status: Arc::new(RwLock::new(String::new())),
-            last_broadcast_total_bytes: AtomicU64::new(0),
-            last_broadcast_file_index: AtomicUsize::new(usize::MAX),
-        }
+impl engine::Slot for StageSlot {
+    type Key = u32;
+
+    fn key(&self) -> u32 {
+        self.stage
     }
 
-    /// Attach the daemon's event bus so progress updates fan out as
-    /// `download_progress` SSE events on `GET /events` (settings-scope
-    /// only — see `super-stt-daemon/src/daemon/events.rs::Topic`).
-    #[must_use]
-    pub fn with_event_bus(mut self, events: Arc<EventBus>) -> Self {
-        self.events = Some(events);
-        self
-    }
-
-    pub fn get_progress(&self) -> DownloadProgress {
-        let bytes_downloaded = self.bytes_downloaded.load(Ordering::Relaxed);
-        let total_bytes = self.total_bytes.load(Ordering::Relaxed);
-
-        let status = self.status.read().clone();
-        let percentage: f32 = if status == "completed" || status == "loading_model" {
-            // Files are all on disk. The remaining work (spawning the
-            // backend, loading weights onto the device) isn't
-            // byte-tracked, so keep the bar full — the app shows a
-            // separate "Loading…" indicator for the `loading_model`
-            // phase.
-            100.0
-        } else if total_bytes > 0 {
-            // Per-file progress: how much of the *current* file has
-            // arrived (or, in the `verifying` phase, been hashed off
-            // disk), matching the per-file "X.X / Y.Y MB" readout.
-            // `bytes_downloaded`/`total_bytes` reset at each file
-            // boundary (`start_file`), so the bar fills 0→100% per file
-            // and the last file's final chunk fills it to the end. No
-            // 90% cap: the old in-tree flow reserved 90–100% for a
-            // loading phase, but subprocess backends report that phase
-            // separately via the `loading_model` status above. The
-            // `file_index` counter ("2/4") conveys which file is in
-            // flight.
-            crate::num_cast::f64_to_f32(
-                (crate::num_cast::u64_to_f64(bytes_downloaded)
-                    / crate::num_cast::u64_to_f64(total_bytes)
-                    * 100.0)
-                    .min(100.0),
-            )
-        } else {
-            // Size for the current file not resolved yet (or there's
-            // nothing to download).
-            0.0
-        };
-
-        let elapsed = self.started_at.elapsed().as_secs();
-        let eta_seconds = if bytes_downloaded > 0 && total_bytes > bytes_downloaded {
-            let remaining_bytes = total_bytes - bytes_downloaded;
-            let bytes_per_second = bytes_downloaded / elapsed.max(1);
-            remaining_bytes.checked_div(bytes_per_second)
-        } else {
-            None
-        };
-
-        DownloadProgress {
-            model_name: self.model_name.clone(),
-            source: self.source.clone(),
-            stage: self.stage,
-            current_file: self.current_file.read().clone(),
-            file_index: self.file_index.load(Ordering::Relaxed),
-            total_files: self.total_files.load(Ordering::Relaxed),
-            bytes_downloaded,
-            total_bytes,
-            percentage,
-            status: self.status.read().clone(),
-            started_at: self.started_at_str.clone(),
-            eta_seconds,
-            error: self.error.read().clone(),
-        }
-    }
-
-    /// Broadcast progress update via the HTTP `/events` SSE bus. Throttled to 1%
-    /// increments so a tight streaming download doesn't flood
-    /// subscribers — but any transition to a terminal `status` value
-    /// (`completed` / `cancelled` / `error`) always publishes, since
-    /// the consumer's `if progress.status == "completed"` arm clears
-    /// the in-UI download indicator and a dropped event there leaves
-    /// the UI permanently stuck.
-    pub fn broadcast_progress(&self) {
-        let progress = self.get_progress();
-
-        // Clamp, round and convert to a fixed-point integer (percentage * 100)
-        let current_percentage =
-            crate::num_cast::f32_to_u64((progress.percentage.clamp(0.0, 100.0) * 100.0).round());
-        let last_percentage = self.last_broadcast_percentage.load(Ordering::Relaxed);
-
-        let status_changed = {
-            let last = self.last_broadcast_status.read().clone();
-            last != progress.status
-        };
-        let percentage_crossed =
-            current_percentage > last_percentage && current_percentage - last_percentage >= 100;
-        // Newly-resolved file size — broadcast immediately so the UI's
-        // "x.x / y.y MB" line flips from "0.0 / 0.0 MB" to the real total
-        // before the first chunk's percentage update lands.
-        let total_bytes_changed =
-            self.last_broadcast_total_bytes.load(Ordering::Relaxed) != progress.total_bytes;
-        // File boundary — per-file counters reset at the start of the
-        // next file, so we publish even if the new file's size matches
-        // the previous file's (which would otherwise leave every
-        // throttle arm unchanged).
-        let file_index_changed =
-            self.last_broadcast_file_index.load(Ordering::Relaxed) != progress.file_index;
-
-        if status_changed || percentage_crossed || total_bytes_changed || file_index_changed {
-            self.last_broadcast_percentage
-                .store(current_percentage, Ordering::Relaxed);
-            self.last_broadcast_status
-                .write()
-                .clone_from(&progress.status);
-            self.last_broadcast_total_bytes
-                .store(progress.total_bytes, Ordering::Relaxed);
-            self.last_broadcast_file_index
-                .store(progress.file_index, Ordering::Relaxed);
-
-            if let Some(ref events) = self.events {
-                let mut payload =
-                    serde_json::to_value(&progress).unwrap_or_else(|_| serde_json::json!({}));
-                if let Some(obj) = payload.as_object_mut() {
-                    obj.insert(
-                        "timestamp".to_string(),
-                        serde_json::Value::String(Utc::now().to_rfc3339()),
-                    );
-                }
-                events.publish_download_progress(payload);
-            }
-        }
-    }
-
-    /// Advance the tracker to the next file. Purely a state update — the
-    /// caller logs, because only it knows whether the file is being fetched
-    /// or was already on disk (cached files come through here too, so the
-    /// progress bar advances without claiming a download happened).
-    pub fn start_file(&self, filename: &str, file_index: usize) {
-        *self.current_file.write() = filename.to_string();
-        self.file_index.store(file_index, Ordering::Relaxed);
-        // Per-file counters: `total_bytes` and `bytes_downloaded`
-        // reflect only the current file, so each file's UI display
-        // is "X.X / <this file's size> MB" rather than an aggregate
-        // across the whole model (which is confusing when sizes
-        // vary by orders of magnitude — `config.json` is sub-MB,
-        // `model-*.safetensors` is multi-GB). The caller publishes
-        // the new file's real numbers after this returns: cached
-        // files store `(md.len(), md.len())` directly, fresh
-        // downloads resolve size via `X-Linked-Size`/HEAD and store
-        // `(file_size, 0)`. Until then we're at 0/0, but no
-        // broadcast goes out between this reset and the caller's
-        // store, so the UI never observes the transient.
-        self.bytes_downloaded.store(0, Ordering::Relaxed);
-        self.total_bytes.store(0, Ordering::Relaxed);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed)
-    }
-
-    pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
-        *self.status.write() = "cancelled".to_string();
-        warn!("Download cancelled for model: {}", self.model_name);
-    }
-
-    /// Enter the `verifying` phase: the file named by the last
-    /// [`Self::start_file`] is on disk and is being checked (size, and its
-    /// declared SHA-256) rather than fetched. `bytes_downloaded` tracks the
-    /// bytes hashed so far, so the client's bar moves through a multi-GB
-    /// checksum instead of sitting frozen on the previous file's numbers.
-    ///
-    /// Every file starts here, and a fully cached model never leaves it — that
-    /// is what keeps a cached load from claiming to download anything.
-    pub fn mark_verifying(&self) {
-        *self.status.write() = "verifying".to_string();
-    }
-
-    /// Enter the `downloading` phase: the file named by the last
-    /// [`Self::start_file`] is absent (or failed verification) and bytes are
-    /// about to come off the network.
-    pub fn mark_downloading(&self) {
-        *self.status.write() = "downloading".to_string();
-    }
-
-    /// Mark the file-download phase done and the (untracked) weight-load
-    /// phase begun. The settings app maps this status to a "Loading model
-    /// into memory…" indicator, so the user sees the operation is still
-    /// progressing after the download bar fills.
-    pub fn mark_loading(&self) {
-        *self.status.write() = "loading_model".to_string();
-        info!(
-            "Files downloaded; loading model into memory: {}",
-            self.model_name
-        );
-    }
-
-    pub fn mark_completed(&self) {
-        *self.status.write() = "completed".to_string();
-        info!("Download completed for model: {}", self.model_name);
-    }
-
-    pub fn mark_error(&self, error: &str) {
-        *self.status.write() = "error".to_string();
-        *self.error.write() = Some(error.to_string());
-        warn!("Download error for model {}: {}", self.model_name, error);
+    fn describe(stage: u32) -> Option<String> {
+        Some(format!("stage {stage}"))
     }
 }
 
-/// Note: We're not implementing `hf_hub::api::Progress` directly since it's a private trait.
-/// Instead, we use our own progress tracking system that integrates with the notification system.
-/// The downloads the pipeline has in flight, one slot per stage.
-///
-/// The stages provision independently — a post-processor can be fetched while
-/// a transcription model is — and nothing serializes the two, so a single slot
-/// meant whichever load started second evicted the other: its progress
-/// vanished from the stage reporting it, and its cancel had nothing left to
-/// cancel. Keyed by stage, each answers only for itself.
-pub struct DownloadStateManager {
-    downloads: Arc<RwLock<HashMap<u32, Arc<DownloadProgressTracker>>>>,
-}
+/// Progress of one model load. See
+/// `super_engine_daemon::download_progress::DownloadProgressTracker`.
+pub type DownloadProgressTracker = engine::DownloadProgressTracker<StageSlot>;
 
-impl Default for DownloadStateManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// The loads in flight, one per pipeline stage. See
+/// `super_engine_daemon::download_progress::DownloadStateManager`.
+pub type DownloadStateManager = engine::DownloadStateManager<StageSlot>;
 
-impl DownloadStateManager {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            downloads: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// Start tracking a download for the stage the tracker names.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if that stage already has a download in progress.
-    pub fn start_download(&self, tracker: Arc<DownloadProgressTracker>) -> Result<(), String> {
-        let mut downloads = self.downloads.write();
-        let stage = tracker.stage;
-        if downloads.contains_key(&stage) {
-            return Err(format!(
-                "A download is already in progress for stage {stage}"
-            ));
-        }
-        downloads.insert(stage, tracker);
-        Ok(())
-    }
-
-    /// The download `stage` has in flight, if any.
-    #[must_use]
-    pub fn get_download(&self, stage: u32) -> Option<Arc<DownloadProgressTracker>> {
-        self.downloads.read().get(&stage).cloned()
-    }
-
-    /// Cancel the download `stage` has in flight.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when that stage has nothing to cancel — including when
-    /// another stage is downloading, which is not this stage's to abandon.
-    pub fn cancel_download(&self, stage: u32) -> Result<(), String> {
-        match self.downloads.read().get(&stage) {
-            Some(tracker) => {
-                tracker.cancel();
-                Ok(())
-            }
-            None => Err(format!("No download in progress for stage {stage}")),
-        }
-    }
-
-    /// Forget `stage`'s download, whatever became of it.
-    pub fn clear_download(&self, stage: u32) {
-        self.downloads.write().remove(&stage);
+/// A load's progress as the wire carries it.
+#[must_use]
+pub fn report(progress: Progress<StageSlot>) -> DownloadProgress {
+    DownloadProgress {
+        model_name: progress.model_name,
+        source: progress.slot.source,
+        stage: progress.slot.stage,
+        current_file: progress.current_file,
+        file_index: progress.file_index,
+        total_files: progress.total_files,
+        bytes_downloaded: progress.bytes_downloaded,
+        total_bytes: progress.total_bytes,
+        percentage: progress.percentage,
+        status: progress.status,
+        started_at: progress.started_at,
+        eta_seconds: progress.eta_seconds,
+        error: progress.error,
+        load: progress.load,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
     use super::*;
-    use super_stt_shared::models::protocol::TRANSCRIPTION_STAGE;
-
-    /// A tracker for a stage-1 download of `model`, the shape every test here
-    /// but the attribution one uses.
-    fn tracker(
-        model: &str,
-        total_files: usize,
-        cancelled: Arc<AtomicBool>,
-    ) -> DownloadProgressTracker {
-        DownloadProgressTracker::new(
-            model.to_string(),
-            "github.com/super-stt/whisper".to_string(),
-            TRANSCRIPTION_STAGE,
-            total_files,
-            cancelled,
-        )
-    }
-
-    /// Regression for the silent UI-stuck bug: when the post-download
-    /// `mark_completed()` runs and `broadcast_progress()` is called,
-    /// the underlying computed percentage often isn't strictly greater
-    /// than the last broadcast (it may even drop). The 1%-increment
-    /// throttle alone would suppress the publish, and the consumer's
-    /// `if progress.status == "completed"` arm would never fire — the
-    /// "downloading" indicator would stay forever. Status transitions
-    /// must bypass the throttle.
-    #[test]
-    fn broadcast_progress_publishes_completed_status_even_without_percentage_increase() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("test-model", 1, cancelled);
-        tracker.total_bytes.store(1000, Ordering::Relaxed);
-        tracker.bytes_downloaded.store(900, Ordering::Relaxed);
-
-        // Simulate the throttle having already seen 90%.
-        tracker
-            .last_broadcast_percentage
-            .store(9000, Ordering::Relaxed);
-        *tracker.last_broadcast_status.write() = "downloading".to_string();
-
-        // Now mark completed without bumping bytes_downloaded — so the
-        // computed percentage stays at 90 — and confirm the broadcast
-        // path still fired, evidenced by `last_broadcast_status`.
-        *tracker.status.write() = "completed".to_string();
-        tracker.broadcast_progress();
-
-        assert_eq!(
-            *tracker.last_broadcast_status.read(),
-            "completed",
-            "broadcast must fire on status transition to `completed` regardless of percentage"
-        );
-    }
-
-    /// Regression for the "0.0 / 0.0 MB" UI bug: when a download starts
-    /// with `total_bytes = 0` (HF's CDN serves large `.safetensors`
-    /// chunked, so no `Content-Length`), the first broadcast publishes
-    /// `total_bytes = 0`. Once the daemon resolves the real size via
-    /// `X-Linked-Size`/HEAD, it bumps `total_bytes` and calls
-    /// `broadcast_progress()` — but `bytes_downloaded` is still 0, so
-    /// percentage stays 0% and status stays "downloading". Without
-    /// detecting the `total_bytes` change, the throttle would suppress
-    /// the publish and the UI would freeze on "0.0 / 0.0 MB" until
-    /// enough chunks streamed to cross the 1% gate (several seconds on
-    /// a slow connection for a multi-GB file).
-    #[test]
-    fn broadcast_progress_publishes_when_total_bytes_changes() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("test-model", 1, cancelled);
-
-        // Initial broadcast — empty last status → "verifying", total_bytes = 0.
-        tracker.broadcast_progress();
-        assert_eq!(
-            tracker.last_broadcast_total_bytes.load(Ordering::Relaxed),
-            0
-        );
-
-        // Size resolves (4 GB). bytes_downloaded still 0, status
-        // unchanged, percentage still 0%. The publish must fire because
-        // total_bytes changed.
-        tracker.total_bytes.store(4_000_000_000, Ordering::Relaxed);
-        tracker.broadcast_progress();
-        assert_eq!(
-            tracker.last_broadcast_total_bytes.load(Ordering::Relaxed),
-            4_000_000_000,
-            "broadcast must fire when total_bytes flips from 0 to the resolved file size"
-        );
-    }
-
-    /// Per-file counters: `start_file` zeroes `total_bytes` and
-    /// `bytes_downloaded` so the UI's "X.X / Y.Y MB" displays only
-    /// the current file's size, not an aggregate across the whole
-    /// model. Without this, a multi-file model (e.g. Voxtral with two
-    /// 3GB safetensors plus a config) shows a cumulative "1500 /
-    /// 6000 MB" mid-second-file, which is confusing.
-    #[test]
-    fn start_file_resets_per_file_counters() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("test-model", 2, cancelled);
-
-        // Simulate file 0 finishing.
-        tracker.total_bytes.store(3_000_000_000, Ordering::Relaxed);
-        tracker
-            .bytes_downloaded
-            .store(3_000_000_000, Ordering::Relaxed);
-
-        // Starting file 1 must zero out per-file counters so the next
-        // size resolution / chunk doesn't accumulate on top of file 0.
-        tracker.start_file("model-00002-of-00002.safetensors", 1);
-        assert_eq!(tracker.total_bytes.load(Ordering::Relaxed), 0);
-        assert_eq!(tracker.bytes_downloaded.load(Ordering::Relaxed), 0);
-        assert_eq!(tracker.file_index.load(Ordering::Relaxed), 1);
-    }
-
-    /// File-index transitions must publish even when the overall
-    /// percentage is flat across the boundary — which is precisely the
-    /// common case with overall (not per-file) progress: file N
-    /// finishing at `(N+1)/total` and file N+1 starting at
-    /// `(N+1)/total` are the same number. Neither `percentage_crossed`
-    /// nor `total_bytes_changed` (same-size files) fires, so without the
-    /// `file_index` arm the throttle would suppress the publish and the
-    /// per-file "X / Y MB" display would stay frozen on the old file.
-    #[test]
-    fn broadcast_progress_publishes_when_file_index_advances() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("test-model", 2, cancelled);
-
-        // File 0 fully downloaded: overall = (0 + 1)/2 = 50%.
-        tracker.total_bytes.store(1000, Ordering::Relaxed);
-        tracker.bytes_downloaded.store(1000, Ordering::Relaxed);
-        tracker.broadcast_progress();
-        assert_eq!(tracker.last_broadcast_file_index.load(Ordering::Relaxed), 0);
-
-        // File 1 starts at 0 bytes, same size: overall = (1 + 0)/2 =
-        // 50% — identical to the previous broadcast. Only file_index
-        // moved.
-        tracker.start_file("file2", 1);
-        tracker.total_bytes.store(1000, Ordering::Relaxed);
-        tracker.broadcast_progress();
-        assert_eq!(
-            tracker.last_broadcast_file_index.load(Ordering::Relaxed),
-            1,
-            "file_index update must publish even when overall percentage is flat across the boundary"
-        );
-    }
-
-    /// The per-file bar reaches 100% when the current file is fully
-    /// downloaded — no 90% cap left over from the in-tree flow. (The
-    /// last file hitting 100%, then `loading_model`/`completed`, fills
-    /// the bar to the end of the whole operation.)
-    #[test]
-    fn percentage_reaches_100_when_current_file_complete() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("m", 3, cancelled);
-        tracker.start_file("f3", 2);
-        tracker.total_bytes.store(500, Ordering::Relaxed);
-        tracker.bytes_downloaded.store(500, Ordering::Relaxed);
-        let pct = tracker.get_progress().percentage;
-        assert!((pct - 100.0).abs() < 0.01, "expected 100%, got {pct}");
-    }
-
-    /// Per-file bar: progress is the current file's byte fraction, not
-    /// an aggregate across files. A half-downloaded second file reads
-    /// 50% regardless of how large the already-finished first file was.
-    #[test]
-    fn percentage_is_per_file_not_aggregate() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("m", 2, cancelled);
-        // Second file (index 1 of 2), half downloaded.
-        tracker.start_file("f2", 1);
-        tracker.total_bytes.store(1000, Ordering::Relaxed);
-        tracker.bytes_downloaded.store(500, Ordering::Relaxed);
-        let pct = tracker.get_progress().percentage;
-        assert!(
-            (pct - 50.0).abs() < 0.01,
-            "expected per-file 50%, got {pct}"
-        );
-    }
-
-    /// `loading_model` and `completed` both pin the bar at 100% — the
-    /// post-download weight-load phase keeps the bar full while the app
-    /// shows its "Loading…" indicator.
-    #[test]
-    fn loading_and_completed_statuses_are_100_percent() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("m", 2, cancelled);
-        tracker.start_file("f1", 0);
-        tracker.total_bytes.store(500, Ordering::Relaxed);
-        tracker.bytes_downloaded.store(100, Ordering::Relaxed);
-
-        tracker.mark_loading();
-        assert!((tracker.get_progress().percentage - 100.0).abs() < 0.01);
-
-        tracker.mark_completed();
-        assert!((tracker.get_progress().percentage - 100.0).abs() < 0.01);
-    }
-
-    /// Provisioning opens in the `verifying` phase, not `downloading`: the
-    /// first thing a load does is check the files already on disk, and a
-    /// tracker that said "downloading" before that check is what made a fully
-    /// cached load paint a download bar with nothing downloading behind it.
-    #[test]
-    fn a_fresh_tracker_starts_in_the_verifying_phase() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("m", 3, cancelled);
-        assert_eq!(tracker.get_progress().status, "verifying");
-    }
-
-    /// The verify → download flip publishes even when nothing else moved: a
-    /// file that failed its existence check goes from `verifying` at 0 bytes
-    /// to `downloading` at 0 bytes, so only the status distinguishes them, and
-    /// a client that missed the transition would keep saying "checking files"
-    /// for the whole of a multi-GB download.
-    #[test]
-    fn broadcast_progress_publishes_the_verify_to_download_flip() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("m", 1, cancelled);
-        tracker.start_file("model.safetensors", 0);
-        tracker.broadcast_progress();
-        assert_eq!(*tracker.last_broadcast_status.read(), "verifying");
-
-        tracker.mark_downloading();
-        tracker.broadcast_progress();
-        assert_eq!(
-            *tracker.last_broadcast_status.read(),
-            "downloading",
-            "the phase flip must publish even with byte counters unchanged"
-        );
-    }
-
-    /// Verification reports progress the same way a download does — bytes of
-    /// the current file over its size — so a client renders one bar for both
-    /// phases and only the verb changes.
-    #[test]
-    fn verifying_reports_per_file_byte_progress() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("m", 2, cancelled);
-        tracker.start_file("model.safetensors", 1);
-        tracker.mark_verifying();
-        tracker.total_bytes.store(4000, Ordering::Relaxed);
-        tracker.bytes_downloaded.store(1000, Ordering::Relaxed);
-
-        let progress = tracker.get_progress();
-        assert_eq!(progress.status, "verifying");
-        assert!(
-            (progress.percentage - 25.0).abs() < 0.01,
-            "expected a quarter of the file hashed, got {}",
-            progress.percentage
-        );
-    }
-
-    /// Companion of the tests above: when nothing meaningful changes
-    /// (percentage, status, `total_bytes`, `file_index` all stable), the
-    /// throttle suppresses the publish. Without this guard,
-    /// `broadcast_progress` would spam events on every chunk.
-    #[test]
-    fn broadcast_progress_suppressed_when_neither_percentage_nor_status_changes() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let tracker = tracker("test-model", 1, cancelled);
-        tracker.total_bytes.store(1000, Ordering::Relaxed);
-        tracker.bytes_downloaded.store(500, Ordering::Relaxed);
-
-        // First broadcast — overall progress of the sole file at
-        // 500/1000 = 50%, fixed-point 5000.
-        tracker.broadcast_progress();
-        let after_first = tracker.last_broadcast_percentage.load(Ordering::Relaxed);
-        assert_eq!(after_first, 5000);
-
-        // Same percentage, same status, same file_index → no change.
-        tracker.broadcast_progress();
-        assert_eq!(
-            tracker.last_broadcast_percentage.load(Ordering::Relaxed),
-            5000,
-            "second call with identical state must be a no-op"
-        );
-    }
+    use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
 
     /// The reported bug: a post-processor's download reported progress a
     /// client could only attribute by looking its model name up in the
     /// catalog, which put the progress bar on the transcription card. Every
-    /// tick now says which stage and which backend it is for.
+    /// tick says which stage and which backend it is for — in the typed
+    /// report and in the event the engine publishes, which must read back as
+    /// the same wire type.
     #[test]
     fn progress_reports_the_stage_and_backend_it_is_for() {
-        use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
-
-        let cancelled = Arc::new(AtomicBool::new(false));
         let tracker = DownloadProgressTracker::new(
             "s1-mini-q4_k_m".to_string(),
-            "github.com/super-stt/s1-mini".to_string(),
-            POST_PROCESSOR_STAGE,
-            2,
-            cancelled,
-        );
-        let progress = tracker.get_progress();
-        assert_eq!(progress.model_name, "s1-mini-q4_k_m");
-        assert_eq!(progress.source, "github.com/super-stt/s1-mini");
-        assert_eq!(progress.stage, POST_PROCESSOR_STAGE);
-
-        let json = serde_json::to_value(&progress).unwrap();
-        assert_eq!(json["stage"], 2);
-        assert_eq!(json["source"], "github.com/super-stt/s1-mini");
-    }
-
-    /// The stages provision independently, so one slot per stage: a
-    /// post-processor's download must not evict the transcription model's —
-    /// which is what left the evicted one's progress unreportable and its
-    /// cancel with nothing to cancel.
-    #[test]
-    fn each_stage_tracks_its_own_download() {
-        use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
-
-        let manager = DownloadStateManager::new();
-        let stage_one = Arc::new(tracker(
-            "whisper-large-v3",
-            1,
-            Arc::new(AtomicBool::new(false)),
-        ));
-        let stage_two = Arc::new(DownloadProgressTracker::new(
-            "s1-mini-q4_k_m".to_string(),
-            "github.com/super-stt/s1-mini".to_string(),
-            POST_PROCESSOR_STAGE,
+            StageSlot {
+                source: "github.com/super-stt/s1-mini".to_string(),
+                stage: POST_PROCESSOR_STAGE,
+            },
             2,
             Arc::new(AtomicBool::new(false)),
-        ));
-
-        manager
-            .start_download(Arc::clone(&stage_one))
-            .expect("stage 1");
-        manager
-            .start_download(Arc::clone(&stage_two))
-            .expect("stage 2");
-
-        assert_eq!(
-            manager
-                .get_download(TRANSCRIPTION_STAGE)
-                .expect("stage 1 download")
-                .model_name,
-            "whisper-large-v3"
         );
-        assert_eq!(
-            manager
-                .get_download(POST_PROCESSOR_STAGE)
-                .expect("stage 2 download")
-                .model_name,
-            "s1-mini-q4_k_m"
-        );
+        tracker.mark_error("disk full");
 
-        // Cancelling one leaves the other running.
-        manager
-            .cancel_download(POST_PROCESSOR_STAGE)
-            .expect("cancel stage 2");
-        assert!(stage_two.is_cancelled());
-        assert!(!stage_one.is_cancelled());
+        let wire = report(tracker.get_progress());
+        assert_eq!(wire.model_name, "s1-mini-q4_k_m");
+        assert_eq!(wire.source, "github.com/super-stt/s1-mini");
+        assert_eq!(wire.stage, POST_PROCESSOR_STAGE);
+        assert_eq!(wire.error.as_deref(), Some("disk full"));
 
-        // And clearing one leaves the other tracked.
-        manager.clear_download(POST_PROCESSOR_STAGE);
-        assert!(manager.get_download(POST_PROCESSOR_STAGE).is_none());
-        assert!(manager.get_download(TRANSCRIPTION_STAGE).is_some());
-    }
-
-    /// A stage with nothing of its own in flight has nothing to cancel, even
-    /// while the other stage downloads: one stage's cancel is not a licence to
-    /// abandon the other's load.
-    #[test]
-    fn a_stage_cannot_cancel_another_stages_download() {
-        use super_stt_shared::models::protocol::POST_PROCESSOR_STAGE;
-
-        let manager = DownloadStateManager::new();
-        let stage_one = Arc::new(tracker("whisper-tiny", 1, Arc::new(AtomicBool::new(false))));
-        manager
-            .start_download(Arc::clone(&stage_one))
-            .expect("stage 1");
-
-        assert!(manager.cancel_download(POST_PROCESSOR_STAGE).is_err());
-        assert!(!stage_one.is_cancelled());
-    }
-
-    /// One stage cannot start two loads at once — the second would leave the
-    /// first untrackable and uncancellable.
-    #[test]
-    fn a_stage_takes_one_download_at_a_time() {
-        let manager = DownloadStateManager::new();
-        let first = Arc::new(tracker("whisper-tiny", 1, Arc::new(AtomicBool::new(false))));
-        let second = Arc::new(tracker(
-            "whisper-large-v3",
-            1,
-            Arc::new(AtomicBool::new(false)),
-        ));
-
-        manager.start_download(first).expect("first");
-        assert!(manager.start_download(second).is_err());
+        let event = serde_json::to_value(tracker.get_progress()).unwrap();
+        let parsed: DownloadProgress =
+            serde_json::from_value(event).expect("the published event is the wire type");
+        assert_eq!(parsed.source, wire.source);
+        assert_eq!(parsed.stage, wire.stage);
+        assert_eq!(parsed.status, "error");
+        assert_eq!(parsed.error, wire.error);
     }
 }

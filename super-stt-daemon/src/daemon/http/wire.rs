@@ -61,29 +61,8 @@ pub(crate) struct ErrorEnvelope {
     pub(crate) message: Option<String>,
 }
 
-/// The auth-failure envelope: `message` names the failure and `data.reason`
-/// says which of its cases occurred.
-///
-/// Distinct from [`ErrorEnvelope`] because the auth surface predates
-/// `error_code` and clients read `data.reason` there. Both are documented
-/// rather than reconciled, since changing either is a breaking wire change.
-#[derive(Serialize, ToSchema)]
-pub(crate) struct ReasonEnvelope {
-    /// Always `error`.
-    #[schema(example = "error")]
-    pub(crate) status: &'static str,
-    /// The failure identifier, e.g. `invalid_session` or `auth_denied`.
-    pub(crate) message: String,
-    pub(crate) data: Reason,
-}
-
-/// The `data` object of a [`ReasonEnvelope`].
-#[derive(Serialize, ToSchema)]
-pub(crate) struct Reason {
-    /// Which case of `message` occurred — e.g. `expired`, `exe_changed`,
-    /// `user_denied`.
-    pub(crate) reason: String,
-}
+/// The auth-failure envelope the guards answer with, shared with Super TTS.
+pub(crate) use super_engine_daemon::http::wire::ReasonEnvelope;
 
 /// The registry surface's error envelope, which carries one extra key.
 ///

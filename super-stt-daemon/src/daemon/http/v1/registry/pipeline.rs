@@ -209,7 +209,9 @@ pub(super) fn spawn_install_pipeline(
             // Bundles can be multi-GB (e.g. a CUDA backend's multi-part
             // archive), so use the generous-timeout download client; the
             // connect timeout still fails fast on an unreachable host.
-            http: super_stt_forge::http::download_client(),
+            http: super_engine_forge::http::download_client(
+                super_stt_registry_types::Stt::USER_AGENT,
+            ),
             on_progress: Arc::new(move |phase, bytes: Option<(u64, Option<u64>)>| {
                 use super_stt_shared::registry::events::{InstallPhase, RegistryEvent};
                 let (bytes_done, bytes_total) = bytes.map_or((None, None), |(d, t)| (Some(d), t));

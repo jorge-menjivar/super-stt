@@ -2,7 +2,7 @@
 
 This directory holds custom WIT package definitions that are part of the Super STT backend protocol but not yet standardized in WASI.
 
-## `realtime.wit` — `super-stt:realtime@0.1.0`
+## `realtime.wit` — `super-engine:realtime@0.1.0`
 
 Defines two interfaces a wasm backend uses for realtime (WebSocket-based) transcription:
 
@@ -12,7 +12,9 @@ Defines two interfaces a wasm backend uses for realtime (WebSocket-based) transc
 A backend that needs realtime support:
 - Declares `[capabilities] websocket = true` in `backend.toml`.
 - Declares at least one `[[models]] realtime = true`.
-- Imports `super-stt:realtime/ws` and exports `super-stt:realtime/ws-server` in its `realtime-backend` world.
+- Imports `super-engine:realtime/ws` and exports `super-engine:realtime/ws-server` in its `realtime-backend` world.
+
+Backends built against the earlier `super-stt:realtime@0.1.0` still load: the daemon offers the same interfaces under that name.
 
 ## Cross-language consumption
 

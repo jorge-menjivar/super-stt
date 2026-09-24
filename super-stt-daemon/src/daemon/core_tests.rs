@@ -557,8 +557,10 @@ async fn list_backends_catalog_and_option_override() {
             processing_interval: Duration::from_secs(1),
             supported_devices: vec![super_stt_registry_types::manifest::Device::None],
             realtime: false,
-            force_preview_support: true,
-            role: super_stt_registry_types::manifest::ModelRole::Transcription,
+            product: super_stt_registry_types::manifest::SttModel {
+                force_preview_support: true,
+                role: super_stt_registry_types::manifest::ModelRole::Transcription,
+            },
             provider: None,
         }],
         // A manifest may not declare a default for `base_url`, so the catalog's
@@ -726,8 +728,10 @@ fn fixture_backend_devices(
             processing_interval: Duration::from_secs(1),
             supported_devices,
             realtime: false,
-            force_preview_support: true,
-            role: super_stt_registry_types::manifest::ModelRole::Transcription,
+            product: super_stt_registry_types::manifest::SttModel {
+                force_preview_support: true,
+                role: super_stt_registry_types::manifest::ModelRole::Transcription,
+            },
             provider: None,
         }],
     }
@@ -942,7 +946,10 @@ async fn each_stage_lists_only_the_models_carrying_its_role() {
         .models
         .push(crate::stt_models::model_definition::ModelDefinition {
             name: "tidy".to_string(),
-            role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+            product: super_stt_registry_types::manifest::SttModel {
+                role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+                ..backend.models[0].product.clone()
+            },
             ..backend.models[0].clone()
         });
     *daemon.backends.write().await = vec![backend];
@@ -1038,8 +1045,10 @@ async fn seed_loaded_model(daemon: &SuperSTTDaemon, name: &str, source: &str) ->
         processing_interval: Duration::from_secs(1),
         supported_devices: vec![super_stt_registry_types::manifest::Device::None],
         realtime: false,
-        force_preview_support: true,
-        role: super_stt_registry_types::manifest::ModelRole::Transcription,
+        product: super_stt_registry_types::manifest::SttModel {
+            force_preview_support: true,
+            role: super_stt_registry_types::manifest::ModelRole::Transcription,
+        },
         provider: None,
     };
     let info = ModelInfoData::new(name, source, true, true, Duration::from_secs(1));
@@ -1069,6 +1078,9 @@ fn backend_with_option(
         r#type: Some(OptionType::String),
         default: None,
         choices: Vec::new(),
+        min: None,
+        max: None,
+        step: None,
         required: false,
     }];
     backend
@@ -1460,7 +1472,7 @@ async fn model_device_refuses_a_model_the_stage_cannot_run() {
     let mut backend = fixture_backend_local("both", source, "Both", "whisper");
     let mut cleanup = backend.models[0].clone();
     cleanup.name = "cleanup".to_string();
-    cleanup.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    cleanup.product.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
     backend.models.push(cleanup);
     *daemon.backends.write().await = vec![backend];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
@@ -1608,7 +1620,7 @@ async fn device_lists_answer_per_model_and_per_stage() {
     online.supported_devices = vec![Device::None];
     let mut cleanup = backend.models[0].clone();
     cleanup.name = "cleanup".to_string();
-    cleanup.role = ModelRole::PostProcessor;
+    cleanup.product.role = ModelRole::PostProcessor;
     cleanup.supported_devices = vec![Device::Cpu, Device::Gpu];
     backend.models.extend([online, cleanup]);
     *daemon.backends.write().await = vec![backend];
@@ -1676,7 +1688,7 @@ async fn set_post_processor_device_when_not_loaded_only_records_the_preference()
             super_stt_registry_types::manifest::Device::Gpu,
         ],
     );
-    backend.models[0].role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    backend.models[0].product.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
     *daemon.backends.write().await = vec![backend];
     daemon.config.write().await.post_processor.source = source.to_string();
 
@@ -1850,7 +1862,7 @@ async fn selecting_a_post_processor_announces_its_load_as_stage_two() {
     let daemon = test_daemon().await;
     let source = "github.com/super-stt/textclean";
     let mut backend = fixture_backend_local("textclean", source, "TextClean", "cleanup");
-    backend.models[0].role = ModelRole::PostProcessor;
+    backend.models[0].product.role = ModelRole::PostProcessor;
     *daemon.backends.write().await = vec![backend];
     let mut rx = daemon.events.subscribe(Topic::DaemonStatusChanged);
 
@@ -1889,8 +1901,10 @@ async fn a_stage_reports_only_its_own_download() {
     let daemon = test_daemon().await;
     let tracker = Arc::new(DownloadProgressTracker::new(
         "s1-mini-q4_k_m".to_string(),
-        "github.com/super-stt/s1-mini".to_string(),
-        POST_PROCESSOR_STAGE,
+        crate::download_progress::StageSlot {
+            source: "github.com/super-stt/s1-mini".to_string(),
+            stage: POST_PROCESSOR_STAGE,
+        },
         2,
         Arc::new(AtomicBool::new(false)),
     ));
@@ -2011,7 +2025,7 @@ async fn every_stage_reports_its_model_slot_alike() {
     let mut backend = fixture_backend_local("mixed", source, "Mixed", "transcribe");
     let mut cleanup = backend.models[0].clone();
     cleanup.name = "cleanup".to_string();
-    cleanup.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
+    cleanup.product.role = super_stt_registry_types::manifest::ModelRole::PostProcessor;
     backend.models.push(cleanup);
     *daemon.backends.write().await = vec![backend];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
@@ -2109,8 +2123,10 @@ async fn cancel_abandons_only_the_addressed_stages_download() {
     let daemon = test_daemon().await;
     let stage_two = Arc::new(DownloadProgressTracker::new(
         "s1-mini-q4_k_m".to_string(),
-        "github.com/super-stt/s1-mini".to_string(),
-        POST_PROCESSOR_STAGE,
+        crate::download_progress::StageSlot {
+            source: "github.com/super-stt/s1-mini".to_string(),
+            stage: POST_PROCESSOR_STAGE,
+        },
         2,
         Arc::new(AtomicBool::new(false)),
     ));
@@ -2256,7 +2272,7 @@ fn fixture_post_processor(source: &str) -> crate::stt_models::backends::Discover
         "cleanup",
         vec![Device::Cpu, Device::Gpu],
     );
-    backend.models[0].role = ModelRole::PostProcessor;
+    backend.models[0].product.role = ModelRole::PostProcessor;
     backend
 }
 
@@ -2412,8 +2428,10 @@ async fn seed_scripted_model(daemon: &SuperSTTDaemon, online: bool, result: Resu
         processing_interval: Duration::from_secs(1),
         supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
         realtime: false,
-        force_preview_support: true,
-        role: super_stt_registry_types::manifest::ModelRole::Transcription,
+        product: super_stt_registry_types::manifest::SttModel {
+            force_preview_support: true,
+            role: super_stt_registry_types::manifest::ModelRole::Transcription,
+        },
         provider: None,
     };
     let info = ModelInfoData::new(
@@ -2464,8 +2482,10 @@ async fn seed_post_processor_named(
         processing_interval: Duration::from_secs(1),
         supported_devices: vec![super_stt_registry_types::manifest::Device::Cpu],
         realtime: false,
-        force_preview_support: true,
-        role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+        product: super_stt_registry_types::manifest::SttModel {
+            force_preview_support: true,
+            role: super_stt_registry_types::manifest::ModelRole::PostProcessor,
+        },
         provider: None,
     };
     let info = ModelInfoData::new(name, source, false, false, Duration::from_secs(1));

@@ -1,42 +1,106 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! HTTP client for the daemon protocol.
+//! HTTP client for the daemon protocol: `super_engine_client::http_client`,
+//! which Super STT shares with Super TTS, plus Super STT's own endpoints.
 //!
-//! The transport is HTTP/1.1 over a Unix domain socket
-//! (`super_stt_shared::validation::get_http_socket_path()`). Each request
-//! opens a fresh `tokio::net::UnixStream`, runs `hyper::client::conn::http1`
-//! over it, and parses the JSON response into a `DaemonResponse`.
-//!
-//! Authentication is per-request: callers pass a session token (obtained
-//! from [`crate::daemon::session::obtain`]) and this module attaches it
-//! as `Authorization: Bearer <token>` on every call except
-//! [`auth_request`]. On 401 the daemon's `data.reason` is surfaced so the
-//! caller can `session::forget` + re-`obtain`.
+//! The transport is HTTP/1.1 over the daemon's Unix socket
+//! (`super_stt_shared::validation::get_http_socket_path()`). Authentication is
+//! per-request: callers pass a session token (obtained from
+//! [`crate::daemon::session::obtain`]) and it is attached as
+//! `Authorization: Bearer <token>` on every call except [`auth_request`].
 
-mod internal;
-mod v1;
+mod transcribe;
 
-pub use internal::error::{HttpError, HttpResult};
+use std::path::PathBuf;
 
-pub use v1::auth::request::{AuthOk, auth_request};
-pub use v1::auth::status::{AuthStatusInfo, auth_status};
-pub use v1::events::{WidgetEvent, events_stream};
-pub use v1::health::{ping, status};
-pub use v1::transcribe::{
+pub use super_engine_client::http_client::{
+    AuthOk, AuthStatusInfo, HttpError, HttpResult, WidgetEvent, auth_request, auth_status,
+    events_stream, ping,
+};
+pub use transcribe::{
     TranscribeEvent, TranscribeOptions, transcribe, transcribe_stop, transcribe_stream,
 };
 
+use crate::models::protocol::DaemonResponse;
+
+/// `GET /status` — current model + device.
+///
+/// # Errors
+/// Returns an error if the daemon HTTP listener isn't reachable or the
+/// response can't be parsed.
+pub async fn status(socket_path: PathBuf, token: &str) -> HttpResult<DaemonResponse> {
+    super_engine_client::http_client::status(socket_path, token).await
+}
+
 /// Public transport surface for downstream clients that compose their own
-/// per-scope endpoint wrappers (e.g. the settings app). Returns
+/// per-scope endpoint wrappers (e.g. the settings app): the engine's, plus
+/// the `settings_*` calls that read Super STT's [`DaemonResponse`]. Returns
 /// [`HttpError`] on transport/auth failure; `401` becomes
 /// [`HttpError::InvalidSession`].
 pub mod transport {
-    pub use super::internal::transport::{
-        delete_json, get_json, post_json, settings_delete, settings_get, settings_post,
-        settings_post_no_timeout,
-    };
+    use std::path::PathBuf;
 
-    /// The single non-2xx-to-[`HttpError`] mapping, exported so the daemon's
-    /// envelope-contract test can assert that every error shape it emits is
-    /// one this client can actually read.
-    pub use super::internal::transport::{daemon_error, error_for_status};
+    pub use super_engine_client::http_client::transport::*;
+
+    use super::HttpResult;
+    use crate::models::protocol::DaemonResponse;
+
+    /// `GET <path>` → `DaemonResponse`. The standard settings read.
+    ///
+    /// # Errors
+    /// Returns [`super::HttpError::InvalidSession`] on `401`;
+    /// [`super::HttpError::Other`] on connection, HTTP, or parse failure.
+    pub async fn settings_get(
+        socket_path: PathBuf,
+        token: &str,
+        path: &str,
+    ) -> HttpResult<DaemonResponse> {
+        get_json(socket_path, token, path).await
+    }
+
+    /// `POST <path>` with a JSON body → `DaemonResponse`. The standard
+    /// settings write.
+    ///
+    /// # Errors
+    /// Returns [`super::HttpError::InvalidSession`] on `401`;
+    /// [`super::HttpError::Other`] on connection, HTTP, body encoding, or
+    /// parse failure.
+    pub async fn settings_post(
+        socket_path: PathBuf,
+        token: &str,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> HttpResult<DaemonResponse> {
+        post_json(socket_path, token, path, body).await
+    }
+
+    /// Like [`settings_post`] but without the fixed header timeout — for a
+    /// long-running write whose response the daemon only sends once the work
+    /// completes (notably `POST /active_model`, a model switch that may stream
+    /// multi-GB weights first). See [`post_json_no_timeout`].
+    ///
+    /// # Errors
+    /// Returns [`super::HttpError::InvalidSession`] on `401`;
+    /// [`super::HttpError::Other`] on connection, HTTP, body encoding, or
+    /// parse failure.
+    pub async fn settings_post_no_timeout(
+        socket_path: PathBuf,
+        token: &str,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> HttpResult<DaemonResponse> {
+        post_json_no_timeout(socket_path, token, path, body).await
+    }
+
+    /// `DELETE <path>` → `DaemonResponse`.
+    ///
+    /// # Errors
+    /// Returns [`super::HttpError::InvalidSession`] on `401`;
+    /// [`super::HttpError::Other`] on connection, HTTP, or parse failure.
+    pub async fn settings_delete(
+        socket_path: PathBuf,
+        token: &str,
+        path: &str,
+    ) -> HttpResult<DaemonResponse> {
+        delete_json(socket_path, token, path).await
+    }
 }

@@ -52,8 +52,8 @@ impl AppModel {
 
             ModelsPageMessage::InstallFailedToStart { source, error } => {
                 log::error!("install({source}) failed to start: {error}");
-                let error =
-                    super_stt_shared::daemon::http_client::HttpError::Other(error).user_message();
+                let error = super_stt_shared::daemon::http_client::HttpError::Other(error)
+                    .user_message(&super_stt_shared::SUPER_STT);
                 // Drop the pending marker (there is no background install) and
                 // record the reason so the Browse card shows "Failed" + a note
                 // instead of silently snapping back to the Install button.

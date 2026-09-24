@@ -27,7 +27,7 @@ mod hotkey;
 #[cfg(target_os = "macos")]
 mod service;
 
-const APP_ID: AppId = AppId("super-stt-cli");
+const APP_ID: AppId = super_stt_shared::daemon::session::app_id("super-stt-cli");
 const APP_NAME: &str = "Super STT CLI";
 const SCOPES: &[&str] = &["transcribe", "status"];
 
@@ -319,7 +319,7 @@ mod tests {
     use super_stt_shared::daemon::scopes::is_known_scope;
 
     /// The CLI's requested scope set must be a subset of the daemon's shared
-    /// catalog. Without this, a wire-scope rename in `scopes::KNOWN_SCOPES`
+    /// catalog. Without this, a wire-scope rename in `scopes::known_scopes`
     /// would leave `SCOPES` requesting a token the daemon rejects, and the
     /// break would only surface at runtime as a failed `/auth/request`. Mirrors
     /// the consent binary's `scope_conformance` guard (audit 2 Tier 3 #33).
@@ -328,7 +328,7 @@ mod tests {
         for scope in SCOPES {
             assert!(
                 is_known_scope(scope),
-                "CLI requests scope `{scope}` that is not in scopes::KNOWN_SCOPES"
+                "CLI requests scope `{scope}` that is not in scopes::known_scopes"
             );
         }
     }

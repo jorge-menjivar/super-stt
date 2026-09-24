@@ -51,7 +51,7 @@ impl SuperSTTDaemon {
         // backend does not serve, failing on every transcript. Refuse the load
         // instead, so the reason is reported once here rather than as a
         // best-effort warning after each recording.
-        if !definition.is_post_processor() {
+        if !definition.product.role.is_post_processor() {
             bail!("model {name} is a transcription model, not a post-processing model");
         }
 

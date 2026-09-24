@@ -234,6 +234,7 @@ impl SuperSTTDaemon {
                 percentage: p.percentage,
                 eta_seconds: p.eta_seconds,
             },
+            load: p.load,
         })
     }
 
@@ -249,7 +250,7 @@ impl SuperSTTDaemon {
         backends.iter().filter(|b| b.source == source).any(|b| {
             b.models
                 .iter()
-                .any(|m| m.is_post_processor() == post_processor)
+                .any(|m| m.product.role.is_post_processor() == post_processor)
         })
     }
 

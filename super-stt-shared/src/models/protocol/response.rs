@@ -215,6 +215,12 @@ pub struct DownloadProgress {
     /// from the wire on every non-error tick.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The backend's own account of the load while `status` is
+    /// `"loading_model"`: its phase, its step, and how far through the step it
+    /// is. Absent until the backend reports any of it, and from backends that
+    /// never do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load: Option<super::LoadProgress>,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -25,10 +25,20 @@ fn install_crypto_provider() {
 
 /// Removes the per-test backend dir on scope exit — including panic unwinds, so a
 /// failed assertion doesn't leak `~/.cache/super-stt-mock-test-<pid>`.
+///
+/// Also the cache dir the daemon grants that backend, which is named after the
+/// backend dir and lives under the real `~/.cache/super-stt/backends`, so each
+/// run would otherwise leave one behind per test.
 struct CleanupDir(std::path::PathBuf);
 impl Drop for CleanupDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+        if let Some(name) = self.0.file_name() {
+            let cache = super_stt_shared::paths::cache_dir()
+                .join("backends")
+                .join(name);
+            let _ = std::fs::remove_dir_all(cache);
+        }
     }
 }
 
@@ -53,6 +63,24 @@ supported_devices = ["cpu"]
 [[models]]
 name = "mock-cleanup"
 role = "post_processor"
+multilingual = false
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu"]
+
+# A model whose load reports building its kernels, for the test that the
+# backend's own progress reaches the card.
+[[models]]
+name = "mock-builds-kernels"
+multilingual = false
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu"]
+
+# A model whose load the mock abandons by exiting, for the test that a failed
+# load says why.
+[[models]]
+name = "mock-dies-on-load"
 multilingual = false
 primary_language = "en"
 supported_languages = ["en"]
@@ -168,19 +196,19 @@ async fn two_backends_from_one_directory_run_concurrently() {
 }
 
 /// The reported bug, at the level it bites: reloading the *same* model in
-/// place. An instance owns its `systemd-run --unit=` name and its socket, both
-/// keyed on (backend, model), so a second instance of one model cannot be built
-/// while the first still holds them — `systemd-run` refuses the duplicate unit
-/// outright.
+/// place. An instance owns its sandbox's name and its socket, both keyed on
+/// (backend, model), so a second instance of one model cannot be built while
+/// the first still holds them. That is why "build the replacement, keep the
+/// old one if it fails" was never a policy a subprocess backend could honor —
+/// and why every load path releases its instance before building the
+/// replacement. Stage 2 loaded first, so every in-place reload it was asked
+/// for — a device switch, an option change — failed while the card went on
+/// showing the model it had just broken.
 ///
-/// Worse, the attempt is not free: the spawn unlinks the socket path before it
-/// reaches systemd, so the failed second spawn leaves the *first* instance
-/// running but unreachable. That is why "build the replacement, keep the old
-/// one if it fails" was never a policy a subprocess backend could honor — and
-/// why every load path releases its instance before building the replacement.
-/// Stage 2 loaded first, so every in-place reload it was asked for — a device
-/// switch, an option change — failed with an opaque systemd error while the
-/// card went on showing the model it had just broken.
+/// The attempt used to cost the running instance too: the spawn unlinked the
+/// socket path before `systemd-run` refused the duplicate unit, leaving the
+/// first instance running but unreachable. It is refused before it touches
+/// anything now, so the running instance keeps serving.
 #[tokio::test]
 async fn a_model_reloads_only_once_its_instance_is_released() {
     if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
@@ -200,19 +228,16 @@ async fn a_model_reloads_only_once_its_instance_is_released() {
         .err()
         .expect("a second instance of one model must not spawn");
     assert!(
-        error.to_string().contains("systemd-run failed"),
-        "expected the duplicate unit name to be refused: {error}"
+        error.to_string().contains("already loading or loaded"),
+        "expected the running instance to be named as the reason: {error}"
     );
 
-    // And the attempt took the running instance's socket with it.
-    assert!(
-        running
-            .process_text("um so hello", Some("en"))
-            .await
-            .is_err(),
-        "the failed spawn unlinked the live instance's socket, so keeping it \
-         was never an option"
-    );
+    // And the refused attempt left the running instance alone.
+    let processed = running
+        .process_text("um so hello", Some("en"))
+        .await
+        .expect("a refused spawn must not take the running instance's socket");
+    assert_eq!(processed, "processed: um so hello");
 
     // Released first, the same model comes straight back up — which is what
     // makes unload-then-load the only order that reloads anything.
@@ -227,6 +252,90 @@ async fn a_model_reloads_only_once_its_instance_is_released() {
     assert_eq!(processed, "processed: um so hello");
 
     reloaded.shutdown().await.expect("clean shutdown");
+}
+
+/// A backend that dies partway through its load fails the load at once, and
+/// the failure carries what the backend said on its way out.
+///
+/// The case this guards is a model thread that panics while loading. When the
+/// backend's status never leaves `loading`, or the backend is simply gone, a
+/// bare "load timed out" (after ten minutes, in the first case) names neither
+/// the backend nor the panic, and the panic is sitting in its log.
+#[tokio::test]
+async fn a_backend_that_dies_while_loading_says_why() {
+    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+        return; // needs a systemd --user session
+    }
+    install_crypto_provider();
+
+    let (dir, _cleanup) = seed_backend_dir("dies");
+
+    let started = std::time::Instant::now();
+    let error = SubprocessBackend::spawn(&dir, "mock-dies-on-load", "cpu", None, Vec::new())
+        .await
+        .err()
+        .expect("a backend that exits mid-load must fail the load");
+    let text = format!("{error:#}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "the load must fail when the backend goes, not at the timeout: {text}"
+    );
+    assert!(
+        text.contains("stopped answering while loading"),
+        "the error must say what happened: {text}"
+    );
+    assert!(
+        text.contains("mock: the model thread panicked while loading"),
+        "the error must carry the backend's own last words: {text}"
+    );
+}
+
+/// What a backend reports of its own load reaches the load's tracker, which
+/// is what puts "Initial setup / Building kernels 50%" on the card instead of
+/// a full bar that sits there for minutes.
+#[tokio::test]
+async fn a_backends_load_progress_reaches_the_tracker() {
+    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+        return; // needs a systemd --user session
+    }
+    install_crypto_provider();
+
+    let (dir, _cleanup) = seed_backend_dir("kernels");
+    let tracker = std::sync::Arc::new(
+        super_stt_daemon::download_progress::DownloadProgressTracker::new(
+            "mock-builds-kernels".to_string(),
+            super_stt_daemon::download_progress::StageSlot {
+                source: "github.com/jorge-menjivar/super-stt-voxtral".to_string(),
+                stage: 1,
+            },
+            0,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        ),
+    );
+
+    let mut backend = SubprocessBackend::spawn(
+        &dir,
+        "mock-builds-kernels",
+        "cpu",
+        Some(&tracker),
+        Vec::new(),
+    )
+    .await
+    .expect("spawn + load a backend that reports its kernel build");
+
+    let load = tracker
+        .get_progress()
+        .load
+        .expect("the backend's report reached the tracker");
+    assert_eq!(load.phase.as_deref(), Some("initial_setup"));
+    assert_eq!(load.step.as_deref(), Some("building_kernels"));
+    assert_eq!(
+        load.progress,
+        Some(0.5),
+        "the last report before ready is what the tracker holds"
+    );
+
+    backend.shutdown().await.expect("clean shutdown");
 }
 
 /// Changing an option reaches a *running* backend, without reloading it.

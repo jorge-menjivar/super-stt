@@ -33,8 +33,8 @@ fn main() -> cosmic::iced::Result {
 
     // Install the rustls crypto provider before any HTTP client is built —
     // the app's first direct download (the self-update installer binary,
-    // via super-stt-forge) needs it.
-    super_stt_forge::install_crypto_provider();
+    // via super-engine-forge) needs it.
+    super_engine_forge::install_crypto_provider();
 
     // Get the system's preferred languages.
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();

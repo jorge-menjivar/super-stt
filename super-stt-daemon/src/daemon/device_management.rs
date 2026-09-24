@@ -183,7 +183,7 @@ impl SuperSTTDaemon {
         let devices = backend_available_devices(
             models
                 .iter()
-                .filter(|m| m.is_post_processor() == stage.is_post_processor())
+                .filter(|m| m.product.role.is_post_processor() == stage.is_post_processor())
                 .map(|m| install.offer(m)),
         );
         DaemonResponse::success()
@@ -324,7 +324,7 @@ impl SuperSTTDaemon {
                 &format!("Backend {source} (stage {position}) serves no model {model}."),
             ));
         };
-        if definition.is_post_processor() != stage.is_post_processor() {
+        if definition.product.role.is_post_processor() != stage.is_post_processor() {
             let (is, other) = if stage.is_post_processor() {
                 ("a transcription model", 1)
             } else {
@@ -1153,8 +1153,10 @@ mod tests {
             processing_interval: std::time::Duration::from_secs(1),
             supported_devices: devices,
             realtime: false,
-            force_preview_support: true,
-            role: super_stt_registry_types::manifest::ModelRole::Transcription,
+            product: super_stt_registry_types::manifest::SttModel {
+                force_preview_support: true,
+                role: super_stt_registry_types::manifest::ModelRole::Transcription,
+            },
             provider: None,
         }
     }

@@ -24,7 +24,7 @@ pub(crate) const SETTINGS_SCOPES: &[&str] = &[
     "daemon_status",
 ];
 pub(crate) const APP_NAME: &str = "Super STT Settings App";
-pub(crate) const APP_ID_NAME: AppId = AppId("super-stt-app");
+pub(crate) const APP_ID_NAME: AppId = session::app_id("super-stt-app");
 
 /// The socket every app→daemon call connects on.
 ///

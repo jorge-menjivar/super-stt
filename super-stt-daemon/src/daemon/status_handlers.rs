@@ -91,7 +91,7 @@ impl SuperSTTDaemon {
             .map(|b| {
                 b.models
                     .iter()
-                    .filter(|d| d.is_post_processor() == post_processor)
+                    .filter(|d| d.product.role.is_post_processor() == post_processor)
                     .map(|d| (d.name.clone(), d.source.clone()))
                     .collect::<Vec<_>>()
             })

@@ -37,11 +37,32 @@ backend directory and the following environment:
 |----------------------------|-----------------------------------------------------------------------|
 | `SUPER_STT_BACKEND_SOCKET` | Pathname of the Unix socket to bind and serve the `/v1` routes on.    |
 | `SUPER_STT_BACKEND_DIR`    | Absolute path to the backend directory; model files live under it at the configured `dest` paths. |
+| `SUPER_STT_BACKEND_CACHE_DIR` | Absolute path to a writable directory the backend may keep regenerable data in, private to it and preserved across runs. The daemon creates it; it is the **only** durable writable path the sandbox grants. |
+| `XDG_CACHE_HOME`           | Set to the same directory, so a library that resolves its own cache the XDG way lands there instead of under the read-only `$HOME`. |
+| `CUDA_CACHE_PATH`          | Set to `<cache dir>/nv`. The NVIDIA driver keeps its PTX-to-SASS translations under `$HOME/.nv/ComputeCache` and ignores XDG, so it is the one consumer the line above misses — and `ProtectHome=read-only` would let it read a cache it can never write, redoing the translation on every load. |
+| `CUDA_CACHE_MAXSIZE`       | Bounds that cache. The driver's own default is around a gigabyte, and the cache is per backend, so the default would be inherited once per installed backend. |
 
 On startup the backend binds `SUPER_STT_BACKEND_SOCKET`, begins serving
 `/v1`, and reports `state: "starting"` from `GET /v1/status` until a
 `POST /v1/load` arrives. It resolves a model's files from
 `SUPER_STT_BACKEND_DIR` joined with the model's `dest`.
+
+The daemon polls for `ready` for **ten minutes** before giving up on a load,
+or for as long as the load keeps moving if the backend reports its progress
+(see [`GET /v1/status`](./contract.md#get-v1status)). Ten minutes is a
+generous budget on purpose: a backend that compiles its GPU kernels
+at runtime should do it during the load, not on the first request, because
+`ready` is what the daemon shows the user and what it starts sending
+transcription requests against. A load that fails must say so with `error`
+rather than leave the daemon waiting out the budget (see
+[`GET /v1/status`](./contract.md#get-v1status)).
+
+Anything a backend wants to keep between runs goes in
+`SUPER_STT_BACKEND_CACHE_DIR` and must be treated as regenerable: it is a
+cache, the daemon does not back it up, and a user may delete it. A backend
+that compiles GPU kernels at runtime — anything on CubeCL/Burn — should point
+its kernel cache there, or it recompiles on every load. A backend with
+nothing to keep can ignore the variable.
 
 Secrets and options are not passed through the environment; the daemon
 injects them as request headers on each `/v1` request (see
@@ -64,8 +85,9 @@ unit. The backend cannot relax these restrictions; design against them:
 | `PrivateNetwork=yes`              | No IP network of any kind. The Unix socket still works.        |
 | `ProtectSystem=strict`            | The entire filesystem is read-only …                           |
 | `ReadOnlyPaths=<backend dir>`     | … including the backend's own directory: the daemon provisions model files before the unit spawns, and the backend never writes there. |
-| `ReadWritePaths=<socket dir>`     | The socket directory is the only writable path granted.        |
-| `ProtectHome=read-only`, `PrivateTmp=yes` | `$HOME` is readable but not writable; `/tmp` is private and writable — put caches there. |
+| `ReadWritePaths=<socket dir>`     | The socket directory is writable.                              |
+| `ReadWritePaths=<cache dir>`      | `SUPER_STT_BACKEND_CACHE_DIR` is writable, and is the only writable path whose contents survive the process. Every cache the daemon points a library at lives under it, including the driver's. |
+| `ProtectHome=read-only`, `PrivateTmp=yes` | `$HOME` is readable but not writable; `/tmp` is private and writable, but it is discarded with the unit — scratch only, never a cache. |
 | `NoNewPrivileges=yes`             | The process cannot acquire new privileges.                     |
 | `SystemCallFilter=@system-service` | A seccomp allowlist; privileged syscall groups are denied.    |
 | `PrivateDevices=yes`              | A private `/dev` with no GPU nodes, unless the model declares a GPU. |

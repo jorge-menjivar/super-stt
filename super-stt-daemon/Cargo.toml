@@ -27,25 +27,20 @@
         default-features = false,
         features = ["json", "query", "tokio", "ws"]
     }
-    base64 = "0.22.1"
-    bytes = { version = "1.11.1", optional = true }
     chrono.workspace = true
     clap.workspace = true
     cpal.workspace = true
     dashmap.workspace = true
     dirs.workspace = true
-    flate2 = "1.1.9"
     futures = "0.3"
     gpu-probe = "0.1.1"
     hex = "0.4.3"
-    http-body = { version = "1.0.1", optional = true }
     http-body-util = "0.1"
     hyper = { version = "1", features = ["http1", "server"] }
     hyper-util = {
         version = "0.1",
         features = ["http1", "server", "server-auto", "tokio"]
     }
-    keyring.workspace = true
     libc.workspace = true
     log.workspace = true
     parking_lot.workspace = true
@@ -58,12 +53,12 @@
         default-features = false,
         features = ["ring", "std", "tls12"]
     }
-    semver = "1.0.28"
     serde.workspace = true
     serde_json.workspace = true
     strum.workspace = true
     strum_macros.workspace = true
-    super-stt-forge = { path = "../super-stt-forge" }
+    super-engine-daemon.workspace = true
+    super-engine-forge.workspace = true
     super-stt-registry-types = { path = "../super-stt-registry-types" }
     # Shared crate
     super-stt-shared = {
@@ -77,7 +72,6 @@
             "openapi",
         ]
     }
-    tar = "0.4.46"
     thiserror.workspace = true
     tokio = {
         workspace = true,
@@ -92,21 +86,12 @@
         ]
     }
     tokio-stream = { version = "0.1.18", features = ["sync"] }
-    tokio-tungstenite = {
-        version = "0.29.0",
-        default-features = false,
-        features = ["connect", "rustls-tls-webpki-roots"]
-    }
-    tokio-util.workspace = true
     toml.workspace = true
     ulid = "1.2.1"
     urlencoding = "2.1.3"
     utoipa.workspace = true
     utoipa-axum.workspace = true
     uuid.workspace = true
-    wasmtime = { version = "45.0.0", features = ["async"], optional = true }
-    wasmtime-wasi = { version = "45.0.0", optional = true }
-    wasmtime-wasi-http = { version = "45.0.0", optional = true }
 
 # Linux-only dependencies.
 #
@@ -152,10 +137,18 @@
     hyper-util = { version = "0.1", features = ["tokio"] }
     libc.workspace = true
     mockito = "1.7.2"
+    # The daemon's own version must parse, for the index `min_client` check.
+    semver = "1.0.28"
     tempfile = "3.27.0"
     # `test-util` enables `#[tokio::test(start_paused = true)]`, so tests covering
     # the notice key-release delay assert it without spending it in wall-clock time.
     tokio = { workspace = true, features = ["test-util"] }
+    # The realtime smoke tests speak WebSocket to the daemon.
+    tokio-tungstenite = {
+        version = "0.29.0",
+        default-features = false,
+        features = ["connect", "rustls-tls-webpki-roots"]
+    }
     wiremock = "0.6.5"
 
 [features]
@@ -164,17 +157,11 @@
     # has cuda/cudnn/flash-attn features.
     default = ["subprocess-backends", "wasm-backends"]
     # Spawn STT backends as sandboxed native subprocesses.
-    subprocess-backends = ["dep:bytes", "hyper/client"]
+    subprocess-backends = ["super-engine-daemon/subprocess"]
     # Build the mock_backend test fixture binary (used by tests/subprocess_mock.rs).
     test-fixtures = ["hyper-util/service"]
     # Load STT backends as sandboxed WASM components.
-    wasm-backends = [
-        "dep:bytes",
-        "dep:http-body",
-        "dep:wasmtime",
-        "dep:wasmtime-wasi",
-        "dep:wasmtime-wasi-http",
-    ]
+    wasm-backends = ["super-engine-daemon/wasm"]
 
 [lints]
     workspace = true

@@ -12,7 +12,7 @@ use super_stt_shared::daemon::session::AppId;
 
 /// Stable identity caching the applet's widget-scope session token under
 /// `(super-stt-session, super-stt-cosmic-applet)`.
-pub const APP_ID: AppId = AppId("super-stt-cosmic-applet");
+pub const APP_ID: AppId = super_stt_shared::daemon::session::app_id("super-stt-cosmic-applet");
 
 /// Human-facing name shown in the daemon's consent prompt.
 pub const APP_NAME: &str = "Super STT COSMIC Applet";

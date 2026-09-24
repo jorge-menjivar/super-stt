@@ -63,6 +63,13 @@ curl --unix-socket \"${XDG_RUNTIME_DIR:-$TMPDIR}/stt/super-stt-http.sock\" \\
     // takes a literal. Writing the port twice is exactly how the document
     // comes to advertise an address the daemon is not on.
     modifiers(&BearerAuth, &LocalServers),
+    // The registry types are shared, generic over what they hold, and a type
+    // reached only through a type parameter is not collected from the routes
+    // on its own. See `super_engine_spec::registry`.
+    components(schemas(
+        super_stt_shared::registry::RegistryBackend,
+        super_stt_shared::registry::RegistryModel,
+    )),
     tags(
         (name = "auth", description = "Consent handshake and token probing."),
         (name = "health", description = "Liveness and what the daemon is currently running."),

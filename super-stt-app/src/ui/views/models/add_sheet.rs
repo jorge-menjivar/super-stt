@@ -289,7 +289,7 @@ fn resolved_preview(
         for m in &b.models {
             let mut r = row![
                 text::caption(m.name.clone()).width(Length::Fill),
-                count_chip(role_label(&m.role).to_string()),
+                count_chip(role_label(&m.product.role).to_string()),
             ]
             .spacing(spacing.space_xxs)
             .align_y(Alignment::Center);

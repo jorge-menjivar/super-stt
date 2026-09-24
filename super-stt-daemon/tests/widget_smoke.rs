@@ -37,9 +37,9 @@ const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 ///
 /// Each is stable across a restart *within* its own test, which is what
 /// `subscription_recovers_from_daemon_restart` needs to verify.
-const APP_ID_RESTART: AppId = AppId("widget-smoke-restart");
-const APP_ID_IDLE: AppId = AppId("widget-smoke-idle");
-const APP_ID_INVALID: AppId = AppId("widget-smoke-invalid");
+const APP_ID_RESTART: AppId = session::app_id("widget-smoke-restart");
+const APP_ID_IDLE: AppId = session::app_id("widget-smoke-idle");
+const APP_ID_INVALID: AppId = session::app_id("widget-smoke-invalid");
 const TEST_APP_NAME: &str = "widget-smoke-test";
 const TEST_SCOPES: &[&str] = &["recording_events", "audio_visualization"];
 const TEST_TOPICS: &[&str] = &["recording_state", "frequency_bands"];
@@ -356,9 +356,17 @@ async fn subscription_recovers_from_invalid_session() {
     // Plant a token the daemon has never seen. The first
     // `events_stream` call will get 401 invalid_session; the helper
     // must `session::forget` and re-`obtain` (which under
-    // SUPER_STT_AUTO_APPROVE returns a fresh real token).
-    session::save(APP_ID_INVALID, "deadbeef_never_minted_by_daemon")
-        .expect("plant fake token in keyring");
+    // SUPER_STT_AUTO_APPROVE returns a fresh real token). It is planted
+    // as minted for `TEST_SCOPES`, or `obtain` would replace it before the
+    // daemon ever saw it and the 401 path would go untested.
+    let granted: Vec<String> = TEST_SCOPES.iter().map(|s| (*s).to_string()).collect();
+    session::save(
+        APP_ID_INVALID,
+        "deadbeef_never_minted_by_daemon",
+        TEST_SCOPES,
+        &granted,
+    )
+    .expect("plant fake token in keyring");
 
     let mut config =
         WidgetSubscriptionConfig::new(_keyring_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);

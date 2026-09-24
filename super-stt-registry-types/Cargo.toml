@@ -3,7 +3,7 @@
     version.workspace = true
     authors.workspace = true
     edition.workspace = true
-    description = "Canonical types for backend.toml manifests and registry.toml entries"
+    description = "Super STT's backend contract, on top of super-engine-spec"
     license = "GPL-3.0-only"
 
 [[bin]]
@@ -12,28 +12,24 @@
     required-features = ["schema"]
 
 [dependencies]
-    hex = "0.4.3"
-    ring = "0.17.14"
     schemars = { version = "1", optional = true }
-    semver = "1"
     serde.workspace = true
     serde_json.workspace = true
-    spdx = { version = "0.13.4", default-features = false }
-    thiserror.workspace = true
-    toml.workspace = true
+    super-engine-spec.workspace = true
     utoipa = { workspace = true, optional = true }
 
 [dev-dependencies]
     jsonschema = { version = "0.46.5", default-features = false }
+    toml.workspace = true
 
 [features]
-    schema = ["dep:schemars"]
+    schema = ["dep:schemars", "super-engine-spec/schema"]
     # Derive `utoipa::ToSchema` on the index leaves the daemon re-exports as its
     # `/registry/backends` response shapes (see `super_stt_shared::registry`), so
     # they carry their own definition into the generated OpenAPI document rather
     # than being re-described there. Separate from `schema`, which is schemars
     # for the backend.toml / registry.toml JSON Schemas.
-    openapi = ["dep:utoipa"]
+    openapi = ["dep:utoipa", "super-engine-spec/openapi"]
 
 [lints]
     workspace = true

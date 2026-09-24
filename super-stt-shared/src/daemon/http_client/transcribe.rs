@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::super::internal::error::HttpResult;
-use super::super::internal::sse;
-use super::super::internal::transport;
-use crate::models::protocol::{DaemonResponse, PreviewSource};
+//! `POST /transcribe` and `POST /transcribe/stop`: Super STT's own endpoints,
+//! on the transport it shares with Super TTS.
+
 use std::path::PathBuf;
+
+use futures_util::StreamExt;
+use super_engine_client::http_client::HttpResult;
+use super_engine_client::http_client::transport::{self, SseEvent};
+
+use crate::models::protocol::{DaemonResponse, PreviewSource};
 
 /// Options for [`transcribe`]. v1 only wires the daemon-mic capture path
 /// (no `audio_data`); pre-captured audio is handled by the daemon's
@@ -71,12 +76,10 @@ pub async fn transcribe(
     token: &str,
     opts: TranscribeOptions,
 ) -> HttpResult<DaemonResponse> {
-    use futures_util::StreamExt;
     // Fire-and-forget: the daemon returns a single `202` JSON ack, not an SSE
     // stream, so parse the response directly instead of reading events.
     if !opts.wait {
-        let req = transport::build_post_json("/transcribe", &record_body(&opts), Some(token))?;
-        return transport::send_request::<DaemonResponse>(&socket_path, req).await;
+        return transport::post_json(socket_path, token, "/transcribe", &record_body(&opts)).await;
     }
     let mut stream = Box::pin(transcribe_stream(socket_path, token, opts).await?);
     let mut last_preview = String::new();
@@ -111,45 +114,32 @@ pub async fn transcribe(
 /// treats as a manual stop signal.
 ///
 /// # Errors
-/// Returns an error if the daemon HTTP listener isn't reachable or the
-/// initial request can't be sent. Errors *during* the stream (e.g.
-/// daemon-side failure) are emitted as a `TranscribeEvent::Error` item.
+/// Returns an error if the daemon HTTP listener isn't reachable, the initial
+/// request can't be sent, or the daemon refuses it (e.g. 409
+/// `recording_in_progress`, 403 `scope_denied`, 429 `rate_limited`). Errors
+/// *during* the stream (e.g. daemon-side failure) are emitted as a
+/// `TranscribeEvent::Error` item.
 pub async fn transcribe_stream(
     socket_path: PathBuf,
     token: &str,
     opts: TranscribeOptions,
 ) -> HttpResult<impl futures_util::Stream<Item = TranscribeEvent> + Send + 'static> {
-    let req = transport::build_post_json("/transcribe", &record_body(&opts), Some(token))?;
-
-    let response = transport::open(&socket_path, req, Some(transport::REQUEST_TIMEOUT)).await?;
-
-    let status = response.status();
-    if !status.is_success() {
-        // Non-2xx response (e.g. 409 `recording_in_progress`, 403
-        // `scope_denied`, 429 `rate_limited`). The body is the JSON error
-        // envelope, not SSE, so map it like every other non-2xx rather than
-        // letting the caller read it as an event stream and report
-        // "transcribe stream ended unexpectedly".
-        let body = transport::collect_body(response).await?;
-        return Err(transport::error_for_status(status, &body));
-    }
-
-    // Parse Server-Sent Events as they arrive: each event is a block of
-    // `field: value\n` lines terminated by a blank line. The framing loop is
-    // shared with `/events` via `sse::block_stream` (Tier 2 #8); here it maps
-    // each block to a typed `TranscribeEvent`.
-    Ok(sse::block_stream(
-        response.into_body(),
-        parse_sse_block,
-        TranscribeEvent::Error,
-    ))
+    let events =
+        transport::post_json_events(socket_path, token, "/transcribe", &record_body(&opts)).await?;
+    Ok(events.filter_map(|event| {
+        std::future::ready(match event {
+            Ok(event) => parse_event(&event),
+            Err(e) => Some(TranscribeEvent::Error(e.to_string())),
+        })
+    }))
 }
 
-fn parse_sse_block(block: &str) -> Option<TranscribeEvent> {
-    let fields = sse::parse_fields(block);
+/// The [`TranscribeEvent`] one SSE event carries, or `None` for an event this
+/// client does not know.
+fn parse_event(event: &SseEvent) -> Option<TranscribeEvent> {
     let payload: serde_json::Value =
-        serde_json::from_str(&fields.data).unwrap_or(serde_json::Value::Null);
-    match fields.event {
+        serde_json::from_str(&event.data).unwrap_or(serde_json::Value::Null);
+    match event.event.as_deref() {
         Some("preview") => Some(TranscribeEvent::Preview {
             text: payload
                 .get("text")
@@ -187,8 +177,13 @@ fn parse_sse_block(block: &str) -> Option<TranscribeEvent> {
 /// Returns an error if the daemon HTTP listener isn't reachable or the
 /// response can't be parsed.
 pub async fn transcribe_stop(socket_path: PathBuf, token: &str) -> HttpResult<DaemonResponse> {
-    let req = transport::build_post_json("/transcribe/stop", &serde_json::json!({}), Some(token))?;
-    transport::send_request::<DaemonResponse>(&socket_path, req).await
+    transport::post_json(
+        socket_path,
+        token,
+        "/transcribe/stop",
+        &serde_json::json!({}),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -196,7 +191,11 @@ mod tests {
     use super::*;
 
     fn preview(data: &str) -> TranscribeEvent {
-        parse_sse_block(&format!("event: preview\ndata: {data}")).expect("a preview block yields")
+        parse_event(&SseEvent {
+            event: Some("preview".to_string()),
+            data: data.to_string(),
+        })
+        .expect("a preview event yields")
     }
 
     fn source_of(event: TranscribeEvent) -> (String, Option<PreviewSource>) {
