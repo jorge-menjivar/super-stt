@@ -24,7 +24,7 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use std::path::PathBuf;
-use super_stt_shared::daemon::session::AppId;
+use super_stt_shared::daemon::session::{self, AppId};
 
 /// The listener's own identity to the daemon, apart from `stt`'s.
 ///
@@ -34,7 +34,7 @@ use super_stt_shared::daemon::session::AppId;
 /// as the app itself. The daemon binds each session to the path that
 /// obtained it, so sharing `stt`'s keychain entry would have each revoke the
 /// other's session every time it was used.
-const APP_ID: AppId = AppId("super-stt-hotkey");
+const APP_ID: AppId = session::app_id("super-stt-hotkey");
 const APP_NAME: &str = "Super STT Shortcut";
 
 /// ⌃⌥Space. The obvious candidates are taken: ⌘Space is Spotlight, ⌃Space
