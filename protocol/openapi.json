@@ -713,7 +713,7 @@
           "backends"
         ],
         "summary": "Override an option (scope: settings)",
-        "description": "Stores a value for this option, overriding the manifest default. Answers with the option's new effective value, so a UI can render the result without a second read.\n\nA `base_url` value is canonicalized before storage, so the field reads back the endpoint that will actually be dialed — the scheme in particular, since whether a request is encrypted should not be invisible in the field the user is looking at. A value that yields no host is stored as typed rather than refused; model load rejects it by name. Every other option is stored verbatim, whitespace included, because it may carry meaning the daemon does not interpret.\n\nA loaded model does not pick this up on its own — reload the stage with `POST /pipeline/{stage}/model/reload`.",
+        "description": "Stores a value for this option, overriding the manifest default. Answers with the option's new effective value, so a UI can render the result without a second read.\n\nA `base_url` value is canonicalized before storage, so the field reads back the endpoint that will actually be dialed — the scheme in particular, since whether a request is encrypted should not be invisible in the field the user is looking at. A value that yields no host is stored as typed rather than refused; model load rejects it by name. Every other option is stored verbatim, whitespace included, because it may carry meaning the daemon does not interpret.\n\nEvery stage running a model from this backend is handed the new value at once and uses it from its next request; nothing is reloaded. If it cannot be handed over, the value is still stored and the message says the running backend kept the old one.",
         "operationId": "set_option",
         "parameters": [
           {
@@ -1080,7 +1080,7 @@
           "backends"
         ],
         "summary": "Store a secret (scope: secrets)",
-        "description": "Writes the credential to the system keyring. It cannot be read back afterwards; only replaced or cleared.\n\nA loaded model does not pick up a new credential on its own — reload the stage with `POST /pipeline/{stage}/model/reload`.",
+        "description": "Writes the credential to the system keyring. It cannot be read back afterwards; only replaced or cleared.\n\nEvery stage running a model from this backend is reloaded so the new credential is used at once, a transcription model and a post-processor alike. A reload that fails is reported in the message, and the stage keeps running the old instance.",
         "operationId": "set_secret",
         "parameters": [
           {
@@ -3679,7 +3679,7 @@
           "registry"
         ],
         "summary": "Install a backend (scope: settings)",
-        "description": "Installs a backend from the registry, from a git repo, or from a local path — send exactly one of `source`, `repo_url`, or `local_path`.\n\nThe daemon picks the release asset matching this host's architecture and accelerators, and answers `202` as soon as that choice is made: the download itself continues in the background. Follow it on the `registry_install` event topic, keyed by the returned `install_id`. A `warning` means the install proceeded with a caveat worth showing the user.\n\nInstalling neither selects the backend nor loads a model — do that through `/pipeline/{stage}`.",
+        "description": "Installs a backend from the registry, from a git-forge repository, or from a directory already staged on this machine — send exactly one of `source`, `repo_url`, or `local_path`. A `repo_url` install may also name its `forge`; without one the daemon picks the forge serving the URL's host.\n\nThe daemon picks the release asset matching this host's architecture and accelerators, and answers `202` as soon as that choice is made: the download, verification and install run in the background. Follow them on the `registry_install` event topic, keyed by the returned `install_id`. A `warning` of `unverified_source` means the bytes came from somewhere the registry does not vouch for — a custom repo or a local directory — and is worth showing the user.\n\nInstalling neither selects the backend nor loads a model; do that through `POST /pipeline/{stage}` and `POST /pipeline/{stage}/model`. Upgrading one already installed is `POST /registry/backend/update`, which runs this same pipeline.",
         "operationId": "install_registry_backend",
         "requestBody": {
           "content": {
@@ -3693,7 +3693,7 @@
         },
         "responses": {
           "202": {
-            "description": "Accepted; the download runs in the background.",
+            "description": "Accepted; the install runs in the background.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3703,7 +3703,7 @@
             }
           },
           "400": {
-            "description": "Not exactly one of `source`, `repo_url`, `local_path` (`bad_request`), a `repo_url` that is not a `<host>/<owner>/<repo>` reference (`bad_repo_url`), a `repo_url` on a host no forge adapter serves and no `forge` to pick one (`unsupported_forge`), or no asset matches this host.",
+            "description": "Not exactly one of `source`, `repo_url`, `local_path` (`bad_request`), a `repo_url` that is not `<host>/<owner>/<repo>` (`bad_repo_url`), a `repo_url` on a host no forge adapter serves and no `forge` to pick one (`unsupported_forge`), or a relative `local_path` (`bad_local_path`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3733,7 +3733,7 @@
             }
           },
           "404": {
-            "description": "No catalog entry for that `source` (`not_found`).",
+            "description": "No catalog entry for that `source`, or the repo, release, directory or manifest does not exist (`not_found`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3743,7 +3743,17 @@
             }
           },
           "409": {
-            "description": "An install for this backend is already in flight, or a recording is running (`backend_busy`).",
+            "description": "An install for this backend is already in flight (`install_in_progress`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No asset matches this host (`incompatible`), or the manifest was rejected (`manifest_invalid`, `manifest_too_large`, `asset_missing`, `source_mismatch`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3758,6 +3768,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The forge could not be reached (`forge_unavailable`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The catalog could not be fetched and nothing is cached (`registry_unavailable`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
                 }
               }
             }
@@ -3778,7 +3808,7 @@
           "registry"
         ],
         "summary": "Browse the published backend catalog (scope: settings)",
-        "description": "Every backend published to the registry, with the models each serves and whether this machine can run it. `compatible` is decided against the host's actual accelerators and this Super STT's version, so the list reflects what is installable here rather than what exists in general.\n\n`needs_client_update` separates the two ways a backend can be blocked: a host that lacks the right GPU will never run it, but a Super STT one version behind is something the user can fix in a minute. Surface those differently.\n\nThis is what is *available*; `GET /backend/list` is what is installed.",
+        "description": "Every backend published to the registry, with the models each serves and whether this machine can run it. `compatibility.compatible` is decided against the host's actual accelerators and this Super STT's version, so the list reflects what is installable here rather than what exists in general; pass `include_incompatible=true` to see the rest, each with a `compatibility.reason` worth showing the user.\n\n`needs_client_update` separates the two ways a backend can be blocked: a host that lacks the right GPU will never run it, but a Super STT one version behind is something the user can fix in a minute. Those are listed even without `include_incompatible`; surface them differently.\n\n`update_available` is the daemon's answer rather than the client's arithmetic: it compares the installed `backend.toml` on disk against what the index offers, by `source`, and refuses a downgrade. An entry with no `installed_version` is an install, not an update.\n\nThis is what is *available*; `GET /backend/list` is what is installed. The index is cached and re-fetched on a schedule — `POST /registry/backend/refresh` forces that now.",
         "operationId": "list_registry_backends",
         "parameters": [
           {
@@ -3793,7 +3823,7 @@
           {
             "name": "kind",
             "in": "query",
-            "description": "Filter by backend kind.",
+            "description": "Filter by transport — `wasm` or `subprocess`.",
             "required": false,
             "schema": {
               "type": [
@@ -3983,7 +4013,7 @@
           "registry"
         ],
         "summary": "Re-fetch the backend catalog (scope: settings)",
-        "description": "Pulls the published index again rather than serving what is cached, and reports how many backends it now holds. Use it after a backend is published, or to clear an `index_stale` flag.\n\n`GET /registry/backend/list` refreshes on its own schedule; this forces it now.",
+        "description": "Pulls the published index again rather than serving what is cached, and reports how many backends it now holds. Use it after a backend is published, or to clear an `index_stale` marker a listing came back with.\n\n`GET /registry/backend/list` refreshes on its own schedule; this forces it now. Idempotent, and concurrent calls coalesce into a single fetch, so a refresh button cannot start a stampede. The outcome is also published on the `registry_install` event topic, which is how a second client learns the catalog moved.",
         "operationId": "refresh_registry",
         "responses": {
           "200": {
@@ -4027,7 +4057,7 @@
             }
           },
           "503": {
-            "description": "The catalog could not be fetched.",
+            "description": "The registry could not be reached (`registry_unavailable`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -4052,7 +4082,7 @@
           "registry"
         ],
         "summary": "Update an installed backend (scope: settings)",
-        "description": "Upgrades an installed backend to the newest version the catalog offers for this host. Answers with the versions moved between; `noop` is `true` when the installed version was already current, which is a success rather than an error.\n\nLike install, the download runs in the background — follow `install_id` on the `registry_install` topic when one is returned.",
+        "description": "Upgrades an installed backend to the newest version the catalog offers for this host. Answers with the versions moved between; `noop` is `true` when the installed version was already current, which is a success rather than an error and carries no `install_id`.\n\nOnly a strictly newer semver is an upgrade: a catalog that has gone backwards, or a version neither side can parse, is a no-op rather than a silent downgrade. `update_available` on `GET /registry/backend/list` is the same comparison, so a client can offer the button only where this will do something.\n\nLike install, the work runs in the background — follow `install_id` on the `registry_install` topic when one is returned.",
         "operationId": "update_registry_backend",
         "requestBody": {
           "content": {
@@ -4066,11 +4096,31 @@
         },
         "responses": {
           "200": {
-            "description": "Up to date already, or the upgrade was accepted.",
+            "description": "Already current; nothing was installed.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UpdateResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted; the upgrade runs in the background.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request carried no body (`missing_body`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
                 }
               }
             }
@@ -4096,7 +4146,7 @@
             }
           },
           "404": {
-            "description": "No installed backend has that `source` (`not_found`).",
+            "description": "No catalog entry for that `source` (`not_found`), or nothing is installed under it (`not_installed`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -4106,7 +4156,17 @@
             }
           },
           "409": {
-            "description": "An install is already in flight, or a recording is running (`backend_busy`).",
+            "description": "An install or update for this backend is already in flight (`update_in_progress`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The newer release has no asset this host can run (`incompatible`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -4121,6 +4181,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The catalog could not be fetched and nothing is cached (`registry_unavailable`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryError"
                 }
               }
             }
@@ -6651,6 +6721,21 @@
             ],
             "description": "Human-readable label for the UI. Falls back to `name` when absent."
           },
+          "max": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "min": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Inclusive bounds for a numeric option, when it declares them. The\ndaemon refuses a write outside them."
+          },
           "name": {
             "type": "string",
             "description": "`snake_case` identifier (the daemon config key; the backend reads it as\n`x-stt-option-<name>`)."
@@ -6658,12 +6743,20 @@
           "required": {
             "type": "boolean"
           },
+          "step": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The increment a numeric option moves in. Present with `min` and `max`\non an option a client should render as a slider; the grid is the\ncontrol's, and the daemon accepts any value within the bounds."
+          },
           "type": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The option's input type (`string` / `integer` / `bool`); absent when the\nbackend declared none."
+            "description": "The option's input type (`string` / `integer` / `float` / `bool`);\nabsent when the backend declared none, which means `string`."
           },
           "value": {
             "type": [
@@ -6703,6 +6796,21 @@
             "type": "string",
             "description": "Human-readable label for a settings UI; falls back to `name`."
           },
+          "max": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "min": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Inclusive bounds for a numeric option, `null` when it declares none.\nA write outside them is refused."
+          },
           "name": {
             "type": "string",
             "description": "The option's identifier, as the backend's manifest declares it."
@@ -6711,9 +6819,17 @@
             "type": "boolean",
             "description": "Whether the backend refuses to load without a value."
           },
+          "step": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The increment a numeric option moves in. Present with `min` and `max`\non an option a client should render as a slider rather than a field;\nthe grid belongs to the control, and any value within the bounds\nstores."
+          },
           "type": {
             "type": "string",
-            "description": "The declared type — `string`, `number`, and so on."
+            "description": "The declared type — `string`, `integer`, `float`, or `bool`."
           },
           "value": {
             "type": [
@@ -7052,7 +7168,7 @@
       },
       "GpuHostInfo": {
         "type": "object",
-        "description": "Host-wide GPU toolchain/driver versions reported on\n[`GET /gpu_info`](../../../docs/protocol/endpoints/v1/gpu_info.md), independent\nof any one GPU. Each field is `null` when that accelerator's runtime isn't\ndetected on this host — see `docs/protocol/endpoints/v1/gpu_info.md` for\nwhat presence and absence do and don't imply for each one.",
+        "description": "Host-wide GPU toolchain/driver versions reported on\n`GET /gpu_info`, independent\nof any one GPU. Each field is `null` when that accelerator's runtime isn't\ndetected on this host. Presence says the runtime is installed, not that a\nGPU is behind it: a caller wanting that reads the GPUs themselves.",
         "properties": {
           "cuda": {
             "oneOf": [
@@ -7088,7 +7204,7 @@
       },
       "GpuInfo": {
         "type": "object",
-        "description": "One GPU as reported by [`GET /gpu_info`](../../../docs/protocol/endpoints/v1/gpu_info.md).\n`vendor` is a lowercase `snake_case` tag (`nvidia` / `amd` / `intel` /\n`apple` / `unknown`). `total_bytes` is dedicated VRAM for discrete GPUs and\nthe shared system-memory ceiling for integrated/unified GPUs;\n`free_bytes` / `used_bytes` are `null` when the platform doesn't report them.",
+        "description": "One GPU as reported by `GET /gpu_info`.\n`vendor` is a lowercase `snake_case` tag (`nvidia` / `amd` / `intel` /\n`apple` / `unknown`). `total_bytes` is dedicated VRAM for discrete GPUs and\nthe shared system-memory ceiling for integrated/unified GPUs;\n`free_bytes` / `used_bytes` are `null` when the platform doesn't report them.",
         "required": [
           "name",
           "vendor",
@@ -7978,7 +8094,7 @@
       },
       "RegistryError": {
         "type": "object",
-        "description": "The registry surface's error envelope, which carries one extra key.\n\nThese endpoints shipped before `error_code` existed, spelling the failure\nidentity as `error`. That key is still sent, because clients read it; the\nstandard `error_code` was added alongside rather than in place of it, so the\nwhole surface honors the \"`error_code` on every error\" rule without breaking\nanyone. Both name the same failure and always agree.\n\nDocumented as its own shape rather than folded into [`ErrorEnvelope`]:\n`error` appears *only* here, and putting it on the shared envelope would\ntell every other endpoint's reader to expect a key they will never receive.",
+        "description": "The registry surface's error envelope, which carries one extra key.\n\nThese endpoints shipped before `error_code` existed, spelling the failure\nidentity as `error`. That key is still sent, because clients read it; the\nstandard `error_code` was added alongside rather than in place of it, so the\nwhole surface honors the \"`error_code` on every error\" rule without breaking\nanyone. Both name the same failure and always agree.\n\nDocumented as its own shape rather than folded into a daemon's general\nerror envelope: `error` appears *only* here, and putting it on the shared\nenvelope would tell every other endpoint's reader to expect a key they will\nnever receive.",
         "required": [
           "status",
           "error_code",
@@ -8035,7 +8151,7 @@
       },
       "RocmHostInfo": {
         "type": "object",
-        "description": "The installed `ROCm` userspace release, e.g. `\"6.2.4\"`. Advisory only — see\n`docs/protocol/endpoints/v1/gpu_info.md`; `arch_target` is what a build must\nactually match.",
+        "description": "The installed `ROCm` userspace release, e.g. `\"6.2.4\"`. Advisory only:\n[`GpuInfo::arch_target`] is what a build must actually match.",
         "required": [
           "version"
         ],
