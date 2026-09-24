@@ -11,19 +11,16 @@
 
 mod common;
 
+use common::TestDaemon;
+
 use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
-use super_stt_shared::daemon::http_client;
 use super_stt_shared::daemon::session::{self, AppId};
 use super_stt_shared::daemon::widget_subscription::{
     DEFAULT_INITIAL_BACKOFF, DEFAULT_MAX_BACKOFF, WidgetSubscriptionConfig,
     WidgetSubscriptionUpdate, run_widget_subscription,
 };
-use tokio::time::sleep;
-
-const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 
 /// One `AppId` per test, because the session cache they share is
 /// process-wide.
@@ -44,29 +41,6 @@ const TEST_APP_NAME: &str = "widget-smoke-test";
 const TEST_SCOPES: &[&str] = &["recording_events", "audio_visualization"];
 const TEST_TOPICS: &[&str] = &["recording_state", "frequency_bands"];
 
-struct DaemonGuard {
-    child: Child,
-    cleanup_paths: Vec<PathBuf>,
-}
-
-impl DaemonGuard {
-    fn pid(&self) -> u32 {
-        self.child.id()
-    }
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        common::shutdown(&mut self.child);
-        for p in &self.cleanup_paths {
-            // Sockets are files, the XDG homes are directories; whichever does
-            // not apply is a no-op.
-            let _ = std::fs::remove_file(p);
-            let _ = std::fs::remove_dir_all(p);
-        }
-    }
-}
-
 /// Forget the test's session entry on exit. With the mock keyring installed
 /// this never reaches the developer's secret service, but the *cache* it also
 /// clears is process-wide, so dropping it still matters.
@@ -77,74 +51,20 @@ impl Drop for KeyringCleanupGuard {
     }
 }
 
-/// Monotonic per-call counter so concurrent tests in the same test
-/// binary get unique paths. `Instant::now().elapsed().as_nanos()`
-/// returns 0 immediately after construction and would collide.
-fn next_test_uniq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static UNIQ: AtomicU64 = AtomicU64::new(0);
-    UNIQ.fetch_add(1, Ordering::Relaxed)
+/// A socket path in a directory of the test's own, removed with it. Outside
+/// any daemon's home, so a daemon restarted onto it outlives the one before.
+fn socket_in_temp_dir() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("create a socket dir");
+    let socket = dir.path().join("http.sock");
+    (dir, socket)
 }
 
-fn unique_socket_paths(label: &str) -> (PathBuf, PathBuf) {
-    let unique = format!("stt-{label}-{}-{}", std::process::id(), next_test_uniq());
-    let tmp = std::env::temp_dir();
-    (
-        tmp.join(format!("{unique}-legacy.sock")),
-        tmp.join(format!("{unique}-http.sock")),
-    )
-}
-
-/// Spawn a hermetic daemon. Returns the child and the XDG dirs it was given, so
-/// the caller's guard can sweep them.
-///
-/// All three dirs are isolated, not just the config: an unisolated
-/// `XDG_DATA_HOME` has the daemon discover whatever backends the developer has
-/// installed (so the test is not hermetic and not reproducible), and an
-/// unisolated `XDG_CACHE_HOME` has it read and overwrite the developer's real
-/// registry index.
-fn spawn_daemon(_legacy_socket: &Path, http_socket: &Path) -> (Child, Vec<PathBuf>) {
-    let unique = format!("stt-widget-{}-{}", std::process::id(), next_test_uniq());
-    let tmp = std::env::temp_dir();
-    let config_home = tmp.join(format!("{unique}-config"));
-    let data_home = tmp.join(format!("{unique}-data"));
-    let cache_home = tmp.join(format!("{unique}-cache"));
-    for d in [&config_home, &data_home, &cache_home] {
-        std::fs::create_dir_all(d).expect("create test xdg dir");
-    }
-
-    let child = Command::new(DAEMON_BIN)
-        .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
-        .env("SUPER_STT_AUTO_APPROVE", "1")
-        .env("SUPER_STT_MUTE_CUES", "1")
-        .env("SUPER_STT_HTTP_SOCKET", http_socket)
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_DATA_HOME", &data_home)
-        .env("XDG_CACHE_HOME", &cache_home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn super-stt-daemon");
-
-    (child, vec![config_home, data_home, cache_home])
-}
-
-async fn wait_for_daemon_ready(http_socket: &Path) {
-    let deadline = Instant::now() + Duration::from_mins(2);
-    while Instant::now() < deadline {
-        if http_socket.exists()
-            && http_client::auth_request(http_socket.to_path_buf(), TEST_APP_NAME, TEST_SCOPES)
-                .await
-                .is_ok()
-        {
-            return;
-        }
-        sleep(Duration::from_millis(200)).await;
-    }
-    panic!(
-        "daemon HTTP listener did not become ready within 120s (socket: {})",
-        http_socket.display()
-    );
+/// Start a hermetic daemon on `http_socket`. See `super_engine_test_daemon`.
+async fn start_daemon(http_socket: &Path) -> TestDaemon {
+    common::daemon("widget")
+        .socket_at(http_socket)
+        .start()
+        .await
 }
 
 /// Pull updates from the subscription stream until either we hit the
@@ -189,24 +109,19 @@ where
 /// to the developer's system keyring and a locked secret-service would hang —
 /// "there's no infrastructure for an in-process keyring shim from an
 /// integration test crate". There is: the daemon takes
-/// `SUPER_STT_KEYRING_MOCK=1`, which `spawn_daemon` has set for a while, and
+/// `SUPER_STT_KEYRING_MOCK=1`, which every test daemon is started with, and
 /// the client side of the mint is routed by [`common::install_mock_keyring`].
 /// Neither side reaches the real secret service, so it runs with the suite.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn subscription_recovers_from_daemon_restart() {
     common::install_mock_keyring();
     let _keyring_guard = KeyringCleanupGuard(APP_ID_RESTART);
-    let (legacy_socket, http_socket) = unique_socket_paths("widget-restart");
+    let (_socket_dir, http_socket) = socket_in_temp_dir();
 
     // 1. Boot the daemon and confirm /auth/request works under
     //    SUPER_STT_AUTO_APPROVE so the subscription's session::obtain
     //    will succeed silently.
-    let (child, xdg_dirs) = spawn_daemon(&legacy_socket, &http_socket);
-    let mut guard = DaemonGuard {
-        child,
-        cleanup_paths: [vec![legacy_socket.clone(), http_socket.clone()], xdg_dirs].concat(),
-    };
-    wait_for_daemon_ready(&http_socket).await;
+    let mut guard = start_daemon(&http_socket).await;
 
     // 2. Drive the subscription with tight timings so the test doesn't
     //    sit on the default backoff for tens of seconds.
@@ -233,10 +148,10 @@ async fn subscription_recovers_from_daemon_restart() {
 
     // 4. Kill the daemon mid-stream. The shared helper must observe
     //    the drop (via stream EOF or read error) and emit Disconnected.
-    let pid = guard.pid();
+    let pid = guard.child().id();
     eprintln!("[smoke] killing daemon pid={pid}");
-    let _ = guard.child.kill();
-    let _ = guard.child.wait();
+    let _ = guard.child().kill();
+    let _ = guard.child().wait();
 
     let mid = drain_until(&mut stream, Duration::from_secs(15), |u| {
         matches!(u, WidgetSubscriptionUpdate::Disconnected { .. })
@@ -254,14 +169,10 @@ async fn subscription_recovers_from_daemon_restart() {
     // 5. Restart the daemon. The subscription should reconnect within
     //    a backoff window without external intervention.
     eprintln!("[smoke] restarting daemon");
-    // Assigning over `guard` drops the old one, which sweeps the dirs the
-    // stopped daemon was using. The restart gets a fresh set.
-    let (child, xdg_dirs) = spawn_daemon(&legacy_socket, &http_socket);
-    guard = DaemonGuard {
-        child,
-        cleanup_paths: [vec![legacy_socket.clone(), http_socket.clone()], xdg_dirs].concat(),
-    };
-    wait_for_daemon_ready(&http_socket).await;
+    // Assigning over `guard` drops the old one, which removes the home the
+    // stopped daemon was using. The restart gets a fresh one, on the same
+    // socket.
+    guard = start_daemon(&http_socket).await;
 
     // 6. Wait for the SECOND Connected — this is the actual "no stale
     //    widget" assertion. If `run_widget_subscription` had given up,
@@ -288,14 +199,9 @@ async fn subscription_recovers_from_daemon_restart() {
 async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
     common::install_mock_keyring();
     let _keyring_guard = KeyringCleanupGuard(APP_ID_IDLE);
-    let (legacy_socket, http_socket) = unique_socket_paths("widget-idle");
+    let (_socket_dir, http_socket) = socket_in_temp_dir();
 
-    let (child, xdg_dirs) = spawn_daemon(&legacy_socket, &http_socket);
-    let _guard = DaemonGuard {
-        child,
-        cleanup_paths: [vec![legacy_socket.clone(), http_socket.clone()], xdg_dirs].concat(),
-    };
-    wait_for_daemon_ready(&http_socket).await;
+    let _guard = start_daemon(&http_socket).await;
 
     // Tight idle timeout — the daemon's first keepalive is 30 s out
     // and there are no recordings in flight, so a 2 s deadline will
@@ -345,14 +251,9 @@ async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
 async fn subscription_recovers_from_invalid_session() {
     common::install_mock_keyring();
     let _keyring_guard = KeyringCleanupGuard(APP_ID_INVALID);
-    let (legacy_socket, http_socket) = unique_socket_paths("widget-invalid");
+    let (_socket_dir, http_socket) = socket_in_temp_dir();
 
-    let (child, xdg_dirs) = spawn_daemon(&legacy_socket, &http_socket);
-    let _guard = DaemonGuard {
-        child,
-        cleanup_paths: [vec![legacy_socket.clone(), http_socket.clone()], xdg_dirs].concat(),
-    };
-    wait_for_daemon_ready(&http_socket).await;
+    let _guard = start_daemon(&http_socket).await;
 
     // Plant a token the daemon has never seen. The first
     // `events_stream` call will get 401 invalid_session; the helper

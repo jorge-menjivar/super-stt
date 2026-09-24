@@ -137,6 +137,8 @@
     mockito = "1.7.2"
     # The daemon's own version must parse, for the index `min_client` check.
     semver = "1.0.28"
+    # Spawns the daemon for the integration tests, in a home of its own.
+    super-engine-test-daemon.workspace = true
     tempfile = "3.27.0"
     # `test-util` enables `#[tokio::test(start_paused = true)]`, so tests covering
     # the notice key-release delay assert it without spending it in wall-clock time.

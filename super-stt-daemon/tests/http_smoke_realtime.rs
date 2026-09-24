@@ -17,22 +17,21 @@
 
 mod common;
 
+use common::{Method, StatusCode, TestDaemon};
+use hyper::Request;
+
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use futures::{SinkExt, StreamExt};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::client::conn::http1::handshake;
-use hyper::{Method, Request, StatusCode};
-use super_stt_shared::daemon::http_client;
 use tokio::net::UnixStream;
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 const FIXTURE_SOURCE: &str = "github.com/super-stt/mock-realtime";
 const REALTIME_MODEL: &str = "mock-realtime-1";
 /// Pinned in the fixture component (`MOCK_REALTIME_TRANSCRIPTION`).
@@ -45,27 +44,6 @@ fn mock_component() -> Option<PathBuf> {
         "tests/fixtures/mock-wasm-realtime-backend/target/wasm32-wasip2/release/mock_wasm_realtime_backend.wasm",
     );
     p.exists().then_some(p)
-}
-
-struct DaemonGuard {
-    child: Child,
-    cleanup_paths: Vec<PathBuf>,
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        common::shutdown(&mut self.child);
-        for p in &self.cleanup_paths {
-            let _ = std::fs::remove_file(p);
-            let _ = std::fs::remove_dir_all(p);
-        }
-    }
-}
-
-fn next_test_uniq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static UNIQ: AtomicU64 = AtomicU64::new(0);
-    UNIQ.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Seed a websocket-capable backend serving one `realtime` model, backed by the
@@ -104,61 +82,15 @@ realtime = true
     std::fs::copy(component, backend_dir.join("mock.wasm")).expect("stage mock component");
 }
 
-/// Boot a daemon against a temp socket + XDG dirs. `component` seeds the
-/// realtime fixture when given; without it the daemon has no realtime model.
-async fn start_daemon(scopes: &[&str], component: Option<&Path>) -> (DaemonGuard, PathBuf, String) {
-    let unique = format!("stt-realtime-{}-{}", std::process::id(), next_test_uniq());
-    let tmp = std::env::temp_dir();
-    let http_socket = tmp.join(format!("{unique}-http.sock"));
-    let config_home = tmp.join(format!("{unique}-config"));
-    let data_home = tmp.join(format!("{unique}-data"));
-    std::fs::create_dir_all(&config_home).expect("create test config dir");
-    std::fs::create_dir_all(&data_home).expect("create test data dir");
-    // Isolate the cache too. The registry client persists its index (and its
-    // ETag) under XDG_CACHE_HOME; sharing one file across concurrently
-    // spawned test daemons has them overwrite each other's catalog, and
-    // unisolated it is the developer's own.
-    let cache_home = tmp.join(format!("{unique}-cache"));
-    std::fs::create_dir_all(&cache_home).expect("create test cache dir");
+async fn start_daemon(scopes: &[&str], component: Option<&Path>) -> (TestDaemon, PathBuf, String) {
+    let daemon = common::daemon("realtime");
     if let Some(component) = component {
-        seed_realtime_backend(&data_home, component);
+        seed_realtime_backend(&daemon.home().data, component);
     }
-
-    let child = Command::new(DAEMON_BIN)
-        .env("SUPER_STT_KEYRING_MOCK", "1")
-        .env("SUPER_STT_AUTO_APPROVE", "1")
-        .env("SUPER_STT_MUTE_CUES", "1")
-        .env("SUPER_STT_HTTP_SOCKET", &http_socket)
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_DATA_HOME", &data_home)
-        .env("XDG_CACHE_HOME", &cache_home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn super-stt-daemon");
-
-    // Hand the child to the guard before the readiness loop: the timeout panic
-    // below must still kill and reap the daemon, not leak it.
-    let guard = DaemonGuard {
-        child,
-        cleanup_paths: vec![http_socket.clone(), config_home, data_home, cache_home],
-    };
-
-    let deadline = Instant::now() + Duration::from_mins(2);
-    while Instant::now() < deadline {
-        if Path::new(&http_socket).exists()
-            && http_client::auth_request(http_socket.clone(), "realtime-smoke-probe", &["status"])
-                .await
-                .is_ok()
-        {
-            let auth = http_client::auth_request(http_socket.clone(), "realtime-smoke", scopes)
-                .await
-                .expect("auth_request for test scopes");
-            return (guard, http_socket, auth.session_token);
-        }
-        sleep(Duration::from_millis(200)).await;
-    }
-    panic!("daemon HTTP listener not ready within 120s");
+    let daemon = daemon.start().await;
+    let token = daemon.token("realtime-smoke", scopes).await;
+    let socket = daemon.socket().to_path_buf();
+    (daemon, socket, token)
 }
 
 /// Issue one HTTP request and return `(status, raw body)`.

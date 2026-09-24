@@ -18,19 +18,10 @@
 
 mod common;
 
-use http_body_util::{BodyExt, Full};
-use hyper::body::Bytes;
-use hyper::client::conn::http1::handshake;
-use hyper::{Method, Request, StatusCode};
-use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
-use super_stt_shared::daemon::http_client;
-use tokio::net::UnixStream;
-use tokio::time::sleep;
+use common::{Method, StatusCode, TestDaemon};
 
-const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
+use serde_json::{Value, json};
+use std::path::PathBuf;
 
 /// The fixture backend's `source`, percent-encoded for a path segment.
 const FIXTURE_SOURCE_ENC: &str = "github.com%2Fsuper-stt%2Fwhisper";
@@ -52,80 +43,19 @@ supported_languages = ["en"]
 supported_devices = ["none"]
 "#;
 
-struct DaemonGuard {
-    child: Child,
-    cleanup_paths: Vec<PathBuf>,
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        common::shutdown(&mut self.child);
-        for p in &self.cleanup_paths {
-            let _ = std::fs::remove_file(p);
-            let _ = std::fs::remove_dir_all(p);
-        }
-    }
-}
-
-fn next_test_uniq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static UNIQ: AtomicU64 = AtomicU64::new(0);
-    UNIQ.fetch_add(1, Ordering::Relaxed)
-}
-
-async fn start_daemon() -> (DaemonGuard, PathBuf, String) {
-    let unique = format!("stt-contexts-{}-{}", std::process::id(), next_test_uniq());
-    let tmp = std::env::temp_dir();
-    let http_socket = tmp.join(format!("{unique}-http.sock"));
-    let config_home = tmp.join(format!("{unique}-config"));
-    let data_home = tmp.join(format!("{unique}-data"));
-    let cache_home = tmp.join(format!("{unique}-cache"));
-    for dir in [&config_home, &data_home, &cache_home] {
-        std::fs::create_dir_all(dir).expect("create test dir");
-    }
-
+async fn start_daemon() -> (TestDaemon, PathBuf, String) {
+    let daemon = common::daemon("contexts");
     common::BackendFixture {
         dir_name: "fixture-whisper",
         manifest: FIXTURE_MANIFEST,
         entrypoint: "whisper.wasm",
         component: None,
     }
-    .install(&data_home);
-
-    let child = Command::new(DAEMON_BIN)
-        .env("SUPER_STT_KEYRING_MOCK", "1")
-        .env("SUPER_STT_AUTO_APPROVE", "1")
-        .env("SUPER_STT_MUTE_CUES", "1")
-        .env("SUPER_STT_HTTP_SOCKET", &http_socket)
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_DATA_HOME", &data_home)
-        .env("XDG_CACHE_HOME", &cache_home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn super-stt-daemon");
-
-    let guard = DaemonGuard {
-        child,
-        cleanup_paths: vec![http_socket.clone(), config_home, data_home, cache_home],
-    };
-
-    let deadline = Instant::now() + Duration::from_mins(2);
-    while Instant::now() < deadline {
-        if Path::new(&http_socket).exists()
-            && http_client::auth_request(http_socket.clone(), "contexts-smoke-probe", &["status"])
-                .await
-                .is_ok()
-        {
-            let auth =
-                http_client::auth_request(http_socket.clone(), "contexts-smoke", &["settings"])
-                    .await
-                    .expect("auth_request for settings scope");
-            return (guard, http_socket, auth.session_token);
-        }
-        sleep(Duration::from_millis(200)).await;
-    }
-    panic!("daemon HTTP listener not ready within 120s");
+    .install(&daemon.home().data);
+    let daemon = daemon.start().await;
+    let token = daemon.token("contexts-smoke", &["settings"]).await;
+    let socket = daemon.socket().to_path_buf();
+    (daemon, socket, token)
 }
 
 async fn raw_request(
@@ -135,43 +65,7 @@ async fn raw_request(
     token: &str,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
-    let stream = UnixStream::connect(socket_path).await.expect("connect");
-    let io = hyper_util::rt::TokioIo::new(stream);
-    let (mut sender, conn) = handshake::<_, Full<Bytes>>(io).await.expect("handshake");
-    tokio::spawn(async move {
-        let _ = conn.await;
-    });
-
-    let body_bytes = body
-        .map(|b| serde_json::to_vec(&b).expect("encode body"))
-        .unwrap_or_default();
-
-    let mut builder = Request::builder()
-        .method(method)
-        .uri(format!("http://stt.local/v1{path}"))
-        .header("host", "stt.local")
-        .header("authorization", format!("Bearer {token}"));
-    if !body_bytes.is_empty() {
-        builder = builder
-            .header("content-type", "application/json")
-            .header("content-length", body_bytes.len().to_string());
-    }
-    let req = builder
-        .body(Full::new(Bytes::from(body_bytes)))
-        .expect("build req");
-
-    let resp = sender.send_request(req).await.expect("send req");
-    let status = resp.status();
-    let bytes = resp
-        .into_body()
-        .collect()
-        .await
-        .expect("collect")
-        .to_bytes();
-    (
-        status,
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
-    )
+    common::request(socket_path, method, path, Some(token), body.as_ref()).await
 }
 
 async fn get(p: &PathBuf, path: &str, token: &str) -> (StatusCode, Value) {

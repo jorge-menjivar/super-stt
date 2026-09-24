@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! End-to-end smoke tests for the new HTTP daemon protocol.
 //!
-//! Spawns the `super-stt-daemon` binary against a temp `XDG_RUNTIME_DIR`,
-//! a dynamically-chosen UDP port, and `SUPER_STT_AUTO_APPROVE=1` (so the
-//! consent popup is bypassed and `/auth/request` auto-approves), then
+//! Spawns the `super-stt-daemon` binary against a temp `XDG_RUNTIME_DIR`
+//! with `SUPER_STT_AUTO_APPROVE=1` (so the consent popup is bypassed and
+//! `/auth/request` auto-approves), then
 //! exercises every endpoint via the shared `http_client` module:
 //!
 //! - `POST /auth/request` mints a session token (auto-approved).
@@ -19,102 +19,21 @@
 
 mod common;
 
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use common::TestDaemon;
+
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use super_stt_shared::daemon::http_client::{self, TranscribeOptions};
-use tokio::time::sleep;
 
-const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 const APP_NAME: &str = "super-stt smoke test";
 const SCOPES: &[&str] = &["transcribe", "status"];
 
-struct DaemonGuard {
-    child: Child,
-    xdg_runtime_dir: PathBuf,
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        common::shutdown(&mut self.child);
-        let _ = std::fs::remove_dir_all(&self.xdg_runtime_dir);
-    }
-}
-
-/// Monotonic per-call counter so concurrent tests in the same test
-/// binary get unique paths. `Instant::now().elapsed().as_nanos()`
-/// returns 0 immediately after construction and would collide.
-fn next_test_uniq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static UNIQ: AtomicU64 = AtomicU64::new(0);
-    UNIQ.fetch_add(1, Ordering::Relaxed)
-}
-
-async fn start_daemon() -> (DaemonGuard, PathBuf) {
-    let xdg = std::env::temp_dir().join(format!(
-        "stt-test-{}-{}",
-        std::process::id(),
-        next_test_uniq()
-    ));
-    std::fs::create_dir_all(xdg.join("stt")).expect("create xdg/stt dir");
-    // CRITICAL: also isolate XDG_CONFIG_HOME so the test daemon
-    // doesn't read or write the developer's real
-    // `~/.config/super-stt/daemon.toml`. Without this, every test
-    // run that passes `--audio-theme silent` or `--device cpu`
-    // overwrites the real user's saved settings via
-    // `apply_cli_overrides_to_config`.
-    let config_home = xdg.join("config");
-    std::fs::create_dir_all(&config_home).expect("create xdg/config dir");
-    // Isolate XDG_DATA_HOME so the daemon discovers no backends (hermetic):
-    // it comes up idle and fast, without spawning a real backend at startup.
-    let data_home = xdg.join("data");
-    std::fs::create_dir_all(&data_home).expect("create xdg/data dir");
-    // Isolate the cache too. The registry client persists its index (and its
-    // ETag) under XDG_CACHE_HOME; sharing one file across concurrently
-    // spawned test daemons has them overwrite each other's catalog, and
-    // unisolated it is the developer's own.
-    let cache_home = xdg.join("cache");
-    std::fs::create_dir_all(&cache_home).expect("create test cache dir");
-
-    let http_socket = xdg.join("stt").join("super-stt-http.sock");
-
-    let child = Command::new(DAEMON_BIN)
-        .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
-        .env("XDG_RUNTIME_DIR", &xdg)
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_DATA_HOME", &data_home)
-        .env("XDG_CACHE_HOME", &cache_home)
-        .env("SUPER_STT_AUTO_APPROVE", "1") // bypass consent popup
-        .env("SUPER_STT_MUTE_CUES", "1")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn super-stt-daemon");
-
-    // Hand the child to the guard before the readiness loop: the timeout
-    // panic below must still kill and reap the daemon, not leak it.
-    let guard = DaemonGuard {
-        child,
-        xdg_runtime_dir: xdg,
-    };
-
-    let deadline = Instant::now() + Duration::from_mins(2);
-    while Instant::now() < deadline {
-        if Path::new(&http_socket).exists() {
-            // Try minting a token to confirm the HTTP listener is fully alive.
-            if http_client::auth_request(http_socket.clone(), APP_NAME, SCOPES)
-                .await
-                .is_ok()
-            {
-                return (guard, http_socket);
-            }
-        }
-        sleep(Duration::from_millis(200)).await;
-    }
-    panic!(
-        "daemon HTTP listener did not become ready within 120s (socket: {})",
-        http_socket.display()
-    );
+/// The socket is left where the daemon puts it when told nothing, under a
+/// runtime directory of the test's own, so these tests cover that default too.
+async fn start_daemon() -> (TestDaemon, PathBuf) {
+    let daemon = common::daemon("smoke").default_socket().start().await;
+    let socket = daemon.socket().to_path_buf();
+    (daemon, socket)
 }
 
 #[tokio::test]
