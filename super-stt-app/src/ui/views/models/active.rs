@@ -3,7 +3,7 @@ use cosmic::Element;
 use cosmic::iced::widget::{column, row};
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, button, text};
-use super_stt_shared::models::protocol::DownloadProgress;
+use super_stt_shared::models::protocol::{DownloadProgress, LoadProgress, load_progress};
 
 use crate::core::app::{AppModel, ModelOperationState};
 use crate::daemon::backends::BackendInfo;
@@ -447,7 +447,11 @@ pub(super) fn operation_status(app: &AppModel, stage: u32) -> Option<Element<'_,
         ModelOperationState::Loading {
             target_model,
             status_message,
-        } => Some(text::body(format!("Loading {target_model}: {status_message}")).into()),
+            load,
+        } => Some(match load {
+            Some(load) => card_load_progress(target_model, load),
+            None => text::body(format!("Loading {target_model}: {status_message}")).into(),
+        }),
         ModelOperationState::Error { message } => Some(card_error(message)),
     }
 }
@@ -517,6 +521,54 @@ pub(super) fn card_provisioning_progress<'a>(
     ]
     .spacing(cosmic::theme::spacing().space_xs)
     .into()
+}
+
+/// The card's title while a backend loads: "Initial setup" when the backend
+/// says this load pays a one-time cost, so the user knows the wait will not
+/// repeat, and the model being loaded otherwise.
+fn load_title(load: &LoadProgress, target_model: &str) -> String {
+    if load.phase.as_deref() == Some(load_progress::phase::INITIAL_SETUP) {
+        "Initial setup".to_string()
+    } else {
+        format!("Loading {target_model}")
+    }
+}
+
+/// What the backend says it is doing, in words. An id this app does not know
+/// is still a load in progress, so it reads as one rather than as an error.
+fn load_step(step: Option<&str>) -> &'static str {
+    match step {
+        Some(load_progress::step::LOADING_WEIGHTS) => "Loading weights",
+        Some(load_progress::step::BUILDING_KERNELS) => "Building kernels",
+        Some(load_progress::step::WARMING_UP) => "Warming up",
+        _ => "Loading",
+    }
+}
+
+/// In-card load progress, as the backend reports it: a title, the step, and a
+/// bar when the backend can say how far through the step it is.
+///
+/// A backend that compiles its GPU kernels on the first load spends minutes
+/// there. Before backends reported it, this card said "Loading model into
+/// memory" for all of it, which reads as stuck.
+fn card_load_progress<'a>(target_model: &str, load: &LoadProgress) -> Element<'a, Message> {
+    let title = text::body(load_title(load, target_model));
+    let step = load_step(load.step.as_deref());
+    match load.progress {
+        Some(fraction) => column![
+            title,
+            row![
+                text::caption(step).width(Length::Fill),
+                text::caption(format!("{:.0}%", fraction * 100.0)),
+            ],
+            widget::determinate_linear(fraction.clamp(0.0, 1.0).max(0.02)).width(Length::Fill),
+        ]
+        .spacing(cosmic::theme::spacing().space_xs)
+        .into(),
+        None => column![title, text::caption(step)]
+            .spacing(cosmic::theme::spacing().space_xs)
+            .into(),
+    }
 }
 
 /// In-card model error: a destructive-colored warning glyph plus the daemon's
@@ -605,5 +657,45 @@ mod provisioning_verb_tests {
     #[test]
     fn an_unknown_phase_falls_back_to_downloading() {
         assert_eq!(provisioning_verb("something_new"), "Downloading");
+    }
+}
+
+#[cfg(test)]
+mod load_progress_tests {
+    //! The words the load card uses for what a backend reports.
+    use super::{LoadProgress, load_step, load_title};
+
+    /// A first load says it is setup, so the user knows the wait is a one-off;
+    /// any other load names the model.
+    #[test]
+    fn a_first_load_is_titled_as_setup() {
+        let setup = LoadProgress {
+            phase: Some("initial_setup".to_string()),
+            ..LoadProgress::default()
+        };
+        assert_eq!(load_title(&setup, "voxtral-mini"), "Initial setup");
+        let ordinary = LoadProgress {
+            phase: Some("loading".to_string()),
+            ..LoadProgress::default()
+        };
+        assert_eq!(
+            load_title(&ordinary, "voxtral-mini"),
+            "Loading voxtral-mini"
+        );
+        assert_eq!(
+            load_title(&LoadProgress::default(), "voxtral-mini"),
+            "Loading voxtral-mini"
+        );
+    }
+
+    /// Every id in the contract's vocabulary has its words, and one this
+    /// build does not know still reads as a load.
+    #[test]
+    fn each_step_reads_as_words() {
+        assert_eq!(load_step(Some("loading_weights")), "Loading weights");
+        assert_eq!(load_step(Some("building_kernels")), "Building kernels");
+        assert_eq!(load_step(Some("warming_up")), "Warming up");
+        assert_eq!(load_step(Some("defragmenting_vram")), "Loading");
+        assert_eq!(load_step(None), "Loading");
     }
 }

@@ -47,7 +47,7 @@ impl AppModel {
             stage,
             ModelOperationState::Provisioning {
                 target_model,
-                progress,
+                progress: Box::new(progress),
             },
         );
     }
@@ -59,12 +59,24 @@ impl AppModel {
         status_message: String,
         stage: u32,
     ) {
+        self.set_model_loading_with(target_model, status_message, stage, None);
+    }
+
+    /// [`Self::set_model_loading`], with what the backend reports of its load.
+    fn set_model_loading_with(
+        &mut self,
+        target_model: String,
+        status_message: String,
+        stage: u32,
+        load: Option<super_stt_shared::models::protocol::LoadProgress>,
+    ) {
         // Entering a switch starts that stage's stall clock (see PingTimeout).
         self.model_operations.start(
             stage,
             ModelOperationState::Loading {
                 target_model,
                 status_message,
+                load,
             },
         );
     }
@@ -108,10 +120,11 @@ impl AppModel {
         let stage = progress.stage;
         match progress.status.as_str() {
             "loading_model" => {
-                self.set_model_loading(
+                self.set_model_loading_with(
                     target_model,
                     "Loading model into memory...".to_string(),
                     stage,
+                    progress.load.clone(),
                 );
             }
             "error" => {

@@ -24,3 +24,6 @@ pub use response::{
     CudaHostInfo, DaemonResponse, DownloadProgress, GpuHostInfo, GpuInfo, NotificationEvent,
     RocmHostInfo, VulkanHostInfo,
 };
+/// A backend's own account of its load, and the ids it is worded in. The
+/// same for every product built on super-engine.
+pub use super_engine_protocol::models::load_progress::{self, LoadProgress};

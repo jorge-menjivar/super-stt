@@ -68,6 +68,15 @@ primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["cpu"]
 
+# A model whose load reports building its kernels, for the test that the
+# backend's own progress reaches the card.
+[[models]]
+name = "mock-builds-kernels"
+multilingual = false
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu"]
+
 # A model whose load the mock abandons by exiting, for the test that a failed
 # load says why.
 [[models]]
@@ -279,6 +288,54 @@ async fn a_backend_that_dies_while_loading_says_why() {
         text.contains("mock: the model thread panicked while loading"),
         "the error must carry the backend's own last words: {text}"
     );
+}
+
+/// What a backend reports of its own load reaches the load's tracker, which
+/// is what puts "Initial setup / Building kernels 50%" on the card instead of
+/// a full bar that sits there for minutes.
+#[tokio::test]
+async fn a_backends_load_progress_reaches_the_tracker() {
+    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+        return; // needs a systemd --user session
+    }
+    install_crypto_provider();
+
+    let (dir, _cleanup) = seed_backend_dir("kernels");
+    let tracker = std::sync::Arc::new(
+        super_stt_daemon::download_progress::DownloadProgressTracker::new(
+            "mock-builds-kernels".to_string(),
+            super_stt_daemon::download_progress::StageSlot {
+                source: "github.com/jorge-menjivar/super-stt-voxtral".to_string(),
+                stage: 1,
+            },
+            0,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        ),
+    );
+
+    let mut backend = SubprocessBackend::spawn(
+        &dir,
+        "mock-builds-kernels",
+        "cpu",
+        Some(&tracker),
+        Vec::new(),
+    )
+    .await
+    .expect("spawn + load a backend that reports its kernel build");
+
+    let load = tracker
+        .get_progress()
+        .load
+        .expect("the backend's report reached the tracker");
+    assert_eq!(load.phase.as_deref(), Some("initial_setup"));
+    assert_eq!(load.step.as_deref(), Some("building_kernels"));
+    assert_eq!(
+        load.progress,
+        Some(0.5),
+        "the last report before ready is what the tracker holds"
+    );
+
+    backend.shutdown().await.expect("clean shutdown");
 }
 
 /// Changing an option reaches a *running* backend, without reloading it.

@@ -246,7 +246,9 @@ Host: backend.local
 {
   "status":   "success",   // envelope outcome: "success" | "error"
   "state":    "loading",   // readiness: "starting" | "loading" | "ready" | "error"
-  "progress": 0.42,        // present only while state == "loading"; 0.0–1.0
+  "phase":    "initial_setup",    // optional, while loading: "initial_setup" | "loading"
+  "step":     "building_kernels", // optional, while loading: see below
+  "progress": 0.42,        // optional, while loading: 0.0–1.0 through `step`
   "model": {               // present once a load has been requested
     "name": "whisper-tiny"
   },
@@ -258,10 +260,31 @@ Host: backend.local
 | Field      | Type    | Notes                                                                       |
 |------------|---------|-----------------------------------------------------------------------------|
 | `state`    | string  | `starting` (spawned, no load yet), `loading`, `ready`, or `error`.          |
-| `progress` | number? | Load progress `0.0`–`1.0`; present only while `state` is `loading`.         |
+| `phase`    | string? | While `loading`: `initial_setup` for a first load that pays a one-time cost (building GPU kernels, say), `loading` otherwise. |
+| `step`     | string? | While `loading`: what the load is doing, `loading_weights`, `building_kernels` or `warming_up`. |
+| `progress` | number? | While `loading`: how far through `step` the load is, `0.0`–`1.0`, or through the whole load when there is no `step`. |
 | `model`    | object? | The model being loaded or loaded; absent in `starting`.                     |
 | `device`   | string? | Device actually in use, one of `cpu`, `cuda`, `rocm`, `metal`, `vulkan`; present once `ready`. |
 | `reason`   | string? | Machine-readable failure cause; present only when `state` is `error`.       |
+
+`phase`, `step` and `progress` are how a load says what it is doing. The
+daemon passes them to its clients, which show a first load as "Initial setup"
+with the step and a bar under it, where they would otherwise show one
+unchanging line for however long the load takes. All three are optional, and
+a backend that sends none still loads. When sending them:
+
+- Send ids, not text. The daemon passes on only lowercase letters, digits and
+  underscores, and each client words the ids itself. An id a client does not
+  know is shown as a load in progress.
+- Keep `progress` rising within a step and below `1.0` until the step ends.
+  It starts again from `0.0` when `step` changes.
+- Once you have sent `progress` in a load, change `step` or `progress` at
+  least once a minute until the load ends. The daemon fails a load whose
+  report has not moved in two minutes, with the backend's recent output, and
+  does not hold it to the ten-minute load budget otherwise, so a slow load
+  that keeps moving is never cut off. Count the small units of the work so
+  the value keeps moving: compiled kernels as well as tuning results, bytes
+  or tensors for `loading_weights`.
 
 `state` transitions:
 
@@ -279,7 +302,8 @@ A load that fails must end in `error` with a `reason`, however it failed: a
 returned error, a panic, a thread that died. Catch a panic where the load
 runs rather than letting it end the loading thread quietly. A backend left
 reporting `loading` after its load can no longer finish gives the daemon
-nothing to act on: it waits out its ten-minute load budget, then fails the
+little to act on: it waits out its ten-minute load budget, or two minutes
+without movement if the backend has reported `progress`, then fails the
 load with the backend's recent output. A backend that exits mid-load fails
 the load at the daemon's next poll, with the same output.
 

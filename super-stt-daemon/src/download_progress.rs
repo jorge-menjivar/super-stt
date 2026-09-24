@@ -58,6 +58,7 @@ pub fn report(progress: Progress<StageSlot>) -> DownloadProgress {
         started_at: progress.started_at,
         eta_seconds: progress.eta_seconds,
         error: progress.error,
+        load: progress.load,
     }
 }
 

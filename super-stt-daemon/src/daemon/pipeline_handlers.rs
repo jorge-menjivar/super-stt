@@ -234,6 +234,7 @@ impl SuperSTTDaemon {
                 percentage: p.percentage,
                 eta_seconds: p.eta_seconds,
             },
+            load: p.load,
         })
     }
 

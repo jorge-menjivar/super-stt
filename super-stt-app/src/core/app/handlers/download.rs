@@ -75,7 +75,7 @@ impl AppModel {
                                 Ok(Some(progress)) => {
                                     // Download is actually happening
                                     cosmic::Action::App(Message::Download(
-                                        DownloadMessage::DownloadProgressUpdate(progress),
+                                        DownloadMessage::DownloadProgressUpdate(Box::new(progress)),
                                     ))
                                 }
                                 // No download in progress (loaded from cache, or
