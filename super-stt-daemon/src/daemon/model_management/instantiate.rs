@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::types::SuperSTTDaemon;
-use crate::registry::host_detect::Host;
 use crate::registry::installed;
 use crate::stt_models::ModelDefinition;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use crate::stt_models::transcribe::Transcribe;
 use anyhow::{Result, anyhow, bail};
+use super_engine_daemon::devices::resolve_accel;
 
 impl SuperSTTDaemon {
     /// Build a running backend instance for `(name, source)` plus its
@@ -381,63 +381,18 @@ impl SuperSTTDaemon {
         // passes the value through as set, which costs nothing for the only
         // backends such a build can run.
         #[cfg(feature = "wasm-backends")]
-        canonicalize_base_url(backend, &mut overrides)?;
+        super_engine_daemon::wasm::base_url::canonicalize_override(backend, &mut overrides)?;
         Ok(overrides)
     }
 
-    /// What the *user* authorized via a `base_url` option: the `host:port` the
-    /// value points at, followed by the bare host.
-    ///
-    /// `base_url` is the documented convention for a backend's configurable
-    /// endpoint (`docs/protocol/backend/config.md`); any backend declaring an
-    /// option with that name has the SSRF guard relaxed for that one authority.
-    /// The value is read from the config override **only** — never from the
-    /// manifest default, which the backend author writes and which therefore
-    /// cannot be allowed to widen the sandbox. (A manifest declaring one is
-    /// refused at publication and scrubbed at load; this read stands on its own
-    /// so the invariant does not depend on either check.) Because the value is
-    /// the user's, it may be
-    /// loopback or private, e.g. a local gateway.
-    ///
-    /// The bare host carries no such relaxation; it keeps the gateway's other
-    /// ports reachable while they stay public, so no extra port on a local or
-    /// private gateway opens up (see
-    /// [`check_host_allowed`](crate::stt_models::wasm::host::check_host_allowed)).
-    /// Unparseable or unset values contribute nothing.
-    ///
-    /// Both outcomes are logged. This is the one path that relaxes the sandbox,
-    /// so an operator asking later why a backend reached a private address needs
-    /// a record of which endpoint was authorized for which backend, and when.
+    /// What the *user* authorized via a `base_url` option. See
+    /// `super_engine_daemon::wasm::base_url::egress_hosts`.
     #[cfg(feature = "wasm-backends")]
     fn base_url_egress_hosts(
         backend: &DiscoveredBackend,
         overrides: &std::collections::HashMap<String, String>,
     ) -> Vec<String> {
-        if !backend
-            .options
-            .iter()
-            .any(|o| o.name == backends::base_url::OPTION_NAME)
-        {
-            return Vec::new();
-        }
-        let Some(value) = overrides.get(backends::base_url::OPTION_NAME) else {
-            return Vec::new();
-        };
-        let entries = backends::base_url::egress_entries(value);
-        // Log the derived authority, never the configured value: the parser
-        // discards userinfo, so a URL pasted with credentials in it cannot reach
-        // the journal through here.
-        match entries.first() {
-            Some(endpoint) => log::info!(
-                "Backend {}: user-set base_url authorizes egress to {endpoint}, with the SSRF guard relaxed for it",
-                backend.source
-            ),
-            None => log::warn!(
-                "Backend {}: base_url is set but names no host the daemon can read; it authorizes nothing and the backend keeps only its manifest egress",
-                backend.source
-            ),
-        }
-        entries
+        super_engine_daemon::wasm::base_url::egress_hosts(backend, overrides)
     }
 }
 
@@ -457,284 +412,6 @@ async fn resolve_device_for_backend(device_pref: &str, backend_dir: &std::path::
         .await
         .ok();
     resolve_accel(device_pref, &installed_accel, host.as_ref())
-}
-
-/// Turn the user's `cpu`/`gpu` preference into the accelerator the backend is
-/// told to load on.
-///
-/// The daemon knows which it is — it chose the asset — so it sends the
-/// concrete value rather than forwarding the preference. A binary carrying
-/// several runtimes needs this to pick; one carrying a single runtime ignores
-/// it, since the contract has always been "anything that is not `cpu` means
-/// use the accelerator".
-///
-/// A dual-runtime asset (`accel = ["cuda", "rocm"]`) cannot be resolved by
-/// list position: `compat::select` (`registry/compat.rs`) chose this asset
-/// because the *host* can run one of its declared families, not because of
-/// where that family sits in the list, so resolving here has to ask the same
-/// question rather than default to "first declared". `host` is `None` only
-/// when detection itself failed, or when none of the declared entries match
-/// what it reports (should not happen for an asset `compat::select` already
-/// approved, but a stale or hand-edited `installed.json` should still degrade
-/// rather than panic) — both fall back to the list-order heuristic.
-///
-/// Returns the empty string when a `gpu` preference names no accelerator at
-/// all: an install with no record (a local-directory import, or one predating
-/// the record) or a CPU-only asset. `device` carries the resolved accelerator
-/// and nothing else, so with none to name the daemon omits the key rather
-/// than forwarding the preference — an absent `device` is the contract's
-/// auto-select, which is precisely "this daemon does not know which
-/// accelerator this build targets".
-pub(crate) fn resolve_accel(
-    preference: &str,
-    installed_accel: &[String],
-    host: Option<&Host>,
-) -> String {
-    if preference == "cpu" {
-        return "cpu".to_string();
-    }
-    if let Some(host) = host
-        && let Some(found) = installed_accel.iter().find(|a| host_can_run(host, a))
-    {
-        return found.clone();
-    }
-    installed_accel
-        .iter()
-        .find(|a| *a != "cpu")
-        .cloned()
-        .unwrap_or_default()
-}
-
-/// Whether the host can run `accel`, mirroring the presence checks
-/// `compat::score` (`registry/compat.rs`) gates asset selection on. Full
-/// sm/gfx/floor compatibility was already proven when the asset was
-/// selected; this only has to tell apart two host-compatible accelerators
-/// declared by the same installed asset.
-fn host_can_run(host: &Host, accel: &str) -> bool {
-    match accel {
-        "cuda" => host.cuda.is_some(),
-        "rocm" => host.rocm.is_some(),
-        "vulkan" => host.vulkan.is_some(),
-        "metal" => host.metal.is_some(),
-        _ => false,
-    }
-}
-
-#[cfg(test)]
-mod resolve_accel_tests {
-    use super::{Host, resolve_accel};
-    use crate::registry::host_detect::{CudaHost, RocmHost, VulkanHost};
-
-    fn nvidia_host() -> Host {
-        Host {
-            target_triple: "x86_64-unknown-linux-gnu".into(),
-            cuda: Some(CudaHost {
-                compute_capability: 86,
-                runtime_major: 13,
-                cudnn_present: true,
-            }),
-            rocm: None,
-            vulkan: None,
-            metal: None,
-        }
-    }
-
-    fn amd_host() -> Host {
-        Host {
-            target_triple: "x86_64-unknown-linux-gnu".into(),
-            cuda: None,
-            rocm: Some(RocmHost {
-                gfx_targets: vec![gpu_probe::GfxTarget::new(11, 0, 0)],
-                version: None,
-            }),
-            vulkan: None,
-            metal: None,
-        }
-    }
-
-    fn metal_host() -> Host {
-        Host {
-            target_triple: "aarch64-apple-darwin".into(),
-            cuda: None,
-            rocm: None,
-            vulkan: None,
-            metal: Some(crate::registry::host_detect::MetalHost),
-        }
-    }
-
-    /// An asset declaring `["metal", "cpu"]` on a Mac must resolve to metal,
-    /// not fall through to the cpu entry. `host_can_run` is what decides
-    /// that, and a missing arm there is invisible: the function returns
-    /// `false`, the `find` skips metal, and the model silently loads on the
-    /// CPU on every Mac.
-    #[test]
-    fn a_mac_resolves_a_metal_asset_to_metal() {
-        let installed = vec!["metal".to_string(), "cpu".to_string()];
-        assert_eq!(
-            resolve_accel("gpu", &installed, Some(&metal_host())),
-            "metal"
-        );
-        // An explicit CPU preference still wins — the same rule every other
-        // accelerator follows.
-        assert_eq!(resolve_accel("cpu", &installed, Some(&metal_host())), "cpu");
-    }
-
-    /// The converse: a metal asset on a host without Metal must not resolve
-    /// to it.
-    #[test]
-    fn a_non_mac_does_not_resolve_metal() {
-        let installed = vec!["metal".to_string(), "cpu".to_string()];
-        assert_eq!(
-            resolve_accel("gpu", &installed, Some(&nvidia_host())),
-            "metal",
-            "with no host-runnable accel the first non-cpu entry is the fallback"
-        );
-        assert!(!super::host_can_run(&nvidia_host(), "metal"));
-    }
-
-    fn vulkan_only_host() -> Host {
-        Host {
-            target_triple: "x86_64-unknown-linux-gnu".into(),
-            cuda: None,
-            rocm: None,
-            vulkan: Some(VulkanHost {
-                api_version: gpu_probe::VulkanVersion::new(1, 3, 0),
-            }),
-            metal: None,
-        }
-    }
-
-    /// The user picks `cpu` or `gpu`; the backend is told which accelerator,
-    /// because a build carrying several runtimes has to be able to choose.
-    #[test]
-    fn a_gpu_preference_resolves_to_the_accel_the_host_can_run() {
-        assert_eq!(
-            resolve_accel("gpu", &["cuda".into()], Some(&nvidia_host())),
-            "cuda"
-        );
-        assert_eq!(
-            resolve_accel("gpu", &["rocm".into()], Some(&amd_host())),
-            "rocm"
-        );
-        assert_eq!(
-            resolve_accel("gpu", &["vulkan".into()], Some(&vulkan_only_host())),
-            "vulkan"
-        );
-    }
-
-    #[test]
-    fn a_cpu_preference_always_resolves_to_cpu() {
-        assert_eq!(
-            resolve_accel("cpu", &["cuda".into()], Some(&nvidia_host())),
-            "cpu"
-        );
-        assert_eq!(resolve_accel("cpu", &[], None), "cpu");
-    }
-
-    /// The bug this pins: `compat::select` chose this asset because the host
-    /// can run one of its declared families, never because of list position.
-    /// An asset declaring `["cuda", "rocm"]` must resolve to whichever the
-    /// *host* actually has — not to `cuda` just because it was declared
-    /// first — or the daemon tells a ROCm-only host to load a runtime it
-    /// cannot run.
-    #[test]
-    fn a_dual_runtime_asset_resolves_by_host_capability_not_list_position() {
-        assert_eq!(
-            resolve_accel("gpu", &["rocm".into(), "cuda".into()], Some(&nvidia_host())),
-            "cuda"
-        );
-        assert_eq!(
-            resolve_accel("gpu", &["cuda".into(), "rocm".into()], Some(&amd_host())),
-            "rocm"
-        );
-    }
-
-    /// Detection failure (`host: None`) degrades to the list-order heuristic
-    /// rather than blocking the load — a `gpu` preference stays meaningful to
-    /// a backend on its own.
-    #[test]
-    fn an_unknown_host_falls_back_to_list_order() {
-        assert_eq!(
-            resolve_accel("gpu", &["cpu".into(), "rocm".into()], None),
-            "rocm"
-        );
-    }
-
-    /// A host that matches none of the asset's declared entries (a stale or
-    /// hand-edited record) also degrades to list order rather than erroring.
-    #[test]
-    fn a_host_matching_nothing_declared_falls_back_to_list_order() {
-        assert_eq!(
-            resolve_accel("gpu", &["rocm".into()], Some(&nvidia_host())),
-            "rocm"
-        );
-    }
-
-    /// No record — a local-directory import, or every install predating the
-    /// record, which is the whole upgrade path. `gpu` is the user's
-    /// preference, and `docs/protocol/backend/contract.md` says `device`
-    /// carries the *resolved accelerator*, never the preference. When the
-    /// daemon cannot resolve one it says nothing rather than something false:
-    /// an omitted `device` is the documented "auto-select" signal, which is
-    /// exactly what "this daemon does not know which accelerator this build
-    /// targets" means.
-    #[test]
-    fn an_unresolvable_gpu_preference_sends_no_device_at_all() {
-        assert_eq!(resolve_accel("gpu", &[], None), "");
-        assert_eq!(
-            resolve_accel("gpu", &[], Some(&nvidia_host())),
-            "",
-            "a host with a GPU still says nothing about what the asset targets"
-        );
-        assert_eq!(
-            resolve_accel("gpu", &["cpu".into()], Some(&nvidia_host())),
-            "",
-            "a CPU-only asset provides no accelerator to name"
-        );
-    }
-}
-
-/// Canonicalize a declared `base_url` override in place (see
-/// [`normalize`](backends::base_url::normalize)); drop one that is only
-/// whitespace; fail on one no host can be read from.
-///
-/// # Errors
-/// Returns an error when a declared, non-empty `base_url` yields no host.
-#[cfg(feature = "wasm-backends")]
-fn canonicalize_base_url(
-    backend: &DiscoveredBackend,
-    overrides: &mut std::collections::HashMap<String, String>,
-) -> Result<()> {
-    let name = backends::base_url::OPTION_NAME;
-    let Some(opt) = backend.options.iter().find(|o| o.name == name) else {
-        return Ok(());
-    };
-    let Some(raw) = overrides.get(name).cloned() else {
-        return Ok(());
-    };
-    if raw.trim().is_empty() {
-        overrides.remove(name);
-    } else if let Some(canonical) = backends::base_url::normalize(&raw) {
-        // The scheme the daemon chose for a value that named none decides
-        // whether the request is encrypted, so an operator asking later why
-        // a gateway was reached in the clear needs it on the record.
-        if !raw.contains("://") {
-            log::info!(
-                "Backend {}: base_url `{}` names no scheme; reading it as `{canonical}`",
-                backend.source,
-                raw.trim()
-            );
-        }
-        overrides.insert(name.to_string(), canonical);
-    } else {
-        // Shaped like the missing-secret error above: name the setting the
-        // user can act on, never the internals.
-        bail!(
-            "{} is not a valid URL.",
-            opt.label.as_deref().unwrap_or(&opt.name)
-        );
-    }
-    Ok(())
 }
 
 /// The effective value of a backend option — the user's override if set, else

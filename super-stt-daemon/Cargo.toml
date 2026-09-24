@@ -124,8 +124,6 @@
 
 [dev-dependencies]
     futures-util.workspace = true
-    # Building a probed host in the model-loading tests.
-    gpu-probe = "0.1.1"
     hound.workspace = true
     # Integration tests route their own (client-side) keyring access to the
     # in-memory mock. `session::install_mock_keyring_if_requested` is the

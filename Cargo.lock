@@ -6868,7 +6868,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "super-engine-client"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=59c01cb32ebd9800fd7d9e684642730bc7011519#59c01cb32ebd9800fd7d9e684642730bc7011519"
+source = "git+https://github.com/super-libre/super-engine?rev=a5594c26c63041ff71c0a89459f817ba381d25ad#a5594c26c63041ff71c0a89459f817ba381d25ad"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -6887,7 +6887,7 @@ dependencies = [
 [[package]]
 name = "super-engine-daemon"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=59c01cb32ebd9800fd7d9e684642730bc7011519#59c01cb32ebd9800fd7d9e684642730bc7011519"
+source = "git+https://github.com/super-libre/super-engine?rev=a5594c26c63041ff71c0a89459f817ba381d25ad#a5594c26c63041ff71c0a89459f817ba381d25ad"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6931,7 +6931,7 @@ dependencies = [
 [[package]]
 name = "super-engine-forge"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=59c01cb32ebd9800fd7d9e684642730bc7011519#59c01cb32ebd9800fd7d9e684642730bc7011519"
+source = "git+https://github.com/super-libre/super-engine?rev=a5594c26c63041ff71c0a89459f817ba381d25ad#a5594c26c63041ff71c0a89459f817ba381d25ad"
 dependencies = [
  "async-trait",
  "log",
@@ -6945,7 +6945,7 @@ dependencies = [
 [[package]]
 name = "super-engine-indexer"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=59c01cb32ebd9800fd7d9e684642730bc7011519#59c01cb32ebd9800fd7d9e684642730bc7011519"
+source = "git+https://github.com/super-libre/super-engine?rev=a5594c26c63041ff71c0a89459f817ba381d25ad#a5594c26c63041ff71c0a89459f817ba381d25ad"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6970,7 +6970,7 @@ dependencies = [
 [[package]]
 name = "super-engine-installer"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=59c01cb32ebd9800fd7d9e684642730bc7011519#59c01cb32ebd9800fd7d9e684642730bc7011519"
+source = "git+https://github.com/super-libre/super-engine?rev=a5594c26c63041ff71c0a89459f817ba381d25ad#a5594c26c63041ff71c0a89459f817ba381d25ad"
 dependencies = [
  "clap",
  "dirs",
@@ -6991,7 +6991,7 @@ dependencies = [
 [[package]]
 name = "super-engine-protocol"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=59c01cb32ebd9800fd7d9e684642730bc7011519#59c01cb32ebd9800fd7d9e684642730bc7011519"
+source = "git+https://github.com/super-libre/super-engine?rev=a5594c26c63041ff71c0a89459f817ba381d25ad#a5594c26c63041ff71c0a89459f817ba381d25ad"
 dependencies = [
  "dirs",
  "env_logger",
@@ -7008,7 +7008,7 @@ dependencies = [
 [[package]]
 name = "super-engine-spec"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=59c01cb32ebd9800fd7d9e684642730bc7011519#59c01cb32ebd9800fd7d9e684642730bc7011519"
+source = "git+https://github.com/super-libre/super-engine?rev=a5594c26c63041ff71c0a89459f817ba381d25ad#a5594c26c63041ff71c0a89459f817ba381d25ad"
 dependencies = [
  "hex",
  "ring",
@@ -7123,7 +7123,6 @@ dependencies = [
  "enigo",
  "futures",
  "futures-util",
- "gpu-probe",
  "hex",
  "hound",
  "http-body-util",
