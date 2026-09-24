@@ -212,8 +212,9 @@ A value that yields no host is stored as typed rather than refused; model load \
 rejects it by name. Every other option is stored verbatim, whitespace included, \
 because it may carry meaning the daemon does not interpret.
 
-A loaded model does not pick this up on its own — reload the stage with \
-`POST /pipeline/{stage}/model/reload`.",
+Every stage running a model from this backend is handed the new value at once and \
+uses it from its next request; nothing is reloaded. If it cannot be handed over, the \
+value is still stored and the message says the running backend kept the old one.",
     params(
         ("backend_id" = String, Path,
          description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
