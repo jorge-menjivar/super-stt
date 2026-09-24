@@ -75,8 +75,25 @@ async fn status(State(s): State<Arc<AppState>>) -> Json<Value> {
     }
 }
 
-async fn load(State(s): State<Arc<AppState>>, _body: String) -> impl IntoResponse {
-    s.loaded.store(true, Ordering::SeqCst);
+/// The model a test loads to have the backend die partway through its load.
+const DIES_ON_LOAD: &str = "mock-dies-on-load";
+
+async fn load(State(s): State<Arc<AppState>>, body: String) -> impl IntoResponse {
+    let name = serde_json::from_str::<Value>(&body)
+        .ok()
+        .and_then(|v| v.get("name").and_then(Value::as_str).map(str::to_string));
+    if name.as_deref() == Some(DIES_ON_LOAD) {
+        // Accept the load, say why it is failing, and exit: the daemon's poll
+        // then finds nobody answering, and the line below is what it should
+        // hand back. Exiting after a moment, so the 202 reaches the daemon.
+        eprintln!("mock: the model thread panicked while loading");
+        tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            std::process::exit(101);
+        });
+    } else {
+        s.loaded.store(true, Ordering::SeqCst);
+    }
     (
         StatusCode::ACCEPTED,
         Json(json!({ "status": "success", "message": "Loading started" })),

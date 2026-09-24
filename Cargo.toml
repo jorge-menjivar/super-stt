@@ -147,23 +147,23 @@
     # is bumped here. Every super-engine crate names the same rev.
     super-engine-client = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "dd62be775b7a3fbc18c3aa15fb002bb4fab980c5",
+      rev = "76bdaf3a30e101ed584a032e57255fef7dab86fa",
     }
     super-engine-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "dd62be775b7a3fbc18c3aa15fb002bb4fab980c5",
+      rev = "76bdaf3a30e101ed584a032e57255fef7dab86fa",
     }
     super-engine-forge = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "dd62be775b7a3fbc18c3aa15fb002bb4fab980c5",
+      rev = "76bdaf3a30e101ed584a032e57255fef7dab86fa",
     }
     super-engine-protocol = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "dd62be775b7a3fbc18c3aa15fb002bb4fab980c5",
+      rev = "76bdaf3a30e101ed584a032e57255fef7dab86fa",
     }
     super-engine-spec = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "dd62be775b7a3fbc18c3aa15fb002bb4fab980c5",
+      rev = "76bdaf3a30e101ed584a032e57255fef7dab86fa",
     }
     thiserror         = "2.0"
     tokio             = {

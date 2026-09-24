@@ -47,6 +47,14 @@ On startup the backend binds `SUPER_STT_BACKEND_SOCKET`, begins serving
 `POST /v1/load` arrives. It resolves a model's files from
 `SUPER_STT_BACKEND_DIR` joined with the model's `dest`.
 
+The daemon polls for `ready` for **ten minutes** before giving up on a load.
+That is a generous budget on purpose: a backend that compiles its GPU kernels
+at runtime should do it during the load, not on the first request, because
+`ready` is what the daemon shows the user and what it starts sending
+transcription requests against. A load that fails must say so with `error`
+rather than leave the daemon waiting out the budget (see
+[`GET /v1/status`](./contract.md#get-v1status)).
+
 Anything a backend wants to keep between runs goes in
 `SUPER_STT_BACKEND_CACHE_DIR` and must be treated as regenerable: it is a
 cache, the daemon does not back it up, and a user may delete it. A backend

@@ -275,6 +275,14 @@ stateDiagram-v2
     error --> loading: POST /v1/load (retry)
 ```
 
+A load that fails must end in `error` with a `reason`, however it failed: a
+returned error, a panic, a thread that died. Catch a panic where the load
+runs rather than letting it end the loading thread quietly. A backend left
+reporting `loading` after its load can no longer finish gives the daemon
+nothing to act on: it waits out its ten-minute load budget, then fails the
+load with the backend's recent output. A backend that exits mid-load fails
+the load at the daemon's next poll, with the same output.
+
 The daemon routes transcription to a backend only while `state` is `ready`.
 
 ### `GET /v1/ping`

@@ -68,6 +68,15 @@ primary_language = "en"
 supported_languages = ["en"]
 supported_devices = ["cpu"]
 
+# A model whose load the mock abandons by exiting, for the test that a failed
+# load says why.
+[[models]]
+name = "mock-dies-on-load"
+multilingual = false
+primary_language = "en"
+supported_languages = ["en"]
+supported_devices = ["cpu"]
+
 # A third, so two tests in one process do not collide: the transient unit is
 # named for the model and the pid, and the daemon never runs two subprocess
 # backends of one stage at once, so the name is only ambiguous under a test.
@@ -234,6 +243,42 @@ async fn a_model_reloads_only_once_its_instance_is_released() {
     assert_eq!(processed, "processed: um so hello");
 
     reloaded.shutdown().await.expect("clean shutdown");
+}
+
+/// A backend that dies partway through its load fails the load at once, and
+/// the failure carries what the backend said on its way out.
+///
+/// The case this guards is a model thread that panics while loading. When the
+/// backend's status never leaves `loading`, or the backend is simply gone, a
+/// bare "load timed out" (after ten minutes, in the first case) names neither
+/// the backend nor the panic, and the panic is sitting in its log.
+#[tokio::test]
+async fn a_backend_that_dies_while_loading_says_why() {
+    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+        return; // needs a systemd --user session
+    }
+    install_crypto_provider();
+
+    let (dir, _cleanup) = seed_backend_dir("dies");
+
+    let started = std::time::Instant::now();
+    let error = SubprocessBackend::spawn(&dir, "mock-dies-on-load", "cpu", None, Vec::new())
+        .await
+        .err()
+        .expect("a backend that exits mid-load must fail the load");
+    let text = format!("{error:#}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "the load must fail when the backend goes, not at the timeout: {text}"
+    );
+    assert!(
+        text.contains("stopped answering while loading"),
+        "the error must say what happened: {text}"
+    );
+    assert!(
+        text.contains("mock: the model thread panicked while loading"),
+        "the error must carry the backend's own last words: {text}"
+    );
 }
 
 /// Changing an option reaches a *running* backend, without reloading it.
