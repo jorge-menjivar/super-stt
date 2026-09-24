@@ -33,7 +33,6 @@
     dashmap.workspace = true
     dirs.workspace = true
     futures = "0.3"
-    gpu-probe = "0.1.1"
     hex = "0.4.3"
     http-body-util = "0.1"
     hyper = { version = "1", features = ["http1", "server"] }
@@ -125,6 +124,8 @@
 
 [dev-dependencies]
     futures-util.workspace = true
+    # Building a probed host in the model-loading tests.
+    gpu-probe = "0.1.1"
     hound.workspace = true
     # Integration tests route their own (client-side) keyring access to the
     # in-memory mock. `session::install_mock_keyring_if_requested` is the
