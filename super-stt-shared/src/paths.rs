@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use super_engine_protocol::SUPER_STT;
+use crate::SUPER_STT;
 use super_engine_protocol::paths;
 
 /// `$XDG_CONFIG_HOME/super-stt`, with the fallbacks

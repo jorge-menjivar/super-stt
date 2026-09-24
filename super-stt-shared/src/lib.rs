@@ -5,11 +5,13 @@ pub mod daemon;
 pub mod launch_agents;
 pub mod models;
 pub mod paths;
+pub mod product;
 pub mod registry;
 pub mod utils;
 pub mod validation;
 
-pub use super_engine_protocol::{SUPER_STT, logging, sandbox};
+pub use product::SUPER_STT;
+pub use super_engine_protocol::{logging, sandbox};
 
 pub mod audio;
 

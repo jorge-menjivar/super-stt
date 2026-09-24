@@ -2,8 +2,8 @@
 //! Session tokens, kept in the keyring per app:
 //! [`super_engine_client::session`], with the product bound to Super STT.
 
+use crate::SUPER_STT;
 pub use super_engine_client::session::{AppId, forget, load, obtain, save, with_token};
-use super_engine_protocol::SUPER_STT;
 
 /// The [`AppId`] Super STT's app `name` keeps its token under, e.g.
 /// `app_id("super-stt-app")`.

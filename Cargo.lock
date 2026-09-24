@@ -6868,7 +6868,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "super-engine-client"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033#e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033"
+source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -6887,7 +6887,7 @@ dependencies = [
 [[package]]
 name = "super-engine-daemon"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033#e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033"
+source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
 dependencies = [
  "anyhow",
  "axum",
@@ -6924,7 +6924,7 @@ dependencies = [
 [[package]]
 name = "super-engine-forge"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033#e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033"
+source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
 dependencies = [
  "async-trait",
  "log",
@@ -6938,7 +6938,7 @@ dependencies = [
 [[package]]
 name = "super-engine-protocol"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033#e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033"
+source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
 dependencies = [
  "dirs",
  "env_logger",
@@ -6954,7 +6954,7 @@ dependencies = [
 [[package]]
 name = "super-engine-spec"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033#e9d8a9dae09b8cb1b6eac24f7c0f33c7f3fb6033"
+source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
 dependencies = [
  "hex",
  "ring",

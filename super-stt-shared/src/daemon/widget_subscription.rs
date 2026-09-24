@@ -4,7 +4,9 @@
 //! Super STT's.
 
 pub use super_engine_client::widget_subscription::*;
-use super_engine_protocol::{SUPER_STT, scopes};
+use super_engine_protocol::scopes;
+
+use crate::SUPER_STT;
 
 /// The scope a subscriber needs for Super STT's event `topic`, or `None` for
 /// a topic Super STT does not publish. Mirrors the daemon's

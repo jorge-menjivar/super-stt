@@ -7,7 +7,9 @@
 //! renders the "unknown scope — deny is safe" warning on a legitimate prompt,
 //! teaching users to distrust real requests.
 
-use super_engine_protocol::{SUPER_STT, scopes};
+use super_engine_protocol::scopes;
+
+use crate::SUPER_STT;
 
 /// Every scope token the daemon understands, in wire (`snake_case`) form. A
 /// token may be granted any non-empty subset. Source of truth for

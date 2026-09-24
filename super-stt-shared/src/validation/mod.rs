@@ -16,7 +16,7 @@ pub use super_engine_protocol::runtime::SUN_PATH_MAX;
 /// [`super_engine_protocol::runtime::secure_runtime_path`] describes.
 #[must_use]
 pub fn secure_runtime_path(relative: &str) -> std::path::PathBuf {
-    super_engine_protocol::runtime::secure_runtime_path(&super_engine_protocol::SUPER_STT, relative)
+    super_engine_protocol::runtime::secure_runtime_path(&crate::SUPER_STT, relative)
 }
 
 /// The daemon's HTTP socket, `super-stt-http.sock`, or
@@ -24,7 +24,7 @@ pub fn secure_runtime_path(relative: &str) -> std::path::PathBuf {
 /// [`super_engine_protocol::runtime::get_http_socket_path`].
 #[must_use]
 pub fn get_http_socket_path() -> std::path::PathBuf {
-    super_engine_protocol::runtime::get_http_socket_path(&super_engine_protocol::SUPER_STT)
+    super_engine_protocol::runtime::get_http_socket_path(&crate::SUPER_STT)
 }
 
 /// Validation errors for better error reporting

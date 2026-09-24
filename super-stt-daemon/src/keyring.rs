@@ -63,3 +63,14 @@ pub async fn delete_backend_secret_async(source: String, name: String) -> Result
 pub async fn has_backend_secret_async(source: String, name: String) -> Result<bool, KeyringError> {
     keyring().has_backend_secret_async(source, name).await
 }
+
+#[cfg(test)]
+mod tests {
+    /// The sessions account is the one Super STT has always used. A change
+    /// here strands every installed daemon's sessions under an account it no
+    /// longer reads, and every client faces a fresh consent popup.
+    #[test]
+    fn the_sessions_account_is_the_one_super_stt_shipped() {
+        assert_eq!(super::keyring().sessions_account(), "stt-sessions");
+    }
+}
