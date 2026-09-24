@@ -139,7 +139,6 @@
     rust-embed        = "8.11.0"
     serde             = { version = "1.0.219", features = ["derive"] }
     serde_json        = "1.0.149"
-    spectrum-analyzer = "1.7.0"
     strum             = { version = "0.28.0", features = ["derive"] }
     strum_macros      = "0.28"
     # The code Super STT shares with Super TTS. Pinned by rev, like
@@ -147,31 +146,31 @@
     # is bumped here. Every super-engine crate names the same rev.
     super-engine-client = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "4bac579f481e05855ec3a623909802341e411715",
+      rev = "4f49ec69c954aeaa2f375fb9fbdc3d7114c9d32b",
     }
     super-engine-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "4bac579f481e05855ec3a623909802341e411715",
+      rev = "4f49ec69c954aeaa2f375fb9fbdc3d7114c9d32b",
     }
     super-engine-forge = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "4bac579f481e05855ec3a623909802341e411715",
+      rev = "4f49ec69c954aeaa2f375fb9fbdc3d7114c9d32b",
     }
     super-engine-indexer = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "4bac579f481e05855ec3a623909802341e411715",
+      rev = "4f49ec69c954aeaa2f375fb9fbdc3d7114c9d32b",
     }
     super-engine-installer = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "4bac579f481e05855ec3a623909802341e411715",
+      rev = "4f49ec69c954aeaa2f375fb9fbdc3d7114c9d32b",
     }
     super-engine-protocol = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "4bac579f481e05855ec3a623909802341e411715",
+      rev = "4f49ec69c954aeaa2f375fb9fbdc3d7114c9d32b",
     }
     super-engine-spec = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "4bac579f481e05855ec3a623909802341e411715",
+      rev = "4f49ec69c954aeaa2f375fb9fbdc3d7114c9d32b",
     }
     thiserror         = "2.0"
     tokio             = {
