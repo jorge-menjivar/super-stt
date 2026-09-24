@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use log::{debug, error, warn};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use super_stt_shared::models::contexts::DictationContext;
 use super_stt_shared::models::notification_method::NotificationMethod;
@@ -238,78 +236,14 @@ pub struct ContextsConfig {
     pub items: Vec<DictationContext>,
 }
 
-/// The daemon's HTTP surface beyond the Unix socket it always serves.
-///
-/// Contract: `docs/protocol/transport.md`. Every field is defaulted, so a
-/// `daemon.toml` written before the section existed loads with the TCP
-/// listener off — which is the only state in which the daemon's callers are
-/// all peer-credential-verified.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct HttpConfig {
-    #[serde(default)]
-    pub tcp: TcpConfig,
-}
+/// The daemon's HTTP surface beyond the Unix socket it always serves. See
+/// `super_engine_daemon::config::HttpConfig`, bound to [`DEFAULT_TCP_PORT`].
+pub type HttpConfig = super_engine_daemon::config::HttpConfig<DEFAULT_TCP_PORT>;
 
-/// The loopback TCP listener, which is what a browser can reach.
-///
-/// A browser cannot dial a Unix socket, so a web client needs this. What it
-/// costs is the identity model: `SO_PEERCRED` gives the Unix socket a caller
-/// identity the kernel vouches for, and TCP has no equivalent. A TCP caller is
-/// identified by its `Origin` header instead — asserted by the browser, not
-/// proven.
-///
-/// **What guards the surface is therefore consent, not this config.** Any page
-/// may *ask*; the dialog names the site and the user decides. That is the same
-/// bargain the Unix socket strikes with a binary, one notch weaker because the
-/// name comes from the browser rather than the kernel — which is what the
-/// dialog says, in those words.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TcpConfig {
-    /// Whether the daemon also serves the API on `127.0.0.1:{port}`.
-    ///
-    /// On by default, so a web client works without the user first finding a
-    /// config file. A port that cannot be bound is logged and skipped rather
-    /// than fatal: the Unix socket is the daemon's primary transport, and
-    /// refusing to start because something else holds this port would take the
-    /// whole daemon down for the sake of an extra.
-    #[serde(default = "default_tcp_enabled")]
-    pub enabled: bool,
-    /// The loopback port to bind.
-    ///
-    /// Fixed rather than OS-chosen because it is half of a browser client's
-    /// origin: a port that moved on every restart would invalidate the other
-    /// side's bookmarks and its stored token binding. The number itself has no
-    /// registered meaning.
-    #[serde(default = "default_tcp_port")]
-    pub port: u16,
-    /// The browser origins allowed to call the API, each a full origin such as
-    /// `http://127.0.0.1:8910` — scheme, host and port, no trailing slash.
-    /// [`ANY_ORIGIN`] anywhere in the list admits every origin, which is the
-    /// default.
-    ///
-    /// Admitting an origin is permission to *ask*, not permission to act: a
-    /// page still faces the consent dialog, and the token it gets is bound to
-    /// its own origin and useless to any other. Narrowing this list is for
-    /// deployments that want a page stopped before it can put a dialog on the
-    /// user's screen at all.
-    ///
-    /// An empty list admits nothing — the deliberate lockdown, distinct from
-    /// the default. Either way the daemon enforces this itself on every
-    /// request rather than relying on the CORS headers it also sends: CORS is a
-    /// browser-side courtesy that a non-browser client simply ignores, so it
-    /// cannot be what guards the surface.
-    #[serde(default = "default_allowed_origins")]
-    pub allowed_origins: Vec<String>,
-}
+/// The loopback TCP listener. See `super_engine_daemon::config::TcpConfig`.
+pub type TcpConfig = super_engine_daemon::config::TcpConfig<DEFAULT_TCP_PORT>;
 
-/// The wildcard entry for [`TcpConfig::allowed_origins`], spelled as CORS
-/// spells it.
-pub const ANY_ORIGIN: &str = "*";
-
-/// See [`TcpConfig::enabled`].
-fn default_tcp_enabled() -> bool {
-    true
-}
+pub use super_engine_daemon::config::ANY_ORIGIN;
 
 /// The loopback port the daemon serves on unless told otherwise.
 ///
@@ -334,72 +268,8 @@ fn default_tcp_enabled() -> bool {
 /// in practice.
 ///
 /// See [`TcpConfig::port`] for why a fixed number rather than an OS-chosen one.
+/// It is also the product's `ProductSpec::tcp_port`, which a test holds it to.
 pub const DEFAULT_TCP_PORT: u16 = 7300;
-
-/// See [`DEFAULT_TCP_PORT`].
-fn default_tcp_port() -> u16 {
-    DEFAULT_TCP_PORT
-}
-
-/// See [`TcpConfig::allowed_origins`].
-fn default_allowed_origins() -> Vec<String> {
-    vec![ANY_ORIGIN.to_string()]
-}
-
-/// Written out rather than derived so a `TcpConfig::default()` and a config
-/// deserialized from an absent `[http.tcp]` agree on every field. The derived
-/// impl would answer `false`, `0` and `[]` — which is not merely a different
-/// default but the opposite behaviour, since `0` means "let the OS choose" to
-/// every bind call that saw it and `[]` admits nothing.
-impl Default for TcpConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_tcp_enabled(),
-            port: default_tcp_port(),
-            allowed_origins: default_allowed_origins(),
-        }
-    }
-}
-
-impl TcpConfig {
-    /// The address to bind, or `None` when the listener is switched off.
-    ///
-    /// Always loopback: a listener reachable from the network would be a
-    /// different product with a different threat model, and nothing in the
-    /// consent flow is prepared for a caller on another host.
-    #[must_use]
-    pub fn bind_addr(&self) -> Option<std::net::SocketAddr> {
-        self.enabled
-            .then(|| std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, self.port)))
-    }
-
-    /// Whether `origin` is one the user has allowed.
-    ///
-    /// [`ANY_ORIGIN`] anywhere in the list admits everything. Otherwise this is
-    /// an exact, case-sensitive match: origins are compared as the opaque
-    /// strings browsers send rather than parsed and normalized, so there is no
-    /// gap between what the user wrote down and what is accepted — a prefix or
-    /// suffix match here would let `http://127.0.0.1:8910.evil.test` through.
-    ///
-    /// Note what this does *not* do: it never widens what a caller becomes. An
-    /// admitted origin is still recorded as itself, so a wildcard list grants
-    /// every page its own identity rather than a shared one.
-    #[must_use]
-    pub fn is_origin_allowed(&self, origin: &str) -> bool {
-        self.allowed_origins
-            .iter()
-            .any(|a| a == ANY_ORIGIN || a == origin)
-    }
-
-    /// Whether the list is the permissive default.
-    ///
-    /// Only used to phrase the startup log, so an operator can see which of the
-    /// two the running daemon is doing without going to read the config.
-    #[must_use]
-    pub fn admits_any_origin(&self) -> bool {
-        self.allowed_origins.iter().any(|a| a == ANY_ORIGIN)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptionConfig {
@@ -546,10 +416,37 @@ fn test_config_path() -> PathBuf {
     PATH.get_or_init(|| {
         let dir =
             std::env::temp_dir().join(format!("super-stt-test-config-{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
         dir.join("daemon.toml")
     })
     .clone()
+}
+
+/// Devices are bare `String`s, not an enum, so no `deserialize_or_default`
+/// catches a stale value at the serde layer — they are normalized here
+/// instead. Unlike the wire setter, which rejects an unparseable value
+/// outright, a persisted value has no such option: a daemon that refused to
+/// start over a stale config field would be worse than one that falls back to
+/// the default, so the global default degrades to `"cpu"` and a per-model
+/// device to "none of its own" rather than triggering a full reset. The
+/// deprecated `cuda`/`metal` spellings normalize to `gpu` rather than falling
+/// back, the same as the wire setter, so a config written before this
+/// vocabulary still loads onto the accelerator it always meant.
+impl super_engine_daemon::config::ConfigFile for DaemonConfig {
+    fn normalize(&mut self) {
+        use crate::daemon::device_management::parse_device_preference;
+
+        self.device.preferred_device = parse_device_preference(&self.device.preferred_device)
+            .unwrap_or_else(|| "cpu".to_string());
+        for settings in self
+            .backends
+            .models
+            .values_mut()
+            .flat_map(HashMap::values_mut)
+        {
+            settings.device = settings.device.as_deref().and_then(parse_device_preference);
+        }
+    }
 }
 
 impl DaemonConfig {
@@ -569,79 +466,22 @@ impl DaemonConfig {
         }
         #[cfg(not(test))]
         {
-            super_stt_shared::paths::config_dir().join("daemon.toml")
+            super_engine_daemon::config::config_path(&super_stt_shared::product::SUPER_STT)
         }
     }
 
-    /// Parse config file `content` into a [`DaemonConfig`], falling back to
-    /// defaults on a parse error. Pure (no I/O) so the load/reset decision is
-    /// unit-testable without touching the real config path. Returns the config
-    /// and whether a reset occurred (so the caller knows to persist defaults).
-    ///
-    /// Devices are bare `String`s, not an enum, so no `deserialize_or_default`
-    /// catches a stale value at the serde layer — they are normalized here
-    /// instead. Unlike the wire setter, which rejects an unparseable value
-    /// outright, a persisted value has no such option: a daemon that refused
-    /// to start over a stale config field would be worse than one that falls
-    /// back to the default, so the global default degrades to `"cpu"` and a
-    /// per-model device to "none of its own" rather than triggering a full
-    /// reset. The deprecated `cuda`/`metal` spellings normalize to `gpu`
-    /// rather than falling back, the same as the wire setter, so a config
-    /// written before this vocabulary still loads onto the accelerator it
-    /// always meant.
+    /// Parse config file `content`, falling back to defaults on a parse
+    /// error. See `super_engine_daemon::config::parse_or_reset`; what a
+    /// stale value is repaired to is `ConfigFile::normalize` above.
+    #[cfg(test)]
     fn parse_or_reset(content: &str) -> (Self, bool) {
-        use crate::daemon::device_management::parse_device_preference;
-        match toml::from_str::<DaemonConfig>(content) {
-            Ok(mut config) => {
-                config.device.preferred_device =
-                    parse_device_preference(&config.device.preferred_device)
-                        .unwrap_or_else(|| "cpu".to_string());
-                for settings in config
-                    .backends
-                    .models
-                    .values_mut()
-                    .flat_map(HashMap::values_mut)
-                {
-                    settings.device = settings.device.as_deref().and_then(parse_device_preference);
-                }
-                (config, false)
-            }
-            Err(e) => {
-                warn!("Failed to parse config: {e}. Resetting to defaults.");
-                (Self::default(), true)
-            }
-        }
+        super_engine_daemon::config::parse_or_reset(content)
     }
 
-    /// Load configuration from disk.
-    ///
-    /// Falls back to defaults when the file is missing or cannot be parsed
-    /// (e.g. after a format change). When falling back, the default config is
-    /// saved to disk so subsequent loads succeed cleanly. If individual fields
-    /// fell back to their defaults (a stale enum value via the shared
-    /// `deserialize_or_default` helper), the canonical form is rewritten so the
-    /// warning doesn't repeat next startup.
+    /// Load configuration from disk. See `super_engine_daemon::config::load`.
     #[must_use]
     pub fn load() -> Self {
-        let config_path = Self::get_config_path();
-
-        let Ok(content) = fs::read_to_string(&config_path) else {
-            return Self::default();
-        };
-
-        let (config, was_reset) = Self::parse_or_reset(&content);
-        if was_reset {
-            // Persist the regenerated defaults so subsequent loads are clean.
-            if let Err(e) = config.save() {
-                error!("Failed to save default config after parse error: {e}");
-            }
-        } else if let Ok(canonical) = toml::to_string_pretty(&config)
-            && canonical != content
-            && let Err(e) = config.save()
-        {
-            error!("Failed to rewrite config in canonical form: {e}");
-        }
-        config
+        super_engine_daemon::config::load(&Self::get_config_path())
     }
 
     /// Save configuration to disk. Blocking (`std::fs::write`); on the async
@@ -652,18 +492,7 @@ impl DaemonConfig {
     /// Returns an error if the configuration directory cannot be created,
     /// serialization fails, or the file cannot be written.
     pub fn save(&self) -> anyhow::Result<()> {
-        let config_path = Self::get_config_path();
-
-        // Create config directory if it doesn't exist
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let toml_content = toml::to_string_pretty(self)?;
-        fs::write(&config_path, toml_content)?;
-
-        debug!("Saved daemon config to {}", config_path.display());
-        Ok(())
+        super_engine_daemon::config::save(&Self::get_config_path(), self)
     }
 
     // Config mutators are PURE (Tier 3 #3): they mutate in-memory state only.
