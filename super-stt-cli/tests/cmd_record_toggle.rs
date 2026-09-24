@@ -66,6 +66,7 @@ impl Drop for DaemonGuard {
         let _ = self.child.wait();
         for p in &self.cleanup {
             let _ = std::fs::remove_file(p);
+            let _ = std::fs::remove_dir_all(p);
         }
     }
 }
@@ -75,13 +76,24 @@ fn spawn_daemon() -> (DaemonGuard, PathBuf) {
     let unique = format!("stt-cli-toggle-{}-{}", std::process::id(), next_uniq());
     let http_socket = tmp.join(format!("{unique}-http.sock"));
     let config_home = tmp.join(format!("{unique}-config"));
-    std::fs::create_dir_all(&config_home).expect("create config dir");
+    // Data and cache too: an unisolated data dir has the daemon discover, and
+    // start, whatever backends the developer has installed, and an unisolated
+    // cache has it overwrite their registry index.
+    let data_home = tmp.join(format!("{unique}-data"));
+    let cache_home = tmp.join(format!("{unique}-cache"));
+    for dir in [&config_home, &data_home, &cache_home] {
+        std::fs::create_dir_all(dir).expect("create test dir");
+    }
 
     let child = Command::new(locate_daemon_bin())
+        // In-memory keyring: session tokens stay out of the developer's.
+        .env("SUPER_STT_KEYRING_MOCK", "1")
         .env("SUPER_STT_AUTO_APPROVE", "1")
         .env("SUPER_STT_MUTE_CUES", "1")
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_DATA_HOME", &data_home)
+        .env("XDG_CACHE_HOME", &cache_home)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -91,7 +103,7 @@ fn spawn_daemon() -> (DaemonGuard, PathBuf) {
     // panic below must still kill and reap the daemon, not leak it.
     let guard = DaemonGuard {
         child,
-        cleanup: vec![http_socket.clone()],
+        cleanup: vec![http_socket.clone(), config_home, data_home, cache_home],
     };
 
     let deadline = Instant::now() + Duration::from_mins(2);

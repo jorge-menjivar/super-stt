@@ -81,6 +81,9 @@ fn spawn_daemon() -> (DaemonGuard, PathBuf) {
     // Empty, isolated data dir → the daemon discovers no backends and comes
     // up idle and fast, which is exactly what these commands need.
     std::fs::create_dir_all(&data_home).expect("create data dir");
+    // And the cache, or the daemon overwrites the developer's registry index.
+    let cache_home = tmp.join(format!("{unique}-cache"));
+    std::fs::create_dir_all(&cache_home).expect("create cache dir");
 
     let child = Command::new(locate_daemon_bin())
         .env("SUPER_STT_KEYRING_MOCK", "1")
@@ -89,6 +92,7 @@ fn spawn_daemon() -> (DaemonGuard, PathBuf) {
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
+        .env("XDG_CACHE_HOME", &cache_home)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -98,7 +102,7 @@ fn spawn_daemon() -> (DaemonGuard, PathBuf) {
     // panic below must still kill and reap the daemon, not leak it.
     let guard = DaemonGuard {
         child,
-        cleanup: vec![http_socket.clone(), config_home, data_home],
+        cleanup: vec![http_socket.clone(), config_home, data_home, cache_home],
     };
 
     let deadline = Instant::now() + Duration::from_mins(2);
