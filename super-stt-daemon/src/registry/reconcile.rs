@@ -39,7 +39,9 @@ pub async fn reconcile(
 }
 
 /// Move `active_backend` — the persisted config and the runtime mirror — onto
-/// `winner` when it named one of the directories just removed.
+/// `winner` when it named one of the directories just removed: by
+/// reconciliation here, or by an install that moved the backend to a new
+/// directory name.
 ///
 /// `active_backend` stores a directory name, and reconciliation is the last
 /// thing standing between that name and a directory that no longer exists.
@@ -60,7 +62,7 @@ pub async fn reconcile(
 /// directory move, not the user choosing a different backend. Clearing
 /// `preferred_model`/`preferred_provider` here would silently discard the
 /// user's model selection as a side effect of housekeeping.
-async fn repoint_active_backend(
+pub(crate) async fn repoint_active_backend(
     daemon: &crate::daemon::types::SuperSTTDaemon,
     removed: &[PathBuf],
     winner: &Path,
@@ -84,9 +86,9 @@ async fn repoint_active_backend(
     drop(cfg);
     *daemon.active_backend.write().await = Some(new_name.to_string());
     if let Err(e) = daemon.persist_config().await {
-        log::warn!("Failed to persist config after reconciling {active}: {e}");
+        log::warn!("Failed to persist config after repointing {active}: {e}");
     }
-    log::info!("Repointed active_backend from {active} to {new_name} after reconciliation");
+    log::info!("Repointed active_backend from {active} to {new_name}");
 }
 
 #[cfg(test)]
