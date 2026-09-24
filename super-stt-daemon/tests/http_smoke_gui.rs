@@ -109,6 +109,7 @@ async fn start_daemon_no_auto_approve() -> (DaemonGuard, PathBuf) {
 
     let child = Command::new(DAEMON_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
+        .env("SUPER_STT_MUTE_CUES", "1")
         .env("XDG_RUNTIME_DIR", &xdg)
         .env("XDG_CONFIG_HOME", &config_home)
         .env_remove("SUPER_STT_AUTO_APPROVE") // ensure the popup path runs

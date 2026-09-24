@@ -123,6 +123,7 @@ async fn start_daemon_with_auto_approve_timer() -> (DaemonGuard, PathBuf) {
 
     let child = Command::new(DAEMON_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
+        .env("SUPER_STT_MUTE_CUES", "1")
         // No SUPER_STT_AUTO_APPROVE — the daemon will spawn the popup.
         // The timer below makes the helper auto-approve so the test
         // doesn't hang waiting for human input.

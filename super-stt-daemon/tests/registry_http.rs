@@ -111,6 +111,7 @@ async fn start_daemon_with_registry_and_backend(
     let child = Command::new(DAEMON_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
         .env("SUPER_STT_AUTO_APPROVE", "1")
+        .env("SUPER_STT_MUTE_CUES", "1")
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("SUPER_STT_REGISTRY_URL", registry_url)
         .env("XDG_CONFIG_HOME", &config_home)

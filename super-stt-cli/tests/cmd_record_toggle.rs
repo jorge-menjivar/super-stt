@@ -79,6 +79,7 @@ fn spawn_daemon() -> (DaemonGuard, PathBuf) {
 
     let child = Command::new(locate_daemon_bin())
         .env("SUPER_STT_AUTO_APPROVE", "1")
+        .env("SUPER_STT_MUTE_CUES", "1")
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .stdout(Stdio::null())
@@ -110,6 +111,7 @@ fn run_cli(socket: &Path, args: &[&str]) -> (i32, String, String) {
     let cli_bin = DAEMON_BIN;
     let mut child = Command::new(cli_bin)
         .env("SUPER_STT_AUTO_APPROVE", "1")
+        .env("SUPER_STT_MUTE_CUES", "1")
         .env("SUPER_STT_HTTP_SOCKET", socket)
         .args(args)
         .stdout(Stdio::piped())
@@ -188,6 +190,7 @@ fn record_routes_to_transcribe_stop_when_already_recording() {
         let cli_bin = DAEMON_BIN;
         Command::new(cli_bin)
             .env("SUPER_STT_AUTO_APPROVE", "1")
+            .env("SUPER_STT_MUTE_CUES", "1")
             .env("SUPER_STT_HTTP_SOCKET", &socket)
             .args(["record", "--stop-mode", "manual-only"])
             .output()

@@ -116,6 +116,7 @@ fn spawn_daemon(_legacy_socket: &Path, http_socket: &Path) -> (Child, Vec<PathBu
     let child = Command::new(DAEMON_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
         .env("SUPER_STT_AUTO_APPROVE", "1")
+        .env("SUPER_STT_MUTE_CUES", "1")
         .env("SUPER_STT_HTTP_SOCKET", http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)

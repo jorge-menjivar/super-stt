@@ -66,6 +66,7 @@ async fn start_daemon() -> (DaemonGuard, PathBuf) {
     let child = Command::new(DAEMON_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1")
         .env("SUPER_STT_AUTO_APPROVE", "1")
+        .env("SUPER_STT_MUTE_CUES", "1")
         .env("SUPER_STT_HTTP_SOCKET", &http_socket)
         .env("XDG_CONFIG_HOME", &config_home)
         .env("XDG_DATA_HOME", &data_home)
