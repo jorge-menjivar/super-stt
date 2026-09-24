@@ -127,9 +127,10 @@ Per-entry fields beyond what `index.json` carries:
   both. The daemon matches an installed backend to this entry by `source`, so
   a backend installed from a custom repository or a local directory is matched
   the same way one installed from the registry is. `false` when nothing is
-  installed, when the installed version is at or ahead of the index's, or when
+  installed, when the installed version is at or ahead of the index's, when
   either version does not parse — so a stale or older index never advertises a
-  downgrade. Clients that want to *show* the versions still have both fields.
+  downgrade — or when `compatibility.compatible` is `false`, since a release
+  this host cannot install is not an update the user can take. Clients that want to *show* the versions still have both fields.
 
 ## Failure modes
 
