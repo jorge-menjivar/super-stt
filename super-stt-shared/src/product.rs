@@ -43,6 +43,24 @@ mod tests {
         assert_eq!(SUPER_STT.consent_helper(), "super-stt-consent");
     }
 
+    /// The macOS `LaunchAgent` plists name their log file in the variable
+    /// `logging::init` reads. The plists are text, so nothing else catches a
+    /// rename on one side only.
+    #[test]
+    fn launch_agents_set_the_log_file_variable() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
+        let key = format!("<key>{}</key>", SUPER_STT.env("LOG_FILE"));
+        for plist in [
+            "super-stt-daemon/launchd/ai.menjivar.super-stt.plist",
+            "super-stt-cli/launchd/ai.menjivar.super-stt.hotkey.plist",
+        ] {
+            let text = std::fs::read_to_string(root.join(plist)).unwrap();
+            assert!(text.contains(&key), "{plist} does not set {key}");
+        }
+    }
+
     /// Every topic names a scope the daemon understands, or no token could
     /// ever subscribe to it.
     #[test]
