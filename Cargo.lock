@@ -6868,7 +6868,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "super-engine-client"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc#afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc"
+source = "git+https://github.com/super-libre/super-engine?rev=7010eed104753005ef402c7fa5af24b2b9c47a8f#7010eed104753005ef402c7fa5af24b2b9c47a8f"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -6887,7 +6887,7 @@ dependencies = [
 [[package]]
 name = "super-engine-daemon"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc#afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc"
+source = "git+https://github.com/super-libre/super-engine?rev=7010eed104753005ef402c7fa5af24b2b9c47a8f#7010eed104753005ef402c7fa5af24b2b9c47a8f"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6933,7 +6933,7 @@ dependencies = [
 [[package]]
 name = "super-engine-forge"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc#afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc"
+source = "git+https://github.com/super-libre/super-engine?rev=7010eed104753005ef402c7fa5af24b2b9c47a8f#7010eed104753005ef402c7fa5af24b2b9c47a8f"
 dependencies = [
  "async-trait",
  "log",
@@ -6947,7 +6947,7 @@ dependencies = [
 [[package]]
 name = "super-engine-indexer"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc#afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc"
+source = "git+https://github.com/super-libre/super-engine?rev=7010eed104753005ef402c7fa5af24b2b9c47a8f#7010eed104753005ef402c7fa5af24b2b9c47a8f"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6972,7 +6972,7 @@ dependencies = [
 [[package]]
 name = "super-engine-installer"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc#afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc"
+source = "git+https://github.com/super-libre/super-engine?rev=7010eed104753005ef402c7fa5af24b2b9c47a8f#7010eed104753005ef402c7fa5af24b2b9c47a8f"
 dependencies = [
  "clap",
  "dirs",
@@ -6993,7 +6993,7 @@ dependencies = [
 [[package]]
 name = "super-engine-protocol"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc#afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc"
+source = "git+https://github.com/super-libre/super-engine?rev=7010eed104753005ef402c7fa5af24b2b9c47a8f#7010eed104753005ef402c7fa5af24b2b9c47a8f"
 dependencies = [
  "dirs",
  "env_logger",
@@ -7010,7 +7010,7 @@ dependencies = [
 [[package]]
 name = "super-engine-spec"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc#afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc"
+source = "git+https://github.com/super-libre/super-engine?rev=7010eed104753005ef402c7fa5af24b2b9c47a8f#7010eed104753005ef402c7fa5af24b2b9c47a8f"
 dependencies = [
  "hex",
  "ring",
@@ -7027,7 +7027,7 @@ dependencies = [
 [[package]]
 name = "super-engine-test-daemon"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc#afba4a50d70b8202ccfcd9e51dcbb601cf4aeafc"
+source = "git+https://github.com/super-libre/super-engine?rev=7010eed104753005ef402c7fa5af24b2b9c47a8f#7010eed104753005ef402c7fa5af24b2b9c47a8f"
 dependencies = [
  "http-body-util",
  "hyper",

@@ -233,10 +233,22 @@ test-install:
 # /usr/lib/systemd/user, so it is deliberately NOT part of `just ci` and
 # refuses to run without SUPER_STT_INSTALL_E2E_YES=1. CI runs it on disposable
 # runners (.github/workflows/install-e2e.yml); locally, run it in a container.
+# The script is super-engine's, fetched at the rev install-e2e.yml pins, so a
+# local run tests what CI does. It installs from the repo install.sh names.
+# Set SUPER_STT_INSTALLER_BIN to a built super-stt-install to run the local
+# pass too.
 # Usage: just test-install-e2e [stable|beta]
 [doc("End-to-end install test (DESTRUCTIVE: real install into /usr/local)")]
 test-install-e2e channel="stable":
-    bash scripts/test-install-e2e.sh {{ channel }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rev=$(grep -oP 'super-engine/\.github/actions/install-e2e@\K[0-9a-f]{40}' .github/workflows/install-e2e.yml)
+    repo=$(grep -oP '^GITHUB_REPO="\K[^"]+' install.sh)
+    script=$(mktemp)
+    trap 'rm -f "$script"' EXIT
+    curl -fsSL -o "$script" \
+      "https://raw.githubusercontent.com/super-libre/super-engine/$rev/.github/actions/install-e2e/test-install-e2e.sh"
+    GITHUB_REPOSITORY="$repo" bash "$script" super-stt stt {{ channel }}
 
 # Load every committed old-config fixture against the current config types.
 config-compat *args:
