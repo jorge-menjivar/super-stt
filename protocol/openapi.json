@@ -36,7 +36,7 @@
           "auth"
         ],
         "summary": "Ask the user for a session token (no token needed)",
-        "description": "The consent handshake, and the only endpoint reachable without a token.\n\nThe daemon reads `SO_PEERCRED` on your connection, resolves `/proc/<pid>/exe`, and shows the user a popup naming that binary and the scopes you asked for. On Allow it mints a 32-byte token bound to that binary and valid for 30 days.\n\nA denial is remembered for the `(binary, scopes)` pair for the rest of the daemon's lifetime and answers `403` immediately without re-prompting — renaming your app does not clear it, since the key is the binary. Restarting the daemon does.\n\nSetting `SUPER_STT_AUTO_APPROVE=1` in the daemon's environment skips the popup entirely; it is for tests and CI, not for production.",
+        "description": "The consent handshake, and the only endpoint reachable without a token.\n\nThe daemon reads `SO_PEERCRED` on your connection, resolves `/proc/<pid>/exe`, and shows the user a popup naming that binary and the scopes you asked for. On Allow it mints a 32-byte token bound to that binary and valid for 30 days.\n\nA denial is remembered for the `(binary, scopes)` pair for the rest of the daemon's lifetime and answers `403` immediately without re-prompting — renaming your app does not clear it, since the key is the binary. Restarting the daemon does.\n\nDo not call this to find out whether a token you already hold is still good: that is `GET /auth/status`, which never prompts.\n\nSetting the product's `AUTO_APPROVE` variable to `1` in the daemon's environment (`<PREFIX>_AUTO_APPROVE`, where `<PREFIX>` is the product's) skips the popup entirely; it is honored only in debug builds, for tests and CI, so a stray environment variable cannot defeat the consent gate in a shipped binary.",
         "operationId": "auth_request",
         "requestBody": {
           "content": {
@@ -98,7 +98,7 @@
           "auth"
         ],
         "summary": "Check the held token without prompting (any valid token)",
-        "description": "Reports what the presented token is good for, and never opens a consent popup — which is what makes it the right probe for a headless or CLI client. Reaching this handler at all means the token validated.\n\nUse it to fail fast on a token about to expire, rather than discovering it mid-operation.",
+        "description": "Reports what the presented token is good for, and never opens a consent popup — which is what makes it the right probe for a headless or CLI client. Reaching this handler at all means the token validated.\n\nUse it to fail fast on a token about to expire, rather than discovering it mid-operation. `GET /ping` proves the daemon is up; this proves the token still is.",
         "operationId": "auth_status",
         "responses": {
           "200": {
@@ -6380,8 +6380,8 @@
             },
             "description": "The scopes to request, at least one. Every entry must be known or the\nwhole request is refused; ask only for what you need, since the user\nsees the list.",
             "example": [
-              "transcribe",
-              "status"
+              "status",
+              "settings"
             ]
           },
           "version": {
@@ -6412,7 +6412,11 @@
             "items": {
               "type": "string"
             },
-            "description": "The scopes the token was minted under."
+            "description": "The scopes the token was minted under.",
+            "example": [
+              "status",
+              "settings"
+            ]
           },
           "status": {
             "type": "string",
@@ -6777,7 +6781,7 @@
           },
           "needs_client_update": {
             "type": "boolean",
-            "description": "Whether the block is \"this Super STT is too old\" rather than \"this\nmachine cannot run it\".\n\nThe two are hidden differently. A host that lacks the right GPU will\nnever run the asset, so Browse tucks it behind \"Show incompatible\"; a\nSuper STT one version behind is a thing the user can fix in a minute,\nand hiding it hides the only notice they would get. `false` on an older\ndaemon that does not send the field, which lists as it always did."
+            "description": "Whether the block is \"this daemon is too old\" rather than \"this\nmachine cannot run it\".\n\nThe two are hidden differently. A host that lacks the right GPU will\nnever run the asset, so Browse tucks it behind \"Show incompatible\"; a\ndaemon one version behind is a thing the user can fix in a minute,\nand hiding it hides the only notice they would get. `false` on an older\ndaemon that does not send the field, which lists as it always did."
           },
           "reason": {
             "type": [
@@ -7154,27 +7158,42 @@
         }
       },
       "IndexModel": {
-        "type": "object",
-        "description": "The browse-only model subset the catalog and host-compatibility filter need\nbefore download. The authoritative manifest (languages, files, …) ships as\nthe pinned `manifest` asset and is installed verbatim — it is not re-encoded\nhere. Also the leaf type for `/registry/backends` (`RegistryModel`).",
-        "required": [
-          "name",
-          "supported_devices"
-        ],
-        "properties": {
-          "name": {
-            "type": "string"
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "The per-model fields Super STT's index carries beside `name` and\n`supported_devices`.",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "description": "What the model is for: `\"transcription\"` (the default) or\n`\"post_processor\"`. Lets Browse show that a backend provides a\npost-processor before it is installed. `default` so an index published\nbefore the field existed still parses, reading every model as\ntranscribing — which is what it was."
+                  }
+                }
+              }
+            ],
+            "description": "The fields the product adds ([`Product::IndexModel`])."
           },
-          "role": {
-            "type": "string",
-            "description": "What the model is for: `\"transcription\"` (the default) or\n`\"post_processor\"`. Lets Browse show that a backend provides a\npost-processor before it is installed. `default` so an index published\nbefore the field existed still parses, reading every model as\ntranscribing — which is what it was."
-          },
-          "supported_devices": {
-            "type": "array",
-            "items": {
-              "type": "string"
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "supported_devices"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "supported_devices": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             }
           }
-        }
+        ],
+        "description": "The browse-only model subset the catalog and host-compatibility filter need\nbefore download. The authoritative manifest (languages, files, …) ships as\nthe pinned `manifest` asset and is installed verbatim — it is not re-encoded\nhere. Also the leaf type of a daemon's registry listing (`RegistryModel`)."
       },
       "IndexOption": {
         "type": "object",
@@ -7402,6 +7421,34 @@
           "status": {
             "type": "string",
             "example": "success"
+          }
+        }
+      },
+      "LoadProgress": {
+        "type": "object",
+        "description": "A backend's own account of its load in progress.",
+        "properties": {
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The kind of load: `initial_setup` for a first load that pays a one-time\ncost, `loading` otherwise. Absent when the backend does not say."
+          },
+          "progress": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "How far through `step` the load is, 0.0 to 1.0, or through the whole\nload when there is no `step`. Absent when the backend cannot tell."
+          },
+          "step": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the load is doing now: `loading_weights`, `building_kernels` or\n`warming_up`, or an id from a newer backend, which a client shows as a\nload in progress. Absent when the backend does not say."
           }
         }
       },
@@ -7682,7 +7729,7 @@
       },
       "PreviewResponse": {
         "type": "object",
-        "description": "Answer to `POST /registry/backend/preview`: what a source would install,\nin the same shape a catalog listing uses, so a client renders it with\nwhatever it already renders Browse cards with.",
+        "description": "Answer to a preview request: what a source would install, in the same\nshape a catalog listing uses, so a client renders it with whatever it\nalready renders Browse cards with.",
         "required": [
           "backend"
         ],
@@ -7750,7 +7797,7 @@
       },
       "ReasonEnvelope": {
         "type": "object",
-        "description": "The auth-failure envelope: `message` names the failure and `data.reason`\nsays which of its cases occurred.\n\nDistinct from [`ErrorEnvelope`] because the auth surface predates\n`error_code` and clients read `data.reason` there. Both are documented\nrather than reconciled, since changing either is a breaking wire change.",
+        "description": "The auth-failure envelope: `message` names the failure and `data.reason`\nsays which of its cases occurred.\n\nDistinct from `ErrorEnvelope` because the auth surface predates\n`error_code` and clients read `data.reason` there. Both are documented\nrather than reconciled, since changing either is a breaking wire change.",
         "required": [
           "status",
           "message",
@@ -7885,7 +7932,7 @@
               "string",
               "null"
             ],
-            "description": "The Super STT release that first understood `contract`, as stamped by\nthe indexer. `None` for an index that predates the stamp."
+            "description": "The release of the daemon's product that first understood `contract`,\nas stamped by the indexer. `None` for an index that predates the\nstamp."
           },
           "models": {
             "type": "array",
@@ -8511,6 +8558,17 @@
           "download": {
             "$ref": "#/components/schemas/SwitchDownload",
             "description": "Byte and file progress, for the `verifying` and `downloading` phases:\nbytes hashed off disk and bytes received respectively."
+          },
+          "load": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LoadProgress",
+                "description": "The backend's own account of the load, in the `loading_model` phase:\nits phase, its step, and how far through the step it is. Absent until\nthe backend reports any of it, and from backends that never do."
+              }
+            ]
           },
           "phase": {
             "type": "string",
