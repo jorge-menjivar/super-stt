@@ -369,10 +369,10 @@ fn canonical_base_url(value: &str) -> Option<String> {
     Some(value.trim().to_string())
 }
 
-/// Returns an error `Response` when `value` is not of the option's declared
-/// type, falls outside its declared bounds, or is not one of its declared
-/// choices, `None` when the write can proceed. Each refusal names which of the
-/// three it broke.
+/// Returns an error `Response` when `value` is not one the option takes — its
+/// type, its bounds or its choices, see
+/// `super_engine_spec::manifest::Opt::permits_value` — `None` when the write
+/// can proceed.
 ///
 /// Runs after [`guard_missing`], so a missing backend or option is already
 /// reported and this only ever looks at an option that exists.
@@ -384,45 +384,11 @@ async fn guard_not_a_choice(
 ) -> Option<Response> {
     let backend = find_backend(s, source).await?;
     let opt = backend.options.iter().find(|o| o.name == name)?;
-    if !opt.accepts_the_type(value) {
-        let wanted = match opt.declared_type() {
-            OptionType::Integer => "an integer",
-            OptionType::Float => "a number",
-            OptionType::Bool => "`true` or `false`",
-            OptionType::String => "text",
-        };
-        return Some(json_error_msg(
-            StatusCode::BAD_REQUEST,
-            "invalid_value",
-            &format!("option `{name}` takes {wanted}, not {value:?}"),
-        ));
-    }
-    if !opt.is_in_range(value) {
-        let bound = match (opt.min, opt.max) {
-            (Some(low), Some(high)) => format!("between {low} and {high}"),
-            (Some(low), None) => format!("{low} or more"),
-            (None, Some(high)) => format!("{high} or less"),
-            (None, None) => unreachable!("a value only falls outside a declared bound"),
-        };
-        return Some(json_error_msg(
-            StatusCode::BAD_REQUEST,
-            "invalid_value",
-            &format!("option `{name}` takes a value {bound}, not {value:?}"),
-        ));
-    }
-    if opt.is_a_choice(value) {
-        return None;
-    }
-    let offered = opt
-        .choices
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
+    let refusal = opt.permits_value(value).err()?;
     Some(json_error_msg(
         StatusCode::BAD_REQUEST,
         "invalid_value",
-        &format!("option `{name}` accepts one of: {offered}"),
+        &refusal,
     ))
 }
 
