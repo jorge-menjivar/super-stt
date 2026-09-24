@@ -127,6 +127,7 @@ impl SuperSTTDaemon {
                 crate::output::notification::Notifier::desktop(),
             )),
             self_update: Arc::new(crate::self_update::checker()),
+            loading: Arc::new(crate::daemon::types::StageLoadGates::default()),
         };
 
         daemon.post_init().await;

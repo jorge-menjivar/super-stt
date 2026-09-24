@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::config::DaemonConfig;
+use crate::daemon::device_management::PipelineStage;
 use crate::daemon::events::EventBus;
 use crate::download_progress::DownloadStateManager;
 use crate::input::audio::AudioProcessor;
@@ -8,6 +9,7 @@ use crate::services::dbus::DBusManager;
 use crate::stt_models::backends::{self, DiscoveredBackend};
 use anyhow::Result;
 use std::sync::{Arc, RwLock};
+use super_engine_daemon::load_gate::LoadGate;
 use super_stt_shared::models::protocol::{DaemonStatusEvent, PreviewSource};
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
@@ -122,6 +124,65 @@ pub struct SuperSTTDaemon {
     // Self-update check state: last completed check + notify-once
     // persistence. See `crate::self_update`.
     pub self_update: Arc<crate::self_update::SelfUpdateChecker>,
+    // One model loads into each stage at a time, and the newest request for
+    // a stage wins. Taken in `instantiate_backend`, which every load of either
+    // stage passes through.
+    pub loading: Arc<StageLoadGates>,
+}
+
+/// A [`LoadGate`] for each pipeline stage.
+///
+/// One per stage, not one for the daemon: both stages are meant to hold a
+/// model at once, so a request for one must never supersede a load into the
+/// other.
+#[derive(Debug, Default)]
+pub struct StageLoadGates {
+    transcription: LoadGate,
+    post_processor: LoadGate,
+}
+
+impl StageLoadGates {
+    /// The gate every load into `stage` passes.
+    #[must_use]
+    pub fn get(&self, stage: PipelineStage) -> &LoadGate {
+        match stage {
+            PipelineStage::Transcription => &self.transcription,
+            PipelineStage::PostProcessor => &self.post_processor,
+        }
+    }
+}
+
+#[cfg(test)]
+mod stage_load_gate_tests {
+    use super::{PipelineStage, StageLoadGates};
+
+    /// A request for the post-processor arriving while a transcription model
+    /// waits to load must not make that load give up: the stages hold
+    /// different models.
+    #[tokio::test]
+    async fn a_request_for_one_stage_does_not_supersede_the_other() {
+        let gates = StageLoadGates::default();
+        let transcription = gates.get(PipelineStage::Transcription).ticket();
+        let _post_processor = gates.get(PipelineStage::PostProcessor).ticket();
+        assert!(
+            gates
+                .get(PipelineStage::Transcription)
+                .enter(transcription)
+                .await
+                .is_some(),
+            "a post-processor request superseded a transcription load"
+        );
+    }
+
+    /// Within a stage the newest request still wins.
+    #[tokio::test]
+    async fn a_newer_request_for_the_same_stage_supersedes() {
+        let gates = StageLoadGates::default();
+        let gate = gates.get(PipelineStage::PostProcessor);
+        let older = gate.ticket();
+        let _newer = gate.ticket();
+        assert!(gate.enter(older).await.is_none());
+    }
 }
 
 /// A daemon wired up with inert defaults: no model, no backends, nothing
@@ -164,6 +225,7 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
             crate::output::notification::Notifier::fake(true).0,
         )),
         self_update: Arc::new(crate::self_update::checker()),
+        loading: Arc::new(StageLoadGates::default()),
     }
 }
 

@@ -15,9 +15,22 @@ impl SuperSTTDaemon {
     /// preference) is resolved into the concrete accelerator right here
     /// rather than by each caller.
     ///
+    /// Being the one place every load passes through, it is also where loads
+    /// are serialized, one at a time per `stage`. A load takes minutes and
+    /// every caller empties the stage's slot before starting, so without this
+    /// two of them overlap: the startup load and a user's pick would both spawn
+    /// a backend and put two models on one GPU. The gate is taken here rather
+    /// than in each caller because no caller should be exempt, and one that
+    /// forgot would look exactly like that bug.
+    ///
+    /// A request superseded while it waits gives up instead of loading a model
+    /// nobody is asking for any more. That is an error rather than a silent
+    /// return, so the caller's log says what happened.
+    ///
     /// # Errors
-    /// Returns an error if no installed backend serves the model, the backend
-    /// kind is unsupported in this build, or instantiation fails.
+    /// Returns an error if a newer load into `stage` superseded this one while
+    /// it waited, no installed backend serves the model, the backend kind is
+    /// unsupported in this build, or instantiation fails.
     pub async fn instantiate_backend(
         &self,
         name: &str,
@@ -25,6 +38,14 @@ impl SuperSTTDaemon {
         device_pref: &str,
         stage: crate::daemon::device_management::PipelineStage,
     ) -> Result<(Box<dyn Transcribe>, ModelDefinition)> {
+        // Claimed before queueing, so waiting here is what reveals a newer
+        // request rather than hiding it.
+        let gate = self.loading.get(stage);
+        let ticket = gate.ticket();
+        let Some(_gate) = gate.enter(ticket).await else {
+            bail!("loading {name} was superseded by a newer model load");
+        };
+
         let (backend, def) = {
             let backends = self.backends.read().await;
             let (b, d) = backends::find_model(&backends, name, source)
