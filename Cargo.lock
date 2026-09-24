@@ -6868,7 +6868,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "super-engine-client"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
+source = "git+https://github.com/super-libre/super-engine?rev=af3e15a3064dbecf27b1476246d34ed5630f7327#af3e15a3064dbecf27b1476246d34ed5630f7327"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -6887,11 +6887,13 @@ dependencies = [
 [[package]]
 name = "super-engine-daemon"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
+source = "git+https://github.com/super-libre/super-engine?rev=af3e15a3064dbecf27b1476246d34ed5630f7327#af3e15a3064dbecf27b1476246d34ed5630f7327"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "base64",
+ "bytes",
  "chrono",
  "flate2",
  "futures-util",
@@ -6916,15 +6918,19 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-tungstenite",
  "tokio-util",
  "utoipa",
  "uuid",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wasmtime-wasi-http",
 ]
 
 [[package]]
 name = "super-engine-forge"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
+source = "git+https://github.com/super-libre/super-engine?rev=af3e15a3064dbecf27b1476246d34ed5630f7327#af3e15a3064dbecf27b1476246d34ed5630f7327"
 dependencies = [
  "async-trait",
  "log",
@@ -6938,7 +6944,7 @@ dependencies = [
 [[package]]
 name = "super-engine-protocol"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
+source = "git+https://github.com/super-libre/super-engine?rev=af3e15a3064dbecf27b1476246d34ed5630f7327#af3e15a3064dbecf27b1476246d34ed5630f7327"
 dependencies = [
  "dirs",
  "env_logger",
@@ -6954,7 +6960,7 @@ dependencies = [
 [[package]]
 name = "super-engine-spec"
 version = "0.1.0"
-source = "git+https://github.com/super-libre/super-engine?rev=79895b8b9428f618169264b79ffa1be397356c3b#79895b8b9428f618169264b79ffa1be397356c3b"
+source = "git+https://github.com/super-libre/super-engine?rev=af3e15a3064dbecf27b1476246d34ed5630f7327#af3e15a3064dbecf27b1476246d34ed5630f7327"
 dependencies = [
  "hex",
  "ring",
@@ -7073,7 +7079,6 @@ dependencies = [
  "gpu-probe",
  "hex",
  "hound",
- "http-body",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -7108,9 +7113,6 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "uuid",
- "wasmtime",
- "wasmtime-wasi",
- "wasmtime-wasi-http",
  "wiremock",
  "zbus",
 ]

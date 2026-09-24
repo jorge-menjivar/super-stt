@@ -1,4 +1,4 @@
-package super-stt:realtime@0.1.0;
+package super-engine:realtime@0.1.0;
 
 interface ws {
     use wasi:io/poll@0.2.0.{pollable};
