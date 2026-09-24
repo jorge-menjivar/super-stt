@@ -141,6 +141,34 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "backend": {
+            "properties": {
+              "contract": {
+                "const": "v3"
+              }
+            },
+            "required": [
+              "contract"
+            ]
+          }
+        },
+        "required": [
+          "backend"
+        ]
+      },
+      "then": {
+        "properties": {
+          "backend": {
+            "required": [
+              "id"
+            ]
+          }
+        }
+      }
     }
   ],
   "definitions": {
@@ -187,7 +215,7 @@
               "$ref": "#/definitions/Contract"
             }
           ],
-          "description": "The backend-protocol contract version implemented."
+          "description": "The backend-protocol contract generation implemented. See\n[`Generation`]."
         },
         "description": {
           "description": "One-line, human-readable summary shown in the registry/Browse listing.\nRequired for every backend.",
@@ -199,7 +227,7 @@
         },
         "id": {
           "default": null,
-          "description": "Globally unique reverse-DNS identifier, e.g. `app.super-stt.voxtral`.\nNames the directory this backend installs into. Optional on disk so a\nbackend installed before the field existed keeps loading; required for\nregistry listing, which the indexer enforces.",
+          "description": "Globally unique reverse-DNS identifier, e.g. `com.example.backend`.\nNames the directory this backend installs into. Optional on disk so a\nbackend installed before the field existed keeps loading; required for\nregistry listing, which the indexer enforces.",
           "type": [
             "string",
             "null"
@@ -448,7 +476,7 @@
       "type": "object"
     },
     "Contract": {
-      "description": "Backend-protocol contract version: the one thing a manifest declares about\nwhat it implements.\n\nA contract generation names a set of manifest fields and backend routes.\nEach generation is additive over the one before — v2 is v1 plus the\n`[[models]].role` field and the `POST /v1/process` route — so a backend\ndeclares the *lowest* generation whose fields it uses, and a daemon\nsupports every generation up to the one it was built with.\n\nThis is a closed enum on purpose. A daemon that predates a generation\ncannot parse a manifest declaring it, which is what stops such a daemon\nfrom installing a backend it cannot drive: the refusal needs no field the\nold daemon would have to know about, because it is the *absence* of\nknowledge that refuses. Every generation added here therefore also gates\nitself against every daemon released before it.\n\nVariant order is generation order; the derived `Ord` relies on it.",
+      "description": "Backend-protocol contract version: the one thing a manifest declares about\nwhat it implements.\n\nA contract generation names a set of manifest fields and backend routes.\nEach generation is additive over the one before — v2 is v1 plus the\n`[[models]].role` field and the `POST /v1/process` route — so a backend\ndeclares the *lowest* generation whose fields it uses, and a daemon\nsupports every generation up to the one it was built with. Closed on\npurpose; see [`Generation`].\n\nVariant order is generation order; the derived `Ord` relies on it.",
       "oneOf": [
         {
           "const": "v1",
@@ -458,6 +486,11 @@
         {
           "const": "v2",
           "description": "v1 plus `[[models]].role` and `POST /v1/process` — a backend may serve\ntranscript post-processors.",
+          "type": "string"
+        },
+        {
+          "const": "v3",
+          "description": "v2 plus nothing in the manifest: what v3 adds is what the daemon\nprovides. A subprocess backend is granted a cache directory that\nsurvives the process (`SUPER_STT_BACKEND_CACHE_DIR`, with\n`XDG_CACHE_HOME` and `CUDA_CACHE_PATH` pointed into it), and the\nload-progress fields of `GET /v1/status` (`phase`, `step`, `progress`)\nare read. A backend that builds GPU kernels at load needs both: without\nthe cache it rebuilds them on every load, and without the progress it\nruns into the flat load limit of a daemon that predates the stall rule.",
           "type": "string"
         }
       ]
@@ -475,11 +508,151 @@
     },
     "FileSpec": {
       "additionalProperties": false,
-      "description": "One `[[models.files]]` entry: a single file to download and where to put it.\n\nSource-agnostic — a file is just a URL, fetched the same way regardless of\nhost. Hugging Face is reached by writing its plain resolve URL, with no\nspecial treatment.",
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "cuda_major": false,
+              "cuda_sm": false
+            }
+          },
+          "if": {
+            "properties": {
+              "accel": {
+                "anyOf": [
+                  {
+                    "const": "cuda"
+                  },
+                  {
+                    "contains": {
+                      "const": "cuda"
+                    },
+                    "type": "array"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "accel"
+            ]
+          },
+          "then": true
+        },
+        {
+          "else": {
+            "properties": {
+              "gfx": false
+            }
+          },
+          "if": {
+            "properties": {
+              "accel": {
+                "anyOf": [
+                  {
+                    "const": "rocm"
+                  },
+                  {
+                    "contains": {
+                      "const": "rocm"
+                    },
+                    "type": "array"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "accel"
+            ]
+          },
+          "then": true
+        },
+        {
+          "else": {
+            "properties": {
+              "vulkan_api": false
+            }
+          },
+          "if": {
+            "properties": {
+              "accel": {
+                "anyOf": [
+                  {
+                    "const": "vulkan"
+                  },
+                  {
+                    "contains": {
+                      "const": "vulkan"
+                    },
+                    "type": "array"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "accel"
+            ]
+          },
+          "then": true
+        }
+      ],
+      "description": "One `[[models.files]]` entry: a single file to download and where to put it.\n\nSource-agnostic — a file is just a URL, fetched the same way regardless of\nhost. Hugging Face is reached by writing its plain resolve URL, with no\nspecial treatment.\n\nAn entry may also carry a **host selector** — `accel`, `cuda_major`,\n`cuda_sm`, `gfx`, `vulkan_api` — written in the same vocabulary\n[`SubprocessAsset`] uses for a build. Entries sharing a\n`destination` are then variants of one file: the daemon scores each against\nthe host exactly as it scores build variants, downloads the best match, and\nleaves the rest alone. That is what lets a model publish per-architecture\nweights, or a kernel cache compiled for one GPU, without a separate build of\nthe backend to carry them.\n\nAn entry with no selector matches every host, which is what an entry\ndeclaring only `url` and `destination` is. That is what lets the selector\nsit in v1 rather than needing a generation to gate it: it changes nothing\nabout a manifest that does not use it.",
       "properties": {
+        "accel": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Accel"
+            },
+            {
+              "items": {
+                "$ref": "#/definitions/Accel"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          ]
+        },
+        "cuda_major": {
+          "default": null,
+          "description": "Highest CUDA major version this variant needs — it matches a host whose\ninstalled CUDA runtime is at least this. Allowed only with `cuda` in\n`accel`; omit to match any CUDA runtime.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cuda_sm": {
+          "oneOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          ]
+        },
         "destination": {
-          "description": "Relative file path (including filename) under the backend directory to\nwrite the download to, e.g. `models/whisper-tiny/config.json`.\nValidated as a safe relative path so it cannot escape the backend dir.",
+          "description": "Relative file path (including filename) under the backend directory to\nwrite the download to, e.g. `models/model/config.json`.\nValidated as a safe relative path so it cannot escape the backend dir.\n\nAlso the variant key: every entry writing to one `destination` is a\ncandidate for it, and exactly one of them is downloaded. The backend\ntherefore reads a fixed path and never learns which variant it got.",
           "type": "string"
+        },
+        "gfx": {
+          "default": [],
+          "description": "AMD architecture targets this variant is built for, in `--offload-arch`\nspelling. Allowed only with `rocm` in `accel`; omit to match any AMD\nhost.",
+          "items": {
+            "$ref": "#/definitions/GfxSpec"
+          },
+          "type": "array"
+        },
+        "optional": {
+          "default": false,
+          "description": "Whether the model can load without this file. Default `false`.\n\nA destination none of whose variants match the host is a hole, and the\ntwo kinds of hole want opposite handling. Weights are load-bearing: the\nload fails, naming what the host offered and what the variants wanted,\nwhich beats a backend erroring on a file it was never given. A\npre-warmed kernel cache is not: the backend compiles its own when the\nfile is absent, so an unlisted GPU should still load, just slower.\n`optional = true` is that second case.\n\nIt describes the destination rather than the entry, so the variants of\none destination must agree on it.",
+          "type": "boolean"
         },
         "sha256": {
           "default": null,
@@ -490,8 +663,20 @@
           ]
         },
         "url": {
-          "description": "Full download URL for this file, e.g.\n`https://huggingface.co/openai/whisper-tiny/resolve/main/config.json`.",
+          "description": "Full download URL for this file, e.g.\n`https://huggingface.co/example/model/resolve/main/config.json`.",
           "type": "string"
+        },
+        "vulkan_api": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/VulkanApi"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum Vulkan API version a host needs to use this variant. Allowed\nonly with `vulkan` in `accel`."
         }
       },
       "required": [
@@ -575,7 +760,7 @@
         },
         "realtime": {
           "default": false,
-          "description": "When `true`, the model is driven over the consumer WebSocket endpoint\nrather than batch `POST /v1/transcribe`. Requires\n`[capabilities] websocket = true`. Default `false`.",
+          "description": "When `true`, the model is driven over the realtime WebSocket transport\nrather than batch requests. Requires `[capabilities] websocket = true`.\nDefault `false`.",
           "type": "boolean"
         },
         "role": {
@@ -662,7 +847,7 @@
           }
         }
       ],
-      "description": "One `[[options]]` declaration — non-secret configuration the backend reads\nas an `x-stt-option-<name>` request header.",
+      "description": "One `[[options]]` declaration — non-secret configuration the backend reads\nas the product's option request header (`x-<short name>-option-<name>`).",
       "properties": {
         "choices": {
           "default": [],
@@ -697,6 +882,24 @@
             "null"
           ]
         },
+        "max": {
+          "default": null,
+          "description": "Highest value a numeric option accepts, inclusive. See [`Opt::min`].",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "min": {
+          "default": null,
+          "description": "Lowest value a numeric option accepts, inclusive.\n\nA bound the daemon keeps, not a hint: a write outside it is refused.\nOnly for `integer` and `float` — a range over strings is not a thing\nthe manifest can mean, and the indexer refuses one.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "name": {
           "description": "`snake_case` identifier the backend reads the value by. Unique within\nthe table.",
           "type": "string"
@@ -705,6 +908,15 @@
           "default": false,
           "description": "Whether a value must be set before the backend can load. Default\n`false`.",
           "type": "boolean"
+        },
+        "step": {
+          "default": null,
+          "description": "The increment a numeric option moves in.\n\nDeclaring it alongside `min` and `max` is what turns the option into a\nslider, the way declaring `choices` turns one into a dropdown: a\ncontrol that can only be dragged needs both ends and a grid to land on,\nand an option that has all three has nothing a text box would add.\n\nThe grid is the control's, not the contract's. The daemon enforces the\nbounds and leaves the step to the client, because a value between two\nnotches is still a value the backend asked to be able to receive —\nrefusing it would make the option narrower than its own range says, and\nwould turn every float that is not exactly representable into a bug\nreport.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "type": {
           "anyOf": [
@@ -735,6 +947,10 @@
           "type": "integer"
         },
         {
+          "format": "double",
+          "type": "number"
+        },
+        {
           "type": "boolean"
         }
       ],
@@ -745,13 +961,14 @@
       "enum": [
         "string",
         "integer",
+        "float",
         "bool"
       ],
       "type": "string"
     },
     "Secret": {
       "additionalProperties": false,
-      "description": "One `[[secrets]]` declaration — an encrypted credential the backend reads\nas an `x-stt-secret-<name>` request header.",
+      "description": "One `[[secrets]]` declaration — an encrypted credential the backend reads\nas the product's secret request header (`x-<short name>-secret-<name>`).",
       "properties": {
         "description": {
           "description": "Help text shown beside the input in the settings UI.",

@@ -28,7 +28,7 @@
         },
         "id": {
           "default": null,
-          "description": "Reverse-DNS identifier for the backend, e.g. `com.example.voxtral`.\nMust equal the `[backend].id` of the release manifest this entry points\nat. Required — the generated `registry.schema.json` says so, and the\nindexer refuses an entry without one.\n\n`Option` only because six entries predate the requirement and their\npublished manifests declare no `[backend].id` to match against. The\nindexer tolerates exactly those (`registry_toml::GRANDFATHERED`) so the\ncatalog keeps building; the schema flags them, which is the backlog.",
+          "description": "Reverse-DNS identifier for the backend, e.g. `com.example.backend`.\nMust equal the `[backend].id` of the release manifest this entry points\nat. Required — the generated `registry.schema.json` says so, and the\nindexer refuses an entry without one.\n\n`Option` only because some entries predate the requirement and their\npublished manifests declare no `[backend].id` to match against. A\nproduct's indexer tolerates exactly those so its catalog keeps\nbuilding; the schema flags them, which is the backlog.",
           "type": [
             "string",
             "null"
