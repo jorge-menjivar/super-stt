@@ -610,6 +610,36 @@ async fn list_backends_catalog_and_option_override() {
     assert!(cat[0]["allowed_hosts"][1].is_null());
 }
 
+/// A numeric option's bounds and step reach the catalog. The daemon already
+/// refuses a write outside the bounds, so a client that cannot see them can
+/// only find them by being refused; and with all three a client renders a
+/// slider rather than a free-text field.
+#[tokio::test]
+async fn the_catalog_lists_an_options_bounds() {
+    use super_stt_registry_types::manifest::OptionType;
+
+    let daemon = test_daemon().await;
+    let source = "github.com/x/opts";
+    let mut backend = backend_with_option(source, "temperature");
+    let opt = &mut backend.options[0];
+    opt.r#type = Some(OptionType::Float);
+    opt.min = Some(0.0);
+    opt.max = Some(2.0);
+    opt.step = Some(0.1);
+    *daemon.backends.write().await = vec![backend];
+
+    let cat = daemon
+        .handle_list_backends()
+        .await
+        .backends
+        .expect("backends catalog");
+    let option = &cat[0]["options"][0];
+    assert_eq!(option["type"], "float");
+    assert_eq!(option["min"], 0.0);
+    assert_eq!(option["max"], 2.0);
+    assert_eq!(option["step"], 0.1);
+}
+
 /// `installed.json` records `"wasm"` as the accel of a wasm-kind backend's
 /// installed asset, but `"wasm"` is a transport, not an accelerator. A client
 /// deriving an offered device list from a non-empty `installed_accel` would

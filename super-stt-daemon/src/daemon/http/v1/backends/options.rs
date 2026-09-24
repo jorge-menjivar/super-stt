@@ -36,7 +36,7 @@ struct BackendOptionValue {
     name: String,
     /// Human-readable label for a settings UI; falls back to `name`.
     label: String,
-    /// The declared type — `string`, `number`, and so on.
+    /// The declared type — `string`, `integer`, `float`, or `bool`.
     #[serde(rename = "type")]
     kind: String,
     /// The manifest's default, or `null` when it declares none.
@@ -46,6 +46,15 @@ struct BackendOptionValue {
     /// field for; a non-empty list is a dropdown, and the only values a write
     /// will be allowed to store.
     choices: Vec<String>,
+    /// Inclusive bounds for a numeric option, `null` when it declares none.
+    /// A write outside them is refused.
+    min: Option<f64>,
+    max: Option<f64>,
+    /// The increment a numeric option moves in. Present with `min` and `max`
+    /// on an option a client should render as a slider rather than a field;
+    /// the grid belongs to the control, and any value within the bounds
+    /// stores.
+    step: Option<f64>,
     /// Whether the backend refuses to load without a value.
     required: bool,
     /// What is actually in effect: the user's override if set, otherwise the
@@ -90,6 +99,9 @@ fn effective(
         kind: opt.r#type.map_or("string", OptionType::as_str).to_string(),
         default,
         choices: opt.choices.iter().map(ToString::to_string).collect(),
+        min: opt.min,
+        max: opt.max,
+        step: opt.step,
         required: opt.required,
         value,
     })
