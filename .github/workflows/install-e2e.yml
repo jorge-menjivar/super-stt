@@ -8,9 +8,10 @@ name: Install E2E
 # path-filtered workflow that doesn't run leaves a required check pending
 # forever and blocks the merge.
 #
-# What actually runs is scripts/test-install-e2e.sh; see its header for the
-# two passes and why the fixture is a published release rather than a tarball
-# built here.
+# What actually runs is super-engine's install-e2e action, shared with Super
+# TTS; see its test-install-e2e.sh for the two passes and why the fixture is a
+# published release rather than a tarball built here. It is pinned at the same
+# rev as the super-engine crates in Cargo.toml.
 
 on:
   pull_request:
@@ -18,9 +19,9 @@ on:
     paths:
       - install.sh
       - uninstall.sh
-      - scripts/**
       - super-stt-install/**
-      # Pins super-engine-forge, which the installer downloads with.
+      # Pins the super-engine crates the installer is built from:
+      # super-engine-installer, and super-engine-forge, which it downloads with.
       - Cargo.toml
       - .github/workflows/install-e2e.yml
   push:
@@ -28,9 +29,9 @@ on:
     paths:
       - install.sh
       - uninstall.sh
-      - scripts/**
       - super-stt-install/**
-      # Pins super-engine-forge, which the installer downloads with.
+      # Pins the super-engine crates the installer is built from:
+      # super-engine-installer, and super-engine-forge, which it downloads with.
       - Cargo.toml
       - .github/workflows/install-e2e.yml
   workflow_dispatch:
@@ -58,34 +59,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: actions/cache@v6
+      - uses: super-libre/super-engine/.github/actions/install-e2e@7010eed104753005ef402c7fa5af24b2b9c47a8f
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-install-e2e-${{ hashFiles('**/Cargo.lock') }}
-
-      # Only the installer is built — the release tarball it installs is the
-      # published one. Unlike every other job here, this needs no apt step:
-      # super-stt-install's dependency tree is reqwest/tokio/clap/tar, with
-      # none of the Wayland/xkbcommon/alsa/dbus libraries the GUI crates pull.
-      - name: Build the installer
-        run: cargo build -p super-stt-install
-
-      # curl, jq, tar, sudo, and `script` (the pty wrapper the harness needs to
-      # put the installer on its sudo escalation path) all ship on the runner.
-      - name: Install, verify, uninstall (${{ matrix.channel }})
-        env:
-          SUPER_STT_INSTALL_E2E_YES: "1"
-          SUPER_STT_INSTALLER_BIN: ${{ github.workspace }}/target/debug/super-stt-install
-          # api.github.com allows 60 unauthenticated requests/hour per source
-          # IP and runners share addresses. The token lifts that for all three
-          # readers of it: the harness's own release resolution, install.sh,
-          # and the installer itself (super_engine_forge::Github::from_env).
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/test-install-e2e.sh ${{ matrix.channel }}
+          slug: super-stt
+          short-name: stt
+          channel: ${{ matrix.channel }}

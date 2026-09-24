@@ -687,7 +687,7 @@ mod tests {
             .with_chunked_body(|w| w.write_all(&[3u8; 1000]))
             .create_async()
             .await;
-        // pid + an atomic counter (super-stt-install/src/escalate.rs's test
+        // pid + an atomic counter (super-engine-installer's test
         // temp-dir convention) so parallel tests can't collide; clear a
         // pre-existing directory first since the pid+counter name is only
         // unique within one process run.

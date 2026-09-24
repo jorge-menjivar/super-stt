@@ -131,6 +131,9 @@ impl SuperSTTDaemon {
                             r#type: o.r#type.map(|t| t.as_str().to_string()),
                             default,
                             choices: o.choices.iter().map(ToString::to_string).collect(),
+                            min: o.min,
+                            max: o.max,
+                            step: o.step,
                             required: o.required,
                             value,
                         }

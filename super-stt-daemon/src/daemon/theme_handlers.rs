@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::audio::beeper::play_beep_sequence_async;
 use crate::daemon::types::SuperSTTDaemon;
 use log::{error, info};
 use std::sync::Arc;
 use super_stt_shared::models::protocol::{DaemonResponse, ErrorCode};
+use super_stt_shared::product::SUPER_STT as PRODUCT;
 use super_stt_shared::theme::AudioTheme;
 
 impl SuperSTTDaemon {
@@ -91,74 +91,34 @@ impl SuperSTTDaemon {
         DaemonResponse::success().with_message(format!("{volume}"))
     }
 
-    /// Handle test audio theme command
+    /// Handle test audio theme command: play the selected theme's start and
+    /// end cues once. See `super_engine_daemon::beeper::preview_theme`.
     pub async fn handle_test_audio_theme(&self) -> DaemonResponse {
-        let current_theme = self.get_audio_theme();
-        let theme_name = format!("{current_theme:?}").to_lowercase();
+        use super_engine_daemon::beeper::{PreviewError, preview_theme};
 
-        // Skip playing sounds for Silent theme
+        let current_theme = self.get_audio_theme();
         if current_theme == AudioTheme::Silent {
-            info!("Testing audio theme: {theme_name} (silent - no sounds played)");
+            info!("Testing audio theme: silent (no sounds played)");
             return DaemonResponse::success().with_message(
                 "Audio theme 'Silent' tested successfully - no sounds played".to_string(),
             );
         }
-
-        // Play both start and end sounds to test the theme
-        let (start_frequencies, start_duration, start_fade_in, start_fade_out) =
-            current_theme.start_sound();
-        let (end_frequencies, end_duration, end_fade_in, end_fade_out) = current_theme.end_sound();
-
-        let volume = self.get_volume_f32();
         info!(
-            "Testing audio theme: {theme_name} (volume: {}%)",
+            "Testing audio theme: {current_theme} (volume: {}%)",
             self.get_volume()
         );
-        info!("Start frequencies: {start_frequencies:?}, duration: {start_duration}ms");
-        info!("End frequencies: {end_frequencies:?}, duration: {end_duration}ms");
-
-        // Test with start sound first
-        info!("Playing start sound...");
-        match play_beep_sequence_async(
-            start_frequencies,
-            start_duration,
-            start_fade_in,
-            start_fade_out,
-            volume,
-        )
-        .await
-        {
-            Ok(()) => {
-                info!("Start sound completed successfully");
-
-                // Test end sound as well
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                info!("Playing end sound...");
-                match play_beep_sequence_async(
-                    end_frequencies,
-                    end_duration,
-                    end_fade_in,
-                    end_fade_out,
-                    volume,
-                )
-                .await
-                {
-                    Ok(()) => {
-                        info!("End sound completed successfully");
-                        DaemonResponse::success()
-                            .with_message("Audio theme test completed successfully".to_string())
-                    }
-                    Err(e) => {
-                        error!("Failed to play end sound: {e}");
-                        DaemonResponse::success()
-                            .with_message(format!("Audio theme tested, but end sound failed: {e}. This is likely due to audio access permissions."))
-                    }
-                }
-            }
-            Err(e) => {
+        match preview_theme(&PRODUCT, current_theme, self.get_volume_f32()).await {
+            Ok(()) => DaemonResponse::success()
+                .with_message("Audio theme test completed successfully".to_string()),
+            Err(PreviewError::Start(e)) => {
                 error!("Failed to play start sound: {e}");
                 DaemonResponse::success()
                     .with_message(format!("Audio theme tested, but playback failed: {e}. This is likely due to audio access permissions. The daemon needs to be in the 'audio' group."))
+            }
+            Err(PreviewError::End(e)) => {
+                error!("Failed to play end sound: {e}");
+                DaemonResponse::success()
+                    .with_message(format!("Audio theme tested, but end sound failed: {e}. This is likely due to audio access permissions."))
             }
         }
     }

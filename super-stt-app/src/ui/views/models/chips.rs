@@ -915,6 +915,9 @@ mod capability_tests {
             r#type: Some("string".to_string()),
             default: None,
             choices: Vec::new(),
+            min: None,
+            max: None,
+            step: None,
             required: false,
             value: value.map(ToString::to_string),
         }];

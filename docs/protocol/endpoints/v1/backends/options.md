@@ -70,6 +70,9 @@ Authorization: Bearer stt_…64hex…
       "default":  "https://api.openai.com",
       "required": false,
       "choices":  [],                       // open-ended; a text field
+      "min":      null,
+      "max":      null,
+      "step":     null,
       "value":    "https://api.openai.com"  // effective value (override or default)
     },
     {
@@ -79,6 +82,9 @@ Authorization: Bearer stt_…64hex…
       "default":  "semi-formal",
       "required": false,
       "choices":  ["casual", "semi-formal", "formal"],  // closed set; a dropdown
+      "min":      null,
+      "max":      null,
+      "step":     null,
       "value":    "formal"
     }
   ]
@@ -90,9 +96,11 @@ Authorization: Bearer stt_…64hex…
 | `options`      | array of objects | One per declared option.                                       |
 | `…[].name`     | string           | The declared option `name` (snake_case).                       |
 | `…[].label`    | string           | Human-readable label; falls back to `name` when absent.        |
-| `…[].type`     | string           | Declared value type (e.g. `string`).                           |
+| `…[].type`     | string           | Declared value type: `string`, `integer`, `float` or `bool`. A `POST` of a value that does not parse as it is refused. |
 | `…[].default`  | any              | Manifest default; the effective value when no override is set. |
 | `…[].choices`  | array            | The values this option accepts. Empty means any value of `type`, which a client renders as a text field; a non-empty list is a dropdown, and a `POST` of anything outside it is refused. |
+| `…[].min`, `…[].max` | number or null | Inclusive bounds a numeric option declares; `null` when it declares none. A `POST` outside them is refused. |
+| `…[].step`     | number or null   | The increment a numeric option moves in. With `min` and `max`, the option is one a client renders as a slider; any value within the bounds is accepted. |
 | `…[].required` | boolean          | Whether the backend needs it to operate.                      |
 | `…[].value`    | any              | Effective value: the override if set, else `default`.          |
 

@@ -5,13 +5,16 @@ use log::info;
 use std::path::PathBuf;
 
 impl SuperSTTDaemon {
+    /// The directory backends install into: the configured one, else the
+    /// default.
+    pub async fn backends_dir(&self) -> PathBuf {
+        let configured = self.config.read().await.transcription.backends_dir.clone();
+        configured.map_or_else(backends::default_backends_dir, PathBuf::from)
+    }
+
     /// Re-scan the backends directory and refresh the in-memory registry.
     pub async fn refresh_backends(&self) {
-        let configured = {
-            let c = self.config.read().await;
-            c.transcription.backends_dir.clone()
-        };
-        let dir = configured.map_or_else(backends::default_backends_dir, PathBuf::from);
+        let dir = self.backends_dir().await;
         let (winners, losers) = backends::discover(&dir);
         info!(
             "Backend registry: {} backend(s) from {}",

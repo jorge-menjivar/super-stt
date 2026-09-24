@@ -36,7 +36,7 @@ struct BackendOptionValue {
     name: String,
     /// Human-readable label for a settings UI; falls back to `name`.
     label: String,
-    /// The declared type — `string`, `number`, and so on.
+    /// The declared type — `string`, `integer`, `float`, or `bool`.
     #[serde(rename = "type")]
     kind: String,
     /// The manifest's default, or `null` when it declares none.
@@ -46,6 +46,15 @@ struct BackendOptionValue {
     /// field for; a non-empty list is a dropdown, and the only values a write
     /// will be allowed to store.
     choices: Vec<String>,
+    /// Inclusive bounds for a numeric option, `null` when it declares none.
+    /// A write outside them is refused.
+    min: Option<f64>,
+    max: Option<f64>,
+    /// The increment a numeric option moves in. Present with `min` and `max`
+    /// on an option a client should render as a slider rather than a field;
+    /// the grid belongs to the control, and any value within the bounds
+    /// stores.
+    step: Option<f64>,
     /// Whether the backend refuses to load without a value.
     required: bool,
     /// What is actually in effect: the user's override if set, otherwise the
@@ -90,6 +99,9 @@ fn effective(
         kind: opt.r#type.map_or("string", OptionType::as_str).to_string(),
         default,
         choices: opt.choices.iter().map(ToString::to_string).collect(),
+        min: opt.min,
+        max: opt.max,
+        step: opt.step,
         required: opt.required,
         value,
     })
@@ -200,8 +212,9 @@ A value that yields no host is stored as typed rather than refused; model load \
 rejects it by name. Every other option is stored verbatim, whitespace included, \
 because it may carry meaning the daemon does not interpret.
 
-A loaded model does not pick this up on its own — reload the stage with \
-`POST /pipeline/{stage}/model/reload`.",
+Every stage running a model from this backend is handed the new value at once and \
+uses it from its next request; nothing is reloaded. If it cannot be handed over, the \
+value is still stored and the message says the running backend kept the old one.",
     params(
         ("backend_id" = String, Path,
          description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fwhisper`.",
@@ -356,10 +369,10 @@ fn canonical_base_url(value: &str) -> Option<String> {
     Some(value.trim().to_string())
 }
 
-/// Returns an error `Response` when `value` is not of the option's declared
-/// type, falls outside its declared bounds, or is not one of its declared
-/// choices, `None` when the write can proceed. Each refusal names which of the
-/// three it broke.
+/// Returns an error `Response` when `value` is not one the option takes — its
+/// type, its bounds or its choices, see
+/// `super_engine_spec::manifest::Opt::permits_value` — `None` when the write
+/// can proceed.
 ///
 /// Runs after [`guard_missing`], so a missing backend or option is already
 /// reported and this only ever looks at an option that exists.
@@ -371,45 +384,11 @@ async fn guard_not_a_choice(
 ) -> Option<Response> {
     let backend = find_backend(s, source).await?;
     let opt = backend.options.iter().find(|o| o.name == name)?;
-    if !opt.accepts_the_type(value) {
-        let wanted = match opt.declared_type() {
-            OptionType::Integer => "an integer",
-            OptionType::Float => "a number",
-            OptionType::Bool => "`true` or `false`",
-            OptionType::String => "text",
-        };
-        return Some(json_error_msg(
-            StatusCode::BAD_REQUEST,
-            "invalid_value",
-            &format!("option `{name}` takes {wanted}, not {value:?}"),
-        ));
-    }
-    if !opt.is_in_range(value) {
-        let bound = match (opt.min, opt.max) {
-            (Some(low), Some(high)) => format!("between {low} and {high}"),
-            (Some(low), None) => format!("{low} or more"),
-            (None, Some(high)) => format!("{high} or less"),
-            (None, None) => unreachable!("a value only falls outside a declared bound"),
-        };
-        return Some(json_error_msg(
-            StatusCode::BAD_REQUEST,
-            "invalid_value",
-            &format!("option `{name}` takes a value {bound}, not {value:?}"),
-        ));
-    }
-    if opt.is_a_choice(value) {
-        return None;
-    }
-    let offered = opt
-        .choices
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
+    let refusal = opt.permits_value(value).err()?;
     Some(json_error_msg(
         StatusCode::BAD_REQUEST,
         "invalid_value",
-        &format!("option `{name}` accepts one of: {offered}"),
+        &refusal,
     ))
 }
 

@@ -22,8 +22,9 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
+use super_engine_test_daemon::TestDaemon;
+use super_stt_shared::product::SUPER_STT;
 
 const CLI_BIN: &str = env!("CARGO_BIN_EXE_super-stt-cli");
 
@@ -44,72 +45,20 @@ fn locate_daemon_bin() -> PathBuf {
     candidate
 }
 
-/// Monotonic per-call counter so temp paths are unique even when these
-/// tests run concurrently in the same binary.
-fn next_uniq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static U: AtomicU64 = AtomicU64::new(0);
-    U.fetch_add(1, Ordering::Relaxed)
-}
-
-struct DaemonGuard {
-    child: Child,
-    cleanup: Vec<PathBuf>,
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        for p in &self.cleanup {
-            let _ = std::fs::remove_file(p);
-            let _ = std::fs::remove_dir_all(p);
-        }
-    }
-}
-
-/// Spawn a hermetic daemon on an isolated socket / config / data dir and
-/// wait for the HTTP socket to appear. Returns the guard plus the socket
-/// path the CLI should target via `--socket`.
-fn spawn_daemon() -> (DaemonGuard, PathBuf) {
-    let tmp = std::env::temp_dir();
-    let unique = format!("stt-cli-basic-{}-{}", std::process::id(), next_uniq());
-    let http_socket = tmp.join(format!("{unique}-http.sock"));
-    let config_home = tmp.join(format!("{unique}-config"));
-    let data_home = tmp.join(format!("{unique}-data"));
-    std::fs::create_dir_all(&config_home).expect("create config dir");
-    // Empty, isolated data dir → the daemon discovers no backends and comes
-    // up idle and fast, which is exactly what these commands need.
-    std::fs::create_dir_all(&data_home).expect("create data dir");
-
-    let child = Command::new(locate_daemon_bin())
-        .env("SUPER_STT_KEYRING_MOCK", "1")
-        .env("SUPER_STT_AUTO_APPROVE", "1")
-        .env("SUPER_STT_HTTP_SOCKET", &http_socket)
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_DATA_HOME", &data_home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn daemon");
-
-    // Hand the child to the guard before the readiness loop: the timeout
-    // panic below must still kill and reap the daemon, not leak it.
-    let guard = DaemonGuard {
-        child,
-        cleanup: vec![http_socket.clone(), config_home, data_home],
-    };
-
-    let deadline = Instant::now() + Duration::from_mins(2);
-    while Instant::now() < deadline {
-        if Path::new(&http_socket).exists() {
-            // Give the listener a beat to finish binding before the CLI connects.
-            std::thread::sleep(Duration::from_millis(500));
-            return (guard, http_socket);
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    panic!("daemon HTTP socket did not appear within 120s");
+/// Start a hermetic daemon (see `super_engine_test_daemon`) and wait for its
+/// socket. Returns it with the socket path the CLI should target via
+/// `--socket`.
+///
+/// These tests are synchronous, and the CLI they run blocks, so the wait gets
+/// a runtime of its own.
+fn spawn_daemon() -> (TestDaemon, PathBuf) {
+    let daemon = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime to wait on the daemon")
+        .block_on(TestDaemon::build(&SUPER_STT, locate_daemon_bin(), "cli-basic").start());
+    let socket = daemon.socket().to_path_buf();
+    (daemon, socket)
 }
 
 /// Run the CLI binary against `socket`, blocking until it exits. Returns
@@ -121,6 +70,7 @@ fn run_cli(socket: &Path, args: &[&str]) -> (i32, String, String) {
     let mut child = Command::new(CLI_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1")
         .env("SUPER_STT_AUTO_APPROVE", "1")
+        .env("SUPER_STT_MUTE_CUES", "1")
         .args(&full_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -203,11 +153,8 @@ fn stop_is_idempotent_when_idle() {
 fn logout_clears_cached_token() {
     // logout ignores the socket, but `--socket` is a global flag so passing
     // a throwaway path keeps `run_cli` uniform.
-    let throwaway = std::env::temp_dir().join(format!(
-        "stt-cli-logout-{}-{}.sock",
-        std::process::id(),
-        next_uniq()
-    ));
+    let throwaway =
+        std::env::temp_dir().join(format!("stt-cli-logout-{}.sock", std::process::id()));
     let mut child = Command::new(CLI_BIN)
         .env("SUPER_STT_KEYRING_MOCK", "1")
         .args(["--socket", throwaway.to_str().unwrap(), "logout"])

@@ -85,13 +85,14 @@ pub async fn run() -> Result<()> {
     #[cfg(target_os = "macos")]
     crate::output::keyboard::probe_accessibility_permission();
 
-    // Set up Ctrl+C handler
+    // SIGTERM as well as SIGINT: `systemctl stop` and `kill` send SIGTERM,
+    // and dying to it skips the graceful path below, which is what stops the
+    // subprocess backend's unit. The handlers are installed here, before the
+    // listener starts.
+    let signal = super_engine_daemon::shutdown::signal();
     let shutdown_tx = daemon.shutdown_tx.clone();
     tokio::spawn(async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to listen for Ctrl+C");
-        info!("Received Ctrl+C, initiating shutdown...");
+        signal.await;
         let _ = shutdown_tx.send(());
     });
 

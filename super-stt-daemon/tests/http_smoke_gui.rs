@@ -26,13 +26,14 @@
 
 mod common;
 
+use common::TestDaemon;
+
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 use super_stt_shared::daemon::http_client;
 use tokio::time::sleep;
 
-const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 const APP_NAME: &str = "super-stt gui smoke test";
 const SCOPES: &[&str] = &["transcribe", "status"];
 
@@ -60,7 +61,7 @@ fn ensure_consent_helper_built() -> PathBuf {
     // The daemon's locate_consent_helper looks alongside its own binary
     // first. Both binaries land in target/<profile>/, so the simple test
     // is that the path next to DAEMON_BIN exists.
-    let daemon_dir = Path::new(DAEMON_BIN)
+    let daemon_dir = Path::new(common::DAEMON_BIN)
         .parent()
         .expect("daemon binary parent dir");
     let helper = daemon_dir.join("super-stt-consent");
@@ -72,73 +73,17 @@ fn ensure_consent_helper_built() -> PathBuf {
     helper
 }
 
-struct DaemonGuard {
-    child: Child,
-    xdg_runtime_dir: PathBuf,
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        common::shutdown(&mut self.child);
-        let _ = std::fs::remove_dir_all(&self.xdg_runtime_dir);
-    }
-}
-
-/// Monotonic per-call counter so concurrent tests in the same test
-/// binary get unique paths. `Instant::now().elapsed().as_nanos()`
-/// returns 0 immediately after construction and would collide.
-fn next_test_uniq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static UNIQ: AtomicU64 = AtomicU64::new(0);
-    UNIQ.fetch_add(1, Ordering::Relaxed)
-}
-
-async fn start_daemon_no_auto_approve() -> (DaemonGuard, PathBuf) {
-    let xdg = std::env::temp_dir().join(format!(
-        "stt-gui-test-{}-{}",
-        std::process::id(),
-        next_test_uniq()
-    ));
-    std::fs::create_dir_all(xdg.join("stt")).expect("create xdg/stt dir");
-    // Isolate XDG_CONFIG_HOME so the test daemon doesn't overwrite
-    // the developer's real config via `apply_cli_overrides_to_config`.
-    let config_home = xdg.join("config");
-    std::fs::create_dir_all(&config_home).expect("create xdg/config dir");
-
-    let http_socket = xdg.join("stt").join("super-stt-http.sock");
-
-    let child = Command::new(DAEMON_BIN)
-        .env("SUPER_STT_KEYRING_MOCK", "1") // in-memory keyring (no secret-service prompt in tests/CI)
-        .env("XDG_RUNTIME_DIR", &xdg)
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env_remove("SUPER_STT_AUTO_APPROVE") // ensure the popup path runs
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn super-stt-daemon");
-
-    // Wait for the HTTP listener to come up. Without auto-approve we
-    // can't issue a real auth_request to confirm readiness, so we just
-    // poll for the socket file's existence + a brief settle.
-    // Hand the child to the guard before the readiness loop: the timeout
-    // panic below must still kill and reap the daemon, not leak it.
-    let guard = DaemonGuard {
-        child,
-        xdg_runtime_dir: xdg,
-    };
-
-    let deadline = Instant::now() + Duration::from_mins(2);
-    while Instant::now() < deadline {
-        if Path::new(&http_socket).exists() {
-            sleep(Duration::from_millis(200)).await;
-            return (guard, http_socket);
-        }
-        sleep(Duration::from_millis(200)).await;
-    }
-    panic!(
-        "daemon HTTP listener did not become ready within 120s (socket: {})",
-        http_socket.display()
-    );
+/// A daemon that shows the real consent dialog: no auto-approval, and its
+/// socket where the daemon puts it by default, under a runtime directory of
+/// the test's own.
+async fn start_daemon_no_auto_approve() -> (TestDaemon, PathBuf) {
+    let daemon = common::daemon("gui")
+        .without("SUPER_STT_AUTO_APPROVE")
+        .default_socket()
+        .start()
+        .await;
+    let socket = daemon.socket().to_path_buf();
+    (daemon, socket)
 }
 
 /// Find the PID of any currently-running `super-stt-consent` process.

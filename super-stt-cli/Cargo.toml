@@ -34,5 +34,9 @@
         features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"],
     }
 
+[dev-dependencies]
+    # Spawns the daemon for the integration tests, in a home of its own.
+    super-engine-test-daemon.workspace = true
+
 [lints]
     workspace = true

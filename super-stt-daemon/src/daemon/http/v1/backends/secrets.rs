@@ -160,8 +160,9 @@ async fn get_secret(
 Writes the credential to the system keyring. It cannot be read back afterwards; \
 only replaced or cleared.
 
-A loaded model does not pick up a new credential on its own — reload the stage with \
-`POST /pipeline/{stage}/model/reload`.",
+Every stage running a model from this backend is reloaded so the new credential is \
+used at once, a transcription model and a post-processor alike. A reload that fails is \
+reported in the message, and the stage keeps running the old instance.",
     params(
         ("backend_id" = String, Path,
          description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Facme%2Fopenai`.",

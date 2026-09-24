@@ -22,91 +22,25 @@
 
 mod common;
 
+use common::{Method, StatusCode, TestDaemon};
+use hyper::Request;
+
 use http_body_util::{BodyExt, Empty};
 use hyper::body::Bytes;
 use hyper::client::conn::http1::handshake;
-use hyper::{Method, Request, StatusCode};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
 use super_stt_shared::daemon::http_client;
 use tokio::net::UnixStream;
-use tokio::time::sleep;
-
-const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-daemon");
 
 /// `ResourceLimits::development().max_requests_per_minute` — the build the
 /// test daemon runs. Kept in sync with
 /// `super-stt-daemon/src/resource_management/mod.rs`.
 const DEV_PER_MINUTE: usize = 300;
 
-struct DaemonGuard {
-    child: Child,
-    cleanup_paths: Vec<PathBuf>,
-}
-
-impl Drop for DaemonGuard {
-    fn drop(&mut self) {
-        common::shutdown(&mut self.child);
-        for p in &self.cleanup_paths {
-            let _ = std::fs::remove_file(p);
-            let _ = std::fs::remove_dir_all(p);
-        }
-    }
-}
-
-fn next_test_uniq() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static UNIQ: AtomicU64 = AtomicU64::new(0);
-    UNIQ.fetch_add(1, Ordering::Relaxed)
-}
-
-async fn start_daemon() -> (DaemonGuard, PathBuf) {
-    let unique = format!("stt-ratelimit-{}-{}", std::process::id(), next_test_uniq());
-    let tmp = std::env::temp_dir();
-    let http_socket = tmp.join(format!("{unique}-http.sock"));
-    let config_home = tmp.join(format!("{unique}-config"));
-    std::fs::create_dir_all(&config_home).expect("create test config dir");
-    let data_home = tmp.join(format!("{unique}-data"));
-    std::fs::create_dir_all(&data_home).expect("create test data dir");
-    // Isolate the cache too. The registry client persists its index (and its
-    // ETag) under XDG_CACHE_HOME; sharing one file across concurrently
-    // spawned test daemons has them overwrite each other's catalog, and
-    // unisolated it is the developer's own.
-    let cache_home = tmp.join(format!("{unique}-cache"));
-    std::fs::create_dir_all(&cache_home).expect("create test cache dir");
-
-    let child = Command::new(DAEMON_BIN)
-        .env("SUPER_STT_KEYRING_MOCK", "1")
-        .env("SUPER_STT_AUTO_APPROVE", "1")
-        .env("SUPER_STT_HTTP_SOCKET", &http_socket)
-        .env("XDG_CONFIG_HOME", &config_home)
-        .env("XDG_DATA_HOME", &data_home)
-        .env("XDG_CACHE_HOME", &cache_home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn super-stt-daemon");
-
-    // Hand the child to the guard before the readiness loop: the timeout
-    // panic below must still kill and reap the daemon, not leak it.
-    let guard = DaemonGuard {
-        child,
-        cleanup_paths: vec![http_socket.clone(), config_home, data_home, cache_home],
-    };
-
-    let deadline = Instant::now() + Duration::from_mins(2);
-    while Instant::now() < deadline {
-        if Path::new(&http_socket).exists()
-            && http_client::auth_request(http_socket.clone(), "ratelimit-smoke", &["status"])
-                .await
-                .is_ok()
-        {
-            return (guard, http_socket);
-        }
-        sleep(Duration::from_millis(200)).await;
-    }
-    panic!("daemon HTTP listener not ready within 120s");
+async fn start_daemon() -> (TestDaemon, PathBuf) {
+    let daemon = common::daemon("ratelimit").start().await;
+    let socket = daemon.socket().to_path_buf();
+    (daemon, socket)
 }
 
 /// Send one `GET /v1/ping` on an existing keep-alive connection and drain

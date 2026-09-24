@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use crate::daemon::types::SuperSTTDaemon;
 use axum::extract::FromRef;
-use parking_lot::RwLock as ParkingRwLock;
-use std::collections::HashSet;
 use std::sync::Arc;
 use super_engine_daemon::auth::Auth;
+use super_engine_daemon::registry::endpoints::Registry;
 
 pub(crate) use super_engine_daemon::http::PeerInfo;
 
@@ -14,11 +13,8 @@ pub(crate) struct AppState {
     /// Session tokens and consent state; what the guards check requests
     /// against.
     pub(crate) auth: Auth,
-    /// Registry HTTP client; shared across all handler invocations.
-    pub(crate) registry_client: Arc<crate::registry::client::Client>,
-    /// Set of `source` strings with an install currently in flight.
-    /// Guards against duplicate concurrent installs for the same backend.
-    pub(crate) install_inflight: Arc<ParkingRwLock<HashSet<String>>>,
+    /// The registry endpoints' index client and the installs in flight.
+    pub(crate) registry: Registry<SuperSTTDaemon>,
 }
 
 impl AppState {
@@ -26,13 +22,14 @@ impl AppState {
     /// auth state. The registry client is configured from environment
     /// variables.
     pub(crate) fn new(daemon: Arc<SuperSTTDaemon>, auth: Auth) -> Self {
+        let registry = Registry::new(
+            Arc::clone(&daemon),
+            crate::registry::client::Client::from_env(crate::registry::DAEMON),
+        );
         Self {
             daemon,
             auth,
-            registry_client: Arc::new(crate::registry::client::Client::from_env(
-                crate::registry::DAEMON,
-            )),
-            install_inflight: Arc::new(ParkingRwLock::new(HashSet::new())),
+            registry,
         }
     }
 }

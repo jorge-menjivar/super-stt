@@ -2,29 +2,11 @@
 //! Super STT's names: everything the daemon and its clients meet on, from the
 //! socket to the scopes a token can carry. See
 //! `super_engine_protocol::ProductSpec`.
+//!
+//! [`SUPER_STT`] is defined in `super-stt-registry-types`, where the
+//! installer can reach it; the tests of what Super STT shipped live here.
 
-use super_engine_protocol::ProductSpec;
-
-/// Super STT: speech to text.
-pub static SUPER_STT: ProductSpec = ProductSpec {
-    display_name: "Super STT",
-    slug: "super-stt",
-    short_name: "stt",
-    env_prefix: "SUPER_STT",
-    tcp_port: 7300,
-    repo: "github.com/jorge-menjivar/super-stt",
-    index_url: "https://jorge-menjivar.github.io/super-stt/index.json",
-    scopes: &["transcribe", "recording_events", "global_transcriptions"],
-    topics: &[
-        ("recording_started", "recording_events"),
-        ("recording_stopped", "recording_events"),
-        ("recording_state", "recording_events"),
-        ("transcribing_started", "recording_events"),
-        ("transcribing_stopped", "recording_events"),
-        ("partial_stt", "global_transcriptions"),
-        ("final_stt", "global_transcriptions"),
-    ],
-};
+pub use super_stt_registry_types::product::SUPER_STT;
 
 #[cfg(test)]
 mod tests {

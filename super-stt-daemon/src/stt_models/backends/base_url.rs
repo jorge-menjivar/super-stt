@@ -17,4 +17,4 @@ pub(crate) const OPTION_NAME: &str = super_stt_registry_types::manifest::BASE_UR
 /// Deriving the endpoint: `super_engine_daemon::wasm::base_url`, shared with
 /// Super TTS.
 #[cfg(feature = "wasm-backends")]
-pub(crate) use super_engine_daemon::wasm::base_url::{egress_entries, normalize};
+pub(crate) use super_engine_daemon::wasm::base_url::normalize;
