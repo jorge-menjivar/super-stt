@@ -42,11 +42,20 @@ pub enum Contract {
     /// v1 plus `[[models]].role` and `POST /v1/process` — a backend may serve
     /// transcript post-processors.
     V2,
+    /// v2 plus nothing in the manifest: what v3 adds is what the daemon
+    /// provides. A subprocess backend is granted a cache directory that
+    /// survives the process (`SUPER_STT_BACKEND_CACHE_DIR`, with
+    /// `XDG_CACHE_HOME` and `CUDA_CACHE_PATH` pointed into it), and the
+    /// load-progress fields of `GET /v1/status` (`phase`, `step`, `progress`)
+    /// are read. A backend that builds GPU kernels at load needs both: without
+    /// the cache it rebuilds them on every load, and without the progress it
+    /// runs into the flat load limit of a daemon that predates the stall rule.
+    V3,
 }
 
 impl Generation for Contract {
-    const ALL: &'static [Self] = &[Self::V1, Self::V2];
-    const LATEST: Self = Self::V2;
+    const ALL: &'static [Self] = &[Self::V1, Self::V2, Self::V3];
+    const LATEST: Self = Self::V3;
 
     /// A new row is a forecast until its release ships, and nothing can check
     /// it: the version that introduces a generation is by definition not yet
@@ -59,6 +68,7 @@ impl Generation for Contract {
             // notion of an installable backend to gate.
             Self::V1 => "0.2.0",
             Self::V2 => "0.2.4-beta.1",
+            Self::V3 => "0.2.5",
         }
     }
 }
@@ -68,6 +78,7 @@ impl fmt::Display for Contract {
         match self {
             Self::V1 => write!(f, "v1"),
             Self::V2 => write!(f, "v2"),
+            Self::V3 => write!(f, "v3"),
         }
     }
 }
@@ -345,7 +356,24 @@ mod tests {
     fn each_generation_names_the_release_that_shipped_it() {
         assert_eq!(Contract::V1.min_client(), "0.2.0");
         assert_eq!(Contract::V2.min_client(), "0.2.4-beta.1");
-        assert_eq!(Contract::LATEST, Contract::V2);
+        assert_eq!(Contract::V3.min_client(), "0.2.5");
+        assert_eq!(Contract::LATEST, Contract::V3);
+    }
+
+    /// v3 adds no field, and keeps everything v2 does: it still requires
+    /// `[backend].id` and reads the v2 model fields.
+    #[test]
+    fn v3_is_v2_with_nothing_removed() {
+        let fields = "role = \"post_processor\"\nforce_preview_support = true";
+        assert!(matches!(
+            Manifest::parse(&manifest("v3", "", fields, "")),
+            Err(ManifestError::FieldRequiredByContract { .. })
+        ));
+
+        let m = Manifest::parse(&manifest("v3", "id = \"com.example.y\"", fields, ""))
+            .expect("a v3 manifest with an id parses");
+        assert!(m.models[0].product.role.is_post_processor());
+        assert_eq!(m.backend.contract, Contract::V3);
     }
 
     /// `role` and `force_preview_support` are v2 fields: a v1 manifest that
