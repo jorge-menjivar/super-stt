@@ -7184,6 +7184,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "super-engine-protocol",
  "super-engine-spec",
  "toml 1.1.0+spec-1.1.0",
  "utoipa",

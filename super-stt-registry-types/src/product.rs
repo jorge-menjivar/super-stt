@@ -6,9 +6,37 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use super_engine_protocol::ProductSpec;
 use super_engine_spec::manifest::{ContractField, FieldRule, Manifest, ManifestError, ModelEntry};
 pub use super_engine_spec::product::{Generation, Product};
 use super_engine_spec::product::{SchemaNames, generation_from_str};
+
+/// Super STT's names: everything the daemon and its clients meet on, from the
+/// socket to the scopes a token can carry. See [`ProductSpec`].
+///
+/// Defined here, beside [`Stt`], rather than in `super-stt-shared`, so the
+/// installer can name it without that crate's keyring and HTTP client.
+/// `super_stt_shared::product` re-exports it, with the tests that pin what
+/// Super STT shipped.
+pub static SUPER_STT: ProductSpec = ProductSpec {
+    display_name: "Super STT",
+    slug: "super-stt",
+    short_name: "stt",
+    env_prefix: "SUPER_STT",
+    tcp_port: 7300,
+    repo: "github.com/jorge-menjivar/super-stt",
+    index_url: "https://jorge-menjivar.github.io/super-stt/index.json",
+    scopes: &["transcribe", "recording_events", "global_transcriptions"],
+    topics: &[
+        ("recording_started", "recording_events"),
+        ("recording_stopped", "recording_events"),
+        ("recording_state", "recording_events"),
+        ("transcribing_started", "recording_events"),
+        ("transcribing_stopped", "recording_events"),
+        ("partial_stt", "global_transcriptions"),
+        ("final_stt", "global_transcriptions"),
+    ],
+};
 
 /// Super STT, as a [`Product`] of the backend contract.
 #[derive(Debug, Clone, Copy)]
