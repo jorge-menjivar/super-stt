@@ -27,15 +27,3 @@ pub(crate) fn usize_to_f64(x: usize) -> f64 {
 pub(crate) fn f32_to_usize(x: f32) -> usize {
     x as usize
 }
-
-/// `f32` → `u64`, truncating toward zero. Caller guarantees non-negative + in range.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub(crate) fn f32_to_u64(x: f32) -> u64 {
-    x as u64
-}
-
-/// `f32` → `i16` PCM sample. Caller MUST clamp to [`i16::MIN`] as f32 / [`i16::MAX`] as f32 first.
-#[allow(clippy::cast_possible_truncation)]
-pub(crate) fn f32_to_i16(x: f32) -> i16 {
-    x as i16
-}
