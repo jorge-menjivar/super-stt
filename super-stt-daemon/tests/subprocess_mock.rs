@@ -219,7 +219,7 @@ async fn a_model_reloads_only_once_its_instance_is_released() {
         .err()
         .expect("a second instance of one model must not spawn");
     assert!(
-        error.to_string().contains("already running"),
+        error.to_string().contains("already loading or loaded"),
         "expected the running instance to be named as the reason: {error}"
     );
 
