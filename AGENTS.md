@@ -4,10 +4,9 @@
 - Workspace root (`Cargo.toml`) with members:
   - `super-stt`: speech-to-text daemon (ML, audio, D-Bus, model mgmt).
   - `super-stt-app`: desktop UI (COSMIC/iced).
-  - `super-stt-cosmic-applet`: panel/applets and COSMIC extension.
   - `super-stt-shared`: shared models, protocol, utils.
 - Tests/tooling: Python scripts at repo root (e.g., `test_download_progress.py`).
-- Assets: app `i18n/`, `resources/`; applet `data/` (desktop entries, icons).
+- Assets: app `i18n/`, `resources/`. The COSMIC panel applet is shared with Super TTS and lives in super-libre/super-cosmic-applet, at the commit `shared-applet.rev` pins.
 
 ## Build, Test, and Development Commands
 - Build release: `just build-release` (or `cargo build --release`).

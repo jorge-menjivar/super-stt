@@ -7110,23 +7110,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-stt-cosmic-applet"
-version = "0.2.4"
-dependencies = [
- "base64",
- "clap",
- "futures-util",
- "libc",
- "libcosmic",
- "log",
- "serde",
- "serde_json",
- "super-stt-shared",
- "tokio",
- "toml 1.1.0+spec-1.1.0",
-]
-
-[[package]]
 name = "super-stt-daemon"
 version = "0.2.4"
 dependencies = [

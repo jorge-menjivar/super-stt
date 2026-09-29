@@ -247,7 +247,6 @@ Super STT is a Rust workspace:
 | `super-stt-daemon`         | The engine: installs backends, loads models, serves the protocol |
 | `super-stt-app`            | Desktop settings & management app                                |
 | `super-stt-cli`            | The `stt` command-line client                                    |
-| `super-stt-cosmic-applet`  | COSMIC panel applet with visualizations                          |
 | `super-stt-consent`        | Consent-popup helper for the auth handshake                      |
 | `super-stt-shared`         | Common types, protocol definitions, validation                   |
 | `super-stt-registry-types` | Super STT's backend contract, on `super-engine-spec`             |
@@ -258,6 +257,11 @@ The code Super STT shares with Super TTS lives in
 the root `Cargo.toml`. A fix to the backend manifest types, for example, goes
 there, and reaches this workspace when the pin is bumped. So does a fix to the
 daemon's session tokens, consent checks or route guards.
+
+The COSMIC panel applet is shared with Super TTS too, and lives in
+[super-cosmic-applet](https://github.com/super-libre/super-cosmic-applet). The
+release builds it at the commit `shared-applet.rev` pins; `just install-applet`
+does the same locally, or builds the checkout `SHARED_APPLET_DIR` names.
 
 The protocol and backend contract that clients and backend authors build
 against live in [`docs/protocol/`](./docs/protocol/).

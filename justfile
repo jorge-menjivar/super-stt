@@ -5,12 +5,17 @@ service_name := 'super-stt'
 cli_name := 'super-stt-cli'
 consent_name := 'super-stt-consent'
 wrapper_name := 'stt'
-applet_name := 'super-stt-cosmic-applet'
 
-# Applet
-applet_full_desktop_file_name := 'super-stt-cosmic-applet-full.desktop'
-applet_left_desktop_file_name := 'super-stt-cosmic-applet-left.desktop'
-applet_right_desktop_file_name := 'super-stt-cosmic-applet-right.desktop'
+# The COSMIC applet Super STT shares with Super TTS. It lives in its own repo,
+# super-libre/super-cosmic-applet, and is built from the commit
+# shared-applet.rev pins, or from the local checkout SHARED_APPLET_DIR names.
+# It replaces Super STT's own applet, super-stt-cosmic-applet, whose files
+# `install-applet` removes.
+shared_applet := 'super-cosmic-applet'
+shared_applet_repo := 'https://github.com/super-libre/super-cosmic-applet'
+shared_applet_rev := trim(shell('cat shared-applet.rev'))
+shared_applet_dir := env('SHARED_APPLET_DIR', 'target' / 'shared-applet')
+old_applet := 'super-stt-cosmic-applet'
 
 # Installation paths — root-owned under /usr/local, matching the
 # release installers, so install/uninstall recipes escalate with sudo
@@ -37,22 +42,10 @@ app_src := 'target' / 'release' / app_name
 daemon_src := 'target' / 'release' / daemon_bin_name
 cli_src := 'target' / 'release' / cli_name
 consent_src := 'target' / 'release' / consent_name
-# The applet builds in a target directory of its own, and is the only binary
-# that does. Cargo resolves features for every package a single invocation
-# selects, so building the applet alongside the rest of the workspace hands it
-# `libcosmic/wgpu` — which `super-stt-app` asks for and the applet, per its own
-# manifest, does not. The applet then initialises a GPU renderer at startup and
-# loads the Mesa and NVIDIA driver stacks: 108 MB of RSS per instance against
-# 23 MB without, measured on an idle applet, once per side per panel. Upstream
-# COSMIC draws the same line — its apps link wgpu, its applets do not.
-applet_target := 'target' / 'applet'
-applet_src := applet_target / 'release' / applet_name
-debug_applet_src := applet_target / 'debug' / applet_name
 app_dst := bin_dir / app_name
 daemon_dst := bin_dir / daemon_bin_name
 cli_dst := bin_dir / cli_name
 consent_dst := bin_dir / consent_name
-applet_dst := bin_dir / applet_name
 wrapper_dst := bin_dir / wrapper_name
 
 # App files
@@ -62,24 +55,14 @@ app_icon_src := 'super-stt-app' / 'resources' / 'icons' / 'hicolor' / 'scalable'
 app_desktop_file_dst := desktop_dir / app_desktop_file_name
 app_icon_dst := icons_dir / 'super-stt-app.svg'
 
-# Applet files
-applet_full_desktop_file_src := 'super-stt-cosmic-applet' / 'resources' / applet_full_desktop_file_name
-applet_left_desktop_file_src := 'super-stt-cosmic-applet' / 'resources' / applet_left_desktop_file_name
-applet_right_desktop_file_src := 'super-stt-cosmic-applet' / 'resources' / applet_right_desktop_file_name
-applet_icon_src := 'super-stt-cosmic-applet' / 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'super-stt-cosmic-applet.svg'
-applet_full_desktop_file_dst := desktop_dir / applet_full_desktop_file_name
-applet_left_desktop_file_dst := desktop_dir / applet_left_desktop_file_name
-applet_right_desktop_file_dst := desktop_dir / applet_right_desktop_file_name
-applet_icon_dst := icons_dir / 'super-stt-cosmic-applet.svg'
-
 # Service file
 service_file := service_name + '.service'
 service_dst := systemd_unit_dir / service_file
 
 # Workspace members that build on macOS.
 #
-# Everything except the two COSMIC shell components (the panel applet and the
-# consent helper) and the CI-only indexer. The settings app is here: libcosmic
+# Everything except the COSMIC consent helper, a Linux shell component, and the
+# CI-only indexer. The settings app is here: libcosmic
 # itself is portable — its vendored iced fork gates every Wayland crate behind
 # `not(target_vendor = "apple")` — so the app builds once its libcosmic
 # feature list drops `applet` and the Wayland/D-Bus features. See
@@ -253,7 +236,6 @@ test-install-e2e channel="stable":
 # Load every committed old-config fixture against the current config types.
 config-compat *args:
     cargo test -p super-stt-daemon --lib config {{ args }}
-    cargo test -p super-stt-cosmic-applet --lib config {{ args }}
 
 # Run doctests
 doctest *args:
@@ -691,93 +673,6 @@ run-consent *scopes: linux-only-gui
 audit:
     cargo audit
 
-# Run the cosmic applet in the cosmic panel for testing purposes
-run-applet *args: linux-only-gui
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    # Ask for sudo up front and keep the timestamp alive in the
-    # background: the build can outlast sudo's credential cache, and a
-    # password prompt buried in build output is easy to miss.
-    sudo -v
-    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
-    sudo_keepalive=$!
-    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
-
-    env CARGO_TARGET_DIR={{ applet_target }} RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build -p {{ applet_name }} {{ args }}
-
-    echo "Installing Debug Super STT COSMIC applet..."
-    sudo mkdir -p {{ bin_dir }}
-    sudo install -m755 {{ debug_applet_src }} {{ applet_dst }}
-
-    # Install the debug desktop entries for panel integration
-    echo "Installing desktop entries for COSMIC panel integration..."
-    sudo install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
-    sudo install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
-    sudo install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
-
-    # Install the applet icon
-    echo "Installing applet icon..."
-    sudo install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
-
-    # Installs are done — don't keep the sudo timestamp fresh while the
-    # panel runs in the foreground.
-    kill "$sudo_keepalive" 2>/dev/null || true
-
-    cosmic-panel
-
-run-applet-windowed *args: linux-only-gui
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }}
-
-# Run the cosmic applet in the cosmic panel for testing purposes
-run-applet-kill *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    # Ask for sudo up front and keep the timestamp alive in the
-    # background: the build can outlast sudo's credential cache, and a
-    # password prompt buried in build output is easy to miss.
-    sudo -v
-    ( while sudo -n -v 2>/dev/null; do sleep 60; done ) &
-    sudo_keepalive=$!
-    trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
-
-    env CARGO_TARGET_DIR={{ applet_target }} RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo build -p {{ applet_name }} {{ args }}
-
-    echo "Installing Debug Super STT COSMIC applet..."
-    sudo mkdir -p {{ bin_dir }}
-    sudo install -m755 {{ debug_applet_src }} {{ applet_dst }}
-
-    # Install the debug desktop entries for panel integration
-    echo "Installing desktop entries for COSMIC panel integration..."
-    sudo install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
-    sudo install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
-    sudo install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
-
-    # Install the applet icon
-    echo "Installing applet icon..."
-    sudo install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
-
-    # Installs are done — don't keep the sudo timestamp fresh while the
-    # panel runs in the foreground.
-    kill "$sudo_keepalive" 2>/dev/null || true
-
-    # Restart cosmic panel for changes to take effect
-    pkill -f cosmic-panel || true
-
-    echo "Running cosmic-panel in this terminal..."
-    cosmic-panel
-
-# Run the cosmic applet for testing purposes with different sides
-run-applet-left *args:
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }} -- --side left
-
-run-applet-right *args:
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }} -- --side right
-
-run-applet-full *args:
-    env RUST_BACKTRACE=full RUST_LOG=debug,super_stt_shared=debug,warn cargo run --bin {{ applet_name }} {{ args }} -- --side full
-
 # Build only the app. The package selection is explained above `run-app`.
 build-app *args:
     #!/usr/bin/env bash
@@ -810,34 +705,25 @@ build-install:
 build-consent: linux-only-gui
     cargo build --release --bin {{ consent_name }}
 
-# Build only the cosmic applet, on its own so it doesn't inherit wgpu
+# Build the shared COSMIC applet: from SHARED_APPLET_DIR when set, else from a
+# checkout of the commit shared-applet.rev pins, fetched into target/ once.
+# Its own `check-renderer` builds the release binary and fails if it links
+# the wgpu renderer.
 build-applet: linux-only-gui
     #!/usr/bin/env bash
     set -euo pipefail
-    # `-p` and not `--bin`: `--bin` still selects every default workspace
-    # member for feature resolution, so it is exactly the command that gave
-    # the applet a GPU renderer. See `applet_target` above.
-    echo "🔧 Building COSMIC applet..."
-    CARGO_TARGET_DIR={{ applet_target }} cargo build --release -p {{ applet_name }}
-    just check-applet-renderer
-
-# Fail if the applet binary carries the wgpu renderer
-check-applet-renderer: linux-only-gui
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # The feature that puts it there is enabled by another crate in the
-    # workspace, so nothing in the applet's own manifest can refuse it and
-    # nothing in either crate's types notices. What is left is to check the
-    # artifact: a GPU renderer in a panel applet is ~85 MB of RSS per
-    # instance and no visible symptom.
-    if grep -aq iced_wgpu {{ applet_src }}; then
-        echo "❌ {{ applet_src }} links iced_wgpu."
-        echo "   The applet renders with tiny-skia; a build that selects other"
-        echo "   workspace members turns wgpu on for it. Build it with"
-        echo "   \`just build-applet\`, which selects the package alone."
-        exit 1
+    dir='{{ shared_applet_dir }}'
+    if [ -z "${SHARED_APPLET_DIR:-}" ]; then
+        if [ ! -d "$dir/.git" ]; then
+            git init -q "$dir"
+            git -C "$dir" remote add origin '{{ shared_applet_repo }}'
+        fi
+        if [ "$(git -C "$dir" rev-parse -q --verify HEAD || true)" != '{{ shared_applet_rev }}' ]; then
+            git -C "$dir" fetch -q --depth 1 origin '{{ shared_applet_rev }}'
+            git -C "$dir" checkout -q --detach FETCH_HEAD
+        fi
     fi
-    echo "✅ applet renders with tiny-skia (no wgpu linked)"
+    just --justfile "$dir/justfile" --working-directory "$dir" check-renderer
 
 # Build the generic mock WASM backend fixture (wasm32-wasip2) that
 # tests/wasm_mock.rs loads to exercise the daemon's WasmBackend orchestration.
@@ -1029,9 +915,11 @@ install-app:
     echo "✓ Desktop entry installed: {{ app_desktop_file_dst }}"
     echo "✓ App icon installed: {{ app_icon_dst }}"
 
-# Install the cosmic applet (system installation under /usr/local)
+# Install the shared COSMIC applet under /usr/local, as the release installer
+# does, and remove Super STT's own applet it replaces.
 install-applet: linux-only-gui
     #!/usr/bin/env bash
+    set -euo pipefail
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the build can outlast sudo's credential cache, and a
     # password prompt buried in build output is easy to miss.
@@ -1040,32 +928,22 @@ install-applet: linux-only-gui
     sudo_keepalive=$!
     trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
 
-    # Build the cosmic applet first
-    echo "Building COSMIC applet..."
-    if ! just build-applet; then
-        echo "❌ COSMIC applet build failed or was interrupted"
-        exit 1
-    fi
+    echo "Building the COSMIC applet..."
+    just build-applet
+    dir='{{ shared_applet_dir }}'
 
-    # Check if binary exists
-    if [ ! -f "{{ applet_src }}" ]; then
-        echo "❌ COSMIC applet binary not found at {{ applet_src }}"
-        exit 1
-    fi
+    echo "Installing the COSMIC applet..."
+    sudo install -Dm0755 "$dir/target/release/{{ shared_applet }}" '{{ bin_dir }}/{{ shared_applet }}'
+    for side in full left right; do
+        sudo install -Dm0644 "$dir/resources/{{ shared_applet }}-$side.desktop" "{{ desktop_dir }}/{{ shared_applet }}-$side.desktop"
+    done
+    sudo install -Dm0644 "$dir/resources/icons/hicolor/scalable/apps/{{ shared_applet }}.svg" '{{ icons_dir }}/{{ shared_applet }}.svg'
 
-    echo "Installing Super STT COSMIC applet..."
-    sudo mkdir -p {{ bin_dir }}
-    sudo install -m755 {{ applet_src }} {{ applet_dst }}
-
-    # Install the desktop entries for panel integration
-    echo "Installing desktop entries for COSMIC panel integration..."
-    sudo install -Dm0644 {{ applet_full_desktop_file_src }} {{ applet_full_desktop_file_dst }}
-    sudo install -Dm0644 {{ applet_left_desktop_file_src }} {{ applet_left_desktop_file_dst }}
-    sudo install -Dm0644 {{ applet_right_desktop_file_src }} {{ applet_right_desktop_file_dst }}
-
-    # Install the applet icon
-    echo "Installing applet icon..."
-    sudo install -Dm0644 {{ applet_icon_src }} {{ applet_icon_dst }}
+    # The shared applet replaces Super STT's own.
+    sudo rm -f '{{ bin_dir }}/{{ old_applet }}' '{{ icons_dir }}/{{ old_applet }}.svg'
+    for side in full left right; do
+        sudo rm -f "{{ desktop_dir }}/{{ old_applet }}-$side.desktop"
+    done
 
     # Refresh the desktop/icon caches so the panel picks up the new applet
     # entries without a relogin (mirrors install-app).
@@ -1083,14 +961,9 @@ install-applet: linux-only-gui
     pkill -f '^cosmic-launcher$' 2>/dev/null || true
     pkill -f '^pop-launcher( |$)' 2>/dev/null || true
 
-    echo "✓ COSMIC applet installed: {{ applet_dst }}"
-    echo "✓ Desktop entries installed for panel integration:"
-    echo "  - Super STT Applet (Full)"
-    echo "  - Super STT Applet (Left Side)"
-    echo "  - Super STT Applet (Right Side)"
-    echo ""
-    echo "🚀 Ready to use! The applet can now be added to your COSMIC panel through:"
-    echo "-- COSMIC Settings > Desktop > Panel > Configure panel applets > Add Applet"
+    echo "✓ COSMIC applet installed: {{ bin_dir }}/{{ shared_applet }}"
+    echo "Add it to a panel in COSMIC Settings > Desktop > Panel > Configure panel applets:"
+    echo "  Super Applet (Full), (Left Side) or (Right Side)."
 
 
 # Install Super STT on macOS: the app bundle into /Applications, its two
@@ -1543,16 +1416,23 @@ uninstall-app:
     echo "✓ Desktop entry removed"
     echo "✓ App icon removed"
 
-# Uninstall the cosmic applet
+# Uninstall the COSMIC applet: Super STT's own, and the shared one unless
+# Super TTS, which uses it too, is still installed.
 uninstall-applet:
     #!/usr/bin/env bash
-    echo "Uninstalling Super STT COSMIC applet..."
-    sudo rm -f {{ applet_dst }}
-    sudo rm -f {{ applet_full_desktop_file_dst }}
-    sudo rm -f {{ applet_left_desktop_file_dst }}
-    sudo rm -f {{ applet_right_desktop_file_dst }}
-    # Remove the applet icon
-    sudo rm -f {{ applet_icon_dst }}
+    echo "Uninstalling the COSMIC applet..."
+    sudo rm -f '{{ bin_dir }}/{{ old_applet }}' '{{ icons_dir }}/{{ old_applet }}.svg'
+    for side in full left right; do
+        sudo rm -f "{{ desktop_dir }}/{{ old_applet }}-$side.desktop"
+    done
+    if [ -e '{{ bin_dir }}/super-tts-daemon' ]; then
+        echo "Super TTS is installed and uses the shared applet, so it stays."
+    else
+        sudo rm -f '{{ bin_dir }}/{{ shared_applet }}' '{{ icons_dir }}/{{ shared_applet }}.svg'
+        for side in full left right; do
+            sudo rm -f "{{ desktop_dir }}/{{ shared_applet }}-$side.desktop"
+        done
+    fi
 
     # Drop the entries from COSMIC's launcher caches without a relogin.
     pkill -f '^cosmic-app-library$' 2>/dev/null || true
@@ -1560,8 +1440,6 @@ uninstall-applet:
     pkill -f '^pop-launcher( |$)' 2>/dev/null || true
 
     echo "✓ COSMIC applet uninstalled"
-    echo "✓ Desktop entries removed"
-    echo "✓ Applet icon removed"
 
 # Uninstall the daemon
 uninstall-daemon:
@@ -1814,8 +1692,8 @@ status: status-daemon
         echo "❌ CLI binary: Not installed"
     fi
 
-    # Check if cosmic applet is installed
-    if [ -f "{{ applet_dst }}" ]; then
+    # Check if the shared COSMIC applet is installed
+    if [ -f "{{ bin_dir }}/{{ shared_applet }}" ]; then
         echo "✅ COSMIC applet: Installed"
     else
         echo "❌ COSMIC applet: Not installed"
