@@ -4,7 +4,6 @@
     "super-stt-app",
     "super-stt-cli",
     "super-stt-consent",
-    "super-stt-cosmic-applet",
     "super-stt-daemon",
     "super-stt-indexer",
     "super-stt-install",
@@ -26,7 +25,6 @@
     "super-stt-app",
     "super-stt-cli",
     "super-stt-consent",
-    "super-stt-cosmic-applet",
     "super-stt-daemon",
     "super-stt-install",
     "super-stt-registry-types",
@@ -148,35 +146,35 @@
     # `just pin-engine <rev>`.
     super-engine-client = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3fc63f7125b8136e637fad57400ab4d83f78ae59",
+      rev = "c6618904f4130fc93c87ef1abbab57df31fa072d",
     }
     super-engine-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3fc63f7125b8136e637fad57400ab4d83f78ae59",
+      rev = "c6618904f4130fc93c87ef1abbab57df31fa072d",
     }
     super-engine-forge = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3fc63f7125b8136e637fad57400ab4d83f78ae59",
+      rev = "c6618904f4130fc93c87ef1abbab57df31fa072d",
     }
     super-engine-indexer = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3fc63f7125b8136e637fad57400ab4d83f78ae59",
+      rev = "c6618904f4130fc93c87ef1abbab57df31fa072d",
     }
     super-engine-installer = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3fc63f7125b8136e637fad57400ab4d83f78ae59",
+      rev = "c6618904f4130fc93c87ef1abbab57df31fa072d",
     }
     super-engine-protocol = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3fc63f7125b8136e637fad57400ab4d83f78ae59",
+      rev = "c6618904f4130fc93c87ef1abbab57df31fa072d",
     }
     super-engine-spec = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3fc63f7125b8136e637fad57400ab4d83f78ae59",
+      rev = "c6618904f4130fc93c87ef1abbab57df31fa072d",
     }
     super-engine-test-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3fc63f7125b8136e637fad57400ab4d83f78ae59",
+      rev = "c6618904f4130fc93c87ef1abbab57df31fa072d",
     }
     thiserror         = "2.0"
     tokio             = {

@@ -42,8 +42,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// A minimal, valid gzip'd tar covering every file `--components=all`
 /// requires (super-engine-installer's `stage::build_manifest`): the three
 /// daemon binaries, the systemd unit, the app binary + desktop + icon, and
-/// the applet binary + desktop file + icon. At least one
-/// `super-stt-cosmic-applet-*.desktop` file is required whenever the applet
+/// the shared COSMIC applet's binary + desktop file + icon, as a release now
+/// carries them. At least one `super-cosmic-applet-*.desktop` file is
+/// required whenever the applet
 /// component is selected (F5 — an empty glob is a hard error, not a silent
 /// no-launcher-entry install), so exactly one is included here; the app
 /// metainfo is still optional in `build_manifest` and omitted.
@@ -57,7 +58,7 @@ fn build_fixture_tarball(dir: &std::path::Path) -> Vec<u8> {
         "super-stt-cli",
         "super-stt-consent",
         "super-stt-app",
-        "super-stt-cosmic-applet",
+        "super-cosmic-applet",
     ] {
         std::fs::write(tree.join(bin), b"#!/bin/sh\necho fake\n").unwrap();
     }
@@ -77,12 +78,12 @@ fn build_fixture_tarball(dir: &std::path::Path) -> Vec<u8> {
     )
     .unwrap();
     std::fs::write(
-        tree.join("resources/super-stt-cosmic-applet-full.desktop"),
-        b"[Desktop Entry]\nName=Super STT Applet\n",
+        tree.join("resources/super-cosmic-applet-full.desktop"),
+        b"[Desktop Entry]\nName=Super Applet\n",
     )
     .unwrap();
     std::fs::write(
-        tree.join("resources/icons/hicolor/scalable/apps/super-stt-cosmic-applet.svg"),
+        tree.join("resources/icons/hicolor/scalable/apps/super-cosmic-applet.svg"),
         b"<svg/>",
     )
     .unwrap();
