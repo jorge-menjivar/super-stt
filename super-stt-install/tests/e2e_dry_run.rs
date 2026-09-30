@@ -20,6 +20,11 @@ const COMPONENTS_ARG: &str = "--components=all";
 /// The release tag this test's fake GitHub API always returns.
 const FAKE_TAG: &str = "v9.9.9-beta.1";
 
+/// The applet release's tag: newer than any applet a host running this test
+/// may have installed, which the installer would otherwise keep, skipping
+/// the download this test checks.
+const FAKE_APPLET_TAG: &str = "v99.0.0-beta.1";
+
 /// This host's Rust target triple, computed the same way
 /// `resolve::target_triple` does — duplicated here because the installer is
 /// a binary crate (no lib target this integration test could import from).
@@ -39,56 +44,15 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(digest.as_ref())
 }
 
-/// A minimal, valid gzip'd tar covering every file `--components=all`
-/// requires (super-engine-installer's `stage::build_manifest`): the three
-/// daemon binaries, the systemd unit, the app binary + desktop + icon, and
-/// the shared COSMIC applet's binary + desktop file + icon, as a release now
-/// carries them. At least one `super-cosmic-applet-*.desktop` file is
-/// required whenever the applet
-/// component is selected (F5 — an empty glob is a hard error, not a silent
-/// no-launcher-entry install), so exactly one is included here; the app
-/// metainfo is still optional in `build_manifest` and omitted.
-fn build_fixture_tarball(dir: &std::path::Path) -> Vec<u8> {
-    let tree = dir.join("tree");
-    std::fs::create_dir_all(tree.join("systemd")).unwrap();
-    std::fs::create_dir_all(tree.join("resources/icons/hicolor/scalable/apps")).unwrap();
-
-    for bin in [
-        "super-stt-daemon",
-        "super-stt-cli",
-        "super-stt-consent",
-        "super-stt-app",
-        "super-cosmic-applet",
-    ] {
-        std::fs::write(tree.join(bin), b"#!/bin/sh\necho fake\n").unwrap();
+/// A gzip'd tar of `files` (path, contents) under `dir`, as `name`.
+fn tarball(dir: &std::path::Path, name: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
+    let tree = dir.join(format!("{name}.tree"));
+    for (path, contents) in files {
+        let full = tree.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, contents).unwrap();
     }
-    std::fs::write(
-        tree.join("systemd/super-stt.service"),
-        b"[Unit]\nDescription=fake\n",
-    )
-    .unwrap();
-    std::fs::write(
-        tree.join("resources/super-stt-app.desktop"),
-        b"[Desktop Entry]\nName=Super STT\n",
-    )
-    .unwrap();
-    std::fs::write(
-        tree.join("resources/icons/hicolor/scalable/apps/super-stt-app.svg"),
-        b"<svg/>",
-    )
-    .unwrap();
-    std::fs::write(
-        tree.join("resources/super-cosmic-applet-full.desktop"),
-        b"[Desktop Entry]\nName=Super Applet\n",
-    )
-    .unwrap();
-    std::fs::write(
-        tree.join("resources/icons/hicolor/scalable/apps/super-cosmic-applet.svg"),
-        b"<svg/>",
-    )
-    .unwrap();
-
-    let tgz_path = dir.join("fixture.tar.gz");
+    let tgz_path = dir.join(name);
     {
         let f = std::fs::File::create(&tgz_path).unwrap();
         let enc = flate2::write::GzEncoder::new(f, flate2::Compression::fast());
@@ -99,13 +63,89 @@ fn build_fixture_tarball(dir: &std::path::Path) -> Vec<u8> {
     std::fs::read(&tgz_path).unwrap()
 }
 
+/// The product's release tarball, covering every file `--components=all`
+/// requires of it (super-engine-installer's `stage::build_manifest`): the three daemon binaries, the
+/// systemd unit, and the app binary, desktop file and icon. It carries no
+/// applet: that comes from the applet's own release. The app metainfo is
+/// optional in `build_manifest` and omitted.
+fn product_tarball(dir: &std::path::Path, name: &str) -> Vec<u8> {
+    tarball(
+        dir,
+        name,
+        &[
+            ("super-stt-daemon", b"#!/bin/sh\necho fake\n"),
+            ("super-stt-cli", b"#!/bin/sh\necho fake\n"),
+            ("super-stt-consent", b"#!/bin/sh\necho fake\n"),
+            ("super-stt-app", b"#!/bin/sh\necho fake\n"),
+            ("systemd/super-stt.service", b"[Unit]\nDescription=fake\n"),
+            (
+                "resources/super-stt-app.desktop",
+                b"[Desktop Entry]\nName=Super STT\n",
+            ),
+            (
+                "resources/icons/hicolor/scalable/apps/super-stt-app.svg",
+                b"<svg/>",
+            ),
+        ],
+    )
+}
+
+/// The applet release's tarball: the binary, one launcher entry (at least one
+/// is required, F5) and the icon.
+fn applet_tarball(dir: &std::path::Path, name: &str) -> Vec<u8> {
+    tarball(
+        dir,
+        name,
+        &[
+            ("super-cosmic-applet", b"#!/bin/sh\necho fake\n"),
+            (
+                "resources/super-cosmic-applet-full.desktop",
+                b"[Desktop Entry]\nName=Super Applet\n",
+            ),
+            (
+                "resources/icons/hicolor/scalable/apps/super-cosmic-applet.svg",
+                b"<svg/>",
+            ),
+        ],
+    )
+}
+
+/// A GitHub releases listing of one prerelease, `tag`, with a tarball and
+/// its `SHA256SUMS`, served from `base` at `/<path>/tarball` and `/<path>/sums`.
+fn releases_json(
+    base: &str,
+    path: &str,
+    tag: &str,
+    tarball: (&str, usize),
+    sums_len: usize,
+) -> String {
+    serde_json::json!([{
+        "tag_name": tag,
+        "draft": false,
+        "prerelease": true,
+        "assets": [
+            {
+                "name": tarball.0,
+                "browser_download_url": format!("{base}/{path}/tarball"),
+                "size": tarball.1,
+            },
+            {
+                "name": "SHA256SUMS",
+                "browser_download_url": format!("{base}/{path}/sums"),
+                "size": sums_len,
+            },
+        ],
+    }])
+    .to_string()
+}
+
 #[tokio::test]
 async fn dry_run_resolves_downloads_verifies_and_stages_against_a_mocked_release() {
     let triple = target_triple();
     let tarball_name = format!("super-stt-{triple}-beta.tar.gz");
 
     let dir = std::env::temp_dir().join(format!(
-        "sstt-install-e2e-{}-{}",
+        "super-engine-installer-e2e-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -113,53 +153,67 @@ async fn dry_run_resolves_downloads_verifies_and_stages_against_a_mocked_release
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    let tarball_bytes = build_fixture_tarball(&dir);
+    let tarball_bytes = product_tarball(&dir, &tarball_name);
     let sums_text = format!("{}  {tarball_name}\n", sha256_hex(&tarball_bytes));
+    let applet_tarball_name = format!("super-cosmic-applet-{triple}-beta.tar.gz");
+    let applet_bytes = applet_tarball(&dir, &applet_tarball_name);
+    let applet_sums = format!("{}  {applet_tarball_name}\n", sha256_hex(&applet_bytes));
 
     let mut server = mockito::Server::new_async().await;
     let base = server.url();
 
-    let releases_json = serde_json::json!([{
-        "tag_name": FAKE_TAG,
-        "draft": false,
-        "prerelease": true,
-        "assets": [
-            {
-                "name": tarball_name,
-                "browser_download_url": format!("{base}/tarball"),
-                "size": tarball_bytes.len(),
-            },
-            {
-                "name": "SHA256SUMS",
-                "browser_download_url": format!("{base}/sums"),
-                "size": sums_text.len(),
-            },
-        ],
-    }])
-    .to_string();
-
-    let _releases_mock = server
-        .mock(
-            "GET",
-            "/repos/jorge-menjivar/super-stt/releases?per_page=100",
-        )
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(&releases_json)
-        .create_async()
-        .await;
-    let _tarball_mock = server
-        .mock("GET", "/tarball")
-        .with_status(200)
-        .with_body(&tarball_bytes)
-        .create_async()
-        .await;
-    let _sums_mock = server
-        .mock("GET", "/sums")
-        .with_status(200)
-        .with_body(&sums_text)
-        .create_async()
-        .await;
+    let mut mocks = Vec::new();
+    for (repo, path, tag, name, bytes, sums) in [
+        (
+            "jorge-menjivar/super-stt",
+            "product",
+            FAKE_TAG,
+            &tarball_name,
+            &tarball_bytes,
+            &sums_text,
+        ),
+        (
+            "super-libre/super-cosmic-applet",
+            "applet",
+            FAKE_APPLET_TAG,
+            &applet_tarball_name,
+            &applet_bytes,
+            &applet_sums,
+        ),
+    ] {
+        let listing = releases_json(&base, path, tag, (name, bytes.len()), sums.len());
+        mocks.push(
+            server
+                .mock(
+                    "GET",
+                    format!("/repos/{repo}/releases?per_page=100").as_str(),
+                )
+                .with_status(200)
+                .with_header("content-type", "application/json")
+                .with_body(listing)
+                .expect(1)
+                .create_async()
+                .await,
+        );
+        mocks.push(
+            server
+                .mock("GET", format!("/{path}/tarball").as_str())
+                .with_status(200)
+                .with_body(bytes)
+                .expect(1)
+                .create_async()
+                .await,
+        );
+        mocks.push(
+            server
+                .mock("GET", format!("/{path}/sums").as_str())
+                .with_status(200)
+                .with_body(sums)
+                .expect(1)
+                .create_async()
+                .await,
+        );
+    }
 
     let out = tokio::task::spawn_blocking({
         let base = base.clone();
@@ -216,6 +270,12 @@ async fn dry_run_resolves_downloads_verifies_and_stages_against_a_mocked_release
         .map(|v| v.as_str().unwrap().to_string())
         .collect();
     assert_eq!(components, vec!["daemon", "app", "applet"]);
+
+    // Both releases were resolved, and both tarballs downloaded and checked:
+    // the applet's from its own repo, since the product's carries none.
+    for mock in &mocks {
+        mock.assert_async().await;
+    }
 
     let _ = std::fs::remove_dir_all(&dir);
 }
