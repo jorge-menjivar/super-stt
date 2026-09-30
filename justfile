@@ -7,14 +7,12 @@ consent_name := 'super-stt-consent'
 wrapper_name := 'stt'
 
 # The COSMIC applet Super STT shares with Super TTS. It lives in its own repo,
-# super-libre/super-cosmic-applet, and is built from the commit
-# shared-applet.rev pins, or from the local checkout SHARED_APPLET_DIR names.
-# It replaces Super STT's own applet, super-stt-cosmic-applet, whose files
-# `install-applet` removes.
+# super-libre/super-cosmic-applet, whose releases the installer installs.
+# `install-applet` builds it from a checkout of that repo: SHARED_APPLET_DIR,
+# else ../super-cosmic-applet. It replaces Super STT's own applet,
+# super-stt-cosmic-applet, whose files `install-applet` removes.
 shared_applet := 'super-cosmic-applet'
-shared_applet_repo := 'https://github.com/super-libre/super-cosmic-applet'
-shared_applet_rev := trim(shell('cat shared-applet.rev'))
-shared_applet_dir := env('SHARED_APPLET_DIR', 'target' / 'shared-applet')
+shared_applet_dir := env('SHARED_APPLET_DIR', '..' / 'super-cosmic-applet')
 old_applet := 'super-stt-cosmic-applet'
 
 # Installation paths — root-owned under /usr/local, matching the
@@ -705,26 +703,6 @@ build-install:
 build-consent: linux-only-gui
     cargo build --release --bin {{ consent_name }}
 
-# Build the shared COSMIC applet: from SHARED_APPLET_DIR when set, else from a
-# checkout of the commit shared-applet.rev pins, fetched into target/ once.
-# Its own `check-renderer` builds the release binary and fails if it links
-# the wgpu renderer.
-build-applet: linux-only-gui
-    #!/usr/bin/env bash
-    set -euo pipefail
-    dir='{{ shared_applet_dir }}'
-    if [ -z "${SHARED_APPLET_DIR:-}" ]; then
-        if [ ! -d "$dir/.git" ]; then
-            git init -q "$dir"
-            git -C "$dir" remote add origin '{{ shared_applet_repo }}'
-        fi
-        if [ "$(git -C "$dir" rev-parse -q --verify HEAD || true)" != '{{ shared_applet_rev }}' ]; then
-            git -C "$dir" fetch -q --depth 1 origin '{{ shared_applet_rev }}'
-            git -C "$dir" checkout -q --detach FETCH_HEAD
-        fi
-    fi
-    just --justfile "$dir/justfile" --working-directory "$dir" check-renderer
-
 # Build the generic mock WASM backend fixture (wasm32-wasip2) that
 # tests/wasm_mock.rs loads to exercise the daemon's WasmBackend orchestration.
 # Requires: rustup target add wasm32-wasip2
@@ -915,11 +893,20 @@ install-app:
     echo "✓ Desktop entry installed: {{ app_desktop_file_dst }}"
     echo "✓ App icon installed: {{ app_icon_dst }}"
 
-# Install the shared COSMIC applet under /usr/local, as the release installer
-# does, and remove Super STT's own applet it replaces.
+# Build the shared COSMIC applet from its checkout and install it under
+# /usr/local, with that repo's own `just install`, then remove Super STT's own
+# applet it replaces. The release installer installs the applet's newest
+# release instead.
 install-applet: linux-only-gui
     #!/usr/bin/env bash
     set -euo pipefail
+    dir='{{ shared_applet_dir }}'
+    if [ ! -f "$dir/justfile" ]; then
+        echo "No super-cosmic-applet checkout at $dir." >&2
+        echo "Clone https://github.com/super-libre/super-cosmic-applet there, or set SHARED_APPLET_DIR to one." >&2
+        exit 1
+    fi
+
     # Ask for sudo up front and keep the timestamp alive in the
     # background: the build can outlast sudo's credential cache, and a
     # password prompt buried in build output is easy to miss.
@@ -928,16 +915,8 @@ install-applet: linux-only-gui
     sudo_keepalive=$!
     trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
 
-    echo "Building the COSMIC applet..."
-    just build-applet
-    dir='{{ shared_applet_dir }}'
-
-    echo "Installing the COSMIC applet..."
-    sudo install -Dm0755 "$dir/target/release/{{ shared_applet }}" '{{ bin_dir }}/{{ shared_applet }}'
-    for side in full left right; do
-        sudo install -Dm0644 "$dir/resources/{{ shared_applet }}-$side.desktop" "{{ desktop_dir }}/{{ shared_applet }}-$side.desktop"
-    done
-    sudo install -Dm0644 "$dir/resources/icons/hicolor/scalable/apps/{{ shared_applet }}.svg" '{{ icons_dir }}/{{ shared_applet }}.svg'
+    echo "Building and installing the COSMIC applet from $dir..."
+    just --justfile "$dir/justfile" --working-directory "$dir" install
 
     # The shared applet replaces Super STT's own.
     sudo rm -f '{{ bin_dir }}/{{ old_applet }}' '{{ icons_dir }}/{{ old_applet }}.svg'

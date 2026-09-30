@@ -35,7 +35,7 @@ just install            # build and install everything, wired to systemd
 # …or one piece at a time:
 just install-daemon
 just install-app
-just install-applet     # COSMIC only
+just install-applet     # COSMIC only, from a super-cosmic-applet checkout
 ```
 
 #### On macOS
@@ -259,9 +259,11 @@ there, and reaches this workspace when the pin is bumped. So does a fix to the
 daemon's session tokens, consent checks or route guards.
 
 The COSMIC panel applet is shared with Super TTS too, and lives in
-[super-cosmic-applet](https://github.com/super-libre/super-cosmic-applet). The
-release builds it at the commit `shared-applet.rev` pins; `just install-applet`
-does the same locally, or builds the checkout `SHARED_APPLET_DIR` names.
+[super-cosmic-applet](https://github.com/super-libre/super-cosmic-applet),
+which publishes its own releases. Super STT's releases don't carry it: the
+installer installs the applet's newest release for the channel. `just
+install-applet` builds and installs it from a checkout of that repo instead,
+`SHARED_APPLET_DIR` or else `../super-cosmic-applet`.
 
 The protocol and backend contract that clients and backend authors build
 against live in [`docs/protocol/`](./docs/protocol/).
