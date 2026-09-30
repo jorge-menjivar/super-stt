@@ -6,15 +6,15 @@
   - `super-stt-app`: desktop UI (COSMIC/iced).
   - `super-stt-shared`: shared models, protocol, utils.
 - Tests/tooling: Python scripts at repo root (e.g., `test_download_progress.py`).
-- Assets: app `i18n/`, `resources/`. The COSMIC panel applet is shared with Super TTS and lives in super-libre/super-cosmic-applet, at the commit `shared-applet.rev` pins.
+- Assets: app `i18n/`, `resources/`. The COSMIC panel applet is shared with Super TTS and lives in super-libre/super-cosmic-applet, which publishes its own releases; the installer installs the newest one.
 
 ## Build, Test, and Development Commands
 - Build release: `just build-release` (or `cargo build --release`).
 - Lint (clippy, pedantic): `just check` (or `cargo clippy --all-features`).
 - Run UI app: `just run-app`.
 - Run daemon: `just run-daemon` (the model is config / `POST /v1` state, not a flag).
-- Run COSMIC applets: `just run-applets`.
-- Install locally: `just install-daemon`, `just install-app`, `just install-applets`.
+- Run the COSMIC applet: `just run` in a super-cosmic-applet checkout.
+- Install locally: `just install-daemon`, `just install-app`, `just install-applet` (builds the applet from a super-cosmic-applet checkout: `SHARED_APPLET_DIR`, else `../super-cosmic-applet`).
 - Status/logs: `just status`, `just logs-daemon`.
 - Offline/vendor build: `just build-vendored`.
 

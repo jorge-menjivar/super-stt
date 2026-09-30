@@ -1,10 +1,13 @@
 name: Release
 
 # Stable release workflow. Builds the daemon/CLI/consent-helper split
-# plus the app and applet, and publishes a non-prerelease
+# plus the app, and publishes a non-prerelease
 # GitHub release. Tags containing the word "beta" go to
 # release-beta.yml instead, which ships the same layout as a prerelease
 # with a `-beta` tarball suffix.
+#
+# The COSMIC applet isn't in the tarball: it has releases of its own, in
+# super-libre/super-cosmic-applet, which the installer installs from.
 
 on:
   push:
@@ -148,31 +151,6 @@ jobs:
             --bin super-stt-app \
             --bin super-stt-install
 
-      # The COSMIC applet Super STT shares with Super TTS lives in its own
-      # repo, at the commit shared-applet.rev pins. It builds in its own
-      # workspace, so it renders with tiny-skia: built beside super-stt-app it
-      # would inherit the app's wgpu renderer.
-      - name: Read the shared applet's pin
-        id: applet
-        run: echo "rev=$(cat shared-applet.rev)" >> "$GITHUB_OUTPUT"
-
-      - name: Check out the shared COSMIC applet
-        uses: actions/checkout@v7
-        with:
-          repository: super-libre/super-cosmic-applet
-          ref: ${{ steps.applet.outputs.rev }}
-          path: shared-applet
-
-      - name: Cache the shared applet's build
-        uses: actions/cache@v6
-        with:
-          path: shared-applet/target
-          key: ${{ matrix.target }}-shared-applet-${{ steps.applet.outputs.rev }}
-
-      - name: Build the shared COSMIC applet
-        working-directory: shared-applet
-        run: cargo build --release --locked --target ${{ matrix.target }}
-
       - name: Create tarball
         run: |
           mkdir -p dist
@@ -183,7 +161,6 @@ jobs:
           cp target/${{ matrix.target }}/release/super-stt-cli dist/
           cp target/${{ matrix.target }}/release/super-stt-consent dist/
           cp target/${{ matrix.target }}/release/super-stt-app dist/
-          cp shared-applet/target/${{ matrix.target }}/release/super-cosmic-applet dist/
 
           # Include systemd service files
           mkdir -p dist/systemd
@@ -193,12 +170,6 @@ jobs:
 
           # Include desktop app resources
           cp -r super-stt-app/resources/* dist/resources
-
-          # The shared COSMIC applet's launcher entries and icon
-          cp shared-applet/resources/super-cosmic-applet-*.desktop dist/resources/
-          mkdir -p dist/resources/icons/hicolor/scalable/apps
-          cp shared-applet/resources/icons/hicolor/scalable/apps/super-cosmic-applet.svg \
-            dist/resources/icons/hicolor/scalable/apps/
 
           # Remove any extra assets
           rm -rf dist/resources/assets
