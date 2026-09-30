@@ -1330,7 +1330,7 @@ dependencies = [
  "atomicwrites",
  "cosmic-config-derive 1.0.0 (git+https://github.com/pop-os/libcosmic.git?rev=ef162b8e16ba4493e05c169cd56c7b9f77f0fda5)",
  "cosmic-settings-daemon",
- "dirs",
+ "dirs 6.0.0",
  "futures-util",
  "iced_futures 0.14.0 (git+https://github.com/pop-os/libcosmic.git?rev=ef162b8e16ba4493e05c169cd56c7b9f77f0fda5)",
  "known-folders",
@@ -1350,7 +1350,7 @@ source = "git+https://github.com/pop-os/libcosmic.git#ef162b8e16ba4493e05c169cd5
 dependencies = [
  "atomicwrites",
  "cosmic-config-derive 1.0.0 (git+https://github.com/pop-os/libcosmic.git)",
- "dirs",
+ "dirs 6.0.0",
  "iced_futures 0.14.0 (git+https://github.com/pop-os/libcosmic.git)",
  "known-folders",
  "notify",
@@ -1461,7 +1461,7 @@ dependencies = [
  "configparser",
  "cosmic-config 1.0.0 (git+https://github.com/pop-os/libcosmic.git?rev=ef162b8e16ba4493e05c169cd56c7b9f77f0fda5)",
  "csscolorparser",
- "dirs",
+ "dirs 6.0.0",
  "hex_color",
  "palette",
  "ron",
@@ -1977,6 +1977,15 @@ name = "dirs"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
+name = "dirs"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
 dependencies = [
  "dirs-sys",
 ]
@@ -6975,7 +6984,7 @@ version = "0.1.0"
 source = "git+https://github.com/super-libre/super-engine?rev=c7d5e0b2fcc7eb3f635f1c144640340ebfd13a91#c7d5e0b2fcc7eb3f635f1c144640340ebfd13a91"
 dependencies = [
  "clap",
- "dirs",
+ "dirs 6.0.0",
  "env_logger",
  "flate2",
  "log",
@@ -6995,7 +7004,7 @@ name = "super-engine-protocol"
 version = "0.1.0"
 source = "git+https://github.com/super-libre/super-engine?rev=c7d5e0b2fcc7eb3f635f1c144640340ebfd13a91#c7d5e0b2fcc7eb3f635f1c144640340ebfd13a91"
 dependencies = [
- "dirs",
+ "dirs 6.0.0",
  "env_logger",
  "libc",
  "log",
@@ -7045,7 +7054,7 @@ version = "0.2.4"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
- "dirs",
+ "dirs 7.0.0",
  "futures-util",
  "http-body-util",
  "hyper",
@@ -7120,7 +7129,7 @@ dependencies = [
  "clap",
  "cpal",
  "dashmap",
- "dirs",
+ "dirs 7.0.0",
  "enigo",
  "futures",
  "futures-util",
@@ -7180,7 +7189,7 @@ dependencies = [
 name = "super-stt-install"
 version = "0.2.4"
 dependencies = [
- "dirs",
+ "dirs 7.0.0",
  "flate2",
  "hex",
  "log",
