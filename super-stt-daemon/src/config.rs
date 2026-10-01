@@ -413,10 +413,21 @@ impl Default for DaemonConfig {
 fn test_config_path() -> PathBuf {
     use std::sync::OnceLock;
     static PATH: OnceLock<PathBuf> = OnceLock::new();
+    // A static is never dropped, so the directory is removed when the test
+    // binary exits instead, failed tests or not.
+    extern "C" fn remove_test_config_dir() {
+        if let Some(dir) = PATH.get().and_then(|path| path.parent()) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
     PATH.get_or_init(|| {
         let dir =
             std::env::temp_dir().join(format!("super-stt-test-config-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
+        // SAFETY: registers a plain `extern "C" fn` with no captured state.
+        unsafe {
+            libc::atexit(remove_test_config_dir);
+        }
         dir.join("daemon.toml")
     })
     .clone()
