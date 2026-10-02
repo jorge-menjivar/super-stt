@@ -144,15 +144,12 @@ async fn dry_run_resolves_downloads_verifies_and_stages_against_a_mocked_release
     let triple = target_triple();
     let tarball_name = format!("super-stt-{triple}-beta.tar.gz");
 
-    let dir = std::env::temp_dir().join(format!(
-        "super-engine-installer-e2e-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
+    // Removed when the test ends, failed or not.
+    let tmp = tempfile::Builder::new()
+        .prefix("super-stt-install-e2e-")
+        .tempdir()
+        .unwrap();
+    let dir = tmp.path();
     let tarball_bytes = product_tarball(&dir, &tarball_name);
     let sums_text = format!("{}  {tarball_name}\n", sha256_hex(&tarball_bytes));
     let applet_tarball_name = format!("super-cosmic-applet-{triple}-beta.tar.gz");
@@ -276,6 +273,4 @@ async fn dry_run_resolves_downloads_verifies_and_stages_against_a_mocked_release
     for mock in &mocks {
         mock.assert_async().await;
     }
-
-    let _ = std::fs::remove_dir_all(&dir);
 }

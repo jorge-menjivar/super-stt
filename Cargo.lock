@@ -7190,6 +7190,7 @@ dependencies = [
  "super-engine-installer",
  "super-stt-registry-types",
  "tar",
+ "tempfile",
  "tokio",
 ]
 

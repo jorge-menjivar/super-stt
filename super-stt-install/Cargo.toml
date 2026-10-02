@@ -22,6 +22,8 @@
     ring = "0.17.14"
     serde_json.workspace = true
     tar = "0.4.46"
+    # Test directories that remove themselves.
+    tempfile = "3.27.0"
     tokio.workspace = true
 
 [lints]
