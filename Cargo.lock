@@ -7086,6 +7086,7 @@ dependencies = [
  "super-stt-daemon",
  "super-stt-registry-types",
  "super-stt-shared",
+ "tempfile",
  "tokio",
  "toml 1.1.0+spec-1.1.0",
  "urlencoding",

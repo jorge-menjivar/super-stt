@@ -457,12 +457,8 @@ mod tests {
     /// it happens to already exist with an old mtime.
     #[tokio::test]
     async fn sweep_stale_run_dirs_removes_only_old_siblings_and_never_touches_keep() {
-        let base = std::env::temp_dir().join(format!(
-            "sstt-app-updater-sweep-test-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
 
         let old_dir = base.join("12345-deadbeef");
         std::fs::create_dir_all(&old_dir).unwrap();
@@ -490,12 +486,8 @@ mod tests {
     /// still-running installer.
     #[tokio::test]
     async fn sweep_stale_run_dirs_leaves_a_just_created_sibling_alone() {
-        let base = std::env::temp_dir().join(format!(
-            "sstt-app-updater-sweep-fresh-test-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let live_dir = base.join("99999-livehex01");
         std::fs::create_dir_all(&live_dir).unwrap();
 
@@ -511,21 +503,15 @@ mod tests {
     /// this sweep is best-effort tidiness, called every run.
     #[tokio::test]
     async fn sweep_stale_run_dirs_tolerates_a_missing_base_dir() {
-        let base = std::env::temp_dir().join(format!(
-            "sstt-app-updater-sweep-missing-test-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&base);
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("missing");
         sweep_stale_run_dirs(&base, &base.join("keep")).await;
     }
 
     #[tokio::test]
     async fn create_run_dir_makes_a_private_0700_directory() {
-        let base = std::env::temp_dir().join(format!(
-            "sstt-app-updater-rundir-test-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let (dir, _bin) = installer_run_paths(&base, "installer-bin");
 
         create_run_dir(&dir).await.unwrap();
@@ -538,11 +524,8 @@ mod tests {
 
     #[tokio::test]
     async fn verify_installer_checksum_matches_and_rejects_corruption() {
-        let dir = std::env::temp_dir().join(format!(
-            "sstt-app-updater-checksum-test-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let bin = dir.join("installer-bin");
         std::fs::write(&bin, b"hello world").unwrap();
         let good = super_stt_registry_types::verify::file_sha256_hex(&bin).unwrap();
@@ -687,19 +670,8 @@ mod tests {
             .with_chunked_body(|w| w.write_all(&[3u8; 1000]))
             .create_async()
             .await;
-        // pid + an atomic counter (super-engine-installer's test
-        // temp-dir convention) so parallel tests can't collide; clear a
-        // pre-existing directory first since the pid+counter name is only
-        // unique within one process run.
-        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "sstt-app-updater-dl-nolen-{}-{n}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let dest = dir.join("blob");
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("blob");
 
         let (mut tx, mut rx) = cosmic::iced::futures::channel::mpsc::channel::<UpdateRunEvent>(8);
         download_installer(&format!("{}/blob", s.url()), &dest, &mut tx)
