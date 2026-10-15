@@ -202,6 +202,9 @@ impl DBusManager {
         emit_audio_level => audio_level(AudioLevelEvent)
     );
 
+    // With a reason: clippy 1.99 asks for `#[must_use]` here, and 1.98 refuses
+    // a bare one, since it takes `&Connection` as `#[must_use]` already.
+    #[must_use = "this only borrows the connection"]
     pub fn connection(&self) -> &Connection {
         &self.connection
     }
