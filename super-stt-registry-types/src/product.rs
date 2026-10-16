@@ -79,11 +79,14 @@ pub enum Contract {
     /// the cache it rebuilds them on every load, and without the progress it
     /// runs into the flat load limit of a daemon that predates the stall rule.
     V3,
+    /// v3 plus a required `[backend].product`: the manifest says it is built
+    /// for Super STT. Nothing the daemon provides changes.
+    V4,
 }
 
 impl Generation for Contract {
-    const ALL: &'static [Self] = &[Self::V1, Self::V2, Self::V3];
-    const LATEST: Self = Self::V3;
+    const ALL: &'static [Self] = &[Self::V1, Self::V2, Self::V3, Self::V4];
+    const LATEST: Self = Self::V4;
 
     /// A new row is a forecast until its release ships, and nothing can check
     /// it: the version that introduces a generation is by definition not yet
@@ -96,7 +99,9 @@ impl Generation for Contract {
             // notion of an installable backend to gate.
             Self::V1 => "0.2.0",
             Self::V2 => "0.2.4-beta.1",
-            Self::V3 => "0.2.5",
+            // v4 ships in the same release as v3, which has not shipped
+            // either.
+            Self::V3 | Self::V4 => "0.2.5",
         }
     }
 }
@@ -107,6 +112,7 @@ impl fmt::Display for Contract {
             Self::V1 => write!(f, "v1"),
             Self::V2 => write!(f, "v2"),
             Self::V3 => write!(f, "v3"),
+            Self::V4 => write!(f, "v4"),
         }
     }
 }
@@ -265,6 +271,8 @@ impl Product for Stt {
     type Model = SttModel;
     type IndexModel = SttIndexModel;
 
+    const SLUG: &'static str = "super-stt";
+
     const CONTRACT_FIELDS: &'static [ContractField<Contract>] = &[
         ContractField {
             since: Contract::V2,
@@ -290,6 +298,16 @@ impl Product for Stt {
             rule: FieldRule::RequiredFrom,
             table: "backend",
             key: "id",
+        },
+        // Every backend published before the field existed is a Super STT
+        // backend, so it stays optional below v4 and an absent one still
+        // reads as this product's. A Super TTS manifest always names its
+        // product, so the rule that refuses it needs no generation.
+        ContractField {
+            since: Contract::V4,
+            rule: FieldRule::RequiredFrom,
+            table: "backend",
+            key: "product",
         },
     ];
 
@@ -346,7 +364,7 @@ impl Product for Stt {
 
 #[cfg(test)]
 mod tests {
-    use super::{Contract, Generation, ModelRole};
+    use super::{Contract, Generation, ModelRole, Product, SUPER_STT, Stt};
     use crate::index::IndexModel;
     use crate::manifest::{Manifest, ManifestError};
 
@@ -385,7 +403,78 @@ mod tests {
         assert_eq!(Contract::V1.min_client(), "0.2.0");
         assert_eq!(Contract::V2.min_client(), "0.2.4-beta.1");
         assert_eq!(Contract::V3.min_client(), "0.2.5");
-        assert_eq!(Contract::LATEST, Contract::V3);
+        assert_eq!(Contract::V4.min_client(), "0.2.5");
+        assert_eq!(Contract::LATEST, Contract::V4);
+    }
+
+    /// A manifest names Super STT by the slug it goes by everywhere else.
+    #[test]
+    fn a_manifest_names_super_stt_by_its_slug() {
+        assert_eq!(Stt::SLUG, SUPER_STT.slug);
+    }
+
+    /// v4 is v3 plus a required `[backend].product`.
+    #[test]
+    fn v4_requires_the_product() {
+        let id = "id = \"com.example.y\"";
+        match Manifest::parse(&manifest("v4", id, "", "")) {
+            Err(ManifestError::FieldRequiredByContract {
+                field, previous, ..
+            }) => {
+                assert_eq!(field, "[backend].product");
+                assert_eq!(previous.as_deref(), Some("v3"));
+            }
+            other => panic!("v4 without a product must be refused, got {other:?}"),
+        }
+
+        let backend = format!("{id}\nproduct = \"super-stt\"");
+        let m =
+            Manifest::parse(&manifest("v4", &backend, "", "")).expect("v4 with a product parses");
+        assert_eq!(m.backend.contract, Contract::V4);
+        assert_eq!(m.backend.product.as_deref(), Some("super-stt"));
+    }
+
+    /// Below v4 the product is optional, because every backend published
+    /// before the field existed is a Super STT backend. One may still name it.
+    #[test]
+    fn older_generations_may_name_the_product_or_leave_it_out() {
+        let id = "id = \"com.example.y\"";
+        for contract in ["v1", "v2", "v3"] {
+            let without = Manifest::parse(&manifest(contract, id, "", ""))
+                .unwrap_or_else(|e| panic!("{contract} without a product: {e}"));
+            assert_eq!(without.backend.product, None);
+
+            let backend = format!("{id}\nproduct = \"super-stt\"");
+            Manifest::parse(&manifest(contract, &backend, "", ""))
+                .unwrap_or_else(|e| panic!("{contract} with a product: {e}"));
+        }
+    }
+
+    /// A manifest naming any product but Super STT is refused, whatever
+    /// contract it declares. Super TTS numbers its contracts from `v1` too, so
+    /// the contract alone would let its backends in.
+    #[test]
+    fn a_manifest_for_another_product_is_refused() {
+        for (contract, product) in [
+            ("v1", "super-tts"),
+            ("v4", "super-tts"),
+            ("v3", "super-sst"),
+        ] {
+            let backend = format!("id = \"com.example.y\"\nproduct = \"{product}\"");
+            match Manifest::parse(&manifest(contract, &backend, "", "")) {
+                Err(ManifestError::OtherProduct { declared, expected }) => {
+                    assert_eq!(declared, product);
+                    assert_eq!(expected, "super-stt");
+                }
+                other => panic!("{product} under {contract} must be refused, got {other:?}"),
+            }
+        }
+        let err = Manifest::parse(&manifest("v1", "product = \"super-tts\"", "", ""))
+            .expect_err("refused");
+        assert_eq!(
+            err.to_string(),
+            "this backend is built for super-tts, not super-stt"
+        );
     }
 
     /// v3 adds no field, and keeps everything v2 does: it still requires

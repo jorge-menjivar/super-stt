@@ -55,6 +55,7 @@ name        = "Whisper (local)"
 version     = "0.1.0"
 kind        = "subprocess"
 entrypoint  = "whisper-backend"
+product     = "super-stt"
 contract    = "v1"
 license     = "Apache-2.0"
 description = "Local Whisper speech-to-text."
@@ -68,7 +69,8 @@ description = "Local Whisper speech-to-text."
 | `version`    | string | yes             | Backend version (semver).                                            |
 | `kind`       | string | yes             | `subprocess` or `wasm` — selects the transport.                       |
 | `entrypoint` | string | yes             | Path, relative to the backend directory, to the executable (`subprocess`) or the `.wasm` component (`wasm`). |
-| `contract`   | string | yes             | The [contract generation](#contract-generations) the backend implements: `v1`, `v2` or `v3`. Declare the lowest generation whose fields you use. Unknown values are rejected. |
+| `product`    | string | **yes** under `contract = "v4"` | The product the backend is built for: `super-stt`. A manifest naming any other product is refused under every contract. Below `v4` it may be left out, and the backend is read as a Super STT backend. See [contract generations](#contract-generations). |
+| `contract`   | string | yes             | The [contract generation](#contract-generations) the backend implements: `v1`, `v2`, `v3` or `v4`. Declare the lowest generation whose fields you use. Unknown values are rejected. |
 | `license`    | string | for publication | SPDX identifier of a current OSI-approved or FSF Free/Libre license (e.g. `Apache-2.0`, `MIT`, `GPL-3.0-only`), or the literal `other` for a license outside that set. Required for registry publication; optional for locally installed backends. |
 | `description`| string | yes             | One-line, human-readable summary shown in the registry/Browse listing. |
 
@@ -109,6 +111,7 @@ is.
 | `v1`       | The base contract: transcription over `POST /v1/transcribe`.                 | Super STT 0.2.0    |
 | `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors; [`[[models]].force_preview_support`](#models) — live previews for a model that has none of its own. Also **requires** [`[backend].id`](#backend). | Super STT 0.2.4    |
 | `v3`       | No manifest field. The daemon grants a subprocess backend a [cache directory](./subprocess.md) that survives the process, and reads the [load progress](./contract.md#get-v1status) (`phase`, `step`, `progress`) of `GET /v1/status`. Declare it when a load builds GPU kernels: an older daemon rebuilds them on every load and cuts a slow one off at its flat load limit. | Super STT 0.2.5    |
+| `v4`       | Nothing the daemon provides. **Requires** [`[backend].product`](#backend), so the manifest says it is built for Super STT. | Super STT 0.2.5    |
 
 Extending the contract does not oblige a backend to serve all of it. Which
 routes a backend must implement is decided by the models it declares, not by
@@ -149,6 +152,19 @@ author's editor:
 `contract = "v2"` requires `[backend].id`, which this manifest does not declare
 — add it, or drop to `contract = "v1"` where it is optional
 ```
+
+`product` is the second. Super STT and Super TTS read the same manifest
+format and both number their contracts from `v1`, so without it nothing in a
+manifest tells their backends apart. Super STT refuses a manifest that names
+any product but `super-stt`, under every contract:
+
+```
+this backend is built for super-tts, not super-stt
+```
+
+Every backend published before the field existed is a Super STT backend, so
+below `v4` it may be left out, and a manifest without it is read as one. `v4`
+requires it.
 
 Only field *names* are versioned this way. A generation that widens an
 existing field's value set instead — a new model `role`, a new device — cannot
@@ -683,6 +699,7 @@ name        = "Whisper (local)"
 version     = "0.1.0"
 kind        = "subprocess"
 entrypoint  = "whisper-backend"
+product     = "super-stt"
 contract    = "v1"
 license     = "Apache-2.0"
 description = "Local Whisper speech-to-text."

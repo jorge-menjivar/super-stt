@@ -200,6 +200,30 @@ fn the_schema_gates_role_on_contract_v2() {
     );
 }
 
+/// `[backend].product` takes `super-stt` and nothing else, and v4 requires
+/// it. The schema half of `Manifest::parse`'s `OtherProduct` and
+/// `FieldRequiredByContract`.
+#[test]
+fn the_schema_takes_only_super_stt_and_v4_requires_it() {
+    let v = backend_validator();
+
+    let mut tts = wasm_base();
+    tts["backend"]["product"] = json!("super-tts");
+    assert!(!v.is_valid(&tts), "a Super TTS manifest is refused");
+
+    let mut v4 = wasm_base();
+    v4["backend"]["contract"] = json!("v4");
+    assert!(!v.is_valid(&v4), "v4 requires the product");
+    v4["backend"]["product"] = json!("super-stt");
+    let errors: Vec<String> = v.iter_errors(&v4).map(|e| e.to_string()).collect();
+    assert!(
+        errors.is_empty(),
+        "v4 naming Super STT validates: {errors:#?}"
+    );
+
+    assert!(v.is_valid(&wasm_base()), "v1 may leave the product out");
+}
+
 /// Every generation the parser knows is one the schema offers, and nothing
 /// else: the `contract` enum is the closed set that gates old daemons, so it
 /// must not drift from `Contract::ALL`.
