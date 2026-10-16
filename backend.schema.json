@@ -169,6 +169,35 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "backend": {
+            "properties": {
+              "contract": {
+                "const": "v4"
+              }
+            },
+            "required": [
+              "contract"
+            ]
+          }
+        },
+        "required": [
+          "backend"
+        ]
+      },
+      "then": {
+        "properties": {
+          "backend": {
+            "required": [
+              "id",
+              "product"
+            ]
+          }
+        }
+      }
     }
   ],
   "definitions": {
@@ -215,7 +244,7 @@
               "$ref": "#/definitions/Contract"
             }
           ],
-          "description": "The backend-protocol contract generation implemented. See\n[`Generation`]."
+          "description": "The backend-protocol contract generation implemented, as\n[`product`](Self::product) numbers them. See [`Generation`]."
         },
         "description": {
           "description": "One-line, human-readable summary shown in the registry/Browse listing.\nRequired for every backend.",
@@ -438,6 +467,15 @@
           "description": "Human-readable display name.",
           "type": "string"
         },
+        "product": {
+          "const": "super-stt",
+          "default": null,
+          "description": "The product this backend is built for, by its slug, e.g. `super-stt`.\nA manifest naming any product other than the one parsing it is\nrefused. Optional on the type so manifests written before the field\nkeep loading; a product's contract makes it required.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "source": {
           "description": "Canonical repository id, e.g. `github.com/<owner>/<repo>`. Becomes the\n`source` of every model this backend provides and must be unique\nacross installed backends. For a monorepo, namespace it under the repo\n(e.g. `github.com/<owner>/<repo>/openai`).",
           "type": "string"
@@ -491,6 +529,11 @@
         {
           "const": "v3",
           "description": "v2 plus nothing in the manifest: what v3 adds is what the daemon\nprovides. A subprocess backend is granted a cache directory that\nsurvives the process (`SUPER_STT_BACKEND_CACHE_DIR`, with\n`XDG_CACHE_HOME` and `CUDA_CACHE_PATH` pointed into it), and the\nload-progress fields of `GET /v1/status` (`phase`, `step`, `progress`)\nare read. A backend that builds GPU kernels at load needs both: without\nthe cache it rebuilds them on every load, and without the progress it\nruns into the flat load limit of a daemon that predates the stall rule.",
+          "type": "string"
+        },
+        {
+          "const": "v4",
+          "description": "v3 plus a required `[backend].product`: the manifest says it is built\nfor Super STT. Nothing the daemon provides changes.",
           "type": "string"
         }
       ]
