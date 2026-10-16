@@ -111,7 +111,7 @@ is.
 | `v1`       | The base contract: transcription over `POST /v1/transcribe`.                 | Super STT 0.2.0    |
 | `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors; [`[[models]].force_preview_support`](#models) — live previews for a model that has none of its own. Also **requires** [`[backend].id`](#backend). | Super STT 0.2.4    |
 | `v3`       | No manifest field. The daemon grants a subprocess backend a [cache directory](./subprocess.md) that survives the process, and reads the [load progress](./contract.md#get-v1status) (`phase`, `step`, `progress`) of `GET /v1/status`. Declare it when a load builds GPU kernels: an older daemon rebuilds them on every load and cuts a slow one off at its flat load limit. | Super STT 0.2.5    |
-| `v4`       | Nothing the daemon provides. **Requires** [`[backend].product`](#backend), so the manifest says it is built for Super STT. | Super STT 0.2.5    |
+| `v4`       | [`[[models]].prepare_files`](#models) and [`POST /v1/prepare`](./contract.md#post-v1prepare): a first load's GPU kernels are built from the model's configuration files while its weights still download. **Requires** [`[backend].product`](#backend), so the manifest says it is built for Super STT. | Super STT 0.2.5    |
 
 Extending the contract does not oblige a backend to serve all of it. Which
 routes a backend must implement is decided by the models it declares, not by
@@ -577,6 +577,7 @@ processing_interval_ms = 1000
 | `realtime`               | bool            | no       | When `true`, the model is driven over the consumer-facing WebSocket endpoint (`GET /v1/transcribe/realtime`) rather than batch `POST /v1/transcribe`. Requires `[capabilities] websocket = true`. Default `false`. |
 | `force_preview_support`  | bool            | no       | **`contract = "v2"`.** Force live previews onto a model that has none of its own: while its microphone is open, the daemon re-transcribes a sliding window of the capture every `processing_interval_ms` and shows the result. Each pass is a full transcription the final pass repeats, and for an online model a billed request whose output is discarded, so it is off unless the manifest turns it on. Default `false`. Not consulted for a `realtime` model, which streams its own previews. See [previews](../endpoints/v1/transcribe.md#previews). |
 | `role`                   | string          | no       | **`contract = "v2"`.** What the model is for: `transcription` (default) or `post_processor`. A `post_processor` model is driven over [`POST /v1/process`](./contract.md#post-v1process) instead of `/v1/transcribe`, and is run in [stage 2 of the pipeline](../endpoints/v1/pipeline.md) rather than stage 1. |
+| `prepare_files`          | array of string | no       | **`contract = "v4"`.** The files the model's [prepare](./contract.md#post-v1prepare) reads, each a `destination` from the model's [`files`](#modelsfiles). The daemon downloads these first, starts the backend and sends `POST /v1/prepare`, then downloads the rest while the backend builds its kernels. Declaring it promises the backend serves `POST /v1/prepare` for this model, and that the prepare reads only these files. An entry that is not one of the model's `destination`s is refused. Default empty: no prepare. |
 | `provider`               | string          | no       | Compatibility field. Not part of model identity and read by nothing in the daemon; it is echoed back verbatim as `provider` in [`POST /v1/load`](./contract.md#post-v1load) so a backend that still validates it keeps loading. |
 
 > **Compatibility.** `provider` was part of model identity before it became
@@ -649,9 +650,10 @@ manifest is rejected.
 
 The files a model needs, and where to place them. `files` is an array in which
 each entry describes **one file**: a download URL and the path to write it to.
-The daemon fetches every file before calling `POST /v1/load`. Files are fetched
-the same way regardless of host — no source is given special treatment. Cloud
-models declare no files.
+The daemon fetches every file before calling `POST /v1/load`, one at a time in
+the order listed, except that the model's [`prepare_files`](#models) come
+first. Files are fetched the same way regardless of host — no source is given
+special treatment. Cloud models declare no files.
 
 Written compactly as an inline-table array on the model:
 
