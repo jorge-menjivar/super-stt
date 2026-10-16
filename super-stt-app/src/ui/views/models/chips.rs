@@ -456,6 +456,14 @@ pub(super) fn role_groups<'a>(models: impl Iterator<Item = (&'a str, &'a str)>) 
 ///
 /// The label names the kind rather than saying "Models", so a card answers
 /// "what does this ship?" without the user opening it.
+///
+/// Each row wraps rather than squeezes. It shares its line with the capability
+/// chips, and three long names beside a GPU *and* a CPU chip are wider than a
+/// card at the default window size: a plain row then breaks a tag's name
+/// across two lines inside its pill and crushes the "+N" chip to a sliver.
+/// Super TTS's Qwen cards hit it first. No backend here pairs three long names
+/// with two device chips yet, but nothing stops one doing so. Wrapping moves
+/// the tags that do not fit to a second line, whole.
 pub(super) fn models_inventory(groups: &[RoleGroup]) -> Option<Element<'static, Message>> {
     if groups.is_empty() {
         return None;
@@ -476,7 +484,7 @@ pub(super) fn models_inventory(groups: &[RoleGroup]) -> Option<Element<'static, 
             if rest > 0 {
                 inventory = inventory.push(count_chip(format!("+{rest}")));
             }
-            inventory.into()
+            inventory.wrap().vertical_spacing(spacing.space_xxs).into()
         })
         .collect();
     Some(
