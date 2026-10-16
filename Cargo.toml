@@ -198,7 +198,7 @@
     # Binds utoipa to axum: `OpenApiRouter` collects each route's spec as the
     # route itself is registered, so a route and its documentation are one
     # declaration and cannot drift apart.
-    utoipa-axum       = "0.2.0"
+    utoipa-axum       = "0.3.0"
     uuid              = { version = "1.23.0", features = ["v4"] }
     # Build dependencies
     vergen            = { version = "8.3.1", features = ["git", "gitcl"] }
