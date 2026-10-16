@@ -53,7 +53,10 @@
     # character never reaches an X11 app: `I think I am OK at NASA` arrived as
     # ` think  am  at ` (jorge-menjivar/super-stt#432). The branch types
     # capitals as Shift plus the real key and binds off-layout characters to
-    # keys the keymap already has.
+    # keys the keymap already has. It also presses the Shift key itself around
+    # a capital: cosmic-comp 1.10 loses the release of a Shift that is only
+    # requested, so the text after a capital stayed in capitals until the next
+    # one (`I AM TESTING THE S-T-T capabilities`).
     # `features` are deliberately absent: the backend enigo drives is
     # per-platform. Linux needs `wayland`, whose optional deps enigo itself
     # gates to `cfg(all(unix, not(target_os = "macos")))`; macOS drives
