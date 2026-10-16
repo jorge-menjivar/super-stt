@@ -523,16 +523,16 @@ Discovery is covered in [config.md](./config.md).
 
 When a model is selected the daemon:
 
-1. Ensures the model's files are present, downloading them into the
-   backend's directory per the configuration. Local backends are
-   network-isolated, so the daemon — not the backend — performs every
-   download.
-2. **Terminates the currently active backend before starting the new one.**
+1. **Terminates the currently active backend before starting the new one.**
    A switch never runs two model-loaded *transcription* backends at once, so
    GPU memory is never doubled. A selected
    [post-processor](../endpoints/v1/pipeline.md) is a separate instance
    with its own lifecycle, and is not disturbed by a transcription-model
    switch — the daemon runs at most one of each.
+2. Ensures the model's files are present, downloading them into the
+   backend's directory per the configuration. Local backends are
+   network-isolated, so the daemon — not the backend — performs every
+   download.
 3. Spawns (subprocess) or instantiates (WASM) the selected backend.
 4. Calls `POST /v1/load` and polls `GET /v1/status` until `state` is
    `ready`.
@@ -548,8 +548,8 @@ sequenceDiagram
     participant B as "Selected backend"
 
     U->>D: select (name, source)
-    D->>D: ensure files present (download into backend dir)
     D->>A: terminate
+    D->>D: ensure files present (download into backend dir)
     D->>B: spawn / instantiate
     D->>B: POST /v1/load { name, device }
     B-->>D: 202 Accepted
