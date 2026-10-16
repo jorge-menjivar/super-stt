@@ -312,7 +312,18 @@ pub(super) fn vram_shortfall(
 /// [`vram_shortfall`] resolved against the current app state: the staged
 /// model's VRAM estimate vs. the primary GPU's free memory (falling back to
 /// its total when the daemon didn't report free).
+///
+/// Silent while the stage is loading. The backend puts the weights on the GPU
+/// before it builds its kernels, so the free memory polled then already
+/// leaves out what this load has taken, and a model that fits reads as one
+/// that doesn't.
 pub(super) fn staged_vram_shortfall(backend: &BackendInfo, app: &AppModel) -> Option<(u64, u64)> {
+    if matches!(
+        app.model_operations.get(STT_STAGE),
+        Some(ModelOperationState::Loading { .. })
+    ) {
+        return None;
+    }
     let model_name = app.staged_picks.get(STT_STAGE).map(|p| p.model.as_str())?;
     let model = backend.models.iter().find(|m| m.name == model_name)?;
     let gpu_available = app
