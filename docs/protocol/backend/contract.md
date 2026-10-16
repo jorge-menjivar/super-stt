@@ -71,6 +71,7 @@ a top-level `status` field of `"success"` or `"error"`.
 | Method | Route            | Purpose                                            |
 |--------|------------------|----------------------------------------------------|
 | POST   | `/v1/load`       | Load a model variant; drives readiness to `ready`. |
+| POST   | `/v1/prepare`    | Build what a first load needs before the weights arrive. **Only models declaring [`prepare_files`](./config.md#models)** (`contract = "v4"`). |
 | GET    | `/v1/status`     | Readiness state and load progress.                 |
 | GET    | `/v1/ping`       | Liveness.                                          |
 | POST   | `/v1/transcribe` | Transcribe audio; one-shot or streaming.           |
@@ -226,6 +227,61 @@ Content-Type: application/json
 | 409  | `already_loading`    | A load is already in progress.                                |
 | 503  | `device_unavailable` | The requested device cannot be initialized.                   |
 
+### `POST /v1/prepare`
+
+Do the one-off part of a first load before the weights arrive. A backend that
+builds GPU kernels on its first load can build them from the model's
+configuration alone, because kernels depend on shapes and dtypes, never on
+weight values. The daemon overlaps that build with the download of the
+weights, and the load that follows is an ordinary one.
+
+The daemon sends it only for a model that declares
+[`prepare_files`](./config.md#models) (`contract = "v4"`), and only once those
+files are on disk. The weights are still downloading, so the prepare may read
+only the files `prepare_files` lists. Declaring the field is the promise that
+the backend serves this route for that model.
+
+The request body is the same as [`POST /v1/load`](#post-v1load)'s. The call
+returns `202` at once and the prepare runs in the background;
+[`GET /v1/status`](#get-v1status) reports it as `preparing`, then `prepared`.
+
+**Response (202):**
+
+```http
+HTTP/1.1 202 Accepted
+Content-Type: application/json
+
+{ "status": "success", "message": "Preparing started" }
+```
+
+It is also `202` when the work is already done, such as kernels cached by an
+earlier prepare or load, and the state then goes straight to `prepared`. A
+prepare of the same model that is already running is left alone, and the
+answer is `202` too.
+
+**Errors:**
+
+| HTTP | `message`         | Meaning                                                           |
+|------|-------------------|-------------------------------------------------------------------|
+| 400  | `invalid_model`   | `name` is not implemented by this backend.                        |
+| 409  | `already_loading` | A load is in progress or done. A prepare only helps before the load. |
+
+A prepare is best effort, and its failure must never fail the load:
+
+- A prepare that fails returns the state to `starting` and logs why, with no
+  `reason`. Nothing is wrong with the backend: its load does the whole first
+  load itself, as it would have without the prepare. Catch a panic where the
+  prepare runs, as for a load.
+- `POST /v1/load` may arrive while the prepare runs. Answer `202` at once and
+  report `loading`. Finish the prepare as part of the load, carrying on its
+  `phase`, `step` and `progress`, then load as usual. Free the memory the
+  prepare held before the weights go onto the device, so the load peaks no
+  higher than it would alone.
+- The daemon does not wait for `prepared`, and does not poll
+  `GET /v1/status` while the weights download. It sends `POST /v1/load` when
+  the download finishes. A backend process that exits during the prepare is
+  started again before that load.
+
 ### `GET /v1/status`
 
 Report readiness. `state` is the backend's readiness; `status` is the
@@ -245,10 +301,10 @@ Host: backend.local
 ```jsonc
 {
   "status":   "success",   // envelope outcome: "success" | "error"
-  "state":    "loading",   // readiness: "starting" | "loading" | "ready" | "error"
-  "phase":    "initial_setup",    // optional, while loading: "initial_setup" | "loading"
-  "step":     "building_kernels", // optional, while loading: see below
-  "progress": 0.42,        // optional, while loading: 0.0–1.0 through `step`
+  "state":    "loading",   // readiness: "starting" | "preparing" | "prepared" | "loading" | "ready" | "error"
+  "phase":    "initial_setup",    // optional, while loading or preparing: "initial_setup" | "loading"
+  "step":     "building_kernels", // optional, while loading or preparing: see below
+  "progress": 0.42,        // optional, while loading or preparing: 0.0–1.0 through `step`
   "model": {               // present once a load has been requested
     "name": "whisper-tiny"
   },
@@ -259,10 +315,10 @@ Host: backend.local
 
 | Field      | Type    | Notes                                                                       |
 |------------|---------|-----------------------------------------------------------------------------|
-| `state`    | string  | `starting` (spawned, no load yet), `loading`, `ready`, or `error`.          |
-| `phase`    | string? | While `loading`: `initial_setup` for a first load that pays a one-time cost (building GPU kernels, say), `loading` otherwise. |
-| `step`     | string? | While `loading`: what the load is doing, `loading_weights`, `building_kernels` or `warming_up`. |
-| `progress` | number? | While `loading`: how far through `step` the load is, `0.0`–`1.0`, or through the whole load when there is no `step`. |
+| `state`    | string  | `starting` (spawned, no load yet), `preparing` or `prepared` (a [prepare](#post-v1prepare) running or done), `loading`, `ready`, or `error`. |
+| `phase`    | string? | While `loading`: `initial_setup` for a first load that pays a one-time cost (building GPU kernels, say), `loading` otherwise. While `preparing`: `initial_setup`. |
+| `step`     | string? | While `loading`: what the load is doing, `loading_weights`, `building_kernels` or `warming_up`. While `preparing`: `building_kernels`. |
+| `progress` | number? | While `loading` or `preparing`: how far through `step` the work is, `0.0`–`1.0`, or through the whole load when there is no `step`. |
 | `model`    | object? | The model being loaded or loaded; absent in `starting`.                     |
 | `device`   | string? | Device actually in use, one of `cpu`, `cuda`, `rocm`, `metal`, `vulkan`; present once `ready`. |
 | `reason`   | string? | Machine-readable failure cause; present only when `state` is `error`.       |
@@ -271,7 +327,9 @@ Host: backend.local
 daemon passes them to its clients, which show a first load as "Initial setup"
 with the step and a bar under it, where they would otherwise show one
 unchanging line for however long the load takes. All three are optional, and
-a backend that sends none still loads. When sending them:
+a backend that sends none still loads. A prepare reports them the same way,
+and under the same rules, since a load that arrives during it carries them
+on. When sending them:
 
 - Send ids, not text. The daemon passes on only lowercase letters, digits and
   underscores, and each client words the ids itself. An id a client does not
@@ -291,7 +349,12 @@ a backend that sends none still loads. When sending them:
 ```mermaid
 stateDiagram-v2
     [*] --> starting
+    starting --> preparing: POST /v1/prepare
+    preparing --> prepared: kernels built
+    preparing --> starting: prepare failed (logged)
     starting --> loading: POST /v1/load
+    preparing --> loading: POST /v1/load
+    prepared --> loading: POST /v1/load
     loading --> ready: weights loaded
     loading --> error: load failed
     ready --> loading: POST /v1/load (new model)
@@ -523,17 +586,22 @@ Discovery is covered in [config.md](./config.md).
 
 When a model is selected the daemon:
 
-1. Ensures the model's files are present, downloading them into the
-   backend's directory per the configuration. Local backends are
-   network-isolated, so the daemon — not the backend — performs every
-   download.
-2. **Terminates the currently active backend before starting the new one.**
+1. **Terminates the currently active backend before starting the new one.**
    A switch never runs two model-loaded *transcription* backends at once, so
    GPU memory is never doubled. A selected
    [post-processor](../endpoints/v1/pipeline.md) is a separate instance
    with its own lifecycle, and is not disturbed by a transcription-model
    switch — the daemon runs at most one of each.
-3. Spawns (subprocess) or instantiates (WASM) the selected backend.
+2. Ensures the model's files are present, downloading them into the
+   backend's directory per the configuration. Local backends are
+   network-isolated, so the daemon — not the backend — performs every
+   download. For a model that declares
+   [`prepare_files`](./config.md#models), it downloads those files first,
+   spawns the backend and sends [`POST /v1/prepare`](#post-v1prepare), then
+   downloads the rest while the backend prepares.
+3. Spawns (subprocess) or instantiates (WASM) the selected backend, unless it
+   already started it for a prepare. A backend started for a prepare that has
+   since exited is started again.
 4. Calls `POST /v1/load` and polls `GET /v1/status` until `state` is
    `ready`.
 5. Routes transcription only after `ready`. A `/v1/transcribe` arriving
@@ -548,9 +616,16 @@ sequenceDiagram
     participant B as "Selected backend"
 
     U->>D: select (name, source)
-    D->>D: ensure files present (download into backend dir)
     D->>A: terminate
-    D->>B: spawn / instantiate
+    opt model declares prepare_files
+        D->>D: download prepare_files
+        D->>B: spawn
+        D->>B: POST /v1/prepare { name, device }
+        B-->>D: 202 Accepted
+        Note over B: builds kernels while the daemon downloads the rest
+    end
+    D->>D: ensure files present (download into backend dir)
+    D->>B: spawn / instantiate (unless already running)
     D->>B: POST /v1/load { name, device }
     B-->>D: 202 Accepted
     loop until ready

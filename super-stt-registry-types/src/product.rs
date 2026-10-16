@@ -79,8 +79,10 @@ pub enum Contract {
     /// the cache it rebuilds them on every load, and without the progress it
     /// runs into the flat load limit of a daemon that predates the stall rule.
     V3,
-    /// v3 plus a required `[backend].product`: the manifest says it is built
-    /// for Super STT. Nothing the daemon provides changes.
+    /// v3 plus a required `[backend].product`, so the manifest says it is
+    /// built for Super STT, and `[[models]].prepare_files`: the daemon
+    /// downloads those files first and sends `POST /v1/prepare`, so a first
+    /// load's GPU kernels are built while the weights still download.
     V4,
 }
 
@@ -309,6 +311,12 @@ impl Product for Stt {
             table: "backend",
             key: "product",
         },
+        ContractField {
+            since: Contract::V4,
+            rule: FieldRule::Added,
+            table: "models",
+            key: "prepare_files",
+        },
     ];
 
     const SCHEMA: SchemaNames = SchemaNames {
@@ -432,6 +440,32 @@ mod tests {
             Manifest::parse(&manifest("v4", &backend, "", "")).expect("v4 with a product parses");
         assert_eq!(m.backend.contract, Contract::V4);
         assert_eq!(m.backend.product.as_deref(), Some("super-stt"));
+    }
+
+    /// `prepare_files` is a v4 field: a v3 manifest that declares it is
+    /// refused, naming the field, and a v4 one parses with it.
+    #[test]
+    fn prepare_files_requires_v4() {
+        let id = "id = \"com.example.y\"";
+        let model = r#"prepare_files = ["m/config.json"]
+            files = [{ url = "https://h/config.json", destination = "m/config.json" }]"#;
+        match Manifest::parse(&manifest("v3", id, model, "")) {
+            Err(ManifestError::FieldRequiresContract {
+                field,
+                since,
+                declared,
+            }) => {
+                assert_eq!(field, "[[models]].prepare_files");
+                assert_eq!(since, "v4");
+                assert_eq!(declared, "v3");
+            }
+            other => panic!("prepare_files under v3 must be refused, got {other:?}"),
+        }
+
+        let backend = format!("{id}\nproduct = \"super-stt\"");
+        let m = Manifest::parse(&manifest("v4", &backend, model, ""))
+            .expect("prepare_files under v4 parses");
+        assert_eq!(m.models[0].prepare_files, ["m/config.json"]);
     }
 
     /// Below v4 the product is optional, because every backend published
