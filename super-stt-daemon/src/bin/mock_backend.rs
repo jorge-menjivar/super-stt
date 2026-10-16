@@ -22,6 +22,8 @@ struct AppState {
     /// Status polls left before a [`BUILDS_KERNELS`] load is ready; zero when
     /// no such load is under way.
     kernel_polls_left: AtomicU32,
+    /// A prepare finished and no load has started since.
+    prepared: AtomicBool,
 }
 
 #[tokio::main]
@@ -30,6 +32,7 @@ async fn main() {
     let state = Arc::new(AppState {
         loaded: AtomicBool::new(false),
         kernel_polls_left: AtomicU32::new(0),
+        prepared: AtomicBool::new(false),
     });
     let app = Router::new()
         .route(
@@ -38,6 +41,7 @@ async fn main() {
         )
         .route("/v1/status", get(status))
         .route("/v1/load", post(load))
+        .route("/v1/prepare", post(prepare))
         .route("/v1/transcribe", post(transcribe))
         .route("/v1/process", post(process))
         .route(
@@ -95,6 +99,8 @@ async fn status(State(s): State<Arc<AppState>>) -> Json<Value> {
             "device": "cpu",
             "model": { "name": "mock" }
         }))
+    } else if s.prepared.load(Ordering::SeqCst) {
+        Json(json!({ "status": "success", "state": "prepared" }))
     } else {
         Json(json!({ "status": "success", "state": "starting" }))
     }
@@ -106,10 +112,86 @@ const DIES_ON_LOAD: &str = "mock-dies-on-load";
 /// The model a test loads to have the backend report building its kernels.
 const BUILDS_KERNELS: &str = "mock-builds-kernels";
 
-async fn load(State(s): State<Arc<AppState>>, body: String) -> impl IntoResponse {
-    let name = serde_json::from_str::<Value>(&body)
+/// The model a test prepares to have the prepare fail, which must leave its
+/// load unharmed.
+const PREPARE_FAILS: &str = "mock-prepare-fails";
+
+/// The model a test prepares to have the backend exit during the prepare, so
+/// the daemon has to start it again before the load.
+const DIES_ON_PREPARE: &str = "mock-dies-on-prepare";
+
+/// The file a successful prepare leaves in the cache directory: the files the
+/// backend directory held when the prepare arrived, one per line, sorted. The
+/// daemon does not poll a prepare, so this is how a test sees that one ran
+/// and what was on disk for it.
+const PREPARED_MARKER: &str = "prepared";
+
+/// The `name` of a load or prepare body.
+fn model_name(body: &str) -> Option<String> {
+    serde_json::from_str::<Value>(body)
         .ok()
-        .and_then(|v| v.get("name").and_then(Value::as_str).map(str::to_string));
+        .and_then(|v| v.get("name").and_then(Value::as_str).map(str::to_string))
+}
+
+async fn prepare(State(s): State<Arc<AppState>>, body: String) -> impl IntoResponse {
+    if s.loaded.load(Ordering::SeqCst) || s.kernel_polls_left.load(Ordering::SeqCst) > 0 {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "status": "error", "message": "already_loading" })),
+        );
+    }
+    match model_name(&body).as_deref() {
+        // A failed prepare is only logged, and the state stays `starting`.
+        Some(PREPARE_FAILS) => eprintln!("mock: the prepare failed"),
+        Some(DIES_ON_PREPARE) => {
+            eprintln!("mock: the driver crashed while preparing");
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                std::process::exit(139);
+            });
+        }
+        _ => {
+            record_prepare();
+            s.prepared.store(true, Ordering::SeqCst);
+        }
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "status": "success", "message": "Preparing started" })),
+    )
+}
+
+/// Write [`PREPARED_MARKER`] into the cache directory.
+fn record_prepare() {
+    let (Ok(dir), Ok(cache)) = (
+        std::env::var("SUPER_STT_BACKEND_DIR"),
+        std::env::var("SUPER_STT_BACKEND_CACHE_DIR"),
+    ) else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let mut files = Vec::new();
+    let mut pending = vec![dir.clone()];
+    while let Some(next) = pending.pop() {
+        for entry in std::fs::read_dir(&next).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(relative) = path.strip_prefix(&dir) {
+                files.push(relative.display().to_string());
+            }
+        }
+    }
+    files.sort();
+    let _ = std::fs::write(
+        std::path::Path::new(&cache).join(PREPARED_MARKER),
+        files.join("\n"),
+    );
+}
+
+async fn load(State(s): State<Arc<AppState>>, body: String) -> impl IntoResponse {
+    s.prepared.store(false, Ordering::SeqCst);
+    let name = model_name(&body);
     if name.as_deref() == Some(BUILDS_KERNELS) {
         s.kernel_polls_left.store(KERNEL_POLLS, Ordering::SeqCst);
     } else if name.as_deref() == Some(DIES_ON_LOAD) {
