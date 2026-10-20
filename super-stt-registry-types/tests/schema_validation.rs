@@ -276,3 +276,38 @@ fn contract_rule_field_names_exist() {
         );
     }
 }
+
+/// `[[models]].prepare_files` is a v4 field. The schema half of
+/// `Manifest::parse`'s `FieldRequiresContract` for it.
+#[test]
+fn the_schema_gates_prepare_files_on_contract_v4() {
+    let v = backend_validator();
+    let model = json!({
+        "name": "m1", "primary_language": "en",
+        "supported_languages": ["en"], "supported_devices": ["cpu"],
+        "prepare_files": ["m/config.json"],
+        "files": [{ "url": "https://h/config.json", "destination": "m/config.json" }]
+    });
+
+    let mut v4 = wasm_base();
+    v4["backend"]["contract"] = json!("v4");
+    v4["backend"]["product"] = json!("super-stt");
+    v4["models"] = json!([model.clone()]);
+    let errors: Vec<String> = v.iter_errors(&v4).map(|e| e.to_string()).collect();
+    assert!(
+        errors.is_empty(),
+        "prepare_files under v4 must validate: {errors:#?}"
+    );
+
+    let mut v3 = wasm_base();
+    v3["backend"]["contract"] = json!("v3");
+    v3["models"] = json!([model]);
+    let at: Vec<String> = v
+        .iter_errors(&v3)
+        .map(|e| e.instance_path().to_string())
+        .collect();
+    assert!(
+        at.iter().any(|path| path.ends_with("/prepare_files")),
+        "prepare_files under v3 must be refused at the field: {at:#?}"
+    );
+}

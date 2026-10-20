@@ -17,12 +17,13 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use log::info;
-use super_engine_daemon::subprocess::{self as engine, Launch, json_headers};
+use super_engine_daemon::subprocess::{self as engine, Start, json_headers};
 use super_stt_shared::models::protocol::LoadProgress;
 
 use super_stt_shared::utils::audio::{ResampleQuality, resample};
 
-use crate::stt_models::backends::manifest::Manifest;
+use crate::stt_models::backends::manifest::{FileSpec, Manifest};
+use crate::stt_models::download::DownloadItem;
 use crate::stt_models::transcribe::{ModelInfo, ModelInfoData, ModelState, Transcribe};
 
 const SAMPLE_RATE: u32 = 16000;
@@ -43,6 +44,11 @@ impl SubprocessBackend {
     /// `"vulkan"`), or empty when none resolved, which leaves the backend to
     /// select for itself. `context_headers` are the already-formed
     /// `x-stt-secret-*` / `x-stt-option-*` pairs to inject on every request.
+    ///
+    /// A model that declares `prepare_files` has those downloaded first. Its
+    /// backend is then started and sent `POST /v1/prepare`, so it builds its
+    /// GPU kernels while the rest of the files download, and the load after
+    /// the download is an ordinary one.
     ///
     /// # Errors
     /// Returns an error if provisioning, spawning, or loading fails.
@@ -66,35 +72,62 @@ impl SubprocessBackend {
         // `DownloadStateManager` so the settings app's progress bar updates in
         // real time. Each file carries its own URL and destination; `parse`
         // already validated every `destination` as a safe relative path, so the
-        // join below cannot escape the backend dir.
-        let items: Vec<_> = model
+        // join below cannot escape the backend dir. The files a prepare reads
+        // go first, in the order the manifest lists them.
+        let (prepare_files, rest_files): (Vec<_>, Vec<_>) = model
             .files
             .iter()
-            .map(|spec| crate::stt_models::download::DownloadItem {
-                url: spec.url.clone(),
-                destination: backend_dir.join(&spec.destination),
-                sha256: spec.sha256.clone(),
-            })
-            .collect();
+            .partition(|spec| model.prepare_files.contains(&spec.destination));
+        let item = |spec: &FileSpec| DownloadItem {
+            url: spec.url.clone(),
+            destination: backend_dir.join(&spec.destination),
+            sha256: spec.sha256.clone(),
+        };
+        let prepare_items: Vec<_> = prepare_files.into_iter().map(item).collect();
+        let rest_items: Vec<_> = rest_files.into_iter().map(item).collect();
         info!(
             "provisioning {model_name}: {} files into {}",
-            items.len(),
+            prepare_items.len() + rest_items.len(),
             backend_dir.display()
         );
-        crate::stt_models::download::download_files(&items, tracker, 0)
-            .await
-            .with_context(|| format!("provisioning {model_name}"))?;
 
-        // All files are on disk. Spawning the sandboxed unit and loading
+        // Once every file is on disk, spawning the sandboxed unit and loading
         // weights onto the device is the slow tail (tens of seconds for a
         // multi-GB model on GPU) but isn't byte-tracked — flip the tracker
         // to "loading_model" so the settings app swaps the full download
         // bar for a "Loading model into memory…" indicator instead of
         // freezing on a full bar.
-        if let Some(t) = tracker {
-            t.mark_loading();
-            t.broadcast_progress();
-        }
+        let mark_loading = || {
+            if let Some(t) = tracker {
+                t.mark_loading();
+                t.broadcast_progress();
+            }
+        };
+
+        let start = Start {
+            backend_dir,
+            entrypoint: &manifest.backend.entrypoint,
+            model: model_name,
+            provider: model.provider.as_deref(),
+            devices: &model.supported_devices,
+            device_pref,
+            context_headers,
+        };
+        let mut backend = if model.prepare_files.is_empty() {
+            provision(model_name, &rest_items, tracker, 0).await?;
+            mark_loading();
+            engine::SubprocessBackend::start(&super_stt_shared::SUPER_STT, start).await?
+        } else {
+            provision(model_name, &prepare_items, tracker, 0).await?;
+            // Dropping the backend stops it, so a download that fails or is
+            // cancelled below takes the prepare down with it.
+            let backend =
+                engine::SubprocessBackend::start(&super_stt_shared::SUPER_STT, start).await?;
+            backend.prepare().await;
+            provision(model_name, &rest_items, tracker, prepare_items.len()).await?;
+            mark_loading();
+            backend
+        };
 
         // What the backend reports of its own load goes to the tracker, so the
         // card can say what the load is doing rather than sit on a full bar.
@@ -104,23 +137,13 @@ impl SubprocessBackend {
                 t.broadcast_progress();
             }
         });
-
-        let backend = engine::SubprocessBackend::spawn(
-            &super_stt_shared::SUPER_STT,
-            Launch {
-                backend_dir,
-                entrypoint: &manifest.backend.entrypoint,
-                model: model_name,
-                provider: model.provider.as_deref(),
-                devices: &model.supported_devices,
-                device_pref,
-                context_headers,
-                on_load_progress: forward
+        backend
+            .load(
+                forward
                     .as_ref()
                     .map(|f| f as &(dyn Fn(LoadProgress) + Send + Sync)),
-            },
-        )
-        .await?;
+            )
+            .await?;
 
         let interval = model
             .processing_interval_ms
@@ -147,6 +170,19 @@ impl SubprocessBackend {
         headers.push(("x-stt-model".to_string(), self.model_id.clone()));
         headers
     }
+}
+
+/// Download `items` for `model_name`, numbering them from `first` on the
+/// tracker so a load provisioned in two parts counts its files once.
+async fn provision(
+    model_name: &str,
+    items: &[DownloadItem],
+    tracker: Option<&Arc<crate::download_progress::DownloadProgressTracker>>,
+    first: usize,
+) -> Result<()> {
+    crate::stt_models::download::download_files(items, tracker, first)
+        .await
+        .with_context(|| format!("provisioning {model_name}"))
 }
 
 impl ModelInfo for SubprocessBackend {
