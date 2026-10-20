@@ -107,6 +107,7 @@
             "items": {
               "properties": {
                 "force_preview_support": false,
+                "prepare_files": false,
                 "role": false
               }
             }
@@ -138,6 +139,13 @@
             "required": [
               "id"
             ]
+          },
+          "models": {
+            "items": {
+              "properties": {
+                "prepare_files": false
+              }
+            }
           }
         }
       }
@@ -166,6 +174,13 @@
             "required": [
               "id"
             ]
+          },
+          "models": {
+            "items": {
+              "properties": {
+                "prepare_files": false
+              }
+            }
           }
         }
       }
@@ -533,7 +548,7 @@
         },
         {
           "const": "v4",
-          "description": "v3 plus a required `[backend].product`: the manifest says it is built\nfor Super STT. Nothing the daemon provides changes.",
+          "description": "v3 plus a required `[backend].product`, so the manifest says it is\nbuilt for Super STT, and `[[models]].prepare_files`: the daemon\ndownloads those files first and sends `POST /v1/prepare`, so a first\nload's GPU kernels are built while the weights still download.",
           "type": "string"
         }
       ]
@@ -778,6 +793,14 @@
         "name": {
           "description": "Wire model name.",
           "type": "string"
+        },
+        "prepare_files": {
+          "default": [],
+          "description": "The files the model's prepare reads, each a `destination` from\n[`files`](Self::files). Empty — the default — means the model has no\nprepare.\n\nA prepare does the one-off part of a first load before the weights\narrive. A backend that builds its GPU kernels on its first load can\nbuild them from the model's configuration alone, because kernels depend\non shapes and never on weight values. The product downloads these files\nfirst, starts the backend and sends `POST /v1/prepare`, then downloads\nthe rest while the backend works. Declaring the field is the backend's\npromise that it serves that route for this model, and that the prepare\nreads only these files.\n\nNamed by destination rather than by entry because a destination is\nwhat the backend reads. Of the variants writing to one, exactly one is\ndownloaded, and the prepare finds it at the same path whichever it is.\n\nWhich generation introduces the field is the product's to say, in\n[`Product::CONTRACT_FIELDS`].",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "primary_language": {
           "description": "Default language code (e.g. `en`); used when `language` is omitted.\nMust appear in `supported_languages`.",
