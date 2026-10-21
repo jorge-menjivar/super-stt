@@ -18,8 +18,10 @@ jobs:
       # PRs gate on `stable` only (fast feedback). The `beta`/`nightly`
       # toolchain checks run post-merge on `push` (main/develop) so a
       # toolchain-specific break is still caught without slowing every PR.
+      # `stable` runs on push too: the cache is saved from main only, so
+      # without it a PR's `stable` run would have no cache to restore.
       matrix:
-        rust: ${{ github.event_name == 'pull_request' && fromJSON('["stable"]') || fromJSON('["beta", "nightly"]') }}
+        rust: ${{ github.event_name == 'pull_request' && fromJSON('["stable"]') || fromJSON('["stable", "beta", "nightly"]') }}
 
     steps:
       - uses: actions/checkout@v7
@@ -258,9 +260,9 @@ jobs:
       # this commit's daemon serves and nobody has to regenerate it by hand.
       # A route change that breaks generation fails this job on the PR.
       #
-      # Deliberately not `needs: test`. On a push to main that matrix is beta
-      # and nightly, so gating on it would let an unrelated nightly regression
-      # stop the docs publishing.
+      # Deliberately not `needs: test`. On a push to main that matrix includes
+      # beta and nightly, so gating on it would let an unrelated nightly
+      # regression stop the docs publishing.
       - name: Generate the OpenAPI document
         run: just openapi
 
@@ -325,10 +327,9 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     # Main pushes only. Coverage exists to publish the gh-pages report (a
-    # main-only step), and on main it doubles as the stable-toolchain test run
-    # (the `test` job covers beta/nightly there). On a PR it would just rebuild
-    # the whole workspace instrumented and re-run the suite for artifacts nobody
-    # reads — the `test (stable)` job is already the PR gate.
+    # main-only step). On a PR it would just rebuild the whole workspace
+    # instrumented and re-run the suite for artifacts nobody reads — the
+    # `test (stable)` job is already the PR gate.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
