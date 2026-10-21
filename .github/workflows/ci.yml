@@ -10,8 +10,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test
+  linux-test:
+    name: Linux Test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -90,8 +90,8 @@ jobs:
       - name: Check generated TOML schemas are current
         run: just schema-check
 
-  clippy:
-    name: Clippy
+  linux-clippy:
+    name: Linux Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -138,9 +138,17 @@ jobs:
       - name: Check backend-feature combinations
         run: just check-features
 
-  macos:
-    name: macOS
+  # The macOS counterparts of the two Linux jobs above, step for step. Where
+  # a step differs, the platform forces it and the step says why.
+  macos-test:
+    name: macOS Test
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      # The same toolchains as the Linux test job, for the same reasons.
+      matrix:
+        rust: ${{ github.event_name == 'pull_request' && fromJSON('["stable"]') || fromJSON('["stable", "beta", "nightly"]') }}
+
     steps:
       - uses: actions/checkout@v7
 
@@ -151,6 +159,55 @@ jobs:
       # No system dependencies to install: CoreAudio, CoreGraphics and the
       # Security framework ship with the OS, and the SDK is preinstalled on
       # the runner.
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          targets: wasm32-wasip2
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Same as the Linux test job: without them the daemon's WASM transport
+      # tests self-skip.
+      - name: Build mock WASM backends
+        run: |
+          just build-mock-wasm-backend
+          just build-mock-wasm-realtime-backend
+
+      # Scoped to the members that build here, like the clippy step in the
+      # macOS clippy job, and for the same reason.
+      - name: Run tests
+        run: just test-macos --verbose
+
+      - name: Run install.sh tests
+        # `detect_triple` reads `uname -s` as well as `uname -m` precisely so
+        # that a Mac is not handed the Linux installer. Running the script's
+        # tests on a Mac is what keeps that honest.
+        run: just test-install
+
+      # Scoped like the tests above: the plain `just doctest` is
+      # whole-workspace.
+      - name: Run doctests
+        run: just doctest-macos --verbose
+
+      - name: Check generated TOML schemas are current
+        run: just schema-check
+
+  macos-clippy:
+    name: macOS Clippy
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: taiki-e/install-action@v2.87.29
+        with:
+          tool: just
+
+      # No system dependencies to install, as in the macOS test job.
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -171,14 +228,6 @@ jobs:
       - name: Run clippy
         run: just check-macos
 
-      - name: Run tests
-        run: just test-macos
-
-      # Scoped like the two steps above, and for the same reason: the plain
-      # `just doctest` is whole-workspace.
-      - name: Run doctests
-        run: just doctest-macos --verbose
-
       # Same reason as the Linux job: the `--all-features` gates above see
       # both backend transports, so a `#[cfg]` slip in a single-transport
       # build is invisible to them. The subprocess transport is the one
@@ -186,12 +235,6 @@ jobs:
       # makes this more load-bearing here than on Linux.
       - name: Check backend-feature combinations
         run: just check-features
-
-      - name: Run install.sh tests
-        # `detect_triple` reads `uname -s` as well as `uname -m` precisely so
-        # that a Mac is not handed the Linux installer. Running the script's
-        # tests on a Mac is what keeps that honest.
-        run: just test-install
 
   fmt:
     name: Rustfmt
@@ -228,8 +271,8 @@ jobs:
           tool: just
 
       # The generator is a daemon binary, and the daemon links xkbcommon
-      # through enigo, so it needs the same system libraries the test job
-      # installs. A trimmed list broke this job once; keep it identical.
+      # through enigo, so it needs the same system libraries the Linux test
+      # job installs. A trimmed list broke this job once; keep it identical.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -260,7 +303,7 @@ jobs:
       # this commit's daemon serves and nobody has to regenerate it by hand.
       # A route change that breaks generation fails this job on the PR.
       #
-      # Deliberately not `needs: test`. On a push to main that matrix includes
+      # Deliberately not `needs: linux-test`. On a push to main that matrix includes
       # beta and nightly, so gating on it would let an unrelated nightly
       # regression stop the docs publishing.
       - name: Generate the OpenAPI document
@@ -329,7 +372,7 @@ jobs:
     # Main pushes only. Coverage exists to publish the gh-pages report (a
     # main-only step). On a PR it would just rebuild the whole workspace
     # instrumented and re-run the suite for artifacts nobody reads — the
-    # `test (stable)` job is already the PR gate.
+    # `Linux Test (stable)` job is already the PR gate.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -342,7 +385,7 @@ jobs:
 
       # `cargo llvm-cov` builds the whole workspace, including the COSMIC/iced
       # GUI crates, so it needs the same Wayland/xkbcommon/GTK/dbus/alsa libs
-      # the test and clippy jobs install.
+      # the Linux test and clippy jobs install.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -371,8 +414,8 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # Same as the test job: build the mock WASM backends so the daemon's WASM
-      # transport integration tests run (and count) instead of self-skipping.
+      # Same as the Linux test job: build the mock WASM backends so the daemon's
+      # WASM transport integration tests run (and count) instead of self-skipping.
       - name: Build mock WASM backends
         run: |
           just build-mock-wasm-backend
