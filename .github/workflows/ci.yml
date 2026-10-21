@@ -51,14 +51,17 @@ jobs:
           toolchain: ${{ matrix.rust }}
           targets: wasm32-wasip2
 
+      # Keyed on the rustc version as well as Cargo.lock. Cargo throws away a
+      # target directory another compiler built, and a key on the lockfile
+      # alone kept restoring one without ever saving a fresh one. A changed
+      # Cargo.lock still restores the last cache, so only what changed
+      # rebuilds. Saved from main only: a pull request restores main's. When
+      # pull requests saved their own, they filled the cache quota and
+      # evicted main's.
       - name: Cache dependencies
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Build the mock WASM backends so tests/wasm_mock.rs and
       # tests/wasm_mock_realtime.rs (the daemon's WASM transport coverage —
@@ -120,13 +123,9 @@ jobs:
           components: clippy
 
       - name: Cache dependencies
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Run clippy
         run: just check
@@ -157,13 +156,9 @@ jobs:
           components: clippy
 
       - name: Cache dependencies
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-macos-${{ hashFiles('**/Cargo.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Scoped to the members that build here rather than the whole
       # workspace: the COSMIC panel applet and the consent helper need
@@ -254,13 +249,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache dependencies
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-openapi-${{ hashFiles('**/Cargo.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The OpenAPI document is not committed. It is built from the router
       # here, on every push and pull request, so what gets published is what
@@ -375,13 +366,9 @@ jobs:
           targets: wasm32-wasip2
 
       - name: Cache dependencies
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2.9.2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-llvmcov-${{ hashFiles('**/Cargo.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Same as the test job: build the mock WASM backends so the daemon's WASM
       # transport integration tests run (and count) instead of self-skipping.
