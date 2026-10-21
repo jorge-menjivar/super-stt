@@ -46,7 +46,6 @@
     reqwest.workspace = true
     # Hashing for content-addressed blobs
     ring = "0.17"
-    rubato.workspace = true
     rustls = {
         version = "0.23",
         default-features = false,
