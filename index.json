@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-21T12:12:30Z",
+  "generated_at": "2026-10-22T00:20:46Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -213,15 +213,16 @@
     },
     {
       "id": "qwen3_asr",
+      "backend_id": "app.super-stt.qwen-transformers",
       "source": "github.com/jorge-menjivar/super-stt-qwen-asr",
-      "version": "0.1.0",
-      "tag": "v0.1.0",
+      "version": "0.1.1",
+      "tag": "v0.1.1",
       "name": "Qwen3-ASR",
-      "description": "Local Qwen3-ASR speech-to-text.",
+      "description": "Local Qwen3-ASR speech-to-text on PyTorch and transformers: CUDA or CPU.",
       "license": "GPL-3.0-only",
       "kind": "subprocess",
-      "contract": "v1",
-      "min_client": "0.2.0",
+      "contract": "v3",
+      "min_client": "0.2.5",
       "entrypoint": "bin/qwen3-asr",
       "allowed_hosts": [],
       "online": false,
@@ -254,9 +255,9 @@
           {
             "target": "x86_64-unknown-linux-gnu",
             "accel": "cpu",
-            "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cpu.tar.gz",
-            "size": 448290983,
-            "sha256": "72a40f7973cbc946783092c34cfc8ca4976ba32a904b9a821f59180d207e765e"
+            "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-cpu.tar.gz",
+            "size": 455865212,
+            "sha256": "8ba6fbc80eb73889bf76dbe4cebed5c5f3eb81020688a64573d632cc123a9fca"
           },
           {
             "target": "x86_64-unknown-linux-gnu",
@@ -264,23 +265,23 @@
             "cuda_major": 13,
             "parts": [
               {
-                "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part00",
+                "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part00",
                 "size": 2097152000,
-                "sha256": "bd8d277e7fbb6fa39fc6eba85d455b09a9077926e603ff8dc8013503e88da224"
+                "sha256": "9566bce1af34b85da9761cc28e30a9a8f6cf6e77c5cd557dadd5722f33f20eae"
               },
               {
-                "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part01",
-                "size": 914369652,
-                "sha256": "586ea6c6063ebc632852bb2aaee595b2e48688ef3b1af8926b826ea2117e44c2"
+                "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.1/qwen3-asr-x86_64-unknown-linux-gnu-cuda13.tar.gz.part01",
+                "size": 1189414667,
+                "sha256": "5f02da3c8f2cc4d7a9ce01fb87c1645f21b76ee5f85d696c145d3f2ceb771cbc"
               }
             ]
           }
         ]
       },
       "manifest": {
-        "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.0/backend.toml",
-        "size": 5463,
-        "sha256": "0925ab3b1a02a362943ec73dad525817079b2192c34356fbdf96cccbf70dbfc1"
+        "url": "https://github.com/jorge-menjivar/super-stt-qwen-asr/releases/download/v0.1.1/backend.toml",
+        "size": 5547,
+        "sha256": "375d47c484ed8a17764aba7e6df328ef7eec6419d25bf3f783b21f6677f6f8bf"
       }
     },
     {
