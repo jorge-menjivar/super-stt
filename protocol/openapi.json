@@ -6301,11 +6301,11 @@
           "context": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/DictationContext",
                 "description": "The context that id names, so a picker can render the current choice\nwithout a second request. `null` whenever `id` is."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -6532,11 +6532,11 @@
           "context": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/DictationContext",
                 "description": "The context this backend will actually be sent, resolved. `null` when\nnothing resolves — including when it is pinned to a context that has\nsince been deleted, which falls back to nothing rather than to the\nactive one."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -6908,10 +6908,10 @@
           "selected_asset": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SelectedAsset"
               },
               {
-                "$ref": "#/components/schemas/SelectedAsset"
+                "type": "null"
               }
             ]
           }
@@ -7137,11 +7137,11 @@
           "error_code": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ErrorCode",
                 "description": "The stable identifier for this failure. Absent only on an unclassified\nserver-side error."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -7173,30 +7173,30 @@
           "cuda": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/CudaHostInfo"
               },
               {
-                "$ref": "#/components/schemas/CudaHostInfo"
+                "type": "null"
               }
             ]
           },
           "rocm": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/RocmHostInfo"
               },
               {
-                "$ref": "#/components/schemas/RocmHostInfo"
+                "type": "null"
               }
             ]
           },
           "vulkan": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/VulkanHostInfo"
               },
               {
-                "$ref": "#/components/schemas/VulkanHostInfo"
+                "type": "null"
               }
             ]
           }
@@ -7276,7 +7276,7 @@
       "IndexModel": {
         "allOf": [
           {
-            "oneOf": [
+            "allOf": [
               {
                 "type": "object",
                 "description": "The per-model fields Super STT's index carries beside `name` and\n`supported_devices`.",
@@ -7286,9 +7286,12 @@
                     "description": "What the model is for: `\"transcription\"` (the default) or\n`\"post_processor\"`. Lets Browse show that a backend provides a\npost-processor before it is installed. `default` so an index published\nbefore the field existed still parses, reading every model as\ntranscribing — which is what it was."
                   }
                 }
+              },
+              {
+                "type": "object",
+                "description": "The fields the product adds ([`Product::IndexModel`])."
               }
-            ],
-            "description": "The fields the product adds ([`Product::IndexModel`])."
+            ]
           },
           {
             "type": "object",
@@ -7424,11 +7427,11 @@
               "forge": {
                 "oneOf": [
                   {
-                    "type": "null"
-                  },
-                  {
                     "$ref": "#/components/schemas/Forge",
                     "description": "Which forge API to speak. Optional: the daemon reads the host out\nof `repo_url` when it is absent, and only a host no adapter serves\nneeds it spelled out."
+                  },
+                  {
+                    "type": "null"
                   }
                 ]
               },
@@ -8024,10 +8027,10 @@
           "index_stale": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/IndexStale"
               },
               {
-                "$ref": "#/components/schemas/IndexStale"
+                "type": "null"
               }
             ]
           },
@@ -8305,10 +8308,10 @@
           "installer_asset": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/InstallerAsset"
               },
               {
-                "$ref": "#/components/schemas/InstallerAsset"
+                "type": "null"
               }
             ]
           },
@@ -8536,11 +8539,11 @@
           "device": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/StageModelDevice",
                 "description": "The accelerator the selection runs on; `null` when nothing is selected.\n\nWhat it *could* run on is `GET /pipeline/{stage}/model/{model}/device/list`,\nkept out of here deliberately: that list costs a host probe, and a card\nfills its picker from it once rather than on every poll of this."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -8564,11 +8567,11 @@
           "switch": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/StageSwitch",
                 "description": "The load or download in flight for this stage; `null` when idle.\n\nHere rather than on the stage because it names a model. The daemon runs\none model operation at a time but not always for the same stage, so it\nis reported per stage."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -8584,11 +8587,11 @@
           "active_backend": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ActiveBackend",
                 "description": "Stage 1 only. `null` when the stage was emptied.\n\nDoubly optional for the same reason `resolved_accel` is: absent means\nthis was a stage 2 mutation, which reports `post_processor` instead;\n`null` means stage 1 itself is now empty."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -8601,11 +8604,11 @@
           "post_processor": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/PostProcessorState",
                 "description": "Stage 2 only."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -8678,11 +8681,11 @@
           "load": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LoadProgress",
                 "description": "The backend's own account of the load, in the `loading_model` phase:\nits phase, its step, and how far through the step it is. Absent until\nthe backend reports any of it, and from backends that never do."
+              },
+              {
+                "type": "null"
               }
             ]
           },
