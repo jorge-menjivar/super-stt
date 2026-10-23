@@ -32,17 +32,17 @@
   ]
 
   [workspace.package]
-    version = "0.2.4"
+    version = "0.3.0-beta.1"
     authors = ["Jorge Menjivar <jorge@menjivar.ai>"]
     edition = "2024"
 
   [workspace.dependencies]
-    anyhow            = "1.0.100"
-    chrono            = { version = "0.4", features = ["serde"] }
-    clap              = { version = "4.5.54", features = ["cargo", "derive"] }
-    cpal              = "0.17.3"
-    dashmap           = "6.1.0"
-    dirs              = "7.0.0"
+    anyhow                   = "1.0.100"
+    chrono                   = { version = "0.4", features = ["serde"] }
+    clap                     = { version = "4.5.54", features = ["cargo", "derive"] }
+    cpal                     = "0.17.3"
+    dashmap                  = "6.1.0"
+    dirs                     = "7.0.0"
     # Input simulation (for client)
     #
     # On the `fix-shifted-characters-drop` branch rather than `main` until it
@@ -63,23 +63,23 @@
     # CoreGraphics with no feature at all. Naming `wayland` here would enable
     # it for every target, so the daemon opts in from its own
     # `cfg(target_os = "linux")` dependency table instead.
-    enigo             = {
+    enigo                    = {
       git              = "https://github.com/jorge-menjivar/enigo",
       branch           = "fix-shifted-characters-drop",
       default-features = false,
     }
-    env_logger        = "0.11.8"
-    futures-util      = "0.3.31"
+    env_logger               = "0.11.8"
+    futures-util             = "0.3.31"
     # Audio processing
-    hound             = "3.5.1"
-    i18n-embed        = {
+    hound                    = "3.5.1"
+    i18n-embed               = {
       version  = "0.16.0",
       features = [
         "desktop-requester",
         "fluent-system",
       ]
     }
-    i18n-embed-fl     = "0.10.0"
+    i18n-embed-fl            = "0.10.0"
     # Both native backends are named because the daemon builds for both
     # platforms. Neither costs the other anything: keyring puts
     # `dbus-secret-service` behind `cfg(target_os = "linux")` and
@@ -87,7 +87,7 @@
     # pulls a dependency only on the target that uses it. Without
     # `apple-native` keyring falls back to its *mock* store on macOS, which
     # would silently drop every session token and backend secret at exit.
-    keyring           = {
+    keyring                  = {
       version  = "3",
       features = [
         "apple-native",
@@ -95,7 +95,7 @@
       ]
     }
     # System calls (for client singleton)
-    libc              = "0.2"
+    libc                     = "0.2"
     # Cosmic specific. The lib target is `cosmic`, so this is `use cosmic::`
     # in code despite the package being `libcosmic` — no rename needed.
     #
@@ -118,15 +118,15 @@
     # wants a much smaller build than the app. `default-features` can only be
     # turned off at the workspace level, so members opt into "default" by
     # name rather than inheriting it.
-    libcosmic         = {
+    libcosmic                = {
       git              = "https://github.com/pop-os/libcosmic.git",
       rev              = "ef162b8e16ba4493e05c169cd56c7b9f77f0fda5",
       default-features = false,
     }
-    log               = "0.4.29"
-    open              = "5.3.3"
-    parking_lot       = "0.12"
-    reqwest           = {
+    log                      = "0.4.29"
+    open                     = "5.3.3"
+    parking_lot              = "0.12"
+    reqwest                  = {
       version          = "0.13.2",
       default-features = false,
       features         = [
@@ -136,42 +136,42 @@
         "stream",
       ]
     }
-    rubato            = "5.0"
-    rust-embed        = "8.11.0"
-    serde             = { version = "1.0.219", features = ["derive"] }
-    serde_json        = "1.0.149"
-    strum             = { version = "0.28.0", features = ["derive"] }
-    strum_macros      = "0.28"
+    rubato                   = "5.0"
+    rust-embed               = "8.11.0"
+    serde                    = { version = "1.0.219", features = ["derive"] }
+    serde_json               = "1.0.149"
+    strum                    = { version = "0.28.0", features = ["derive"] }
+    strum_macros             = "0.28"
     # The code Super STT shares with Super TTS. Pinned by rev, like
     # libcosmic, so a change there reaches this workspace only when the rev
     # is bumped here. Every super-engine crate names the same rev, and so do
     # the shared CI jobs in .github/workflows: bump them all with
     # `just pin-engine <rev>`.
-    super-engine-client = {
+    super-engine-client      = {
       git = "https://github.com/super-libre/super-engine",
       rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
-    super-engine-daemon = {
+    super-engine-daemon      = {
       git = "https://github.com/super-libre/super-engine",
       rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
-    super-engine-forge = {
+    super-engine-forge       = {
       git = "https://github.com/super-libre/super-engine",
       rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
-    super-engine-indexer = {
+    super-engine-indexer     = {
       git = "https://github.com/super-libre/super-engine",
       rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
-    super-engine-installer = {
+    super-engine-installer   = {
       git = "https://github.com/super-libre/super-engine",
       rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
-    super-engine-protocol = {
+    super-engine-protocol    = {
       git = "https://github.com/super-libre/super-engine",
       rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
-    super-engine-spec = {
+    super-engine-spec        = {
       git = "https://github.com/super-libre/super-engine",
       rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
@@ -179,8 +179,8 @@
       git = "https://github.com/super-libre/super-engine",
       rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
-    thiserror         = "2.0"
-    tokio             = {
+    thiserror                = "2.0"
+    tokio                    = {
       version  = "1.49.0",
       features = [
         "full",
@@ -191,22 +191,25 @@
       ]
     }
     # Filesystem utilities
-    toml              = "1.0.6"
+    toml                     = "1.0.6"
     # OpenAPI: the daemon protocol spec is generated from the router and the
     # wire types, not hand-maintained (see `just openapi`). `axum_extras`
     # teaches the `#[utoipa::path]` macro to read axum's own extractors, so
     # path/query parameters come from the handler signature instead of a
     # second declaration that could disagree with it.
-    utoipa            = { version = "6.0.0", features = ["axum_extras", "chrono"] }
+    utoipa                   = {
+      version  = "6.0.0",
+      features = ["axum_extras", "chrono"]
+    }
     # Binds utoipa to axum: `OpenApiRouter` collects each route's spec as the
     # route itself is registered, so a route and its documentation are one
     # declaration and cannot drift apart.
-    utoipa-axum       = "0.3.0"
-    uuid              = { version = "1.23.0", features = ["v4"] }
+    utoipa-axum              = "0.3.0"
+    uuid                     = { version = "1.23.0", features = ["v4"] }
     # Build dependencies
-    vergen            = { version = "8.3.1", features = ["git", "gitcl"] }
+    vergen                   = { version = "8.3.1", features = ["git", "gitcl"] }
     # D-Bus integration
-    zbus              = "5.14.0"
+    zbus                     = "5.14.0"
 
   [workspace.lints.clippy]
     pedantic = { level = "warn", priority = -1 }

@@ -7135,7 +7135,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-app"
-version = "0.2.4"
+version = "0.3.0-beta.1"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -7181,7 +7181,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-cli"
-version = "0.2.4"
+version = "0.3.0-beta.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -7196,7 +7196,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-consent"
-version = "0.2.4"
+version = "0.3.0-beta.1"
 dependencies = [
  "libc",
  "libcosmic",
@@ -7206,7 +7206,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-daemon"
-version = "0.2.4"
+version = "0.3.0-beta.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7272,7 +7272,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-install"
-version = "0.2.4"
+version = "0.3.0-beta.1"
 dependencies = [
  "dirs 7.0.0",
  "flate2",
@@ -7289,7 +7289,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-registry-types"
-version = "0.2.4"
+version = "0.3.0-beta.1"
 dependencies = [
  "jsonschema",
  "schemars",
@@ -7303,7 +7303,7 @@ dependencies = [
 
 [[package]]
 name = "super-stt-shared"
-version = "0.2.4"
+version = "0.3.0-beta.1"
 dependencies = [
  "anyhow",
  "async-stream",
