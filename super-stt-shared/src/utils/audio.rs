@@ -94,6 +94,9 @@ pub enum ResampleQuality {
 
 /// Resampling with configurable quality
 ///
+/// The output has `ceil(len * to_sr / from_sr)` samples and lines up with the
+/// input in time.
+///
 /// # Errors
 ///
 /// Returns an error if the resampler cannot be constructed or if processing fails.
@@ -103,6 +106,11 @@ pub fn resample(
     to_sr: u32,
     quality: ResampleQuality,
 ) -> Result<Vec<f32>> {
+    // `process_all` feeds the clip through in chunks of this many frames, then
+    // pumps silence to flush the resampler's delay. A chunk sized to the whole
+    // clip would make that flush a second pass over the clip.
+    const CHUNK_FRAMES: usize = 1024;
+
     if from_sr == to_sr {
         return Ok(samples.to_vec());
     }
@@ -135,18 +143,86 @@ pub fn resample(
         f64::from(to_sr) / f64::from(from_sr),
         2.0, // max relative ratio change
         &params,
-        samples.len(),
+        CHUNK_FRAMES,
         1, // channels
         FixedAsync::Input,
     )?;
 
     // Mono audio: an interleaved single-channel buffer is just the flat slice.
     let input = InterleavedSlice::new(samples, 1, samples.len())?;
-    let out_frames = resampler.output_frames_next();
-    let mut waves_out = vec![0.0f32; out_frames];
-    let mut output = InterleavedSlice::new_mut(&mut waves_out, 1, out_frames)?;
-    let (_, written) = resampler.process_into_buffer(&input, &mut output, None)?;
-    waves_out.truncate(written);
+    // Trims the delay, so the output lines up with the input and keeps its
+    // last frames. A clip resampled in pieces then joins up without gaps.
+    let output = resampler.process_all(&input, samples.len(), None)?;
 
-    Ok(waves_out)
+    Ok(output.take_data())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ResampleQuality, resample};
+
+    /// A 220 Hz tone at half amplitude, `len` samples long at `rate`.
+    fn tone(rate: u32, len: u32) -> Vec<f32> {
+        (0..len)
+            .map(|i| {
+                let t = f64::from(i) / f64::from(rate);
+                #[allow(clippy::cast_possible_truncation)]
+                let sample = (0.5 * (std::f64::consts::TAU * 220.0 * t).sin()) as f32;
+                sample
+            })
+            .collect()
+    }
+
+    #[test]
+    fn output_length_follows_the_rate_ratio() {
+        for (from, len, want) in [
+            (48_000, 4_800, 1_600),
+            (44_100, 4_410, 1_600),
+            (22_050, 2_205, 1_600),
+            (8_000, 800, 1_600),
+            // Shorter than one resampler chunk.
+            (48_000, 100, 34),
+        ] {
+            let out = resample(&tone(from, len), from, 16_000, ResampleQuality::Fast).unwrap();
+            assert_eq!(out.len(), want, "{len} samples at {from} Hz");
+        }
+    }
+
+    #[test]
+    fn output_lines_up_with_the_input() {
+        // The resampler delays its output by half its filter length. Untrimmed,
+        // that shifts this tone by about 10 samples, an error of about 0.45.
+        for from in [48_000, 44_100] {
+            let out = resample(&tone(from, from), from, 16_000, ResampleQuality::Fast).unwrap();
+            let exact = tone(16_000, 16_000);
+            // The filter sees silence past each end of the clip, so skip those.
+            let worst = out[64..out.len() - 64]
+                .iter()
+                .zip(&exact[64..])
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f32::max);
+            assert!(worst < 0.05, "{from} Hz: off by up to {worst}");
+        }
+    }
+
+    #[test]
+    fn resampling_a_stream_in_polls_keeps_every_sample() {
+        // The realtime path resamples each ~100 ms poll on its own.
+        let clip = tone(48_000, 48_000);
+        let total: usize = clip
+            .chunks(4_800)
+            .map(|poll| {
+                resample(poll, 48_000, 16_000, ResampleQuality::Fast)
+                    .unwrap()
+                    .len()
+            })
+            .sum();
+        assert_eq!(total, 16_000);
+    }
+
+    #[test]
+    fn empty_input_gives_empty_output() {
+        let out = resample(&[], 48_000, 16_000, ResampleQuality::Fast).unwrap();
+        assert!(out.is_empty());
+    }
 }
