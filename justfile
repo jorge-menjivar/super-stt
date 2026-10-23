@@ -312,7 +312,7 @@ coverage-badge:
 # tests, doctests, schemas
 ci: fmt-check check check-features test test-install doctest schema-check
 
-# The macOS counterpart to `ci`, mirroring the macOS job in
+# The macOS counterpart to `ci`, mirroring the macOS jobs in
 # .github/workflows/ci.yml.
 #
 # Same gates, with the three whole-workspace ones swapped for their
