@@ -149,35 +149,35 @@
     # `just pin-engine <rev>`.
     super-engine-client = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8927efc600cd6819a58e1ed10fa21b70c0a80c1b",
+      rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
     super-engine-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8927efc600cd6819a58e1ed10fa21b70c0a80c1b",
+      rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
     super-engine-forge = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8927efc600cd6819a58e1ed10fa21b70c0a80c1b",
+      rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
     super-engine-indexer = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8927efc600cd6819a58e1ed10fa21b70c0a80c1b",
+      rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
     super-engine-installer = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8927efc600cd6819a58e1ed10fa21b70c0a80c1b",
+      rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
     super-engine-protocol = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8927efc600cd6819a58e1ed10fa21b70c0a80c1b",
+      rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
     super-engine-spec = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8927efc600cd6819a58e1ed10fa21b70c0a80c1b",
+      rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
     super-engine-test-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "8927efc600cd6819a58e1ed10fa21b70c0a80c1b",
+      rev = "109d0491b6f1f28765772ea430d10033784f1875",
     }
     thiserror         = "2.0"
     tokio             = {
@@ -197,11 +197,11 @@
     # teaches the `#[utoipa::path]` macro to read axum's own extractors, so
     # path/query parameters come from the handler signature instead of a
     # second declaration that could disagree with it.
-    utoipa            = { version = "5.5.0", features = ["axum_extras", "chrono"] }
+    utoipa            = { version = "6.0.0", features = ["axum_extras", "chrono"] }
     # Binds utoipa to axum: `OpenApiRouter` collects each route's spec as the
     # route itself is registered, so a route and its documentation are one
     # declaration and cannot drift apart.
-    utoipa-axum       = "0.2.0"
+    utoipa-axum       = "0.3.0"
     uuid              = { version = "1.23.0", features = ["v4"] }
     # Build dependencies
     vergen            = { version = "8.3.1", features = ["git", "gitcl"] }
