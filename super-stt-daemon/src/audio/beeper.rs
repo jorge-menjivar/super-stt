@@ -4,6 +4,7 @@
 //! which is what the test daemons set.
 
 use anyhow::Result;
+use std::time::Instant;
 use super_stt_shared::product::SUPER_STT;
 
 /// Play a sequence of beeps. See `super_engine_daemon::beeper::play_beep_sequence`.
@@ -30,19 +31,21 @@ pub fn play_beep_sequence(
 }
 
 /// [`play_beep_sequence`] on a blocking thread, so an async caller does not
-/// stall a worker for the sound's full duration.
+/// stall a worker for the sound's full duration. Returns the instant the
+/// sequence finished playing. See
+/// `super_engine_daemon::beeper::play_beep_sequence_until_played`.
 ///
 /// # Errors
 ///
 /// Propagates the playback error, or reports a task-join failure.
-pub async fn play_beep_sequence_async(
+pub async fn play_beep_sequence_until_played(
     frequencies: Vec<f32>,
     duration_ms: u64,
     fade_in_ms: u64,
     fade_out_ms: u64,
     volume: f32,
-) -> Result<()> {
-    super_engine_daemon::beeper::play_beep_sequence_async(
+) -> Result<Instant> {
+    super_engine_daemon::beeper::play_beep_sequence_until_played(
         &SUPER_STT,
         frequencies,
         duration_ms,
