@@ -61,7 +61,7 @@ jobs:
       # pull requests saved their own, they filled the cache quota and
       # evicted main's.
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -125,7 +125,7 @@ jobs:
           components: clippy
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -167,7 +167,7 @@ jobs:
           targets: wasm32-wasip2
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -215,7 +215,7 @@ jobs:
           components: clippy
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -294,7 +294,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -410,7 +410,7 @@ jobs:
           targets: wasm32-wasip2
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
