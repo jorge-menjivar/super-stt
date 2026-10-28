@@ -150,6 +150,9 @@ impl DaemonAudioRecorder {
         silence_detection_disabled: bool,
         // Optional external stop signal (shortcut stop or early stop)
         mut stop_rx: Option<tokio::sync::broadcast::Receiver<()>>,
+        // Fired once the microphone is capturing. Dropped unfired when the
+        // recorder fails before it gets there.
+        capture_started: tokio::sync::oneshot::Sender<()>,
     ) -> Result<Vec<f32>> {
         info!("🎤 Starting audio recording with streaming...");
 
@@ -160,6 +163,7 @@ impl DaemonAudioRecorder {
 
         let (stream, analysis_task, stream_config, samples_tx) =
             self.build_audio_stream(&events, preview_tx)?;
+        let _ = capture_started.send(());
 
         let timeout_occurred = self
             .run_silence_loop(silence_detection_disabled, &mut stop_rx)

@@ -72,7 +72,7 @@ whole subscription.
 
 | Topic                  | Scope              | Payload                                                                                   |
 |------------------------|--------------------|-------------------------------------------------------------------------------------------|
-| `recording_started`    | `recording_events` | `{ client_id, timestamp, write_mode }`                                                    |
+| `recording_started`    | `recording_events` | `{ client_id, timestamp, write_mode }` — emitted when mic capture begins, after the start cue |
 | `recording_stopped`    | `recording_events` | `{ client_id, timestamp }` — emitted when mic capture ends, before transcription           |
 | `recording_state`      | `recording_events` | `{ is_recording: bool }` — `true` at capture start, `false` when the mic releases (mic-capture phase only; not the whole cycle) |
 | `transcribing_started` | `recording_events` | `{ client_id, timestamp }` — model decode of the captured audio has begun                 |

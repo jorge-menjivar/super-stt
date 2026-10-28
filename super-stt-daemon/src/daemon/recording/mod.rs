@@ -219,10 +219,15 @@ impl SuperSTTDaemon {
         info!("Starting direct audio recording in daemon with simplified architecture");
 
         // Phase 1: spawn the recorder. `busy` is set inside setup.
-        let session = self
+        let (session, capture_started) = self
             .spawn_recorder(write_mode, stop_mode, preview_typing, cue_theme)
             .await?;
-        // Capture is starting — announce it now that the recorder exists.
+        // Announce capture once the microphone is capturing, not when the
+        // recorder is spawned: the start cue plays first, and a widget lit up
+        // during it invites speech the take never hears. A recorder that fails
+        // first drops the sender; the event still goes out, so the
+        // `recording_stopped` Phase 3 sends for the failure follows a start.
+        let _ = capture_started.await;
         self.emit_recording_started(write_mode).await;
 
         // Phase 2: stream incremental transcripts while capturing.

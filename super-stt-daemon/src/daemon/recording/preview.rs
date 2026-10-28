@@ -48,14 +48,16 @@ fn preview_window(since_last_pass: Duration) -> Duration {
 impl SuperSTTDaemon {
     /// Phase 1: create the stop broadcast channel, set up the recorder, and
     /// spawn the recording task. Returns a [`RecordingSession`] that carries
-    /// all the state the subsequent phases need.
+    /// all the state the subsequent phases need, and a receiver that resolves
+    /// once the microphone is capturing (or errs when the recorder fails
+    /// first).
     pub(super) async fn spawn_recorder(
         &self,
         write_mode: bool,
         stop_mode: super_stt_shared::models::recording_stop_mode::RecordingStopMode,
         preview_typing: bool,
         cue_theme: super_stt_shared::theme::AudioTheme,
-    ) -> Result<RecordingSession> {
+    ) -> Result<(RecordingSession, tokio::sync::oneshot::Receiver<()>)> {
         let silence_detection_disabled = !stop_mode.silence_detection_enabled();
         info!("🎛️ Recording mode: {stop_mode}");
 
@@ -109,6 +111,7 @@ impl SuperSTTDaemon {
         .unwrap_or(16000);
 
         // Start the recorder in its own thread
+        let (capture_started_tx, capture_started) = tokio::sync::oneshot::channel();
         let recorder_handle = tokio::spawn({
             let events = Arc::clone(&self.events);
             async move {
@@ -118,6 +121,7 @@ impl SuperSTTDaemon {
                         None,
                         silence_detection_disabled,
                         Some(stop_rx),
+                        capture_started_tx,
                     )
                     .await
             }
@@ -125,17 +129,20 @@ impl SuperSTTDaemon {
 
         let start_time = Instant::now();
 
-        Ok(RecordingSession {
-            recorder_handle,
-            model_processing_interval,
-            force_preview_support,
-            preview_typing,
-            actually_typed,
-            preview_buffer,
-            speech_state,
-            device_sample_rate,
-            start_time,
-        })
+        Ok((
+            RecordingSession {
+                recorder_handle,
+                model_processing_interval,
+                force_preview_support,
+                preview_typing,
+                actually_typed,
+                preview_buffer,
+                speech_state,
+                device_sample_rate,
+                start_time,
+            },
+            capture_started,
+        ))
     }
 
     /// Phase 2: poll the recorder task and stream live preview transcriptions
