@@ -9,7 +9,7 @@ use super_stt_registry_types::Stt;
 /// Entries that predate the `id` requirement, and the migration backlog.
 ///
 /// `registry.schema.json` requires an `id` of *every* entry, so an editor
-/// already flags these five. They are tolerated here so the scheduled index
+/// already flags these two. They are tolerated here so the scheduled index
 /// build keeps publishing a catalog while they are fixed one at a time —
 /// removing a name without fixing its backend would take every user's Browse
 /// listing down with it.
@@ -18,7 +18,7 @@ use super_stt_registry_types::Stt;
 /// pins the release to it, so the order is: add `[backend].id` to that
 /// backend's own `backend.toml`, cut a release, *then* add the same id here
 /// and delete the name below. Adding the id here first earns an `IdMismatch`.
-const GRANDFATHERED: &[&str] = &["deepgram", "mistral", "openai", "voxtral", "whisper"];
+const GRANDFATHERED: &[&str] = &["deepgram", "voxtral"];
 
 const INDEXER: Indexer = Indexer {
     name: "super-stt-indexer",
