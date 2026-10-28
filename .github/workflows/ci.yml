@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# A newer push to a pull request makes the run on its older commit moot, so
+# that run is cancelled. A push to main or develop gets a group of its own:
+# every commit there keeps its run, which saves the cache and publishes.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -86,9 +93,6 @@ jobs:
 
       - name: Run doctests
         run: just doctest --verbose
-
-      - name: Check generated TOML schemas are current
-        run: just schema-check
 
   linux-clippy:
     name: Linux Clippy
@@ -194,9 +198,6 @@ jobs:
       - name: Run doctests
         run: just doctest-macos --verbose
 
-      - name: Check generated TOML schemas are current
-        run: just schema-check
-
   macos-clippy:
     name: macOS Clippy
     runs-on: macos-latest
@@ -249,6 +250,29 @@ jobs:
           components: rustfmt
       - name: Check formatting
         run: just fmt-check
+
+  # The schemas and the TOML files they check are the same on every platform
+  # and toolchain, so this runs once, like Rustfmt, rather than in each test
+  # job. The crate links no system libraries, so there is nothing to install.
+  schemas:
+    name: TOML schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: taiki-e/install-action@v2.87.31
+        with:
+          tool: just
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Check generated TOML schemas are current
+        run: just schema-check
 
   protocol:
     name: Protocol docs
