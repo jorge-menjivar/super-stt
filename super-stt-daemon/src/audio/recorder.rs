@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::audio::beeper;
+use crate::audio::cue_gate::CueGate;
 use crate::audio::device::{
     AudioDeviceCache, AudioHealthStatus, get_or_initialize_audio_device,
     verify_audio_device_readiness,
 };
-use crate::audio::processing::{
-    process_audio_data_f32_with_streaming, process_audio_data_i16_with_streaming,
-};
+use crate::audio::processing::{captured_at, downmix_f32, downmix_i16, process_and_stream_samples};
 use crate::audio::state::RecordingState;
 use crate::daemon::events::EventBus;
 use anyhow::{Context, Result};
@@ -33,6 +32,8 @@ pub struct DaemonAudioRecorder {
     pub sample_rate: u32,
     audio_buffer: Arc<Mutex<VecDeque<f32>>>,
     recording_state: Arc<Mutex<RecordingState>>,
+    // Holds what the microphone hears until the start cue has played.
+    cue_gate: Arc<CueGate>,
     pub audio_level_tx: broadcast::Sender<AudioLevel>,
     audio_theme: AudioTheme,
     volume: f32,
@@ -53,6 +54,7 @@ struct StreamSetup<'a> {
     device: &'a Device,
     config: &'a StreamConfig,
     sample_format: SampleFormat,
+    gate: Arc<CueGate>,
     buffer: Arc<Mutex<VecDeque<f32>>>,
     state: Arc<Mutex<RecordingState>>,
     level_tx: broadcast::Sender<AudioLevel>,
@@ -81,6 +83,7 @@ impl DaemonAudioRecorder {
             sample_rate: 16000,
             audio_buffer: Arc::new(Mutex::new(VecDeque::new())),
             recording_state: Arc::new(Mutex::new(RecordingState::new())),
+            cue_gate: Arc::new(CueGate::default()),
             audio_level_tx,
             audio_theme: theme,
             volume,
@@ -150,16 +153,26 @@ impl DaemonAudioRecorder {
         silence_detection_disabled: bool,
         // Optional external stop signal (shortcut stop or early stop)
         mut stop_rx: Option<tokio::sync::broadcast::Receiver<()>>,
+        // Fired once the microphone is capturing. Dropped unfired when the
+        // recorder fails before it gets there.
+        capture_started: tokio::sync::oneshot::Sender<()>,
     ) -> Result<Vec<f32>> {
         info!("🎤 Starting audio recording with streaming...");
 
-        // Play start sound and wait for it to complete
-        self.play_start_sound_and_wait().await;
-
         self.init_recording_state(silence_detection_disabled);
 
+        // Open the microphone before the start cue, so its startup overlaps
+        // the cue instead of following it. The gate holds what it captures.
+        let opened_at = Instant::now();
         let (stream, analysis_task, stream_config, samples_tx) =
             self.build_audio_stream(&events, preview_tx)?;
+
+        // Keep what was captured from the moment the cue stopped playing, so
+        // the take holds none of the cue and loses no speech after it. With
+        // no cue, keep everything since the microphone opened.
+        let cue_end = self.play_start_sound_and_wait().await;
+        self.cue_gate.release(cue_end.unwrap_or(opened_at));
+        let _ = capture_started.send(());
 
         let timeout_occurred = self
             .run_silence_loop(silence_detection_disabled, &mut stop_rx)
@@ -192,12 +205,15 @@ impl DaemonAudioRecorder {
 
     /// Clear the audio buffer and reset recording state before a new recording.
     fn init_recording_state(&self, silence_detection_disabled: bool) {
+        self.cue_gate.hold();
+
         let mut buffer = self.audio_buffer.lock();
         buffer.clear();
 
+        // `recording_start` stays unset: the first audio past the cue gate
+        // sets it, so the grace period starts when the take does.
         let mut state = self.recording_state.lock();
         *state = RecordingState::new();
-        state.recording_start = Some(Instant::now());
         state.silence_detection_disabled = silence_detection_disabled;
     }
 
@@ -259,6 +275,7 @@ impl DaemonAudioRecorder {
             device: &device,
             config: &stream_config,
             sample_format,
+            gate: Arc::clone(&self.cue_gate),
             buffer: buffer_clone,
             state: state_clone,
             level_tx,
@@ -377,18 +394,25 @@ impl DaemonAudioRecorder {
 
     /// Play start recording sound using current theme and wait for it to
     /// complete. `play_beep_sequence` spin-waits for the sound's full duration,
-    /// so run it off the async runtime (Tier 3 #4).
-    async fn play_start_sound_and_wait(&self) {
+    /// so run it off the async runtime (Tier 3 #4). Returns the instant it
+    /// finished playing, or `None` when nothing played.
+    async fn play_start_sound_and_wait(&self) -> Option<Instant> {
         if self.audio_theme == AudioTheme::Silent {
-            return;
+            return None;
         }
         let (frequencies, duration, fade_in, fade_out) = self.audio_theme.start_sound();
-        if let Err(e) =
-            beeper::play_beep_sequence_async(frequencies, duration, fade_in, fade_out, self.volume)
-                .await
-        {
+        beeper::play_beep_sequence_until_played(
+            frequencies,
+            duration,
+            fade_in,
+            fade_out,
+            self.volume,
+        )
+        .await
+        .inspect_err(|e| {
             log::warn!("Failed to play start sound (audio permissions may be missing): {e}");
-        }
+        })
+        .ok()
     }
 
     /// Play end recording sound using current theme
@@ -409,12 +433,14 @@ impl DaemonAudioRecorder {
 
     fn create_audio_stream_with_streaming(setup: StreamSetup<'_>) -> Result<Stream> {
         let channels = setup.config.channels as usize;
+        let sample_rate = setup.config.sample_rate;
 
         match setup.sample_format {
             SampleFormat::F32 => {
                 let StreamSetup {
                     device,
                     config,
+                    gate,
                     buffer,
                     state,
                     level_tx,
@@ -423,15 +449,17 @@ impl DaemonAudioRecorder {
                 } = setup;
                 let stream = device.build_input_stream(
                     config,
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        process_audio_data_f32_with_streaming(
-                            data,
-                            channels,
-                            &buffer,
-                            &state,
-                            &level_tx,
-                            &samples_tx,
-                        );
+                    move |data: &[f32], info: &cpal::InputCallbackInfo| {
+                        let mono = downmix_f32(data, channels);
+                        gate.admit(captured_at(info), mono, sample_rate, |kept| {
+                            process_and_stream_samples(
+                                kept,
+                                &buffer,
+                                &state,
+                                &level_tx,
+                                &samples_tx,
+                            );
+                        });
                     },
                     |err| log::error!("Stream error: {err}"),
                     None,
@@ -442,6 +470,7 @@ impl DaemonAudioRecorder {
                 let StreamSetup {
                     device,
                     config,
+                    gate,
                     buffer,
                     state,
                     level_tx,
@@ -450,15 +479,17 @@ impl DaemonAudioRecorder {
                 } = setup;
                 let stream = device.build_input_stream(
                     config,
-                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        process_audio_data_i16_with_streaming(
-                            data,
-                            channels,
-                            &buffer,
-                            &state,
-                            &level_tx,
-                            &samples_tx,
-                        );
+                    move |data: &[i16], info: &cpal::InputCallbackInfo| {
+                        let mono = downmix_i16(data, channels);
+                        gate.admit(captured_at(info), mono, sample_rate, |kept| {
+                            process_and_stream_samples(
+                                kept,
+                                &buffer,
+                                &state,
+                                &level_tx,
+                                &samples_tx,
+                            );
+                        });
                     },
                     |err| log::error!("Stream error: {err}"),
                     None,

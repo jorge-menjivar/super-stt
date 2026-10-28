@@ -18,7 +18,7 @@ see [auth.md](../auth.md).
 
 | Topic                  | Carries                                                          |
 |------------------------|------------------------------------------------------------------|
-| `recording_started`    | `{ client_id, timestamp, write_mode }`                           |
+| `recording_started`    | `{ client_id, timestamp, write_mode }` — emitted when mic capture begins, after the start cue |
 | `recording_stopped`    | `{ client_id, timestamp }` — emitted when mic capture ends        |
 | `recording_state`      | `{ is_recording: bool }` — coarse on/off ping                    |
 | `transcribing_started` | `{ client_id, timestamp }` — model decode begins                 |
