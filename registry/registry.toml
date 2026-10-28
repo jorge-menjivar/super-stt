@@ -17,7 +17,13 @@
   repo  = "github.com/jorge-menjivar/super-stt-openai"
   forge = "github"
 
+[qwen]
+  id    = "app.super-stt.qwen"
+  repo  = "github.com/super-libre/super-stt-qwen"
+  forge = "github"
+
 [qwen3_asr]
+  id    = "app.super-stt.qwen-transformers"
   repo  = "github.com/jorge-menjivar/super-stt-qwen-asr"
   forge = "github"
 
