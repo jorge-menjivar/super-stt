@@ -101,9 +101,9 @@ impl Generation for Contract {
             // notion of an installable backend to gate.
             Self::V1 => "0.2.0",
             Self::V2 => "0.2.4-beta.1",
-            // v4 ships in the same release as v3, which has not shipped
-            // either.
-            Self::V3 | Self::V4 => "0.2.5",
+            // v4 ships in the same release as v3. There is no 0.2.5: the
+            // release after 0.2.4 is 0.3.0.
+            Self::V3 | Self::V4 => "0.3.0",
         }
     }
 }
@@ -410,8 +410,8 @@ mod tests {
     fn each_generation_names_the_release_that_shipped_it() {
         assert_eq!(Contract::V1.min_client(), "0.2.0");
         assert_eq!(Contract::V2.min_client(), "0.2.4-beta.1");
-        assert_eq!(Contract::V3.min_client(), "0.2.5");
-        assert_eq!(Contract::V4.min_client(), "0.2.5");
+        assert_eq!(Contract::V3.min_client(), "0.3.0");
+        assert_eq!(Contract::V4.min_client(), "0.3.0");
         assert_eq!(Contract::LATEST, Contract::V4);
     }
 
