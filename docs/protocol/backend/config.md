@@ -110,8 +110,8 @@ is.
 |------------|------------------------------------------------------------------------------|--------------------|
 | `v1`       | The base contract: transcription over `POST /v1/transcribe`.                 | Super STT 0.2.0    |
 | `v2`       | [`[[models]].role`](#model-roles) and [`POST /v1/process`](./contract.md#post-v1process) — transcript post-processors; [`[[models]].force_preview_support`](#models) — live previews for a model that has none of its own. Also **requires** [`[backend].id`](#backend). | Super STT 0.2.4    |
-| `v3`       | No manifest field. The daemon grants a subprocess backend a [cache directory](./subprocess.md) that survives the process, and reads the [load progress](./contract.md#get-v1status) (`phase`, `step`, `progress`) of `GET /v1/status`. Declare it when a load builds GPU kernels: an older daemon rebuilds them on every load and cuts a slow one off at its flat load limit. | Super STT 0.2.5    |
-| `v4`       | [`[[models]].prepare_files`](#models) and [`POST /v1/prepare`](./contract.md#post-v1prepare): a first load's GPU kernels are built from the model's configuration files while its weights still download. **Requires** [`[backend].product`](#backend), so the manifest says it is built for Super STT. | Super STT 0.2.5    |
+| `v3`       | No manifest field. The daemon grants a subprocess backend a [cache directory](./subprocess.md) that survives the process, and reads the [load progress](./contract.md#get-v1status) (`phase`, `step`, `progress`) of `GET /v1/status`. Declare it when a load builds GPU kernels: an older daemon rebuilds them on every load and cuts a slow one off at its flat load limit. | Super STT 0.3.0    |
+| `v4`       | [`[[models]].prepare_files`](#models) and [`POST /v1/prepare`](./contract.md#post-v1prepare): a first load's GPU kernels are built from the model's configuration files while its weights still download. **Requires** [`[backend].product`](#backend), so the manifest says it is built for Super STT. | Super STT 0.3.0    |
 
 Extending the contract does not oblige a backend to serve all of it. Which
 routes a backend must implement is decided by the models it declares, not by
