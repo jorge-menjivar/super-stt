@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-29T06:10:59Z",
+  "generated_at": "2026-10-29T08:22:37Z",
   "min_client": "0.1.0",
   "backends": [
     {
@@ -222,7 +222,7 @@
       "license": "GPL-3.0-only",
       "kind": "subprocess",
       "contract": "v4",
-      "min_client": "0.2.5",
+      "min_client": "0.3.0",
       "entrypoint": "super-stt-backend-qwen",
       "allowed_hosts": [],
       "online": false,
@@ -367,7 +367,7 @@
       "license": "GPL-3.0-only",
       "kind": "subprocess",
       "contract": "v3",
-      "min_client": "0.2.5",
+      "min_client": "0.3.0",
       "entrypoint": "bin/qwen3-asr",
       "allowed_hosts": [],
       "online": false,
