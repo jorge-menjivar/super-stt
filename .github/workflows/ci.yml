@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: taiki-e/install-action@v2.87.31
+      - uses: taiki-e/install-action@v2.88.1
         with:
           tool: just
 
@@ -100,7 +100,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: taiki-e/install-action@v2.87.31
+      - uses: taiki-e/install-action@v2.88.1
         with:
           tool: just
 
@@ -156,7 +156,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: taiki-e/install-action@v2.87.31
+      - uses: taiki-e/install-action@v2.88.1
         with:
           tool: just
 
@@ -204,7 +204,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: taiki-e/install-action@v2.87.31
+      - uses: taiki-e/install-action@v2.88.1
         with:
           tool: just
 
@@ -242,7 +242,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: taiki-e/install-action@v2.87.31
+      - uses: taiki-e/install-action@v2.88.1
         with:
           tool: just
       - uses: dtolnay/rust-toolchain@stable
@@ -260,7 +260,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: taiki-e/install-action@v2.87.31
+      - uses: taiki-e/install-action@v2.88.1
         with:
           tool: just
 
@@ -290,7 +290,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: taiki-e/install-action@v2.87.31
+      - uses: taiki-e/install-action@v2.88.1
         with:
           tool: just
 
@@ -403,7 +403,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: taiki-e/install-action@v2.87.31
+      - uses: taiki-e/install-action@v2.88.1
         with:
           tool: just,cargo-llvm-cov
 
