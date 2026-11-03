@@ -7169,7 +7169,6 @@ dependencies = [
  "super-stt-shared",
  "tempfile",
  "tokio",
- "toml 1.1.0+spec-1.1.0",
  "urlencoding",
  "uuid",
  "vergen",
