@@ -1981,11 +1981,11 @@ async fn an_unload_switches_stage_one_off_and_keeps_its_selection() {
         vec![fixture_backend_local("whisper", source, "Whisper", "small")];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
     seed_loaded_model(&daemon, "small", source).await;
-    daemon.config.write().await.update_preferred_model(
-        "small".to_string(),
-        source.to_string(),
-        None,
-    );
+    daemon
+        .config
+        .write()
+        .await
+        .update_preferred_model("small".to_string(), source.to_string());
 
     let slot = async || {
         daemon
@@ -2059,11 +2059,11 @@ async fn every_stage_reports_its_model_slot_alike() {
     backend.models.push(cleanup);
     *daemon.backends.write().await = vec![backend];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
-    daemon.config.write().await.update_preferred_model(
-        "transcribe".to_string(),
-        source.to_string(),
-        None,
-    );
+    daemon
+        .config
+        .write()
+        .await
+        .update_preferred_model("transcribe".to_string(), source.to_string());
     daemon
         .config
         .write()

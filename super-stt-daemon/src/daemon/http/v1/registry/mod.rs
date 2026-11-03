@@ -122,7 +122,6 @@ description = "Test backend."
         daemon.config.write().await.update_preferred_model(
             "voxtral-mini".to_string(),
             "github.com/x/voxtral".to_string(),
-            Some("local_voxtral".to_string()),
         );
 
         retire_and_repoint(
@@ -144,7 +143,6 @@ description = "Test backend."
             cfg.transcription.preferred_model, "voxtral-mini",
             "the model preference must survive the rename"
         );
-        assert_eq!(cfg.transcription.preferred_provider, "local_voxtral");
         drop(cfg);
         assert_eq!(
             daemon.active_backend.read().await.as_deref(),
@@ -161,11 +159,11 @@ description = "Test backend."
         let daemon = test_daemon().await;
         daemon.config.write().await.transcription.active_backend =
             Some("some-other-backend".to_string());
-        daemon.config.write().await.update_preferred_model(
-            "other-model".to_string(),
-            "github.com/x/other".to_string(),
-            Some("local_other".to_string()),
-        );
+        daemon
+            .config
+            .write()
+            .await
+            .update_preferred_model("other-model".to_string(), "github.com/x/other".to_string());
 
         retire_and_repoint(
             &daemon,
@@ -189,7 +187,6 @@ description = "Test backend."
             "an unrelated active backend must not be repointed"
         );
         assert_eq!(cfg.transcription.preferred_model, "other-model");
-        assert_eq!(cfg.transcription.preferred_provider, "local_other");
         drop(cfg);
         assert_eq!(daemon.active_backend.read().await.as_deref(), None);
     }

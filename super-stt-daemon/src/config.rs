@@ -290,19 +290,6 @@ pub struct TranscriptionConfig {
     pub enabled: bool,
     #[serde(default)]
     pub preferred_model: String,
-    /// Compatibility shim; the daemon resolves its startup model by
-    /// `(preferred_model, preferred_source)` and never reads this.
-    ///
-    /// It is written, not merely preserved, because `daemon.toml` outlives the
-    /// binary that wrote it. Daemons through v0.2.0 resolve their startup model
-    /// by `(model, provider, source)`, so a user who rolls back after a bad
-    /// upgrade gets an idle daemon — with no error, just a lost selection — if
-    /// this key is missing *or* stale. Keeping it in step with the selected
-    /// model is what makes the rollback recoverable.
-    ///
-    /// Delete once no supported daemon resolves by provider.
-    #[serde(default)]
-    pub preferred_provider: String,
     #[serde(default)]
     pub preferred_source: String,
     #[serde(default)]
@@ -383,7 +370,6 @@ impl Default for DaemonConfig {
                 // different question: what an *older* config meant.
                 enabled: false,
                 preferred_model: String::new(),
-                preferred_provider: String::new(),
                 preferred_source: String::new(),
                 write_mode: false,             // Default to not auto-typing
                 preview_typing_enabled: false, // Default to disabled (beta feature)
@@ -608,21 +594,13 @@ impl DaemonConfig {
         self.audio.theme = theme;
     }
 
-    /// Update preferred model + source, and the legacy `preferred_provider`
-    /// the model declares (see [`TranscriptionConfig::preferred_provider`] for
-    /// why a stale value is as bad as a missing one).
-    pub fn update_preferred_model(
-        &mut self,
-        model: String,
-        source: String,
-        provider: Option<String>,
-    ) {
+    /// Update preferred model + source.
+    pub fn update_preferred_model(&mut self, model: String, source: String) {
         // Selecting a model switches the stage on, exactly as
         // `enable_post_processor` does for stage 2.
         self.transcription.enabled = true;
         self.transcription.preferred_model = model;
         self.transcription.preferred_source = source;
-        self.transcription.preferred_provider = provider.unwrap_or_default();
     }
 
     /// Stop running stage 1, keeping the selection so re-loading it is one
@@ -643,14 +621,13 @@ impl DaemonConfig {
         self.transcription.active_backend = Some(dir);
         self.transcription.enabled = false;
         self.transcription.preferred_model = String::new();
-        self.transcription.preferred_provider = String::new();
     }
 
     /// Repoint the active backend to `new_dir` without touching the loaded
     /// model preference.
     ///
     /// Deliberately narrower than [`update_active_backend`]: that method
-    /// clears `preferred_model`/`preferred_provider` because it models the
+    /// clears `preferred_model` because it models the
     /// user *choosing a different backend*, where any previously loaded
     /// model no longer applies. This method models an install-time directory
     /// rename of the *same* backend — its identity, models, and selection are
@@ -667,7 +644,6 @@ impl DaemonConfig {
         self.transcription.enabled = false;
         self.transcription.preferred_model = String::new();
         self.transcription.preferred_source = String::new();
-        self.transcription.preferred_provider = String::new();
     }
 
     /// Select the post-processor model and whether it runs. Stored as the same
