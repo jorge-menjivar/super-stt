@@ -143,7 +143,7 @@
         "UNNotificationTrigger",
         "UNUserNotificationCenter",
     ]
-    muda.version = "0.20"
+    muda.version = "0.21"
     muda.default-features = false
     raw-window-handle = "0.6"
 
