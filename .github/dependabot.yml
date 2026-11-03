@@ -1,13 +1,31 @@
 version: 2
 updates:
+  # Minor and patch bumps land together, one PR a week per ecosystem rather
+  # than one per dependency, each with a CI run of its own. A major arrives as
+  # its own PR: it can change behavior, and red in the group it would hold back
+  # every routine bump behind it.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     target-branch: "main"
+    groups:
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
     target-branch: "main"
+    groups:
+      cargo:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
