@@ -10,8 +10,8 @@ version wrote. Do not reformat existing files — they represent real on-disk
 user configs.
 
 Releases before the move to RON wrote `daemon.toml`. The daemon imports one
-into `daemon.ron` on the first load after the upgrade, and the tests read those
-fixtures the way the import does.
+into `daemon.ron` on the first load after the upgrade and then removes it. The
+tests read those fixtures the way the import does.
 
 The COSMIC applet's configs moved with the applet to
 [super-cosmic-applet](https://github.com/super-libre/super-cosmic-applet),

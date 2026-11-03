@@ -501,12 +501,11 @@ impl DaemonConfig {
     }
 
     /// Write the `daemon.toml` beside `path` to `path`, when there is no
-    /// config at `path` yet. Releases before the move to RON stored the config
-    /// as TOML.
+    /// config at `path` yet, then remove it. Releases before the move to RON
+    /// stored the config as TOML.
     ///
-    /// The TOML file stays where it is. A daemon rolled back to one of those
-    /// releases reads it, and comes up with the settings it had before the
-    /// upgrade.
+    /// The TOML file is removed only once `path` is written, so a failed write
+    /// leaves it for the next start to try again.
     fn import_toml(path: &Path) {
         if path.exists() {
             return;
@@ -516,9 +515,13 @@ impl DaemonConfig {
             return;
         };
         let (config, _) = Self::parse_toml(&content);
-        match super_engine_daemon::config::save(path, &config) {
-            Ok(()) => log::info!("Imported {} into {}", toml_path.display(), path.display()),
-            Err(e) => log::error!("Failed to import {}: {e}", toml_path.display()),
+        if let Err(e) = super_engine_daemon::config::save(path, &config) {
+            log::error!("Failed to import {}: {e}", toml_path.display());
+            return;
+        }
+        log::info!("Imported {} into {}", toml_path.display(), path.display());
+        if let Err(e) = std::fs::remove_file(&toml_path) {
+            log::warn!("Failed to remove {}: {e}", toml_path.display());
         }
     }
 

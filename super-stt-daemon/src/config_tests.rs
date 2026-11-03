@@ -645,10 +645,10 @@ fn all_published_daemon_configs_load_cleanly() {
     );
 }
 
-/// The first load after the upgrade brings `daemon.toml` across, and leaves
-/// it in place for a daemon rolled back to the release that wrote it.
+/// The first load after the upgrade brings `daemon.toml` across, then
+/// removes it.
 #[test]
-fn an_upgrade_imports_daemon_toml_once_and_keeps_it() {
+fn an_upgrade_imports_daemon_toml_once_and_removes_it() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ron_path = dir.path().join("daemon.ron");
     let toml_path = dir.path().join("daemon.toml");
@@ -667,17 +667,14 @@ fn an_upgrade_imports_daemon_toml_once_and_keeps_it() {
         imported.device.preferred_device, "gpu",
         "repaired on the way in, as a load repairs it"
     );
-    assert_eq!(
-        std::fs::read_to_string(&toml_path).expect("daemon.toml kept"),
-        v0_1_3_daemon_fixture(),
-        "daemon.toml is left as it was"
-    );
+    assert!(!toml_path.exists(), "daemon.toml is removed");
 
-    // Once `daemon.ron` exists, `daemon.toml` is not read again, so a change
+    // Once `daemon.ron` exists, a `daemon.toml` is not read again, so a change
     // made since the import stays.
     let mut changed = imported;
     changed.audio.volume = 30;
     super_engine_daemon::config::save(&ron_path, &changed).expect("save");
+    std::fs::write(&toml_path, v0_1_3_daemon_fixture()).expect("write daemon.toml");
     DaemonConfig::import_toml(&ron_path);
     let kept = from_ron(&std::fs::read_to_string(&ron_path).expect("read daemon.ron"));
     assert_eq!(kept.audio.volume, 30);
@@ -699,6 +696,31 @@ fn an_unreadable_daemon_toml_imports_as_defaults() {
 
     let imported = from_ron(&std::fs::read_to_string(&ron_path).expect("daemon.ron written"));
     assert_eq!(written(&imported), written(&DaemonConfig::default()));
+    assert!(!dir.path().join("daemon.toml").exists());
+}
+
+/// A `daemon.toml` stays until `daemon.ron` is written, so an import that
+/// cannot write is tried again on the next start rather than lost.
+#[test]
+fn a_failed_import_keeps_daemon_toml() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ron_path = dir.path().join("daemon.ron");
+    let toml_path = dir.path().join("daemon.toml");
+    std::fs::write(&toml_path, v0_1_3_daemon_fixture()).expect("write daemon.toml");
+    let read_only = std::fs::Permissions::from_mode(0o500);
+    std::fs::set_permissions(dir.path(), read_only).expect("make the dir read-only");
+
+    DaemonConfig::import_toml(&ron_path);
+
+    let writable = std::fs::Permissions::from_mode(0o700);
+    std::fs::set_permissions(dir.path(), writable).expect("make the dir writable");
+    assert!(!ron_path.exists());
+    assert_eq!(
+        std::fs::read_to_string(&toml_path).expect("daemon.toml kept"),
+        v0_1_3_daemon_fixture()
+    );
 }
 
 /// With no `daemon.toml` there is nothing to import, and nothing is written.
