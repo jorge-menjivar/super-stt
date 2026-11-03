@@ -5,7 +5,7 @@ persisted, hand-derived from that tag's source, for the daemon's config tests
 (`just config-compat`) to prove the current code still loads configs written by
 older releases — it must load, migrate, or reset, never crash.
 
-**On every release, add a `vX.Y.Z/` directory** with the `daemon.toml` that
+**On every release, add a `vX.Y.Z/` directory** with the `daemon.ron` that
 version wrote. Do not reformat existing files — they represent real on-disk
 user configs.
 
@@ -19,7 +19,7 @@ migration path that no user can be on. They were removed rather than rewritten,
 because a hand-edited fixture claiming to be "what v0.1.3 wrote" is worse than
 no fixture at all.
 
-Add `daemon.toml` starting with Super TTS's first release.
+Add `daemon.ron` starting with Super TTS's first release.
 
 The applet's configs moved with the applet to
 [super-cosmic-applet](https://github.com/super-libre/super-cosmic-applet),

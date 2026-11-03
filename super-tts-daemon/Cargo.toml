@@ -78,7 +78,6 @@
             "signal",
         ]
     }
-    toml.workspace = true
     urlencoding = "2.1.3"
     utoipa.workspace = true
     utoipa-axum.workspace = true

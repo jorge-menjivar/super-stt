@@ -93,7 +93,7 @@ model, at
 [`/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice).
 A daemon upgraded from the global preference keeps loading models where it
 always did: a model with no device of its own falls back to the old global
-value in `daemon.toml`, and takes its own the first time one is set.
+value in `daemon.ron`, and takes its own the first time one is set.
 
 ## Auth
 

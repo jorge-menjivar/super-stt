@@ -9,7 +9,7 @@ use crate::SUPER_TTS;
 use super_engine_protocol::paths;
 
 /// `$XDG_CONFIG_HOME/super-tts`, with the fallbacks
-/// [`paths::config_dir`] names. Daemon: append `daemon.toml`; applet: append
+/// [`paths::config_dir`] names. Daemon: append `daemon.ron`; applet: append
 /// `applet-<variant>.toml`.
 #[must_use]
 pub fn config_dir() -> PathBuf {

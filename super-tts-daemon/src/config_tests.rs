@@ -1,6 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use super::*;
 
+/// A config as the daemon stores it. Fails the test if it would have been
+/// reset.
+fn from_ron(content: &str) -> DaemonConfig {
+    let (config, was_reset) = DaemonConfig::parse_or_reset(content);
+    assert!(!was_reset, "the config must parse, not reset");
+    config
+}
+
+/// `config` as the daemon writes it.
+fn written(config: &DaemonConfig) -> String {
+    super_engine_daemon::config::to_string(config).expect("serialize")
+}
+
+/// `config` after a trip through the file.
+fn round_trip(config: &DaemonConfig) -> DaemonConfig {
+    from_ron(&written(config))
+}
+
 #[test]
 fn default_config_has_online_models_disabled() {
     let config = DaemonConfig::default();
@@ -9,18 +27,12 @@ fn default_config_has_online_models_disabled() {
 
 #[test]
 fn config_without_online_section_deserializes() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro-tiny"
-"#;
-    let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (preferred_model: "kokoro-tiny"),
+)"#;
+    let config = from_ron(ron_str);
     assert!(!config.online.allow_online_models);
 }
 
@@ -29,8 +41,7 @@ fn config_with_online_section_round_trips() {
     let mut config = DaemonConfig::default();
     config.online.allow_online_models = true;
 
-    let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-    let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+    let parsed = round_trip(&config);
     assert!(parsed.online.allow_online_models);
 }
 
@@ -40,8 +51,7 @@ fn config_with_online_model_preferred_round_trips() {
     config.online.allow_online_models = true;
     config.synthesis.preferred_model = "kokoro-1".to_string();
 
-    let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-    let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+    let parsed = round_trip(&config);
     assert!(parsed.online.allow_online_models);
     assert_eq!(parsed.synthesis.preferred_model, "kokoro-1");
 }
@@ -59,8 +69,7 @@ fn config_preserves_all_online_model_variants() {
         let mut config = DaemonConfig::default();
         config.synthesis.preferred_model = model.clone();
 
-        let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-        let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+        let parsed = round_trip(&config);
         assert_eq!(parsed.synthesis.preferred_model, model);
     }
 }
@@ -79,18 +88,12 @@ fn default_config_has_no_custom_models_dir() {
 
 #[test]
 fn config_without_custom_models_dir_deserializes() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro-tiny"
-"#;
-    let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (preferred_model: "kokoro-tiny"),
+)"#;
+    let config = from_ron(ron_str);
     assert!(config.synthesis.custom_models_dir.is_none());
 }
 
@@ -99,8 +102,7 @@ fn config_with_custom_models_dir_round_trips() {
     let mut config = DaemonConfig::default();
     config.synthesis.custom_models_dir = Some("/tmp/models".to_string());
 
-    let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-    let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+    let parsed = round_trip(&config);
     assert_eq!(
         parsed.synthesis.custom_models_dir.as_deref(),
         Some("/tmp/models")
@@ -111,8 +113,7 @@ fn config_with_custom_models_dir_round_trips() {
 fn config_with_none_custom_models_dir_round_trips() {
     let config = DaemonConfig::default();
 
-    let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-    let parsed: DaemonConfig = toml::from_str(&toml_str).expect("should deserialize");
+    let parsed = round_trip(&config);
     assert!(parsed.synthesis.custom_models_dir.is_none());
 }
 
@@ -137,9 +138,8 @@ fn backend_options_set_clear_and_round_trip() {
         Some("https://gw.example")
     );
 
-    // Survives a TOML round-trip.
-    let toml_str = toml::to_string_pretty(&config).expect("serialize");
-    let parsed: DaemonConfig = toml::from_str(&toml_str).expect("deserialize");
+    // Survives the file.
+    let parsed = round_trip(&config);
     assert_eq!(
         parsed.backend_option(src, "base_url"),
         Some("https://gw.example")
@@ -159,18 +159,12 @@ fn backend_options_set_clear_and_round_trip() {
 
 #[test]
 fn config_without_backends_section_deserializes() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro-1"
-"#;
-    let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (preferred_model: "kokoro-1"),
+)"#;
+    let config = from_ron(ron_str);
     assert!(config.backends.options.is_empty());
 }
 
@@ -180,24 +174,17 @@ preferred_model = "kokoro-1"
 /// `[synthesis]` section. The user's other settings have to survive.
 #[test]
 fn config_with_legacy_provider_string_falls_back() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "silent"
-volume = 75
-
-[synthesis]
-preferred_model = "kokoro-tiny"
-preferred_provider = "LocalKokoro"
-preferred_source = "BadValue"
-
-[online]
-allow_online_models = true
-"#;
-    let config: DaemonConfig =
-        toml::from_str(toml_str).expect("legacy provider string should not fail the whole config");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "silent", volume: 75),
+    synthesis: (
+        preferred_model: "kokoro-tiny",
+        preferred_provider: "LocalKokoro",
+        preferred_source: "BadValue",
+    ),
+    online: (allow_online_models: true),
+)"#;
+    let config = from_ron(ron_str);
     // Both are free-form strings now — any value is accepted, and the legacy
     // provider is carried through rather than rejected or dropped.
     assert_eq!(config.synthesis.preferred_source, "BadValue");
@@ -211,20 +198,16 @@ allow_online_models = true
 
 #[test]
 fn config_with_canonical_snake_case_provider_round_trips() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro-base"
-preferred_provider = "local_piper"
-preferred_source = "github.com/super-tts/piper"
-"#;
-    let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (
+        preferred_model: "kokoro-base",
+        preferred_provider: "local_piper",
+        preferred_source: "github.com/super-tts/piper",
+    ),
+)"#;
+    let config = from_ron(ron_str);
     assert_eq!(
         config.synthesis.preferred_source,
         "github.com/super-tts/piper"
@@ -240,20 +223,20 @@ fn active_backend_default_is_none() {
     assert!(config.synthesis.active_backend.is_none());
 }
 
-/// A persisted relative dir round-trips through TOML, preserving the
+/// A persisted relative dir round-trips through the file, preserving the
 /// stable handle the daemon uses to find the backend on restart.
 #[test]
-fn active_backend_round_trips_through_toml() {
+fn active_backend_round_trips_through_the_file() {
     let mut config = DaemonConfig::default();
     config.synthesis.active_backend = Some("mistral".to_string());
 
-    let serialized = toml::to_string_pretty(&config).expect("serialize");
+    let serialized = written(&config);
     assert!(
-        serialized.contains("active_backend = \"mistral\""),
+        serialized.contains("active_backend: Some(\"mistral\")"),
         "serialized form: {serialized}"
     );
 
-    let parsed: DaemonConfig = toml::from_str(&serialized).expect("deserialize");
+    let parsed = from_ron(&serialized);
     assert_eq!(parsed.synthesis.active_backend.as_deref(), Some("mistral"));
 }
 
@@ -261,44 +244,32 @@ fn active_backend_round_trips_through_toml() {
 /// still deserialize cleanly (the field is `Option`-with-default).
 #[test]
 fn config_without_active_backend_field_deserializes() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro-tiny"
-"#;
-    let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (preferred_model: "kokoro-tiny"),
+)"#;
+    let config = from_ron(ron_str);
     assert!(config.synthesis.active_backend.is_none());
 }
 
 #[test]
 fn daemon_bad_theme_falls_back_preserving_rest() {
     // A single unrecognized enum value must NOT wipe the whole config.
-    let toml_str = r#"
-[device]
-preferred_device = "cuda"
-
-[audio]
-theme = "Nonexistent"
-volume = 80
-
-[synthesis]
-preferred_model = "KokoroTiny"
-"#;
-    let cfg: DaemonConfig = toml::from_str(toml_str).expect("must parse, not error");
+    let ron_str = r#"(
+    device: (preferred_device: "gpu"),
+    audio: (theme: "Nonexistent", volume: 80),
+    synthesis: (preferred_model: "KokoroTiny"),
+)"#;
+    let cfg = from_ron(ron_str);
     assert_eq!(cfg.audio.theme, AudioTheme::default()); // bad field reset
     assert_eq!(cfg.audio.volume, 80); // everything else preserved
-    assert_eq!(cfg.device.preferred_device, "cuda");
+    assert_eq!(cfg.device.preferred_device, "gpu");
 }
 
 #[test]
 fn corrupt_daemon_config_resets_to_default() {
-    let (cfg, was_reset) = DaemonConfig::parse_or_reset("this is not ::: valid toml [");
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset("this is not ::: valid ron [");
     assert!(was_reset, "garbage input must trigger a reset");
     // The reset config is a valid default (proves no panic, app can start).
     assert_eq!(cfg.audio.theme, AudioTheme::default());
@@ -313,32 +284,32 @@ fn corrupt_daemon_config_resets_to_default() {
 /// the accelerator it always meant.
 #[test]
 fn a_persisted_device_preference_normalizes_and_a_bogus_one_falls_back_to_cpu() {
-    let toml_str = |device: &str| {
+    let ron_str = |device: &str| {
         format!(
-            "[device]\npreferred_device = \"{device}\"\n\
-             [audio]\ntheme = \"classic\"\nvolume = 100\n\
-             [synthesis]\npreferred_model = \"\"\n"
+            "(device: (preferred_device: \"{device}\"), \
+             audio: (theme: \"classic\", volume: 100), \
+             synthesis: (preferred_model: \"\"))"
         )
     };
 
-    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&toml_str("cuda"));
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("cuda"));
     assert!(!was_reset);
     assert_eq!(cfg.device.preferred_device, "gpu");
 
-    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&toml_str("gpu"));
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("gpu"));
     assert!(!was_reset);
     assert_eq!(cfg.device.preferred_device, "gpu");
 
     // A garbage value (or `none`, a model sentinel rather than a preference)
     // degrades to the default instead of failing the whole config load.
-    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&toml_str("xpu"));
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("xpu"));
     assert!(
         !was_reset,
         "a stale device field must not reset the whole config"
     );
     assert_eq!(cfg.device.preferred_device, "cpu");
 
-    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&toml_str("none"));
+    let (cfg, was_reset) = DaemonConfig::parse_or_reset(&ron_str("none"));
     assert!(!was_reset);
     assert_eq!(cfg.device.preferred_device, "cpu");
 }
@@ -359,8 +330,7 @@ fn cleared_preferred_model_persists_as_idle_with_backend_kept() {
     config.synthesis.preferred_model = String::new();
     config.synthesis.preferred_source = String::new();
 
-    let toml_str = toml::to_string_pretty(&config).expect("should serialize");
-    let (parsed, was_reset) = DaemonConfig::parse_or_reset(&toml_str);
+    let (parsed, was_reset) = DaemonConfig::parse_or_reset(&written(&config));
     assert!(!was_reset, "cleared config must re-parse cleanly");
     assert!(
         parsed.synthesis.preferred_model.is_empty(),
@@ -375,36 +345,30 @@ fn cleared_preferred_model_persists_as_idle_with_backend_kept() {
 }
 
 /// The regression: `preferred_provider` used to be dropped from the struct, so
-/// the first save after an upgrade rewrote `daemon.toml` without it. Daemons
+/// the first save after an upgrade rewrote the config file without it. Daemons
 /// through v0.2.0 resolve their startup model by `(model, provider, source)`,
 /// so a user rolling back after a bad upgrade got an idle daemon with their
-/// selection silently gone — and `daemon.toml` outlives the binary that wrote
+/// selection silently gone — and the config file outlives the binary that wrote
 /// it, so nothing later can recover the value.
 #[test]
 fn a_save_preserves_preferred_provider() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "piper-mini"
-preferred_provider = "local_piper"
-preferred_source = "github.com/super-tts/piper"
-
-[online]
-allow_online_models = false
-"#;
-    let config: DaemonConfig = toml::from_str(toml_str).expect("fixture parses");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (
+        preferred_model: "piper-mini",
+        preferred_provider: "local_piper",
+        preferred_source: "github.com/super-tts/piper",
+    ),
+    online: (allow_online_models: false),
+)"#;
+    let config = from_ron(ron_str);
     assert_eq!(config.synthesis.preferred_provider, "local_piper");
 
-    let written = toml::to_string_pretty(&config).expect("serializes");
+    let stored = written(&config);
     assert!(
-        written.contains("preferred_provider = \"local_piper\""),
-        "a save dropped `preferred_provider`; a rollback to v0.2.0 comes up idle:\n{written}"
+        stored.contains("preferred_provider: \"local_piper\""),
+        "a save dropped `preferred_provider`; a rollback to v0.2.0 comes up idle:\n{stored}"
     );
 }
 
@@ -443,19 +407,12 @@ fn a_model_switch_updates_preferred_provider() {
 /// A stored method round-trips.
 #[test]
 fn daemon_config_reads_notification_method() {
-    let toml = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro"
-notification_method = "off"
-"#;
-    let cfg: DaemonConfig = toml::from_str(toml).unwrap();
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (preferred_model: "kokoro", notification_method: "off"),
+)"#;
+    let cfg = from_ron(ron_str);
     assert_eq!(cfg.synthesis.notification_method, NotificationMethod::Off);
 }
 
@@ -464,19 +421,15 @@ notification_method = "off"
 /// it — see the endpoint doc.)
 #[test]
 fn daemon_bad_notification_method_falls_back_preserving_rest() {
-    let toml = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro"
-notification_method = "BogusMethod"
-"#;
-    let cfg: DaemonConfig = toml::from_str(toml).unwrap();
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (
+        preferred_model: "kokoro",
+        notification_method: "BogusMethod",
+    ),
+)"#;
+    let cfg = from_ron(ron_str);
     assert_eq!(
         cfg.synthesis.notification_method,
         NotificationMethod::default()
@@ -486,18 +439,12 @@ notification_method = "BogusMethod"
 /// An absent field is the default.
 #[test]
 fn daemon_missing_notification_method_is_auto() {
-    let toml = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro"
-"#;
-    let cfg: DaemonConfig = toml::from_str(toml).unwrap();
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (preferred_model: "kokoro"),
+)"#;
+    let cfg = from_ron(ron_str);
     assert_eq!(cfg.synthesis.notification_method, NotificationMethod::Auto);
 }
 
@@ -515,18 +462,12 @@ fn default_update_config() {
 fn config_without_update_section_gets_defaults() {
     // Mirror the literal-TOML shape of `config_without_online_section_deserializes`
     // above: a full config WITHOUT an [update] section.
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro-tiny"
-"#;
-    let cfg: DaemonConfig = toml::from_str(toml_str).expect("must parse");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (preferred_model: "kokoro-tiny"),
+)"#;
+    let cfg = from_ron(ron_str);
     assert!(cfg.update.check_enabled);
 }
 
@@ -534,22 +475,13 @@ preferred_model = "kokoro-tiny"
 fn bad_beta_optin_falls_back_preserving_rest() {
     // Mirror the shape of `daemon_bad_theme_falls_back_preserving_rest`: one
     // bad enum value must reset only that field, not wipe the config.
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 80
-
-[synthesis]
-preferred_model = "kokoro-tiny"
-
-[update]
-check_enabled = false
-beta_optin = "yes-please"
-"#;
-    let cfg: DaemonConfig = toml::from_str(toml_str).expect("must parse, not error");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 80),
+    synthesis: (preferred_model: "kokoro-tiny"),
+    update: (check_enabled: false, beta_optin: "yes-please"),
+)"#;
+    let cfg = from_ron(ron_str);
     assert_eq!(
         cfg.update.beta_optin,
         super_tts_shared::models::update_beta_optin::UpdateBetaOptIn::Auto
@@ -563,9 +495,9 @@ fn update_config_round_trips() {
     let mut cfg = DaemonConfig::default();
     cfg.update.check_enabled = false;
     cfg.update.beta_optin = super_tts_shared::models::update_beta_optin::UpdateBetaOptIn::Enabled;
-    let serialized = toml::to_string(&cfg).unwrap();
-    assert!(serialized.contains("beta_optin = \"enabled\""));
-    let back: DaemonConfig = toml::from_str(&serialized).unwrap();
+    let serialized = written(&cfg);
+    assert!(serialized.contains("beta_optin: \"enabled\""));
+    let back = from_ron(&serialized);
     assert_eq!(back.update, cfg.update);
 }
 
@@ -623,23 +555,17 @@ fn rename_active_backend_preserves_the_model_preference() {
     assert_eq!(c.synthesis.preferred_provider, "local_piper");
 }
 
-/// The `[http]` section is optional: a `daemon.toml` written before it existed
+/// The `http` section is optional: a config written before it existed
 /// loads, and gets the same listener a fresh install gets. Upgrading a config
 /// is not a way to end up with a daemon that behaves differently from a new one.
 #[test]
 fn config_without_http_section_gets_the_default_listener() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = "kokoro-tiny"
-"#;
-    let config: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (preferred_model: "kokoro-tiny"),
+)"#;
+    let config = from_ron(ron_str);
     assert!(config.http.tcp.enabled);
     assert!(config.http.tcp.admits_any_origin());
     assert_eq!(
@@ -655,20 +581,13 @@ preferred_model = "kokoro-tiny"
 /// from a file with an empty section.
 #[test]
 fn tcp_defaults_are_the_same_whether_constructed_or_deserialized() {
-    let toml_str = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 100
-
-[synthesis]
-preferred_model = ""
-
-[http.tcp]
-"#;
-    let from_empty_section: DaemonConfig = toml::from_str(toml_str).expect("should deserialize");
+    let ron_str = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 100),
+    synthesis: (preferred_model: ""),
+    http: (tcp: ()),
+)"#;
+    let from_empty_section = from_ron(ron_str);
     assert_eq!(
         from_empty_section.http.tcp,
         DaemonConfig::default().http.tcp

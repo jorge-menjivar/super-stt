@@ -375,7 +375,7 @@ what a browser can reach — see
 four ways:
 
 - **A page must be on the allowlist to ask at all.**
-  `[http.tcp].allowed_origins` defaults to `["*"]`, so by default any
+  `http.tcp.allowed_origins` defaults to `["*"]`, so by default any
   page may. One that is not on the list is refused with `403` and
   `data.reason = "origin_not_allowed"` — before the request reaches
   consent, so an unlisted page cannot put a dialog on the user's screen.

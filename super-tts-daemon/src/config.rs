@@ -169,7 +169,7 @@ pub struct SynthesisConfig {
     /// Compatibility shim; the daemon resolves its startup model by
     /// `(preferred_model, preferred_source)` and never reads this.
     ///
-    /// It is written, not merely preserved, because `daemon.toml` outlives the
+    /// It is written, not merely preserved, because the config file outlives the
     /// binary that wrote it. Daemons through v0.2.0 resolve their startup model
     /// by `(model, provider, source)`, so a user who rolls back after a bad
     /// upgrade gets an idle daemon — with no error, just a lost selection — if
@@ -239,7 +239,7 @@ impl Default for DaemonConfig {
     }
 }
 
-/// The `daemon.toml` path used by `DaemonConfig::get_config_path()` under
+/// The `daemon.ron` path used by `DaemonConfig::get_config_path()` under
 /// `#[cfg(test)]`: a directory under the OS temp dir, unique per test
 /// *process* (keyed by pid) and cached for the life of that process so every
 /// test in the binary agrees on the same path. This is what keeps unit tests
@@ -263,7 +263,7 @@ fn test_config_path() -> PathBuf {
         unsafe {
             libc::atexit(remove_test_config_dir);
         }
-        dir.join("daemon.toml")
+        dir.join("daemon.ron")
     })
     .clone()
 }
@@ -301,7 +301,7 @@ impl DaemonConfig {
     /// Under `#[cfg(test)]` this resolves to a process-local temp file instead
     /// of the real XDG config path, so `load()`/`save()` in this crate's unit
     /// tests can never read or clobber the developer's real
-    /// `~/.config/super-tts/daemon.toml`. Known limitation: this only covers
+    /// `~/.config/super-tts/daemon.ron`. Known limitation: this only covers
     /// unit tests compiled *into* this crate (`cfg(test)`). Integration tests
     /// under `tests/` link against the crate without `cfg(test)`, so they
     /// still resolve the real path — not addressed here.
@@ -575,7 +575,7 @@ mod language_config_tests {
     use super::*;
 
     #[test]
-    fn primary_and_model_language_round_trip_through_toml() {
+    fn primary_and_model_language_round_trip_through_the_file() {
         let mut cfg = DaemonConfig::default();
         assert_eq!(cfg.primary_language(), None);
 
@@ -586,8 +586,9 @@ mod language_config_tests {
             Some("fr".to_string()),
         );
 
-        let toml = toml::to_string(&cfg).expect("serialize");
-        let back: DaemonConfig = toml::from_str(&toml).expect("deserialize");
+        let written = super_engine_daemon::config::to_string(&cfg).expect("serialize");
+        let (back, reset) = DaemonConfig::parse_or_reset(&written);
+        assert!(!reset);
 
         assert_eq!(back.primary_language(), Some("es-MX"));
         assert_eq!(
@@ -598,17 +599,18 @@ mod language_config_tests {
     }
 
     /// The voice rides in the same per-model record as the language and the
-    /// device, so it has to survive the same round trip through TOML.
+    /// device, so it has to survive the same round trip through the file.
     #[test]
-    fn a_model_voice_round_trips_through_toml() {
+    fn a_model_voice_round_trips_through_the_file() {
         let mut cfg = DaemonConfig::default();
         cfg.update_model_voice(
             "github.com/x/qwen".into(),
             "qwen3-tts-0.6b-custom-voice".into(),
             Some("aiden".into()),
         );
-        let toml = toml::to_string(&cfg).expect("config serializes");
-        let back: DaemonConfig = toml::from_str(&toml).expect("config parses");
+        let written = super_engine_daemon::config::to_string(&cfg).expect("serialize");
+        let (back, reset) = DaemonConfig::parse_or_reset(&written);
+        assert!(!reset);
         assert_eq!(
             back.model_voice("github.com/x/qwen", "qwen3-tts-0.6b-custom-voice"),
             Some("aiden")
@@ -684,8 +686,9 @@ mod device_config_tests {
         assert_eq!(cfg.model_language("s", "m"), Some("fr"));
         assert_eq!(cfg.model_device("s", "m"), Some("gpu"));
 
-        let toml = toml::to_string(&cfg).expect("serialize");
-        let back: DaemonConfig = toml::from_str(&toml).expect("deserialize");
+        let written = super_engine_daemon::config::to_string(&cfg).expect("serialize");
+        let (back, reset) = DaemonConfig::parse_or_reset(&written);
+        assert!(!reset);
         assert_eq!(back.model_language("s", "m"), Some("fr"));
         assert_eq!(back.model_device("s", "m"), Some("gpu"));
     }
@@ -696,24 +699,19 @@ mod device_config_tests {
     /// whole config.
     #[test]
     fn persisted_model_devices_are_normalized_on_load() {
-        let content = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 80
-
-[synthesis]
-preferred_model = ""
-
-[backends.models."github.com/x/kokoro".large]
-device = "cuda"
-
-[backends.models."github.com/x/kokoro".small]
-device = "xpu"
-language = "fr"
-"#;
+        let content = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 80),
+    synthesis: (preferred_model: ""),
+    backends: (
+        models: {
+            "github.com/x/kokoro": {
+                "large": (device: Some("cuda")),
+                "small": (device: Some("xpu"), language: Some("fr")),
+            },
+        },
+    ),
+)"#;
         let (cfg, reset) = DaemonConfig::parse_or_reset(content);
         assert!(!reset);
         assert_eq!(

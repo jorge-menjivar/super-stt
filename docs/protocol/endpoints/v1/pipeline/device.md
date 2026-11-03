@@ -13,7 +13,7 @@ name to a backend.
 > **Replaces `/active_device`,** which set one device for the whole daemon.
 > A daemon upgraded from it keeps loading models where it always did: a model
 > with no device of its own falls back to the old global value in
-> `daemon.toml`, and takes its own the first time one is set here.
+> `daemon.ron`, and takes its own the first time one is set here.
 
 Two list endpoints sit beside it: the per-model list, which is the narrow and
 accurate answer once a model is chosen, and
