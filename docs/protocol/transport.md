@@ -23,7 +23,7 @@ about.
 | Transport      | Address                                            | When                                     |
 |----------------|----------------------------------------------------|------------------------------------------|
 | Unix socket    | `<runtime dir>/stt/super-stt-http.sock`            | Always                                   |
-| TCP            | `127.0.0.1:7300`                                   | On by default; `[http.tcp]` turns it off |
+| TCP            | `127.0.0.1:7300`                                   | On by default; `http.tcp` turns it off   |
 
 The runtime directory is the per-user, owner-only directory the platform
 provides:
@@ -298,8 +298,8 @@ around them are not.
    `app_name` is not part of the identity: it is self-reported, and
    renaming your app neither widens nor narrows what a token covers.
 
-2. **An origin allowlist.** `[http.tcp].allowed_origins` in
-   `daemon.toml` says which origins may call at all. The default is
+2. **An origin allowlist.** `http.tcp.allowed_origins` in
+   `daemon.ron` says which origins may call at all. The default is
    `["*"]` — any page may *ask*, and the consent dialog is what it has
    to get past. An origin that is not on the list is refused with `403`
    and `data.reason = "origin_not_allowed"`, before authentication,
@@ -337,7 +337,7 @@ daemon: `7300` Super STT, `7301` Super TTS, the rest unused for now.
 The port is fixed rather than OS-chosen because it is half of a browser
 client's origin: one that moved on every restart would invalidate the
 other side's bookmarks and its stored token binding. Change it with
-`[http.tcp].port` if something else on your machine wants it.
+`http.tcp.port` in `daemon.ron` if something else on your machine wants it.
 
 ## Authoring a non-Rust client
 

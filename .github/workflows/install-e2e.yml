@@ -59,7 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: super-libre/super-engine/.github/actions/install-e2e@0713de67a150dd6c61c420d4620bd824b9ce93fc
+      - uses: super-libre/super-engine/.github/actions/install-e2e@9a1aca189ceb7bcb4720da104aa079cb2765313d
         with:
           slug: super-stt
           short-name: stt
