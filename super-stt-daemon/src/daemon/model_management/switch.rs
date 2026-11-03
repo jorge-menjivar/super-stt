@@ -281,11 +281,10 @@ impl SuperSTTDaemon {
         definition: ModelDefinition,
         instance: Box<dyn Transcribe>,
     ) -> DaemonResponse {
-        let provider = definition.provider.clone();
         let actual_device = self.finalize_loaded_model(definition, instance).await;
         {
             let mut config_guard = self.config.write().await;
-            config_guard.update_preferred_model(model.clone(), source.clone(), provider);
+            config_guard.update_preferred_model(model.clone(), source.clone());
         }
         if let Err(e) = self.persist_config().await {
             warn!("Failed to persist config after model switch: {e}");

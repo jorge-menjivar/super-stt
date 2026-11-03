@@ -201,11 +201,7 @@ mod tests {
             let mut cfg = daemon.config.write().await;
             cfg.transcription.backends_dir = Some(root.path().to_string_lossy().into_owned());
             cfg.transcription.active_backend = Some("super-stt-y".to_string());
-            cfg.update_preferred_model(
-                "m".to_string(),
-                "github.com/x/y".to_string(),
-                Some("local_y".to_string()),
-            );
+            cfg.update_preferred_model("m".to_string(), "github.com/x/y".to_string());
         }
         *daemon.active_backend.write().await = Some("super-stt-y".to_string());
 
