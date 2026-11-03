@@ -4,8 +4,8 @@
 //! These cover the seam between "a model is loaded" and "a backend is
 //! selected". The two are set by different code paths — `switch.rs` records
 //! the selection when a user picks a model, while the startup path resolves
-//! its model from the legacy `preferred_model`/`preferred_provider`/
-//! `preferred_source` config, which carries no `active_backend` at all. When
+//! its model from the `preferred_model`/`preferred_source` config, which
+//! carries no `active_backend` at all. When
 //! the startup path forgets to record it the daemon still speaks, so
 //! nothing fails and no log line complains; the only symptom is that the
 //! settings app renders its "no backend loaded" empty state and the model

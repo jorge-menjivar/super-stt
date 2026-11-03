@@ -168,7 +168,7 @@ fn config_without_backends_section_deserializes() {
     assert!(config.backends.options.is_empty());
 }
 
-/// A pre-existing TOML config carrying a stale provider/source string
+/// A config carrying a stale provider/source string
 /// (e.g. `PascalCase` variant names from a prior build) must keep loading
 /// — falling back to the type's `Default` rather than failing the whole
 /// `[synthesis]` section. The user's other settings have to survive.
@@ -185,34 +185,15 @@ fn config_with_legacy_provider_string_falls_back() {
     online: (allow_online_models: true),
 )"#;
     let config = from_ron(ron_str);
-    // Both are free-form strings now — any value is accepted, and the legacy
-    // provider is carried through rather than rejected or dropped.
+    // The source is a free-form string, so any value is accepted. The legacy
+    // provider key is ignored, and the next write leaves it out.
     assert_eq!(config.synthesis.preferred_source, "BadValue");
-    assert_eq!(config.synthesis.preferred_provider, "LocalKokoro");
+    assert!(!written(&config).contains("preferred_provider"));
     // Other fields must survive the field-level fallback.
     assert_eq!(config.synthesis.preferred_model, "kokoro-tiny");
     assert_eq!(config.audio.theme, AudioTheme::Silent);
     assert_eq!(config.audio.volume, 75);
     assert!(config.online.allow_online_models);
-}
-
-#[test]
-fn config_with_canonical_snake_case_provider_round_trips() {
-    let ron_str = r#"(
-    device: (preferred_device: "cpu"),
-    audio: (theme: "classic", volume: 100),
-    synthesis: (
-        preferred_model: "kokoro-base",
-        preferred_provider: "local_piper",
-        preferred_source: "github.com/super-tts/piper",
-    ),
-)"#;
-    let config = from_ron(ron_str);
-    assert_eq!(
-        config.synthesis.preferred_source,
-        "github.com/super-tts/piper"
-    );
-    assert_eq!(config.synthesis.preferred_provider, "local_piper");
 }
 
 /// `synthesis.active_backend` defaults to `None` (no backend selected
@@ -344,66 +325,6 @@ fn cleared_preferred_model_persists_as_idle_with_backend_kept() {
     );
 }
 
-/// The regression: `preferred_provider` used to be dropped from the struct, so
-/// the first save after an upgrade rewrote the config file without it. Daemons
-/// through v0.2.0 resolve their startup model by `(model, provider, source)`,
-/// so a user rolling back after a bad upgrade got an idle daemon with their
-/// selection silently gone — and the config file outlives the binary that wrote
-/// it, so nothing later can recover the value.
-#[test]
-fn a_save_preserves_preferred_provider() {
-    let ron_str = r#"(
-    device: (preferred_device: "cpu"),
-    audio: (theme: "classic", volume: 100),
-    synthesis: (
-        preferred_model: "piper-mini",
-        preferred_provider: "local_piper",
-        preferred_source: "github.com/super-tts/piper",
-    ),
-    online: (allow_online_models: false),
-)"#;
-    let config = from_ron(ron_str);
-    assert_eq!(config.synthesis.preferred_provider, "local_piper");
-
-    let stored = written(&config);
-    assert!(
-        stored.contains("preferred_provider: \"local_piper\""),
-        "a save dropped `preferred_provider`; a rollback to v0.2.0 comes up idle:\n{stored}"
-    );
-}
-
-/// Preserving the key is not enough on its own: a model switch under the new
-/// daemon must carry the newly-selected model's provider into it. A value left
-/// pointing at the *previous* model is exactly as unusable to a rolled-back
-/// v0.2.0 daemon as a missing one — it resolves nothing and the daemon idles.
-#[test]
-fn a_model_switch_updates_preferred_provider() {
-    let mut config = DaemonConfig::default();
-    config.update_preferred_model(
-        "piper-mini".to_string(),
-        "github.com/super-tts/piper".to_string(),
-        Some("local_piper".to_string()),
-    );
-    assert_eq!(config.synthesis.preferred_provider, "local_piper");
-
-    // Switching to a model from another backend must not leave the old one.
-    config.update_preferred_model(
-        "kokoro-tiny".to_string(),
-        "github.com/super-tts/kokoro".to_string(),
-        Some("local_kokoro".to_string()),
-    );
-    assert_eq!(config.synthesis.preferred_provider, "local_kokoro");
-
-    // A model whose manifest declares none clears it rather than keeping a
-    // provider that belongs to a different model.
-    config.update_preferred_model(
-        "openai-tts-1".to_string(),
-        "github.com/super-tts/openai".to_string(),
-        None,
-    );
-    assert_eq!(config.synthesis.preferred_provider, "");
-}
-
 /// A stored method round-trips.
 #[test]
 fn daemon_config_reads_notification_method() {
@@ -501,36 +422,6 @@ fn update_config_round_trips() {
     assert_eq!(back.update, cfg.update);
 }
 
-/// Every path that drops the model preference drops the provider with it —
-/// otherwise the persisted triple names a model that is no longer selected.
-#[test]
-fn clearing_the_model_preference_clears_the_provider() {
-    let seeded = || {
-        let mut c = DaemonConfig::default();
-        c.update_preferred_model(
-            "piper-mini".to_string(),
-            "github.com/super-tts/piper".to_string(),
-            Some("local_piper".to_string()),
-        );
-        c
-    };
-
-    let mut c = seeded();
-    c.clear_preferred_model();
-    assert_eq!(c.synthesis.preferred_provider, "");
-
-    let mut c = seeded();
-    c.update_active_backend("kokoro".to_string());
-    assert_eq!(
-        c.synthesis.preferred_provider, "",
-        "selecting a backend drops the model preference; the provider must go too"
-    );
-
-    let mut c = seeded();
-    c.clear_active_backend();
-    assert_eq!(c.synthesis.preferred_provider, "");
-}
-
 /// `rename_active_backend` (an install-time directory migration of the *same*
 /// backend) must not disturb the loaded-model preference the way
 /// `update_active_backend` (a user picking a *different* backend) does —
@@ -542,7 +433,6 @@ fn rename_active_backend_preserves_the_model_preference() {
     c.update_preferred_model(
         "piper-mini".to_string(),
         "github.com/super-tts/piper".to_string(),
-        Some("local_piper".to_string()),
     );
 
     c.rename_active_backend("app.super-tts.piper".to_string());
@@ -552,7 +442,6 @@ fn rename_active_backend_preserves_the_model_preference() {
         Some("app.super-tts.piper")
     );
     assert_eq!(c.synthesis.preferred_model, "piper-mini");
-    assert_eq!(c.synthesis.preferred_provider, "local_piper");
 }
 
 /// The `http` section is optional: a config written before it existed

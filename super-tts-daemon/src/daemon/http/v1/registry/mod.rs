@@ -119,11 +119,11 @@ description = "Test backend."
 
         let daemon = test_daemon().await;
         daemon.config.write().await.synthesis.active_backend = Some("super-tts-piper".to_string());
-        daemon.config.write().await.update_preferred_model(
-            "piper-mini".to_string(),
-            "github.com/x/piper".to_string(),
-            Some("local_piper".to_string()),
-        );
+        daemon
+            .config
+            .write()
+            .await
+            .update_preferred_model("piper-mini".to_string(), "github.com/x/piper".to_string());
 
         retire_and_repoint(
             &daemon,
@@ -144,7 +144,6 @@ description = "Test backend."
             cfg.synthesis.preferred_model, "piper-mini",
             "the model preference must survive the rename"
         );
-        assert_eq!(cfg.synthesis.preferred_provider, "local_piper");
         drop(cfg);
         assert_eq!(
             daemon.active_backend.read().await.as_deref(),
@@ -161,11 +160,11 @@ description = "Test backend."
         let daemon = test_daemon().await;
         daemon.config.write().await.synthesis.active_backend =
             Some("some-other-backend".to_string());
-        daemon.config.write().await.update_preferred_model(
-            "other-model".to_string(),
-            "github.com/x/other".to_string(),
-            Some("local_other".to_string()),
-        );
+        daemon
+            .config
+            .write()
+            .await
+            .update_preferred_model("other-model".to_string(), "github.com/x/other".to_string());
 
         retire_and_repoint(
             &daemon,
@@ -189,7 +188,6 @@ description = "Test backend."
             "an unrelated active backend must not be repointed"
         );
         assert_eq!(cfg.synthesis.preferred_model, "other-model");
-        assert_eq!(cfg.synthesis.preferred_provider, "local_other");
         drop(cfg);
         assert_eq!(daemon.active_backend.read().await.as_deref(), None);
     }

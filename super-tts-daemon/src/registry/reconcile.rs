@@ -60,7 +60,7 @@ pub async fn reconcile(
 /// `rename_active_backend` (not `update_active_backend`) is deliberate too:
 /// the winner serves the same `source` and the same models, so this is a
 /// directory move, not the user choosing a different backend. Clearing
-/// `preferred_model`/`preferred_provider` here would silently discard the
+/// `preferred_model` here would silently discard the
 /// user's model selection as a side effect of housekeeping.
 pub(crate) async fn repoint_active_backend(
     daemon: &crate::daemon::types::SuperTTSDaemon,
@@ -144,11 +144,7 @@ mod tests {
         {
             let mut cfg = daemon.config.write().await;
             cfg.synthesis.active_backend = Some("super-tts-y".to_string());
-            cfg.update_preferred_model(
-                "m".to_string(),
-                "github.com/x/y".to_string(),
-                Some("local_y".to_string()),
-            );
+            cfg.update_preferred_model("m".to_string(), "github.com/x/y".to_string());
         }
         *daemon.active_backend.write().await = Some("super-tts-y".to_string());
 
@@ -167,7 +163,6 @@ mod tests {
             cfg.synthesis.preferred_model, "m",
             "the model preference must survive the repoint"
         );
-        assert_eq!(cfg.synthesis.preferred_provider, "local_y");
         assert_eq!(cfg.synthesis.preferred_source, "github.com/x/y");
         drop(cfg);
         assert_eq!(
@@ -189,11 +184,7 @@ mod tests {
         {
             let mut cfg = daemon.config.write().await;
             cfg.synthesis.active_backend = Some("some-other-backend".to_string());
-            cfg.update_preferred_model(
-                "other-model".to_string(),
-                "github.com/x/other".to_string(),
-                Some("local_other".to_string()),
-            );
+            cfg.update_preferred_model("other-model".to_string(), "github.com/x/other".to_string());
         }
 
         let (winners, losers) = crate::tts_models::backends::discover(root.path());

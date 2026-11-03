@@ -166,19 +166,6 @@ pub const DEFAULT_TCP_PORT: u16 = 7301;
 pub struct SynthesisConfig {
     #[serde(default)]
     pub preferred_model: String,
-    /// Compatibility shim; the daemon resolves its startup model by
-    /// `(preferred_model, preferred_source)` and never reads this.
-    ///
-    /// It is written, not merely preserved, because the config file outlives the
-    /// binary that wrote it. Daemons through v0.2.0 resolve their startup model
-    /// by `(model, provider, source)`, so a user who rolls back after a bad
-    /// upgrade gets an idle daemon — with no error, just a lost selection — if
-    /// this key is missing *or* stale. Keeping it in step with the selected
-    /// model is what makes the rollback recoverable.
-    ///
-    /// Delete once no supported daemon resolves by provider.
-    #[serde(default)]
-    pub preferred_provider: String,
     #[serde(default)]
     pub preferred_source: String,
     /// How a synthesis failure is surfaced to the user. An unparseable stored
@@ -223,7 +210,6 @@ impl Default for DaemonConfig {
                 // selected — it never auto-picks one, since loading a model can
                 // pull gigabytes.
                 preferred_model: String::new(),
-                preferred_provider: String::new(),
                 preferred_source: String::new(),
                 notification_method: NotificationMethod::default(),
                 custom_models_dir: None,
@@ -405,18 +391,10 @@ impl DaemonConfig {
         self.audio.theme = theme;
     }
 
-    /// Update preferred model + source, and the legacy `preferred_provider`
-    /// the model declares (see [`SynthesisConfig::preferred_provider`] for
-    /// why a stale value is as bad as a missing one).
-    pub fn update_preferred_model(
-        &mut self,
-        model: String,
-        source: String,
-        provider: Option<String>,
-    ) {
+    /// Update preferred model + source.
+    pub fn update_preferred_model(&mut self, model: String, source: String) {
         self.synthesis.preferred_model = model;
         self.synthesis.preferred_source = source;
-        self.synthesis.preferred_provider = provider.unwrap_or_default();
     }
 
     /// Clear the loaded-model preference (model + source) while keeping the
@@ -425,7 +403,6 @@ impl DaemonConfig {
     pub fn clear_preferred_model(&mut self) {
         self.synthesis.preferred_model = String::new();
         self.synthesis.preferred_source = String::new();
-        self.synthesis.preferred_provider = String::new();
     }
 
     /// Set the active backend (its relative install dir) and drop the loaded
@@ -433,14 +410,13 @@ impl DaemonConfig {
     pub fn update_active_backend(&mut self, dir: String) {
         self.synthesis.active_backend = Some(dir);
         self.synthesis.preferred_model = String::new();
-        self.synthesis.preferred_provider = String::new();
     }
 
     /// Repoint the active backend to `new_dir` without touching the loaded
     /// model preference.
     ///
     /// Deliberately narrower than [`update_active_backend`]: that method
-    /// clears `preferred_model`/`preferred_provider` because it models the
+    /// clears `preferred_model` because it models the
     /// user *choosing a different backend*, where any previously loaded
     /// model no longer applies. This method models an install-time directory
     /// rename of the *same* backend — its identity, models, and selection are
@@ -456,7 +432,6 @@ impl DaemonConfig {
         self.synthesis.active_backend = None;
         self.synthesis.preferred_model = String::new();
         self.synthesis.preferred_source = String::new();
-        self.synthesis.preferred_provider = String::new();
     }
 
     /// Update master volume.

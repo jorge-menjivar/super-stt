@@ -2022,11 +2022,11 @@ async fn the_stage_slot_reports_a_selection_that_is_not_loaded() {
     // Selecting the backend clears any model preference, so record the
     // selection after it — the order a real switch uses.
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
-    daemon.config.write().await.update_preferred_model(
-        "kokoro-82m".to_string(),
-        source.to_string(),
-        None,
-    );
+    daemon
+        .config
+        .write()
+        .await
+        .update_preferred_model("kokoro-82m".to_string(), source.to_string());
 
     let slot = daemon.handle_get_model().await.stage_model.expect("a slot");
     assert_eq!(slot.model.as_deref(), Some("kokoro-82m"));
@@ -2058,11 +2058,11 @@ async fn the_stage_slot_reports_a_loaded_selection() {
         "kokoro-82m",
     )];
     let _ = daemon.handle_set_active_backend(source.to_string()).await;
-    daemon.config.write().await.update_preferred_model(
-        "kokoro-82m".to_string(),
-        source.to_string(),
-        None,
-    );
+    daemon
+        .config
+        .write()
+        .await
+        .update_preferred_model("kokoro-82m".to_string(), source.to_string());
     seed_loaded_model(&daemon, "kokoro-82m", source).await;
 
     let response = daemon.handle_get_model().await;
