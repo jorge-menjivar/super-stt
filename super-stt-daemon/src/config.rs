@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use super_stt_shared::models::contexts::DictationContext;
 use super_stt_shared::models::notification_method::NotificationMethod;
 use super_stt_shared::models::recording_stop_mode::RecordingStopMode;
@@ -219,7 +219,7 @@ impl PostProcessorConfig {
 /// are [`DictationContext`], shared with the settings app.
 ///
 /// A `Vec` rather than a map keyed by id, because the list is ordered and the
-/// user sees that order. It is also what keeps `daemon.toml` still: [`DaemonConfig::load`]
+/// user sees that order. It is also what keeps the config file still: [`DaemonConfig::load`]
 /// rewrites the file whenever pretty-printing it differs from what is on disk,
 /// and a `HashMap`'s key order is not stable across runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -404,7 +404,7 @@ impl Default for DaemonConfig {
     }
 }
 
-/// The `daemon.toml` path used by `DaemonConfig::get_config_path()` under
+/// The `daemon.ron` path used by `DaemonConfig::get_config_path()` under
 /// `#[cfg(test)]`: a directory under the OS temp dir, unique per test
 /// *process* (keyed by pid) and cached for the life of that process so every
 /// test in the binary agrees on the same path. This is what keeps unit tests
@@ -428,7 +428,7 @@ fn test_config_path() -> PathBuf {
         unsafe {
             libc::atexit(remove_test_config_dir);
         }
-        dir.join("daemon.toml")
+        dir.join("daemon.ron")
     })
     .clone()
 }
@@ -466,7 +466,7 @@ impl DaemonConfig {
     /// Under `#[cfg(test)]` this resolves to a process-local temp file instead
     /// of the real XDG config path, so `load()`/`save()` in this crate's unit
     /// tests can never read or clobber the developer's real
-    /// `~/.config/super-stt/daemon.toml`. Known limitation: this only covers
+    /// `~/.config/super-stt/daemon.ron`. Known limitation: this only covers
     /// unit tests compiled *into* this crate (`cfg(test)`). Integration tests
     /// under `tests/` link against the crate without `cfg(test)`, so they
     /// still resolve the real path — not addressed here.
@@ -490,9 +490,54 @@ impl DaemonConfig {
     }
 
     /// Load configuration from disk. See `super_engine_daemon::config::load`.
+    ///
+    /// The first load after an upgrade imports the `daemon.toml` the earlier
+    /// release wrote. See [`Self::import_toml`].
     #[must_use]
     pub fn load() -> Self {
-        super_engine_daemon::config::load(&Self::get_config_path())
+        let path = Self::get_config_path();
+        Self::import_toml(&path);
+        super_engine_daemon::config::load(&path)
+    }
+
+    /// Write the `daemon.toml` beside `path` to `path`, when there is no
+    /// config at `path` yet. Releases before the move to RON stored the config
+    /// as TOML.
+    ///
+    /// The TOML file stays where it is. A daemon rolled back to one of those
+    /// releases reads it, and comes up with the settings it had before the
+    /// upgrade.
+    fn import_toml(path: &Path) {
+        if path.exists() {
+            return;
+        }
+        let toml_path = path.with_file_name("daemon.toml");
+        let Ok(content) = std::fs::read_to_string(&toml_path) else {
+            return;
+        };
+        let (config, _) = Self::parse_toml(&content);
+        match super_engine_daemon::config::save(path, &config) {
+            Ok(()) => log::info!("Imported {} into {}", toml_path.display(), path.display()),
+            Err(e) => log::error!("Failed to import {}: {e}", toml_path.display()),
+        }
+    }
+
+    /// Parse a `daemon.toml`, falling back to defaults when it does not parse,
+    /// as the releases that wrote it did. Repairs stale values the same way a
+    /// RON load does.
+    fn parse_toml(content: &str) -> (Self, bool) {
+        use super_engine_daemon::config::ConfigFile;
+
+        match toml::from_str::<Self>(content) {
+            Ok(mut config) => {
+                config.normalize();
+                (config, false)
+            }
+            Err(e) => {
+                log::warn!("Failed to parse daemon.toml: {e}. Importing defaults.");
+                (Self::default(), true)
+            }
+        }
     }
 
     /// Save configuration to disk. Blocking (`std::fs::write`); on the async
@@ -841,7 +886,7 @@ mod language_config_tests {
     use super::*;
 
     #[test]
-    fn primary_and_model_language_round_trip_through_toml() {
+    fn primary_and_model_language_round_trip_through_the_file() {
         let mut cfg = DaemonConfig::default();
         assert_eq!(cfg.primary_language(), None);
 
@@ -852,8 +897,9 @@ mod language_config_tests {
             Some("fr".to_string()),
         );
 
-        let toml = toml::to_string(&cfg).expect("serialize");
-        let back: DaemonConfig = toml::from_str(&toml).expect("deserialize");
+        let written = super_engine_daemon::config::to_string(&cfg).expect("serialize");
+        let (back, reset) = DaemonConfig::parse_or_reset(&written);
+        assert!(!reset);
 
         assert_eq!(back.primary_language(), Some("es-MX"));
         assert_eq!(
@@ -914,8 +960,9 @@ mod device_config_tests {
         assert_eq!(cfg.model_language("s", "m"), Some("fr"));
         assert_eq!(cfg.model_device("s", "m"), Some("gpu"));
 
-        let toml = toml::to_string(&cfg).expect("serialize");
-        let back: DaemonConfig = toml::from_str(&toml).expect("deserialize");
+        let written = super_engine_daemon::config::to_string(&cfg).expect("serialize");
+        let (back, reset) = DaemonConfig::parse_or_reset(&written);
+        assert!(!reset);
         assert_eq!(back.model_language("s", "m"), Some("fr"));
         assert_eq!(back.model_device("s", "m"), Some("gpu"));
     }
@@ -926,26 +973,23 @@ mod device_config_tests {
     /// whole config.
     #[test]
     fn persisted_model_devices_are_normalized_on_load() {
-        let content = r#"
-[device]
-preferred_device = "cpu"
-
-[audio]
-theme = "classic"
-volume = 80
-
-[transcription]
-write_mode = true
-recording_stop_mode = "manual_only"
-write_method = "ydotool"
-
-[backends.models."github.com/x/whisper".large]
-device = "cuda"
-
-[backends.models."github.com/x/whisper".small]
-device = "xpu"
-language = "fr"
-"#;
+        let content = r#"(
+    device: (preferred_device: "cpu"),
+    audio: (theme: "classic", volume: 80),
+    transcription: (
+        write_mode: true,
+        recording_stop_mode: "manual_only",
+        write_method: "ydotool",
+    ),
+    backends: (
+        models: {
+            "github.com/x/whisper": {
+                "large": (device: Some("cuda")),
+                "small": (device: Some("xpu"), language: Some("fr")),
+            },
+        },
+    ),
+)"#;
         let (cfg, reset) = DaemonConfig::parse_or_reset(content);
         assert!(!reset);
         assert_eq!(

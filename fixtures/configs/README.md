@@ -5,9 +5,13 @@ hand-derived from that tag's source. They are loaded by the daemon's config
 tests (`just config-compat`) to prove the current code still loads configs
 written by older releases — it must load, migrate, or reset, never crash.
 
-**On every release, add a `vX.Y.Z/` directory** with the `daemon.toml` that
+**On every release, add a `vX.Y.Z/` directory** with the `daemon.ron` that
 version wrote. Do not reformat existing files — they represent real on-disk
 user configs.
+
+Releases before the move to RON wrote `daemon.toml`. The daemon imports one
+into `daemon.ron` on the first load after the upgrade, and the tests read those
+fixtures the way the import does.
 
 The COSMIC applet's configs moved with the applet to
 [super-cosmic-applet](https://github.com/super-libre/super-cosmic-applet),
