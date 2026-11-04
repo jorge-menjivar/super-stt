@@ -355,7 +355,7 @@ impl SuperSTTDaemon {
         config: &Arc<tokio::sync::RwLock<DaemonConfig>>,
     ) -> Result<(), anyhow::Error> {
         // Snapshot under the lock (cheap clone), release it, then do the
-        // blocking TOML-serialize + `fs::write` on a blocking thread — never on
+        // blocking serialize + atomic write on a blocking thread — never on
         // an async worker while a config lock is held (Tier 3 #3).
         let snapshot = config.read().await.clone();
         tokio::task::spawn_blocking(move || snapshot.save())
