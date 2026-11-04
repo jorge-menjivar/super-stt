@@ -7,7 +7,6 @@ mod transcribe;
 
 use crate::daemon::types::SuperSTTDaemon;
 use crate::output::notice;
-use crate::services::dbus::ListeningEvent;
 use crate::{audio::recorder::DaemonAudioRecorder, output::typer::Typer};
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -228,7 +227,7 @@ impl SuperSTTDaemon {
         // first drops the sender; the event still goes out, so the
         // `recording_stopped` Phase 3 sends for the failure follows a start.
         let _ = capture_started.await;
-        self.emit_recording_started(write_mode).await;
+        self.emit_recording_started(write_mode);
 
         // Phase 2: stream incremental transcripts while capturing.
         //
@@ -417,41 +416,15 @@ impl SuperSTTDaemon {
             });
     }
 
-    /// Emit "capture has begun" (Phase 1): mic event + D-Bus `listening_started`.
-    async fn emit_recording_started(&self, write_mode: bool) {
+    /// Emit "capture has begun" (Phase 1): the mic state and `recording_started`.
+    fn emit_recording_started(&self, write_mode: bool) {
         self.broadcast_recording_state_change(true);
-        self.emit_listening_started_dbus(write_mode).await;
-    }
-
-    /// Emit D-Bus listening started event AND publish the matching
-    /// `recording_started` event on the widget HTTP/SSE bus. The two
-    /// transports carry the same fact, so they're issued together to
-    /// avoid drift between subscribers.
-    async fn emit_listening_started_dbus(&self, write_mode: bool) {
-        let timestamp = Utc::now().to_rfc3339();
-        let client_id = CLIENT_ID.to_string();
-
-        // Widget bus
         self.events
             .publish_recording_started(crate::daemon::events::RecordingStartedEvent {
-                client_id: client_id.clone(),
-                timestamp: timestamp.clone(),
+                client_id: CLIENT_ID.to_string(),
+                timestamp: Utc::now().to_rfc3339(),
                 write_mode,
             });
-
-        if let Some(ref dbus_manager) = self.dbus_manager {
-            let event = ListeningEvent {
-                client_id,
-                timestamp,
-                write_mode,
-                timeout_seconds: 0,
-                audio_level: 0.0,
-            };
-
-            if let Err(e) = dbus_manager.emit_listening_started(event).await {
-                warn!("Failed to emit D-Bus listening_started signal: {e}");
-            }
-        }
     }
 
     /// Finalize the cycle: clear the busy guard and emit the transcription
@@ -468,10 +441,6 @@ impl SuperSTTDaemon {
             *busy_guard = false;
         }
 
-        let timestamp = Utc::now().to_rfc3339();
-        let client_id = CLIENT_ID.to_string();
-        let dbus_error = error.clone().unwrap_or_default();
-
         // Final transcription text — success only; failures are conveyed by
         // transcribing_stopped's `error`. Widgets need `global_transcriptions`.
         if transcription_success {
@@ -481,23 +450,10 @@ impl SuperSTTDaemon {
         // Transcribing phase ended (widget bus).
         self.events
             .publish_transcribing_stopped(crate::daemon::events::TranscribingStoppedEvent {
-                client_id: client_id.clone(),
-                timestamp: timestamp.clone(),
+                client_id: CLIENT_ID.to_string(),
+                timestamp: Utc::now().to_rfc3339(),
                 transcription_success,
                 error,
             });
-
-        // D-Bus listening stopped, paired with transcribing_stopped.
-        if let Some(ref dbus_manager) = self.dbus_manager {
-            let event = crate::services::dbus::ListeningStoppedEvent {
-                client_id,
-                timestamp,
-                transcription_success,
-                error: dbus_error,
-            };
-            if let Err(e) = dbus_manager.emit_listening_stopped(event).await {
-                warn!("Failed to emit D-Bus listening_stopped signal: {e}");
-            }
-        }
     }
 }

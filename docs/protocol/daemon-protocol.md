@@ -19,7 +19,7 @@ graph TD
 
     %% Event Flow
     D_Core -- "Events (Recording, STT, Progress)" --> D_SSE
-    D_Core -- "Signals (Listening, Audio Level)" --> D_DBus
+    D_Core -- "Liveness (ping, no signals)" --> D_DBus
 
     %% HTTP Route Groups
     D_API --> R_Auth["/auth"]
@@ -69,9 +69,4 @@ graph TD
     DB_Int --> DB_Obj["/com/github/jorge_menjivar/SuperSTT"]
     DB_Obj -.-> DB_M1["ping()"]
     DB_Obj -.-> DB_M2["get_status()"]
-    DB_Obj -.-> DB_S1["listening_started"]
-    DB_Obj -.-> DB_S2["listening_stopped"]
-    DB_Obj -.-> DB_S3["transcription_started"]
-    DB_Obj -.-> DB_S4["transcription_completed"]
-    DB_Obj -.-> DB_S5["audio_level"]
 ```

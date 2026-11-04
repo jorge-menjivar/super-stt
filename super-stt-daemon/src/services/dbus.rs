@@ -1,72 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! The daemon's D-Bus presence: a `com.github.jorge_menjivar.SuperSTT1`
-//! interface on the session bus that broadcasts recording and transcription
-//! activity as signals.
+//! The daemon's session-bus presence: a name to own and a liveness probe.
 //!
-//! **Linux only.** macOS has no session bus, and no macOS client is listening
-//! for one, so the service is not served there. The daemon's own event
-//! transport — `GET /v1/events`, which every first-party client already uses
-//! — is cross-platform and carries the same events, so nothing is lost but
-//! the D-Bus mirror of them.
+//! This interface used to publish five signals: listening started/stopped,
+//! transcription started/completed, and audio level. `transcription_completed`
+//! carried the full text of every transcription. They are deliberately gone: a
+//! session-bus signal is readable by every process on the bus, with no consent
+//! at all, while the same information on `GET /v1/events` costs a
+//! `recording_events`, `global_transcriptions` or `audio_visualization` grant
+//! the user has to approve. Publishing both made those grants a formality, since
+//! anything denied there could just listen on the bus instead. No client
+//! listened to them anyway: every first-party client uses `/v1/events`.
 //!
-//! The event structs themselves are defined on both platforms, because the
-//! recording and transcription paths build one before deciding whether there
-//! is anywhere to send it. Only the `zvariant::Type` derive that makes them
-//! marshalable is Linux-only.
+//! What is left is what carries no information the user would want gated: the
+//! well-known name (so "is the daemon up?" is answerable without a socket) and
+//! a ping. Super TTS made the same cut.
+//!
+//! **Linux only.** macOS has no session bus, so the service is not served there.
 
+#[cfg(target_os = "linux")]
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
-use zbus::{Connection, interface, object_server::SignalEmitter};
-
-/// D-Bus interface for Super STT service
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(target_os = "linux", derive(zbus::zvariant::Type))]
-pub struct ListeningEvent {
-    pub client_id: String,
-    pub timestamp: String,
-    pub write_mode: bool,
-    pub timeout_seconds: u64,
-    pub audio_level: f32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(target_os = "linux", derive(zbus::zvariant::Type))]
-pub struct ListeningStoppedEvent {
-    pub client_id: String,
-    pub timestamp: String,
-    pub transcription_success: bool,
-    pub error: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(target_os = "linux", derive(zbus::zvariant::Type))]
-pub struct TranscriptionStartedEvent {
-    pub client_id: String,
-    pub timestamp: String,
-    pub audio_length_ms: f64,
-    pub sample_rate: u32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(target_os = "linux", derive(zbus::zvariant::Type))]
-pub struct TranscriptionCompletedEvent {
-    pub client_id: String,
-    pub timestamp: String,
-    pub transcription: String,
-    pub duration_ms: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(target_os = "linux", derive(zbus::zvariant::Type))]
-pub struct AudioLevelEvent {
-    pub client_id: String,
-    pub timestamp: String,
-    pub level: f32,
-    pub is_speech: bool,
-}
+use zbus::{Connection, interface};
 
 #[cfg(target_os = "linux")]
 pub struct SuperSTTDBusService;
@@ -74,38 +30,6 @@ pub struct SuperSTTDBusService;
 #[cfg(target_os = "linux")]
 #[interface(name = "com.github.jorge_menjivar.SuperSTT1")]
 impl SuperSTTDBusService {
-    /// Signal emitted when STT starts listening
-    #[zbus(signal)]
-    pub async fn listening_started(
-        ctxt: &SignalEmitter<'_>,
-        event: ListeningEvent,
-    ) -> zbus::Result<()>;
-
-    /// Signal emitted when STT stops listening
-    #[zbus(signal)]
-    pub async fn listening_stopped(
-        ctxt: &SignalEmitter<'_>,
-        event: ListeningStoppedEvent,
-    ) -> zbus::Result<()>;
-
-    /// Signal emitted when transcription starts
-    #[zbus(signal)]
-    pub async fn transcription_started(
-        ctxt: &SignalEmitter<'_>,
-        event: TranscriptionStartedEvent,
-    ) -> zbus::Result<()>;
-
-    /// Signal emitted when transcription completes
-    #[zbus(signal)]
-    pub async fn transcription_completed(
-        ctxt: &SignalEmitter<'_>,
-        event: TranscriptionCompletedEvent,
-    ) -> zbus::Result<()>;
-
-    /// Signal emitted for real-time audio level updates
-    #[zbus(signal)]
-    pub async fn audio_level(ctxt: &SignalEmitter<'_>, event: AudioLevelEvent) -> zbus::Result<()>;
-
     /// Method to check if daemon is running
     #[must_use]
     pub fn ping(&self) -> String {
@@ -122,32 +46,9 @@ impl SuperSTTDBusService {
     }
 }
 
-/// Object path the interface is served at (and the target of every signal).
+/// Object path the interface is served at.
 #[cfg(target_os = "linux")]
 const OBJECT_PATH: &str = "/com/github/jorge_menjivar/SuperSTT";
-
-/// Define an `emit_*` wrapper that looks up the served interface and fires one
-/// of the `#[zbus(signal)]` methods. The five wrappers differ only in the
-/// signal method and its event type, so generate them from one template. A
-/// generic async helper can't express this cleanly (the closure would return a
-/// future borrowing the emitter), so a macro is the idiomatic dedup.
-#[cfg(target_os = "linux")]
-macro_rules! emit_signal {
-    ($(#[$meta:meta])* $method:ident => $signal:ident($event:ty)) => {
-        $(#[$meta])*
-        ///
-        /// # Errors
-        /// Returns an error if the signal cannot be emitted.
-        pub async fn $method(&self, event: $event) -> Result<()> {
-            let object_server = self.connection.object_server();
-            let iface_ref = object_server
-                .interface::<_, SuperSTTDBusService>(OBJECT_PATH)
-                .await?;
-            SuperSTTDBusService::$signal(iface_ref.signal_emitter(), event).await?;
-            Ok(())
-        }
-    };
-}
 
 #[cfg(target_os = "linux")]
 pub struct DBusManager {
@@ -177,31 +78,6 @@ impl DBusManager {
         Ok(Self { connection })
     }
 
-    emit_signal!(
-        /// Emit a signal indicating that listening has started.
-        emit_listening_started => listening_started(ListeningEvent)
-    );
-
-    emit_signal!(
-        /// Emit a signal indicating that listening has stopped.
-        emit_listening_stopped => listening_stopped(ListeningStoppedEvent)
-    );
-
-    emit_signal!(
-        /// Emit a signal indicating that transcription has started.
-        emit_transcription_started => transcription_started(TranscriptionStartedEvent)
-    );
-
-    emit_signal!(
-        /// Emit a signal indicating that transcription has completed.
-        emit_transcription_completed => transcription_completed(TranscriptionCompletedEvent)
-    );
-
-    emit_signal!(
-        /// Emit a signal for real-time audio level updates.
-        emit_audio_level => audio_level(AudioLevelEvent)
-    );
-
     // With a reason: clippy 1.99 asks for `#[must_use]` here, and 1.98 refuses
     // a bare one, since it takes `&Connection` as `#[must_use]` already.
     #[must_use = "this only borrows the connection"]
@@ -213,72 +89,8 @@ impl DBusManager {
 /// The macOS stand-in for [the Linux `DBusManager`](DBusManager).
 ///
 /// Uninhabited on purpose. The daemon holds its manager as an
-/// `Option<Arc<DBusManager>>` and the recording and transcription paths each
-/// guard their emit on `if let Some(..)`; making the type impossible to
-/// construct turns "there is no session bus on macOS" into something the
-/// compiler knows, so the `Some` arms are statically dead rather than dead by
-/// convention. The alternative — a unit struct with no-op methods — would
-/// compile just as well and would quietly keep working if someone later
-/// handed it a real value to hold.
-///
-/// The `emit_*` methods exist so those call sites need no `cfg` of their own:
-/// each is reached only through a value of this type, and there are none.
+/// `Option<Arc<DBusManager>>`; making the type impossible to construct turns
+/// "there is no session bus on macOS" into something the compiler knows, so
+/// that field is `None` by construction rather than by convention.
 #[cfg(target_os = "macos")]
 pub enum DBusManager {}
-
-// `allow`, not `expect`: clippy 1.98 files these under `unused_async_trait_impl`
-// and later releases under `unused_async`, so either `expect` goes unfulfilled
-// on some toolchain.
-#[cfg(target_os = "macos")]
-#[allow(
-    clippy::unused_async,
-    clippy::unused_async_trait_impl,
-    reason = "each method mirrors the Linux signature and is unreachable: the type is uninhabited"
-)]
-impl DBusManager {
-    /// Emit a signal indicating that listening has started.
-    ///
-    /// # Errors
-    /// Unreachable: no value of this type exists.
-    pub async fn emit_listening_started(&self, _event: ListeningEvent) -> Result<()> {
-        match *self {}
-    }
-
-    /// Emit a signal indicating that listening has stopped.
-    ///
-    /// # Errors
-    /// Unreachable: no value of this type exists.
-    pub async fn emit_listening_stopped(&self, _event: ListeningStoppedEvent) -> Result<()> {
-        match *self {}
-    }
-
-    /// Emit a signal indicating that transcription has started.
-    ///
-    /// # Errors
-    /// Unreachable: no value of this type exists.
-    pub async fn emit_transcription_started(
-        &self,
-        _event: TranscriptionStartedEvent,
-    ) -> Result<()> {
-        match *self {}
-    }
-
-    /// Emit a signal indicating that transcription has completed.
-    ///
-    /// # Errors
-    /// Unreachable: no value of this type exists.
-    pub async fn emit_transcription_completed(
-        &self,
-        _event: TranscriptionCompletedEvent,
-    ) -> Result<()> {
-        match *self {}
-    }
-
-    /// Emit a signal for real-time audio level updates.
-    ///
-    /// # Errors
-    /// Unreachable: no value of this type exists.
-    pub async fn emit_audio_level(&self, _event: AudioLevelEvent) -> Result<()> {
-        match *self {}
-    }
-}
