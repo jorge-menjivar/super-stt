@@ -186,27 +186,6 @@ impl FromDaemon for PreviewTypingState {
     }
 }
 
-/// The models directory override.
-#[derive(Serialize, ToSchema)]
-pub(crate) struct CustomModelsDirState {
-    #[schema(example = "success")]
-    status: &'static str,
-    /// The configured directory, or `null` when no override is set. Always
-    /// present — `null` is the answer, not an absent key.
-    custom_models_dir: Option<String>,
-}
-
-impl FromDaemon for CustomModelsDirState {
-    fn from_daemon(resp: DaemonResponse) -> Self {
-        Self {
-            status: "success",
-            // Doubly optional on the bus: the outer layer is "this command did
-            // not set it", the inner is the documented nullable value.
-            custom_models_dir: resp.custom_models_dir.flatten(),
-        }
-    }
-}
-
 /// Whether the periodic update check runs.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct UpdateCheckEnabledState {

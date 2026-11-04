@@ -185,28 +185,6 @@ async fn settings_scope_endpoints() {
     .await;
     assert_eq!(s, StatusCode::OK);
 
-    // --- GET /custom_models_dir (new endpoint) ---
-    let (s, body) =
-        raw_get_json(&http_socket, "/settings/custom_models_dir", &settings_token).await;
-    assert_eq!(s, StatusCode::OK);
-    assert_eq!(body["status"], "success");
-    // The field is Option<Option<String>>; present, possibly null.
-    assert!(body.get("custom_models_dir").is_some());
-
-    // --- POST /custom_models_dir: null clears the override, then read-back ---
-    let (s, _) = raw_post_json(
-        &http_socket,
-        "/settings/custom_models_dir",
-        &settings_token,
-        serde_json::json!({ "path": null }),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK, "POST /custom_models_dir null");
-    let (s, body) =
-        raw_get_json(&http_socket, "/settings/custom_models_dir", &settings_token).await;
-    assert_eq!(s, StatusCode::OK);
-    assert!(body["custom_models_dir"].is_null());
-
     // --- /active_device is gone: a device belongs to a model, and is read
     // and set at /pipeline/{stage}/model/{model}/device (covered by
     // http_smoke_pipeline.rs). ---

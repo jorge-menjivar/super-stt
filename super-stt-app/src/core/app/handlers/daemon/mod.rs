@@ -41,9 +41,9 @@ impl AppModel {
             | DaemonMessage::WidgetBlocked(_)
             | DaemonMessage::RetryAuthorization => self.handle_daemon_errors_retry(message),
 
-            DaemonMessage::CurrentAudioThemeLoaded(_)
-            | DaemonMessage::VolumeLoaded(_)
-            | DaemonMessage::CustomModelsDirLoaded(_) => self.handle_daemon_initial_loads(message),
+            DaemonMessage::CurrentAudioThemeLoaded(_) | DaemonMessage::VolumeLoaded(_) => {
+                self.handle_daemon_initial_loads(&message)
+            }
 
             DaemonMessage::DaemonEventsReceived(_) => self.handle_daemon_events(message),
         }
@@ -208,9 +208,9 @@ impl AppModel {
 
     fn handle_daemon_initial_loads(
         &mut self,
-        message: DaemonMessage,
+        message: &DaemonMessage,
     ) -> Task<cosmic::Action<Message>> {
-        match message {
+        match *message {
             DaemonMessage::CurrentAudioThemeLoaded(theme) => {
                 self.selected_audio_theme = theme;
                 if theme != AudioTheme::Silent {
@@ -224,16 +224,6 @@ impl AppModel {
                 // Keep the rollback target aligned with the daemon's value so a
                 // later failed commit rolls back to what's actually persisted.
                 self.last_committed_volume = vol;
-                Task::none()
-            }
-
-            DaemonMessage::CustomModelsDirLoaded(custom_path) => {
-                let old_committed = self.custom_models_dir.as_deref().unwrap_or_default();
-                if self.custom_models_dir_input == old_committed {
-                    self.custom_models_dir_input =
-                        custom_path.as_deref().unwrap_or_default().to_string();
-                }
-                self.custom_models_dir = custom_path;
                 Task::none()
             }
 

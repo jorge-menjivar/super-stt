@@ -44,17 +44,15 @@ impl SuperTTSDaemon {
     }
 
     /// Choose the model to load at startup: the configured preference, but only
-    /// if it is installed and usable. Online models are "usable" only when the
-    /// online toggle is on and a key exists. Returns `None` (daemon stays idle)
+    /// if it is installed. Returns `None` (daemon stays idle)
     /// when there is no preference or it can't be loaded — the daemon never
     /// auto-picks an arbitrary model, since loading one can pull gigabytes.
     pub async fn pick_startup_model(&self) -> Option<(String, String)> {
-        let (pref_model, pref_source, allow_online) = {
+        let (pref_model, pref_source) = {
             let c = self.config.read().await;
             (
                 c.synthesis.preferred_model.clone(),
                 c.synthesis.preferred_source.clone(),
-                c.online.allow_online_models,
             )
         };
         if pref_model.is_empty() {
@@ -81,24 +79,8 @@ impl SuperTTSDaemon {
         };
         let backends = self.backends.read().await;
         let (_, def) = backends::find_model(&backends, &pref_model, &pref_source)?;
-        // Online models need the online gate on to be usable; local models are
-        // always usable (the required secret is enforced at load).
-        let usable = !def.is_online() || allow_online;
-        usable.then(|| (def.name.clone(), def.source.clone()))
-    }
-
-    /// First discovered local (non-online) model, if any. Used as the safe
-    /// fallback when online models are turned off.
-    pub async fn first_local_model(&self) -> Option<(String, String)> {
-        let backends = self.backends.read().await;
-        for backend in backends.iter() {
-            for def in &backend.models {
-                if !def.is_online() {
-                    return Some((def.name.clone(), def.source.clone()));
-                }
-            }
-        }
-        None
+        // A required secret is enforced at load.
+        Some((def.name.clone(), def.source.clone()))
     }
 }
 

@@ -138,10 +138,6 @@ impl AppModel {
             volume: 100,
             last_committed_volume: 100,
 
-            // Custom models directory
-            custom_models_dir: None,
-            custom_models_dir_input: String::new(),
-
             // Models page UI state
             models_page: crate::state::models_page::ModelsPageState::default(),
 

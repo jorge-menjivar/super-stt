@@ -181,14 +181,6 @@ pub enum Command {
         source: String,
         model: String,
     },
-    SetAllowOnlineModels {
-        enabled: bool,
-    },
-    GetAllowOnlineModels,
-    SetCustomModelsDir {
-        path: Option<String>,
-    },
-    GetCustomModelsDir,
     /// List installed backends with their models, secrets, and options.
     ListBackends,
     /// Re-instantiate the active model in place to apply changed secrets/options.

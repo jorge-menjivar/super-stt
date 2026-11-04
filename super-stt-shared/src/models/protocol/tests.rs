@@ -237,45 +237,6 @@ fn set_recording_stop_mode_parses() {
 }
 
 #[test]
-fn set_custom_models_dir_parses_with_path() {
-    let request = make_request(
-        "set_custom_models_dir",
-        Some(json!({ "path": "/tmp/models" })),
-    );
-    let command = Command::try_from(request).expect("command should parse");
-    match command {
-        Command::SetCustomModelsDir { path } => {
-            assert_eq!(path.as_deref(), Some("/tmp/models"));
-        }
-        _ => panic!("expected Command::SetCustomModelsDir"),
-    }
-}
-
-#[test]
-fn set_custom_models_dir_parses_with_null() {
-    let request = make_request("set_custom_models_dir", Some(json!({ "path": null })));
-    let command = Command::try_from(request).expect("command should parse");
-    match command {
-        Command::SetCustomModelsDir { path } => {
-            assert!(path.is_none());
-        }
-        _ => panic!("expected Command::SetCustomModelsDir"),
-    }
-}
-
-#[test]
-fn set_custom_models_dir_parses_without_data() {
-    let request = make_request("set_custom_models_dir", None);
-    let command = Command::try_from(request).expect("command should parse");
-    match command {
-        Command::SetCustomModelsDir { path } => {
-            assert!(path.is_none());
-        }
-        _ => panic!("expected Command::SetCustomModelsDir"),
-    }
-}
-
-#[test]
 fn list_backends_parses() {
     let request = make_request("list_backends", None);
     let command = Command::try_from(request).expect("command should parse");

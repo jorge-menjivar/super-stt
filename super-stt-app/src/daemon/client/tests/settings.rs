@@ -6,8 +6,8 @@ use serde_json::json;
 
 use super::fake_daemon::{FakeDaemon, Reply};
 use crate::daemon::client::v1::settings::{
-    audio_theme, custom_models_dir, language, notification_method, preview_typing,
-    recording_stop_mode, update_beta_optin, update_check_enabled, volume, write_method,
+    audio_theme, language, notification_method, preview_typing, recording_stop_mode,
+    update_beta_optin, update_check_enabled, volume, write_method,
 };
 use crate::state::AudioTheme;
 
@@ -130,40 +130,6 @@ async fn a_getter_whose_field_is_absent_falls_back_to_the_daemons_default() {
         !preview_typing::get_preview_typing()
             .await
             .expect("preview typing")
-    );
-}
-
-/// The override is `Option<Option<String>>` on the wire: absent means "the
-/// daemon did not say", `null` means "no override set". Both render as the
-/// default models directory, and neither is a failure.
-#[tokio::test]
-async fn an_unset_custom_models_dir_reads_as_none() {
-    let daemon = FakeDaemon::start().await;
-    daemon
-        .reply(Reply::json(
-            &json!({ "status": "success", "custom_models_dir": null }),
-        ))
-        .reply(Reply::json(&json!({
-            "status": "success",
-            "custom_models_dir": "/home/me/models",
-        })));
-
-    assert_eq!(
-        custom_models_dir::get_custom_models_dir()
-            .await
-            .expect("dir read"),
-        None
-    );
-    assert_eq!(
-        custom_models_dir::get_custom_models_dir()
-            .await
-            .expect("dir read"),
-        Some("/home/me/models".to_string())
-    );
-    assert_eq!(
-        daemon.requests()[0].path(),
-        "/settings/custom_models_dir",
-        "both reads hit the same path"
     );
 }
 

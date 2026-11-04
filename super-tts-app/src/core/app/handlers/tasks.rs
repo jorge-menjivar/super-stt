@@ -4,9 +4,8 @@
 //! result-to-`Message` mapping isn't re-rolled at each call site.
 
 use crate::daemon::client::{
-    get_current_audio_theme, get_custom_models_dir, get_notification_method,
-    get_update_check_enabled, get_update_status, get_volume, list_backends, list_stage_backends,
-    ping_daemon,
+    get_current_audio_theme, get_notification_method, get_update_check_enabled, get_update_status,
+    get_volume, list_backends, list_stage_backends, ping_daemon,
 };
 use crate::state::AudioTheme;
 use crate::ui::messages::{
@@ -115,15 +114,6 @@ pub(in crate::core::app) fn build_load_settings_tasks() -> Task<cosmic::Action<M
             Err(e) => {
                 warn!("Failed to load volume: {e}");
                 cosmic::Action::App(Message::Daemon(DaemonMessage::VolumeLoaded(100)))
-            }
-        }),
-        Task::perform(get_custom_models_dir(), |result| match result {
-            Ok(dir) => {
-                cosmic::Action::App(Message::Daemon(DaemonMessage::CustomModelsDirLoaded(dir)))
-            }
-            Err(e) => {
-                warn!("Failed to load custom models dir: {e}");
-                cosmic::Action::App(Message::Daemon(DaemonMessage::CustomModelsDirLoaded(None)))
             }
         }),
         Task::perform(get_notification_method(), |result| {

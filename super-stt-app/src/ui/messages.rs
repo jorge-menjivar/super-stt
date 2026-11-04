@@ -118,7 +118,6 @@ pub enum DaemonMessage {
     // GET endpoint.
     CurrentAudioThemeLoaded(AudioTheme),
     VolumeLoaded(u8),
-    CustomModelsDirLoaded(Option<String>),
     // Carries the typed error so `classify_daemon_error` can decide
     // blocked-vs-retry on the variant, not the wording.
     DaemonError(super_stt_shared::daemon::http_client::HttpError),

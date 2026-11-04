@@ -12,8 +12,6 @@ pub struct DaemonConfig {
     pub audio: AudioConfig,
     pub synthesis: SynthesisConfig,
     #[serde(default)]
-    pub online: OnlineConfig,
-    #[serde(default)]
     pub backends: BackendsConfig,
     #[serde(default)]
     pub update: UpdateConfig,
@@ -119,14 +117,6 @@ fn default_volume() -> u8 {
     100
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct OnlineConfig {
-    /// Whether online models (that send audio to external APIs) are allowed.
-    /// Defaults to false for privacy.
-    #[serde(default)]
-    pub allow_online_models: bool,
-}
-
 /// The daemon's HTTP surface beyond the Unix socket it always serves. See
 /// `super_engine_daemon::config::HttpConfig`, bound to [`DEFAULT_TCP_PORT`].
 pub type HttpConfig = super_engine_daemon::config::HttpConfig<DEFAULT_TCP_PORT>;
@@ -175,10 +165,6 @@ pub struct SynthesisConfig {
         deserialize_with = "super_tts_shared::utils::serde_helpers::deserialize_or_default"
     )]
     pub notification_method: NotificationMethod,
-    /// Vestigial: retained for config compatibility. Custom models are now
-    /// provided as backends discovered under [`backends_dir`].
-    #[serde(default)]
-    pub custom_models_dir: Option<String>,
     /// Directory scanned for installed backends. `None` uses the default
     /// (`<data_dir>/super-tts/backends`).
     #[serde(default)]
@@ -212,12 +198,10 @@ impl Default for DaemonConfig {
                 preferred_model: String::new(),
                 preferred_source: String::new(),
                 notification_method: NotificationMethod::default(),
-                custom_models_dir: None,
                 backends_dir: None,
                 active_backend: None,
                 primary_language: None,
             },
-            online: OnlineConfig::default(),
             backends: BackendsConfig::default(),
             update: UpdateConfig::default(),
             http: HttpConfig::default(),

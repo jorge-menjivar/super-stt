@@ -263,32 +263,4 @@ impl SuperSTTDaemon {
         let optin = self.config.read().await.update.beta_optin;
         DaemonResponse::success().with_update_beta_optin(optin.to_string())
     }
-
-    /// Handle get custom models directory command
-    pub async fn handle_get_custom_models_dir(&self) -> DaemonResponse {
-        let path = self
-            .config
-            .read()
-            .await
-            .transcription
-            .custom_models_dir
-            .clone();
-        DaemonResponse::success().with_custom_models_dir(path)
-    }
-
-    /// Handle set custom models directory command
-    pub async fn handle_set_custom_models_dir(&self, path: Option<String>) -> DaemonResponse {
-        let path_display = path.as_deref().unwrap_or("none").to_string();
-
-        let persist = self
-            .set_config_field(|c| c.transcription.custom_models_dir = path)
-            .await;
-
-        info!("Custom models directory set to {path_display}");
-        Self::settings_saved(
-            DaemonResponse::success(),
-            format!("Custom models directory set to {path_display}"),
-            persist,
-        )
-    }
 }

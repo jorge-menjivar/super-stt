@@ -307,10 +307,6 @@ pub struct TranscriptionConfig {
     /// value degrades to the default rather than failing the whole config load.
     #[serde(default, deserialize_with = "deserialize_notification_method")]
     pub notification_method: NotificationMethod,
-    /// Vestigial: retained for config compatibility. Custom models are now
-    /// provided as backends discovered under [`backends_dir`].
-    #[serde(default)]
-    pub custom_models_dir: Option<String>,
     /// Directory scanned for installed backends. `None` uses the default
     /// (`<data_dir>/super-stt/backend/list`).
     #[serde(default)]
@@ -376,7 +372,6 @@ impl Default for DaemonConfig {
                 recording_stop_mode: RecordingStopMode::default(),
                 write_method: WriteMethod::default(),
                 notification_method: NotificationMethod::default(),
-                custom_models_dir: None,
                 backends_dir: None,
                 active_backend: None,
                 primary_language: None,

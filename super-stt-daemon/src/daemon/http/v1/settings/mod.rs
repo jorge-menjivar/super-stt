@@ -18,7 +18,6 @@
 //! lives in the macro call and nowhere else.
 
 pub(crate) mod audio_theme;
-pub(crate) mod custom_models_dir;
 pub(crate) mod language;
 pub(crate) mod notification_method;
 pub(crate) mod preview_typing;
@@ -63,10 +62,6 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(
             preview_typing::get_preview_typing,
             preview_typing::set_preview_typing
-        ))
-        .routes(routes!(
-            custom_models_dir::get_custom_models_dir,
-            custom_models_dir::set_custom_models_dir
         ))
         .routes(routes!(
             update_check_enabled::get_update_check_enabled,

@@ -1873,7 +1873,7 @@
             }
           },
           "400": {
-            "description": "`model` was missing or empty (`invalid_value`); no installed backend serves `(model, source)` in this stage's role (`invalid_model`); `source` was omitted and the stage has no backend (`invalid_backend`); or the model is online and `allow_online_models` is off (`online_models_disabled`).",
+            "description": "`model` was missing or empty (`invalid_value`); no installed backend serves `(model, source)` in this stage's role (`invalid_model`); or `source` was omitted and the stage has no backend (`invalid_backend`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3976,132 +3976,6 @@
         ]
       }
     },
-    "/v1/settings/allow_online_models": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read whether network models may be used (scope: settings)",
-        "description": "Answers with the gate's state. `false` is a guarantee about where audio is produced: no model that would send text off this machine can be loaded while it holds, so a client can truthfully label the daemon as local-only. It says nothing about which model is loaded — that is `GET /pipeline/{stage}/model`.",
-        "operationId": "get_allow_online_models",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AllowOnlineModelsState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Allow or forbid models that synthesize over the network (scope: settings)",
-        "description": "The privacy gate for hosted providers. While it is off, `POST /pipeline/{stage}/model` refuses any model whose backend would send text to a third party, and turning it off while such a model is loaded reverts the stage to a local model — or empties the stage, when this host has no local backend to fall back to. Read `message` to learn which of those two happened before reporting to the user that everything is now local. Subscribers to `GET /events?topics=daemon_status_changed` see the follow-up event for whatever model ends up loaded.",
-        "operationId": "set_allow_online_models",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AllowOnlineModelsBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AllowOnlineModelsState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
     "/v1/settings/audio_theme": {
       "get": {
         "tags": [
@@ -4312,142 +4186,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Ack"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      }
-    },
-    "/v1/settings/custom_models_dir": {
-      "get": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Read the custom models directory (scope: settings)",
-        "description": "Answers with the configured path, or `null` when no override is set. The key is always present — `null` is the answer, not an absent field — so a client can render the row without guessing whether the daemon simply declined to speak to it.",
-        "operationId": "get_custom_models_dir",
-        "responses": {
-          "200": {
-            "description": "Done.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CustomModelsDirState"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Token unknown, expired, or its binary changed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReasonEnvelope"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token lacks the `settings` scope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Per-client rate limit hit; back off and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_token": [
-              "settings"
-            ]
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "settings"
-        ],
-        "summary": "Point the daemon at a models directory of your own (scope: settings)",
-        "description": "Overrides where the daemon looks for model files supplied out of band. The directory is scanned as soon as the setting lands, so anything found in it shows up in `GET /pipeline/{stage}/model/list` under the `custom` source and can be selected from there without a restart. Send `null` to clear the override and fall back to the default location. Backends installed from the registry live elsewhere and are unaffected.",
-        "operationId": "set_custom_models_dir",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CustomModelsDirBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Applied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CustomModelsDirState"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The value was rejected — out of range, or not one of the accepted tokens.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -6290,43 +6028,6 @@
           }
         }
       },
-      "AllowOnlineModelsBody": {
-        "type": "object",
-        "description": "Allow or forbid models that synthesize over the network",
-        "required": [
-          "enabled"
-        ],
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "description": "Whether the feature is on."
-          }
-        }
-      },
-      "AllowOnlineModelsState": {
-        "type": "object",
-        "description": "Whether models that synthesize over the network may be used at all.",
-        "required": [
-          "status",
-          "allow_online_models"
-        ],
-        "properties": {
-          "allow_online_models": {
-            "type": "boolean",
-            "description": "`false` keeps every utterance on this machine: a model whose backend\nwould send text to a third party cannot be loaded while it is off."
-          },
-          "message": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "example": "success"
-          }
-        }
-      },
       "AudioTheme": {
         "type": "string",
         "enum": [
@@ -6863,39 +6564,6 @@
           }
         }
       },
-      "CustomModelsDirBody": {
-        "type": "object",
-        "description": "Point the daemon at a models directory of your own",
-        "properties": {
-          "path": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Absolute path to a directory the daemon can read, or `null` to clear the override."
-          }
-        }
-      },
-      "CustomModelsDirState": {
-        "type": "object",
-        "description": "The models directory override.",
-        "required": [
-          "status"
-        ],
-        "properties": {
-          "custom_models_dir": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The configured directory, or `null` when no override is set. Always\npresent — `null` is the answer, not an absent key."
-          },
-          "status": {
-            "type": "string",
-            "example": "success"
-          }
-        }
-      },
       "DaemonStatus": {
         "type": "object",
         "description": "What `GET /status` reports.",
@@ -6976,7 +6644,6 @@
           "invalid_backend",
           "cuda_unavailable",
           "invalid_device",
-          "online_models_disabled",
           "invalid_audio_theme",
           "unsupported_language",
           "invalid_value",
