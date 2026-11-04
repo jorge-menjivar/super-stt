@@ -100,10 +100,8 @@ ls -la "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-ht
 - **Control character filtering**: Prevents injection of dangerous characters
 
 ### 5. Resource Management and Rate Limiting
-- **Connection limits**: Maximum concurrent connections enforced (20 in production, 50 in development)
-- **Rate limiting**: Per-client request limits with sliding window tracking
-  - Production: 60 requests/minute, 1800 requests/hour
-  - Development: 300 requests/minute, 7200 requests/hour
+- **Connection limits**: At most 40 concurrent connections, in every build
+- **Rate limiting**: Per-client request limits with sliding window tracking: 600 requests a minute and 14,400 an hour, in every build. One daemon serves both features, so it leaves room for two apps, two CLIs and an applet
 - **Connection timeouts**: Automatic cleanup of inactive connections (3 minutes production, 10 minutes development)
 - **Memory protection**: Resource limits prevent memory exhaustion attacks
 

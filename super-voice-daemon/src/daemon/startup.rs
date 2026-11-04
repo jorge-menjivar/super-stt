@@ -53,11 +53,7 @@ impl DaemonComponents {
 
         let download_manager = Arc::new(DownloadStateManager::new());
 
-        let resource_manager = if cfg!(debug_assertions) {
-            Arc::new(ResourceManager::development())
-        } else {
-            Arc::new(ResourceManager::production())
-        };
+        let resource_manager = Arc::new(crate::limits::resource_manager());
 
         // D-Bus is optional; absence is non-fatal.
         #[cfg(target_os = "linux")]
