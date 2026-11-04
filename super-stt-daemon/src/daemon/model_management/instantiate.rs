@@ -249,8 +249,8 @@ impl SuperSTTDaemon {
     /// Form the `x-stt-secret-*` / `x-stt-option-*` headers a backend is
     /// handed on every `/v1` request, whichever transport carries it.
     ///
-    /// Secrets come solely from the generic per-backend keyring store
-    /// (`backend:<source>:<name>`) written by the settings app — there is no
+    /// Secrets come solely from the daemon's secrets file, by backend source
+    /// and secret name, as the settings app wrote them — there is no
     /// legacy `<provider>-api-key` fallback, so the key must be set for this
     /// specific backend. Options use the config override if set, else the
     /// manifest default. A required secret that resolves to nothing is an error.
@@ -262,13 +262,10 @@ impl SuperSTTDaemon {
     ) -> Result<Vec<(String, String)>> {
         let mut headers = Vec::new();
         for secret in &backend.secrets {
-            let value = crate::keyring::get_backend_secret_async(
-                backend.source.clone(),
-                secret.name.clone(),
-            )
-            .await
-            .map_err(|e| anyhow!(e))?
-            .filter(|v| !v.is_empty());
+            let value = self
+                .secrets
+                .get_backend_secret(&backend.source, &secret.name)
+                .filter(|v| !v.is_empty());
             match value {
                 Some(v) => headers.push((format!("x-stt-secret-{}", secret.name), v)),
                 // Safety-net error: the settings UI is expected to surface this
@@ -292,8 +289,8 @@ impl SuperSTTDaemon {
         }
         // The user's dictation context, for a backend that said it can use one.
         // Read last and in a scope of its own: no await may happen under the
-        // config guard, and everything above this either awaits the keyring or
-        // works from the `overrides` snapshot it was handed.
+        // config guard, and everything above this works from the secrets in
+        // memory or the `overrides` snapshot it was handed.
         //
         // Gated on the capability rather than sent to everyone, because a
         // backend that does not read these headers has no way to say so and
@@ -333,8 +330,8 @@ impl SuperSTTDaemon {
     /// between, so the component could be handed one gateway while a different
     /// one was authorized, and every request would then be refused until the
     /// model was reloaded. Cloned rather than held as a guard: the header path
-    /// awaits a keyring round-trip, and a read guard spanning that would block
-    /// config writers for its duration.
+    /// awaits, and a read guard spanning that would block config writers for
+    /// its duration.
     ///
     /// `base_url` is canonicalized on the way out (see
     /// [`normalize`](backends::base_url::normalize)). It is the one value the
@@ -580,7 +577,7 @@ mod tests {
         let daemon = test_daemon().await;
         let source = "github.com/super-stt/openai";
         // No secrets: the assertions run through the real header path, which
-        // would otherwise reach the keyring for the fixture's required key.
+        // would otherwise refuse the fixture's required key, unset here.
         let backend = DiscoveredBackend {
             description: String::new(),
             secrets: Vec::new(),
@@ -636,7 +633,7 @@ mod tests {
         let daemon = test_daemon().await;
         let source = "github.com/super-stt/openai";
         // No secrets: this drives the real header path, which would otherwise
-        // reach the keyring for the fixture's required key.
+        // refuse the fixture's required key, unset here.
         let backend = DiscoveredBackend {
             description: String::new(),
             secrets: Vec::new(),
@@ -730,7 +727,7 @@ mod tests {
         let daemon = test_daemon().await;
         let source = "github.com/super-stt/openai";
         // No secrets: this drives the real `backend_headers`, which would
-        // otherwise reach the keyring for the fixture's required key.
+        // otherwise refuse the fixture's required key, unset here.
         let backend = DiscoveredBackend {
             description: String::new(),
             secrets: Vec::new(),

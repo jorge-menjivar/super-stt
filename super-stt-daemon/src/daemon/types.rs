@@ -10,6 +10,7 @@ use crate::stt_models::backends::{self, DiscoveredBackend};
 use anyhow::Result;
 use std::sync::{Arc, RwLock};
 use super_engine_daemon::load_gate::LoadGate;
+use super_engine_daemon::secrets::Secrets;
 use super_stt_shared::models::protocol::{DaemonStatusEvent, PreviewSource};
 use super_stt_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
@@ -128,6 +129,9 @@ pub struct SuperSTTDaemon {
     // a stage wins. Taken in `instantiate_backend`, which every load of either
     // stage passes through.
     pub loading: Arc<StageLoadGates>,
+    // The secrets file: the session tokens the daemon has issued and every
+    // backend's API keys. One per process, opened at startup; clones share it.
+    pub secrets: Secrets,
 }
 
 /// A [`LoadGate`] for each pipeline stage.
@@ -226,6 +230,8 @@ pub(crate) async fn test_daemon() -> SuperSTTDaemon {
         )),
         self_update: Arc::new(crate::self_update::checker()),
         loading: Arc::new(StageLoadGates::default()),
+        // In memory: no daemon test reads or writes the user's secrets file.
+        secrets: Secrets::in_memory(),
     }
 }
 

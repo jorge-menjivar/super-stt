@@ -68,7 +68,7 @@ sequenceDiagram
     Note over App,D: 1. Authenticate (one time)
     App->>D: POST /auth/request<br/>{ app_name, scopes: ["transcribe", "status"] }
     D-->>App: 200 { session_token, scopes, expires_at }
-    App->>App: persist token in keyring
+    App->>App: persist token
 
     Note over App,D: 2. Drive a transcription
     App->>D: POST /transcribe<br/>{ data: { wait: true, stream_realtime: true } }

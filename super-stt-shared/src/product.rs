@@ -14,12 +14,11 @@ mod tests {
     use super_engine_protocol::scopes::{CORE_TOPICS, is_known_scope};
 
     /// The derived names are the ones Super STT has always shipped with. A
-    /// change here moves a socket, a keyring entry or an override variable
+    /// change here moves a socket or an override variable
     /// out from under every installed client.
     #[test]
     fn derived_names_match_what_super_stt_shipped() {
         assert_eq!(SUPER_STT.socket_file(), "super-stt-http.sock");
-        assert_eq!(SUPER_STT.session_keyring_service(), "super-stt-session");
         assert_eq!(SUPER_STT.http_host(), "stt.local");
         assert_eq!(SUPER_STT.env("HTTP_SOCKET"), "SUPER_STT_HTTP_SOCKET");
         assert_eq!(SUPER_STT.consent_helper(), "super-stt-consent");

@@ -13,7 +13,7 @@ use super_stt_shared::models::contexts::DictationContext;
 use super::surface::muted_text_color;
 
 /// Body of the per-backend configuration sheet (shown in the right-side
-/// context drawer): the backend's secrets (system keyring) and options (daemon
+/// context drawer): the backend's secrets (the daemon's secrets file) and options (daemon
 /// config) as one settings section. The drawer supplies the title and close
 /// affordance, so there's no in-body header or Back button.
 pub fn configure_sheet<'a>(backend: &'a BackendInfo, app: &'a AppModel) -> Element<'a, Message> {

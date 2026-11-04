@@ -172,8 +172,8 @@ empty for them.
 Encrypted credentials the backend needs at runtime, such as API keys. A
 backend may declare several — a primary and a fallback key, or keys for
 different upstreams — and use whichever it needs. The user supplies each
-value through the settings UI; the daemon stores it encrypted in the system
-keyring and never writes it to disk in plaintext.
+value through the settings UI; the daemon stores it in its secrets file,
+which only the user can read, and never in its config.
 
 ```toml
 [[secrets]]

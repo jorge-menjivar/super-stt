@@ -8,6 +8,7 @@ use crate::tts_models::backends::{self, DiscoveredBackend};
 use anyhow::Result;
 use std::sync::{Arc, RwLock};
 use super_engine_daemon::load_gate::LoadGate;
+use super_engine_daemon::secrets::Secrets;
 use super_tts_shared::models::protocol::DaemonStatusEvent;
 use super_tts_shared::theme::AudioTheme;
 use tokio::sync::broadcast;
@@ -129,6 +130,9 @@ pub struct SuperTTSDaemon {
     // Read in `instantiate_backend`, which every load path funnels through.
     // See `super_engine_daemon::load_gate`.
     pub loading: Arc<LoadGate>,
+    // The secrets file: the session tokens the daemon has issued and every
+    // backend's API keys. One per process, opened at startup; clones share it.
+    pub secrets: Secrets,
 }
 
 /// A daemon wired up with inert defaults: no model, no backends, nothing
@@ -178,6 +182,8 @@ pub(crate) async fn test_daemon() -> SuperTTSDaemon {
             },
         )),
         loading: Arc::new(LoadGate::default()),
+        // In memory: no daemon test reads or writes the user's secrets file.
+        secrets: Secrets::in_memory(),
     }
 }
 

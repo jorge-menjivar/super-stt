@@ -158,9 +158,15 @@ check-json: (check '--message-format=json')
 check-macos *args:
     cargo clippy --all-features {{ macos_members }} {{ args }} -- -W clippy::pedantic -D warnings -D unused_must_use
 
-# Test the members that build on macOS. See `check-macos`.
+# Test the members that build on macOS. See `check-macos`, and `test` for the
+# state directory.
 [doc("Test the workspace members that build on macOS")]
 test-macos *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    XDG_STATE_HOME=$(mktemp -d)
+    export XDG_STATE_HOME
+    trap 'rm -rf "$XDG_STATE_HOME"' EXIT
     cargo test {{ macos_members }} {{ args }}
 
 # Verify the daemon compiles under every backend-transport feature combination.
@@ -192,7 +198,18 @@ fmt:
     cargo fmt --all
 
 # Run the test suite. Usage: just test [--verbose]
+#
+# The run gets a state directory of its own, removed afterwards. Tests that
+# drive a client in their own process keep its session token there, under
+# `$XDG_STATE_HOME`, and refuse to run without one: the token would otherwise
+# replace the developer's own. The daemons they start get homes of their own
+# from the test harness either way.
 test *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    XDG_STATE_HOME=$(mktemp -d)
+    export XDG_STATE_HOME
+    trap 'rm -rf "$XDG_STATE_HOME"' EXIT
     cargo test {{ args }}
 
 # Run the #[ignore]'d GUI smoke tests. These spawn real libcosmic surfaces
@@ -759,10 +776,36 @@ gen-schemas:
 # Write docs/protocol/openapi.json from the daemon's live /v1 router. The file
 # is not committed: CI generates it the same way on every push and publishes
 # it, so it cannot fall behind the protocol. Run this to read it locally
-# (`just openapi-serve` does so for you). Starts no daemon and touches no
-# keyring — the document is built from the route registrations themselves.
+# (`just openapi-serve` does so for you). Starts no daemon and reads no
+# secrets file — the document is built from the route registrations themselves.
 openapi:
     cargo run -q -p super-stt-daemon --bin gen_openapi
+
+# Write tts/docs/protocol/openapi.json from the TTS daemon's /v1 router. Unlike
+# Super STT's, this one is committed: the TTS settings app's path-contract
+# tests read it. Run it after changing a TTS route.
+[doc("Regenerate the committed TTS OpenAPI document")]
+openapi-tts:
+    cargo run -q -p super-tts-daemon --bin gen_openapi
+
+# Fails when the committed TTS OpenAPI document no longer matches the router.
+# Regenerates in place and restores the file on exit, so a failing check never
+# leaves the tree modified.
+[doc("Check the committed TTS OpenAPI document is current")]
+openapi-tts-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    spec=tts/docs/protocol/openapi.json
+    before=$(mktemp)
+    cp "$spec" "$before"
+    trap 'cp "$before" "$spec"; rm -f "$before"' EXIT
+    cargo run -q -p super-tts-daemon --bin gen_openapi >/dev/null
+    if ! diff -u "$before" "$spec"; then
+        echo >&2
+        echo "tts/docs/protocol/openapi.json is stale. Run 'just openapi-tts' and commit it." >&2
+        exit 1
+    fi
+    echo "tts/docs/protocol/openapi.json is current"
 
 # Browse the protocol spec locally. Regenerates it first so what you read is
 # what the router currently serves, then serves docs/protocol/ over HTTP —

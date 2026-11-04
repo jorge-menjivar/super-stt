@@ -158,8 +158,8 @@ pub async fn run() -> Result<()> {
 
     // Drain any queued session-store writes before `process::exit` skips the
     // fire-and-forget persist task — otherwise a token minted or revoked in the
-    // final moments is lost (audit 2 Tier 1 #5). Bounded so a locked keyring
-    // (D-Bus unlock prompt) can't hang shutdown.
+    // final moments is lost (audit 2 Tier 1 #5). Bounded so a write stuck on
+    // a slow disk can't hang shutdown.
     crate::daemon::http::flush_persisted_sessions(tokio::time::Duration::from_secs(5)).await;
 
     // Give a brief moment for any remaining cleanup, then force exit if needed

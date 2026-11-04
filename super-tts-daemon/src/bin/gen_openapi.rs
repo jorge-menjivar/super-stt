@@ -1,24 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Write the daemon protocol's `OpenAPI` document to `docs/protocol/openapi.json`.
+//! Write the daemon protocol's `OpenAPI` document to
+//! `tts/docs/protocol/openapi.json`.
 //!
-//! Run it with `just openapi` after changing anything under
-//! `src/daemon/http/v1/`; `just openapi-check` (part of `just ci`) fails when
-//! the committed file no longer matches what the router produces, so the
-//! published spec cannot fall behind the protocol.
+//! Run it with `just openapi-tts` after changing anything under
+//! `src/daemon/http/v1/`. The settings app's path-contract tests read the
+//! committed file, so a route it no longer lists fails them.
 //!
 //! The document is built from the route registrations themselves, so this
-//! starts no daemon, opens no socket, and touches no keyring.
+//! starts no daemon, opens no socket, and reads no secrets file.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Resolve `docs/protocol/openapi.json` from the crate's own location, so the
-/// generator writes the same file whatever directory it is invoked from.
+/// Resolve `tts/docs/protocol/openapi.json` from the crate's own location, so
+/// the generator writes the same file whatever directory it is invoked from.
+/// Super STT's document is `docs/protocol/openapi.json`, beside it; the two
+/// become one with the combined daemon.
 fn output_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("the daemon crate always sits inside the workspace root")
-        .join("docs/protocol/openapi.json")
+        .join("tts/docs/protocol/openapi.json")
 }
 
 fn main() -> std::io::Result<()> {

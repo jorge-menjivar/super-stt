@@ -21,8 +21,7 @@
 //! `speaking_state` → `playback_events`, `frequency_bands` →
 //! `audio_visualization`.
 //!
-//! Hermetic: `SUPER_TTS_AUTO_APPROVE=1` (no GUI) + `SUPER_TTS_KEYRING_MOCK=1`
-//! (in-memory keyring), so it runs in the default `cargo test` flow.
+//! Hermetic: `SUPER_TTS_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
 
 mod common;
 

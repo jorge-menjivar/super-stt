@@ -16,13 +16,6 @@
 //!   installing it, and the ways a body can be malformed.
 //! - `POST /v1/registry/backend/update` — the version lookup's failure modes,
 //!   and that a failed update releases its inflight marker.
-//!
-//! The first two once carried `#[ignore]`, on the grounds that a real daemon
-//! needs a responsive system keyring and CI's hangs on an unlock prompt. The
-//! harness below has since set `SUPER_STT_KEYRING_MOCK=1` — the in-memory
-//! store the rest of the smoke tests run against — so there is no prompt to
-//! hang on, and the whole `/registry` surface was being skipped for a reason
-//! that no longer held. They run with the suite.
 
 mod common;
 

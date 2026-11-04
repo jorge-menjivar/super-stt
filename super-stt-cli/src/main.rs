@@ -2,10 +2,9 @@
 //! Super STT CLI — talks to the daemon over the HTTP protocol on a Unix socket.
 //!
 //! Auth flow is delegated to `super_stt_shared::daemon::session`, the
-//! shared client-side session helper. All client tokens (CLI, settings
-//! app, applet) live under the same keyring service
-//! (`super-stt-session`) keyed by per-app `AppId`. The CLI's entry is
-//! `super-stt-cli@super-stt-session`.
+//! shared client-side session helper. Each client (CLI, settings app,
+//! applet) keeps its token in a file of its own, named by its `AppId`; the
+//! CLI's is `$XDG_STATE_HOME/super-stt/clients/super-stt-cli.json`.
 //!
 //! `session::with_token` handles cache-hit, consent-popup-on-miss, and
 //! `invalid_session` retry transparently — handlers below just write
@@ -35,11 +34,6 @@ fn main() -> Result<()> {
     // The CLI previously had no logging at all; initialize it like the other
     // binaries (RUST_LOG wins, else Info) (Tier 2 #6).
     super_stt_shared::logging::init();
-
-    // Honor SUPER_STT_KEYRING_MOCK before any session-token access so
-    // automated shells / CI (and our own integration tests) don't block on
-    // the system secret service. No-op when the env var is unset.
-    session::install_mock_keyring_if_requested();
 
     let matches = build_cli().get_matches();
 

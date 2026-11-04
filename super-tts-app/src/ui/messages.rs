@@ -223,8 +223,8 @@ pub enum ModelsPageMessage {
     ///
     /// Rarely the right button, and deliberately not the only route: writing a
     /// backend option or secret already reloads every stage running that
-    /// backend. This is for what the daemon cannot see change — a keyring entry
-    /// edited by another tool, a model file replaced underneath it — where the
+    /// backend. This is for what the daemon cannot see change — a model file
+    /// replaced underneath it — where the
     /// alternative is Unload, re-pick, Load.
     ReloadActiveModel,
     /// Open the per-backend configuration sub-view for `source`.

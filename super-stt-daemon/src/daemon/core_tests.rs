@@ -536,7 +536,7 @@ async fn an_online_model_loads_without_a_gate() {
 
 /// `handle_list_backends` builds the catalog JSON (models, secrets,
 /// options) from the discovered backends, and an in-memory config option
-/// override is reflected in an option's effective `value`. Keyring-free.
+/// override is reflected in an option's effective `value`.
 #[tokio::test]
 async fn list_backends_catalog_and_option_override() {
     use crate::daemon::test_fixtures::openai_backend;

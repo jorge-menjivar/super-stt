@@ -15,7 +15,6 @@
         version = "0.1",
         features = ["client", "client-legacy", "http1", "tokio"]
     }
-    keyring.workspace = true
     log.workspace = true
     rubato = { workspace = true, optional = true }
     serde.workspace = true

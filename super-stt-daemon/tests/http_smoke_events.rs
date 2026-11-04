@@ -21,8 +21,7 @@
 //! `recording_state` → `recording_events`, `frequency_bands` →
 //! `audio_visualization`.
 //!
-//! Hermetic: `SUPER_STT_AUTO_APPROVE=1` (no GUI) + `SUPER_STT_KEYRING_MOCK=1`
-//! (in-memory keyring), so it runs in the default `cargo test` flow.
+//! Hermetic: `SUPER_STT_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
 
 mod common;
 

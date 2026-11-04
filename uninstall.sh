@@ -29,7 +29,7 @@
 # What is PRESERVED:
 #   - ~/.local/share/stt/logs/ (in case you need to inspect history)
 #   - ~/.config/super-stt/ (user-set defaults)
-#   - System keyring entries (cached session tokens, API keys)
+#   - ~/.local/state/super-stt/ (session tokens, API keys)
 #   - The `stt` system group (other users may depend on it)
 #
 # The daemon is stopped as the final step so any in-flight
@@ -67,6 +67,7 @@ USER_SYSTEMD_DIR="$HOME/.config/systemd/user"
 RUN_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/stt"
 LOG_DIR="$HOME/.local/share/stt/logs"
 CONFIG_DIR="$HOME/.config/super-stt"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/super-stt"
 COSMIC_SHORTCUTS="$HOME/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom"
 SERVICE_NAME="super-stt"
 
@@ -305,4 +306,4 @@ print_info ""
 print_info "Preserved (delete manually if you want a deeper clean):"
 print_info "  - Logs:    $LOG_DIR"
 print_info "  - Config:  $CONFIG_DIR"
-print_info "  - Keyring entries (open your keyring manager — Seahorse, KWalletManager — and delete entries under 'super-stt-session' and 'super-stt')"
+print_info "  - Secrets: $STATE_DIR (session tokens and API keys)"

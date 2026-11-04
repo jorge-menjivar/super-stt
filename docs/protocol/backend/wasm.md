@@ -75,7 +75,7 @@ its [configuration](./config.md), and — for a backend declaring
 [dictation context](../endpoints/v1/context.md) as `x-stt-prompt` and
 `x-stt-vocabulary`, all arrive as request headers on every `/v1` request (see
 [request headers](./contract.md#request-headers)). The component reads them from
-the incoming request's headers; it never sees the keyring, and it needs no
+the incoming request's headers; it never sees the secrets file, and it needs no
 `wasi:config` import.
 
 For an OpenAI backend declaring `OPENAI_API_KEY`, each `/v1/transcribe`

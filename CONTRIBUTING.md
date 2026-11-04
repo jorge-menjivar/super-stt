@@ -152,12 +152,11 @@ are handled strictly one at a time: `cmd_record` decides start-or-stop from
 the daemon's `busy` flag, so two presses in flight together would both see
 "idle" and both try to start.
 
-To exercise it without a daemon, a microphone or your Keychain, point it at a
-socket that does not exist and use the in-memory keyring — a press then logs
-`pressed` followed by a connection error:
+To exercise it without a daemon or a microphone, point it at a socket that
+does not exist — a press then logs `pressed` followed by a connection error:
 
 ```bash
-SUPER_STT_KEYRING_MOCK=1 RUST_LOG=super_stt_cli=debug \
+RUST_LOG=super_stt_cli=debug \
   ./target/debug/super-stt-cli --socket /tmp/nope.sock hotkey --key ctrl+alt+shift+F19
 ```
 

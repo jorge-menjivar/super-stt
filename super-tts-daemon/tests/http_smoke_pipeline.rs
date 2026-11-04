@@ -16,8 +16,7 @@
 //! 6. `/pipeline/1/device/list` and `.../model/{model}/device/list` say what a
 //!    stage's backend, and one of its models, can be run on here.
 //!
-//! Uses `SUPER_TTS_KEYRING_MOCK=1` (in-memory keyring) and
-//! `SUPER_TTS_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_TTS_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend declares one local model (`kokoro-82m`, cpu+gpu) and one
 //! that runs remotely (`gpt-4o-tts`, `none`), so both sides of every device

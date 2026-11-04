@@ -253,7 +253,7 @@ impl SuperTTSDaemon {
         backend: &DiscoveredBackend,
     ) -> Result<crate::tts_models::synthesize::BackendContext> {
         let overrides = self.backend_option_overrides(backend).await?;
-        let headers = self.backend_headers(backend, &overrides).await?;
+        let headers = self.backend_headers(backend, &overrides)?;
         // Only the WASM transport can dial anything; a subprocess backend runs
         // under `PrivateNetwork=yes`, so there is no egress for a `base_url` to
         // authorize and nothing to derive.
@@ -270,26 +270,23 @@ impl SuperTTSDaemon {
     /// Form the `x-tts-secret-*` / `x-tts-option-*` headers a backend is
     /// handed on every `/v1` request, whichever transport carries it.
     ///
-    /// Secrets come solely from the generic per-backend keyring store
-    /// (`backend:<source>:<name>`) written by the settings app — there is no
+    /// Secrets come solely from the daemon's secrets file, by backend source
+    /// and secret name, as the settings app wrote them — there is no
     /// legacy `<provider>-api-key` fallback, so the key must be set for this
     /// specific backend. Options use the config override if set, else the
     /// manifest default. A required secret that resolves to nothing is an error.
     #[cfg(any(feature = "wasm-backends", feature = "subprocess-backends"))]
-    async fn backend_headers(
+    fn backend_headers(
         &self,
         backend: &DiscoveredBackend,
         overrides: &std::collections::HashMap<String, String>,
     ) -> Result<Vec<(String, String)>> {
         let mut headers = Vec::new();
         for secret in &backend.secrets {
-            let value = crate::keyring::get_backend_secret_async(
-                backend.source.clone(),
-                secret.name.clone(),
-            )
-            .await
-            .map_err(|e| anyhow!(e))?
-            .filter(|v| !v.is_empty());
+            let value = self
+                .secrets
+                .get_backend_secret(&backend.source, &secret.name)
+                .filter(|v| !v.is_empty());
             match value {
                 Some(v) => headers.push((format!("x-tts-secret-{}", secret.name), v)),
                 // Safety-net error: the settings UI is expected to surface this
@@ -320,9 +317,8 @@ impl SuperTTSDaemon {
     /// derivation. Resolving them separately let a config write land in
     /// between, so the component could be handed one gateway while a different
     /// one was authorized, and every request would then be refused until the
-    /// model was reloaded. Cloned rather than held as a guard: the header path
-    /// awaits a keyring round-trip, and a read guard spanning that would block
-    /// config writers for its duration.
+    /// model was reloaded. Cloned rather than held as a guard, so no config
+    /// writer waits on the header path.
     ///
     /// `base_url` is canonicalized on the way out (see
     /// [`normalize`](backends::base_url::normalize)). It is the one value the
@@ -495,7 +491,7 @@ mod tests {
         let daemon = test_daemon().await;
         let source = "github.com/super-tts/openai";
         // No secrets: the assertions run through the real header path, which
-        // would otherwise reach the keyring for the fixture's required key.
+        // would otherwise refuse the fixture's required key, unset here.
         let backend = DiscoveredBackend {
             secrets: Vec::new(),
             ..openai_backend(source, Vec::new(), None)
@@ -522,7 +518,6 @@ mod tests {
                 .expect("a valid base_url");
             let headers = daemon
                 .backend_headers(&backend, &overrides)
-                .await
                 .expect("headers for a secret-free backend");
             let injected = headers
                 .iter()
@@ -550,7 +545,7 @@ mod tests {
         let daemon = test_daemon().await;
         let source = "github.com/super-tts/openai";
         // No secrets: this drives the real header path, which would otherwise
-        // reach the keyring for the fixture's required key.
+        // refuse the fixture's required key, unset here.
         let backend = DiscoveredBackend {
             secrets: Vec::new(),
             ..openai_backend(source, Vec::new(), None)
@@ -574,7 +569,6 @@ mod tests {
             .expect("a valid base_url");
         let headers = daemon
             .backend_headers(&backend, &overrides)
-            .await
             .expect("headers for a secret-free backend");
         let injected = headers
             .iter()
@@ -642,7 +636,7 @@ mod tests {
         let daemon = test_daemon().await;
         let source = "github.com/super-tts/openai";
         // No secrets: this drives the real `backend_headers`, which would
-        // otherwise reach the keyring for the fixture's required key.
+        // otherwise refuse the fixture's required key, unset here.
         let backend = DiscoveredBackend {
             secrets: Vec::new(),
             ..openai_backend(source, Vec::new(), None)
@@ -676,7 +670,6 @@ mod tests {
         // regression this pins is `backend_headers` reading config for itself.
         let headers = daemon
             .backend_headers(&backend, &overrides)
-            .await
             .expect("headers for a secret-free backend");
         let injected = headers
             .iter()

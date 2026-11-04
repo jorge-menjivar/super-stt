@@ -13,8 +13,7 @@
 //! context whose id happened to be `active`, which is exactly why that id is
 //! refused.
 //!
-//! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
-//! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 
 mod common;
 

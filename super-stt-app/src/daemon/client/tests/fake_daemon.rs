@@ -22,7 +22,7 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, Once};
+use std::sync::{Arc, Mutex};
 
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
@@ -136,11 +136,11 @@ impl FakeDaemon {
     /// Bind a socket, start serving, and point the client at it.
     pub async fn start() -> Self {
         let only_one = ONLY_ONE.lock().await;
-        install_mock_keyring();
+        require_own_state_dir();
         // Seed the in-memory token cache: `obtain` returns from it before any
-        // keyring read or consent popup, as long as the token was requested
-        // with the scopes it now asks for. `save` writes through to the
-        // keyring on its way, which is why the mock has to be installed first.
+        // token-file read or consent popup, as long as the token was requested
+        // with the scopes it now asks for. `save` writes the token file on its
+        // way, which is why the run needs a state directory of its own.
         let granted: Vec<String> = SETTINGS_SCOPES.iter().map(|s| (*s).to_string()).collect();
         let _ =
             super_stt_shared::daemon::session::save(APP_ID_NAME, TOKEN, SETTINGS_SCOPES, &granted);
@@ -273,13 +273,20 @@ async fn handle(
         .expect("fake daemon response builds"))
 }
 
-/// Route this process's keyring at the in-memory mock, once. The session
-/// module writes through to the keyring on every `save`, and an automated run
-/// has no business touching the developer's own secret service — nor, in CI,
-/// a secret service that isn't there.
-fn install_mock_keyring() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
-    });
+/// Refuse to seed a token unless the run has a state directory of its own.
+///
+/// `session::save` writes the app's token file under `$XDG_STATE_HOME`, and
+/// the app id is the real app's: without a directory of the run's own, the
+/// fake token would replace the developer's. Setting the variable from a
+/// process that already has threads running is unsound under edition 2024,
+/// so `just test` gives the whole run a fresh one.
+fn require_own_state_dir() {
+    let own = std::env::var_os("XDG_STATE_HOME")
+        .is_some_and(|dir| std::path::Path::new(&dir).starts_with(std::env::temp_dir()));
+    assert!(
+        own,
+        "XDG_STATE_HOME must be a directory under {} for this test, or it replaces \
+         your real app token. Run it with `just test`.",
+        std::env::temp_dir().display()
+    );
 }

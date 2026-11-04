@@ -5,11 +5,10 @@
 //! recovers from a daemon restart end-to-end — i.e. the applet won't
 //! get permanently stuck on stale data when the daemon goes away.
 //!
-//! Run with:
-//!
-//! ```bash
-//! cargo test -p super-tts-daemon --test widget_smoke -- --nocapture
-//! ```
+//! Hermetic: the daemon gets isolated XDG dirs, and the client side of the
+//! session mint keeps its token under the run's own state directory (see
+//! [`common::require_own_state_dir`]), so this runs as part of the ordinary
+//! suite rather than needing a desktop session.
 
 mod common;
 
@@ -24,21 +23,31 @@ use super_tts_shared::daemon::widget_subscription::{
     WidgetSubscriptionUpdate, run_widget_subscription,
 };
 
-/// Stable `AppId` used across the test run. We don't need a per-run
-/// unique id here: the daemon-side persisted token survives restart by
-/// design, and that's exactly what we want to verify. We do
-/// `session::forget` in the test's drop guard so we don't leak entries
-/// on the developer's keyring.
-const TEST_APP_ID: AppId = session::app_id("widget-smoke-test");
+/// One `AppId` per test, because the session cache they share is
+/// process-wide.
+///
+/// `session::save` writes an in-memory cache that `obtain` consults before the
+/// token file, and it is keyed by `AppId` alone. With a single id across the file,
+/// `subscription_recovers_from_invalid_session` — which deliberately plants a
+/// token the daemon has never seen — would hand that dead token to whichever
+/// other test looked next. These ran `--test-threads=1` while they were
+/// `#[ignore]`d, which hid it; running with the suite does not.
+///
+/// Each is stable across a restart *within* its own test, which is what
+/// `subscription_recovers_from_daemon_restart` needs to verify.
+const APP_ID_RESTART: AppId = session::app_id("widget-smoke-restart");
+const APP_ID_IDLE: AppId = session::app_id("widget-smoke-idle");
+const APP_ID_INVALID: AppId = session::app_id("widget-smoke-invalid");
 const TEST_APP_NAME: &str = "widget-smoke-test";
 const TEST_SCOPES: &[&str] = &["playback_events", "audio_visualization"];
 const TEST_TOPICS: &[&str] = &["speaking_state", "frequency_bands"];
 
-/// Forget the test's keyring entry on test exit so we don't leak.
-struct KeyringCleanupGuard;
-impl Drop for KeyringCleanupGuard {
+/// Forget the test's session on exit. The token file is the run's own, but
+/// the *cache* it also clears is process-wide, so dropping it still matters.
+struct SessionCleanupGuard(AppId);
+impl Drop for SessionCleanupGuard {
     fn drop(&mut self) {
-        let _ = session::forget(TEST_APP_ID);
+        let _ = session::forget(self.0);
     }
 }
 
@@ -95,21 +104,10 @@ where
 /// → kill daemon → wait for `Disconnected` → restart daemon → wait for
 /// the *second* `Connected`. Any of those phases failing means the
 /// applet would be stuck on stale data after a daemon restart.
-///
-/// `#[ignore]` because this spawns the real daemon, which writes to
-/// the developer's system keyring on each mint. Run explicitly with:
-///
-/// ```bash
-/// cargo test -p super-tts-daemon --test widget_smoke -- --ignored --test-threads=1
-/// ```
-///
-/// (A locked or unresponsive secret-service will hang the daemon's
-/// first session-mint flush — there's no infrastructure for an
-/// in-process keyring shim from an integration test crate.)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "spawns real daemon; requires a responsive system keyring"]
 async fn subscription_recovers_from_daemon_restart() {
-    let _keyring_guard = KeyringCleanupGuard;
+    common::require_own_state_dir();
+    let _session_guard = SessionCleanupGuard(APP_ID_RESTART);
     let (_socket_dir, http_socket) = socket_in_temp_dir();
 
     // 1. Boot the daemon and confirm /auth/request works under
@@ -120,7 +118,7 @@ async fn subscription_recovers_from_daemon_restart() {
     // 2. Drive the subscription with tight timings so the test doesn't
     //    sit on the default backoff for tens of seconds.
     let mut config =
-        WidgetSubscriptionConfig::new(TEST_APP_ID, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
+        WidgetSubscriptionConfig::new(_session_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
     config.idle_timeout = Duration::from_secs(5);
     config.initial_backoff = DEFAULT_INITIAL_BACKOFF;
     config.max_backoff = DEFAULT_MAX_BACKOFF;
@@ -163,6 +161,9 @@ async fn subscription_recovers_from_daemon_restart() {
     // 5. Restart the daemon. The subscription should reconnect within
     //    a backoff window without external intervention.
     eprintln!("[smoke] restarting daemon");
+    // Assigning over `guard` drops the old one, which removes the home the
+    // stopped daemon was using. The restart gets a fresh one, on the same
+    // socket.
     guard = start_daemon(&http_socket).await;
 
     // 6. Wait for the SECOND Connected — this is the actual "no stale
@@ -185,12 +186,11 @@ async fn subscription_recovers_from_daemon_restart() {
 /// Idle-timeout sanity: if the daemon doesn't send anything within
 /// the configured idle window, the subscription must surface a
 /// `Disconnected { reason: idle_timeout(...) }` rather than block
-/// forever. See note on `subscription_recovers_from_daemon_restart`
-/// re: `#[ignore]`.
+/// forever.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "spawns real daemon; requires a responsive system keyring"]
 async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
-    let _keyring_guard = KeyringCleanupGuard;
+    common::require_own_state_dir();
+    let _session_guard = SessionCleanupGuard(APP_ID_IDLE);
     let (_socket_dir, http_socket) = socket_in_temp_dir();
 
     let _guard = start_daemon(&http_socket).await;
@@ -199,7 +199,7 @@ async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
     // and there are no recordings in flight, so a 2 s deadline will
     // fire before any natural traffic.
     let mut config =
-        WidgetSubscriptionConfig::new(TEST_APP_ID, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
+        WidgetSubscriptionConfig::new(_session_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
     config.idle_timeout = Duration::from_secs(2);
 
     let mut stream: std::pin::Pin<
@@ -232,15 +232,17 @@ async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
     drop(stream);
 }
 
-/// `invalid_session` recovery: forge a stale token in the keyring and
+/// `invalid_session` recovery: forge a stale token in the token file and
 /// confirm the subscription drops it (`session::forget`) and re-mints
 /// via the consent path on the next iteration. Without this fix the
-/// subscription would loop forever on the same dead token. See note on
-/// `subscription_recovers_from_daemon_restart` re: `#[ignore]`.
+/// subscription would loop forever on the same dead token.
+///
+/// The planted token rides the process-wide session cache, which is why this
+/// test needs an `AppId` of its own — see [`APP_ID_INVALID`].
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "spawns real daemon + writes to system keyring; requires responsive secret-service"]
 async fn subscription_recovers_from_invalid_session() {
-    let _keyring_guard = KeyringCleanupGuard;
+    common::require_own_state_dir();
+    let _session_guard = SessionCleanupGuard(APP_ID_INVALID);
     let (_socket_dir, http_socket) = socket_in_temp_dir();
 
     let _guard = start_daemon(&http_socket).await;
@@ -248,21 +250,20 @@ async fn subscription_recovers_from_invalid_session() {
     // Plant a token the daemon has never seen. The first
     // `events_stream` call will get 401 invalid_session; the helper
     // must `session::forget` and re-`obtain` (which under
-    // SUPER_TTS_AUTO_APPROVE returns a fresh real token).
-    // Planted with the scopes the subscription asks for, so `obtain` reuses it
-    // and the daemon is the one that rejects it — which is the path under test.
-    // A record with no scopes would be replaced before it was ever presented.
+    // SUPER_TTS_AUTO_APPROVE returns a fresh real token). It is planted
+    // as minted for `TEST_SCOPES`, or `obtain` would replace it before the
+    // daemon ever saw it and the 401 path would go untested.
     let granted: Vec<String> = TEST_SCOPES.iter().map(|s| (*s).to_string()).collect();
     session::save(
-        TEST_APP_ID,
+        APP_ID_INVALID,
         "deadbeef_never_minted_by_daemon",
         TEST_SCOPES,
         &granted,
     )
-    .expect("plant fake token in keyring");
+    .expect("plant fake token");
 
     let mut config =
-        WidgetSubscriptionConfig::new(TEST_APP_ID, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
+        WidgetSubscriptionConfig::new(_session_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
     config.idle_timeout = Duration::from_secs(5);
 
     let mut stream: std::pin::Pin<

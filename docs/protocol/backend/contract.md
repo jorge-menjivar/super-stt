@@ -657,7 +657,7 @@ reach:
   WASM backend has no ambient filesystem access.
 - **Secrets and options.** A backend declares the API keys (secrets) and
   configuration (options) it needs; the user sets them in the settings UI.
-  The daemon stores secrets encrypted in the keyring and options as plaintext,
+  The daemon stores secrets in a file only the user can read and options in its config,
   and injects both as request headers on every `/v1` request (see
   [request headers](#request-headers)). Backends never read them from
   disk. Over the external client API, secret values are **write-only**: a

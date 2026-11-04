@@ -86,7 +86,6 @@ Content-Type: application/json
 | `throttled`           | Too many `/auth/request` calls from this peer in a short window.                         | Back off and retry later.                                              |
 | `uid_mismatch`        | Peer UID doesn't match the daemon's effective UID. The daemon only serves its own user; cross-user requests under a shared group are rejected before the popup. | Run as the same user as the daemon (typically the desktop user).         |
 
-The token returned by this endpoint should be persisted in a
-**secure** store (the platform keyring, libsecret/KWallet, the OS
-credential manager) — plaintext on disk would let any other process
-running as the same user impersonate the app.
+The token returned by this endpoint should be persisted where only the user
+can read it — a file at mode 0600, or the OS credential manager. See
+[Auth](../../../auth.md).

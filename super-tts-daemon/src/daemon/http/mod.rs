@@ -25,7 +25,7 @@ pub(crate) use super_engine_daemon::auth::tokens::flush_persisted_sessions;
 
 /// The generated `OpenAPI` document for the `/v1` surface. Built from the same
 /// route registrations the live router uses, so it needs no daemon and no
-/// keyring — see `src/bin/gen_openapi.rs`.
+/// secrets file — see `src/bin/gen_openapi.rs`.
 #[must_use]
 pub fn openapi_document() -> utoipa::openapi::OpenApi {
     v1::openapi()

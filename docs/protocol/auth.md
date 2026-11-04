@@ -170,7 +170,7 @@ sequenceDiagram
         else Allow
             U-->>D: Allow
             D-->>App: 200 { session_token, scopes, expires_at }
-            App->>App: persist token in own keyring
+            App->>App: persist token
         else Deny
             U-->>D: Deny
             D-->>App: 403 auth_denied<br/>{ reason: "user_denied" }
@@ -193,10 +193,12 @@ The token returned on Allow is a 32-byte random hex string
 scope set is bound server-side at issue time and validated per
 request.
 
-**Persist the token in a secure store** (your platform keyring,
-libsecret/KWallet, the OS credential manager). Plaintext on disk
-defeats the design — any other process running as the same user
-can read it and impersonate the app.
+**Persist the token where only the user can read it**: a file at mode
+0600 in the user's state directory, as Super STT's own clients keep
+theirs, or the OS credential manager. A file other users can read lets
+them impersonate the app. Against the user's own processes neither
+protects the token. What limits a copied token is the daemon's check, on
+every request, that the caller is the executable it was granted to.
 
 ## First-party clients
 

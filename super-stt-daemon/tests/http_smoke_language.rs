@@ -10,8 +10,7 @@
 //! 4. Per-model 400: POST an unsupported tag → 400 (`unsupported_language`).
 //! 5. Scope denial: a `status`-scoped token → 403 on both the global and per-model paths.
 //!
-//! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
-//! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend (`fixture-openai/backend.toml`) is seeded so the daemon
 //! discovers it on startup. Its model is multilingual and secret-gated, so the

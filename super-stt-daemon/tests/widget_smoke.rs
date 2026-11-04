@@ -5,9 +5,10 @@
 //! recovers from a daemon restart end-to-end — i.e. the applet won't
 //! get permanently stuck on stale data when the daemon goes away.
 //!
-//! Hermetic: the daemon gets isolated XDG dirs and an in-memory keyring, and
-//! the client side of the session mint is mocked too, so this runs as part of
-//! the ordinary suite rather than needing a desktop session.
+//! Hermetic: the daemon gets isolated XDG dirs, and the client side of the
+//! session mint keeps its token under the run's own state directory (see
+//! [`common::require_own_state_dir`]), so this runs as part of the ordinary
+//! suite rather than needing a desktop session.
 
 mod common;
 
@@ -26,7 +27,7 @@ use super_stt_shared::daemon::widget_subscription::{
 /// process-wide.
 ///
 /// `session::save` writes an in-memory cache that `obtain` consults before the
-/// keyring, and it is keyed by `AppId` alone. With a single id across the file,
+/// token file, and it is keyed by `AppId` alone. With a single id across the file,
 /// `subscription_recovers_from_invalid_session` — which deliberately plants a
 /// token the daemon has never seen — would hand that dead token to whichever
 /// other test looked next. These ran `--test-threads=1` while they were
@@ -41,11 +42,10 @@ const TEST_APP_NAME: &str = "widget-smoke-test";
 const TEST_SCOPES: &[&str] = &["recording_events", "audio_visualization"];
 const TEST_TOPICS: &[&str] = &["recording_state", "frequency_bands"];
 
-/// Forget the test's session entry on exit. With the mock keyring installed
-/// this never reaches the developer's secret service, but the *cache* it also
-/// clears is process-wide, so dropping it still matters.
-struct KeyringCleanupGuard(AppId);
-impl Drop for KeyringCleanupGuard {
+/// Forget the test's session on exit. The token file is the run's own, but
+/// the *cache* it also clears is process-wide, so dropping it still matters.
+struct SessionCleanupGuard(AppId);
+impl Drop for SessionCleanupGuard {
     fn drop(&mut self) {
         let _ = session::forget(self.0);
     }
@@ -104,18 +104,10 @@ where
 /// → kill daemon → wait for `Disconnected` → restart daemon → wait for
 /// the *second* `Connected`. Any of those phases failing means the
 /// applet would be stuck on stale data after a daemon restart.
-///
-/// This once carried `#[ignore]`, on the grounds that minting a session writes
-/// to the developer's system keyring and a locked secret-service would hang —
-/// "there's no infrastructure for an in-process keyring shim from an
-/// integration test crate". There is: the daemon takes
-/// `SUPER_STT_KEYRING_MOCK=1`, which every test daemon is started with, and
-/// the client side of the mint is routed by [`common::install_mock_keyring`].
-/// Neither side reaches the real secret service, so it runs with the suite.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn subscription_recovers_from_daemon_restart() {
-    common::install_mock_keyring();
-    let _keyring_guard = KeyringCleanupGuard(APP_ID_RESTART);
+    common::require_own_state_dir();
+    let _session_guard = SessionCleanupGuard(APP_ID_RESTART);
     let (_socket_dir, http_socket) = socket_in_temp_dir();
 
     // 1. Boot the daemon and confirm /auth/request works under
@@ -126,7 +118,7 @@ async fn subscription_recovers_from_daemon_restart() {
     // 2. Drive the subscription with tight timings so the test doesn't
     //    sit on the default backoff for tens of seconds.
     let mut config =
-        WidgetSubscriptionConfig::new(_keyring_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
+        WidgetSubscriptionConfig::new(_session_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
     config.idle_timeout = Duration::from_secs(5);
     config.initial_backoff = DEFAULT_INITIAL_BACKOFF;
     config.max_backoff = DEFAULT_MAX_BACKOFF;
@@ -197,8 +189,8 @@ async fn subscription_recovers_from_daemon_restart() {
 /// forever.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
-    common::install_mock_keyring();
-    let _keyring_guard = KeyringCleanupGuard(APP_ID_IDLE);
+    common::require_own_state_dir();
+    let _session_guard = SessionCleanupGuard(APP_ID_IDLE);
     let (_socket_dir, http_socket) = socket_in_temp_dir();
 
     let _guard = start_daemon(&http_socket).await;
@@ -207,7 +199,7 @@ async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
     // and there are no recordings in flight, so a 2 s deadline will
     // fire before any natural traffic.
     let mut config =
-        WidgetSubscriptionConfig::new(_keyring_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
+        WidgetSubscriptionConfig::new(_session_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
     config.idle_timeout = Duration::from_secs(2);
 
     let mut stream: std::pin::Pin<
@@ -240,7 +232,7 @@ async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
     drop(stream);
 }
 
-/// `invalid_session` recovery: forge a stale token in the keyring and
+/// `invalid_session` recovery: forge a stale token in the token file and
 /// confirm the subscription drops it (`session::forget`) and re-mints
 /// via the consent path on the next iteration. Without this fix the
 /// subscription would loop forever on the same dead token.
@@ -249,8 +241,8 @@ async fn subscription_emits_idle_timeout_when_daemon_goes_quiet() {
 /// test needs an `AppId` of its own — see [`APP_ID_INVALID`].
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn subscription_recovers_from_invalid_session() {
-    common::install_mock_keyring();
-    let _keyring_guard = KeyringCleanupGuard(APP_ID_INVALID);
+    common::require_own_state_dir();
+    let _session_guard = SessionCleanupGuard(APP_ID_INVALID);
     let (_socket_dir, http_socket) = socket_in_temp_dir();
 
     let _guard = start_daemon(&http_socket).await;
@@ -268,10 +260,10 @@ async fn subscription_recovers_from_invalid_session() {
         TEST_SCOPES,
         &granted,
     )
-    .expect("plant fake token in keyring");
+    .expect("plant fake token");
 
     let mut config =
-        WidgetSubscriptionConfig::new(_keyring_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
+        WidgetSubscriptionConfig::new(_session_guard.0, TEST_APP_NAME, TEST_SCOPES, TEST_TOPICS);
     config.idle_timeout = Duration::from_secs(5);
 
     let mut stream: std::pin::Pin<

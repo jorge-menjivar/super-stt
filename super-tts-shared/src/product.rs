@@ -14,12 +14,11 @@ mod tests {
     use super_engine_protocol::scopes::{CORE_TOPICS, is_known_scope};
 
     /// The derived names are the ones Super TTS has always shipped with. A
-    /// change here moves a socket, a keyring entry or an override variable
+    /// change here moves a socket or an override variable
     /// out from under every installed client.
     #[test]
     fn derived_names_match_what_super_tts_shipped() {
         assert_eq!(SUPER_TTS.socket_file(), "super-tts-http.sock");
-        assert_eq!(SUPER_TTS.session_keyring_service(), "super-tts-session");
         assert_eq!(SUPER_TTS.http_host(), "tts.local");
         assert_eq!(SUPER_TTS.env("HTTP_SOCKET"), "SUPER_TTS_HTTP_SOCKET");
         assert_eq!(SUPER_TTS.consent_helper(), "super-tts-consent");

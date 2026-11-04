@@ -21,7 +21,7 @@ fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()
 }
 
-/// Write a credential to the system keyring
+/// Write a credential to the daemon's secrets file
 /// (HTTP `POST /backend/{source}/secret/{name}`).
 ///
 /// Replaces whatever was there. If the pipeline is running a model from this
@@ -48,7 +48,7 @@ pub async fn set_backend_secret(source: String, name: String, value: String) -> 
 /// Remove a stored credential
 /// (HTTP `DELETE /backend/{source}/secret/{name}`).
 ///
-/// The value leaves the keyring rather than being ignored — this is what a
+/// The value leaves the secrets file rather than being ignored — this is what a
 /// "disconnect account" control has to call for the promise it makes to be
 /// true.
 pub async fn clear_backend_secret(source: String, name: String) -> HttpResult<()> {
