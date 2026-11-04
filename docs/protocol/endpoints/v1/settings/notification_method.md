@@ -16,9 +16,8 @@ This setting controls the additional, human-facing notice.
 | `off`     | Log the failure only; never surface it.                                                        |
 
 `desktop` was called `dbus` before macOS support; the name now describes what
-the user sees rather than one platform's transport for it. This endpoint does
-not accept the old token. A `daemon.toml` that stores it still loads as
-`desktop`, and the daemon rewrites it under the new name.
+the user sees rather than one platform's transport for it. Neither this
+endpoint nor the config file accepts the old token.
 
 Desktop notifications use the freedesktop Desktop Notifications interface
 (`org.freedesktop.Notifications`) on the session bus on Linux, so they work on

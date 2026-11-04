@@ -7353,7 +7353,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
- "toml 1.1.0+spec-1.1.0",
  "urlencoding",
  "utoipa",
  "utoipa-axum",
