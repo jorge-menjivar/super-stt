@@ -111,7 +111,7 @@ Declare the lowest generation whose fields you use.
 
 | Generation | Adds                                                                         | First supported by |
 |------------|------------------------------------------------------------------------------|--------------------|
-| `v1`       | The whole contract today: transcription over [`POST /v1/transcribe`](./contract.md#post-v1transcribe), post-processing over [`POST /v1/process`](./contract.md#post-v1process), and every manifest field on this page. **Requires** [`[backend].id`](#backend) and [`[backend].product`](#backend). | Super Voice 0.3.0  |
+| `v1`       | The whole contract today: transcription over [`POST /v1/transcribe`](./contract.md#post-v1transcribe), post-processing over [`POST /v1/process`](./contract.md#post-v1process), synthesis over [`POST /v1/synthesize`](./contract.md#post-v1synthesize) with the cloned-voice routes for models that declare them, [`POST /v1/prepare`](./contract.md#post-v1prepare) for models that declare `prepare_files`, and every manifest field on this page. **Requires** [`[backend].id`](#backend) and [`[backend].product`](#backend). | Super Voice 0.3.0  |
 
 Super Voice starts a contract line of its own. Super STT's backends were on
 its `v1` to `v4`, and Super TTS's on its own `v1`; Super Voice's `v1` holds
@@ -686,7 +686,7 @@ It says nothing about *which* accelerator — CUDA, ROCm, Vulkan — since one
 asset can serve several models and one of them may have no GPU path; that
 detail lives on the asset that ends up installed (see
 [`[[assets.subprocess]]`](#assets)) and is reported per-backend as
-`installed_accel` (see [`GET /backend/list`](../endpoints/v1/backend/list.md)). The
+`installed_accel` (see [`GET /backend/list`](../endpoints/v1/backends.md)). The
 settings app uses `supported_devices` to present the device choice at load
 time. `"none"` marks a remote/online model with no local compute; mixing
 `"none"` with any local device (`"cpu"` / `"gpu"`) is a contradiction and the

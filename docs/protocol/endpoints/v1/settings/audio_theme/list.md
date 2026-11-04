@@ -16,7 +16,7 @@ List the audio cue themes available for selection via
 ```http
 GET /settings/audio_theme/list HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

@@ -21,12 +21,12 @@ sub-resource of its singular noun:
 
 | Path | Method | Does |
 |---|---|---|
-| [`/tts/voice/list`](#get-voicelist)        | `GET`    | Every stored voice, plus what the loaded model can do with them |
-| [`/tts/voice`](#post-voice)                | `POST`   | Add one — the body is the WAV itself |
-| [`/tts/voice/{id}`](#get-voiceid)          | `GET`    | One voice's metadata |
-| [`/tts/voice/{id}`](#patch-voiceid)        | `PATCH`  | Rename it |
-| [`/tts/voice/{id}`](#delete-voiceid)       | `DELETE` | Forget it and its recording |
-| [`/tts/voice/{id}/audio`](#get-voiceidaudio) | `GET`  | The stored clip, to play back |
+| [`/tts/voice/list`](#get-ttsvoicelist)        | `GET`    | Every stored voice, plus what the loaded model can do with them |
+| [`/tts/voice`](#post-ttsvoice)                | `POST`   | Add one — the body is the WAV itself |
+| [`/tts/voice/{id}`](#get-ttsvoiceid)          | `GET`    | One voice's metadata |
+| [`/tts/voice/{id}`](#patch-ttsvoiceid)        | `PATCH`  | Rename it |
+| [`/tts/voice/{id}`](#delete-ttsvoiceid)       | `DELETE` | Forget it and its recording |
+| [`/tts/voice/{id}/audio`](#get-ttsvoiceidaudio) | `GET`  | The stored clip, to play back |
 
 These are **cloned** voices. A model's **preset** voices are declared in its
 manifest and listed with the model on
@@ -72,7 +72,7 @@ Every stored voice, newest first.
 
 ```http
 GET /tts/voice/list HTTP/1.1
-Authorization: Bearer tts_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 ```json
@@ -124,7 +124,7 @@ string, which keeps adding a voice to one request.
 
 ```http
 POST /tts/voice?label=Ada&transcript=The%20quick%20brown%20fox HTTP/1.1
-Authorization: Bearer tts_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: audio/wav
 Content-Length: 1587244
 

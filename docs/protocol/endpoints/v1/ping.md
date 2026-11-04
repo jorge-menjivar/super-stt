@@ -19,7 +19,7 @@ a popup on failure), prefer [`GET /auth/status`](./auth/status.md)
 ```http
 GET /ping HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**

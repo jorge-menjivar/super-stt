@@ -33,8 +33,8 @@ complete text.
 
 ```http
 POST /tts/speak HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -122,7 +122,7 @@ one-at-a-time — adding an id later would break every client written against it
 | 400  | `invalid_value`     | `text` missing, empty, or over the cap; a `voice` the model does not declare or whose shape it did not opt into (see [`voice_kinds`](../../../backend/config.md#voices)); or a malformed field. |
 | 401  | `invalid_session`   | Token unknown / expired / `exe_changed` — re-auth and retry.                                |
 | 403  | `scope_denied`      | Token lacks the `speak` scope.                                                              |
-| 409  | `model_not_loaded`  | No model is loaded. Load one via [`POST /tts/pipeline/1/model`](./pipeline/model.md#post-pipelinestagemodel) and retry.        |
+| 409  | `model_not_loaded`  | No model is loaded. Load one via [`POST /tts/pipeline/1/model`](./pipeline/model.md#post-ttspipelinestagemodel) and retry.        |
 | 429  | `rate_limited`      | Too many requests; back off.                                                                |
 | 500  | —                   | The backend failed, or the output device could not be opened. `message` carries the reason.  |
 

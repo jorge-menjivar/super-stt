@@ -12,23 +12,23 @@ so a client learns one shape and applies it anywhere in the pipeline:
 
 | Verb | Path | Meaning |
 |---|---|---|
-| Read the backend | [`GET /tts/pipeline/{stage}`](./pipeline/stage.md#get-pipelinestage) | Which backend fills this stage, and whether it is switched on |
+| Read the backend | [`GET /tts/pipeline/{stage}`](./pipeline/stage.md#get-ttspipelinestage) | Which backend fills this stage, and whether it is switched on |
 | List its backends | [`GET /tts/pipeline/{stage}/backend/list`](./pipeline/backend-list.md) | The installed backends that can fill this stage |
-| Select backend | [`POST /tts/pipeline/{stage}`](./pipeline/stage.md#post-pipelinestage) | Which installed backend fills this stage |
-| Deselect backend | [`DELETE /tts/pipeline/{stage}`](./pipeline/stage.md#delete-pipelinestage) | Empty the stage, forgetting its model |
-| Read its model | [`GET /tts/pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel) | What it is pointed at, whether that is up, and the device it runs on |
-| Run a model | [`POST /tts/pipeline/{stage}/model`](./pipeline/model.md#post-pipelinestagemodel) | Load and run one of that backend's models |
+| Select backend | [`POST /tts/pipeline/{stage}`](./pipeline/stage.md#post-ttspipelinestage) | Which installed backend fills this stage |
+| Deselect backend | [`DELETE /tts/pipeline/{stage}`](./pipeline/stage.md#delete-ttspipelinestage) | Empty the stage, forgetting its model |
+| Read its model | [`GET /tts/pipeline/{stage}/model`](./pipeline/model.md#get-ttspipelinestagemodel) | What it is pointed at, whether that is up, and the device it runs on |
+| Run a model | [`POST /tts/pipeline/{stage}/model`](./pipeline/model.md#post-ttspipelinestagemodel) | Load and run one of that backend's models |
 | List its models | [`GET /tts/pipeline/{stage}/model/list`](./pipeline/model-list.md) | The models the backend filling this stage serves |
-| Stop it | [`DELETE /tts/pipeline/{stage}/model`](./pipeline/model.md#delete-pipelinestagemodel) | Unload, keeping the backend selected |
-| Abandon a load | [`POST /tts/pipeline/{stage}/model/cancel`](./pipeline/model.md#post-pipelinestagemodelcancel) | Stop the load this stage has in flight, download included |
-| Reload in place | [`POST /tts/pipeline/{stage}/model/reload`](./pipeline/model.md#post-pipelinestagemodelreload) | Re-instantiate it to pick up changed secrets or options |
-| Read a model's device | [`GET /tts/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice) | Where one of that backend's models runs |
-| Set it | [`POST /tts/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#post-pipelinestagemodelmodeldevice) | Run it on the CPU or the GPU, reloading if it is loaded |
-| List a model's devices | [`GET /tts/pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-pipelinestagemodelmodeldevicelist) | What this install can run that model on |
-| List the backend's devices | [`GET /tts/pipeline/{stage}/device/list`](./pipeline/device.md#get-pipelinestagedevicelist) | What this install can run that backend on, for this stage |
+| Stop it | [`DELETE /tts/pipeline/{stage}/model`](./pipeline/model.md#delete-ttspipelinestagemodel) | Unload, keeping the backend selected |
+| Abandon a load | [`POST /tts/pipeline/{stage}/model/cancel`](./pipeline/model.md#post-ttspipelinestagemodelcancel) | Stop the load this stage has in flight, download included |
+| Reload in place | [`POST /tts/pipeline/{stage}/model/reload`](./pipeline/model.md#post-ttspipelinestagemodelreload) | Re-instantiate it to pick up changed secrets or options |
+| Read a model's device | [`GET /tts/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-ttspipelinestagemodelmodeldevice) | Where one of that backend's models runs |
+| Set it | [`POST /tts/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#post-ttspipelinestagemodelmodeldevice) | Run it on the CPU or the GPU, reloading if it is loaded |
+| List a model's devices | [`GET /tts/pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-ttspipelinestagemodelmodeldevicelist) | What this install can run that model on |
+| List the backend's devices | [`GET /tts/pipeline/{stage}/device/list`](./pipeline/device.md#get-ttspipelinestagedevicelist) | What this install can run that backend on, for this stage |
 | Read a model's language | [`GET /tts/pipeline/{stage}/model/{model}/language`](./pipeline/language.md) | The language one of that backend's models speaks in |
-| Set it | [`POST /tts/pipeline/{stage}/model/{model}/language`](./pipeline/language.md#post-pipelinestagemodelmodellanguage) | Pin it, overriding the global setting |
-| List a model's languages | [`GET /tts/pipeline/{stage}/model/{model}/language/list`](./pipeline/language.md#get-pipelinestagemodelmodellanguagelist) | What that model can be pinned to |
+| Set it | [`POST /tts/pipeline/{stage}/model/{model}/language`](./pipeline/language.md#post-ttspipelinestagemodelmodellanguage) | Pin it, overriding the global setting |
+| List a model's languages | [`GET /tts/pipeline/{stage}/model/{model}/language/list`](./pipeline/language.md#get-ttspipelinestagemodelmodellanguagelist) | What that model can be pinned to |
 
 `/tts/pipeline/{stage}` and `/tts/pipeline/{stage}/model` draw a deliberate split:
 choosing a backend is cheap and cannot fail for runtime reasons, while loading a
@@ -70,14 +70,14 @@ different model.
 
 | Was | Now |
 |---|---|
-| `GET /active_backend`        | [`GET /tts/pipeline/1`](./pipeline/stage.md#get-pipelinestage) (`stage.source`) plus [`GET /tts/pipeline/1/model`](./pipeline/model.md#get-pipelinestagemodel) |
-| `POST /active_backend`       | [`POST /tts/pipeline/1`](./pipeline/stage.md#post-pipelinestage)   |
-| `DELETE /active_backend`     | [`DELETE /tts/pipeline/1`](./pipeline/stage.md#delete-pipelinestage) |
-| `GET /active_model`          | [`GET /tts/pipeline/1/model`](./pipeline/model.md#get-pipelinestagemodel) |
-| `POST /active_model`         | [`POST /tts/pipeline/1/model`](./pipeline/model.md#post-pipelinestagemodel) |
-| `DELETE /active_model`       | [`DELETE /tts/pipeline/1/model`](./pipeline/model.md#delete-pipelinestagemodel) |
-| `POST /active_model/cancel`  | [`POST /tts/pipeline/1/model/cancel`](./pipeline/model.md#post-pipelinestagemodelcancel) |
-| `POST /active_model/reload`  | [`POST /tts/pipeline/1/model/reload`](./pipeline/model.md#post-pipelinestagemodelreload) |
+| `GET /active_backend`        | [`GET /tts/pipeline/1`](./pipeline/stage.md#get-ttspipelinestage) (`stage.source`) plus [`GET /tts/pipeline/1/model`](./pipeline/model.md#get-ttspipelinestagemodel) |
+| `POST /active_backend`       | [`POST /tts/pipeline/1`](./pipeline/stage.md#post-ttspipelinestage)   |
+| `DELETE /active_backend`     | [`DELETE /tts/pipeline/1`](./pipeline/stage.md#delete-ttspipelinestage) |
+| `GET /active_model`          | [`GET /tts/pipeline/1/model`](./pipeline/model.md#get-ttspipelinestagemodel) |
+| `POST /active_model`         | [`POST /tts/pipeline/1/model`](./pipeline/model.md#post-ttspipelinestagemodel) |
+| `DELETE /active_model`       | [`DELETE /tts/pipeline/1/model`](./pipeline/model.md#delete-ttspipelinestagemodel) |
+| `POST /active_model/cancel`  | [`POST /tts/pipeline/1/model/cancel`](./pipeline/model.md#post-ttspipelinestagemodelcancel) |
+| `POST /active_model/reload`  | [`POST /tts/pipeline/1/model/reload`](./pipeline/model.md#post-ttspipelinestagemodelreload) |
 | `GET /models`                | [`GET /tts/pipeline/1/model/list`](./pipeline/model-list.md)       |
 | `GET`/`POST /active_device`  | [`/tts/pipeline/1/model/{model}/device`](./pipeline/device.md)     |
 | `/backends/{source}/models/{model}/language` | [`/tts/pipeline/1/model/{model}/language`](./pipeline/language.md) |
@@ -90,7 +90,7 @@ compatibility shim that was always an empty string — is gone.
 is a property of a model — a small preset-voice model runs fine on the CPU
 while the cloning model beside it needs the GPU — so it is now read and set per
 model, at
-[`/tts/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-pipelinestagemodelmodeldevice).
+[`/tts/pipeline/{stage}/model/{model}/device`](./pipeline/device.md#get-ttspipelinestagemodelmodeldevice).
 A daemon upgraded from the global preference keeps loading models where it
 always did: a model with no device of its own falls back to the old global
 value in `daemon.ron`, and takes its own the first time one is set.
@@ -125,7 +125,7 @@ just not right now", which is what the user meant.
 ## The model object
 
 One stage's model slot, from
-[`GET /tts/pipeline/{stage}/model`](./pipeline/model.md#get-pipelinestagemodel).
+[`GET /tts/pipeline/{stage}/model`](./pipeline/model.md#get-ttspipelinestagemodel).
 
 | Field    | Type    | Notes                                                                   |
 |----------|---------|-------------------------------------------------------------------------|
@@ -144,7 +144,7 @@ One stage's model slot, from
 
 What the model *could* run on is deliberately not here: that list costs a fresh
 probe of the host's accelerators, and
-[`GET /tts/pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-pipelinestagemodelmodeldevicelist)
+[`GET /tts/pipeline/{stage}/model/{model}/device/list`](./pipeline/device.md#get-ttspipelinestagemodelmodeldevicelist)
 is the endpoint that answers it. Filling a device picker means one call for the
 options and this one for the current value.
 
@@ -185,8 +185,8 @@ Every stage, in order.
 
 ```http
 GET /tts/pipeline HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -214,7 +214,7 @@ the array rather than indexing `[0]` and calling it "the model": the array is
 what grows.
 
 Which model that backend is running is
-[`GET /tts/pipeline/1/model`](./pipeline/model.md#get-pipelinestagemodel) — one
+[`GET /tts/pipeline/1/model`](./pipeline/model.md#get-ttspipelinestagemodel) — one
 call per position, deliberately not folded in here, because a stage report
 should not have to wait on a load in flight.
 
@@ -233,8 +233,8 @@ says:
 
 ```http
 GET /tts/pipeline/2 HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 ```http

@@ -24,7 +24,7 @@ slow-consumer behavior, revoked / shutdown frames — live in
 ```http
 GET /events?topics=recording_state,frequency_bands HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Accept: text/event-stream
 ```
 

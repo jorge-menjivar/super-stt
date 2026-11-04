@@ -38,7 +38,7 @@ daemon can detect.
 ```http
 POST /settings/write_method/test HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 No request body.

@@ -1,10 +1,23 @@
 # `/settings/language`
 
-Read and set the **global Primary Language** — the default transcription
-language applied to any multilingual model that supports it. A value is a
-BCP-47 tag (`en`, `es-MX`, `es-419`) or the reserved `auto` (auto-detect);
-absent means no preference (each model uses its own `primary_language`). Per-model
-overrides live at [`/backend/{backend_id}/models/{model}/settings/language`](../pipeline/language.md).
+Read and set the **global Primary Language** — the default language applied
+to any multilingual model that supports it, for both features: the language
+transcribed in and the language spoken in. A value is a BCP-47 tag (`en`,
+`es-MX`, `es-419`) or the reserved `auto` (auto-detect); absent means no
+preference (each model uses its own `primary_language`). Per-model overrides
+live at [`/stt/pipeline/{stage}/model/{model}/language`](../pipeline/language.md)
+and [`/tts/pipeline/{stage}/model/{model}/language`](../tts/pipeline/language.md).
+
+This setting is the middle term of a three-step resolution: a model's own
+override wins, then this value, then the model's `primary_language`. Setting it
+here spares a user who speaks one language from pinning every model
+individually, and a model that cannot speak the chosen tag ignores it rather
+than failing — the resolution each model actually arrives at is what its
+per-model `language` endpoint reports.
+
+What this endpoint accepts is listed by `GET /settings/language/list`, kept
+separate for the same reason every "is set" / "may be set" pair on this
+surface is: only one of the two changes when the user picks a language.
 
 ## Auth
 
@@ -19,7 +32,7 @@ overrides live at [`/backend/{backend_id}/models/{model}/settings/language`](../
 ```http
 POST /settings/language HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -29,7 +42,7 @@ Content-Type: application/json
 
 | Field      | Type   | Required | Notes                                          |
 |------------|--------|----------|------------------------------------------------|
-| `language` | string | yes      | A BCP-47 tag or `auto`. To clear, use `DELETE`. |
+| `language` | string | yes      | A tag `GET /settings/language/list` offers, or `auto`. Any other is refused. To clear, use `DELETE`. |
 
 **Response (200):**
 
@@ -47,7 +60,7 @@ Content-Type: application/json
 ```http
 GET /settings/language HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -70,7 +83,7 @@ Clear the global Primary Language (back to no preference).
 ```http
 DELETE /settings/language HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -81,6 +94,12 @@ Content-Type: application/json
 
 { "status": "success", "language": null }
 ```
+
+**Errors (`POST`):**
+
+| HTTP | `error_code`           | Meaning                                                  |
+|------|------------------------|----------------------------------------------------------|
+| 400  | `unsupported_language` | `language` is not one `/settings/language/list` offers |
 
 **Errors (all methods):**
 

@@ -11,7 +11,7 @@ independently, so one stage's cancel is never a licence to abandon another's
 download.
 
 Emptying the stage entirely — forgetting the backend along with the model — is
-[`DELETE /tts/pipeline/{stage}`](./stage.md#delete-pipelinestage) instead. The
+[`DELETE /tts/pipeline/{stage}`](./stage.md#delete-ttspipelinestage) instead. The
 [auth](../pipeline.md#auth), the [model object](../pipeline.md#the-model-object)
 and its [`device`](../pipeline.md#the-device-object) and
 [`switch`](../pipeline.md#the-switch-object) sub-objects are described once in
@@ -27,7 +27,7 @@ A model is named by a `(model, source)` pair:
 Two backends may serve the same `name`, so resolving an omitted `source` by
 scanning for whichever backend happens to serve it would load an engine the
 caller did not ask for — and that choice is persisted. Select the backend first
-with [`POST /tts/pipeline/{stage}`](./stage.md#post-pipelinestage), or name
+with [`POST /tts/pipeline/{stage}`](./stage.md#post-ttspipelinestage), or name
 `source` explicitly.
 
 ## `GET /tts/pipeline/{stage}/model`
@@ -40,8 +40,8 @@ whole Model section from a single request.
 
 ```http
 GET /tts/pipeline/1/model HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -63,7 +63,7 @@ Authorization: Bearer tts_…64hex…
 ```
 
 `model` is the **selection**, not the running instance: it survives an
-[unload](#delete-pipelinestagemodel), so a client can offer to load the same
+[unload](#delete-ttspipelinestagemodel), so a client can offer to load the same
 model again — onto another device, say — without the user picking it a second
 time. `loaded` is what says whether it is up, and what a Speak button should be
 gated on.
@@ -79,7 +79,7 @@ describe what was there before — the previous model keeps speaking until the
 new one is up. What the loaded model can *do* — its voices, its input cap, its
 output rate — is not here: that is the model's manifest entry on
 [`GET /backend/list`](../../backends.md), plus the loaded-model summary
-[`GET /tts/voice/list`](../voice.md#get-voicelist) carries for a voices UI.
+[`GET /tts/voice/list`](../voice.md#get-ttsvoicelist) carries for a voices UI.
 
 **Phase values** (`switch.phase`):
 
@@ -89,7 +89,7 @@ output rate — is not here: that is the model's manifest entry on
 | `downloading`   | Pulling model files; the `download` sub-object is populated.            |
 | `loading_model` | Files are in place; weights are being loaded onto the chosen device.    |
 | `completed`     | The load finished; cleared on the next read after `ready`.              |
-| `cancelled`     | [`POST …/model/cancel`](#post-pipelinestagemodelcancel) interrupted it. |
+| `cancelled`     | [`POST …/model/cancel`](#post-ttspipelinestagemodelcancel) interrupted it. |
 | `error`         | The load failed (network, disk, hash mismatch, a missing secret, …).    |
 
 **Errors:** `404 unknown_stage`, plus the auth errors below.
@@ -100,7 +100,7 @@ Run a model in this stage. The call returns as soon as the switch is *started*,
 not when it finishes: a load downloads weights and allocates a device, which can
 take minutes. The status is `200`, so it does not tell you that — the
 `"Model switch started"` message does, and progress is visible by polling
-[`GET /tts/pipeline/{stage}/model`](#get-pipelinestagemodel) or, better, by
+[`GET /tts/pipeline/{stage}/model`](#get-ttspipelinestagemodel) or, better, by
 subscribing to
 [`GET /events?topics=daemon_status_changed,download_progress`](../../events.md).
 
@@ -108,8 +108,8 @@ subscribing to
 
 ```http
 POST /tts/pipeline/1/model HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -133,7 +133,7 @@ Content-Type: application/json
 ```
 
 A `200` here means "the switch was accepted and has begun", never "the model is
-loaded". Read [`GET /tts/pipeline/{stage}/model`](#get-pipelinestagemodel) for that:
+loaded". Read [`GET /tts/pipeline/{stage}/model`](#get-ttspipelinestagemodel) for that:
 `loaded` is the field that answers it, and `switch` reports the operation still
 in flight.
 
@@ -150,7 +150,7 @@ first. Asking for the model that is already running changes nothing and
 interrupts nothing.
 
 The model loads on its own
-[device](./device.md#get-pipelinestagemodelmodeldevice), which is not part of
+[device](./device.md#get-ttspipelinestagemodelmodeldevice), which is not part of
 this request: set it first, and it is remembered for every later load of that
 model. Changing the device of a model that is **already running** does not need
 this endpoint at all — `POST` the new device and the daemon reloads it in
@@ -181,15 +181,15 @@ their choice — erasing the selection here was the old behavior, and it emptied
 the settings card every time someone unloaded a model to reclaim VRAM.
 
 Forgetting the model as well is
-[`DELETE /tts/pipeline/{stage}`](./stage.md#delete-pipelinestage), which drops the
+[`DELETE /tts/pipeline/{stage}`](./stage.md#delete-ttspipelinestage), which drops the
 backend with it.
 
 **Request:**
 
 ```http
 DELETE /tts/pipeline/1/model HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -221,8 +221,8 @@ different switch afterwards.
 
 ```http
 POST /tts/pipeline/1/model/cancel HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 No request body.
@@ -234,7 +234,7 @@ No request body.
 ```
 
 After a successful cancel the next
-[`GET /tts/pipeline/{stage}/model`](#get-pipelinestagemodel) reports the previous
+[`GET /tts/pipeline/{stage}/model`](#get-ttspipelinestagemodel) reports the previous
 model as `model` and the abandoned load as `switch: { "phase": "cancelled", … }`,
 cleared on the next switch attempt.
 
@@ -255,7 +255,7 @@ device preference — so a changed
 [secret or option](../../backends/options.md) takes effect without picking a
 different model. A stage with nothing loaded answers `200` and does nothing.
 
-Unlike [`POST /tts/pipeline/{stage}/model`](#post-pipelinestagemodel), which starts
+Unlike [`POST /tts/pipeline/{stage}/model`](#post-ttspipelinestagemodel), which starts
 a possibly-long switch and returns before it completes, reload is
 **synchronous**: the
 response is sent after the model has been re-instantiated. On success the
@@ -276,8 +276,8 @@ the one being torn down — including when the reload comes from a
 
 ```http
 POST /tts/pipeline/1/model/reload HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 No request body.

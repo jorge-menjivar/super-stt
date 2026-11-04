@@ -22,8 +22,8 @@ which is the whole reason this endpoint exists.
 
 ```http
 POST /tts/speak/stop HTTP/1.1
-Host: tts.local
-Authorization: Bearer tts_…64hex…
+Host: voice.local
+Authorization: Bearer …64hex…
 ```
 
 No request body.

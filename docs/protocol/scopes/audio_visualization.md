@@ -8,13 +8,15 @@ The daemon runs the FFT and broadcasts ready-to-render frequency bands; this
 scope grants those bands and nothing else. Raw PCM is deliberately **not**
 exposed on the wire — a visualizer gets the bar heights it needs without
 receiving reconstructable audio. The COSMIC applet shipped with this repo is a
-client of this scope (plus [`recording_events`](./recording_events.md)).
+client of this scope (plus [`recording_events`](./recording_events.md) and
+[`playback_events`](./playback_events.md)).
 
 ## Topics
 
 | Topic             | Carries                                                                                  |
 |-------------------|------------------------------------------------------------------------------------------|
-| `frequency_bands` | `{ bands_b64, sample_rate, total_energy }` — base64-encoded f32 visualization bands       |
+| `frequency_bands` | `{ bands_b64, sample_rate, total_energy }` — base64-encoded f32 visualization bands of the microphone |
+| `playback_frequency_bands` | The same shape, of the speech being played. `sample_rate` is the backend's rate |
 
 Full payload semantics and the SSE framing rules live on
 [`/events`](../endpoints/v1/events.md). A subscription that requests a topic

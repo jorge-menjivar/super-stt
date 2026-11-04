@@ -18,8 +18,8 @@ separate endpoints, as they are for the device:
 
 | | is set | may be set |
 |---|---|---|
-| device   | [`/device`](./device.md#get-pipelinestagemodelmodeldevice)   | [`/device/list`](./device.md#get-pipelinestagemodelmodeldevicelist) |
-| language | `/language`                                                  | [`/language/list`](#get-pipelinestagemodelmodellanguagelist)        |
+| device   | [`/device`](./device.md#get-sttpipelinestagemodelmodeldevice)   | [`/device/list`](./device.md#get-sttpipelinestagemodelmodeldevicelist) |
+| language | `/language`                                                  | [`/language/list`](#get-sttpipelinestagemodelmodellanguagelist)        |
 
 `{model}` is the model name as
 [`GET /stt/pipeline/{stage}/model/list`](./model-list.md) spells it; names contain
@@ -57,7 +57,7 @@ Returns the daemon's full resolution for the named model.
 ```http
 GET /stt/pipeline/1/model/whisper-large-v3/language HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -79,7 +79,7 @@ For a non-multilingual model: `"multilingual": false`, `"effective": null`,
 `"override": null`, `"primary": "en"`, `"source": "default"`.
 
 The tags this model accepts are **not** here — they are
-[`GET .../language/list`](#get-pipelinestagemodelmodellanguagelist), the way a
+[`GET .../language/list`](#get-sttpipelinestagemodelmodellanguagelist), the way a
 model's device list is not part of its device. This endpoint answers what is
 set; that one answers what may be set, and only one of them changes when the
 user picks a language.
@@ -94,7 +94,7 @@ What `POST` will accept for this model: the tags it serves, plus the reserved
 ```http
 GET /stt/pipeline/1/model/whisper-large-v3/language/list HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
@@ -112,7 +112,7 @@ discovers by choosing it.
 
 **Empty for a monolingual model**, which has nothing to choose however many tags
 its manifest lists — the same shape
-[`/device/list`](./device.md#get-pipelinestagemodelmodeldevicelist) answers with
+[`/device/list`](./device.md#get-sttpipelinestagemodelmodeldevicelist) answers with
 for a model that runs remotely. A client hides the control on an empty list
 rather than special-casing a status.
 
@@ -123,7 +123,7 @@ rather than special-casing a status.
 ```http
 POST /stt/pipeline/1/model/whisper-large-v3/language HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 { "language": "es-419" }
@@ -131,7 +131,7 @@ Content-Type: application/json
 
 | Field      | Type   | Required | Notes                                                              |
 |------------|--------|----------|--------------------------------------------------------------------|
-| `language` | string | yes      | One of the tags [`/language/list`](#get-pipelinestagemodelmodellanguagelist) offers. To clear, `DELETE`. |
+| `language` | string | yes      | One of the tags [`/language/list`](#get-sttpipelinestagemodelmodellanguagelist) offers. To clear, `DELETE`. |
 
 **Response (200):** the resolution block (as `GET`).
 
@@ -144,7 +144,7 @@ Clear the override (back to Automatic).
 ```http
 DELETE /stt/pipeline/1/model/whisper-large-v3/language HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):** the resolution block (as `GET`).
@@ -153,7 +153,7 @@ Authorization: Bearer stt_…64hex…
 
 | HTTP | `message`              | Meaning                                                                                                      |
 |------|------------------------|--------------------------------------------------------------------------------------------------------------|
-| 400  | `unsupported_language` | `language` is not one [`/language/list`](#get-pipelinestagemodelmodellanguagelist) offers — a tag the model does not serve, or any tag at all for a monolingual model |
+| 400  | `unsupported_language` | `language` is not one [`/language/list`](#get-sttpipelinestagemodelmodellanguagelist) offers — a tag the model does not serve, or any tag at all for a monolingual model |
 | 401  | `invalid_session`      | Token unknown / expired / `exe_changed`                                                                      |
 | 403  | `scope_denied`         | Token lacks the `settings` scope                                                                             |
 | 404  | `unknown_backend`      | No installed backend has that `source`                                                                       |

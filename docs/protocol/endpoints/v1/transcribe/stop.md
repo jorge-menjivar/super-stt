@@ -41,7 +41,7 @@ that issued the stop.
 ```http
 POST /stt/transcribe/stop HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 No request body.

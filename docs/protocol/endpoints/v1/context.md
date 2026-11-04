@@ -131,7 +131,7 @@ An existing context keeps its place in the list; a new one is appended.
 ```http
 POST /stt/context/coding HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 Content-Type: application/json
 
 {
@@ -208,7 +208,7 @@ request. `id` and `context` are both `null` when nothing is active.
 
 ## `GET /stt/backend/{backend_id}/context`
 
-`{backend_id}` is the backend's `source` as [`GET /backend/list`](./backend/list.md)
+`{backend_id}` is the backend's `source` as [`GET /backend/list`](./backends.md)
 reports it, percent-encoded.
 
 **Response (200):**

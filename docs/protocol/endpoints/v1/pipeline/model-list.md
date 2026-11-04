@@ -5,13 +5,13 @@ stage's role**. This is what fills a model picker.
 
 Each entry is a `[name, source]` pair, where `source` is the repo id of the
 backend serving it (see [`docs/protocol/backend/`](../../../backend/)). That is
-the pair [`POST /stt/pipeline/{stage}/model`](./model.md#post-pipelinestagemodel)
+the pair [`POST /stt/pipeline/{stage}/model`](./model.md#post-sttpipelinestagemodel)
 accepts.
 
 ## Scoped twice, and both halves matter
 
 **To the stage's backend.** Only the backend
-[filling this stage](./stage.md#post-pipelinestage) is consulted. A model from
+[filling this stage](./stage.md#post-sttpipelinestage) is consulted. A model from
 another backend cannot load here, so offering it gives the user a pick that
 fails. Empty when the stage has no backend selected.
 
@@ -22,7 +22,7 @@ successfully and then fails on every recording — after the user has already
 spoken.
 
 The full catalog, every installed backend and every role, is
-[`GET /backend/list`](../backend/list.md). This endpoint is the narrow per-stage read,
+[`GET /backend/list`](../backends.md). This endpoint is the narrow per-stage read,
 answered by the daemon precisely so a client does not have to re-derive roles
 for itself.
 
@@ -48,7 +48,7 @@ for itself.
 ```http
 GET /stt/pipeline/1/model/list HTTP/1.1
 Host: voice.local
-Authorization: Bearer stt_…64hex…
+Authorization: Bearer …64hex…
 ```
 
 **Response (200):**
