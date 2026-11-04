@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! CLI integration test: `super-stt-cli record` toggle dispatch.
+//! CLI integration test: `voice record` toggle dispatch.
 //!
 //! Pins the protocol-correct behavior added when the toggle UX moved
 //! from the daemon to the CLI (see
@@ -22,7 +22,7 @@
 //! manually with:
 //!
 //! ```bash
-//! cargo test -p super-stt-cli --test cmd_record_toggle -- --ignored --nocapture
+//! cargo test -p super-voice-cli --test cmd_record_toggle -- --ignored --nocapture
 //! ```
 
 use std::io::Read;
@@ -32,10 +32,10 @@ use std::time::Duration;
 use super_engine_test_daemon::TestDaemon;
 use super_stt_shared::product::SUPER_VOICE;
 
-const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-stt-cli");
+const DAEMON_BIN: &str = env!("CARGO_BIN_EXE_super-voice-cli");
 
 /// Locate the daemon binary next to the CLI binary's target dir.
-/// `cargo test -p super-stt-cli` builds the daemon as a workspace
+/// `cargo test -p super-voice-cli` builds the daemon as a workspace
 /// dependency, so they live in the same `target/<profile>/` slot.
 fn locate_daemon_bin() -> PathBuf {
     let cli_path = PathBuf::from(DAEMON_BIN); // misnamed env var: this points to cli

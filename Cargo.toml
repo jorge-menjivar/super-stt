@@ -2,14 +2,13 @@
   resolver        = "2"
   members         = [
     "super-stt-app",
-    "super-stt-cli",
+    "super-voice-cli",
     "super-voice-consent",
     "super-voice-daemon",
     "super-voice-indexer",
     "super-stt-install",
     "super-stt-shared",
     "super-tts-app",
-    "super-tts-cli",
     "super-tts-shared",
     "super-voice-registry-types",
   ]
@@ -28,13 +27,12 @@
   # `cargo build`/`run`/`test` (no `--workspace`) stays lean.
   default-members = [
     "super-stt-app",
-    "super-stt-cli",
+    "super-voice-cli",
     "super-voice-consent",
     "super-voice-daemon",
     "super-stt-install",
     "super-stt-shared",
     "super-tts-app",
-    "super-tts-cli",
     "super-tts-shared",
     "super-voice-registry-types",
   ]

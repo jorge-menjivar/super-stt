@@ -7,7 +7,7 @@
   Linux the DE runs `stt record --write` when the key is pressed; macOS has no
   such place to bind a key to a command, so this keeps a small client alive
   that owns the key and does the same thing on each press. See
-  super-stt-cli/src/hotkey.rs.
+  super-voice-cli/src/hotkey.rs.
 
   Its own agent rather than a thread in the daemon: the daemon stays headless
   and knows nothing about input, and the shortcut can be stopped, rebound or
@@ -42,16 +42,16 @@
       see `bundle_helpers_dir` in super-voice-daemon's auth/consent.rs.
     -->
     <key>BundleProgram</key>
-    <string>Contents/Helpers/super-stt-cli</string>
+    <string>Contents/Helpers/super-voice-cli</string>
 
     <!--
-      `super-stt-cli/src/main.rs` parses these in a test
+      `super-voice-cli/src/main.rs` parses these in a test
       (`hotkey_launch_agent_arguments_parse`), so a rename in the CLI cannot
       leave this agent passing arguments clap rejects.
     -->
     <key>ProgramArguments</key>
     <array>
-        <string>super-stt-cli</string>
+        <string>super-voice-cli</string>
         <string>hotkey</string>
         <string>--key</string>
         <string>__BINDING__</string>

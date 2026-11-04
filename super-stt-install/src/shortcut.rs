@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Super STT's own post-install steps: the COSMIC `Super+Space` shortcut to
-//! `stt record --write`. They run after super-engine-installer's shared
+//! Super Voice's own post-install steps: the COSMIC `Super+Space` shortcut to
+//! `voice record --write`. They run after super-engine-installer's shared
 //! steps, as [`after_install`], and are best-effort like them: a failure is
 //! logged, and the install still succeeds.
 
@@ -11,7 +11,7 @@ use super_engine_installer::{AfterInstall, Components};
 /// One shortcut step, in the order [`plan`] returns them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
-    /// Rewrite a legacy `~/.local/bin/stt` shortcut reference, if present.
+    /// Rewrite a shortcut that runs Super STT's `stt` to run `voice`.
     MigrateShortcut,
     /// Interactively offer to add the `Super+Space` shortcut.
     PromptShortcut,
@@ -42,45 +42,74 @@ pub fn after_install(done: &AfterInstall<'_>) {
     }
 }
 
-/// Rewrite a legacy `<home>/.local/bin/stt ` shortcut command to
-/// `<prefix>/bin/stt `, since the wrapper no longer lives in the removed
-/// per-user layout. Returns `None` when `content` doesn't reference the
-/// legacy path (nothing to migrate).
+/// Rewrite every shortcut that runs Super STT's `stt` — from wherever its
+/// wrapper was installed, `~/.local/bin` or the prefix — to run
+/// `<prefix>/bin/voice`, and rename its "Super STT" description. `stt` is
+/// gone, so a shortcut left on it would do nothing. The arguments carry over:
+/// `record` is `voice record` too, and `stt stop` is `voice record stop`.
+/// Returns `None` when no shortcut runs `stt` (nothing to migrate).
 #[must_use]
-pub fn migrate_shortcut_content(content: &str, home: &str, prefix: &str) -> Option<String> {
-    let legacy = format!("{home}/.local/bin/stt ");
-    if !content.contains(&legacy) {
-        return None;
+pub fn migrate_shortcut_content(content: &str, prefix: &str) -> Option<String> {
+    const SPAWN: &str = "Spawn(\"";
+    let mut out = String::with_capacity(content.len());
+    let mut rest = content;
+    let mut changed = false;
+    while let Some(at) = rest.find(SPAWN) {
+        let start = at + SPAWN.len();
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let end = rest.find('"').unwrap_or(rest.len());
+        let command = &rest[..end];
+        let program_end = command.find(' ').unwrap_or(command.len());
+        let program = &command[..program_end];
+        if program == "stt" || program.ends_with("/stt") {
+            let args = &command[program_end..];
+            let args = args
+                .strip_prefix(" stop")
+                .map_or_else(|| args.to_string(), |tail| format!(" record stop{tail}"));
+            out.push_str(prefix);
+            out.push_str("/bin/voice");
+            out.push_str(&args);
+            changed = true;
+        } else {
+            out.push_str(command);
+        }
+        rest = &rest[end..];
     }
-    let replacement = format!("{prefix}/bin/stt ");
-    Some(content.replace(&legacy, &replacement))
+    out.push_str(rest);
+    changed.then(|| {
+        out.replace(
+            "description: Some(\"Super STT\")",
+            "description: Some(\"Super Voice\")",
+        )
+    })
 }
 
-/// Build the `Spawn(...)` shortcut entry block for `stt_command`, RON-shaped
+/// Build the `Spawn(...)` shortcut entry block for `command`, RON-shaped
 /// like the rest of the COSMIC shortcuts file.
-fn shortcut_entry(stt_command: &str) -> String {
+fn shortcut_entry(command: &str) -> String {
     format!(
-        "    (\n        modifiers: [\n            Super,\n        ],\n        key: \"space\",\n        description: Some(\"Super STT\"),\n    ): Spawn(\"{stt_command}\"),\n"
+        "    (\n        modifiers: [\n            Super,\n        ],\n        key: \"space\",\n        description: Some(\"Super Voice\"),\n    ): Spawn(\"{command}\"),\n"
     )
 }
 
-/// Add a `Super+Space` → `stt_command` shortcut entry to `content` (the
+/// Add a `Super+Space` → `command` shortcut entry to `content` (the
 /// COSMIC custom-shortcuts file's current text), subject to two coarse
-/// checks: skip (return `None`) if a "Super STT" entry already exists, or if
+/// checks: skip (return `None`) if a "Super Voice" entry already exists, or if
 /// `key: "space"` is already bound to a `Super`-modified shortcut
 /// (approximated as both substrings appearing anywhere in `content`). Empty or
 /// `{}`-only content gets the full-file template; otherwise the entry is
 /// inserted before the final closing brace.
 #[must_use]
-pub fn shortcut_with_super_stt(content: &str, stt_command: &str) -> Option<String> {
-    if content.contains("Super STT") {
+pub fn shortcut_with_super_voice(content: &str, command: &str) -> Option<String> {
+    if content.contains("Super Voice") {
         return None;
     }
     if content.contains("key: \"space\"") && content.contains("Super") {
         return None;
     }
 
-    let entry = shortcut_entry(stt_command);
+    let entry = shortcut_entry(command);
     let trimmed = content.trim();
     if trimmed.is_empty() || trimmed == "{}" {
         return Some(format!("{{\n{entry}}}\n"));
@@ -113,8 +142,8 @@ fn prompt_yes_no(prompt: &str) -> bool {
     !line.trim().eq_ignore_ascii_case("n")
 }
 
-/// Rewrite a legacy `~/.local/bin/stt` shortcut reference in the COSMIC
-/// custom-shortcuts file, if present.
+/// Rewrite a shortcut in the COSMIC custom-shortcuts file that runs `stt`,
+/// if there is one. See [`migrate_shortcut_content`].
 fn migrate_shortcut(prefix: &Path) {
     let Some(home) = dirs::home_dir() else {
         return;
@@ -122,8 +151,7 @@ fn migrate_shortcut(prefix: &Path) {
     let shortcuts_file =
         home.join(".config/cosmic/com.system76.CosmicSettings.Shortcuts/v1/custom");
     if let Ok(content) = std::fs::read_to_string(&shortcuts_file)
-        && let Some(migrated) =
-            migrate_shortcut_content(&content, &home.to_string_lossy(), &prefix.to_string_lossy())
+        && let Some(migrated) = migrate_shortcut_content(&content, &prefix.to_string_lossy())
         && let Err(e) = std::fs::write(&shortcuts_file, migrated)
     {
         log::warn!("failed to migrate COSMIC shortcut: {e}");
@@ -146,9 +174,9 @@ fn prompt_shortcut(prefix: &Path) {
         log::warn!("failed to create COSMIC shortcuts dir: {e}");
         return;
     }
-    let stt_command = format!("{}/bin/stt record --write", prefix.display());
+    let command = format!("{}/bin/voice record --write", prefix.display());
     let existing = std::fs::read_to_string(&shortcuts_file).unwrap_or_default();
-    if let Some(updated) = shortcut_with_super_stt(&existing, &stt_command)
+    if let Some(updated) = shortcut_with_super_voice(&existing, &command)
         && let Err(e) = std::fs::write(&shortcuts_file, updated)
     {
         log::warn!("failed to write COSMIC shortcut: {e}");
@@ -159,50 +187,82 @@ fn prompt_shortcut(prefix: &Path) {
 mod tests {
     use super::*;
 
-    const STT_CMD: &str = "/usr/local/bin/stt record --write";
+    const VOICE_CMD: &str = "/usr/local/bin/voice record --write";
 
+    /// Super STT's binding moves to `voice`, from either place its wrapper
+    /// was installed, with its arguments kept.
     #[test]
-    fn migrate_rewrites_legacy_path_only_when_present() {
-        let c = r#"{ (key: "space"): Spawn("/home/u/.local/bin/stt record --write"), }"#;
-        let out = migrate_shortcut_content(c, "/home/u", "/usr/local").unwrap();
-        assert!(out.contains("/usr/local/bin/stt record --write"));
-        assert!(!out.contains(".local/bin/stt "));
-        assert!(migrate_shortcut_content("{}", "/home/u", "/usr/local").is_none());
+    fn migrate_moves_an_stt_shortcut_to_voice() {
+        for old in [
+            "/home/u/.local/bin/stt record --write",
+            "/usr/local/bin/stt record --write",
+        ] {
+            let c =
+                format!(r#"{{ (key: "space", description: Some("Super STT")): Spawn("{old}"), }}"#);
+            let out = migrate_shortcut_content(&c, "/usr/local").unwrap();
+            assert!(
+                out.contains(r#"Spawn("/usr/local/bin/voice record --write")"#),
+                "{out}"
+            );
+            assert!(out.contains(r#"description: Some("Super Voice")"#), "{out}");
+            assert!(!out.contains("/stt "), "{out}");
+        }
+    }
+
+    /// `stt stop` was speech to text's; it is `voice record stop` now.
+    #[test]
+    fn migrate_moves_stt_stop_under_record() {
+        let c = r#"{ (key: "s"): Spawn("/usr/local/bin/stt stop"), }"#;
+        let out = migrate_shortcut_content(c, "/usr/local").unwrap();
+        assert!(
+            out.contains(r#"Spawn("/usr/local/bin/voice record stop")"#),
+            "{out}"
+        );
+    }
+
+    /// Nothing runs `stt`: nothing to migrate, and other shortcuts are left
+    /// alone, including one whose program merely ends in `stt`-like text.
+    #[test]
+    fn migrate_leaves_other_shortcuts_alone() {
+        assert!(migrate_shortcut_content("{}", "/usr/local").is_none());
+        let c = r#"{ (key: "t"): Spawn("/usr/bin/gstt record"), (key: "u"): Spawn("term"), }"#;
+        assert!(migrate_shortcut_content(c, "/usr/local").is_none());
     }
 
     #[test]
-    fn add_skips_when_super_stt_or_super_space_exists() {
+    fn add_skips_when_super_voice_or_super_space_exists() {
         assert!(
-            shortcut_with_super_stt(r#"{ description: Some("Super STT") }"#, STT_CMD).is_none()
+            shortcut_with_super_voice(r#"{ description: Some("Super Voice") }"#, VOICE_CMD)
+                .is_none()
         );
         let taken = "{\n    (\n        modifiers: [\n            Super,\n        ],\n        key: \"space\",\n        description: Some(\"Other\"),\n    ): Spawn(\"x\"),\n}";
-        assert!(shortcut_with_super_stt(taken, STT_CMD).is_none());
+        assert!(shortcut_with_super_voice(taken, VOICE_CMD).is_none());
     }
 
     #[test]
     fn add_writes_full_file_when_empty_and_inserts_before_close_otherwise() {
-        let fresh = shortcut_with_super_stt("", STT_CMD).unwrap();
+        let fresh = shortcut_with_super_voice("", VOICE_CMD).unwrap();
         assert!(fresh.starts_with("{"));
-        assert!(fresh.contains("Super STT"));
+        assert!(fresh.contains("Super Voice"));
         assert!(fresh.trim_end().ends_with("}"));
 
         // The literal `{}`-only case (not just a truly empty file) also
         // gets the full-file template, per the doc comment's "Empty or
         // `{}`-only content" — not just whitespace-empty.
-        let fresh_braces = shortcut_with_super_stt("{}", STT_CMD).unwrap();
-        assert!(fresh_braces.contains("Super STT"));
+        let fresh_braces = shortcut_with_super_voice("{}", VOICE_CMD).unwrap();
+        assert!(fresh_braces.contains("Super Voice"));
         assert_eq!(
             fresh_braces.matches('}').count(),
             fresh_braces.matches('{').count()
         );
 
         let existing = "{\n    (\n        modifiers: [\n            Ctrl,\n        ],\n        key: \"t\",\n        description: Some(\"Terminal\"),\n    ): Spawn(\"term\"),\n}";
-        let merged = shortcut_with_super_stt(existing, STT_CMD).unwrap();
+        let merged = shortcut_with_super_voice(existing, VOICE_CMD).unwrap();
         assert!(merged.contains("Terminal"));
-        assert!(merged.contains("Super STT"));
+        assert!(merged.contains("Super Voice"));
         assert_eq!(merged.matches('}').count(), merged.matches('{').count());
-        // Super STT entry comes after the existing one, before the final close.
-        assert!(merged.rfind("Super STT").unwrap() > merged.find("Terminal").unwrap());
+        // Super Voice's entry comes after the existing one, before the final close.
+        assert!(merged.rfind("Super Voice").unwrap() > merged.find("Terminal").unwrap());
     }
 
     fn daemon_only() -> Components {

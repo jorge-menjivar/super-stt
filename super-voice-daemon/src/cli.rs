@@ -7,7 +7,7 @@ pub fn build() -> Command {
     command!()
     .about("Super Voice daemon: speech to text and text to speech")
     .long_about(
-        "A high-performance speech-to-text daemon that loads a STT model once and keeps it in memory, serving transcription requests over the HTTP protocol at $XDG_RUNTIME_DIR/voice/super-voice-http.sock. Use `super-stt-cli` (or the `stt` wrapper) to drive recordings."
+        "The Super Voice daemon: loads speech-to-text and text-to-speech models once and keeps them in memory, serving requests over the HTTP protocol at $XDG_RUNTIME_DIR/voice/super-voice-http.sock. Use the `voice` command to record and speak."
     )
     .subcommand_required(false)
     .arg_required_else_help(false)

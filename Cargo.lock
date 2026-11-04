@@ -7164,22 +7164,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-stt-cli"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyhow",
- "clap",
- "global-hotkey",
- "log",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "super-engine-test-daemon",
- "super-stt-shared",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "super-stt-install"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7258,18 +7242,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-tts-cli"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyhow",
- "clap",
- "super-engine-test-daemon",
- "super-tts-shared",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "super-tts-shared"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7292,6 +7264,23 @@ dependencies = [
  "tokio",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "super-voice-cli"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyhow",
+ "clap",
+ "global-hotkey",
+ "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "super-engine-test-daemon",
+ "super-stt-shared",
+ "super-tts-shared",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

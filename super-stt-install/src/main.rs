@@ -11,7 +11,7 @@ use super_voice_registry_types::product::{SUPER_VOICE, Voice};
 static INSTALLER: Installer = Installer {
     product: &SUPER_VOICE,
     user_agent: Voice::USER_AGENT,
-    wrapper_usage: "Used by keyboard shortcuts (e.g. Super+Space → \"stt record --write\").",
+    wrapper_usage: "Used by keyboard shortcuts (e.g. Super+Space → \"voice record --write\").",
     after_install: Some(shortcut::after_install),
 };
 

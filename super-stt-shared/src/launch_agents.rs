@@ -11,7 +11,7 @@
 //!
 //! `SMAppService` finds a plist through the calling process's main bundle,
 //! so these calls mean something only from an executable inside the bundle —
-//! the settings app, or `Contents/MacOS/super-stt-cli`. From a bare binary in
+//! the settings app, or `Contents/MacOS/super-voice-cli`. From a bare binary in
 //! `target/` every agent is [`Status::NotInBundle`].
 
 use anyhow::{Result, anyhow};
@@ -27,7 +27,7 @@ use std::path::PathBuf;
 pub enum Agent {
     /// `super-voice-daemon`.
     Daemon,
-    /// `super-stt-cli hotkey`, the global shortcut.
+    /// `super-voice-cli hotkey`, the global shortcut.
     Hotkey,
 }
 

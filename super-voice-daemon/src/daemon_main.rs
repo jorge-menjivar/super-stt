@@ -5,7 +5,7 @@
 //! Boots the daemon, spawns the HTTP listener on
 //! `$XDG_RUNTIME_DIR/voice/super-voice-http.sock`, and waits for a shutdown
 //! signal. Client commands (`record`, `status`, etc.) live in
-//! `super-stt-cli`, which talks to the daemon over HTTP.
+//! `super-voice-cli` (the `voice` command), which talks to the daemon over HTTP.
 
 use crate::cli;
 use crate::config::DaemonConfig;

@@ -1,26 +1,27 @@
 [package]
-    name = "super-stt-cli"
+    name = "super-voice-cli"
     version.workspace = true
     authors.workspace = true
     edition.workspace = true
-    description = "Command-line client for the Super STT daemon (HTTP protocol)"
+    description = "The voice command: Super Voice's command-line client"
     repository = "https://github.com/jorge-menjivar/super-stt"
     license = "GPL-3.0-only"
 
 [[bin]]
-    name = "super-stt-cli"
+    name = "super-voice-cli"
     path = "src/main.rs"
 
 [dependencies]
     anyhow.workspace = true
     clap.workspace = true
     super-stt-shared = { path = "../super-stt-shared" }
+    super-tts-shared = { path = "../super-tts-shared" }
     tokio = {
         workspace = true,
         features = ["io-util", "macros", "net", "rt-multi-thread"]
     }
 
-# `stt hotkey` (src/hotkey.rs). macOS only: on Linux the desktop environment
+# `voice hotkey` (src/hotkey.rs). macOS only: on Linux the desktop environment
 # owns global shortcuts, and these crates would have nothing to register with.
 # objc2 / objc2-app-kit are the versions global-hotkey already pulls in, named
 # here only for NSApplication, whose event loop delivers the shortcut.
