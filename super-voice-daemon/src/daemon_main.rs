@@ -75,10 +75,17 @@ pub async fn run() -> Result<()> {
         }
     };
 
+    // The daemon that holds the socket is the one whose crash note this is:
+    // read the last run's, then arm the hook that writes the next. See
+    // `crate::crash`.
+    let crash_note = crate::crash::note_path();
+    let crashed = crate::crash::take_note(&crash_note);
+    crate::crash::install_panic_hook(crash_note);
+
     // Load saved configuration
     let config = DaemonConfig::load();
 
-    info!("Starting Super STT Daemon");
+    info!("Starting the Super Voice daemon");
     info!("Model: {}", config.transcription.preferred_model);
     info!("Default device: {}", config.device.preferred_device);
     info!("Audio theme: {}", config.audio.theme);
@@ -87,7 +94,12 @@ pub async fn run() -> Result<()> {
 
     info!("Daemon initialized successfully");
 
-    // Defensive: stop any `super-stt-backend-*` --user units left behind by
+    if let Some(note) = crashed {
+        warn!("The last run crashed: {}", note.trim());
+        daemon.announce_crash_restart().await;
+    }
+
+    // Defensive: stop any `super-voice-backend-*` --user units left behind by
     // a previous daemon that exited ungracefully (SIGKILL / panic / a
     // skipped `Drop`). The transient unit's name embeds the spawning
     // daemon's PID, so a restarted daemon can't reach it via the regular

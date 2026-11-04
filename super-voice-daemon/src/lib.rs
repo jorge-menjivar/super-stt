@@ -2,6 +2,7 @@
 pub mod audio;
 pub mod cli;
 pub mod config;
+pub mod crash;
 pub mod daemon;
 pub mod download_progress;
 pub use super_engine_daemon::download_stream;

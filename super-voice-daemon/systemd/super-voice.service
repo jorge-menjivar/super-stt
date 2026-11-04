@@ -3,6 +3,11 @@ Description=Super Voice daemon - speech to text and text to speech
 Documentation=https://github.com/jorge-menjivar/super-stt
 After=pipewire.service pulseaudio.service graphical-session.target
 Requires=graphical-session.target
+# A panic aborts the daemon and it is started again a second later. Five
+# crashes in a minute is a daemon that cannot start, so systemd stops trying
+# rather than looping.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -13,7 +18,7 @@ ExecStartPre=/bin/sh -c 'while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do 
 ExecStart=super-voice-daemon
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
-RestartSec=5
+RestartSec=1
 TimeoutStartSec=60
 TimeoutStopSec=10
 
