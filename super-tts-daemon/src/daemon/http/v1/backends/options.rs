@@ -1,0 +1,432 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//! `/backend/{backend_id}/option/list` — a backend's non-sensitive settings.
+//!
+//! Contract: `docs/protocol/endpoints/v1/backends/options.md`.
+//!
+//! The mirror image of [`super::secrets`], and deliberately shaped the same
+//! way: the same four verbs on the same two paths, differing only where the
+//! subject matter forces it. An option's value is not sensitive, so `GET`
+//! returns it and the `settings` scope is enough; a secret's is, so it never
+//! comes back and the `secrets` scope guards it.
+use super::{decode_source, find_backend, json_error, json_error_msg, ok};
+use crate::daemon::http::internal::helpers::dispatch::dispatch_command;
+use crate::daemon::http::state::AppState;
+use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
+use crate::tts_models::backends::DiscoveredBackend;
+use crate::tts_models::backends::manifest::OptionType;
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
+
+pub(crate) fn routes() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(list_backend_options))
+        .routes(routes!(
+            get_backend_option,
+            set_backend_option,
+            delete_backend_option
+        ))
+}
+
+/// The value to store for an option.
+#[derive(Deserialize, ToSchema)]
+struct OptionBody {
+    /// The new value. Empty is refused — clear an override with `DELETE`
+    /// instead, which is the operation that reverts to the manifest default.
+    #[serde(default)]
+    value: String,
+}
+
+/// One option a backend declares, with the value in effect.
+#[derive(Serialize, ToSchema)]
+struct BackendOptionValue {
+    /// The option's identifier, as the backend's manifest declares it.
+    name: String,
+    /// Human-readable label for a settings UI; falls back to `name`.
+    label: String,
+    /// The declared type — `string`, `integer`, or `bool`.
+    #[serde(rename = "type")]
+    kind: String,
+    /// The manifest's default, or `null` when it declares none.
+    default: Option<String>,
+    /// The values this option accepts, when it accepts a closed set. Empty
+    /// means any value of `type`, which is what a client renders a free-text
+    /// field for; a non-empty list is a dropdown, and the only values a write
+    /// will be allowed to store.
+    choices: Vec<String>,
+    /// Inclusive bounds for a numeric option, `null` when it declares none.
+    /// A write outside them is refused.
+    min: Option<f64>,
+    max: Option<f64>,
+    /// The increment a numeric option moves in. Present with `min` and `max`
+    /// on an option a client should render as a slider rather than a field;
+    /// the grid belongs to the control, and any value within the bounds
+    /// stores.
+    step: Option<f64>,
+    /// Whether the backend refuses to load without a value.
+    required: bool,
+    /// What is actually in effect: the user's override if set, otherwise the
+    /// default.
+    value: Option<String>,
+}
+
+/// Every option a backend declares.
+#[derive(Serialize, ToSchema)]
+struct BackendOptions {
+    #[schema(example = "success")]
+    status: &'static str,
+    options: Vec<BackendOptionValue>,
+}
+
+/// One option's effective value.
+#[derive(Serialize, ToSchema)]
+struct OptionValue {
+    #[schema(example = "success")]
+    status: &'static str,
+    name: String,
+    /// What is in effect now.
+    value: Option<String>,
+    /// The manifest default, so a UI can show what clearing would revert to.
+    default: Option<String>,
+}
+
+/// Compute the effective value + metadata for a single option.
+///
+/// Returns `None` if `name` is not declared by the backend.
+fn effective(
+    b: &DiscoveredBackend,
+    cfg_value: Option<&str>,
+    name: &str,
+) -> Option<BackendOptionValue> {
+    let opt = b.options.iter().find(|o| o.name == name)?;
+    let default = opt.default.as_ref().map(ToString::to_string);
+    let value = cfg_value.map(str::to_string).or_else(|| default.clone());
+    Some(BackendOptionValue {
+        name: opt.name.clone(),
+        label: opt.label.clone().unwrap_or_else(|| opt.name.clone()),
+        kind: opt.r#type.map_or("string", OptionType::as_str).to_string(),
+        default,
+        choices: opt.choices.iter().map(ToString::to_string).collect(),
+        min: opt.min,
+        max: opt.max,
+        step: opt.step,
+        required: opt.required,
+        value,
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/backend/{backend_id}/option/list",
+    tag = "backends",
+    summary = "List a backend's options",
+    description = "\
+Every option this backend declares, each with its label, type, default, `choices`, \
+and the value actually in effect. This is what a settings UI renders a form from: an \
+empty `choices` is a text field, a non-empty one is a dropdown offering exactly those \
+values.
+
+Options are the backend's own configuration — an endpoint URL, a speaking-style \
+preset, a timeout — declared in its manifest and injected as `x-tts-option-*` headers \
+on every request. Credentials are not options; those are secrets, at \
+`/backend/{backend_id}/secret/list`.",
+    params(
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Fsuper-tts%2Fopenai`.",
+         example = "github.com%2Fsuper-tts%2Fopenai"),
+    ),
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "The backend's options.", body = BackendOptions),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No installed backend has that `source` (`unknown_backend`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+async fn list_backend_options(State(s): State<AppState>, Path(source): Path<String>) -> Response {
+    let source = decode_source(&source);
+    let Some(b) = find_backend(&s, &source).await else {
+        return json_error(StatusCode::NOT_FOUND, "unknown_backend");
+    };
+    let cfg = s.daemon.config.read().await;
+    let out: Vec<_> = b
+        .options
+        .iter()
+        .filter_map(|o| effective(&b, cfg.backend_option(&source, &o.name), &o.name))
+        .collect();
+    ok(&BackendOptions {
+        status: "success",
+        options: out,
+    })
+}
+
+#[utoipa::path(
+    get,
+    path = "/backend/{backend_id}/option/{name}",
+    tag = "backends",
+    summary = "Read one option's effective value",
+    description = "\
+The value in effect for a single option — the stored override when there is one, the \
+manifest default otherwise — alongside that default, so a UI can show what clearing it \
+would revert to.
+
+The values this option accepts are not repeated here. Read `choices` from \
+`GET /backend/{backend_id}/option/list`, which is the call a picker is built from \
+anyway.",
+    params(
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Fsuper-tts%2Fopenai`.",
+         example = "github.com%2Fsuper-tts%2Fopenai"),
+        ("name" = String, Path, description = "The option's name, as the backend's manifest declares it."),
+    ),
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "The option's effective value.", body = OptionValue),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such backend (`unknown_backend`) or no such option (`unknown_option`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+async fn get_backend_option(
+    State(s): State<AppState>,
+    Path((source, name)): Path<(String, String)>,
+) -> Response {
+    get_backend_option_inner(s, decode_source(&source), name).await
+}
+
+async fn get_backend_option_inner(s: AppState, source: String, name: String) -> Response {
+    let Some(b) = find_backend(&s, &source).await else {
+        return json_error(StatusCode::NOT_FOUND, "unknown_backend");
+    };
+    let cfg = s.daemon.config.read().await;
+    match effective(&b, cfg.backend_option(&source, &name), &name) {
+        Some(v) => ok(&OptionValue {
+            status: "success",
+            name,
+            value: v.value,
+            default: v.default,
+        }),
+        None => json_error(StatusCode::NOT_FOUND, "unknown_option"),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/backend/{backend_id}/option/{name}",
+    tag = "backends",
+    summary = "Override an option",
+    description = "\
+Stores a value for this option, overriding the manifest default. Answers with the \
+option's new effective value, so a UI can render the result without a second read.
+
+An option that declares `choices` takes those values and nothing else: anything \
+outside the set is refused with `400 invalid_value`, and the message names what is on \
+offer. An option with no `choices` takes any string.
+
+A `base_url` value is canonicalized before storage, so the field reads back the \
+endpoint that will actually be dialed — the scheme in particular, since whether a \
+request is encrypted should not be invisible in the field the user is looking at. A \
+value that yields no host is stored as typed rather than refused; model load rejects \
+it by name. Every other option is stored verbatim, whitespace included, because it may \
+carry meaning the daemon does not interpret.
+
+If the stage is currently running a model from this backend, the daemon reloads it so \
+the new value takes effect at once; a reload that fails is reported in the daemon's \
+message and the old instance keeps running rather than leaving the stage empty.",
+    params(
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Fsuper-tts%2Fopenai`.",
+         example = "github.com%2Fsuper-tts%2Fopenai"),
+        ("name" = String, Path, description = "The option's name, as the backend's manifest declares it."),
+    ),
+    request_body = OptionBody,
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "Stored; this is the new effective value.", body = OptionValue),
+        (status = 400, description = "The value was empty (`invalid_request`), or it is not one the option accepts (`invalid_value`): not of the declared `type`, outside a declared `min`/`max`, the option declares `choices` and the value is not one of them, it is `base_url` and names no host, or it is longer than 4000 characters or carries a control character. An option value is sent as an `x-tts-option-<name>` request header, which can hold neither a line break nor an unbounded number of bytes, so a value that cannot be delivered is refused rather than stored. Use `DELETE` to clear an override.", body = ErrorEnvelope),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such backend (`unknown_backend`) or no such option (`unknown_option`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+async fn set_backend_option(
+    State(s): State<AppState>,
+    Path((source, name)): Path<(String, String)>,
+    axum::Json(body): axum::Json<OptionBody>,
+) -> Response {
+    let source = decode_source(&source);
+    // `base_url` is stored canonical — the same rewrite model load applies, run
+    // here so the settings field reads back the endpoint that will actually be
+    // dialed. The scheme is the reason it matters: a value naming none is read
+    // by its host, and whether the request is encrypted is not something to
+    // leave invisible in the field the user is looking at. Other options keep
+    // the value verbatim, whitespace included: it may carry meaning in one the
+    // daemon does not interpret.
+    //
+    // Validated here as well as canonicalized. A value yielding no host used to
+    // be stored as typed and refused at the next model load, a fair division of
+    // labour while an option write reloaded the model — it now reconfigures the
+    // running one instead, so there is no later load to catch it and storing an
+    // unreadable URL would report success while the backend kept its old
+    // endpoint. It still cannot catch the mistake that misleads people most, a
+    // well-formed URL naming the wrong port; nothing at this layer can.
+    let value = if name == crate::tts_models::backends::base_url::OPTION_NAME {
+        // An all-whitespace value is not a malformed URL, it is the empty value
+        // every option refuses just below — `DELETE` is how an override is
+        // cleared — so it takes that answer rather than "not a URL".
+        match body.value.trim() {
+            "" => String::new(),
+            trimmed => match canonical_base_url(trimmed) {
+                Some(canonical) => canonical,
+                None => {
+                    return json_error_msg(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_value",
+                        &format!("option `{name}` takes a URL, and {trimmed:?} is not one"),
+                    );
+                }
+            },
+        }
+    } else {
+        body.value.clone()
+    };
+    let value = value.as_str();
+    if value.is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "invalid_request");
+    }
+    if let Some(r) = guard_missing(&s, &source, &name).await {
+        return r;
+    }
+    // An option that declares `choices` accepts those and nothing else. The
+    // dropdown a settings UI renders cannot offer anything else either, so
+    // this is for the clients that write straight to the API — and for the
+    // stored value to stay one the backend understands, since it is injected
+    // into the load headers verbatim.
+    if let Some(r) = guard_not_a_choice(&s, &source, &name, value).await {
+        return r;
+    }
+    let (code, _hdrs, body_str) = dispatch_command(
+        &s.daemon,
+        "set_backend_option",
+        Some(serde_json::json!({ "source": source, "name": name, "value": value })),
+    )
+    .await;
+    if code != StatusCode::OK {
+        return (code, [("content-type", "application/json")], body_str).into_response();
+    }
+    get_backend_option_inner(s, source, name).await
+}
+
+#[utoipa::path(
+    delete,
+    path = "/backend/{backend_id}/option/{name}",
+    tag = "backends",
+    summary = "Clear an option override",
+    description = "\
+Removes the stored value, reverting the option to the manifest default. Answers with \
+the effective value that results, which is the default when one is declared and `null` \
+when none is.
+
+Idempotent: clearing an option that has no override succeeds and reports the same \
+value. This is also how a client returns a `choices` option to its declared default — \
+storing a copy of the default instead would pin the user to today's value and stop a \
+later manifest from moving it.",
+    params(
+        ("backend_id" = String, Path,
+         description = "The backend's id — its `source` as `GET /backend/list` reports it — percent-encoded, e.g. `github.com%2Fsuper-tts%2Fopenai`.",
+         example = "github.com%2Fsuper-tts%2Fopenai"),
+        ("name" = String, Path, description = "The option's name, as the backend's manifest declares it."),
+    ),
+    security(("session_token" = ["settings"])),
+    responses(
+        (status = 200, description = "Cleared; this is the value now in effect.", body = OptionValue),
+        (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
+        (status = 403, description = "The token lacks the `settings` scope.", body = ErrorEnvelope),
+        (status = 404, description = "No such backend (`unknown_backend`) or no such option (`unknown_option`).", body = ErrorEnvelope),
+        (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
+    ),
+)]
+async fn delete_backend_option(
+    State(s): State<AppState>,
+    Path((source, name)): Path<(String, String)>,
+) -> Response {
+    let source = decode_source(&source);
+    if let Some(r) = guard_missing(&s, &source, &name).await {
+        return r;
+    }
+    // Empty value clears the override → reverts to the manifest default.
+    let (code, _hdrs, body_str) = dispatch_command(
+        &s.daemon,
+        "set_backend_option",
+        Some(serde_json::json!({ "source": source, "name": name, "value": "" })),
+    )
+    .await;
+    if code != StatusCode::OK {
+        return (code, [("content-type", "application/json")], body_str).into_response();
+    }
+    get_backend_option_inner(s, source, name).await
+}
+
+/// The `base_url` form to store, or `None` for a value no host can be read
+/// from.
+///
+/// Refusing is the point of the `Option`. A value that yields no host used to
+/// be stored as typed so the next model load could refuse it by name, which
+/// worked while an option write reloaded the model — it no longer does, so the
+/// write itself has to be the thing that says no. The one outcome still ruled
+/// out is dropping it silently: that would leave the backend on its built-in
+/// endpoint, sending the user's text and credentials to the vendor they had
+/// configured their way out of.
+#[cfg(feature = "wasm-backends")]
+fn canonical_base_url(value: &str) -> Option<String> {
+    crate::tts_models::backends::base_url::normalize(value)
+}
+
+/// Without the wasm transport nothing derives an endpoint from this value, so
+/// there is no canonical form to agree on and nothing to read it with — only
+/// the trim that keeps a padded value from reading back padded.
+#[cfg(not(feature = "wasm-backends"))]
+fn canonical_base_url(value: &str) -> Option<String> {
+    Some(value.trim().to_string())
+}
+
+/// Returns an error `Response` when `value` is not one the option takes — its
+/// type, its bounds or its choices, see
+/// `super_engine_spec::manifest::Opt::permits_value` — `None` when the write
+/// can proceed.
+///
+/// Runs after [`guard_missing`], so a missing backend or option is already
+/// reported and this only ever looks at an option that exists — which is why
+/// both `None` arms here mean "nothing to object to" rather than "not found".
+async fn guard_not_a_choice(
+    s: &AppState,
+    source: &str,
+    name: &str,
+    value: &str,
+) -> Option<Response> {
+    let backend = find_backend(s, source).await?;
+    let opt = backend.options.iter().find(|o| o.name == name)?;
+    let refusal = opt.permits_value(value).err()?;
+    Some(json_error_msg(
+        StatusCode::BAD_REQUEST,
+        "invalid_value",
+        &refusal,
+    ))
+}
+
+/// Returns an error `Response` when the backend or the named option is missing,
+/// `None` when the option is present and a write can proceed.
+async fn guard_missing(s: &AppState, source: &str, name: &str) -> Option<Response> {
+    match find_backend(s, source).await {
+        None => Some(json_error(StatusCode::NOT_FOUND, "unknown_backend")),
+        Some(b) if b.options.iter().any(|o| o.name == name) => None,
+        Some(_) => Some(json_error(StatusCode::NOT_FOUND, "unknown_option")),
+    }
+}

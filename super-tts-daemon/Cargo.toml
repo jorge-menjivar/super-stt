@@ -1,0 +1,130 @@
+[package]
+    name = "super-tts-daemon"
+    version.workspace = true
+    authors.workspace = true
+    edition.workspace = true
+    description = "Super TTS cli and daemon service"
+    repository = "https://github.com/jorge-menjivar/super-tts"
+    license = "GPL-3.0-only"
+
+[[bin]]
+    name = "mock_backend"
+    path = "src/bin/mock_backend.rs"
+    required-features = ["test-fixtures"]
+
+[dependencies]
+    # Core dependencies
+    anyhow.workspace = true
+    async-trait = "0.1.89"
+    axum = {
+        version = "0.8",
+        default-features = false,
+        features = ["json", "query", "tokio", "ws"]
+    }
+    base64 = "0.23.1"
+    bytes = { version = "1.11.1", optional = true }
+    chrono.workspace = true
+    clap.workspace = true
+    cpal.workspace = true
+    dirs.workspace = true
+    futures = "0.3"
+    hex = "0.4.3"
+    hound.workspace = true
+    http-body = { version = "1.0.1", optional = true }
+    http-body-util = "0.1"
+    hyper = { version = "1", features = ["http1", "server"] }
+    hyper-util = {
+        version = "0.1",
+        features = ["http1", "server", "server-auto", "tokio"]
+    }
+    libc.workspace = true
+    log.workspace = true
+    parking_lot.workspace = true
+    reqwest.workspace = true
+    # Hashing for content-addressed blobs
+    ring = "0.17"
+    rustls = {
+        version = "0.23",
+        default-features = false,
+        features = ["ring", "std", "tls12"]
+    }
+    serde.workspace = true
+    serde_json.workspace = true
+    super-engine-daemon = { workspace = true, features = ["beeper"] }
+    super-engine-forge.workspace = true
+    super-tts-registry-types = { path = "../super-tts-registry-types", features = ["openapi"] }
+    # Shared crate
+    super-tts-shared = {
+        path = "../super-tts-shared",
+        features = [
+            "analysis",
+            "audio",
+            # The protocol types the daemon publishes in its OpenAPI document
+            # carry their own `ToSchema`, so the spec describes each one where it
+            # is defined instead of restating its fields at the router.
+            "openapi",
+        ]
+    }
+    thiserror.workspace = true
+    tokio = {
+        workspace = true,
+        features = [
+            "fs",
+            "io-std",
+            "io-util",
+            "macros",
+            "process",
+            "rt-multi-thread",
+            "signal",
+        ]
+    }
+    urlencoding = "2.1.3"
+    utoipa.workspace = true
+    utoipa-axum.workspace = true
+    uuid.workspace = true
+    zbus.workspace = true
+
+[dev-dependencies]
+    futures-util.workspace = true
+    http-body-util = "0.1"
+    hyper = { version = "1", features = ["client", "http1"] }
+    hyper-util = { version = "0.1", features = ["tokio"] }
+    libc.workspace = true
+    mockito = "1.7.2"
+    # The daemon's own version must parse, for the index `min_client` check.
+    semver = "1.0.28"
+    # Spawns the daemon for the integration tests, in a home of its own.
+    super-engine-test-daemon.workspace = true
+    tempfile = "3.27.0"
+    # `test-util` enables `#[tokio::test(start_paused = true)]`, so tests covering
+    # the notice key-release delay assert it without spending it in wall-clock time.
+    tokio = { workspace = true, features = ["test-util"] }
+    # The realtime smoke tests speak WebSocket to the daemon.
+    tokio-tungstenite = {
+        version = "0.29.0",
+        default-features = false,
+        features = ["connect", "rustls-tls-webpki-roots"]
+    }
+    wiremock = "0.6.5"
+
+[features]
+    # Models are served by out-of-tree backends; both transports are on by
+    # default. GPU residency now lives in the backend, so the daemon no longer
+    # has cuda/cudnn/flash-attn features.
+    default = ["subprocess-backends", "wasm-backends"]
+    # Spawn TTS backends as sandboxed native subprocesses.
+    # `http-body` is shared with the wasm transport: `tts_models::v1` pumps a
+    # framed synthesis body generically over `http_body::Body`, so both
+    # transports reach it through the same code.
+    subprocess-backends = [
+        "dep:bytes",
+        "dep:http-body",
+        "super-engine-daemon/subprocess",
+    ]
+    # Build the mock_backend test fixture binary (used by tests/subprocess_mock.rs).
+    test-fixtures = ["hyper-util/service"]
+    # Load TTS backends as sandboxed WASM components.
+    wasm-backends = ["dep:bytes", "dep:http-body", "super-engine-daemon/wasm"]
+
+[lints]
+    workspace = true

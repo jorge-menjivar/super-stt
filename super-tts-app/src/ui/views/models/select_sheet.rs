@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: GPL-3.0-only
+use cosmic::Element;
+use cosmic::iced::widget::row;
+use cosmic::iced::{Alignment, Length};
+use cosmic::widget::{self, button, text};
+
+use crate::core::app::AppModel;
+use crate::daemon::backends::BackendInfo;
+use crate::state::ContextPage;
+use crate::ui::icons;
+use crate::ui::messages::{Message, ModelsPageMessage, ShellMessage};
+
+use super::active::backend_glyph_tile;
+use super::chips::{
+    CloudEgress, backend_has_user_url, backend_is_online, backend_supports_cpu,
+    backend_supports_gpu, capability_chips,
+};
+use super::surface::muted_text_color;
+
+/// The Synthesis section's empty state, shown when no backend is selected: a
+/// soft glyph tile, a short prompt, and a primary "Select synthesis backend"
+/// button that opens the [`select_backend_sheet`].
+///
+/// Centered horizontally but sized to its content, under the section heading
+/// like the card it stands in for. Filling the page height instead would float
+/// it to the middle of the window, away from the heading that names it.
+pub(super) fn no_backend_empty_state<'a>() -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
+    let ring = super::active::glyph_tile(72.0, 34.0, true);
+
+    let col = widget::column::with_capacity(4)
+        .align_x(Alignment::Center)
+        .spacing(spacing.space_xs)
+        .push(ring)
+        .push(text::title4("No backend selected"))
+        .push(
+            text::body("Select a backend to start speaking.")
+                .class(cosmic::theme::Text::Color(muted_text_color())),
+        )
+        .push(
+            button::suggested("Select synthesis backend")
+                .leading_icon(icons::phosphor_handle(icons::PLAY))
+                .on_press(Message::Shell(ShellMessage::ToggleContextPage(
+                    ContextPage::SelectBackend,
+                ))),
+        );
+
+    widget::container(col)
+        .center_x(Length::Fill)
+        .width(Length::Fill)
+        .padding([spacing.space_m, 0, spacing.space_m, 0])
+        .into()
+}
+
+/// The "Select synthesis backend" side sheet: a hint line plus one row per
+/// backend that can fill the synthesis stage. The active backend is flagged;
+/// every other row carries a Select button that activates it (and dismisses the
+/// sheet).
+///
+/// Drawn from `stage_backends`, not the full installed catalog: the daemon
+/// refuses a backend that serves nothing this stage can run, so a sheet built
+/// from the catalog offers picks that fail the moment they are made. The two
+/// lists are identical while synthesis is the only stage — which is why reading
+/// the wrong one here would look right for as long as it took to add a second.
+pub fn select_backend_sheet(app: &AppModel) -> Element<'_, Message> {
+    let spacing = cosmic::theme::spacing();
+    let muted = muted_text_color();
+    let active = app.models_page.active_backend.as_deref();
+
+    let mut col = widget::column::with_capacity(app.stage_backends.len() + 1)
+        .spacing(spacing.space_xs)
+        .width(Length::Fill)
+        .push(
+            text::caption(
+                "Pick which backend powers speech. Add and manage backends in your Library.",
+            )
+            .class(cosmic::theme::Text::Color(muted)),
+        );
+
+    if app.stage_backends.is_empty() {
+        return col
+            .push(text::body(
+                "No backends installed yet. Open the Library to install one.",
+            ))
+            .into();
+    }
+
+    for backend in &app.stage_backends {
+        col = col.push(select_backend_row(
+            backend,
+            active == Some(backend.source.as_str()),
+        ));
+    }
+    col.into()
+}
+
+/// One backend row inside the sheet: glyph + name + capability chips, then
+/// either an "Active" flag or a Select button.
+fn select_backend_row(backend: &BackendInfo, is_active: bool) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    let online = backend_is_online(backend);
+    let egress = online.then(|| CloudEgress {
+        hosts: backend.allowed_hosts.as_slice(),
+        user_url: backend_has_user_url(backend),
+    });
+
+    let mut meta = widget::column::with_capacity(2)
+        .spacing(spacing.space_xxxs)
+        .width(Length::Fill)
+        .push(text::body(backend.name.clone()));
+    if let Some(chips) = capability_chips(
+        backend_supports_gpu(backend),
+        backend_supports_cpu(backend),
+        egress,
+        true,
+    ) {
+        meta = meta.push(chips);
+    }
+
+    let trailing: Element<'static, Message> = if is_active {
+        text::caption("Active")
+            .class(cosmic::theme::Text::Accent)
+            .into()
+    } else {
+        button::suggested("Select")
+            .leading_icon(icons::phosphor_handle(icons::PLAY))
+            .on_press(Message::ModelsPage(ModelsPageMessage::SelectBackend(
+                backend.source.clone(),
+            )))
+            .into()
+    };
+
+    let inner = row![backend_glyph_tile(), meta, trailing]
+        .spacing(spacing.space_s)
+        .align_y(Alignment::Center);
+
+    widget::container(inner)
+        .padding(spacing.space_xs)
+        .width(Length::Fill)
+        .class(cosmic::theme::Container::custom(move |theme| {
+            let cosmic = theme.cosmic();
+            let component = &theme.current_container().component;
+            cosmic::iced::widget::container::Style {
+                background: Some(cosmic::iced::Background::Color(component.base.into())),
+                border: cosmic::iced::Border {
+                    radius: cosmic.corner_radii.radius_s.into(),
+                    width: 1.0,
+                    color: super::surface::accent_border_color(theme, is_active),
+                },
+                ..Default::default()
+            }
+        }))
+        .into()
+}

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Super TTS
+Comment=High-performance text-to-speech application
+Type=Application
+Icon=super-tts-app
+Exec=super-tts-app
+Terminal=false
+StartupNotify=true
+Categories=AudioVideo;Audio;
+Keywords=speech;synthesis;tts;voice;audio;text-to-speech;
+MimeType=
