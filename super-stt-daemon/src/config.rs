@@ -529,8 +529,9 @@ impl DaemonConfig {
         }
     }
 
-    /// Save configuration to disk. Blocking (`std::fs::write`); on the async
-    /// runtime call it via `persist_config()` / `spawn_blocking`, not inline.
+    /// Save configuration to disk, atomically. Blocking (it `fsync`s); on the
+    /// async runtime call it via `persist_config()` / `spawn_blocking`, not
+    /// inline.
     ///
     /// # Errors
     ///
