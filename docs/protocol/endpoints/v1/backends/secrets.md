@@ -3,8 +3,8 @@
 Store, check, and clear a backend's **secrets** — the sensitive values
 (API keys and the like) a backend declares as `[[secrets]]` in its
 [`backend.toml`](../../../backend/config.md). The daemon owns secret storage
-end to end: a client sets a secret here, the daemon persists it in the system
-keyring, and the daemon reads it back **only** at model-load time to inject it
+end to end: a client sets a secret here, the daemon persists it in its secrets
+file, and the daemon reads it back **only** at model-load time to inject it
 as an `x-stt-secret-<name>` request header (see
 [contract.md](../../../backend/contract.md#request-headers)).
 
@@ -42,7 +42,7 @@ defining difference from [options](./options.md), whose non-sensitive values
 
 `{name}` must be a secret the backend **declares**. The endpoint can only
 read or write secrets that appear in the backend's `[[secrets]]`; it is not a
-general-purpose keyring. A `{name}` that the backend does not declare returns
+general-purpose secret store. A `{name}` that the backend does not declare returns
 `404 unknown_secret`; an unknown `{source}` returns `404 unknown_backend`. A
 *declared but unset* secret is not an error — it reports `configured: false`.
 
@@ -169,4 +169,4 @@ Authorization: Bearer stt_…64hex…
 | 403  | `scope_denied`        | Token lacks the `secrets` scope.                              |
 | 404  | `unknown_backend`     | No installed backend has that `source`.                      |
 | 404  | `unknown_secret`      | `{name}` is not a declared secret of that backend.           |
-| 503  | `keyring_unavailable` | The system keyring could not be read or written.             |
+| 500  | `secrets_write_failed` | The secrets file could not be written.                      |

@@ -324,7 +324,7 @@ impl Transcribe for RecordingStage {
 }
 
 /// A discovered backend that declares it can be handed a context, and nothing
-/// else — no secrets to reach the keyring for, no options to resolve.
+/// else — no secrets to look up, no options to resolve.
 fn context_capable(source: &str) -> DiscoveredBackend {
     DiscoveredBackend {
         description: String::new(),

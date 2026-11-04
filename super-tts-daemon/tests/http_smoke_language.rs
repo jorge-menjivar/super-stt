@@ -18,8 +18,7 @@
 //! they moved under `/pipeline/{stage}` — so each per-model test first points
 //! stage 1 at the fixture backend, which is what a bare name resolves against.
 //!
-//! Uses `SUPER_TTS_KEYRING_MOCK=1` (in-memory keyring) and
-//! `SUPER_TTS_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_TTS_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend (`fixture-openai/backend.toml`) is seeded so the daemon
 //! discovers it on startup. Its model is multilingual and secret-gated, so the

@@ -18,8 +18,7 @@
 //! - `DELETE /backend/{backend_id}` → `404 not_found` for an unknown backend
 //! - scope enforcement            → a `client`-scope token gets `403 scope_denied`
 //!
-//! Uses `SUPER_TTS_AUTO_APPROVE=1` (no GUI) and `SUPER_TTS_KEYRING_MOCK=1`
-//! (in-memory keyring), so it's part of the default `cargo test` flow.
+//! Uses `SUPER_TTS_AUTO_APPROVE=1` (no GUI), so it's part of the default `cargo test` flow.
 
 mod common;
 

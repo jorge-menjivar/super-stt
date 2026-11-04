@@ -211,7 +211,7 @@ async fn clearing_a_secret_deletes_the_same_path() {
 }
 
 /// The list reports which secrets are *configured*, never their values — the
-/// daemon holds those in the keyring and the app never sees one.
+/// daemon holds those in its secrets file and the app never sees one.
 #[tokio::test]
 async fn listing_secrets_reports_configured_without_values() {
     let daemon = FakeDaemon::start().await;

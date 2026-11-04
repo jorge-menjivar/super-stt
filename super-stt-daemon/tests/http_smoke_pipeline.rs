@@ -20,8 +20,7 @@
 //! 11. Uninstalling a backend empties every stage it was filling.
 //!     The answer names each stage it was filling, and only those.
 //!
-//! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
-//! `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend declares one transcription model and one post-processor
 //! so both directions of the role gate are exercisable. Both are `wasm`/cloud

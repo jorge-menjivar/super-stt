@@ -19,7 +19,7 @@ directly.
 
 - **Secrets** (`[[secrets]]`) — sensitive values such as API keys, managed
   under [`/backend/{backend_id}/secret/list`](./backends/secrets.md) (the `secrets`
-  scope). The daemon stores them in the **system keyring** and reads them only
+  scope). The daemon stores them in its **secrets file** and reads them only
   at model-load time, injecting each as an `x-stt-secret-<name>` request header
   (see [contract.md](../../backend/contract.md#request-headers)). Values are
   **write-only**: a client sets or clears a secret and can check whether one is
@@ -29,8 +29,9 @@ directly.
   `settings` scope). The daemon stores them as plaintext in its config, and
   their values *are* returned.
 
-The keyring account for a backend secret is `backend:<source>:<name>` under the
-`super-stt` service, where `<source>` is the backend's repo id.
+The secrets file is `$XDG_STATE_HOME/super-stt/secrets.ron`, mode 0600. Only the
+daemon reads or writes it. A backend's secrets are kept under its `source`, the
+backend's repo id, and the secret's name.
 
 ## Auth
 

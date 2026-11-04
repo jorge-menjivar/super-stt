@@ -94,20 +94,6 @@
       ]
     }
     i18n-embed-fl            = "0.10.0"
-    # Both native backends are named because the daemon builds for both
-    # platforms. Neither costs the other anything: keyring puts
-    # `dbus-secret-service` behind `cfg(target_os = "linux")` and
-    # `security-framework` behind `cfg(target_os = "macos")`, so each feature
-    # pulls a dependency only on the target that uses it. Without
-    # `apple-native` keyring falls back to its *mock* store on macOS, which
-    # would silently drop every session token and backend secret at exit.
-    keyring                  = {
-      version  = "3",
-      features = [
-        "apple-native",
-        "sync-secret-service",
-      ]
-    }
     # System calls (for client singleton)
     libc                     = "0.2"
     # Cosmic specific. The lib target is `cosmic`, so this is `use cosmic::`
@@ -163,35 +149,35 @@
     # `just pin-engine <rev>`.
     super-engine-client      = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "5544d03c528c51a4cc6320f270ff234fb2d8fb1a",
     }
     super-engine-daemon      = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "5544d03c528c51a4cc6320f270ff234fb2d8fb1a",
     }
     super-engine-forge       = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "5544d03c528c51a4cc6320f270ff234fb2d8fb1a",
     }
     super-engine-indexer     = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "5544d03c528c51a4cc6320f270ff234fb2d8fb1a",
     }
     super-engine-installer   = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "5544d03c528c51a4cc6320f270ff234fb2d8fb1a",
     }
     super-engine-protocol    = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "5544d03c528c51a4cc6320f270ff234fb2d8fb1a",
     }
     super-engine-spec        = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "5544d03c528c51a4cc6320f270ff234fb2d8fb1a",
     }
     super-engine-test-daemon = {
       git = "https://github.com/super-libre/super-engine",
-      rev = "3cd940dfbf7c41153dc684e66c272d69cc78b88a",
+      rev = "5544d03c528c51a4cc6320f270ff234fb2d8fb1a",
     }
     thiserror                = "2.0"
     tokio                    = {

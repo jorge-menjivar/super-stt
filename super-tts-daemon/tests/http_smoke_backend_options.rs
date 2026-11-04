@@ -6,8 +6,7 @@
 //! 2. Unknown option: GET/POST to a `{name}` not declared → 404 `unknown_option`.
 //! 3. Unknown backend: GET on a source not installed → 404 `unknown_backend`.
 //!
-//! Uses `SUPER_TTS_KEYRING_MOCK=1` (in-memory keyring) and
-//! `SUPER_TTS_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_TTS_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend (`fixture-openai/backend.toml`) is written into the
 //! isolated `XDG_DATA_HOME/super-tts/backends/` tree so the daemon discovers

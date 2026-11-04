@@ -10,14 +10,6 @@
 //! - `POST /v1/registry/backend/install` + `GET /v1/events` — hash mismatch
 //!   in the install pipeline surfaces as a `registry.install.failed` SSE
 //!   event.
-//!
-//! Both tests carry `#[ignore]` so they are skipped by the automated
-//! `cargo test --lib` run (which hangs on a locked keyring). Run them
-//! manually with:
-//!
-//! ```bash
-//! cargo test -p super-tts-daemon --test registry_http -- --ignored --nocapture
-//! ```
 
 mod common;
 
@@ -210,7 +202,6 @@ fn fixture_index_correct_hash(asset_url: &str) -> String {
 /// `compatibility.compatible == true` for a wasm backend (wasm is always
 /// compatible on any host) and `id == "openai"`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "spawns real daemon; requires a responsive system keyring"]
 async fn list_registry_backends_returns_compat() {
     let mut mock_server = mockito::Server::new_async().await;
 
@@ -270,7 +261,6 @@ async fn list_registry_backends_returns_compat() {
 /// - Drain the SSE stream (with a timeout) looking for
 ///   `registry.install.failed` carrying `error == "asset_hash_mismatch"`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "spawns real daemon; requires a responsive system keyring"]
 async fn install_pipeline_rejects_hash_mismatch() {
     // Two independent mockito servers: one for the registry index, one for
     // the asset download. Using separate servers avoids path-collision issues

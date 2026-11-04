@@ -18,7 +18,7 @@
 //! the readiness probe) doesn't consume the quota the flood is measured
 //! against.
 //!
-//! Hermetic: `SUPER_STT_AUTO_APPROVE=1` + `SUPER_STT_KEYRING_MOCK=1`.
+//! Hermetic: `SUPER_STT_AUTO_APPROVE=1`.
 
 mod common;
 

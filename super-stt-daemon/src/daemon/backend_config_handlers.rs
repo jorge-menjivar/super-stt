@@ -229,8 +229,8 @@ impl SuperSTTDaemon {
     /// Re-resolved rather than patched in place, because the injected headers
     /// and the egress list have to come from one snapshot of the options and
     /// only [`backend_context`](Self::backend_context) produces that pair.
-    /// Secrets are re-read on the way through; a keyring round-trip per
-    /// settings write costs nothing and keeps this on the code path a load
+    /// Secrets are re-read on the way through; a read of the secrets in
+    /// memory per settings write costs nothing and keeps this on the code path a load
     /// already uses, so the two cannot resolve a value differently.
     ///
     /// Returns a warning if the new context could not be resolved. The stages
@@ -264,7 +264,7 @@ impl SuperSTTDaemon {
                 return Some(format!("{source} is not installed"));
             };
             // Resolved without either slot held. It reads config and the
-            // keyring, and the transcribe path holds those slots for a whole
+            // secrets, and the transcribe path holds those slots for a whole
             // inference.
             let context = match self.backend_context(&backend).await {
                 Ok(context) => context,
@@ -428,10 +428,13 @@ impl SuperSTTDaemon {
         name: String,
         value: String,
     ) -> DaemonResponse {
-        if let Err(e) =
-            crate::keyring::set_backend_secret_async(source.clone(), name.clone(), value).await
+        if let Err(e) = self
+            .secrets
+            .clone()
+            .set_backend_secret_async(source.clone(), name.clone(), value)
+            .await
         {
-            return DaemonResponse::error(&format!("keyring_unavailable: {e}"));
+            return DaemonResponse::error(&format!("secrets_write_failed: {e}"));
         }
         let reload_warning = self.reload_if_source_active(&source).await;
         info!("Set backend secret {name} for {source}");
@@ -447,10 +450,13 @@ impl SuperSTTDaemon {
         source: String,
         name: String,
     ) -> DaemonResponse {
-        if let Err(e) =
-            crate::keyring::delete_backend_secret_async(source.clone(), name.clone()).await
+        if let Err(e) = self
+            .secrets
+            .clone()
+            .delete_backend_secret_async(source.clone(), name.clone())
+            .await
         {
-            return DaemonResponse::error(&format!("keyring_unavailable: {e}"));
+            return DaemonResponse::error(&format!("secrets_write_failed: {e}"));
         }
         let reload_warning = self.reload_if_source_active(&source).await;
         info!("Cleared backend secret {name} for {source}");

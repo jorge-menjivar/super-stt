@@ -114,7 +114,7 @@ impl AppModel {
         // bump `udp_restart_counter` on reconnect. Restarting
         // the iced subscription would cancel the helper
         // mid-retry and cause another `session::obtain` round
-        // — i.e. another potential keyring touch (session-token reload).
+        // — i.e. another read of the session-token file.
         if was_disconnected {
             info!("Daemon reconnected; events subscription is self-healing, no iced restart");
         }

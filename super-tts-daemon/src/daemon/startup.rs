@@ -14,6 +14,8 @@ use crate::tts_models::backends;
 use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
+use super_engine_daemon::secrets::Secrets;
+use super_tts_shared::SUPER_TTS;
 use tokio::sync::broadcast;
 
 /// Pre-assembled subsystem handles created during daemon startup.
@@ -66,9 +68,14 @@ impl SuperTTSDaemon {
     ///
     /// # Errors
     ///
-    /// Returns an error if model loading fails.
+    /// Returns an error if the secrets file exists and cannot be read.
     pub async fn new() -> Result<Self> {
         info!("Initializing Super TTS Daemon...");
+
+        // Before anything else that could fail: a daemon that cannot read the
+        // file must not start, or its first write would replace a file it
+        // never read.
+        let secrets = Secrets::open(&SUPER_TTS)?;
 
         let config = Self::load_and_persist_config();
 
@@ -112,6 +119,7 @@ impl SuperTTSDaemon {
             ),
             voices,
             loading: Arc::new(super_engine_daemon::load_gate::LoadGate::default()),
+            secrets,
         };
 
         daemon.post_init().await;

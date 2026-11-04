@@ -55,8 +55,8 @@ impl Default for UpdateConfig {
     }
 }
 
-/// User-set configuration for installed backends. Secrets live in the keyring;
-/// only non-sensitive **options** are stored here (plaintext).
+/// User-set configuration for installed backends. Secrets live in the
+/// secrets file; only non-sensitive **options** are stored here (plaintext).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BackendsConfig {
     /// Per-backend option overrides: backend `source` → (option name → value).

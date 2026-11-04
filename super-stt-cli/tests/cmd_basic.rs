@@ -10,10 +10,10 @@
 //! - `ping`   → `GET  /v1/ping`            : liveness, prints the daemon's reply.
 //! - `status` → `GET  /v1/status`          : prints `Model:` / `Device:` lines.
 //! - `stop`   → `POST /v1/transcribe/stop` : idempotent against an idle daemon.
-//! - `logout` → local keyring only         : forgets the cached session token.
+//! - `logout` → local token file only         : forgets the cached session token.
 //!
-//! Both processes run with `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring,
-//! no secret-service prompt) and `SUPER_STT_AUTO_APPROVE=1` (the daemon
+//! The CLI keeps its token in the test daemon's home, never the developer's
+//! state directory, and the daemon runs with `SUPER_STT_AUTO_APPROVE=1` (it
 //! auto-approves `/auth/request`, so no consent popup is spawned).
 //!
 //! ```bash
@@ -21,7 +21,7 @@
 //! ```
 
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use super_engine_test_daemon::TestDaemon;
 use super_stt_shared::product::SUPER_STT;
@@ -46,29 +46,26 @@ fn locate_daemon_bin() -> PathBuf {
 }
 
 /// Start a hermetic daemon (see `super_engine_test_daemon`) and wait for its
-/// socket. Returns it with the socket path the CLI should target via
-/// `--socket`.
+/// socket. The CLI targets it with `--socket`.
 ///
 /// These tests are synchronous, and the CLI they run blocks, so the wait gets
 /// a runtime of its own.
-fn spawn_daemon() -> (TestDaemon, PathBuf) {
-    let daemon = tokio::runtime::Builder::new_current_thread()
+fn spawn_daemon() -> TestDaemon {
+    tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("a runtime to wait on the daemon")
-        .block_on(TestDaemon::build(&SUPER_STT, locate_daemon_bin(), "cli-basic").start());
-    let socket = daemon.socket().to_path_buf();
-    (daemon, socket)
+        .block_on(TestDaemon::build(&SUPER_STT, locate_daemon_bin(), "cli-basic").start())
 }
 
-/// Run the CLI binary against `socket`, blocking until it exits. Returns
-/// `(exit code, stdout, stderr)`.
-fn run_cli(socket: &Path, args: &[&str]) -> (i32, String, String) {
-    let mut full_args = vec!["--socket", socket.to_str().expect("socket utf8")];
+/// Run the CLI binary against `daemon`, blocking until it exits. Its token is
+/// kept in the daemon's home. Returns `(exit code, stdout, stderr)`.
+fn run_cli(daemon: &TestDaemon, args: &[&str]) -> (i32, String, String) {
+    let mut full_args = vec!["--socket", daemon.socket().to_str().expect("socket utf8")];
     full_args.extend_from_slice(args);
 
     let mut child = Command::new(CLI_BIN)
-        .env("SUPER_STT_KEYRING_MOCK", "1")
+        .env("XDG_STATE_HOME", &daemon.home().state)
         .env("SUPER_STT_AUTO_APPROVE", "1")
         .env("SUPER_STT_MUTE_CUES", "1")
         .args(&full_args)
@@ -93,8 +90,8 @@ fn run_cli(socket: &Path, args: &[&str]) -> (i32, String, String) {
 /// print the daemon's liveness reply with a clean exit.
 #[test]
 fn ping_reports_daemon_alive() {
-    let (_guard, socket) = spawn_daemon();
-    let (code, stdout, stderr) = run_cli(&socket, &["ping"]);
+    let daemon = spawn_daemon();
+    let (code, stdout, stderr) = run_cli(&daemon, &["ping"]);
     assert_eq!(
         code, 0,
         "ping should exit 0; stdout=`{stdout}` stderr=`{stderr}`"
@@ -111,8 +108,8 @@ fn ping_reports_daemon_alive() {
 /// `(none loaded)` — but both labels are always present.
 #[test]
 fn status_reports_model_and_device() {
-    let (_guard, socket) = spawn_daemon();
-    let (code, stdout, stderr) = run_cli(&socket, &["status"]);
+    let daemon = spawn_daemon();
+    let (code, stdout, stderr) = run_cli(&daemon, &["status"]);
     assert_eq!(
         code, 0,
         "status should exit 0; stdout=`{stdout}` stderr=`{stderr}`"
@@ -133,8 +130,8 @@ fn status_reports_model_and_device() {
 /// relies on when the user double-presses after audio failed to start.
 #[test]
 fn stop_is_idempotent_when_idle() {
-    let (_guard, socket) = spawn_daemon();
-    let (code, stdout, stderr) = run_cli(&socket, &["stop"]);
+    let daemon = spawn_daemon();
+    let (code, stdout, stderr) = run_cli(&daemon, &["stop"]);
     assert_eq!(
         code, 0,
         "stop on idle daemon should exit 0; stdout=`{stdout}` stderr=`{stderr}`"
@@ -145,18 +142,22 @@ fn stop_is_idempotent_when_idle() {
     );
 }
 
-/// `logout` is local-only — it forgets the cached session token via the
-/// keyring and never contacts the daemon. Under the mock keyring there is
-/// nothing stored, but `forget` is idempotent, so it still reports success
-/// and exits cleanly. No daemon needed.
+/// `logout` is local-only — it deletes the CLI's token file and never
+/// contacts the daemon. No daemon needed.
 #[test]
 fn logout_clears_cached_token() {
+    let state = tempfile::tempdir().expect("a state directory");
+    let token = state.path().join("super-stt/clients/super-stt-cli.json");
+    std::fs::create_dir_all(token.parent().unwrap()).expect("create the clients directory");
+    std::fs::write(&token, r#"{"token":"t","requested":[],"granted":[]}"#)
+        .expect("plant a token file");
+
     // logout ignores the socket, but `--socket` is a global flag so passing
     // a throwaway path keeps `run_cli` uniform.
     let throwaway =
         std::env::temp_dir().join(format!("stt-cli-logout-{}.sock", std::process::id()));
     let mut child = Command::new(CLI_BIN)
-        .env("SUPER_STT_KEYRING_MOCK", "1")
+        .env("XDG_STATE_HOME", state.path())
         .args(["--socket", throwaway.to_str().unwrap(), "logout"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -179,4 +180,5 @@ fn logout_clears_cached_token() {
         stdout.contains("Cached session token removed"),
         "logout should confirm the token was forgotten; stdout=`{stdout}` stderr=`{stderr}`"
     );
+    assert!(!token.exists(), "logout must delete the token file");
 }

@@ -4,7 +4,7 @@
 //! GitHub API (`GITHUB_API_BASE`, honored by `Github::from_env` /
 //! `accept_base_url` — loopback `http://` is allowed for exactly this),
 //! with `--dry-run` so nothing is installed and no escalation happens.
-//! Safe to run locally: no root, no keyring, no real network.
+//! Safe to run locally: no root, no real network.
 
 use std::io::Write;
 

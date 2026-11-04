@@ -6,8 +6,7 @@
 //! 2. Scope denial: a `settings`-only token is rejected on secret endpoints.
 //! 3. Undeclared secret: POST to an unknown `{name}` → 404 `unknown_secret`.
 //!
-//! Uses `SUPER_TTS_KEYRING_MOCK=1` (in-memory keyring) and
-//! `SUPER_TTS_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_TTS_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend (`fixture-openai/backend.toml`) is written into the
 //! isolated `XDG_DATA_HOME/super-tts/backends/` tree so the daemon discovers

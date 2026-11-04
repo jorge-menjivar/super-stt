@@ -103,27 +103,27 @@ impl BackendFixture<'_> {
     }
 }
 
-// ---------- client-side keyring ----------------------------------------------
+// ---------- client-side session tokens ---------------------------------------
 
-/// Route *this process's* keyring access to the in-memory mock.
+/// Refuse to run a client in this process unless the run has a state
+/// directory of its own.
 ///
-/// The daemon subprocess gets the mock from `SUPER_STT_KEYRING_MOCK=1` in its
-/// environment. A test that drives a client helper — anything reaching
+/// A test that drives a client helper — anything reaching
 /// `session::obtain`/`save`/`forget` — does that work in the test process
-/// itself, which has no such routing and so reaches the real secret service:
-/// it writes entries into the developer's keyring, and on a headless CI runner
-/// it blocks on an unlock prompt that never comes. That is what kept the widget
-/// subscription tests behind `#[ignore]`.
-///
-/// `session::install_mock_keyring_if_requested` is the production entry point,
-/// but it is gated on reading that env var, and *setting* an env var from a
-/// process that already has threads running is unsound under edition 2024. So
-/// this calls the same builder directly. Idempotent, and safe to call from
-/// every test: the default builder must be set before any keyring access, and
-/// `Once` makes the first caller win while the rest wait.
-pub fn install_mock_keyring() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
-    });
+/// itself, and the client keeps its token in a file under
+/// `$XDG_STATE_HOME/<product>/clients/`. The daemon subprocess gets a home of
+/// its own from the harness; this process can only get one from its
+/// environment, and setting a variable from a process that already has
+/// threads running is unsound under edition 2024. `just test` gives the whole
+/// run a fresh one. Without it, the test would write tokens into the
+/// developer's real state directory.
+pub fn require_own_state_dir() {
+    let own = std::env::var_os("XDG_STATE_HOME")
+        .is_some_and(|dir| std::path::Path::new(&dir).starts_with(std::env::temp_dir()));
+    assert!(
+        own,
+        "XDG_STATE_HOME must be a directory under {} for this test, or it writes \
+         client tokens into your real state directory. Run it with `just test`.",
+        std::env::temp_dir().display()
+    );
 }

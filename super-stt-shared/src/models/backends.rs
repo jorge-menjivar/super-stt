@@ -3,8 +3,8 @@
 //! The `GET /backend/list` installed-backend catalog response.
 //!
 //! A backend is an installed model provider discovered on disk. Each one
-//! declares the models it serves, the secrets it needs (stored in the system
-//! keyring), and the options it accepts (stored in the daemon config). The
+//! declares the models it serves, the secrets it needs (stored in the
+//! daemon's secrets file), and the options it accepts (stored in the daemon config). The
 //! daemon serializes this catalog from its discovered backends; the settings UI
 //! deserializes it and renders one section per backend. Keeping the shape here,
 //! shared by both sides, is what keeps the wire contract from drifting.
@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BackendInfo {
     /// Repo id the backend was installed from, e.g.
-    /// `github.com/super-stt/openai`. Used as the daemon's keyring account
-    /// key and option key.
+    /// `github.com/super-stt/openai`. The key the daemon stores its
+    /// secrets and options under.
     pub source: String,
     /// Human-readable backend name, e.g. `OpenAI`.
     pub name: String,
@@ -69,7 +69,7 @@ pub struct BackendInfo {
     pub installed_accel: Vec<String>,
     /// Models this backend serves.
     pub models: Vec<BackendModel>,
-    /// Sensitive values (API keys, etc.) stored in the system keyring.
+    /// Sensitive values (API keys, etc.) stored in the daemon's secrets file.
     pub secrets: Vec<BackendSecret>,
     /// Non-sensitive options stored in the daemon config.
     pub options: Vec<BackendOption>,
@@ -155,11 +155,11 @@ fn default_role() -> String {
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-/// A sensitive value the backend requires, stored in the system keyring.
+/// A sensitive value the backend requires, stored in the daemon's secrets
+/// file.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BackendSecret {
-    /// `snake_case` identifier (the keyring account suffix; the backend reads
-    /// it as `x-stt-secret-<name>`).
+    /// `snake_case` identifier; the backend reads it as `x-stt-secret-<name>`.
     pub name: String,
     /// Human-readable label for the UI. Falls back to `name` when absent.
     #[serde(default)]

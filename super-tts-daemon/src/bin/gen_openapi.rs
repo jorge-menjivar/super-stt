@@ -7,7 +7,7 @@
 //! published spec cannot fall behind the protocol.
 //!
 //! The document is built from the route registrations themselves, so this
-//! starts no daemon, opens no socket, and touches no keyring.
+//! starts no daemon, opens no socket, and reads no secrets file.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

@@ -274,8 +274,8 @@ pub async fn cancel_download(stage: u32) -> HttpResult<()> {
 ///
 /// Rarely needed: writing an option or a secret already reloads every stage
 /// running a model from that backend. This is the explicit button for the case
-/// where something changed outside the daemon's view — a keyring edited by
-/// another tool, say.
+/// where something changed outside the daemon's view — a model file replaced
+/// underneath it, say.
 pub async fn reload_stage_model(stage: u32) -> HttpResult<()> {
     let path = format!("/pipeline/{stage}/model/reload");
     with_settings_token(move |socket, token| {

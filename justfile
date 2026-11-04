@@ -158,9 +158,15 @@ check-json: (check '--message-format=json')
 check-macos *args:
     cargo clippy --all-features {{ macos_members }} {{ args }} -- -W clippy::pedantic -D warnings -D unused_must_use
 
-# Test the members that build on macOS. See `check-macos`.
+# Test the members that build on macOS. See `check-macos`, and `test` for the
+# state directory.
 [doc("Test the workspace members that build on macOS")]
 test-macos *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    XDG_STATE_HOME=$(mktemp -d)
+    export XDG_STATE_HOME
+    trap 'rm -rf "$XDG_STATE_HOME"' EXIT
     cargo test {{ macos_members }} {{ args }}
 
 # Verify the daemon compiles under every backend-transport feature combination.
@@ -192,7 +198,18 @@ fmt:
     cargo fmt --all
 
 # Run the test suite. Usage: just test [--verbose]
+#
+# The run gets a state directory of its own, removed afterwards. Tests that
+# drive a client in their own process keep its session token there, under
+# `$XDG_STATE_HOME`, and refuse to run without one: the token would otherwise
+# replace the developer's own. The daemons they start get homes of their own
+# from the test harness either way.
 test *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    XDG_STATE_HOME=$(mktemp -d)
+    export XDG_STATE_HOME
+    trap 'rm -rf "$XDG_STATE_HOME"' EXIT
     cargo test {{ args }}
 
 # Run the #[ignore]'d GUI smoke tests. These spawn real libcosmic surfaces
@@ -759,8 +776,8 @@ gen-schemas:
 # Write docs/protocol/openapi.json from the daemon's live /v1 router. The file
 # is not committed: CI generates it the same way on every push and publishes
 # it, so it cannot fall behind the protocol. Run this to read it locally
-# (`just openapi-serve` does so for you). Starts no daemon and touches no
-# keyring — the document is built from the route registrations themselves.
+# (`just openapi-serve` does so for you). Starts no daemon and reads no
+# secrets file — the document is built from the route registrations themselves.
 openapi:
     cargo run -q -p super-stt-daemon --bin gen_openapi
 

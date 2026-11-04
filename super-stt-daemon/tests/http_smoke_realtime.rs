@@ -11,8 +11,7 @@
 //! opening `recv` saw a closed consumer stream and returned without a word. The
 //! round-trip test below fails exactly that way if the call is ever lost again.
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) + `SUPER_STT_KEYRING_MOCK=1`
-//! (in-memory keyring), so it runs in the default `cargo test` flow.
+//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
 #![cfg(feature = "wasm-backends")]
 
 mod common;

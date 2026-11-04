@@ -23,6 +23,7 @@
 [dev-dependencies]
     # Spawns the daemon for the integration tests, in a home of its own.
     super-engine-test-daemon.workspace = true
+    tempfile = "3.27.0"
 
 [lints]
     workspace = true

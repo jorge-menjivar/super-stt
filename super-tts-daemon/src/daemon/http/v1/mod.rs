@@ -52,8 +52,8 @@ use utoipa_axum::routes;
 /// two ways cannot exist, because there is only one spelling.
 ///
 /// The guards are applied separately, in [`router`], for a practical reason:
-/// `from_fn_with_state` needs a live [`AppState`], and building one opens the
-/// system keyring. Keeping route registration free of it is what lets
+/// `from_fn_with_state` needs a live [`AppState`], and building one needs a
+/// daemon. Keeping route registration free of it is what lets
 /// [`openapi`] generate the document from these same registrations without a
 /// running daemon — see `src/bin/gen_openapi.rs`.
 struct ScopeGroups {

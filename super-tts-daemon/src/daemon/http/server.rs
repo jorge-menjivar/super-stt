@@ -2,7 +2,7 @@
 //! HTTP server for the daemon protocol.
 //!
 //! The listeners and the auth layer are `super-engine-daemon`'s, shared with
-//! Super STT; this names Super TTS's router, keyring and consent dialog to
+//! Super STT; this names Super TTS's router, secrets and consent dialog to
 //! them.
 //!
 //! Binds `$XDG_RUNTIME_DIR/tts/super-tts-http.sock` (override via
@@ -72,8 +72,7 @@ pub const AUTO_APPROVE_ENV: &str = "SUPER_TTS_AUTO_APPROVE";
 /// `tokio::select!`.
 ///
 /// # Errors
-/// Returns an error if the system keyring is unavailable, or the socket
-/// can't be created or bound.
+/// Returns an error if the socket can't be created or bound.
 pub async fn start_http_server(
     daemon: Arc<SuperTTSDaemon>,
     instance: InstanceLock,
@@ -91,12 +90,12 @@ pub async fn start_http_server(
             product: &SUPER_TTS,
             describe_scopes: super_tts_shared::consent::permissions_for_scopes,
         },
-        keyring: crate::keyring::keyring(),
+        secrets: daemon.secrets.clone(),
         resource_manager: Arc::clone(&resource_manager),
         allowed_origins: tcp.allowed_origins,
     };
     serve(listeners, resource_manager, shutdown_tx, move || {
-        let auth = Auth::load(config)?;
+        let auth = Auth::load(config);
         Ok(crate::daemon::http::v1::router(AppState::new(daemon, auth)))
     })
     .await

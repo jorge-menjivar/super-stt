@@ -20,8 +20,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
 /// The secret to store.
 #[derive(Deserialize, ToSchema)]
 struct SecretBody {
-    /// The credential itself. Written to the system keyring, never returned by
-    /// any endpoint. Empty is refused — clear a secret with `DELETE`.
+    /// The credential itself. Written to the daemon's secrets file, never
+    /// returned by any endpoint. Empty is refused — clear a secret with `DELETE`.
     #[serde(default)]
     value: String,
 }
@@ -66,8 +66,8 @@ struct SecretConfigured {
     summary = "List a backend's secrets",
     description = "\
 Every credential this backend declares, with whether each is currently set. \
-**Values are never returned** — not here, not anywhere. They live in the system \
-keyring, and the only operations are write and clear.
+**Values are never returned** — not here, not anywhere. They live in the daemon's \
+secrets file, and the only operations are write and clear.
 
 This is a separate scope from `settings` precisely because it is the credential \
 surface: a token granted `settings` cannot reach it.",
@@ -92,9 +92,7 @@ async fn list_secrets(State(s): State<AppState>, Path(source): Path<String>) -> 
     };
     let mut out = Vec::with_capacity(backend.secrets.len());
     for sec in &backend.secrets {
-        let configured = crate::keyring::has_backend_secret_async(source.clone(), sec.name.clone())
-            .await
-            .unwrap_or(false);
+        let configured = s.daemon.secrets.has_backend_secret(&source, &sec.name);
         out.push(SecretState {
             name: sec.name.clone(),
             label: sec.label.clone().unwrap_or_else(|| sec.name.clone()),
@@ -139,9 +137,7 @@ async fn get_secret(
         Guard::NoBackend => json_error(StatusCode::NOT_FOUND, "unknown_backend"),
         Guard::NoItem => json_error(StatusCode::NOT_FOUND, "unknown_secret"),
         Guard::Ok => {
-            let configured = crate::keyring::has_backend_secret_async(source.clone(), name.clone())
-                .await
-                .unwrap_or(false);
+            let configured = s.daemon.secrets.has_backend_secret(&source, &name);
             ok(&SecretConfigured {
                 status: "success",
                 name: Some(name),
@@ -157,7 +153,7 @@ async fn get_secret(
     tag = "backends",
     summary = "Store a secret",
     description = "\
-Writes the credential to the system keyring. It cannot be read back afterwards; \
+Writes the credential to the daemon's secrets file. It cannot be read back afterwards; \
 only replaced or cleared.
 
 Every stage running a model from this backend is reloaded so the new credential is \
@@ -174,7 +170,7 @@ reported in the message, and the stage keeps running the old instance.",
     responses(
         (status = 200, description = "Stored.", body = SecretConfigured),
         (status = 400, description = "The value was empty (`invalid_request`). Use `DELETE` to clear a secret.", body = ErrorEnvelope),
-        (status = 503, description = "The keyring could not be written (`keyring_unavailable`).", body = ErrorEnvelope),
+        (status = 500, description = "The secrets file could not be written (`secrets_write_failed`).", body = ErrorEnvelope),
         (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
         (status = 403, description = "The token lacks the `secrets` scope.", body = ErrorEnvelope),
         (status = 404, description = "No such backend (`unknown_backend`) or no such secret (`unknown_secret`).", body = ErrorEnvelope),
@@ -209,7 +205,7 @@ async fn set_secret(
     tag = "backends",
     summary = "Clear a secret",
     description = "\
-Removes the stored credential from the keyring, returning the secret to unset. A \
+Removes the stored credential from the secrets file, returning the secret to unset. A \
 backend that requires it will refuse to load until one is stored again.",
     params(
         ("backend_id" = String, Path,
@@ -220,7 +216,7 @@ backend that requires it will refuse to load until one is stored again.",
     security(("session_token" = ["secrets"])),
     responses(
         (status = 200, description = "Cleared.", body = SecretConfigured),
-        (status = 503, description = "The keyring could not be written (`keyring_unavailable`).", body = ErrorEnvelope),
+        (status = 500, description = "The secrets file could not be written (`secrets_write_failed`).", body = ErrorEnvelope),
         (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
         (status = 403, description = "The token lacks the `secrets` scope.", body = ErrorEnvelope),
         (status = 404, description = "No such backend (`unknown_backend`) or no such secret (`unknown_secret`).", body = ErrorEnvelope),
@@ -260,7 +256,8 @@ async fn declared_secret(s: &AppState, source: &str, name: &str) -> Guard {
 ///
 /// Precondition: only reached after all `unknown_backend`, `unknown_secret`,
 /// and empty-value guards have passed, so the sole remaining failure mode is a
-/// keyring write error — safely collapsed to `503 keyring_unavailable`.
+/// failure to write the secrets file — safely collapsed to
+/// `500 secrets_write_failed`.
 fn secret_result(
     resp: &super_stt_shared::models::protocol::DaemonResponse,
     configured: bool,
@@ -273,9 +270,11 @@ fn secret_result(
         })
     } else {
         json_error_msg(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "keyring_unavailable",
-            resp.message.as_deref().unwrap_or("keyring is unavailable"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "secrets_write_failed",
+            resp.message
+                .as_deref()
+                .unwrap_or("the secrets file could not be written"),
         )
     }
 }

@@ -83,7 +83,7 @@ stt record --write --stop-mode manual_only
 
 ## 🤖 Models
 
-Models come from a **library** of backends you install on demand. Open the app, go to **Library → Browse**, install a backend, and it appears in the model selector. Some run **locally** (your audio never leaves your machine); others are **online** providers you reach with your own API, which is stored securely in your system keyring (GNOME Keyring, KWallet, …).
+Models come from a **library** of backends you install on demand. Open the app, go to **Library → Browse**, install a backend, and it appears in the model selector. Some run **locally** (your audio never leaves your machine); others are **online** providers you reach with your own API key, which the daemon keeps in a file only you can read.
 
 ### Recommended models
 

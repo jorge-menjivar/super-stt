@@ -16,6 +16,8 @@ use crate::stt_models::backends;
 use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
+use super_engine_daemon::secrets::Secrets;
+use super_stt_shared::SUPER_STT;
 use tokio::sync::broadcast;
 
 /// Pre-assembled subsystem handles created during daemon startup.
@@ -88,9 +90,14 @@ impl SuperSTTDaemon {
     ///
     /// # Errors
     ///
-    /// Returns an error if model loading fails.
+    /// Returns an error if the secrets file exists and cannot be read.
     pub async fn new() -> Result<Self> {
         info!("Initializing Super STT Daemon...");
+
+        // Before anything else that could fail: a daemon that cannot read the
+        // file must not start, or its first write would replace a file it
+        // never read.
+        let secrets = Secrets::open(&SUPER_STT)?;
 
         let config = Self::load_and_persist_config();
 
@@ -128,6 +135,7 @@ impl SuperSTTDaemon {
             )),
             self_update: Arc::new(crate::self_update::checker()),
             loading: Arc::new(crate::daemon::types::StageLoadGates::default()),
+            secrets,
         };
 
         daemon.post_init().await;

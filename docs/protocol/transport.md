@@ -368,7 +368,8 @@ The minimal recipe for a fresh client of any scope:
    }, ...);
    ```
 
-2. Persist the returned `session_token` in your platform's keyring.
+2. Persist the returned `session_token` where only the user can read it
+   (see [Auth](./auth.md)).
 
 3. For commands, send `Authorization: Bearer <token>` on every request:
    ```bash

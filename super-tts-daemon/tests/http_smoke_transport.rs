@@ -9,8 +9,7 @@
 //! - known route, wrong method     → `405` (both with and without auth middleware in front)
 //! - malformed / missing JSON body → `400`
 //!
-//! Uses `SUPER_TTS_AUTO_APPROVE=1` (no GUI) + `SUPER_TTS_KEYRING_MOCK=1`
-//! (in-memory keyring), so it runs in the default `cargo test` flow.
+//! Uses `SUPER_TTS_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
 
 mod common;
 

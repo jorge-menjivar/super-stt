@@ -5,7 +5,6 @@ pub mod config;
 pub mod daemon;
 pub mod download_progress;
 pub use super_engine_daemon::download_stream;
-pub mod keyring;
 pub mod output;
 pub mod registry;
 pub use super_engine_daemon::resource_management;

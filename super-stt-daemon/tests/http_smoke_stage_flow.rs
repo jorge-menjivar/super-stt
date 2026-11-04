@@ -26,8 +26,7 @@
 //! and steps 3 through 6 are all about what happens once something has:
 //!   just build-mock-wasm-backend
 //!
-//! Uses `SUPER_STT_KEYRING_MOCK=1` (in-memory keyring) and
-//! `SUPER_STT_AUTO_APPROVE=1` (no GUI), so it runs in the default flow.
+//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI), so it runs in the default flow.
 #![cfg(feature = "wasm-backends")]
 
 mod common;

@@ -128,13 +128,13 @@ After the registry work, the daemon process itself opens HTTPS to:
 - `objects.githubusercontent.com` and `github.com` — release asset
   downloads.
 
-No keyring secrets cross these boundaries. Secrets are read at model load
-time only, not at install time.
+No secrets cross these boundaries. Secrets are read at model load time
+only, not at install time.
 
 The integrity story for installed assets is SHA-256 verification against the
 registry's index, computed by the indexer at index-build time. A compromised
 Pages host could serve a malicious index, but cannot bypass the wasm
-sandbox or recover keyring secrets through the install path. Custom-repo
+sandbox or recover the user's secrets through the install path. Custom-repo
 installs are explicitly unverified — only TLS protects them — and the daemon
 surfaces this to the client.
 
