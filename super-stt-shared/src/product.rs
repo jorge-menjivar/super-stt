@@ -3,7 +3,7 @@
 //! socket to the scopes a token can carry. See
 //! `super_engine_protocol::ProductSpec`.
 //!
-//! [`SUPER_STT`] is defined in `super-stt-registry-types`, where the
+//! [`SUPER_STT`] is defined in `super-voice-registry-types`, where the
 //! installer can reach it; the tests of what Super STT shipped live here.
 
 pub use super_voice_registry_types::product::SUPER_STT;

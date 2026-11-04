@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [package]
-    name = "super-stt-indexer"
+    name = "super-voice-indexer"
     edition = "2024"
     description = "Cron-driven indexer that builds index.json from registry.toml"
     license = "GPL-3.0-only"

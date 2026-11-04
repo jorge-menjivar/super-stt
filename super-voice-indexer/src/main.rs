@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `super-stt-indexer`: builds Super STT's backend registry index. The
+//! `super-voice-indexer`: builds Super Voice's backend registry index. The
 //! indexer is `super_engine_indexer`'s; what is here is what makes it Super
-//! STT's.
+//! Voice's.
 
 use super_engine_indexer::Indexer;
 use super_voice_registry_types::Voice;
@@ -21,7 +21,7 @@ use super_voice_registry_types::Voice;
 const GRANDFATHERED: &[&str] = &["deepgram", "voxtral"];
 
 const INDEXER: Indexer = Indexer {
-    name: "super-stt-indexer",
+    name: "super-voice-indexer",
     user_agent: Voice::USER_AGENT,
     grandfathered: GRANDFATHERED,
 };

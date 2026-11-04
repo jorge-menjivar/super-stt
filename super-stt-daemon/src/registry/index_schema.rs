@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Daemon-side registry-index policy. The `index.json` schema itself is the
-//! canonical `super-stt-registry-types::index` (shared with the indexer
+//! canonical `super-voice-registry-types::index` (shared with the indexer
 //! producer and the `/registry/backend/list` leaf types); the policy over it
 //! — the `min_client` soft-floor check and the unsafe-path backend filter —
 //! is `super_engine_daemon::registry::index`, shared with Super TTS.
@@ -32,19 +32,19 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
 
-    /// The `super-stt-indexer` binary sibling to this test binary
-    /// (`target/<profile>/super-stt-indexer`), if it has been built.
+    /// The `super-voice-indexer` binary sibling to this test binary
+    /// (`target/<profile>/super-voice-indexer`), if it has been built.
     fn indexer_bin() -> Option<PathBuf> {
         let exe = std::env::current_exe().ok()?;
         // .../target/<profile>/deps/<testbin> -> .../target/<profile>
-        let bin = exe.parent()?.parent()?.join("super-stt-indexer");
+        let bin = exe.parent()?.parent()?.join("super-voice-indexer");
         bin.exists().then_some(bin)
     }
 
     #[test]
     fn reads_generated_test_index_end_to_end() {
         let Some(indexer) = indexer_bin() else {
-            eprintln!("skipping: super-stt-indexer binary not built");
+            eprintln!("skipping: super-voice-indexer binary not built");
             return;
         };
         let dummy =
@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn current_client_meets_the_published_floor() {
         // The value pinned in the indexer
-        // (`super-stt-indexer/src/index_json.rs`). The running
+        // (`super-voice-indexer/src/index_json.rs`). The running
         // daemon must satisfy it, or every install would warn against its own
         // registry.
         assert_eq!(

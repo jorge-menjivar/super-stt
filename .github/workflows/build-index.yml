@@ -23,5 +23,5 @@ jobs:
   build:
     uses: super-libre/super-engine/.github/workflows/build-index.yml@3cd940dfbf7c41153dc684e66c272d69cc78b88a
     with:
-      indexer: super-stt-indexer
+      indexer: super-voice-indexer
       registry-types: super-voice-registry-types
