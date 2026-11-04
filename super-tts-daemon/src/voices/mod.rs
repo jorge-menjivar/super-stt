@@ -158,6 +158,48 @@ impl VoiceLibrary {
         &self.dir
     }
 
+    /// Delete every voice directory that has no `voice.json`, and return how
+    /// many there were.
+    ///
+    /// [`create`](Self::create) writes the clip, then the metadata. A daemon
+    /// that dies between the two leaves a recording the library never lists,
+    /// so nothing the user can see would ever delete it. Call this at startup,
+    /// before anything can be creating a voice: run while one is, it would
+    /// take that voice's clip as such a leftover.
+    ///
+    /// Only what the library itself creates is touched: a real directory (not
+    /// a symlink) named by a UUID. A backup folder, or anything else someone
+    /// put there, is left alone.
+    pub fn sweep_incomplete(&self) -> usize {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return 0;
+        };
+        let mut swept = 0;
+        for entry in entries.filter_map(Result::ok) {
+            // `file_type` does not follow a symlink, so a link is never a dir.
+            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+            let is_voice = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| uuid::Uuid::parse_str(name).is_ok());
+            let path = entry.path();
+            if !is_dir || !is_voice || path.join("voice.json").exists() {
+                continue;
+            }
+            match std::fs::remove_dir_all(&path) {
+                Ok(()) => swept += 1,
+                Err(e) => log::warn!(
+                    "could not remove the unfinished voice {}: {e}",
+                    path.display()
+                ),
+            }
+        }
+        if swept > 0 {
+            log::info!("Removed {swept} unfinished voice(s) left by an earlier run");
+        }
+        swept
+    }
+
     /// Add a voice from an uploaded WAV file.
     ///
     /// Blocking and CPU-bound — it decodes and resamples the whole clip — so
@@ -381,14 +423,16 @@ fn read_voice(path: &Path) -> Result<Voice, VoiceError> {
     serde_json::from_slice(&bytes).map_err(|e| VoiceError::Io(format!("unreadable metadata: {e}")))
 }
 
-/// Write `bytes` to `path`, readable only by the owner.
+/// Write `bytes` to `path`, readable only by the owner, atomically.
 ///
 /// A reference clip is a recording of somebody's voice. It gets the same
-/// treatment as the session store, not the default umask.
+/// treatment as the session store, not the default umask: the file is created
+/// at 0600, so it never has a wider mode, even before a `chmod`. It replaces
+/// any file there whole, so a crash mid-write leaves the old file or the new
+/// one, never a voice that cannot be read.
 fn write_private(path: &Path, bytes: &[u8]) -> Result<(), VoiceError> {
-    std::fs::write(path, bytes).map_err(|e| VoiceError::Io(e.to_string()))?;
-    restrict(path, 0o600);
-    Ok(())
+    super_engine_spec::fs::write_atomic_private(path, bytes)
+        .map_err(|e| VoiceError::Io(e.to_string()))
 }
 
 /// Best-effort `chmod`. A library that is readable is still usable, so a
