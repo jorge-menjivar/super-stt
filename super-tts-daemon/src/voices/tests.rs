@@ -251,3 +251,22 @@ fn stores_clips_private_to_the_user() {
     let mode = std::fs::metadata(&clip).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600, "clip.wav is owner-only, got {mode:o}");
 }
+
+/// A voice whose metadata never got written is a recording nobody can see, so
+/// the startup sweep removes it, and only it.
+#[test]
+fn a_voice_left_without_metadata_is_swept() {
+    let (_guard, lib) = library();
+    let kept = lib
+        .create(&wav(24_000, 1.0), "Kept", None)
+        .expect("a whole voice");
+    let orphan = lib.dir().join("unfinished");
+    std::fs::create_dir_all(&orphan).unwrap();
+    std::fs::write(orphan.join("clip.wav"), b"RIFF").unwrap();
+
+    assert_eq!(lib.sweep_incomplete(), 1);
+    assert!(!orphan.exists(), "the clip with no metadata is gone");
+    let listed: Vec<_> = lib.list().unwrap().into_iter().map(|v| v.id).collect();
+    assert_eq!(listed, vec![kept.id], "the whole voice stays");
+    assert_eq!(lib.sweep_incomplete(), 0);
+}

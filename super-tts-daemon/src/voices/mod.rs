@@ -158,6 +158,37 @@ impl VoiceLibrary {
         &self.dir
     }
 
+    /// Delete every voice directory that has no `voice.json`, and return how
+    /// many there were.
+    ///
+    /// [`create`](Self::create) writes the clip, then the metadata. A daemon
+    /// that dies between the two leaves a recording the library never lists,
+    /// so nothing the user can see would ever delete it. Call this at startup,
+    /// before anything can be creating a voice: run while one is, it would
+    /// take that voice's clip as such a leftover.
+    pub fn sweep_incomplete(&self) -> usize {
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return 0;
+        };
+        let mut swept = 0;
+        for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
+            if !path.is_dir() || path.join("voice.json").exists() {
+                continue;
+            }
+            match std::fs::remove_dir_all(&path) {
+                Ok(()) => swept += 1,
+                Err(e) => log::warn!(
+                    "could not remove the unfinished voice {}: {e}",
+                    path.display()
+                ),
+            }
+        }
+        if swept > 0 {
+            log::info!("Removed {swept} unfinished voice(s) left by an earlier run");
+        }
+        swept
+    }
+
     /// Add a voice from an uploaded WAV file.
     ///
     /// Blocking and CPU-bound — it decodes and resamples the whole clip — so
