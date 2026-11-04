@@ -68,7 +68,7 @@ impl SuperSTTDaemon {
                 crate::daemon::device_management::PipelineStage::PostProcessor,
             ),
             // Routeless: every client reads a stage's in-flight load from
-            // `GET /pipeline/{stage}`, which asks per stage. Kept as the
+            // `GET /stt/pipeline/{stage}`, which asks per stage. Kept as the
             // transcription stage's for the internal callers that predate it.
             Command::GetDownloadStatus => self.handle_get_download_status(
                 crate::daemon::device_management::PipelineStage::Transcription,

@@ -58,7 +58,7 @@ values.**
 
 ```http
 GET /backend/github.com%2Fsuper-stt%2Fopenai/secret HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -94,7 +94,7 @@ Report whether one secret is configured. **No value.**
 
 ```http
 GET /backend/github.com%2Fsuper-stt%2Fopenai/secret/openai_api_key HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -121,7 +121,7 @@ instance.
 
 ```http
 POST /backend/github.com%2Fsuper-stt%2Fopenai/secret/openai_api_key HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -150,7 +150,7 @@ succeeds.
 
 ```http
 DELETE /backend/github.com%2Fsuper-stt%2Fopenai/secret/openai_api_key HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

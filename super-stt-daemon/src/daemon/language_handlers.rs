@@ -48,7 +48,7 @@ impl SuperSTTDaemon {
                 &format!(
                     "Language `{language}` is not one GET /settings/language/list offers. \
                      A model-specific tag belongs on that model, at \
-                     POST /pipeline/{{stage}}/model/{{model}}/language."
+                     POST /stt/pipeline/{{stage}}/model/{{model}}/language."
                 ),
             );
         }
@@ -146,7 +146,7 @@ impl SuperSTTDaemon {
     }
 
     /// The languages `(source, model)` can be pinned to — what
-    /// `GET /pipeline/{stage}/model/{model}/language/list` answers.
+    /// `GET /stt/pipeline/{stage}/model/{model}/language/list` answers.
     ///
     /// The set [`Self::handle_set_model_language`] accepts, which is not the
     /// manifest's `supported_languages`: `auto` is choosable and is not

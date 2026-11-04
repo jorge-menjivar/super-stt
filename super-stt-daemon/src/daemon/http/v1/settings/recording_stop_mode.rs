@@ -10,7 +10,7 @@ settings_setter!(
     RecordingStopModeState,
     "Choose what ends a recording",
     "Sets whether a recording stops on an explicit signal, on a period of silence, or \
-on either. This governs daemon-mic captures started through `POST /transcribe`; it \
+on either. This governs daemon-mic captures started through `POST /stt/transcribe`; it \
 has no bearing on the pre-captured path, which has no capture to end.",
     "One of the accepted `snake_case` mode tokens. An unknown token is a `400`.",
 );
@@ -21,6 +21,6 @@ settings_dispatch!(
     RecordingStopModeState,
     "Read what currently ends a recording",
     "Answers with the configured mode. It governs daemon-mic captures started \
-through `POST /transcribe`; the pre-captured path has no capture to end, and a \
+through `POST /stt/transcribe`; the pre-captured path has no capture to end, and a \
 `wait: true` caller can always end one by closing the connection."
 );

@@ -1229,13 +1229,13 @@ recording_stop_mode = "silence_and_manual"
     assert!(config.backends.context_override.is_empty());
 }
 
-/// The listener's default port is the one `SUPER_STT` names. The two are
+/// The listener's default port is the one `SUPER_VOICE` names. The two are
 /// written apart, a const parameter and a static, so this is what keeps them
 /// the same number.
 #[test]
 fn the_default_tcp_port_is_super_stts() {
     assert_eq!(
         crate::config::DEFAULT_TCP_PORT,
-        super_stt_shared::product::SUPER_STT.tcp_port
+        super_stt_shared::product::SUPER_VOICE.tcp_port
     );
 }

@@ -7180,16 +7180,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "super-stt-consent"
-version = "0.3.0-beta.2"
-dependencies = [
- "libc",
- "libcosmic",
- "log",
- "super-stt-shared",
-]
-
-[[package]]
 name = "super-stt-daemon"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7426,6 +7416,16 @@ dependencies = [
  "tokio",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "super-voice-consent"
+version = "0.3.0-beta.2"
+dependencies = [
+ "libc",
+ "libcosmic",
+ "log",
+ "super-stt-shared",
 ]
 
 [[package]]

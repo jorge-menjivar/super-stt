@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Language-settings HTTP smoke test: `/v1/language` (global) +
-//! `/v1/pipeline/{stage}/model/{model}/language` (per-model).
+//! `/v1/stt/pipeline/{stage}/model/{model}/language` (per-model).
 //!
 //! Test cases:
 //! 1. Global round-trip: GET → null; POST `es-MX` → 200 + language; GET → `es-MX`; DELETE → null.
@@ -10,7 +10,7 @@
 //! 4. Per-model 400: POST an unsupported tag → 400 (`unsupported_language`).
 //! 5. Scope denial: a `status`-scoped token → 403 on both the global and per-model paths.
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend (`fixture-openai/backend.toml`) is seeded so the daemon
 //! discovers it on startup. Its model is multilingual and secret-gated, so the
@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 /// The model is multilingual and requires a secret, so the daemon starts idle.
 fn seed_fixture_backend(data_home: &Path) {
     let backend_dir = data_home
-        .join("super-stt")
+        .join("super-voice")
         .join("backends")
         .join("fixture-openai");
     std::fs::create_dir_all(&backend_dir).expect("create fixture backend dir");
@@ -157,11 +157,11 @@ const FIXTURE_SOURCE_ENC: &str = "github.com%2Fsuper-stt%2Fopenai";
 /// A precondition the `{source}`-addressed endpoint did not have: the stage is
 /// what resolves a bare model name now, so a model whose backend fills no stage
 /// has no path to it. The same precondition
-/// `/pipeline/{stage}/model/{model}/device` has always had.
+/// `/stt/pipeline/{stage}/model/{model}/device` has always had.
 async fn select_fixture_backend(sock: &PathBuf, token: &str) {
     let (st, body) = post_req(
         sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         token,
         serde_json::json!({ "source": "github.com/super-stt/openai" }),
     )
@@ -173,7 +173,7 @@ async fn select_fixture_backend(sock: &PathBuf, token: &str) {
 /// through stage 1 — which is what resolves the bare model name against the
 /// backend filling it.
 fn fixture_model_lang_path() -> String {
-    "/pipeline/1/model/whisper-1/language".to_string()
+    "/stt/pipeline/1/model/whisper-1/language".to_string()
 }
 
 /// Case 2 — Per-model round-trip without a loaded model.
@@ -249,7 +249,7 @@ async fn per_model_language_unknown_targets_are_404() {
     select_fixture_backend(&sock, &token).await;
 
     // Unknown model under the backend filling stage 1.
-    let unknown_model = "/pipeline/1/model/does-not-exist/language".to_string();
+    let unknown_model = "/stt/pipeline/1/model/does-not-exist/language".to_string();
     let (st, body) = get(&sock, &unknown_model, &token).await;
     assert_eq!(
         st,
@@ -275,7 +275,7 @@ async fn per_model_language_unknown_targets_are_404() {
     // A stage that does not exist. There is no `{source}` segment to get wrong
     // any more; the equivalent failure is asking about a position the pipeline
     // does not have.
-    let unknown_source = "/pipeline/9/model/whisper-1/language";
+    let unknown_source = "/stt/pipeline/9/model/whisper-1/language";
     let (st, body) = get(&sock, unknown_source, &token).await;
     assert_eq!(
         st,

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model` — the model a stage is pointed at.
+//! `/stt/pipeline/{stage}/model` — the model a stage is pointed at.
 //!
 //! Read it, run it, stop it, or abandon a load still in flight. All of them are
 //! scoped to the stage in the path: the stages provision independently, so the
@@ -66,7 +66,7 @@ impl StageModel {
     }
 }
 
-/// Wire envelope for `GET /pipeline/{stage}/model`.
+/// Wire envelope for `GET /stt/pipeline/{stage}/model`.
 ///
 /// Parsed here rather than off the shared `DaemonResponse`, whose fields happen
 /// to match most envelope keys by name. That coupling is invisible and fails
@@ -116,10 +116,10 @@ struct StageDownload {
 }
 
 fn model_path(stage: u32) -> String {
-    format!("/pipeline/{stage}/model")
+    format!("/stt/pipeline/{stage}/model")
 }
 
-/// Read `stage`'s model slot (HTTP `GET /pipeline/{stage}/model`).
+/// Read `stage`'s model slot (HTTP `GET /stt/pipeline/{stage}/model`).
 pub async fn get_stage_model(stage: u32) -> HttpResult<StageModel> {
     with_settings_token(move |socket, token| async move {
         let envelope =
@@ -185,7 +185,7 @@ pub async fn get_download_status(
     .await
 }
 
-/// Run `model` in `stage` (HTTP `POST /pipeline/{stage}/model`).
+/// Run `model` in `stage` (HTTP `POST /stt/pipeline/{stage}/model`).
 ///
 /// `source` is optional: omitted, the daemon resolves the model against the
 /// backend already filling the stage.
@@ -212,7 +212,7 @@ pub async fn set_stage_model(stage: u32, model: String, source: Option<String>) 
 }
 
 /// Stop running `stage`'s model, keeping the selection
-/// (HTTP `DELETE /pipeline/{stage}/model`).
+/// (HTTP `DELETE /stt/pipeline/{stage}/model`).
 ///
 /// This is a card's Unload: the backend stays *and so does the model*, so
 /// loading it again — onto another device, say — is one click rather than a
@@ -227,13 +227,13 @@ pub async fn unload_stage_model(stage: u32) -> HttpResult<()> {
 }
 
 /// Abandon the load `stage` has in flight
-/// (HTTP `POST /pipeline/{stage}/model/cancel`).
+/// (HTTP `POST /stt/pipeline/{stage}/model/cancel`).
 ///
 /// Addressed to a stage because the stages provision independently: the Cancel
 /// button under a post-processor's progress must not abandon a transcription
 /// model's download.
 pub async fn cancel_download(stage: u32) -> HttpResult<()> {
-    let path = format!("/pipeline/{stage}/model/cancel");
+    let path = format!("/stt/pipeline/{stage}/model/cancel");
     with_settings_token(move |socket, token| {
         let path = path.clone();
         async move {

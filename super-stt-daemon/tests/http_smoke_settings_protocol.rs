@@ -118,8 +118,8 @@ async fn raw_get_status(socket: &Path, path: &str, token: Option<&str>) -> Statu
     });
     let mut req = Request::builder()
         .method(Method::GET)
-        .uri(format!("http://stt.local/v1{path}"))
-        .header("host", "stt.local");
+        .uri(format!("http://voice.local/v1{path}"))
+        .header("host", "voice.local");
     if let Some(t) = token {
         req = req.header("authorization", format!("Bearer {t}"));
     }

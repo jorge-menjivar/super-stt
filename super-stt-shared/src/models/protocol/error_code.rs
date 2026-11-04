@@ -17,7 +17,7 @@ pub enum ErrorCode {
     // state forbids it. ---
     /// A daemon-mic recording is active; a mutation that needs the mic/model
     /// (backend switch, model switch, reload, unload, device switch, or a fresh
-    /// `POST /transcribe`) must wait for it to finish.
+    /// `POST /stt/transcribe`) must wait for it to finish.
     RecordingInProgress,
     /// A model download/switch is already in flight.
     DownloadInProgress,

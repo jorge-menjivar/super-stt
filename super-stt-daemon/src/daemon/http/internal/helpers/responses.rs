@@ -11,9 +11,9 @@ pub(crate) use super_engine_daemon::http::responses::{
 };
 
 /// Pre-built `409 recording_in_progress` JSON response for the
-/// `/v1/transcribe` handler. Clients should check `GET /v1/status`
-/// for `busy` and call `/v1/transcribe/stop` instead of
-/// retrying `/v1/transcribe`.
+/// `/v1/stt/transcribe` handler. Clients should check `GET /v1/status`
+/// for `busy` and call `/v1/stt/transcribe/stop` instead of
+/// retrying `/v1/stt/transcribe`.
 pub(crate) fn recording_in_progress_response() -> Response {
     let body = serde_json::json!({
         "status":  "error",
@@ -27,7 +27,7 @@ pub(crate) fn recording_in_progress_response() -> Response {
         .into_response()
 }
 
-/// Pre-built `409 model_not_loaded` JSON response for the `/v1/transcribe`
+/// Pre-built `409 model_not_loaded` JSON response for the `/v1/stt/transcribe`
 /// handler's daemon-mic paths. Mirrors [`recording_in_progress_response`]
 /// (same shape, same literal identifier as `message`): returned before the
 /// `202`/`200 text/event-stream` envelope below would otherwise commit, so

@@ -13,12 +13,12 @@ pub fn init() {
 /// Initialize logging with an explicit default level. `RUST_LOG` still
 /// overrides (e.g. the daemon passes `Debug` under `--verbose`).
 ///
-/// On macOS, output first goes to the file `SUPER_STT_LOG_FILE` names, which
+/// On macOS, output first goes to the file `SUPER_VOICE_LOG_FILE` names, which
 /// the app bundle's `LaunchAgent` plists set. See
 /// `super_engine_protocol::logging::redirect_stdio`.
 pub fn init_with(default_level: log::LevelFilter) {
     #[cfg(target_os = "macos")]
-    super_engine_protocol::logging::redirect_stdio(&crate::product::SUPER_STT);
+    super_engine_protocol::logging::redirect_stdio(&crate::product::SUPER_VOICE);
 
     super_engine_protocol::logging::init_with(default_level);
 }

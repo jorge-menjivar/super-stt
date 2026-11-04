@@ -18,7 +18,7 @@
 //! - `DELETE /backend/{source}`  → `404 not_found` for an unknown backend
 //! - scope enforcement            → a `client`-scope token gets `403 scope_denied`
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI), so it's part of the default `cargo test` flow.
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI), so it's part of the default `cargo test` flow.
 
 mod common;
 
@@ -84,19 +84,19 @@ async fn backend_management_endpoints() {
         "no backends are installed in the isolated data dir, got: {body}"
     );
 
-    // --- GET /pipeline/1: idle daemon → an empty stage ---
-    let (s, body) = get(&sock, "/pipeline/1", &settings_token).await;
-    assert_eq!(s, StatusCode::OK, "GET /pipeline/1: {body}");
+    // --- GET /stt/pipeline/1: idle daemon → an empty stage ---
+    let (s, body) = get(&sock, "/stt/pipeline/1", &settings_token).await;
+    assert_eq!(s, StatusCode::OK, "GET /stt/pipeline/1: {body}");
     assert_eq!(body["status"], "success");
     assert!(
         body["stage"]["source"].is_null(),
         "no backend should fill stage 1 on a fresh daemon: {body}"
     );
 
-    // --- POST /pipeline/1 with an unknown source → 400 invalid_backend ---
+    // --- POST /stt/pipeline/1 with an unknown source → 400 invalid_backend ---
     let (s, body) = post(
         &sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         &settings_token,
         serde_json::json!({ "source": "github.com/does-not/exist" }),
     )
@@ -115,14 +115,14 @@ async fn backend_management_endpoints() {
     );
 
     // The failed selection must not have changed state.
-    let (_, after) = get(&sock, "/pipeline/1", &settings_token).await;
+    let (_, after) = get(&sock, "/stt/pipeline/1", &settings_token).await;
     assert!(
         after["stage"]["source"].is_null(),
         "a rejected selection must leave the daemon idle: {after}"
     );
 
-    // --- DELETE /pipeline/1: idempotent when already idle ---
-    let (s, body) = delete(&sock, "/pipeline/1", &settings_token).await;
+    // --- DELETE /stt/pipeline/1: idempotent when already idle ---
+    let (s, body) = delete(&sock, "/stt/pipeline/1", &settings_token).await;
     assert_eq!(
         s,
         StatusCode::OK,
@@ -173,7 +173,7 @@ async fn backend_endpoints_reject_client_scope() {
 
     for (method, path) in [
         (Method::GET, "/backend/list"),
-        (Method::GET, "/pipeline/1"),
+        (Method::GET, "/stt/pipeline/1"),
         (Method::GET, "/gpu_info"),
     ] {
         let (s, body) = raw_request(&sock, method.clone(), path, &client_token, None).await;
@@ -191,7 +191,7 @@ async fn backend_endpoints_reject_client_scope() {
     // A settings POST must be rejected too.
     let (s, body) = post(
         &sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         &client_token,
         serde_json::json!({ "source": "github.com/x/y" }),
     )

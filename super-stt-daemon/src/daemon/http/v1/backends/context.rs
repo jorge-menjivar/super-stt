@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/backend/{backend_id}/context` — which dictation context one backend uses.
+//! `/stt/backend/{backend_id}/context` — which dictation context one backend uses.
 //!
 //! Contract: `docs/protocol/endpoints/v1/context.md`.
 //!
@@ -78,7 +78,7 @@ struct BackendContextWrite {
 Which context this backend uses, and the one that resolves for it.
 
 `mode` says which of three: `active` means it follows the context in force \
-(`GET /context/active`), which is the default and what almost every backend should be; \
+(`GET /stt/context/active`), which is the default and what almost every backend should be; \
 `pinned` means it uses `id` whatever is active; `none` means it is sent no context.
 
 `context` is what it will actually be sent, already resolved — a client showing what a \

@@ -2,7 +2,7 @@
 //! Running a final transcript through the loaded post-processor.
 //!
 //! One funnel, called from both final-transcription paths (the one-shot
-//! `POST /transcribe` and the push-to-talk recording flow). Previews and
+//! `POST /stt/transcribe` and the push-to-talk recording flow). Previews and
 //! realtime sessions deliberately do not call it: a preview is rewritten again
 //! on the next pass, and both are latency paths where a second model round-trip
 //! is exactly what the user does not want.

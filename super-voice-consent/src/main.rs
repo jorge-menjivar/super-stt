@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Super STT consent dialog — a small floating libcosmic window that the
+//! Super Voice consent dialog — a small floating libcosmic window that the
 //! daemon spawns when an app asks to authenticate.
 //!
 //! The daemon spawns this binary with env vars carrying the request details
 //! (the names are [`contract`]'s, shared with Super TTS):
 //!
-//! - `SUPER_STT_AUTH_APP_NAME` — declared (untrusted) app name from the
+//! - `SUPER_VOICE_AUTH_APP_NAME` — declared (untrusted) app name from the
 //!   request. Shown for a native caller, never for a web one — see [`Caller`].
-//! - `SUPER_STT_AUTH_SCOPES`   — space-separated scope set (e.g. `transcribe status`)
-//! - `SUPER_STT_AUTH_EXE_PATH` — peer `/proc/<pid>/exe` (trusted, kernel-resolved)
-//! - `SUPER_STT_AUTH_FLATPAK_APP_ID` — set only when the caller is inside a flatpak
-//! - `SUPER_STT_AUTH_WEB_ORIGIN` — set only when the caller reached the daemon
+//! - `SUPER_VOICE_AUTH_SCOPES`   — space-separated scope set (e.g. `transcribe status`)
+//! - `SUPER_VOICE_AUTH_EXE_PATH` — peer `/proc/<pid>/exe` (trusted, kernel-resolved)
+//! - `SUPER_VOICE_AUTH_FLATPAK_APP_ID` — set only when the caller is inside a flatpak
+//! - `SUPER_VOICE_AUTH_WEB_ORIGIN` — set only when the caller reached the daemon
 //!   over its TCP listener, carrying the browser-reported origin. The daemon
-//!   sets this *or* `SUPER_STT_AUTH_EXE_PATH`, never both, and this one wins.
+//!   sets this *or* `SUPER_VOICE_AUTH_EXE_PATH`, never both, and this one wins.
 //!
 //! The user clicks Allow or Deny. The dialog writes one of `allow`, `deny`,
 //! or `dismissed` to stdout (newline-terminated) and exits.
@@ -29,7 +29,7 @@
 //!
 //! For X11 sessions, layer-shell isn't available; libcosmic falls back
 //! to a regular window. On X11 tiling WMs you'd add a per-class float
-//! rule using the `WM_CLASS` `super-stt-consent`.
+//! rule using the `WM_CLASS` `super-voice-consent`.
 
 use cosmic::iced::event::{self, listen_with};
 use cosmic::iced::platform_specific::shell::commands::corner_radius::corner_radius;
@@ -46,12 +46,12 @@ use cosmic::widget::{button, dialog, icon, text};
 use std::io::Write;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use super_stt_shared::SUPER_STT;
+use super_stt_shared::SUPER_VOICE;
 use super_stt_shared::consent::contract;
 // The decision payloads written to stdout right before exit.
 use contract::{ALLOW, DENY, DISMISSED};
 
-const APP_ID: &str = "ai.menjivar.super-stt-consent";
+const APP_ID: &str = "ai.menjivar.super-voice-consent";
 
 const QUESTION_ICON: &[u8] = include_bytes!("../resources/icons/phosphor/question.svg");
 
@@ -72,12 +72,12 @@ const SQUARE_CORNERS: CornerRadius = CornerRadius {
 /// `widget::autosize::autosize` measures its child to size the parent
 /// layer-shell surface; without it the surface is 0×0.
 static AUTOSIZE_ID: LazyLock<cosmic::widget::Id> =
-    LazyLock::new(|| cosmic::widget::Id::new("super-stt-consent-autosize"));
+    LazyLock::new(|| cosmic::widget::Id::new("super-voice-consent-autosize"));
 
 /// The value of the request variable `name` (one of [`contract`]'s), under
-/// Super STT's prefix.
+/// Super Voice's prefix.
 fn request_var(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(SUPER_STT.env(name))
+    std::env::var(SUPER_VOICE.env(name))
 }
 
 /// Set the moment the user picks Allow or Deny. Used by the
@@ -233,9 +233,9 @@ impl cosmic::Application for ConsentApp {
                 } else {
                     &self.app_name
                 };
-                format!("{name} wants access to Super STT.")
+                format!("{name} wants access to Super Voice.")
             }
-            Caller::Web { origin } => format!("{origin} wants access to Super STT."),
+            Caller::Web { origin } => format!("{origin} wants access to Super Voice."),
         };
 
         let permission_lines = super_stt_shared::consent::permissions_for_scopes(&self.scopes);
@@ -279,7 +279,7 @@ impl cosmic::Application for ConsentApp {
         if matches!(self.caller, Caller::Web { .. }) {
             control = control.push(text::caption(
                 "Your browser reports which website this is. That is a weaker check \
-                 than Super STT does for installed programs.",
+                 than Super Voice does for installed programs.",
             ));
         }
 
@@ -290,7 +290,7 @@ impl cosmic::Application for ConsentApp {
             // read as a rendering bug. Ours is a standalone surface with the
             // desktop behind it, so it takes the frosted treatment instead.
             .is_overlay(false)
-            .title("Allow access to Super STT?")
+            .title("Allow access to Super Voice?")
             .body(body_text)
             .icon(
                 icon::from_svg_bytes(QUESTION_ICON)
@@ -465,7 +465,7 @@ fn spawn_dismiss_timer() {
     });
 }
 
-/// If `SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS` is set to a parseable u64,
+/// If `SUPER_VOICE_AUTH_AUTO_APPROVE_AFTER_MS` is set to a parseable u64,
 /// spawn a background thread that sleeps for that many milliseconds
 /// and then writes "allow\n" to stdout + `_exit(0)`. Lets you (or a
 /// test runner) actually see the dialog render for that long before
@@ -478,7 +478,7 @@ fn spawn_dismiss_timer() {
 /// builds with `debug_assertions` on, so the smoke tests keep working.
 #[cfg(debug_assertions)]
 fn maybe_spawn_auto_approve_timer() {
-    let var = SUPER_STT.env(contract::AUTO_APPROVE_AFTER_MS);
+    let var = SUPER_VOICE.env(contract::AUTO_APPROVE_AFTER_MS);
     let Ok(raw) = std::env::var(&var) else {
         return;
     };
@@ -547,9 +547,9 @@ fn read_env() -> AuthRequestPayload {
 
 /// Which kind of caller the daemon is asking about.
 ///
-/// `SUPER_STT_AUTH_WEB_ORIGIN` wins when present because the daemon sets
+/// `SUPER_VOICE_AUTH_WEB_ORIGIN` wins when present because the daemon sets
 /// exactly one of the two — see its `ask_user_for_consent`. Reading it first
-/// means a stale `SUPER_STT_AUTH_EXE_PATH` inherited from the environment can
+/// means a stale `SUPER_VOICE_AUTH_EXE_PATH` inherited from the environment can
 /// never turn a website into an executable in the sentence the user reads.
 fn read_caller() -> Caller {
     if let Ok(origin) = request_var(contract::WEB_ORIGIN)

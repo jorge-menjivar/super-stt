@@ -20,20 +20,28 @@ use super_engine_spec::product::{SchemaNames, generation_from_str};
 /// reads it.
 pub const INDEX_URL: &str = "https://jorge-menjivar.github.io/super-voice/index.json";
 
-/// The speech-to-text daemon's names: everything it and its clients meet on,
-/// from the socket to the scopes a token can carry. See [`ProductSpec`].
+/// Super Voice's names: everything its daemon and its clients meet on, from
+/// the socket to the scopes a token can carry. See [`ProductSpec`].
 ///
-/// The daemons for the two features merge into one Super Voice daemon; until
-/// they do, each keeps its own names, and both read the one registry.
-pub static SUPER_STT: ProductSpec = ProductSpec {
-    display_name: "Super STT",
-    slug: "super-stt",
-    short_name: "stt",
-    env_prefix: "SUPER_STT",
+/// One product, so one list: the scopes and topics of both features, beside
+/// the core ones every daemon has. The speech-to-text feature's come first.
+pub static SUPER_VOICE: ProductSpec = ProductSpec {
+    display_name: "Super Voice",
+    slug: "super-voice",
+    short_name: "voice",
+    env_prefix: "SUPER_VOICE",
     tcp_port: 7300,
+    // Releases are published from this repo until it is renamed.
     repo: "github.com/jorge-menjivar/super-stt",
     index_url: INDEX_URL,
-    scopes: &["transcribe", "recording_events", "global_transcriptions"],
+    scopes: &[
+        "transcribe",
+        "recording_events",
+        "global_transcriptions",
+        "speak",
+        "voices",
+        "playback_events",
+    ],
     topics: &[
         ("recording_started", "recording_events"),
         ("recording_stopped", "recording_events"),
@@ -42,10 +50,13 @@ pub static SUPER_STT: ProductSpec = ProductSpec {
         ("transcribing_stopped", "recording_events"),
         ("partial_stt", "global_transcriptions"),
         ("final_stt", "global_transcriptions"),
+        ("speaking_state", "playback_events"),
+        ("speech_progress", "playback_events"),
     ],
 };
 
-/// The text-to-speech daemon's names. See [`SUPER_STT`].
+/// The text-to-speech daemon's names, until it is part of the Super Voice
+/// daemon. See [`SUPER_VOICE`].
 pub static SUPER_TTS: ProductSpec = ProductSpec {
     display_name: "Super TTS",
     slug: "super-tts",

@@ -4,10 +4,10 @@ Read and toggle the preview-typing default. When enabled,
 intermediate transcription text is typed into the focused window as
 it's being recognized — letting the user see partial results
 without waiting for the final transcript. Per-request overrides via
-[`POST /transcribe`](../transcribe.md)'s `data.preview` take
+[`POST /stt/transcribe`](../transcribe.md)'s `data.preview` take
 precedence over the default set here.
 
-This flag is independent of `write_mode` on `/transcribe`: if
+This flag is independent of `write_mode` on `/stt/transcribe`: if
 `write_mode` is `false` on a request, no typing happens at all,
 regardless of `preview_typing`.
 
@@ -23,7 +23,7 @@ regardless of `preview_typing`.
 
 ```http
 POST /settings/preview_typing HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -61,7 +61,7 @@ Content-Type: application/json
 
 ```http
 GET /settings/preview_typing HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

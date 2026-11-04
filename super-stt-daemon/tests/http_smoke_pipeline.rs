@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline` HTTP smoke test, driving stage 2 (post-processing).
+//! `/stt/pipeline` HTTP smoke test, driving stage 2 (post-processing).
 //!
 //! Covers the endpoint's whole contract against a live daemon:
 //! 1. Default state — the stage exists, disabled, nothing selected.
 //! 2. Select the stage's backend, then run one of its models → GET reflects it.
-//! 3. `DELETE /pipeline/2/model` stops it and keeps the choice;
-//!    `DELETE /pipeline/2` deselects the backend and forgets it.
+//! 3. `DELETE /stt/pipeline/2/model` stops it and keeps the choice;
+//!    `DELETE /stt/pipeline/2` deselects the backend and forgets it.
 //! 4. A model that is not installed is refused.
 //! 5. A transcription model is refused for this stage, and a post-processor is
 //!    refused for `/active_model` — the two roles do not cross.
 //! 6. `GET /backend/list` reports each model's `role`.
-//! 7. `GET /pipeline` lists both stages, and an out-of-range stage 404s.
-//! 8. `/pipeline/{stage}/model/{model}/device` reads and records a model's
+//! 7. `GET /stt/pipeline` lists both stages, and an out-of-range stage 404s.
+//! 8. `/stt/pipeline/{stage}/model/{model}/device` reads and records a model's
 //!    device through its stage, per model, with the same validation.
-//! 9. `/pipeline/{stage}/device/list` and `.../model/{model}/device/list`
+//! 9. `/stt/pipeline/{stage}/device/list` and `.../model/{model}/device/list`
 //!    say what a stage's backend, and one of its models, can be run on here.
-//! 10. `/pipeline/{stage}/model/{cancel,reload}` answer for every stage, each
+//! 10. `/stt/pipeline/{stage}/model/{cancel,reload}` answer for every stage, each
 //!     about its own model.
 //! 11. Uninstalling a backend empties every stage it was filling.
 //!     The answer names each stage it was filling, and only those.
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend declares one transcription model and one post-processor
 //! so both directions of the role gate are exercisable. Both are `wasm`/cloud
@@ -37,8 +37,8 @@ use std::path::{Path, PathBuf};
 /// The fixture backend's repo id — the `source` half of every model identity
 /// in these tests.
 /// Post-processing is stage 2 of the pipeline.
-const PP_STAGE: &str = "/pipeline/2";
-const PP_STAGE_MODEL: &str = "/pipeline/2/model";
+const PP_STAGE: &str = "/stt/pipeline/2";
+const PP_STAGE_MODEL: &str = "/stt/pipeline/2/model";
 
 /// A backend that serves only a post-processor.
 const PP_ONLY_SOURCE: &str = "github.com/super-stt/textclean";
@@ -51,7 +51,7 @@ const FIXTURE_SOURCE: &str = "github.com/super-stt/openai";
 /// be exercised without tripping the separate online-models gate.
 fn seed_fixture_backend(data_home: &Path) {
     let backend_dir = data_home
-        .join("super-stt")
+        .join("super-voice")
         .join("backends")
         .join("fixture-openai");
     std::fs::create_dir_all(&backend_dir).expect("create fixture backend dir");
@@ -123,7 +123,7 @@ supported_devices = ["cpu"]
 /// `super-stt-textclean` looks like on disk. Stage 1 must refuse it.
 fn seed_post_processor_only_backend(data_home: &Path) {
     let backend_dir = data_home
-        .join("super-stt")
+        .join("super-voice")
         .join("backends")
         .join("fixture-textclean");
     std::fs::create_dir_all(&backend_dir).expect("create pp-only backend dir");
@@ -324,13 +324,13 @@ async fn the_two_roles_do_not_cross() {
         "the message must name both kinds, got: {msg:?}"
     );
     assert!(
-        msg.contains("/pipeline/1/model"),
+        msg.contains("/stt/pipeline/1/model"),
         "and point at the stage that runs it, got: {msg:?}"
     );
 
     let (status, body) = post_req(
         &sock,
-        "/pipeline/1/model",
+        "/stt/pipeline/1/model",
         &token,
         serde_json::json!({ "model": "cleanup-1", "source": FIXTURE_SOURCE }),
     )
@@ -343,7 +343,7 @@ async fn the_two_roles_do_not_cross() {
         "the mirror message must name both kinds too, got: {msg:?}"
     );
     assert!(
-        msg.contains("/pipeline/2/model"),
+        msg.contains("/stt/pipeline/2/model"),
         "and point at the post-processing stage, got: {msg:?}"
     );
 }
@@ -530,7 +530,7 @@ async fn switching_backends_drops_the_previous_model() {
 async fn the_pipeline_lists_its_stages_in_order() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
-    let (status, body) = get(&sock, "/pipeline", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     let stages = body["pipeline"].as_array().expect("an ordered stage list");
     assert_eq!(stages.len(), 2);
@@ -547,9 +547,9 @@ async fn an_out_of_range_stage_is_not_found() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
     for (method, path) in [
-        ("GET", "/pipeline/3"),
-        ("DELETE", "/pipeline/3"),
-        ("DELETE", "/pipeline/0/model"),
+        ("GET", "/stt/pipeline/3"),
+        ("DELETE", "/stt/pipeline/3"),
+        ("DELETE", "/stt/pipeline/0/model"),
     ] {
         let (status, body) = if method == "GET" {
             get(&sock, path, &token).await
@@ -573,19 +573,19 @@ async fn stage_one_is_the_transcription_stage() {
 
     let (status, body) = post_req(
         &sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         &token,
         serde_json::json!({ "source": FIXTURE_SOURCE }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
 
-    let (_, body) = get(&sock, "/pipeline/1", &token).await;
+    let (_, body) = get(&sock, "/stt/pipeline/1", &token).await;
     assert_eq!(body["stage"]["role"], "transcription");
     assert_eq!(body["stage"]["source"], FIXTURE_SOURCE);
 
     // And the whole-pipeline view agrees with the single-stage one.
-    let (_, body) = get(&sock, "/pipeline", &token).await;
+    let (_, body) = get(&sock, "/stt/pipeline", &token).await;
     assert_eq!(body["pipeline"][0]["source"], FIXTURE_SOURCE);
 }
 
@@ -600,7 +600,7 @@ async fn a_post_processor_only_backend_cannot_fill_stage_one() {
     // here; seed a second backend that serves only a post-processor.
     let (status, body) = post_req(
         &sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         &token,
         serde_json::json!({ "source": PP_ONLY_SOURCE }),
     )
@@ -634,7 +634,7 @@ async fn a_models_device_is_its_own() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
     let (status, body) = post_req(
         &sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         &token,
         serde_json::json!({ "source": FIXTURE_SOURCE }),
     )
@@ -642,7 +642,7 @@ async fn a_models_device_is_its_own() {
     assert_eq!(status, StatusCode::OK, "body: {body}");
 
     // The default, before anything is set.
-    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/1/model/whisper-local/device", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["device"], "cpu");
     assert_eq!(body["resolved_accel"], "cpu", "cpu needs no resolution");
@@ -657,7 +657,7 @@ async fn a_models_device_is_its_own() {
     // "cuda" is the deprecated spelling, accepted and normalized to "gpu".
     let (status, body) = post_req(
         &sock,
-        "/pipeline/1/model/whisper-local/device",
+        "/stt/pipeline/1/model/whisper-local/device",
         &token,
         serde_json::json!({ "device": "cuda" }),
     )
@@ -670,9 +670,9 @@ async fn a_models_device_is_its_own() {
         "a gpu choice has resolved to nothing before a load confirms it"
     );
 
-    let (_, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
+    let (_, body) = get(&sock, "/stt/pipeline/1/model/whisper-local/device", &token).await;
     assert_eq!(body["device"], "gpu", "the choice is recorded");
-    let (_, body) = get(&sock, "/pipeline/1/model", &token).await;
+    let (_, body) = get(&sock, "/stt/pipeline/1/model", &token).await;
     assert_eq!(body["model"]["loaded"], false, "nothing was loaded");
 
     // The post-processor on the same backend has its own device.
@@ -684,7 +684,7 @@ async fn a_models_device_is_its_own() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/device", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/2/model/cleanup-1/device", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["device"], "cpu");
 }
@@ -693,7 +693,7 @@ async fn a_models_device_is_its_own() {
 ///
 /// The fixture makes the case that matters: one backend serves both roles, one
 /// serves only a post-processor. Stage 1 must not offer the second — selecting
-/// it leaves the model picker empty, and `POST /pipeline/1` refuses it anyway,
+/// it leaves the model picker empty, and `POST /stt/pipeline/1` refuses it anyway,
 /// so a picker built from `GET /backend/list` hands the user an error to discover
 /// by choosing it.
 #[tokio::test]
@@ -718,7 +718,7 @@ async fn each_stage_lists_only_the_backends_that_can_fill_it() {
         "the whole catalog carries both: {installed:?}"
     );
 
-    let stage_one = sources("/pipeline/1/backend/list").await;
+    let stage_one = sources("/stt/pipeline/1/backend/list").await;
     assert!(
         stage_one.contains(&FIXTURE_SOURCE.to_string()),
         "the dual-role backend transcribes: {stage_one:?}"
@@ -728,7 +728,7 @@ async fn each_stage_lists_only_the_backends_that_can_fill_it() {
         "a post-processor-only backend is not a transcription backend: {stage_one:?}"
     );
 
-    let stage_two = sources("/pipeline/2/backend/list").await;
+    let stage_two = sources("/stt/pipeline/2/backend/list").await;
     assert!(
         stage_two.contains(&PP_ONLY_SOURCE.to_string()),
         "and it is a post-processor backend: {stage_two:?}"
@@ -743,7 +743,7 @@ async fn each_stage_lists_only_the_backends_that_can_fill_it() {
     for source in &stage_one {
         let (status, body) = post_req(
             &sock,
-            "/pipeline/1",
+            "/stt/pipeline/1",
             &token,
             serde_json::json!({ "source": source }),
         )
@@ -756,7 +756,7 @@ async fn each_stage_lists_only_the_backends_that_can_fill_it() {
     }
     let (status, body) = post_req(
         &sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         &token,
         serde_json::json!({ "source": PP_ONLY_SOURCE }),
     )
@@ -768,7 +768,7 @@ async fn each_stage_lists_only_the_backends_that_can_fill_it() {
     );
 
     // An out-of-range position is the same 404 every stage path answers with.
-    let (status, _) = get(&sock, "/pipeline/9/backend/list", &token).await;
+    let (status, _) = get(&sock, "/stt/pipeline/9/backend/list", &token).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
@@ -783,7 +783,7 @@ async fn a_models_language_list_is_what_its_setter_accepts() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
     let (status, _) = post_req(
         &sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         &token,
         serde_json::json!({ "source": FIXTURE_SOURCE }),
     )
@@ -791,7 +791,12 @@ async fn a_models_language_list_is_what_its_setter_accepts() {
     assert_eq!(status, StatusCode::OK);
 
     // The block says what is in effect, and no longer carries the list.
-    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/language", &token).await;
+    let (status, body) = get(
+        &sock,
+        "/stt/pipeline/1/model/whisper-local/language",
+        &token,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert!(
         body["language"].get("supported").is_none(),
@@ -801,7 +806,7 @@ async fn a_models_language_list_is_what_its_setter_accepts() {
 
     let (status, body) = get(
         &sock,
-        "/pipeline/1/model/whisper-local/language/list",
+        "/stt/pipeline/1/model/whisper-local/language/list",
         &token,
     )
     .await;
@@ -823,7 +828,7 @@ async fn a_models_language_list_is_what_its_setter_accepts() {
     for tag in &offered {
         let (status, body) = post_req(
             &sock,
-            "/pipeline/1/model/whisper-local/language",
+            "/stt/pipeline/1/model/whisper-local/language",
             &token,
             serde_json::json!({ "language": tag }),
         )
@@ -838,7 +843,7 @@ async fn a_models_language_list_is_what_its_setter_accepts() {
     // And a tag it does not offer is refused, so the list is the whole truth.
     let (status, _) = post_req(
         &sock,
-        "/pipeline/1/model/whisper-local/language",
+        "/stt/pipeline/1/model/whisper-local/language",
         &token,
         serde_json::json!({ "language": "zz" }),
     )
@@ -855,7 +860,12 @@ async fn a_models_language_list_is_what_its_setter_accepts() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/language/list", &token).await;
+    let (status, body) = get(
+        &sock,
+        "/stt/pipeline/2/model/cleanup-1/language/list",
+        &token,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(
         body["available_languages"],
@@ -873,13 +883,13 @@ async fn the_device_verb_validates_the_model_and_the_device() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
     // Nothing selected for stage 1 yet.
-    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/1/model/whisper-local/device", &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
     assert_eq!(body["error_code"], "invalid_backend");
 
     let (status, _) = post_req(
         &sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         &token,
         serde_json::json!({ "source": FIXTURE_SOURCE }),
     )
@@ -888,25 +898,25 @@ async fn the_device_verb_validates_the_model_and_the_device() {
 
     let (status, body) = post_req(
         &sock,
-        "/pipeline/1/model/whisper-local/device",
+        "/stt/pipeline/1/model/whisper-local/device",
         &token,
         serde_json::json!({ "device": "definitely-not-a-real-device" }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
     assert_eq!(body["error_code"], "invalid_device");
-    let (_, body) = get(&sock, "/pipeline/1/model/whisper-local/device", &token).await;
+    let (_, body) = get(&sock, "/stt/pipeline/1/model/whisper-local/device", &token).await;
     assert_eq!(body["device"], "cpu", "the bogus value was not recorded");
 
     // An online model has no device: reading reports the manifest's `none`,
     // setting is refused.
-    let (status, body) = get(&sock, "/pipeline/1/model/whisper-1/device", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/1/model/whisper-1/device", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["device"], "none");
     assert_eq!(body["available_devices"], serde_json::json!([]));
     let (status, body) = post_req(
         &sock,
-        "/pipeline/1/model/whisper-1/device",
+        "/stt/pipeline/1/model/whisper-1/device",
         &token,
         serde_json::json!({ "device": "cpu" }),
     )
@@ -915,13 +925,13 @@ async fn the_device_verb_validates_the_model_and_the_device() {
     assert_eq!(body["error_code"], "invalid_device");
 
     // A post-processor is not a stage-1 model, whichever backend serves it.
-    let (status, body) = get(&sock, "/pipeline/1/model/cleanup-1/device", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/1/model/cleanup-1/device", &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
     assert_eq!(body["error_code"], "invalid_model");
     assert!(
         body["message"]
             .as_str()
-            .is_some_and(|m| m.contains("/pipeline/2/model/cleanup-1/device")),
+            .is_some_and(|m| m.contains("/stt/pipeline/2/model/cleanup-1/device")),
         "and the message points at the stage that runs it: {body}"
     );
 
@@ -936,7 +946,7 @@ async fn the_device_verb_validates_the_model_and_the_device() {
     assert_eq!(status, StatusCode::OK);
     let (status, body) = post_req(
         &sock,
-        "/pipeline/2/model/cleanup-1/device",
+        "/stt/pipeline/2/model/cleanup-1/device",
         &token,
         serde_json::json!({ "device": "gpu" }),
     )
@@ -945,7 +955,7 @@ async fn the_device_verb_validates_the_model_and_the_device() {
     assert_eq!(body["error_code"], "invalid_device");
 
     // And the stage itself still has to exist.
-    let (status, body) = get(&sock, "/pipeline/3/model/whisper-local/device", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/3/model/whisper-local/device", &token).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
     assert_eq!(body["error_code"], "unknown_stage");
 }
@@ -960,14 +970,14 @@ async fn device_lists_for_a_model_and_for_a_stage() {
 
     // Nothing selected: nothing to list against, and the stage itself still
     // has to exist.
-    let (status, body) = get(&sock, "/pipeline/1/device/list", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/1/device/list", &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
     assert_eq!(body["error_code"], "invalid_backend");
-    let (status, body) = get(&sock, "/pipeline/3/device/list", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/3/device/list", &token).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
     assert_eq!(body["error_code"], "unknown_stage");
 
-    for stage in ["/pipeline/1", PP_STAGE] {
+    for stage in ["/stt/pipeline/1", PP_STAGE] {
         let (status, _) = post_req(
             &sock,
             stage,
@@ -978,20 +988,25 @@ async fn device_lists_for_a_model_and_for_a_stage() {
         assert_eq!(status, StatusCode::OK);
     }
 
-    let (status, body) = get(&sock, "/pipeline/1/model/whisper-local/device/list", &token).await;
+    let (status, body) = get(
+        &sock,
+        "/stt/pipeline/1/model/whisper-local/device/list",
+        &token,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     let offered = body["available_devices"].as_array().expect("a list");
     assert_eq!(offered.first(), Some(&serde_json::json!("cpu")));
-    let (status, body) = get(&sock, "/pipeline/1/model/whisper-1/device/list", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/1/model/whisper-1/device/list", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["available_devices"], serde_json::json!([]));
-    let (status, body) = get(&sock, "/pipeline/1/model/cleanup-1/device/list", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/1/model/cleanup-1/device/list", &token).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
     assert_eq!(body["error_code"], "invalid_model");
 
     // The stage-1 list is the union: the online model adds nothing, the local
     // one brings the CPU and, where the host has one, the GPU.
-    let (status, body) = get(&sock, "/pipeline/1/device/list", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/1/device/list", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     let stage_devices = body["available_devices"].as_array().expect("a list");
     assert_eq!(stage_devices.first(), Some(&serde_json::json!("cpu")));
@@ -1002,10 +1017,10 @@ async fn device_lists_for_a_model_and_for_a_stage() {
 
     // Stage 2's backend is the same install, but only its post-processor
     // counts there, and that one is CPU-only.
-    let (status, body) = get(&sock, "/pipeline/2/device/list", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/2/device/list", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["available_devices"], serde_json::json!(["cpu"]));
-    let (status, body) = get(&sock, "/pipeline/2/model/cleanup-1/device/list", &token).await;
+    let (status, body) = get(&sock, "/stt/pipeline/2/model/cleanup-1/device/list", &token).await;
     assert_eq!(status, StatusCode::OK, "body: {body}");
     assert_eq!(body["available_devices"], serde_json::json!(["cpu"]));
 }
@@ -1022,7 +1037,7 @@ async fn every_stage_answers_cancel_and_reload() {
     for stage in [1, 2] {
         let (status, body) = post_req(
             &sock,
-            &format!("/pipeline/{stage}/model/cancel"),
+            &format!("/stt/pipeline/{stage}/model/cancel"),
             &token,
             serde_json::json!({}),
         )
@@ -1033,7 +1048,7 @@ async fn every_stage_answers_cancel_and_reload() {
         // Nothing loaded in either stage, so a reload is a no-op success.
         let (status, body) = post_req(
             &sock,
-            &format!("/pipeline/{stage}/model/reload"),
+            &format!("/stt/pipeline/{stage}/model/reload"),
             &token,
             serde_json::json!({}),
         )
@@ -1043,7 +1058,10 @@ async fn every_stage_answers_cancel_and_reload() {
     }
 
     // And the stage still has to exist.
-    for path in ["/pipeline/3/model/cancel", "/pipeline/3/model/reload"] {
+    for path in [
+        "/stt/pipeline/3/model/cancel",
+        "/stt/pipeline/3/model/reload",
+    ] {
         let (status, body) = post_req(&sock, path, &token, serde_json::json!({})).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "body: {body}");
         assert_eq!(body["error_code"], "unknown_stage");
@@ -1092,7 +1110,7 @@ async fn uninstalling_a_backend_empties_every_stage_it_filled() {
 async fn uninstalling_a_backend_names_every_stage_it_filled() {
     let (_guard, sock, token) = start_daemon(&["settings"]).await;
 
-    for stage in ["/pipeline/1", PP_STAGE] {
+    for stage in ["/stt/pipeline/1", PP_STAGE] {
         let (status, body) = post_req(
             &sock,
             stage,
@@ -1110,7 +1128,7 @@ async fn uninstalling_a_backend_names_every_stage_it_filled() {
     assert_eq!(body["was_active"], true, "it was stage 1's: {body}");
     assert_eq!(body["was_post_processor"], true, "and stage 2's: {body}");
 
-    for stage in ["/pipeline/1", PP_STAGE] {
+    for stage in ["/stt/pipeline/1", PP_STAGE] {
         let (status, body) = get(&sock, stage, &token).await;
         assert_eq!(status, StatusCode::OK, "{stage} body: {body}");
         assert!(body["stage"]["source"].is_null(), "{stage} body: {body}");

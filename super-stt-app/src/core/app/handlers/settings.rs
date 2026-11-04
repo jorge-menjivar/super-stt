@@ -121,7 +121,7 @@ impl AppModel {
         self.model_operations.set_ready(PP_STAGE);
     }
 
-    /// Map a `GET /pipeline/2` result into its message.
+    /// Map a `GET /stt/pipeline/2` result into its message.
     fn reloaded_post_processor(
         result: super_stt_shared::daemon::http_client::HttpResult<
             crate::daemon::client::StageState,

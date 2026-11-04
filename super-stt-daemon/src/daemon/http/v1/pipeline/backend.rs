@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/backend/list` — the backends that can fill a stage.
+//! `/stt/pipeline/{stage}/backend/list` — the backends that can fill a stage.
 //!
 //! Contract: `docs/protocol/endpoints/v1/pipeline/backend-list.md`.
 //!
-//! The slot itself is `/pipeline/{stage}`, one level up: `GET` reports the
+//! The slot itself is `/stt/pipeline/{stage}`, one level up: `GET` reports the
 //! backend filling the position and `POST` chooses it. This is the menu that
 //! `POST` will accept — the same relationship [`super::model`] has with
 //! `/model/list`, and [`super::device`] with `/device/list`.
 //!
-//! It exists because the daemon already decides this. `POST /pipeline/{stage}`
+//! It exists because the daemon already decides this. `POST /stt/pipeline/{stage}`
 //! refuses a backend that serves nothing the stage can run, and a client that
 //! builds its own list from `GET /backend/list` is reimplementing that rule — with
 //! a picker that offers a backend the daemon then rejects as the failure mode.
@@ -22,7 +22,7 @@ use super::{Stage, unknown_stage};
 use crate::daemon::http::v1::wire::{BackendCatalog, FromDaemon};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 
-/// `GET /pipeline/{stage}/backend/list` — the installed backends this stage can
+/// `GET /stt/pipeline/{stage}/backend/list` — the installed backends this stage can
 /// be filled with.
 #[utoipa::path(
     get,
@@ -34,7 +34,7 @@ The installed backends serving at least one model this stage can run, in the sha
 `GET /backend/list` returns them.
 
 Fill a stage's backend picker from this rather than from `GET /backend/list`: a backend \
-serving nothing this stage can run is refused by `POST /pipeline/{stage}`, and offering \
+serving nothing this stage can run is refused by `POST /stt/pipeline/{stage}`, and offering \
 one hands the user an error to discover by choosing it. A backend serving both roles \
 appears in both stages' lists.
 

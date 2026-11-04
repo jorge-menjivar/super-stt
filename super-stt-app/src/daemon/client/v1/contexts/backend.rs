@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/backend/{source}/context` — which dictation context one backend uses.
+//! `/stt/backend/{source}/context` — which dictation context one backend uses.
 //!
 //! Three states, three verbs, so nothing on the wire is a magic value:
 //! [`clear_backend_context`] puts the backend back on the active context,
@@ -50,10 +50,10 @@ pub struct BackendContext {
 }
 
 fn path(source: &str) -> String {
-    format!("/backend/{}/context", urlencoding::encode(source))
+    format!("/stt/backend/{}/context", urlencoding::encode(source))
 }
 
-/// `GET /backend/{source}/context`.
+/// `GET /stt/backend/{source}/context`.
 pub async fn get_backend_context(source: String) -> HttpResult<BackendContext> {
     with_settings_token(move |socket, token| {
         let source = source.clone();
@@ -62,7 +62,7 @@ pub async fn get_backend_context(source: String) -> HttpResult<BackendContext> {
     .await
 }
 
-/// `POST /backend/{source}/context` — pin this backend to `id`, or send it no
+/// `POST /stt/backend/{source}/context` — pin this backend to `id`, or send it no
 /// context at all with `None`.
 ///
 /// `None` here is *not* "follow the active context" — that is
@@ -78,7 +78,7 @@ pub async fn set_backend_context(source: String, id: Option<String>) -> HttpResu
     .await
 }
 
-/// `DELETE /backend/{source}/context` — back to following the active context.
+/// `DELETE /stt/backend/{source}/context` — back to following the active context.
 pub async fn clear_backend_context(source: String) -> HttpResult<BackendContext> {
     with_settings_token(move |socket, token| {
         let source = source.clone();

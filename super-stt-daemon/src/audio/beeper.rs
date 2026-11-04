@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The daemon's audio cues. The player is `super_engine_daemon::beeper`'s;
-//! these bind it to Super STT, so `SUPER_STT_MUTE_CUES=1` silences every cue,
+//! these bind it to Super STT, so `SUPER_VOICE_MUTE_CUES=1` silences every cue,
 //! which is what the test daemons set.
 
 use anyhow::Result;
 use std::time::Instant;
-use super_stt_shared::product::SUPER_STT;
+use super_stt_shared::product::SUPER_VOICE;
 
 /// Play a sequence of beeps. See `super_engine_daemon::beeper::play_beep_sequence`.
 ///
@@ -21,7 +21,7 @@ pub fn play_beep_sequence(
     volume: f32,
 ) -> Result<()> {
     super_engine_daemon::beeper::play_beep_sequence(
-        &SUPER_STT,
+        &SUPER_VOICE,
         frequencies,
         duration_ms,
         fade_in_ms,
@@ -46,7 +46,7 @@ pub async fn play_beep_sequence_until_played(
     volume: f32,
 ) -> Result<Instant> {
     super_engine_daemon::beeper::play_beep_sequence_until_played(
-        &SUPER_STT,
+        &SUPER_VOICE,
         frequencies,
         duration_ms,
         fade_in_ms,

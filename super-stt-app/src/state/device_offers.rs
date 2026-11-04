@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! What the daemon says can run where: the device lists behind
-//! `/pipeline/{stage}/device/list` and
-//! `/pipeline/{stage}/model/{model}/device/list`.
+//! `/stt/pipeline/{stage}/device/list` and
+//! `/stt/pipeline/{stage}/model/{model}/device/list`.
 //!
 //! The app used to derive this itself, intersecting a model's declared
 //! `supported_devices` with the backend's installed accelerator. The daemon
@@ -16,7 +16,7 @@
 
 /// The pipeline positions, under the names the app addresses them by:
 /// transcription is stage 1, post-processing stage 2. The numbers are the
-/// daemon's — the same ones `/pipeline/{stage}` takes and the `stage` field of
+/// daemon's — the same ones `/stt/pipeline/{stage}` takes and the `stage` field of
 /// its events carries — so they are re-exported rather than restated.
 pub use super_stt_shared::models::protocol::{
     POST_PROCESSOR_STAGE as PP_STAGE, TRANSCRIPTION_STAGE as STT_STAGE,

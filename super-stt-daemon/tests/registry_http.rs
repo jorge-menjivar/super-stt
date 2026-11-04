@@ -49,7 +49,7 @@ async fn start_daemon_with_registry_and_backend(
     registry_url: &str,
     installed: Option<&str>,
 ) -> (TestDaemon, PathBuf) {
-    let daemon = common::daemon("registry").env("SUPER_STT_REGISTRY_URL", registry_url);
+    let daemon = common::daemon("registry").env("SUPER_VOICE_REGISTRY_URL", registry_url);
     if let Some(manifest) = installed {
         common::BackendFixture {
             dir_name: "fixture-openai",
@@ -112,8 +112,8 @@ async fn open_sse_stream(
 
     let req = Request::builder()
         .method(Method::GET)
-        .uri("http://stt.local/v1/events?topics=registry_install")
-        .header("host", "stt.local")
+        .uri("http://voice.local/v1/events?topics=registry_install")
+        .header("host", "voice.local")
         .header("authorization", format!("Bearer {token}"))
         .header("accept", "text/event-stream")
         .body(Empty::<Bytes>::new())
@@ -295,7 +295,7 @@ async fn list_registry_backends_returns_compat() {
     // Mint a settings-scope token (registry endpoints require settings scope).
     let auth = http_client::auth_request(http_socket.clone(), "registry-test", &["settings"])
         .await
-        .expect("auth_request should succeed under SUPER_STT_AUTO_APPROVE=1");
+        .expect("auth_request should succeed under SUPER_VOICE_AUTO_APPROVE=1");
     let token = auth.session_token;
 
     let (status, body) = raw_get_json(&http_socket, "/registry/backend/list", &token).await;
@@ -326,7 +326,7 @@ async fn list_registry_backends_returns_compat() {
 /// - Mockito index server hosts the index with `sha256 = "deadbeef..."`.
 /// - Mockito asset server serves the 4-byte wasm magic `\x00\x61\x73\x6d`.
 ///   Real sha256 of those bytes: `cd5d4935...`, not `deadbeef...`.
-/// - Daemon is pointed at the index server via `SUPER_STT_REGISTRY_URL`.
+/// - Daemon is pointed at the index server via `SUPER_VOICE_REGISTRY_URL`.
 /// - Subscribe to `/events?topics=registry_install` before posting the
 ///   install so no events are missed.
 /// - POST returns `202 Accepted` with an `install_id`.
@@ -504,7 +504,7 @@ async fn start_with_catalog() -> CatalogFixture {
 
     let token = http_client::auth_request(socket.clone(), "registry-test", &["settings"])
         .await
-        .expect("auth_request should succeed under SUPER_STT_AUTO_APPROVE=1")
+        .expect("auth_request should succeed under SUPER_VOICE_AUTO_APPROVE=1")
         .session_token;
 
     CatalogFixture {
@@ -757,7 +757,7 @@ async fn start_with_installed_backend(catalog_version: &str) -> CatalogFixture {
 
     let token = http_client::auth_request(socket.clone(), "registry-test", &["settings"])
         .await
-        .expect("auth_request should succeed under SUPER_STT_AUTO_APPROVE=1")
+        .expect("auth_request should succeed under SUPER_VOICE_AUTO_APPROVE=1")
         .session_token;
 
     CatalogFixture {

@@ -54,5 +54,5 @@ pub fn discover(backends_dir: &Path) -> (Vec<DiscoveredBackend>, Vec<DiscoveredB
 /// The default backends search directory: `<data_dir>/super-stt/backends`.
 #[must_use]
 pub fn default_backends_dir() -> PathBuf {
-    engine::default_backends_dir(&super_stt_shared::SUPER_STT)
+    engine::default_backends_dir(&super_stt_shared::SUPER_VOICE)
 }

@@ -458,7 +458,7 @@ impl DaemonConfig {
         }
         #[cfg(not(test))]
         {
-            super_engine_daemon::config::config_path(&super_stt_shared::product::SUPER_STT)
+            super_engine_daemon::config::config_path(&super_stt_shared::product::SUPER_VOICE)
         }
     }
 

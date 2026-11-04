@@ -1,4 +1,4 @@
-# `/pipeline/{stage}/model`
+# `/stt/pipeline/{stage}/model`
 
 The model one [stage](./stage.md) is pointed at: read it, run it, stop it,
 abandon a load still in flight, or re-instantiate it in place.
@@ -8,20 +8,20 @@ independently, so one stage's cancel is not a licence to abandon another's
 download, and a post-processor's reload leaves the transcription model alone.
 
 Emptying the stage entirely — forgetting the backend along with the model — is
-[`DELETE /pipeline/{stage}`](./stage.md#delete-pipelinestage) instead. The
+[`DELETE /stt/pipeline/{stage}`](./stage.md#delete-pipelinestage) instead. The
 [auth](../pipeline.md#auth), the [model object](../pipeline.md#the-model-object)
 and its [`device`](../pipeline.md#the-device-object) and
 [`switch`](../pipeline.md#the-switch-object) sub-objects are described in the
 family overview.
 
-## `GET /pipeline/{stage}/model`
+## `GET /stt/pipeline/{stage}/model`
 
 What this stage is pointed at, whether it is running, the accelerator it runs
 on, and the load still in flight.
 
 ```http
-GET /pipeline/1/model HTTP/1.1
-Host: stt.local
+GET /stt/pipeline/1/model HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -60,15 +60,15 @@ An empty slot reports `null` rather than omitting the keys:
 
 **Errors:** `404 unknown_stage`, plus the auth errors below.
 
-## `POST /pipeline/{stage}/model`
+## `POST /stt/pipeline/{stage}/model`
 
 Run a model in this stage.
 
 **Request:**
 
 ```http
-POST /pipeline/2/model HTTP/1.1
-Host: stt.local
+POST /stt/pipeline/2/model HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -104,7 +104,7 @@ passing text through rather than costing the user their words.
 | 401  | `invalid_session`        | Token unknown / expired / `exe_changed`                              |
 | 403  | `scope_denied`           | Token lacks the `settings` scope                                     |
 
-## `DELETE /pipeline/{stage}/model`
+## `DELETE /stt/pipeline/{stage}/model`
 
 Stop this stage, **keeping its backend selected and the model it was pointed
 at**, so restarting it is one `POST` with no arguments to re-derive. No-op when
@@ -116,13 +116,13 @@ selection here, because without an `enabled` flag that was the only way to stop
 a restart reloading what had just been stopped.
 
 Forgetting the model as well is
-[`DELETE /pipeline/{stage}`](./stage.md#delete-pipelinestage), which drops the
+[`DELETE /stt/pipeline/{stage}`](./stage.md#delete-pipelinestage), which drops the
 backend with it.
 
 **Errors:** `404 unknown_stage`, `409 recording_in_progress`, plus the auth
 errors above.
 
-## `POST /pipeline/{stage}/model/cancel`
+## `POST /stt/pipeline/{stage}/model/cancel`
 
 Abandon the load **this stage** has in flight, including the download feeding
 it. Every stage implements it: a post-processor downloads its weights like any
@@ -135,7 +135,7 @@ one's to abandon.
 **Errors:** `409 no_switch_in_progress` when this stage has no load in progress,
 `404 unknown_stage`, plus the auth errors above.
 
-## `POST /pipeline/{stage}/model/reload`
+## `POST /stt/pipeline/{stage}/model/reload`
 
 Re-instantiate this stage's model in place, picking up changed
 [secrets and options](../backend/list.md) without a manual stop/start. A stage with

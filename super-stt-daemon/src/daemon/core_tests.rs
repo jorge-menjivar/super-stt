@@ -223,8 +223,8 @@ async fn stop_signal_succeeds_even_with_no_receivers() {
 
 /// Verify that `handle_status` reports `busy` correctly.
 /// The CLI's record subcommand uses this to decide between
-/// starting a fresh recording (`POST /v1/transcribe`) and stopping
-/// an in-flight one (`POST /v1/transcribe/stop`).
+/// starting a fresh recording (`POST /v1/stt/transcribe`) and stopping
+/// an in-flight one (`POST /v1/stt/transcribe/stop`).
 #[tokio::test]
 async fn handle_status_reports_busy_correctly() {
     let daemon = test_daemon().await;
@@ -1922,7 +1922,7 @@ async fn selecting_a_post_processor_announces_its_load_as_stage_two() {
     assert_eq!(config.post_processor.selection(), Some(("cleanup", source)));
 }
 
-/// The polled mirror of the same rule: `GET /pipeline/{stage}/model` reports an
+/// The polled mirror of the same rule: `GET /stt/pipeline/{stage}/model` reports an
 /// in-flight download only under the stage that started it. The daemon runs one
 /// at a time, and before it said which stage that was, a post-processor's
 /// download surfaced as stage 1's — the progress bar under the transcription
@@ -2046,7 +2046,7 @@ async fn an_unload_switches_stage_one_off_and_keeps_its_selection() {
     );
 }
 
-/// Every stage answers `GET /pipeline/{stage}/model` with the same shape and
+/// Every stage answers `GET /stt/pipeline/{stage}/model` with the same shape and
 /// the same meanings: `model` is the selection, `loaded` whether it is up.
 ///
 /// The two used to disagree — stage 1's `model` came off the loaded instance,
@@ -2112,7 +2112,7 @@ async fn every_stage_reports_its_model_slot_alike() {
 
 /// A stage reports the backend filling it and nothing about its model.
 ///
-/// The fields moved to `/pipeline/{stage}/model`; a client still reading them
+/// The fields moved to `/stt/pipeline/{stage}/model`; a client still reading them
 /// off the stage would get nothing, silently, which is why the absence is
 /// asserted rather than left to the schema.
 #[tokio::test]

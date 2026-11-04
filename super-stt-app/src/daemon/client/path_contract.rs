@@ -147,8 +147,8 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
         "/backend/list",
         "/backend/{}/option/{}",
         "/backend/{}/secret/{}",
-        "/pipeline/{}",
-        "/pipeline/{}/model",
+        "/stt/pipeline/{}",
+        "/stt/pipeline/{}/model",
         "/gpu_info",
         "/settings/volume",
     ] {
@@ -169,7 +169,7 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
 /// rather than as an error. Nothing logs, nothing 404s — a card simply comes up
 /// with nothing in it.
 ///
-/// That is not hypothetical. `GET /pipeline/{stage}/model` answers with its
+/// That is not hypothetical. `GET /stt/pipeline/{stage}/model` answers with its
 /// slot under `model`, and the client read it off the shared `DaemonResponse`'s
 /// `stage_model` field, which the envelope never carries. Every call returned
 /// `None`, so the stage came back from a restart having forgotten a selection
@@ -180,26 +180,30 @@ fn the_scan_finds_the_paths_the_app_depends_on() {
 /// actually reads: this is a check on the agreement, not an inventory of the
 /// schema.
 const RESPONSE_KEYS: &[(&str, &str, &[&str])] = &[
-    ("/v1/pipeline/{stage}", "get", &["stage"]),
-    ("/v1/pipeline/{stage}/backend/list", "get", &["backends"]),
-    ("/v1/pipeline/{stage}/model", "get", &["model"]),
+    ("/v1/stt/pipeline/{stage}", "get", &["stage"]),
     (
-        "/v1/pipeline/{stage}/model/{model}/device",
+        "/v1/stt/pipeline/{stage}/backend/list",
+        "get",
+        &["backends"],
+    ),
+    ("/v1/stt/pipeline/{stage}/model", "get", &["model"]),
+    (
+        "/v1/stt/pipeline/{stage}/model/{model}/device",
         "get",
         &["device", "available_devices"],
     ),
     (
-        "/v1/pipeline/{stage}/model/{model}/device/list",
+        "/v1/stt/pipeline/{stage}/model/{model}/device/list",
         "get",
         &["available_devices"],
     ),
     (
-        "/v1/pipeline/{stage}/model/{model}/language",
+        "/v1/stt/pipeline/{stage}/model/{model}/language",
         "get",
         &["language"],
     ),
     (
-        "/v1/pipeline/{stage}/model/{model}/language/list",
+        "/v1/stt/pipeline/{stage}/model/{model}/language/list",
         "get",
         &["available_languages"],
     ),
@@ -208,7 +212,7 @@ const RESPONSE_KEYS: &[(&str, &str, &[&str])] = &[
         "get",
         &["available_languages"],
     ),
-    ("/v1/pipeline", "get", &["pipeline"]),
+    ("/v1/stt/pipeline", "get", &["pipeline"]),
     ("/v1/backend/list", "get", &["backends"]),
     ("/v1/gpu_info", "get", &["gpu_info"]),
 ];

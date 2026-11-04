@@ -1,9 +1,9 @@
-# `POST /transcribe`
+# `POST /stt/transcribe`
 
 > **Realtime models** — models with `realtime = true` in their backend
 > configuration — are driven over
-> [`GET /v1/transcribe/realtime`](../../backend/contract.md#consumer-facing-endpoint)
-> (a WebSocket endpoint) rather than this route. `POST /v1/transcribe` is for
+> [`GET /v1/stt/transcribe/realtime`](../../backend/contract.md#consumer-facing-endpoint)
+> (a WebSocket endpoint) rather than this route. `POST /v1/stt/transcribe` is for
 > non-realtime models only.
 
 Start a transcription. The same endpoint covers four use cases,
@@ -17,7 +17,7 @@ dispatched on the request body:
 | Pre-captured audio (one-shot)             | `[f32]` present | (must be `false` or absent) | (implicit `true`) | `200` JSON with `{ "transcription": "..." }`     |
 
 To stop an in-flight daemon-mic capture, see
-[`POST /transcribe/stop`](./transcribe/stop.md).
+[`POST /stt/transcribe/stop`](./transcribe/stop.md).
 
 ## Auth
 
@@ -25,7 +25,7 @@ To stop an in-flight daemon-mic capture, see
 - `Authorization: Bearer <session_token>` is required.
 - Tokens without the `transcribe` scope get `403 scope_denied`.
 
-## `POST /transcribe`
+## `POST /stt/transcribe`
 
 **Request body:**
 
@@ -47,7 +47,7 @@ To stop an in-flight daemon-mic capture, see
   // Default false. true = hold the response open until the transcription
   // is delivered (`200 text/event-stream`); false = fire-and-forget
   // (`202 { "message": "Recording started" }`, recording runs in the
-  // background — stop it with POST /transcribe/stop).
+  // background — stop it with POST /stt/transcribe/stop).
   "wait":            true,
 
   // Stream incremental `event: preview` SSE frames before the final
@@ -133,19 +133,19 @@ comments and then the single `done` frame.
 
 A daemon older than the `source` field omits it.
 
-**Stopping early via socket disconnect:** for any `POST /transcribe`
+**Stopping early via socket disconnect:** for any `POST /stt/transcribe`
 issued with `wait: true`, closing the HTTP connection acts as an
 implicit stop signal — the disconnect is detected on the next SSE
 write, the capture ends, and any output not yet sent is dropped.
 For `wait: false` (fire-and-forget) the connection is closed *by
 design* immediately after `202 Accepted`; to stop a fire-and-forget
-recording use [`POST /transcribe/stop`](./transcribe/stop.md).
+recording use [`POST /stt/transcribe/stop`](./transcribe/stop.md).
 
-**`POST /transcribe` never doubles as a stop signal.** Issuing it
+**`POST /stt/transcribe` never doubles as a stop signal.** Issuing it
 while a daemon-mic capture is already running returns
 `409 recording_in_progress`. To implement toggle behavior, clients
 should consult `busy` on [`GET /status`](./status.md) and
-route the request to [`POST /transcribe/stop`](./transcribe/stop.md)
+route the request to [`POST /stt/transcribe/stop`](./transcribe/stop.md)
 when a capture is already in progress.
 
 **Errors:**
@@ -156,8 +156,8 @@ when a capture is already in progress.
 | 400  | (names the field)                  | A microphone option had an invalid value, such as an unknown `stop_mode` or a non-boolean `audio_cues`. Refused before capture, whatever `wait` is |
 | 401  | `invalid_session`                  | Token unknown / expired / `exe_changed` — re-auth and retry             |
 | 403  | `scope_denied`                     | Token lacks the `transcribe` scope                                      |
-| 409  | `model_not_loaded`                 | No model is loaded, so no transcription is possible; load one via `POST /pipeline/1/model` and retry |
-| 409  | `recording_in_progress`            | A daemon-mic capture was already running; check `busy` on `/status` and call `/transcribe/stop` instead |
+| 409  | `model_not_loaded`                 | No model is loaded, so no transcription is possible; load one via `POST /stt/pipeline/1/model` and retry |
+| 409  | `recording_in_progress`            | A daemon-mic capture was already running; check `busy` on `/status` and call `/stt/transcribe/stop` instead |
 | 429  | `rate_limited`                     | Per-client rate limit hit; back off and retry                           |
 | 503  | `connection_rejected`              | Server refused the connection                                           |
 

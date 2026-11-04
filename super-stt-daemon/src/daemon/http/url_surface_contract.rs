@@ -27,32 +27,35 @@ const URL_SURFACE: &[(&str, &str)] = &[
     ("/v1/auth/status", "get"),
     ("/v1/backend/list", "get"),
     ("/v1/backend/{backend_id}", "delete"),
-    ("/v1/backend/{backend_id}/context", "delete,get,post"),
+    ("/v1/stt/backend/{backend_id}/context", "delete,get,post"),
     ("/v1/backend/{backend_id}/option/list", "get"),
     ("/v1/backend/{backend_id}/option/{name}", "delete,get,post"),
     ("/v1/backend/{backend_id}/secret/list", "get"),
     ("/v1/backend/{backend_id}/secret/{name}", "delete,get,post"),
-    ("/v1/context/active", "get,post"),
-    ("/v1/context/list", "get"),
-    ("/v1/context/{id}", "delete,get,post"),
+    ("/v1/stt/context/active", "get,post"),
+    ("/v1/stt/context/list", "get"),
+    ("/v1/stt/context/{id}", "delete,get,post"),
     ("/v1/events", "get"),
     ("/v1/gpu_info", "get"),
     ("/v1/ping", "get"),
-    ("/v1/pipeline", "get"),
-    ("/v1/pipeline/{stage}", "delete,get,post"),
-    ("/v1/pipeline/{stage}/backend/list", "get"),
-    ("/v1/pipeline/{stage}/device/list", "get"),
-    ("/v1/pipeline/{stage}/model", "delete,get,post"),
-    ("/v1/pipeline/{stage}/model/cancel", "post"),
-    ("/v1/pipeline/{stage}/model/list", "get"),
-    ("/v1/pipeline/{stage}/model/reload", "post"),
-    ("/v1/pipeline/{stage}/model/{model}/device", "get,post"),
-    ("/v1/pipeline/{stage}/model/{model}/device/list", "get"),
+    ("/v1/stt/pipeline", "get"),
+    ("/v1/stt/pipeline/{stage}", "delete,get,post"),
+    ("/v1/stt/pipeline/{stage}/backend/list", "get"),
+    ("/v1/stt/pipeline/{stage}/device/list", "get"),
+    ("/v1/stt/pipeline/{stage}/model", "delete,get,post"),
+    ("/v1/stt/pipeline/{stage}/model/cancel", "post"),
+    ("/v1/stt/pipeline/{stage}/model/list", "get"),
+    ("/v1/stt/pipeline/{stage}/model/reload", "post"),
+    ("/v1/stt/pipeline/{stage}/model/{model}/device", "get,post"),
+    ("/v1/stt/pipeline/{stage}/model/{model}/device/list", "get"),
     (
-        "/v1/pipeline/{stage}/model/{model}/language",
+        "/v1/stt/pipeline/{stage}/model/{model}/language",
         "delete,get,post",
     ),
-    ("/v1/pipeline/{stage}/model/{model}/language/list", "get"),
+    (
+        "/v1/stt/pipeline/{stage}/model/{model}/language/list",
+        "get",
+    ),
     ("/v1/registry/backend/list", "get"),
     ("/v1/registry/backend/preview", "post"),
     ("/v1/registry/backend/install", "post"),
@@ -72,9 +75,9 @@ const URL_SURFACE: &[(&str, &str)] = &[
     ("/v1/settings/write_method", "get,post"),
     ("/v1/settings/write_method/test", "post"),
     ("/v1/status", "get"),
-    ("/v1/transcribe", "post"),
-    ("/v1/transcribe/realtime", "get"),
-    ("/v1/transcribe/stop", "post"),
+    ("/v1/stt/transcribe", "post"),
+    ("/v1/stt/transcribe/realtime", "get"),
+    ("/v1/stt/transcribe/stop", "post"),
     ("/v1/update", "get"),
     ("/v1/update/check", "post"),
 ];
@@ -154,7 +157,7 @@ fn the_url_surface_is_exactly_this() {
 ///
 /// This is the invariant the namespace exists to carry. It is easy to lose in
 /// the obvious way: `settings` is also a *scope*, and the scope guards far more
-/// than the settings — `/backends`, `/pipeline` and `/registry` all sit behind
+/// than the settings — `/backends`, `/stt/pipeline` and `/registry` all sit behind
 /// it. Tagging by scope rather than by subject is what once filed a live GPU
 /// probe and a model catalog as "settings", which is how a reader ends up
 /// looking for `/v1/settings/gpu_info`.
@@ -259,7 +262,7 @@ fn no_operation_is_served_at_two_paths() {
 /// Both directions drift silently. A tag declared and no longer carried by any
 /// operation renders as an empty section in the published docs — which is how
 /// `models` was left behind when `GET /models` became
-/// `GET /pipeline/{stage}/model/list`. A tag used but never declared renders
+/// `GET /stt/pipeline/{stage}/model/list`. A tag used but never declared renders
 /// with no description at all, under a heading the reader has to guess at.
 #[test]
 fn every_declared_tag_is_used_and_every_used_tag_is_declared() {

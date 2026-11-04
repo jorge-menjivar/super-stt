@@ -9,7 +9,7 @@
 //! - known route, wrong method     → `405` (both with and without auth middleware in front)
 //! - malformed / missing JSON body → `400`
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI), so it runs in the default `cargo test` flow.
 
 mod common;
 
@@ -51,8 +51,8 @@ async fn send(
     let body_bytes = body.map(<[u8]>::to_vec).unwrap_or_default();
     let mut builder = Request::builder()
         .method(method)
-        .uri(format!("http://stt.local{path}"))
-        .header("host", "stt.local");
+        .uri(format!("http://voice.local{path}"))
+        .header("host", "voice.local");
     if let Some(t) = token {
         builder = builder.header("authorization", format!("Bearer {t}"));
     }

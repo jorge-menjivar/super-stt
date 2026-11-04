@@ -25,11 +25,11 @@ use std::collections::HashMap;
 use zbus::{Connection, interface};
 
 #[cfg(target_os = "linux")]
-pub struct SuperSTTDBusService;
+pub struct SuperVoiceDBusService;
 
 #[cfg(target_os = "linux")]
-#[interface(name = "com.github.jorge_menjivar.SuperSTT1")]
-impl SuperSTTDBusService {
+#[interface(name = "com.github.jorge_menjivar.SuperVoice1")]
+impl SuperVoiceDBusService {
     /// Method to check if daemon is running
     #[must_use]
     pub fn ping(&self) -> String {
@@ -48,7 +48,7 @@ impl SuperSTTDBusService {
 
 /// Object path the interface is served at.
 #[cfg(target_os = "linux")]
-const OBJECT_PATH: &str = "/com/github/jorge_menjivar/SuperSTT";
+const OBJECT_PATH: &str = "/com/github/jorge_menjivar/SuperVoice";
 
 #[cfg(target_os = "linux")]
 pub struct DBusManager {
@@ -66,13 +66,13 @@ impl DBusManager {
 
         // Request the service name
         connection
-            .request_name("com.github.jorge_menjivar.SuperSTT")
+            .request_name("com.github.jorge_menjivar.SuperVoice")
             .await?;
 
         // Serve the interface
         connection
             .object_server()
-            .at(OBJECT_PATH, SuperSTTDBusService)
+            .at(OBJECT_PATH, SuperVoiceDBusService)
             .await?;
 
         Ok(Self { connection })

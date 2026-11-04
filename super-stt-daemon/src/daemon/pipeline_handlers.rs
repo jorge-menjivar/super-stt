@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `GET /pipeline` — the ordered stages a transcript passes through.
+//! `GET /stt/pipeline` — the ordered stages a transcript passes through.
 //!
 //! Contract: `docs/protocol/endpoints/v1/pipeline.md`.
 //!
@@ -42,7 +42,7 @@ impl SuperSTTDaemon {
             .with_message("Pipeline retrieved successfully".to_string())
     }
 
-    /// `GET /pipeline/{stage}/model` — one stage's model slot.
+    /// `GET /stt/pipeline/{stage}/model` — one stage's model slot.
     ///
     /// Every stage answers this the same way, which is the whole point of it:
     /// `model` is what the stage is pointed at, `loaded` whether that is
@@ -174,7 +174,7 @@ impl SuperSTTDaemon {
 
     /// The device block for a stage's selection.
     ///
-    /// Deliberately the shape `GET /pipeline/{stage}/model/{model}/device`
+    /// Deliberately the shape `GET /stt/pipeline/{stage}/model/{model}/device`
     /// answers with, minus `available_devices`: that list costs a fresh host
     /// probe, and a card fills its picker from the device endpoint once rather
     /// than on every poll of the stage's model.

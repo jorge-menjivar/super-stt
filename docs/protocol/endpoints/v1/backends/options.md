@@ -53,7 +53,7 @@ List the backend's declared options with their effective values.
 
 ```http
 GET /backend/github.com%2Fsuper-stt%2Fopenai/option HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -112,7 +112,7 @@ Read one option's effective value.
 
 ```http
 GET /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -157,7 +157,7 @@ setting they typed.
 
 ```http
 POST /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -194,7 +194,7 @@ Idempotent: resetting an option that has no override succeeds. The returned
 
 ```http
 DELETE /backend/github.com%2Fsuper-stt%2Fopenai/option/base_url HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

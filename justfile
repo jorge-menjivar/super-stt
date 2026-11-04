@@ -3,7 +3,7 @@ daemon_bin_name := 'super-stt-daemon'
 # systemd unit name (matches super-stt-daemon/systemd/super-stt.service)
 service_name := 'super-stt'
 cli_name := 'super-stt-cli'
-consent_name := 'super-stt-consent'
+consent_name := 'super-voice-consent'
 wrapper_name := 'stt'
 
 # The COSMIC applet Super STT shares with Super TTS. It lives in its own repo,
@@ -28,7 +28,7 @@ systemd_unit_dir := '/usr/lib/systemd/user'
 # platform that sets no XDG_RUNTIME_DIR (macOS) does not abort the recipe that
 # happens to mention it. The daemon resolves its own socket path; this is only
 # for the install/uninstall recipes.
-run_dir := env('XDG_RUNTIME_DIR', '/run/user/' + shell('id -u')) / 'stt'
+run_dir := env('XDG_RUNTIME_DIR', '/run/user/' + shell('id -u')) / 'voice'
 log_dir := home_dir / '.local' / 'share' / 'stt' / 'logs'
 desktop_dir := install_prefix / 'share' / 'applications'
 icons_dir := install_prefix / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps'
@@ -180,7 +180,7 @@ check-features:
     RUSTFLAGS="-D warnings" cargo check -p super-stt-daemon --no-default-features
     # Compile (don't run) the subprocess transport integration test + its
     # mock_backend fixture so a refactor breaking SubprocessBackend can't pass CI
-    # green. Running it needs a systemd --user session (SUPER_STT_TEST_SUBPROCESS=1)
+    # green. Running it needs a systemd --user session (SUPER_VOICE_TEST_SUBPROCESS=1)
     # that hosted runners lack — unlike the WASM mock it can't run hermetically —
     # but compiling it keeps it from bit-rotting (audit 2 Tier 2 #13).
     RUSTFLAGS="-D warnings" cargo test -p super-stt-daemon --features test-fixtures --no-run --test subprocess_mock
@@ -220,7 +220,7 @@ test *args:
 # denial). Run them after touching any surface setup. Usage: just test-gui
 [doc("Run the GUI smoke tests against the live compositor (needs a desktop session)")]
 test-gui *args: linux-only-gui
-    cargo test -p super-stt-consent --test gui_smoke -- --ignored --nocapture {{ args }}
+    cargo test -p super-voice-consent --test gui_smoke -- --ignored --nocapture {{ args }}
 
 # Unit-test install.sh's pure logic (arch detection, channel validation, tag
 # resolution from a JSON string) against fixture JSON. It's a bash script,
@@ -233,11 +233,11 @@ test-install:
 # the complete installed tree, then uninstalls and asserts nothing is left.
 # DESTRUCTIVE — it writes to (and clears) the real /usr/local and
 # /usr/lib/systemd/user, so it is deliberately NOT part of `just ci` and
-# refuses to run without SUPER_STT_INSTALL_E2E_YES=1. CI runs it on disposable
+# refuses to run without SUPER_VOICE_INSTALL_E2E_YES=1. CI runs it on disposable
 # runners (.github/workflows/install-e2e.yml); locally, run it in a container.
 # The script is super-engine's, fetched at the rev install-e2e.yml pins, so a
 # local run tests what CI does. It installs from the repo install.sh names.
-# Set SUPER_STT_INSTALLER_BIN to a built super-stt-install to run the local
+# Set SUPER_VOICE_INSTALLER_BIN to a built super-stt-install to run the local
 # pass too.
 # Usage: just test-install-e2e [stable|beta]
 [doc("End-to-end install test (DESTRUCTIVE: real install into /usr/local)")]
@@ -384,11 +384,11 @@ linux-only-gui:
 # Signed as a whole, inside out. The daemon and the CLI go first, each with
 # the identifier `build-daemon` and `build-cli` give them, so macOS goes on
 # recognising them for the grants they hold; then the bundle, which signs the
-# app and seals everything else. With SUPER_STT_SIGN_IDENTITY unset the
+# app and seals everything else. With SUPER_VOICE_SIGN_IDENTITY unset the
 # signature is ad hoc: enough to run on this Mac, and nothing more. See
 # `codesign-macos`. Notarizing for other Macs is not done here.
 #
-# SUPER_STT_HOTKEY picks the shortcut (default ctrl+alt+space). It is written
+# SUPER_VOICE_HOTKEY picks the shortcut (default ctrl+alt+space). It is written
 # into the shortcut agent's plist before signing, since nothing inside a
 # signed bundle can be changed afterwards.
 #
@@ -411,9 +411,9 @@ bundle-macos:
     # into the agent unchecked, a binding it rejects would have launchd
     # restart it every few seconds, failing identically, and the only symptom
     # would be a key that does nothing.
-    binding="${SUPER_STT_HOTKEY:-ctrl+alt+space}"
+    binding="${SUPER_VOICE_HOTKEY:-ctrl+alt+space}"
     if ! target/release/{{ cli_name }} hotkey --key "$binding" --check; then
-        echo "❌ SUPER_STT_HOTKEY='$binding' is not a shortcut the listener accepts" >&2
+        echo "❌ SUPER_VOICE_HOTKEY='$binding' is not a shortcut the listener accepts" >&2
         exit 1
     fi
 
@@ -443,9 +443,9 @@ bundle-macos:
 
     just macos-icon "$contents/Resources/AppIcon.icns"
 
-    identity="${SUPER_STT_SIGN_IDENTITY:-}"
+    identity="${SUPER_VOICE_SIGN_IDENTITY:-}"
     if [ -z "$identity" ]; then
-        echo "codesign: SUPER_STT_SIGN_IDENTITY unset, signing the bundle ad hoc." >&2
+        echo "codesign: SUPER_VOICE_SIGN_IDENTITY unset, signing the bundle ad hoc." >&2
         echo "          macOS drops its Accessibility/Keychain grants on every rebuild." >&2
         echo "          See CONTRIBUTING.md, \"Sign your local builds\"." >&2
         identity="-"
@@ -495,7 +495,7 @@ macos-icon out:
 #
 # Opt in by exporting the name of a code-signing certificate in your keychain:
 #
-#   export SUPER_STT_SIGN_IDENTITY="Super STT Dev"
+#   export SUPER_VOICE_SIGN_IDENTITY="Super STT Dev"
 #
 # Create that certificate once — Keychain Access -> Certificate Assistant ->
 # Create a Certificate, any name, type "Code Signing", self-signed is fine.
@@ -517,9 +517,9 @@ codesign-macos bin identifier:
     # choice, but silence here is indistinguishable from signing that worked,
     # and the symptom only shows up later as a permission that stopped
     # applying — by which point nobody suspects the build.
-    identity="${SUPER_STT_SIGN_IDENTITY:-}"
+    identity="${SUPER_VOICE_SIGN_IDENTITY:-}"
     if [ -z "$identity" ]; then
-        echo "codesign: SUPER_STT_SIGN_IDENTITY unset, leaving {{ bin }} ad-hoc." >&2
+        echo "codesign: SUPER_VOICE_SIGN_IDENTITY unset, leaving {{ bin }} ad-hoc." >&2
         echo "          macOS drops its Accessibility/Keychain grants on every rebuild." >&2
         echo "          See CONTRIBUTING.md, \"Sign your local builds\"." >&2
         exit 0
@@ -535,7 +535,7 @@ codesign-macos bin identifier:
     if ! codesign --force --sign "$identity" --identifier "{{ identifier }}" "{{ bin }}"; then
         echo "" >&2
         echo "codesign: could not sign {{ bin }} as '$identity'." >&2
-        echo "SUPER_STT_SIGN_IDENTITY must name a code-signing certificate you hold:" >&2
+        echo "SUPER_VOICE_SIGN_IDENTITY must name a code-signing certificate you hold:" >&2
         echo "  security find-identity -v -p codesigning" >&2
         exit 1
     fi
@@ -591,13 +591,13 @@ run-app *args:
 
 # Run the daemon for testing purposes.
 #
-# On Linux this also builds super-stt-consent into the same target dir, since
+# On Linux this also builds super-voice-consent into the same target dir, since
 # the daemon only looks for the consent helper alongside its own binary
 # (auth_request popups fail without it).
 #
 # On macOS there is no helper to build: the daemon puts the consent question
 # up itself through osascript. Building it anyway would not merely be wasted
-# work — super-stt-consent is a libcosmic application, and libcosmic's
+# work — super-voice-consent is a libcosmic application, and libcosmic's
 # Wayland stack does not compile on macOS, so the build fails before the
 # daemon is reached.
 #
@@ -659,7 +659,7 @@ run-cli *args:
 #
 # Heads up: the dialog is an overlay layer surface with an exclusive keyboard
 # grab, so it holds the keyboard until you click Allow or Deny — the mouse
-# still works. For a hands-free run, set SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS and it
+# still works. For a hands-free run, set SUPER_VOICE_AUTH_AUTO_APPROVE_AFTER_MS and it
 # approves itself after that many milliseconds. That env var is debug-only; a
 # release build can never self-approve.
 #
@@ -668,7 +668,7 @@ run-cli *args:
 # Usage: just run-consent [scope...]
 #   just run-consent
 #   just run-consent transcribe settings secrets
-#   SUPER_STT_AUTH_AUTO_APPROVE_AFTER_MS=4000 just run-consent
+#   SUPER_VOICE_AUTH_AUTO_APPROVE_AFTER_MS=4000 just run-consent
 [doc("Run the consent dialog standalone. Usage: just run-consent [scope...]")]
 run-consent *scopes: linux-only-gui
     #!/usr/bin/env bash
@@ -682,10 +682,10 @@ run-consent *scopes: linux-only-gui
     # Quiet RUST_LOG: the default pulls in thousands of wgpu/zbus/wayland lines
     # at startup and buries the dialog's own output.
     env RUST_BACKTRACE=full \
-        RUST_LOG=super_stt_consent=debug,super_stt_shared=debug \
-        SUPER_STT_AUTH_APP_NAME="Test App" \
-        SUPER_STT_AUTH_SCOPES="$scopes" \
-        SUPER_STT_AUTH_EXE_PATH="/usr/bin/test-app" \
+        RUST_LOG=super_voice_consent=debug,super_stt_shared=debug \
+        SUPER_VOICE_AUTH_APP_NAME="Test App" \
+        SUPER_VOICE_AUTH_SCOPES="$scopes" \
+        SUPER_VOICE_AUTH_EXE_PATH="/usr/bin/test-app" \
         cargo run --bin {{ consent_name }}
 
 # Run security audit to check for vulnerabilities
@@ -1077,13 +1077,13 @@ install-macos:
         fi
     done
 
-    binding="${SUPER_STT_HOTKEY:-ctrl+alt+space}"
+    binding="${SUPER_VOICE_HOTKEY:-ctrl+alt+space}"
     echo ""
     echo "✓ Super STT installed: {{ macos_bundle_dst }}"
     echo "✓ The daemon and the shortcut run in the background, and at every login."
     echo "  They are listed under System Settings › General › Login Items."
     echo "✓ Shortcut: $binding starts and stops a recording"
-    echo "  Change it with SUPER_STT_HOTKEY=... just install"
+    echo "  Change it with SUPER_VOICE_HOTKEY=... just install"
     echo ""
     echo "Open Super STT once, and allow its notifications when asked. Two more"
     echo "macOS permissions are needed, and neither can be granted from here:"

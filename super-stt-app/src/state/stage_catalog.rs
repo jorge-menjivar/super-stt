@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! What the daemon says each pipeline stage can be filled with:
-//! `GET /pipeline/{stage}/backend/list`.
+//! `GET /stt/pipeline/{stage}/backend/list`.
 //!
 //! The app used to derive this itself, filtering the `/backend/list` catalog on
 //! each model's `role` string — twice over, once for which backends a stage may
 //! use and once for which of their models. That worked, and it was still a
-//! second implementation of a rule the daemon enforces: `POST /pipeline/{stage}`
+//! second implementation of a rule the daemon enforces: `POST /stt/pipeline/{stage}`
 //! refuses a backend serving nothing the stage can run, and
-//! `POST /pipeline/{stage}/model` refuses a model of the wrong role. A local
+//! `POST /stt/pipeline/{stage}/model` refuses a model of the wrong role. A local
 //! filter that drifted from either would offer the user something the daemon
 //! then rejects — an error discoverable only by choosing it.
 //!

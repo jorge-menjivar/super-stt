@@ -26,7 +26,7 @@
 //! and steps 3 through 6 are all about what happens once something has:
 //!   just build-mock-wasm-backend
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI), so it runs in the default flow.
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI), so it runs in the default flow.
 #![cfg(feature = "wasm-backends")]
 
 mod common;
@@ -79,7 +79,7 @@ fn mock_component() -> Option<PathBuf> {
 /// CPU is a case the daemon already reports honestly.
 fn seed_mock_backend(data_home: &Path, component: &Path) {
     let backend_dir = data_home
-        .join("super-stt")
+        .join("super-voice")
         .join("backends")
         .join("mock-both-stages");
     std::fs::create_dir_all(&backend_dir).expect("create fixture backend dir");
@@ -147,7 +147,7 @@ async fn request(
         .unwrap_or_default();
     let request = Request::builder()
         .method(method)
-        .uri(format!("http://stt.local/v1{path}"))
+        .uri(format!("http://voice.local/v1{path}"))
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
         .body(Full::new(Bytes::from(payload)))
@@ -184,14 +184,14 @@ async fn delete(socket: &PathBuf, path: &str, token: &str) -> (StatusCode, serde
 
 /// The stage's model slot, as a card reads it.
 async fn slot(socket: &PathBuf, stage: u32, token: &str) -> serde_json::Value {
-    let (status, body) = get(socket, &format!("/pipeline/{stage}/model"), token).await;
+    let (status, body) = get(socket, &format!("/stt/pipeline/{stage}/model"), token).await;
     assert_eq!(status, StatusCode::OK, "GET stage {stage} model: {body}");
     body["model"].clone()
 }
 
 /// Whether the stage is switched on, from the stage itself.
 async fn stage_enabled(socket: &PathBuf, stage: u32, token: &str) -> bool {
-    let (status, body) = get(socket, &format!("/pipeline/{stage}"), token).await;
+    let (status, body) = get(socket, &format!("/stt/pipeline/{stage}"), token).await;
     assert_eq!(status, StatusCode::OK, "GET stage {stage}: {body}");
     body["stage"]["enabled"]
         .as_bool()
@@ -224,9 +224,9 @@ async fn a_card_can_select_load_move_unload_and_load_again_at_every_stage() {
 
     for stage in STAGES {
         let (position, model) = (stage.position, stage.model);
-        let stage_path = format!("/pipeline/{position}");
-        let model_path = format!("/pipeline/{position}/model");
-        let device_path = format!("/pipeline/{position}/model/{model}/device");
+        let stage_path = format!("/stt/pipeline/{position}");
+        let model_path = format!("/stt/pipeline/{position}/model");
+        let device_path = format!("/stt/pipeline/{position}/model/{model}/device");
 
         // --- 1. select a backend -------------------------------------------
         let (status, body) = post(

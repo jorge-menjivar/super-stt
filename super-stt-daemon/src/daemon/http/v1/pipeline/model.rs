@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model` — the model a stage is pointed at.
+//! `/stt/pipeline/{stage}/model` — the model a stage is pointed at.
 //!
 //! Read it, run it, stop it, abandon a load still in flight, or re-instantiate
 //! it in place. All of them are scoped to the stage in the path: the stages
 //! provision independently, so one stage's cancel must not abandon another's
 //! download.
 //!
-//! The read is where the selection lives. `GET /pipeline/{stage}` reports the
+//! The read is where the selection lives. `GET /stt/pipeline/{stage}` reports the
 //! *backend* filling the position and nothing else; what that backend is
 //! running — and whether it is running at all — is here.
 
@@ -20,7 +20,7 @@ use super::{Stage, unknown_stage};
 use crate::daemon::http::v1::wire::{FromDaemon, ModelList, StageModelEnvelope, StageMutation};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 
-/// `GET /pipeline/{stage}/model` — the model this stage is pointed at.
+/// `GET /stt/pipeline/{stage}/model` — the model this stage is pointed at.
 #[utoipa::path(
     get,
     path = "/pipeline/{stage}/model",
@@ -38,7 +38,7 @@ to behave alike.
 
 `device` carries the stored preference and what it resolved to, which is all a \
 picker needs to render its current value. What the model *could* run on is \
-`GET /pipeline/{stage}/model/{model}/device/list`, kept separate because that answer \
+`GET /stt/pipeline/{stage}/model/{model}/device/list`, kept separate because that answer \
 costs a fresh probe of the host's accelerators.",
     params(
         ("stage" = u32, Path,
@@ -83,7 +83,7 @@ pub(crate) struct SetModelBody {
     pub(crate) source: Option<String>,
 }
 
-/// `POST /pipeline/{stage}/model` — run a model in this stage.
+/// `POST /stt/pipeline/{stage}/model` — run a model in this stage.
 #[utoipa::path(
     post,
     path = "/pipeline/{stage}/model",
@@ -92,8 +92,8 @@ pub(crate) struct SetModelBody {
     description = "\
 Loads `model` into the stage, downloading it first if this machine does not have it \
 yet. That download can be long: watch the `download_progress` event topic, or poll \
-`GET /pipeline/{stage}/model` and read `switch`. Abandon it with \
-`POST /pipeline/{stage}/model/cancel`.
+`GET /stt/pipeline/{stage}/model` and read `switch`. Abandon it with \
+`POST /stt/pipeline/{stage}/model/cancel`.
 
 Omitting `source` uses the backend already selected for the stage.",
     params(
@@ -128,7 +128,7 @@ pub(crate) async fn set_stage_model(
     narrowed(resp, StageMutation::from_daemon)
 }
 
-/// `DELETE /pipeline/{stage}/model` — stop this stage, keeping its backend.
+/// `DELETE /stt/pipeline/{stage}/model` — stop this stage, keeping its backend.
 #[utoipa::path(
     delete,
     path = "/pipeline/{stage}/model",
@@ -137,7 +137,7 @@ pub(crate) async fn set_stage_model(
     description = "\
 Unloads the model, freeing its device memory, and leaves the backend selected so a \
 different model can be loaded without re-selecting it. To empty the stage entirely, \
-use `DELETE /pipeline/{stage}`.",
+use `DELETE /stt/pipeline/{stage}`.",
     params(
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
@@ -163,7 +163,7 @@ pub(crate) async fn clear_stage_model(
     narrowed(resp, StageMutation::from_daemon)
 }
 
-/// `POST /pipeline/{stage}/model/cancel` — abandon the load this stage has in
+/// `POST /stt/pipeline/{stage}/model/cancel` — abandon the load this stage has in
 /// flight. Scoped to the stage: the stages provision independently, so one
 /// stage's cancel is not a licence to abandon another's download.
 #[utoipa::path(
@@ -203,7 +203,7 @@ pub(crate) async fn cancel_stage_model(
     narrowed(resp, crate::daemon::http::wire::Ack::from_daemon)
 }
 
-/// `POST /pipeline/{stage}/model/reload` — re-instantiate in place, picking up
+/// `POST /stt/pipeline/{stage}/model/reload` — re-instantiate in place, picking up
 /// changed secrets and options without a manual unload/load.
 #[utoipa::path(
     post,
@@ -241,7 +241,7 @@ pub(crate) async fn reload_stage_model(
     narrowed(resp, crate::daemon::http::wire::Ack::from_daemon)
 }
 
-/// `GET /pipeline/{stage}/model/list` — the models this stage can run.
+/// `GET /stt/pipeline/{stage}/model/list` — the models this stage can run.
 #[utoipa::path(
     get,
     path = "/pipeline/{stage}/model/list",

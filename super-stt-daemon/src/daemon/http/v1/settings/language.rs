@@ -2,9 +2,9 @@
 //! `/language` \u{2014} the transcription language every model uses by default.
 //!
 //! The per-model override lives at
-//! `/pipeline/{stage}/model/{model}/language` (see
+//! `/stt/pipeline/{stage}/model/{model}/language` (see
 //! `crate::daemon::http::v1::backends::model_language`), and a single request
-//! can override both by sending `language` in the `POST /transcribe` body.
+//! can override both by sending `language` in the `POST /stt/transcribe` body.
 
 use super::super::wire::{LanguageList, LanguageState};
 
@@ -26,7 +26,7 @@ settings_setter!(
     "Set the default transcription language",
     "Sets the language every model transcribes in unless something more specific \
 overrides it: a per-model setting, or a `language` field in a single \
-`POST /transcribe` body.",
+`POST /stt/transcribe` body.",
     "A BCP-47 tag such as `es`, or `auto` to let the model detect the language.",
 );
 settings_dispatch!(
@@ -53,5 +53,5 @@ or `en-US` for its models — the daemon narrows a qualified global to whichever
 actually serves, which is a rule no client can infer.
 
 A tag for one particular model belongs on that model, at \
-`POST /pipeline/{stage}/model/{model}/language`, whose own list may be narrower."
+`POST /stt/pipeline/{stage}/model/{model}/language`, whose own list may be narrower."
 );

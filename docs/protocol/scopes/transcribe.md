@@ -18,27 +18,27 @@ and stop. Scopes are composable — request the set you need in a single
 [`POST /auth/request`](../endpoints/v1/auth/request.md); see [auth.md](../auth.md).
 
 All traffic is HTTP/1.1 over the Unix domain socket at
-`<runtime dir>/stt/super-stt-http.sock`. See [transport.md](../transport.md)
+`<runtime dir>/voice/super-voice-http.sock`. See [transport.md](../transport.md)
 for the wire-level details (HTTP framing, SSE mechanics, example client code).
 
 ## Endpoint reference
 
 | Endpoint                                                      | Methods   | Notes                                       |
 |--------------------------------------------------------------|-----------|---------------------------------------------|
-| [`/transcribe`](../endpoints/v1/transcribe.md)               | POST      | Start a transcription                       |
-| [`/transcribe/stop`](../endpoints/v1/transcribe/stop.md)     | POST      | Stop an in-flight daemon-mic capture        |
-| `/transcribe/realtime`                                       | GET (WS)  | Realtime WebSocket transcription session    |
+| [`/stt/transcribe`](../endpoints/v1/transcribe.md)               | POST      | Start a transcription                       |
+| [`/stt/transcribe/stop`](../endpoints/v1/transcribe/stop.md)     | POST      | Stop an in-flight daemon-mic capture        |
+| `/stt/transcribe/realtime`                                       | GET (WS)  | Realtime WebSocket transcription session    |
 
 [`/auth/request`](../endpoints/v1/auth/request.md),
 [`/auth/status`](../endpoints/v1/auth/status.md), and
 [`/ping`](../endpoints/v1/ping.md) require only a valid token, not the
 `transcribe` scope.
 
-## The four `/transcribe` modes
+## The four `/stt/transcribe` modes
 
 A single endpoint covers four use cases, dispatched on the body. The full
 request body, response shape, and error table are on
-[`/transcribe`](../endpoints/v1/transcribe.md); the quick map:
+[`/stt/transcribe`](../endpoints/v1/transcribe.md); the quick map:
 
 | Use case                                  | `audio_data`    | `stream_realtime` | `wait`         | Response                                                  |
 |-------------------------------------------|-----------------|-------------------|----------------|-----------------------------------------------------------|
@@ -47,11 +47,11 @@ request body, response shape, and error table are on
 | Daemon-mic, stream preview + final        | absent          | `true`            | `true`         | `200 text/event-stream` with `event: preview` then `event: done` |
 | Pre-captured audio (one-shot)             | `[f32]` present | (must be `false`) | (implicit)     | `200` JSON with `{ "transcription": "..." }`              |
 
-`POST /transcribe` never doubles as a stop signal — issuing it while a
+`POST /stt/transcribe` never doubles as a stop signal — issuing it while a
 daemon-mic capture is already running returns `409 recording_in_progress`. To
 implement toggle behavior, consult `busy` on
 [`GET /status`](../endpoints/v1/status.md) (the `status` scope) and route to
-[`POST /transcribe/stop`](../endpoints/v1/transcribe/stop.md) when a capture is
+[`POST /stt/transcribe/stop`](../endpoints/v1/transcribe/stop.md) when a capture is
 in progress. The `super-stt` CLI's `record` subcommand does exactly this.
 
 ## A typical transcription session
@@ -71,7 +71,7 @@ sequenceDiagram
     App->>App: persist token
 
     Note over App,D: 2. Drive a transcription
-    App->>D: POST /transcribe<br/>{ data: { wait: true, stream_realtime: true } }
+    App->>D: POST /stt/transcribe<br/>{ data: { wait: true, stream_realtime: true } }
     D-->>App: 200 text/event-stream
     D-->>App: event: preview<br/>data: { "text": "hello" }
     D-->>App: event: preview<br/>data: { "text": "hello world" }

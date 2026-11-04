@@ -27,7 +27,7 @@ in auth.md.
 
 ```http
 POST /auth/request HTTP/1.1
-Host: stt.local
+Host: voice.local
 Content-Type: application/json
 
 {

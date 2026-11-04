@@ -1,7 +1,7 @@
 # `/settings/write_method`
 
 Read and set the keyboard simulation method used when a
-[`POST /transcribe`](../transcribe.md) request has `write_mode:
+[`POST /stt/transcribe`](../transcribe.md) request has `write_mode:
 true` and needs to type the final transcription into the focused
 window.
 
@@ -22,7 +22,7 @@ needs it fails rather than falling back. Only `auto` walks the chain. Asking
 for a Linux-only method on macOS is rejected outright rather than reported as
 temporarily unavailable.
 
-The new method takes effect on the next `/transcribe` request. To
+The new method takes effect on the next `/stt/transcribe` request. To
 check that the configured method can actually type — and, for `auto`,
 to learn which backend it resolves to — use
 [`POST /settings/write_method/test`](./write_method/test.md).
@@ -39,7 +39,7 @@ to learn which backend it resolves to — use
 
 ```http
 POST /settings/write_method HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -78,7 +78,7 @@ Content-Type: application/json
 
 ```http
 GET /settings/write_method HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

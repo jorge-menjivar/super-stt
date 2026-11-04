@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! HTTP client for the daemon protocol: `super_engine_client::http_client`,
-//! which Super STT shares with Super TTS, plus Super STT's own endpoints.
+//! plus speech to text's own endpoints.
 //!
 //! The transport is HTTP/1.1 over the daemon's Unix socket
 //! (`super_stt_shared::validation::get_http_socket_path()`). Authentication is

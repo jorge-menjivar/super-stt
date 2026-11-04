@@ -30,9 +30,9 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 
 | Mutation                                                                                                                          | Mirrored as an SSE event?                                                                            |
 |-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| `/pipeline/{stage}/model`, `/pipeline/{stage}/model/{model}/device` (when it reloads) | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled). Both carry the `stage` they are about: every stage reports its own model lifecycle. |
-| `/pipeline/1` (backend selection)                                                                                               | Yes — `daemon_status_changed` (`active_backend_changed` variant)                                      |
-| `/settings/update_check_enabled`, `/settings/update_beta_optin`, `/pipeline/{stage}` (post-processing stages), every write under `/context` and `/backend/{backend_id}/context`                                     | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
+| `/stt/pipeline/{stage}/model`, `/stt/pipeline/{stage}/model/{model}/device` (when it reloads) | Yes — `daemon_status_changed` (and `download_progress` while files are being pulled). Both carry the `stage` they are about: every stage reports its own model lifecycle. |
+| `/stt/pipeline/1` (backend selection)                                                                                               | Yes — `daemon_status_changed` (`active_backend_changed` variant)                                      |
+| `/settings/update_check_enabled`, `/settings/update_beta_optin`, `/stt/pipeline/{stage}` (post-processing stages), every write under `/stt/context` and `/stt/backend/{backend_id}/context`                                     | Yes — `daemon_status_changed` (`settings_changed` variant)                                            |
 | `/settings/audio_theme`, `/settings/volume`, `/settings/write_method`, `/settings/notification_method`, `/settings/recording_stop_mode`, `/settings/preview_typing` | No. Clients that want to see *another* app change one of these must re-`GET` the relevant endpoint.  |
 
 ## Endpoint reference
@@ -40,31 +40,31 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 | Endpoint                                                    | Methods    | Notes                                                                                                |
 |-------------------------------------------------------------|------------|------------------------------------------------------------------------------------------------------|
 | [`/backend/{backend_id}/models/{model}/settings/language`](../endpoints/v1/pipeline/language.md) | GET, POST, DELETE | Per-model language override + resolved effective language |
-| [`/pipeline/{stage}/model/list`](../endpoints/v1/pipeline/model-list.md) | GET | The models a stage can run: its backend's, carrying its role |
+| [`/stt/pipeline/{stage}/model/list`](../endpoints/v1/pipeline/model-list.md) | GET | The models a stage can run: its backend's, carrying its role |
 | [`/settings/language`](../endpoints/v1/settings/language.md)                  | GET, POST, DELETE | Global Primary Language (BCP-47 tag / `auto` / unset)                          |
 | [`/settings/audio_theme`](../endpoints/v1/settings/audio_theme.md)            | POST, GET  | Set / read the audio cue theme                                                                        |
 | [`/settings/audio_theme/test`](../endpoints/v1/settings/audio_theme/test.md)  | POST       | Audition the current theme's start + stop cues                                                        |
 | [`/settings/audio_theme/list`](../endpoints/v1/settings/audio_theme/list.md)          | GET        | List available themes                                                                                  |
 | [`/settings/volume`](../endpoints/v1/settings/volume.md)                      | POST, GET  | Set / read audio cue volume (0–100)                                                                   |
-| [`/settings/recording_stop_mode`](../endpoints/v1/settings/recording_stop_mode.md) | POST, GET | Default stop behavior for `/transcribe` (silence_only / silence_and_manual / manual_only)                  |
+| [`/settings/recording_stop_mode`](../endpoints/v1/settings/recording_stop_mode.md) | POST, GET | Default stop behavior for `/stt/transcribe` (silence_only / silence_and_manual / manual_only)                  |
 | [`/settings/preview_typing`](../endpoints/v1/settings/preview_typing.md)      | POST, GET  | Toggle live typing of preview text while recording                                                    |
-| [`/pipeline`](../endpoints/v1/pipeline.md)                  | GET        | The ordered stages a transcript passes through                                                        |
-| [`/pipeline/{stage}`](../endpoints/v1/pipeline/stage.md)          | GET, POST, DELETE | Select / deselect the backend filling one stage                                                |
-| [`/pipeline/{stage}/model`](../endpoints/v1/pipeline/model.md)    | POST, DELETE | Run / stop a model in one stage                                                                     |
-| [`/pipeline/{stage}/model/cancel`](../endpoints/v1/pipeline/model.md#post-pipelinestagemodelcancel) | POST   | Abort an in-flight load for one stage                                                             |
-| [`/pipeline/{stage}/model/reload`](../endpoints/v1/pipeline/model.md#post-pipelinestagemodelreload) | POST   | Re-instantiate a stage in place, applying changed secrets/options                                 |
-| [`/pipeline/{stage}/model/{model}/device`](../endpoints/v1/pipeline/device.md#get-pipelinestagemodelmodeldevice) | GET, POST | Read / set the device one of a stage's models runs on (cpu / gpu)                    |
-| [`/pipeline/{stage}/model/{model}/device/list`](../endpoints/v1/pipeline/device.md#get-pipelinestagemodelmodeldevicelist) | GET | The devices this install can run one of a stage's models on                     |
-| [`/pipeline/{stage}/device/list`](../endpoints/v1/pipeline/device.md#get-pipelinestagedevicelist) | GET | The devices this install can run a stage's backend on                                 |
+| [`/stt/pipeline`](../endpoints/v1/pipeline.md)                  | GET        | The ordered stages a transcript passes through                                                        |
+| [`/stt/pipeline/{stage}`](../endpoints/v1/pipeline/stage.md)          | GET, POST, DELETE | Select / deselect the backend filling one stage                                                |
+| [`/stt/pipeline/{stage}/model`](../endpoints/v1/pipeline/model.md)    | POST, DELETE | Run / stop a model in one stage                                                                     |
+| [`/stt/pipeline/{stage}/model/cancel`](../endpoints/v1/pipeline/model.md#post-pipelinestagemodelcancel) | POST   | Abort an in-flight load for one stage                                                             |
+| [`/stt/pipeline/{stage}/model/reload`](../endpoints/v1/pipeline/model.md#post-pipelinestagemodelreload) | POST   | Re-instantiate a stage in place, applying changed secrets/options                                 |
+| [`/stt/pipeline/{stage}/model/{model}/device`](../endpoints/v1/pipeline/device.md#get-pipelinestagemodelmodeldevice) | GET, POST | Read / set the device one of a stage's models runs on (cpu / gpu)                    |
+| [`/stt/pipeline/{stage}/model/{model}/device/list`](../endpoints/v1/pipeline/device.md#get-pipelinestagemodelmodeldevicelist) | GET | The devices this install can run one of a stage's models on                     |
+| [`/stt/pipeline/{stage}/device/list`](../endpoints/v1/pipeline/device.md#get-pipelinestagedevicelist) | GET | The devices this install can run a stage's backend on                                 |
 | [`/settings/write_method`](../endpoints/v1/settings/write_method.md)          | POST, GET  | Keyboard simulation method (auto / built_in / xdg_desktop_portal / ydotool)                   |
 | [`/settings/write_method/test`](../endpoints/v1/settings/write_method/test.md) | POST      | Type a test string with the configured method; reports the backend it resolved to                     |
 | [`/settings/notification_method`](../endpoints/v1/settings/notification_method.md) | POST, GET  | How recording failures are surfaced (auto / desktop / typed / off)                                    |
 | [`/backend/list`](../endpoints/v1/backend/list.md)                  | GET, DELETE | List installed backends; uninstall a backend                                                  |
 | [`/backend/{backend_id}/option/list`](../endpoints/v1/backends/options.md) | GET, POST, DELETE | List / read / set / reset a backend's non-sensitive options                          |
-| [`/context/list`](../endpoints/v1/context.md)                       | GET        | The dictation contexts the user has, and which is active                                      |
-| [`/context/{id}`](../endpoints/v1/context.md)                       | GET, POST, DELETE | Read / create / replace / delete one dictation context                                 |
-| [`/context/active`](../endpoints/v1/context.md)                     | GET, POST  | Which context is in force by default                                                          |
-| [`/backend/{backend_id}/context`](../endpoints/v1/context.md)       | GET, POST, DELETE | Point one backend at a context of its own, at none, or back at the active one          |
+| [`/stt/context/list`](../endpoints/v1/context.md)                       | GET        | The dictation contexts the user has, and which is active                                      |
+| [`/stt/context/{id}`](../endpoints/v1/context.md)                       | GET, POST, DELETE | Read / create / replace / delete one dictation context                                 |
+| [`/stt/context/active`](../endpoints/v1/context.md)                     | GET, POST  | Which context is in force by default                                                          |
+| [`/stt/backend/{backend_id}/context`](../endpoints/v1/context.md)       | GET, POST, DELETE | Point one backend at a context of its own, at none, or back at the active one          |
 | [`/gpu_info`](../endpoints/v1/gpu_info.md)                  | GET        | GPU / VRAM information                                                                                 |
 | [`/registry/backend/list`](../endpoints/v1/registry/backend/list.md) | GET      | List backends available in the registry                                                               |
 | [`/registry/backend/refresh`](../endpoints/v1/registry/refresh.md) | POST | Refresh the registry index                                                                            |
@@ -94,7 +94,7 @@ sequenceDiagram
     D-->>App: 200 { session_token, scopes }
 
     Note over App,D: 2. Load current state — one round-trip per panel
-    App->>D: GET /pipeline,<br/>      GET /settings/audio_theme/list, GET /settings/audio_theme, GET /settings/volume, …
+    App->>D: GET /stt/pipeline,<br/>      GET /settings/audio_theme/list, GET /settings/audio_theme, GET /settings/volume, …
     D-->>App: …
 
     Note over App,D: 3. Subscribe to status + progress events (separate connection)
@@ -102,7 +102,7 @@ sequenceDiagram
     D-->>App: 200 SSE stream
 
     Note over App,D: 4. User picks a different model
-    App->>D: POST /pipeline/1/model<br/>{ model: "voxtral-mini", source: "github.com/super-stt/voxtral" }
+    App->>D: POST /stt/pipeline/1/model<br/>{ model: "voxtral-mini", source: "github.com/super-stt/voxtral" }
     D-->>App: 202 { message: "Model switch started" }
 
     Note over App,D: 5. Switch progress arrives on the SSE stream

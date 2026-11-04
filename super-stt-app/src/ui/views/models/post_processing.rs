@@ -40,7 +40,7 @@ use super::surface::{
 
 /// The backends that can fill stage 2, each already narrowed to the
 /// post-processors it serves — the daemon's answer, from
-/// `GET /pipeline/2/backend/list`.
+/// `GET /stt/pipeline/2/backend/list`.
 ///
 /// `None` while the answer is in flight, which the sheet draws differently from
 /// an empty answer: one is loading, the other is "install one".
@@ -478,7 +478,7 @@ fn sheet_row(backend: &BackendInfo, is_selected: bool) -> Element<'static, Messa
 #[cfg(test)]
 mod tests {
     //! Which backends and models a stage may offer is no longer decided here —
-    //! it is `GET /pipeline/2/backend/list`, and the daemon's own tests
+    //! it is `GET /stt/pipeline/2/backend/list`, and the daemon's own tests
     //! (`each_stage_lists_only_the_backends_that_can_fill_it`,
     //! `each_stage_lists_only_the_models_carrying_its_role`) cover the rule,
     //! including manifest order. What is left here is what this file still

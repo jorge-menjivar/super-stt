@@ -82,7 +82,7 @@
           resolves this against `$HOME` itself; see
           super-stt-shared/src/logging.rs.
         -->
-        <key>SUPER_STT_LOG_FILE</key>
+        <key>SUPER_VOICE_LOG_FILE</key>
         <string>Library/Logs/super-stt/daemon.log</string>
     </dict>
 </dict>

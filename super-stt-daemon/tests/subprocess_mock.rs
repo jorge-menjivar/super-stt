@@ -2,10 +2,10 @@
 //! Drives the daemon's real `SubprocessBackend` orchestration (manifest parse,
 //! socket, systemd-run spawn, ping/load/status/transcribe, teardown) against the
 //! `mock_backend` fixture — no GPU, model, or network. Needs a systemd `--user`
-//! session, so it is gated behind `SUPER_STT_TEST_SUBPROCESS=1` and skipped on
+//! session, so it is gated behind `SUPER_VOICE_TEST_SUBPROCESS=1` and skipped on
 //! hosted CI runners.
 //!
-//! Run: `SUPER_STT_TEST_SUBPROCESS=1` cargo test -p super-stt-daemon \
+//! Run: `SUPER_VOICE_TEST_SUBPROCESS=1` cargo test -p super-stt-daemon \
 //!        --features test-fixtures --test `subprocess_mock` -- --nocapture
 #![cfg(all(feature = "subprocess-backends", feature = "test-fixtures"))]
 
@@ -129,7 +129,7 @@ fn seed_backend_dir_with(suffix: &str, manifest: &str) -> (std::path::PathBuf, C
 
 #[tokio::test]
 async fn subprocess_orchestration_against_mock() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();
@@ -162,7 +162,7 @@ async fn subprocess_orchestration_against_mock() {
 /// teardown would stop the other's unit.
 #[tokio::test]
 async fn two_backends_from_one_directory_run_concurrently() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();
@@ -220,7 +220,7 @@ async fn two_backends_from_one_directory_run_concurrently() {
 /// anything now, so the running instance keeps serving.
 #[tokio::test]
 async fn a_model_reloads_only_once_its_instance_is_released() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();
@@ -272,7 +272,7 @@ async fn a_model_reloads_only_once_its_instance_is_released() {
 /// the backend nor the panic, and the panic is sitting in its log.
 #[tokio::test]
 async fn a_backend_that_dies_while_loading_says_why() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();
@@ -304,7 +304,7 @@ async fn a_backend_that_dies_while_loading_says_why() {
 /// a full bar that sits there for minutes.
 #[tokio::test]
 async fn a_backends_load_progress_reaches_the_tracker() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();
@@ -355,7 +355,7 @@ async fn a_backends_load_progress_reaches_the_tracker() {
 /// `/v1/process` carries the new value where the first carried the old one.
 #[tokio::test]
 async fn a_changed_option_reaches_a_running_subprocess() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();
@@ -405,7 +405,7 @@ async fn a_changed_option_reaches_a_running_subprocess() {
 /// request, so the daemon has to put them there; the mock echoes what it got.
 #[tokio::test]
 async fn option_headers_reach_the_subprocess() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();
@@ -527,7 +527,7 @@ fn prepared_with(dir: &std::path::Path) -> Option<String> {
 /// files are pulled forward rather than taken in manifest order.
 #[tokio::test]
 async fn a_prepare_runs_before_the_weights_download() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();
@@ -563,7 +563,7 @@ async fn a_prepare_runs_before_the_weights_download() {
 /// it had never been sent.
 #[tokio::test]
 async fn a_failed_prepare_leaves_the_load_unharmed() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();
@@ -592,7 +592,7 @@ async fn a_failed_prepare_leaves_the_load_unharmed() {
 /// is also the test of the restart clearing that.
 #[tokio::test]
 async fn a_backend_that_dies_preparing_is_started_again() {
-    if std::env::var("SUPER_STT_TEST_SUBPROCESS").is_err() {
+    if std::env::var("SUPER_VOICE_TEST_SUBPROCESS").is_err() {
         return; // needs a systemd --user session
     }
     install_crypto_provider();

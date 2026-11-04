@@ -2,7 +2,7 @@
 //! Static content shown in the consent popup.
 //!
 //! Lives here rather than in the popup because there is more than one popup.
-//! Linux renders the libcosmic `super-stt-consent` helper; macOS has no such
+//! Linux renders the libcosmic `super-voice-consent` helper; macOS has no such
 //! helper, so the daemon puts the same question up through `osascript`. Both
 //! describe the same grant, and a user who is told different things by the
 //! two is being asked to approve something neither sentence pins down — so
@@ -17,8 +17,7 @@
 //! These are what the user reads in the dialog, not a developer reference.
 //!
 //! How the daemon hands the request to the Linux dialog, and how the dialog
-//! answers, is [`contract`]: the variable names and the three answers, shared
-//! with Super TTS.
+//! answers, is [`contract`]: the variable names and the three answers.
 
 pub use super_engine_protocol::consent as contract;
 
@@ -28,24 +27,46 @@ pub const TRANSCRIBE_PERMISSIONS: &[&str] = &[
     "Receive this app's own transcription text (preview and final)",
 ];
 
+/// Bullets for the `speak` scope.
+///
+/// Phrased around what the user gives up — control of the speakers — rather
+/// than what the app gains. Interrupting is called out because it is the part
+/// that surprises people: granting this lets the app cut off whatever else is
+/// being read aloud.
+pub const SPEAK_PERMISSIONS: &[&str] = &[
+    "Play synthesized speech through your speakers",
+    "Interrupt or stop speech this or another app started",
+];
+
 /// Bullets for the `status` scope.
-pub const STATUS_PERMISSIONS: &[&str] =
-    &["Read which speech-to-text model and device are currently active"];
+pub const STATUS_PERMISSIONS: &[&str] = &[
+    "Read which models and devices are active",
+    "See whether it is recording or speaking right now",
+];
 
 /// Bullets for the `settings` scope.
 pub const SETTINGS_PERMISSIONS: &[&str] = &[
-    "Read and change every daemon setting (model, device, audio cues, volume, recording behavior)",
-    "Allow or block sending audio to online providers (OpenAI, Mistral, Deepgram)",
-    "Install, update, and remove speech-to-text backends",
+    "Read and change every setting (models, devices, audio cues, volume, recording behavior)",
+    "Install, update, and remove backends",
 ];
 
 /// Bullets for the `recording_events` scope.
 pub const RECORDING_EVENTS_PERMISSIONS: &[&str] =
     &["See when any recording starts and stops on this device"];
 
+/// Bullets for the `playback_events` scope.
+///
+/// Reading these events reveals *when* the machine is speaking and how far
+/// through it is — not the text — so the bullets say exactly that rather than
+/// implying access to content the scope does not grant.
+pub const PLAYBACK_EVENTS_PERMISSIONS: &[&str] = &[
+    "See when speech starts and stops",
+    "See how far through the current speech playback has got",
+];
+
 /// Bullets for the `audio_visualization` scope.
 pub const AUDIO_VISUALIZATION_PERMISSIONS: &[&str] =
-    &["Receive audio visualization data (frequency bars) while a recording is running"];
+    &["Receive audio visualization data (frequency bars) while recording or speaking"];
 
 /// Bullets for the `global_transcriptions` scope.
 pub const GLOBAL_TRANSCRIPTIONS_PERMISSIONS: &[&str] =
@@ -54,6 +75,16 @@ pub const GLOBAL_TRANSCRIPTIONS_PERMISSIONS: &[&str] =
 /// Bullets for the `daemon_status` scope.
 pub const DAEMON_STATUS_PERMISSIONS: &[&str] =
     &["Monitor model changes, downloads, and backend installation progress"];
+
+/// Bullets for the `voices` scope.
+///
+/// These are recordings of somebody speaking, so the bullets name the
+/// recordings themselves rather than "manage voices" — the thing the user is
+/// deciding about is audio of a person, not a settings list.
+pub const VOICES_PERMISSIONS: &[&str] = &[
+    "List, play back, and delete your saved voice recordings",
+    "Add new voice recordings to clone a voice from",
+];
 
 /// Bullets for the `secrets` scope shown in the consent popup.
 pub const SECRETS_PERMISSIONS: &[&str] = &[
@@ -83,6 +114,9 @@ pub fn permissions_for_scope(scope: &str) -> &'static [&'static str] {
         "global_transcriptions" => GLOBAL_TRANSCRIPTIONS_PERMISSIONS,
         "daemon_status" => DAEMON_STATUS_PERMISSIONS,
         "secrets" => SECRETS_PERMISSIONS,
+        "speak" => SPEAK_PERMISSIONS,
+        "playback_events" => PLAYBACK_EVENTS_PERMISSIONS,
+        "voices" => VOICES_PERMISSIONS,
         _ => UNKNOWN_SCOPE_PERMISSIONS,
     }
 }

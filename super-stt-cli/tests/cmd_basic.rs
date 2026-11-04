@@ -9,11 +9,11 @@
 //!
 //! - `ping`   → `GET  /v1/ping`            : liveness, prints the daemon's reply.
 //! - `status` → `GET  /v1/status`          : prints `Model:` / `Device:` lines.
-//! - `stop`   → `POST /v1/transcribe/stop` : idempotent against an idle daemon.
+//! - `stop`   → `POST /v1/stt/transcribe/stop` : idempotent against an idle daemon.
 //! - `logout` → local token file only         : forgets the cached session token.
 //!
 //! The CLI keeps its token in the test daemon's home, never the developer's
-//! state directory, and the daemon runs with `SUPER_STT_AUTO_APPROVE=1` (it
+//! state directory, and the daemon runs with `SUPER_VOICE_AUTO_APPROVE=1` (it
 //! auto-approves `/auth/request`, so no consent popup is spawned).
 //!
 //! ```bash
@@ -24,7 +24,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use super_engine_test_daemon::TestDaemon;
-use super_stt_shared::product::SUPER_STT;
+use super_stt_shared::product::SUPER_VOICE;
 
 const CLI_BIN: &str = env!("CARGO_BIN_EXE_super-stt-cli");
 
@@ -55,7 +55,7 @@ fn spawn_daemon() -> TestDaemon {
         .enable_all()
         .build()
         .expect("a runtime to wait on the daemon")
-        .block_on(TestDaemon::build(&SUPER_STT, locate_daemon_bin(), "cli-basic").start())
+        .block_on(TestDaemon::build(&SUPER_VOICE, locate_daemon_bin(), "cli-basic").start())
 }
 
 /// Run the CLI binary against `daemon`, blocking until it exits. Its token is
@@ -66,8 +66,8 @@ fn run_cli(daemon: &TestDaemon, args: &[&str]) -> (i32, String, String) {
 
     let mut child = Command::new(CLI_BIN)
         .env("XDG_STATE_HOME", &daemon.home().state)
-        .env("SUPER_STT_AUTO_APPROVE", "1")
-        .env("SUPER_STT_MUTE_CUES", "1")
+        .env("SUPER_VOICE_AUTO_APPROVE", "1")
+        .env("SUPER_VOICE_MUTE_CUES", "1")
         .args(&full_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -147,7 +147,7 @@ fn stop_is_idempotent_when_idle() {
 #[test]
 fn logout_clears_cached_token() {
     let state = tempfile::tempdir().expect("a state directory");
-    let token = state.path().join("super-stt/clients/super-stt-cli.json");
+    let token = state.path().join("super-voice/clients/super-stt-cli.json");
     std::fs::create_dir_all(token.parent().unwrap()).expect("create the clients directory");
     std::fs::write(&token, r#"{"token":"t","requested":[],"granted":[]}"#)
         .expect("plant a token file");

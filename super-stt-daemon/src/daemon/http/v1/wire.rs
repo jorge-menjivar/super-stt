@@ -450,7 +450,7 @@ pub(crate) struct PostProcessorState {
 /// stage 2 with `post_processor` — because each grew its own endpoint before
 /// the pipeline addressed stages by position. Both are documented rather than
 /// reconciled: changing either is a breaking wire change. Read the stage back
-/// with `GET /pipeline/{stage}` for the one shape both share.
+/// with `GET /stt/pipeline/{stage}` for the one shape both share.
 #[derive(Serialize, ToSchema)]
 pub(crate) struct StageMutation {
     #[schema(example = "success")]

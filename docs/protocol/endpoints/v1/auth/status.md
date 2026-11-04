@@ -19,7 +19,7 @@ negative response does **not** trigger consent.
 
 ```http
 GET /auth/status HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

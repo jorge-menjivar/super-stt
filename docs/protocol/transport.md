@@ -22,7 +22,7 @@ about.
 
 | Transport      | Address                                            | When                                     |
 |----------------|----------------------------------------------------|------------------------------------------|
-| Unix socket    | `<runtime dir>/stt/super-stt-http.sock`            | Always                                   |
+| Unix socket    | `<runtime dir>/voice/super-voice-http.sock`            | Always                                   |
 | TCP            | `127.0.0.1:7300`                                   | On by default; `http.tcp` turns it off   |
 
 The runtime directory is the per-user, owner-only directory the platform
@@ -55,7 +55,7 @@ Unix socket is the daemon's primary transport, and refusing to start
 because something else holds the port would take dictation, the applet and
 the CLI down for the sake of an extra.
 
-The socket path can be overridden via the `SUPER_STT_HTTP_SOCKET`
+The socket path can be overridden via the `SUPER_VOICE_HTTP_SOCKET`
 environment variable (tests use this to bind a unique socket per run).
 The daemon and every in-tree client resolve the path through the same
 helper, so the override applies to both ends — set it in a shared
@@ -69,8 +69,8 @@ Every interaction except event streaming is one HTTP request and one
 HTTP response. Standard HTTP semantics:
 
 ```http
-POST /transcribe HTTP/1.1
-Host: stt.local
+POST /stt/transcribe HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 Content-Length: 178
@@ -102,7 +102,7 @@ open one connection per request or hold a keep-alive open is up to
 you; authentication is per-request via the `Authorization` header.
 
 The `Host` header is required by HTTP/1.1 but its value is ignored.
-Use `stt.local`, `localhost`, or anything else.
+Use `voice.local`, `localhost`, or anything else.
 
 ## Authentication header
 
@@ -147,7 +147,7 @@ denial), 5xx for server-side failures.
 | HTTP status | When                                                        |
 |-------------|-------------------------------------------------------------|
 | 200 OK      | Successful read or mutation                                 |
-| 202 Accepted| Successful mutation that runs asynchronously (e.g. `POST /pipeline/1/model`) |
+| 202 Accepted| Successful mutation that runs asynchronously (e.g. `POST /stt/pipeline/1/model`) |
 | 400 Bad Request | Request validation failed (missing fields, bad enum)    |
 | 401 Unauthorized | Missing or invalid `Authorization` header              |
 | 403 Forbidden | Token valid but scope insufficient (`scope_denied`)       |
@@ -164,7 +164,7 @@ client disconnects or the daemon shuts down.
 
 ```http
 GET /events?topics=recording_state,frequency_bands,daemon_status_changed,download_progress HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…
 Accept: text/event-stream
 ```
@@ -236,7 +236,7 @@ A subscriber that doesn't drain fast enough has its oldest queued
 events dropped — the connection itself isn't closed, and the next
 live event arrives normally. Clients that want to verify they
 didn't miss critical state can issue a fresh `GET` on the relevant
-resource (e.g. `GET /pipeline/1`) — those snapshots are
+resource (e.g. `GET /stt/pipeline/1`) — those snapshots are
 authoritative.
 
 ### Closing the stream
@@ -345,15 +345,15 @@ The minimal recipe for a fresh client of any scope:
 
 1. Use any HTTP client your language has. Examples:
    ```bash
-   curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock" \
-        -X POST http://stt.local/auth/request \
+   curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-http.sock" \
+        -X POST http://voice.local/auth/request \
         -H 'Content-Type: application/json' \
         -d '{"app_name":"My App","scopes":["transcribe","status"],"version":"0.1"}'
    ```
    ```python
    import requests_unixsocket
    s = requests_unixsocket.Session()
-   r = s.post("http+unix://%2Frun%2Fuser%2F1000%2Fstt%2Fsuper-stt-http.sock/auth/request",
+   r = s.post("http+unix://%2Frun%2Fuser%2F1000%2Fstt%2Fsuper-voice-http.sock/auth/request",
               json={"app_name": "My App", "scopes": ["transcribe", "status"], "version": "0.1"})
    token = r.json()["session_token"]
    ```
@@ -361,7 +361,7 @@ The minimal recipe for a fresh client of any scope:
    // Node
    const http = require('http');
    const req = http.request({
-     socketPath: '/run/user/1000/stt/super-stt-http.sock',
+     socketPath: '/run/user/1000/stt/super-voice-http.sock',
      method: 'POST',
      path: '/auth/request',
      headers: {'Content-Type': 'application/json'}
@@ -373,8 +373,8 @@ The minimal recipe for a fresh client of any scope:
 
 3. For commands, send `Authorization: Bearer <token>` on every request:
    ```bash
-   curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock" \
-        -X POST http://stt.local/transcribe \
+   curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-http.sock" \
+        -X POST http://voice.local/transcribe \
         -H "Authorization: Bearer $STT_TOKEN" \
         -H 'Content-Type: application/json' \
         -d '{"data":{"wait":true,"stream_realtime":true}}'
@@ -383,9 +383,9 @@ The minimal recipe for a fresh client of any scope:
 4. For event streams, use any HTTP client that supports SSE (or just
    read line-by-line):
    ```bash
-   curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/stt/super-stt-http.sock" \
+   curl --unix-socket "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-http.sock" \
         -N \
-        "http://stt.local/events?topics=recording_state,daemon_status_changed,download_progress" \
+        "http://voice.local/events?topics=recording_state,daemon_status_changed,download_progress" \
         -H "Authorization: Bearer $STT_TOKEN"
    ```
 

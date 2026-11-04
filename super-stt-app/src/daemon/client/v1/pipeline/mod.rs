@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline` — the ordered stages a transcript passes through.
+//! `/stt/pipeline` — the ordered stages a transcript passes through.
 //!
-//! Mirrors the daemon's `v1/pipeline/` tree: [`stage`] wraps `/pipeline/{stage}`,
+//! Mirrors the daemon's `v1/pipeline/` tree: [`stage`] wraps `/stt/pipeline/{stage}`,
 //! [`backend`] the menu that fills it, [`model`] wraps
-//! `/pipeline/{stage}/model` and its verbs, [`device`] and [`language`] wrap the
+//! `/stt/pipeline/{stage}/model` and its verbs, [`device`] and [`language`] wrap the
 //! two per-model preferences.
 //!
 //! [`StageState`] sits here, above them, because it is the one thing that
@@ -49,7 +49,7 @@ pub struct StageState {
     /// The device the selection runs on; `None` when nothing is selected.
     ///
     /// Read through [`Self::running_device`]. The value a device *picker*
-    /// shows comes from `GET /pipeline/{stage}/model/{model}/device` instead,
+    /// shows comes from `GET /stt/pipeline/{stage}/model/{model}/device` instead,
     /// alongside the list it offers — one answer for one control, rather than
     /// the preference arriving by one route and the options by another.
     pub device: Option<StageDevice>,
@@ -77,7 +77,7 @@ impl StageState {
 }
 
 /// Read a whole stage: its backend and its model slot
-/// (HTTP `GET /pipeline/{stage}` then `GET /pipeline/{stage}/model`).
+/// (HTTP `GET /stt/pipeline/{stage}` then `GET /stt/pipeline/{stage}/model`).
 ///
 /// Two requests over a Unix socket, which is what a card needs and what the
 /// split costs. A failure in either fails the read, since a half-drawn card is

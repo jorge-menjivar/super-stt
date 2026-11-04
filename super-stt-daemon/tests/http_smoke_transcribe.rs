@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `POST /v1/transcribe` with audio the caller already has.
+//! `POST /v1/stt/transcribe` with audio the caller already has.
 //!
 //! The endpoint has four use cases dispatched on the body, and three of them
 //! need a microphone. This one does not: a top-level `audio_data` array means
@@ -99,7 +99,7 @@ async fn post(
 async fn load_stage_one(sock: &PathBuf, token: &str) {
     let (status, body) = post(
         sock,
-        "/pipeline/1",
+        "/stt/pipeline/1",
         token,
         serde_json::json!({ "source": FIXTURE_SOURCE }),
     )
@@ -108,7 +108,7 @@ async fn load_stage_one(sock: &PathBuf, token: &str) {
 
     let (status, body) = post(
         sock,
-        "/pipeline/1/model",
+        "/stt/pipeline/1/model",
         token,
         serde_json::json!({ "model": FIXTURE_MODEL }),
     )
@@ -118,7 +118,7 @@ async fn load_stage_one(sock: &PathBuf, token: &str) {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut last = serde_json::Value::Null;
     while Instant::now() < deadline {
-        let (_, body) = get(sock, "/pipeline/1/model", token).await;
+        let (_, body) = get(sock, "/stt/pipeline/1/model", token).await;
         last = body["model"].clone();
         if last["loaded"] == true {
             return;
@@ -138,7 +138,7 @@ fn silence() -> Vec<f32> {
 /// The whole point: hand the daemon a buffer and get a transcript back, with no
 /// microphone anywhere in it.
 ///
-/// This is the one path through `/transcribe` that runs the real backend host
+/// This is the one path through `/stt/transcribe` that runs the real backend host
 /// end to end — request built, dispatched to a loaded component, and narrowed
 /// back to the documented `{status, transcription}` body.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -152,13 +152,13 @@ async fn precaptured_audio_comes_back_as_a_transcript() {
 
     let (status, body) = post(
         &sock,
-        "/transcribe",
+        "/stt/transcribe",
         &token,
         serde_json::json!({ "audio_data": silence(), "sample_rate": 16000 }),
     )
     .await;
 
-    assert_eq!(status, StatusCode::OK, "POST /transcribe: {body}");
+    assert_eq!(status, StatusCode::OK, "POST /stt/transcribe: {body}");
     assert_eq!(body["status"], "success", "{body}");
     assert_eq!(
         body["transcription"],
@@ -181,7 +181,7 @@ async fn precaptured_audio_accepts_a_language_override() {
 
     let (status, body) = post(
         &sock,
-        "/transcribe",
+        "/stt/transcribe",
         &token,
         serde_json::json!({ "audio_data": silence(), "sample_rate": 16000, "language": "en" }),
     )
@@ -190,7 +190,7 @@ async fn precaptured_audio_accepts_a_language_override() {
     assert_eq!(
         status,
         StatusCode::OK,
-        "POST /transcribe with language: {body}"
+        "POST /stt/transcribe with language: {body}"
     );
     assert_eq!(body["transcription"], common::MOCK_TRANSCRIPTION, "{body}");
 }
@@ -209,7 +209,7 @@ async fn precaptured_audio_refuses_a_realtime_stream() {
 
     let (status, body) = post(
         &sock,
-        "/transcribe",
+        "/stt/transcribe",
         &token,
         serde_json::json!({ "audio_data": silence(), "stream_realtime": true }),
     )
@@ -236,7 +236,7 @@ async fn audio_data_that_is_not_samples_is_rejected() {
 
     let (status, body) = post(
         &sock,
-        "/transcribe",
+        "/stt/transcribe",
         &token,
         serde_json::json!({ "audio_data": ["not", "numbers"] }),
     )
@@ -268,7 +268,7 @@ async fn precaptured_audio_with_no_model_loaded_is_an_error() {
 
     let (status, body) = post(
         &sock,
-        "/transcribe",
+        "/stt/transcribe",
         &token,
         serde_json::json!({ "audio_data": silence(), "sample_rate": 16000 }),
     )
@@ -306,7 +306,7 @@ async fn an_invalid_microphone_option_is_a_bad_request() {
         for wait in [false, true] {
             let mut request = option.clone();
             request["wait"] = serde_json::json!(wait);
-            let (status, body) = post(&sock, "/transcribe", &token, request).await;
+            let (status, body) = post(&sock, "/stt/transcribe", &token, request).await;
 
             assert_eq!(
                 status,

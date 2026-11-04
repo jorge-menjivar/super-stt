@@ -116,13 +116,13 @@ impl SubprocessBackend {
         let mut backend = if model.prepare_files.is_empty() {
             provision(model_name, &rest_items, tracker, 0).await?;
             mark_loading();
-            engine::SubprocessBackend::start(&super_stt_shared::SUPER_STT, start).await?
+            engine::SubprocessBackend::start(&super_stt_shared::SUPER_VOICE, start).await?
         } else {
             provision(model_name, &prepare_items, tracker, 0).await?;
             // Dropping the backend stops it, so a download that fails or is
             // cancelled below takes the prepare down with it.
             let backend =
-                engine::SubprocessBackend::start(&super_stt_shared::SUPER_STT, start).await?;
+                engine::SubprocessBackend::start(&super_stt_shared::SUPER_VOICE, start).await?;
             backend.prepare().await;
             provision(model_name, &rest_items, tracker, prepare_items.len()).await?;
             mark_loading();
@@ -250,5 +250,5 @@ impl Transcribe for SubprocessBackend {
 /// Stop backends left behind by a previous daemon run. See
 /// [`super_engine_daemon::subprocess::cleanup_orphans`].
 pub async fn cleanup_orphan_units() {
-    engine::cleanup_orphans(&super_stt_shared::SUPER_STT).await;
+    engine::cleanup_orphans(&super_stt_shared::SUPER_VOICE).await;
 }

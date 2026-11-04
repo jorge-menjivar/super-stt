@@ -117,7 +117,7 @@ same backend is unaffected, as is replacing an install whose `backend.toml`
 no longer parses.
 
 **Integrity & limits.** Operator base-URL overrides (`GITHUB_API_BASE`,
-`SUPER_STT_REGISTRY_URL`) must be `https://` (loopback `http://` is allowed for
+`SUPER_VOICE_REGISTRY_URL`) must be `https://` (loopback `http://` is allowed for
 testing); insecure values are ignored and the secure default is used. Downloads
 are capped at the index-declared asset size plus a small margin (or an absolute
 ceiling when no size is declared), and tarball extraction enforces per-file and

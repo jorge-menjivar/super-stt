@@ -16,7 +16,7 @@ itself is read / set via [`/settings/audio_theme`](./audio_theme.md).
 
 ```http
 POST /settings/volume HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -55,7 +55,7 @@ Content-Type: application/json
 
 ```http
 GET /settings/volume HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

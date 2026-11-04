@@ -3,7 +3,7 @@
 //!
 //! Contract: `docs/protocol/endpoints/v1/pipeline.md` (stage 2).
 //!
-//! Reached over `/pipeline/2` and `/pipeline/2/model`, the same paths every
+//! Reached over `/stt/pipeline/2` and `/stt/pipeline/2/model`, the same paths every
 //! stage answers: the first records *which backend* provides the post-processor
 //! (cheap, cannot fail for runtime reasons), the second runs one of its models
 //! (the step that downloads, loads and can fail). `POST` enables, `DELETE`
@@ -41,7 +41,7 @@ impl SuperSTTDaemon {
                 return DaemonResponse::error_with_code(
                     ErrorCode::InvalidBackend,
                     "No post-processing backend is selected, so there is nothing to \
-                     resolve the model against. Select one with POST /pipeline/2, \
+                     resolve the model against. Select one with POST /stt/pipeline/2, \
                      or name a source.",
                 );
             }
@@ -68,7 +68,7 @@ impl SuperSTTDaemon {
                 &format!(
                     "Model {model} is a transcription model, not a post-processing \
                      model. Run it in the transcription stage with \
-                     POST /pipeline/1/model instead."
+                     POST /stt/pipeline/1/model instead."
                 ),
             );
         }
@@ -136,7 +136,7 @@ impl SuperSTTDaemon {
                 ErrorCode::InvalidBackend,
                 &format!(
                     "Backend {source} serves no post-processing model. If it \
-                     transcribes, select it for that stage with POST /pipeline/1."
+                     transcribes, select it for that stage with POST /stt/pipeline/1."
                 ),
             );
         }

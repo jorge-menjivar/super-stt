@@ -1,4 +1,4 @@
-# `/pipeline/{stage}/model/{model}/device`
+# `/stt/pipeline/{stage}/model/{model}/device`
 
 Which accelerator a model runs on, and what this install can offer it.
 
@@ -10,24 +10,24 @@ remembered per `(source, model)`, and addressed through the
 name to a backend.
 
 Two list endpoints sit beside it: the per-model list, which is the narrow and
-accurate answer once a model is chosen, and `/pipeline/{stage}/device/list`,
+accurate answer once a model is chosen, and `/stt/pipeline/{stage}/device/list`,
 the backend-wide union for a client filling a picker before one is. The
 [auth](../pipeline.md#auth) is the family's.
 
 > `GET /gpu_info` reports the host's hardware without regard to what a model
 > supports; fill a device picker from `available_devices` here instead.
 
-## `GET /pipeline/{stage}/model/{model}/device`
+## `GET /stt/pipeline/{stage}/model/{model}/device`
 
 The device `model` runs on. `model` is resolved against the backend selected
 for this stage — the same resolution an omitted `source` gets on
-`POST /pipeline/{stage}/model` — and must carry this stage's `role`.
+`POST /stt/pipeline/{stage}/model` — and must carry this stage's `role`.
 
 **Request:**
 
 ```http
-GET /pipeline/1/model/whisper-large-v3/device HTTP/1.1
-Host: stt.local
+GET /stt/pipeline/1/model/whisper-large-v3/device HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -61,7 +61,7 @@ Content-Type: application/json
 | 401  | `invalid_session` | Token unknown / expired / `exe_changed`                                    |
 | 403  | `scope_denied`    | Token lacks the `settings` scope                                           |
 
-## `POST /pipeline/{stage}/model/{model}/device`
+## `POST /stt/pipeline/{stage}/model/{model}/device`
 
 Run `model` on `device`. For the model loaded in this stage this is a reload
 onto the new device; for any other it only records the choice, which the
@@ -72,8 +72,8 @@ can live on different devices.
 **Request:**
 
 ```http
-POST /pipeline/1/model/whisper-large-v3/device HTTP/1.1
-Host: stt.local
+POST /stt/pipeline/1/model/whisper-large-v3/device HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -120,7 +120,7 @@ the CPU, surfaced as `resolved_accel: "cpu"` and the `ready` event's
 `actual_device`. A client that wants to offer only what will work narrows its
 picker to `available_devices`.
 
-## `GET /pipeline/{stage}/model/{model}/device/list`
+## `GET /stt/pipeline/{stage}/model/{model}/device/list`
 
 The devices this install can offer `model` on this host — the
 `available_devices` of the model's [device](#get-pipelinestagemodelmodeldevice),
@@ -140,7 +140,7 @@ Content-Type: application/json
 Empty for an online model, and for a local model this install cannot run on
 any device (a GPU-only model whose installed asset is CPU-only).
 
-## `GET /pipeline/{stage}/device/list`
+## `GET /stt/pipeline/{stage}/device/list`
 
 The devices the backend selected for this stage can be run on here: the union
 of the list above over the models it serves **for this stage's role**. A

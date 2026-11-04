@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/context/...` — the named dictation contexts and which one is in force.
+//! `/stt/context/...` — the named dictation contexts and which one is in force.
 //!
 //! Contract: `docs/protocol/endpoints/v1/context.md`.
 //!
@@ -40,7 +40,7 @@ struct OneContext {
 
 /// The active selection, as the daemon reports it after a write.
 ///
-/// The object is not read here: `GET /context/list` already carries both the
+/// The object is not read here: `GET /stt/context/list` already carries both the
 /// list and the active id, and the page re-reads that after every write anyway
 /// — the selection is the one change a *different* row also has to show. This
 /// type exists so the write's answer is parsed rather than discarded, which is
@@ -51,15 +51,15 @@ pub struct ActiveContext {
     id: Option<String>,
 }
 
-/// `GET /context/list` — every context plus the active id.
+/// `GET /stt/context/list` — every context plus the active id.
 pub async fn list_contexts() -> HttpResult<ContextCatalog> {
     with_settings_token(|socket, token| async move {
-        transport::get_json::<ContextCatalog>(socket, &token, "/context/list").await
+        transport::get_json::<ContextCatalog>(socket, &token, "/stt/context/list").await
     })
     .await
 }
 
-/// `POST /context/{id}` — create or replace, answering with the context as
+/// `POST /stt/context/{id}` — create or replace, answering with the context as
 /// stored.
 ///
 /// Reading the answer rather than echoing what was sent is the point: the
@@ -69,7 +69,7 @@ pub async fn set_context(context: DictationContext) -> HttpResult<DictationConte
     with_settings_token(move |socket, token| {
         let context = context.clone();
         async move {
-            let path = format!("/context/{}", urlencoding::encode(&context.id));
+            let path = format!("/stt/context/{}", urlencoding::encode(&context.id));
             let body = serde_json::json!({
                 "name": context.name,
                 "prompt": context.prompt,
@@ -83,12 +83,12 @@ pub async fn set_context(context: DictationContext) -> HttpResult<DictationConte
     .await
 }
 
-/// `DELETE /context/{id}`.
+/// `DELETE /stt/context/{id}`.
 pub async fn delete_context(id: String) -> HttpResult<()> {
     with_settings_token(move |socket, token| {
         let id = id.clone();
         async move {
-            let path = format!("/context/{}", urlencoding::encode(&id));
+            let path = format!("/stt/context/{}", urlencoding::encode(&id));
             let resp = transport::settings_delete(socket, &token, &path).await?;
             require_unit(resp, "delete_context")
         }
@@ -96,14 +96,14 @@ pub async fn delete_context(id: String) -> HttpResult<()> {
     .await
 }
 
-/// `POST /context/active` — put a context in force, or (`None`) leave none
+/// `POST /stt/context/active` — put a context in force, or (`None`) leave none
 /// active. Answers with the id now in force.
 pub async fn set_active_context(id: Option<String>) -> HttpResult<Option<String>> {
     with_settings_token(move |socket, token| {
         let id = id.clone();
         async move {
             let body = serde_json::json!({ "id": id });
-            transport::post_json::<ActiveContext>(socket, &token, "/context/active", &body)
+            transport::post_json::<ActiveContext>(socket, &token, "/stt/context/active", &body)
                 .await
                 .map(|answer| answer.id)
         }

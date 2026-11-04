@@ -9,7 +9,12 @@
 //! bodies they answer with.
 //!
 //! `/auth` is the exception: its routes are `super_engine_daemon::auth::routes`,
-//! shared with Super TTS, and only registered here.
+//! and only registered here.
+//!
+//! What belongs to one feature is served under that feature's prefix:
+//! speech to text's under `/stt` (see [`STT`]). What the daemon has once,
+//! whatever the feature — auth, events, status, backends, the registry,
+//! settings, updates — stays at the root.
 
 // Must come first: `#[macro_use]` puts the settings-endpoint macros in scope for
 // every module declared after it.
@@ -70,8 +75,13 @@ struct ScopeGroups {
     unauthenticated: OpenApiRouter<AppState>,
 }
 
+/// The prefix speech to text's own routes are served under: transcription, its
+/// pipeline, and dictation contexts.
+pub(crate) const STT: &str = "/stt";
+
 /// Every `/v1` route, in its group. Paths are bare here (`/ping`); the `/v1`
-/// prefix is applied once, in [`assemble`].
+/// prefix is applied once, in [`assemble`], and a feature's prefix where the
+/// group takes its routes.
 fn scope_groups() -> ScopeGroups {
     ScopeGroups {
         any: OpenApiRouter::new()
@@ -79,7 +89,7 @@ fn scope_groups() -> ScopeGroups {
             .routes(routes!(auth::auth_status))
             .merge(events::routes()),
         status: OpenApiRouter::new().routes(routes!(status::status)),
-        transcribe: transcribe::routes(),
+        transcribe: OpenApiRouter::new().nest(STT, transcribe::routes()),
         settings: settings_routes(),
         secrets: backends::secrets::routes(),
         unauthenticated: OpenApiRouter::new().routes(routes!(auth::auth_request)),
@@ -102,9 +112,14 @@ fn settings_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(update::post_check))
         .merge(settings::routes())
         .merge(backends::routes())
-        .merge(contexts::routes())
-        .merge(pipeline::routes())
         .merge(registry::routes())
+        .nest(
+            STT,
+            OpenApiRouter::new()
+                .merge(contexts::routes())
+                .merge(backends::context::routes())
+                .merge(pipeline::routes()),
+        )
 }
 
 /// Apply each group's guard. Rate limiting is layered under the scope check on

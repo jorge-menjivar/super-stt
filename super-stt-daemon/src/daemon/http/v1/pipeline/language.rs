@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model/{model}/language` — a model's language override.
+//! `/stt/pipeline/{stage}/model/{model}/language` — a model's language override.
 //!
 //! Contract: `docs/protocol/endpoints/v1/pipeline/language.md`.
 //!
@@ -51,7 +51,7 @@ struct LanguageBody {
 }
 
 /// Resolve `model` against the backend filling `stage`, the same resolution an
-/// omitted `source` gets on `POST /pipeline/{stage}/model`.
+/// omitted `source` gets on `POST /stt/pipeline/{stage}/model`.
 ///
 /// `Err` carries the response to send: no such stage, no backend selected for
 /// it, or a backend that does not serve this model.
@@ -89,12 +89,12 @@ whether or not the model is loaded.
 
 `override` is `null` when none is set, which is what \"follows the global setting\" \
 looks like. What the override *may* be set to is \
-`GET /pipeline/{stage}/model/{model}/language/list`.",
+`GET /stt/pipeline/{stage}/model/{model}/language/list`.",
     params(
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model's name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage."),
+        ("model" = String, Path, description = "The model's name, as `GET /stt/pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage."),
     ),
     security(("session_token" = ["settings"])),
     responses(
@@ -131,12 +131,12 @@ async fn get_model_language(
 Pins this model to a language regardless of the global `/settings/language` setting. A tag \
 the model does not serve is refused rather than silently ignored.
 
-Overridden in turn by a `language` field in a single `POST /transcribe` body.",
+Overridden in turn by a `language` field in a single `POST /stt/transcribe` body.",
     params(
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model's name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage."),
+        ("model" = String, Path, description = "The model's name, as `GET /stt/pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage."),
     ),
     request_body = LanguageBody,
     security(("session_token" = ["settings"])),
@@ -180,7 +180,7 @@ Removes the per-model pin, returning this model to the global `/settings/languag
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model's name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage."),
+        ("model" = String, Path, description = "The model's name, as `GET /stt/pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage."),
     ),
     security(("session_token" = ["settings"])),
     responses(
@@ -214,7 +214,7 @@ async fn clear_model_language(
     tag = "pipeline",
     summary = "List the languages a model can be pinned to",
     description = "\
-What `POST /pipeline/{stage}/model/{model}/language` will accept for this model: the \
+What `POST /stt/pipeline/{stage}/model/{model}/language` will accept for this model: the \
 tags it serves, plus the reserved `auto` for letting it detect the language itself.
 
 Fill a language picker from this rather than from a general BCP-47 list — a tag the \
@@ -222,14 +222,14 @@ model does not serve is refused, and offering one is an error the user only disc
 by choosing it.
 
 Empty for a monolingual model, which has nothing to choose however many tags its \
-manifest lists. That is the same shape `GET /pipeline/{stage}/model/{model}/device/list` \
+manifest lists. That is the same shape `GET /stt/pipeline/{stage}/model/{model}/device/list` \
 answers with for a model that runs remotely, and a client hides the control on an empty \
 list rather than special-casing a status.",
     params(
         ("stage" = u32, Path,
          description = "Pipeline position: `1` transcribes, `2` post-processes. A position that does not exist is a `404 unknown_stage`.",
          example = 1),
-        ("model" = String, Path, description = "The model\'s name, as `GET /pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage."),
+        ("model" = String, Path, description = "The model\'s name, as `GET /stt/pipeline/{stage}/model/list` spells it. Resolved against the backend filling this stage."),
     ),
     security(("session_token" = ["settings"])),
     responses(

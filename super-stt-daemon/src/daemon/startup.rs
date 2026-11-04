@@ -17,7 +17,7 @@ use anyhow::Result;
 use log::{info, warn};
 use std::sync::{Arc, RwLock};
 use super_engine_daemon::secrets::Secrets;
-use super_stt_shared::SUPER_STT;
+use super_stt_shared::SUPER_VOICE;
 use tokio::sync::broadcast;
 
 /// Pre-assembled subsystem handles created during daemon startup.
@@ -97,7 +97,7 @@ impl SuperSTTDaemon {
         // Before anything else that could fail: a daemon that cannot read the
         // file must not start, or its first write would replace a file it
         // never read.
-        let secrets = Secrets::open(&SUPER_STT)?;
+        let secrets = Secrets::open(&SUPER_VOICE)?;
 
         let config = Self::load_and_persist_config();
 
@@ -155,6 +155,7 @@ impl SuperSTTDaemon {
     /// temporary session-level device override, then kick off background
     /// loading of the startup model (if one is configured).
     async fn post_init(&self) {
+        self.move_super_stt_backends().await;
         // Discover installed backends.
         self.refresh_backends().await;
 
@@ -222,6 +223,35 @@ impl SuperSTTDaemon {
                     }
                 }
             });
+        }
+    }
+
+    /// Move the backends Super STT installed into Super Voice's folder, once:
+    /// a start that finds none to move does nothing. Only into the default
+    /// folder, since a folder the user chose is theirs to fill. A failure is
+    /// logged, never fatal: the daemon still starts, with whatever backends
+    /// its own folder holds.
+    async fn move_super_stt_backends(&self) {
+        if self
+            .config
+            .read()
+            .await
+            .transcription
+            .backends_dir
+            .is_some()
+        {
+            return;
+        }
+        let into = backends::default_backends_dir();
+        let Some(from) = crate::old_data::super_stt_backends_dir(&into) else {
+            return;
+        };
+        if let Err(e) = crate::old_data::move_backends(&from, &into) {
+            warn!(
+                "Could not move Super STT's backends from {} into {}: {e}",
+                from.display(),
+                into.display()
+            );
         }
     }
 

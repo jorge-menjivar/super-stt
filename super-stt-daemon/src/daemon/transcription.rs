@@ -78,7 +78,7 @@ impl SuperSTTDaemon {
 
     /// Resolve the effective language for the currently-loaded model.
     /// `request_override` is an optional per-request language (BCP-47 or
-    /// `"auto"`) from an external `POST /v1/transcribe`. Per the
+    /// `"auto"`) from an external `POST /v1/stt/transcribe`. Per the
     /// transcription-language design it takes precedence over all configured
     /// resolution and is **passed straight through** — the backend validates it
     /// (it is not re-adapted against the model's supported set). When it is

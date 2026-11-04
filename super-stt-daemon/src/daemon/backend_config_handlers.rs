@@ -40,12 +40,12 @@ impl SuperSTTDaemon {
             .with_message("Backends listed successfully".to_string())
     }
 
-    /// `GET /pipeline/{stage}/backend/list` — the installed backends that can
+    /// `GET /stt/pipeline/{stage}/backend/list` — the installed backends that can
     /// fill this stage: those serving at least one model carrying its role.
     ///
     /// The same catalog `GET /backend/list` returns, narrowed. Narrowed *here*
     /// rather than by each client, because the daemon already decides this when
-    /// it accepts or refuses `POST /pipeline/{stage}` — and a client filtering
+    /// it accepts or refuses `POST /stt/pipeline/{stage}` — and a client filtering
     /// on its own can offer a backend the daemon then refuses, which is a
     /// picker that hands the user an error.
     pub async fn handle_list_stage_backends(&self, post_processor: bool) -> DaemonResponse {

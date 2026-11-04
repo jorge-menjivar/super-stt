@@ -9,7 +9,7 @@ use crate::daemon::client::v1::pipeline::{self, backend, device, language, model
 
 const SOURCE: &str = "github.com/super-stt/openai";
 
-/// A `/pipeline/{stage}` envelope. Every field is required on the wire, so the
+/// A `/stt/pipeline/{stage}` envelope. Every field is required on the wire, so the
 /// fixture carries them all and each test varies the one it is about.
 fn stage_envelope(source: Option<&str>, enabled: bool) -> serde_json::Value {
     json!({
@@ -33,7 +33,7 @@ async fn reading_a_stage_reports_the_backend_filling_it() {
 
     let request = daemon.request();
     assert_eq!(request.method, "GET");
-    assert_eq!(request.path(), "/pipeline/1");
+    assert_eq!(request.path(), "/stt/pipeline/1");
     assert_eq!(filled.source.as_deref(), Some(SOURCE));
     assert_eq!(filled.name.as_deref(), Some("OpenAI"));
     assert!(filled.enabled);
@@ -53,8 +53,8 @@ async fn each_stage_is_addressed_by_its_position() {
     stage::get_stage(2).await.expect("stage 2 read");
 
     let requests = daemon.requests();
-    assert_eq!(requests[0].path(), "/pipeline/1");
-    assert_eq!(requests[1].path(), "/pipeline/2");
+    assert_eq!(requests[0].path(), "/stt/pipeline/1");
+    assert_eq!(requests[1].path(), "/stt/pipeline/2");
 }
 
 /// A daemon that predates the pipeline omits the object entirely. Reading that
@@ -80,7 +80,7 @@ async fn selecting_a_backend_posts_the_source_to_the_stage() {
 
     let request = daemon.request();
     assert_eq!(request.method, "POST");
-    assert_eq!(request.path(), "/pipeline/2");
+    assert_eq!(request.path(), "/stt/pipeline/2");
     assert_eq!(request.json(), json!({ "source": SOURCE }));
 }
 
@@ -92,7 +92,7 @@ async fn deselecting_a_backend_deletes_the_stage() {
 
     let request = daemon.request();
     assert_eq!(request.method, "DELETE");
-    assert_eq!(request.path(), "/pipeline/2");
+    assert_eq!(request.path(), "/stt/pipeline/2");
 }
 
 #[tokio::test]
@@ -112,7 +112,7 @@ async fn the_backends_offered_for_a_stage_come_from_the_daemon() {
     let offered = backend::list_stage_backends(2).await.expect("menu read");
 
     let request = daemon.request();
-    assert_eq!(request.path(), "/pipeline/2/backend/list");
+    assert_eq!(request.path(), "/stt/pipeline/2/backend/list");
     assert_eq!(offered.len(), 1);
     assert_eq!(offered[0].source, SOURCE);
 }
@@ -175,7 +175,7 @@ async fn the_model_slot_is_read_from_the_envelopes_own_key() {
 
     let request = daemon.request();
     assert_eq!(request.method, "GET");
-    assert_eq!(request.path(), "/pipeline/1/model");
+    assert_eq!(request.path(), "/stt/pipeline/1/model");
     assert_eq!(slot.model.as_deref(), Some("whisper-large-v3"));
     assert!(slot.loaded);
     assert_eq!(slot.running_device(), Some("cuda"));
@@ -234,12 +234,12 @@ async fn loading_a_model_sends_the_source_only_when_there_is_one() {
 
     let requests = daemon.requests();
     assert_eq!(requests[0].method, "POST");
-    assert_eq!(requests[0].path(), "/pipeline/1/model");
+    assert_eq!(requests[0].path(), "/stt/pipeline/1/model");
     assert_eq!(
         requests[0].json(),
         json!({ "model": "whisper-large-v3", "source": SOURCE })
     );
-    assert_eq!(requests[1].path(), "/pipeline/2/model");
+    assert_eq!(requests[1].path(), "/stt/pipeline/2/model");
     assert_eq!(requests[1].json(), json!({ "model": "qwen3" }));
 }
 
@@ -252,9 +252,9 @@ async fn unloading_keeps_the_stage_and_cancel_is_addressed_to_it() {
 
     let requests = daemon.requests();
     assert_eq!(requests[0].method, "DELETE");
-    assert_eq!(requests[0].path(), "/pipeline/2/model");
+    assert_eq!(requests[0].path(), "/stt/pipeline/2/model");
     assert_eq!(requests[1].method, "POST");
-    assert_eq!(requests[1].path(), "/pipeline/2/model/cancel");
+    assert_eq!(requests[1].path(), "/stt/pipeline/2/model/cancel");
     assert_eq!(requests[1].json(), json!({}));
 }
 
@@ -292,7 +292,7 @@ async fn a_polled_download_is_attributed_to_the_stage_that_was_asked() {
         .expect("status read")
         .expect("a download is in flight");
 
-    assert_eq!(daemon.request().path(), "/pipeline/2/model");
+    assert_eq!(daemon.request().path(), "/stt/pipeline/2/model");
     assert_eq!(progress.stage, 2);
     assert_eq!(progress.model_name, "qwen3");
     assert_eq!(progress.source, SOURCE);
@@ -354,7 +354,10 @@ async fn reading_a_models_device_addresses_it_through_the_stage() {
 
     let request = daemon.request();
     assert_eq!(request.method, "GET");
-    assert_eq!(request.path(), "/pipeline/1/model/whisper-large-v3/device");
+    assert_eq!(
+        request.path(),
+        "/stt/pipeline/1/model/whisper-large-v3/device"
+    );
     assert_eq!(read.device, "gpu");
     assert_eq!(read.resolved_accel.as_deref(), Some("cuda"));
     assert_eq!(read.available_devices, vec!["cpu", "gpu"]);
@@ -370,7 +373,10 @@ async fn setting_a_models_device_posts_the_preference() {
 
     let request = daemon.request();
     assert_eq!(request.method, "POST");
-    assert_eq!(request.path(), "/pipeline/1/model/whisper-large-v3/device");
+    assert_eq!(
+        request.path(),
+        "/stt/pipeline/1/model/whisper-large-v3/device"
+    );
     assert_eq!(request.json(), json!({ "device": "cpu" }));
 }
 
@@ -401,9 +407,9 @@ async fn the_two_device_lists_are_separate_paths() {
     let requests = daemon.requests();
     assert_eq!(
         requests[0].path(),
-        "/pipeline/1/model/whisper-large-v3/device/list"
+        "/stt/pipeline/1/model/whisper-large-v3/device/list"
     );
-    assert_eq!(requests[1].path(), "/pipeline/1/device/list");
+    assert_eq!(requests[1].path(), "/stt/pipeline/1/device/list");
     assert_eq!(for_model, vec!["cpu"]);
     assert_eq!(for_stage, vec!["cpu", "gpu"]);
 }
@@ -439,7 +445,7 @@ async fn a_model_name_with_a_slash_is_encoded_into_the_language_path() {
     let request = daemon.request();
     assert_eq!(
         request.path(),
-        "/pipeline/1/model/openai%2Fwhisper-large-v3/language"
+        "/stt/pipeline/1/model/openai%2Fwhisper-large-v3/language"
     );
     assert_eq!(resolution.effective.as_deref(), Some("en"));
     assert_eq!(resolution.source, "override");
@@ -469,10 +475,10 @@ async fn setting_and_clearing_a_language_override_share_the_path() {
 
     let requests = daemon.requests();
     assert_eq!(requests[0].method, "POST");
-    assert_eq!(requests[0].path(), "/pipeline/1/model/whisper/language");
+    assert_eq!(requests[0].path(), "/stt/pipeline/1/model/whisper/language");
     assert_eq!(requests[0].json(), json!({ "language": "es" }));
     assert_eq!(requests[1].method, "DELETE");
-    assert_eq!(requests[1].path(), "/pipeline/1/model/whisper/language");
+    assert_eq!(requests[1].path(), "/stt/pipeline/1/model/whisper/language");
     assert_eq!(after_set.effective.as_deref(), Some("es"));
     assert_eq!(after_clear.source, "global");
 }
@@ -498,7 +504,7 @@ async fn the_languages_on_offer_are_a_separate_list() {
 
     assert_eq!(
         daemon.requests()[0].path(),
-        "/pipeline/1/model/whisper/language/list"
+        "/stt/pipeline/1/model/whisper/language/list"
     );
     assert_eq!(multilingual, vec!["auto", "en", "es"]);
     assert!(monolingual.is_empty());
@@ -524,8 +530,8 @@ async fn a_stage_view_joins_the_backend_and_the_model_slot() {
 
     let requests = daemon.requests();
     assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].path(), "/pipeline/1");
-    assert_eq!(requests[1].path(), "/pipeline/1/model");
+    assert_eq!(requests[0].path(), "/stt/pipeline/1");
+    assert_eq!(requests[1].path(), "/stt/pipeline/1/model");
     assert_eq!(view.source.as_deref(), Some(SOURCE));
     assert_eq!(view.name.as_deref(), Some("OpenAI"));
     assert!(view.enabled);

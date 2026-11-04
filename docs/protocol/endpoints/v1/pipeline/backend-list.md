@@ -1,9 +1,9 @@
-# `GET /pipeline/{stage}/backend/list`
+# `GET /stt/pipeline/{stage}/backend/list`
 
 The installed backends that can fill one [stage](./stage.md): those serving at
 least one model carrying its role.
 
-The slot itself is [`/pipeline/{stage}`](./stage.md) one level up — `GET`
+The slot itself is [`/stt/pipeline/{stage}`](./stage.md) one level up — `GET`
 reports the backend filling the position, `POST` chooses it. This is the menu
 that `POST` accepts, the same relationship [`/model/list`](./model-list.md) has
 with [`/model`](./model.md) and
@@ -12,7 +12,7 @@ with [`/model`](./model.md) and
 
 **Fill a stage's backend picker from this, not from
 [`GET /backend/list`](../backend/list.md).** A backend serving nothing this stage can
-run is refused by `POST /pipeline/{stage}`, so offering one hands the user an
+run is refused by `POST /stt/pipeline/{stage}`, so offering one hands the user an
 error to discover by choosing it. The daemon already applies this rule when it
 accepts or rejects a selection; a client filtering on its own is reimplementing
 it, and the two can drift.
@@ -29,8 +29,8 @@ own stage's models, which is [`/model/list`](./model-list.md)'s business.
 ## Request
 
 ```http
-GET /pipeline/1/backend/list HTTP/1.1
-Host: stt.local
+GET /stt/pipeline/1/backend/list HTTP/1.1
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

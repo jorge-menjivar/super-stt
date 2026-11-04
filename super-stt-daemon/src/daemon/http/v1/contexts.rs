@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/context/...` — the named dictation contexts and which one is in force.
+//! `/stt/context/...` — the named dictation contexts and which one is in force.
 //!
 //! Contract: `docs/protocol/endpoints/v1/context.md`.
 //!
@@ -119,7 +119,7 @@ daemon delivers whichever context resolves for a backend to that backend, if its
 manifest says it can use one.
 
 `active` is the id of the context in force by default. A backend may be pointed at a \
-different one, or at none — see `GET /backend/{backend_id}/context`.",
+different one, or at none — see `GET /stt/backend/{backend_id}/context`.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "The contexts and the active selection.", body = ContextCatalog),
@@ -147,7 +147,7 @@ joined \u{2014} and a term holding whatever delimiter a blob chose, like \
 `Menjivar, Jorge`, would be ambiguous. The daemon splits once so nobody downstream \
 guesses.",
     params(
-        ("id" = String, Path, description = "The context's id, as `GET /context/list` reports it.", example = "coding"),
+        ("id" = String, Path, description = "The context's id, as `GET /stt/context/list` reports it.", example = "coding"),
     ),
     security(("session_token" = ["settings"])),
     responses(
@@ -277,7 +277,7 @@ The context in force by default, as both its id and the object itself, so a pick
 render the current choice in one request.
 
 Default, not universal: a backend pointed somewhere else by \
-`POST /backend/{backend_id}/context` ignores this.",
+`POST /stt/backend/{backend_id}/context` ignores this.",
     security(("session_token" = ["settings"])),
     responses(
         (status = 200, description = "The active selection; `id` is `null` when none is active.", body = ActiveContext),

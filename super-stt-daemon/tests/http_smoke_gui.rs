@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! GUI-driven end-to-end smoke test for the auth flow.
 //!
-//! Unlike `http_smoke.rs` (which uses `SUPER_STT_AUTO_APPROVE=1` to skip
+//! Unlike `http_smoke.rs` (which uses `SUPER_VOICE_AUTO_APPROVE=1` to skip
 //! the popup), this test runs the daemon **without** auto-approve so the
 //! real consent helper subprocess gets spawned. It then dismisses that
 //! popup by sending it SIGTERM (simulating the user closing the dialog
@@ -19,7 +19,7 @@
 //!   ```
 //!
 //! What's covered:
-//! - The daemon successfully locates and spawns `super-stt-consent`.
+//! - The daemon successfully locates and spawns `super-voice-consent`.
 //! - The env-var contract between daemon and helper is wired up.
 //! - When the helper exits without a decision (SIGTERM → dismissed-on-
 //!   close path), the daemon translates that to the proper error.
@@ -47,16 +47,19 @@ fn skip_if_no_display() -> Option<&'static str> {
     }
 }
 
-/// Build `super-stt-consent` so the daemon can spawn it. The daemon
+/// Build `super-voice-consent` so the daemon can spawn it. The daemon
 /// looks for the helper alongside its own binary first, and `cargo test`
 /// builds both to `target/debug/`, so this is just an explicit cargo
 /// build to make sure both are present.
 fn ensure_consent_helper_built() -> PathBuf {
     let status = Command::new(env!("CARGO"))
-        .args(["build", "-p", "super-stt-consent"])
+        .args(["build", "-p", "super-voice-consent"])
         .status()
-        .expect("invoke cargo to build super-stt-consent");
-    assert!(status.success(), "cargo build -p super-stt-consent failed");
+        .expect("invoke cargo to build super-voice-consent");
+    assert!(
+        status.success(),
+        "cargo build -p super-voice-consent failed"
+    );
 
     // The daemon's locate_consent_helper looks alongside its own binary
     // first. Both binaries land in target/<profile>/, so the simple test
@@ -64,7 +67,7 @@ fn ensure_consent_helper_built() -> PathBuf {
     let daemon_dir = Path::new(common::DAEMON_BIN)
         .parent()
         .expect("daemon binary parent dir");
-    let helper = daemon_dir.join("super-stt-consent");
+    let helper = daemon_dir.join("super-voice-consent");
     assert!(
         helper.exists(),
         "expected consent helper to be built at {} (daemon's locate logic uses this path)",
@@ -78,7 +81,7 @@ fn ensure_consent_helper_built() -> PathBuf {
 /// the test's own.
 async fn start_daemon_no_auto_approve() -> (TestDaemon, PathBuf) {
     let daemon = common::daemon("gui")
-        .without("SUPER_STT_AUTO_APPROVE")
+        .without("SUPER_VOICE_AUTO_APPROVE")
         .default_socket()
         .start()
         .await;
@@ -86,7 +89,7 @@ async fn start_daemon_no_auto_approve() -> (TestDaemon, PathBuf) {
     (daemon, socket)
 }
 
-/// Find the PID of any currently-running `super-stt-consent` process.
+/// Find the PID of any currently-running `super-voice-consent` process.
 fn find_consent_helper_pid() -> Option<u32> {
     let entries = std::fs::read_dir("/proc").ok()?;
     for entry in entries.flatten() {
@@ -100,7 +103,7 @@ fn find_consent_helper_pid() -> Option<u32> {
             && target
                 .file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n == "super-stt-consent")
+                .is_some_and(|n| n == "super-voice-consent")
             && let Ok(pid) = pid_str.parse::<u32>()
         {
             return Some(pid);

@@ -46,8 +46,8 @@ pub const MAX_VOCABULARY_CHARS: usize = 4000;
 
 /// Ids a context may not take, because a path already means something by them.
 ///
-/// Contexts are addressed at `/v1/context/{id}`, and that namespace holds two
-/// fixed siblings — `/v1/context/list` and `/v1/context/active`. A router
+/// Contexts are addressed at `/v1/stt/context/{id}`, and that namespace holds two
+/// fixed siblings — `/v1/stt/context/list` and `/v1/stt/context/active`. A router
 /// prefers the literal, so a context called `active` would be stored fine and
 /// then be unreachable: every read of it would answer with the active
 /// selection instead. Refusing the two ids costs the user nothing, since the
@@ -124,7 +124,7 @@ impl DictationContext {
     /// Whether `value` is a usable context id: a short slug a path can carry
     /// without escaping.
     ///
-    /// Deliberately narrow. The id appears in `/v1/context/{id}`, and the
+    /// Deliberately narrow. The id appears in `/v1/stt/context/{id}`, and the
     /// alternative — accepting anything and percent-encoding it the way
     /// `backend_id` is handled — buys nothing here, because unlike a backend's
     /// `source` this id is not a pre-existing name the daemon must accept. A

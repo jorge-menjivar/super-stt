@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `POST /transcribe` and `POST /transcribe/stop`: Super STT's own endpoints,
-//! on the transport it shares with Super TTS.
+//! `POST /stt/transcribe` and `POST /stt/transcribe/stop`: speech to text's own
+//! endpoints, on the engine's transport.
 
 use std::path::PathBuf;
 
@@ -12,7 +12,7 @@ use crate::models::protocol::{DaemonResponse, PreviewSource};
 
 /// Options for [`transcribe`]. v1 only wires the daemon-mic capture path
 /// (no `audio_data`); pre-captured audio is handled by the daemon's
-/// `POST /transcribe` when a client sends a top-level `audio_data` array.
+/// `POST /stt/transcribe` when a client sends a top-level `audio_data` array.
 #[derive(Debug, Default, Clone)]
 pub struct TranscribeOptions {
     pub write_mode: bool,
@@ -27,7 +27,7 @@ pub struct TranscribeOptions {
     pub stream_realtime: bool,
 }
 
-/// Build the `POST /transcribe` request body from options. Mic-capture options
+/// Build the `POST /stt/transcribe` request body from options. Mic-capture options
 /// are sent at the top level (the daemon reads them from the request body).
 fn record_body(opts: &TranscribeOptions) -> serde_json::Value {
     let mut data = serde_json::json!({
@@ -41,7 +41,7 @@ fn record_body(opts: &TranscribeOptions) -> serde_json::Value {
     data
 }
 
-/// One event from the `/transcribe` Server-Sent Events stream.
+/// One event from the `/stt/transcribe` Server-Sent Events stream.
 ///
 /// Matches the daemon's wire-level event types — `preview` for
 /// in-flight text, `done` for the final transcription, `error` for a
@@ -64,7 +64,7 @@ pub enum TranscribeEvent {
     Error(String),
 }
 
-/// `POST /transcribe` — start a daemon-mic recording. Non-streaming
+/// `POST /stt/transcribe` — start a daemon-mic recording. Non-streaming
 /// variant: collapses the entire SSE event stream into a single
 /// final result.
 ///
@@ -79,7 +79,8 @@ pub async fn transcribe(
     // Fire-and-forget: the daemon returns a single `202` JSON ack, not an SSE
     // stream, so parse the response directly instead of reading events.
     if !opts.wait {
-        return transport::post_json(socket_path, token, "/transcribe", &record_body(&opts)).await;
+        return transport::post_json(socket_path, token, "/stt/transcribe", &record_body(&opts))
+            .await;
     }
     let mut stream = Box::pin(transcribe_stream(socket_path, token, opts).await?);
     let mut last_preview = String::new();
@@ -104,7 +105,7 @@ pub async fn transcribe(
     }
 }
 
-/// `POST /transcribe` — start a daemon-mic recording, returning a stream
+/// `POST /stt/transcribe` — start a daemon-mic recording, returning a stream
 /// of [`TranscribeEvent`]s as the recording progresses.
 ///
 /// The connection is held open by the daemon: each preview update
@@ -125,7 +126,8 @@ pub async fn transcribe_stream(
     opts: TranscribeOptions,
 ) -> HttpResult<impl futures_util::Stream<Item = TranscribeEvent> + Send + 'static> {
     let events =
-        transport::post_json_events(socket_path, token, "/transcribe", &record_body(&opts)).await?;
+        transport::post_json_events(socket_path, token, "/stt/transcribe", &record_body(&opts))
+            .await?;
     Ok(events.filter_map(|event| {
         std::future::ready(match event {
             Ok(event) => parse_event(&event),
@@ -171,7 +173,7 @@ fn parse_event(event: &SseEvent) -> Option<TranscribeEvent> {
     }
 }
 
-/// `POST /transcribe/stop` — stop an in-flight daemon-mic recording.
+/// `POST /stt/transcribe/stop` — stop an in-flight daemon-mic recording.
 ///
 /// # Errors
 /// Returns an error if the daemon HTTP listener isn't reachable or the
@@ -180,7 +182,7 @@ pub async fn transcribe_stop(socket_path: PathBuf, token: &str) -> HttpResult<Da
     transport::post_json(
         socket_path,
         token,
-        "/transcribe/stop",
+        "/stt/transcribe/stop",
         &serde_json::json!({}),
     )
     .await

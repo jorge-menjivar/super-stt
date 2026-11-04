@@ -32,7 +32,7 @@ posting application, or Do Not Disturb is on, the post still reports success,
 so `auto` will *not* fall back to typing. Both follow from the daemon being a
 plain binary rather than a bundled, signed `.app`.
 
-Typing requires a `POST /transcribe` with `write_mode: true`. For a recording
+Typing requires a `POST /stt/transcribe` with `write_mode: true`. For a recording
 that is not in write mode, `typed` — and `auto` once notification delivery has
 failed — logs the failure instead.
 
@@ -85,7 +85,7 @@ backend text:
 
 ```http
 POST /settings/notification_method HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -124,7 +124,7 @@ Content-Type: application/json
 
 ```http
 GET /settings/notification_method HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 

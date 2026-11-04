@@ -64,7 +64,8 @@ fn tarball(dir: &std::path::Path, name: &str, files: &[(&str, &[u8])]) -> Vec<u8
 }
 
 /// The product's release tarball, covering every file `--components=all`
-/// requires of it (super-engine-installer's `stage::build_manifest`): the three daemon binaries, the
+/// requires of it, each named after Super Voice's slug as the installer
+/// derives it (super-engine-installer's `stage::build_manifest`): the three daemon binaries, the
 /// systemd unit, and the app binary, desktop file and icon. It carries no
 /// applet: that comes from the applet's own release. The app metainfo is
 /// optional in `build_manifest` and omitted.
@@ -73,17 +74,17 @@ fn product_tarball(dir: &std::path::Path, name: &str) -> Vec<u8> {
         dir,
         name,
         &[
-            ("super-stt-daemon", b"#!/bin/sh\necho fake\n"),
-            ("super-stt-cli", b"#!/bin/sh\necho fake\n"),
-            ("super-stt-consent", b"#!/bin/sh\necho fake\n"),
-            ("super-stt-app", b"#!/bin/sh\necho fake\n"),
-            ("systemd/super-stt.service", b"[Unit]\nDescription=fake\n"),
+            ("super-voice-daemon", b"#!/bin/sh\necho fake\n"),
+            ("super-voice-cli", b"#!/bin/sh\necho fake\n"),
+            ("super-voice-consent", b"#!/bin/sh\necho fake\n"),
+            ("super-voice-app", b"#!/bin/sh\necho fake\n"),
+            ("systemd/super-voice.service", b"[Unit]\nDescription=fake\n"),
             (
-                "resources/super-stt-app.desktop",
-                b"[Desktop Entry]\nName=Super STT\n",
+                "resources/super-voice-app.desktop",
+                b"[Desktop Entry]\nName=Super Voice\n",
             ),
             (
-                "resources/icons/hicolor/scalable/apps/super-stt-app.svg",
+                "resources/icons/hicolor/scalable/apps/super-voice-app.svg",
                 b"<svg/>",
             ),
         ],
@@ -142,7 +143,7 @@ fn releases_json(
 #[tokio::test]
 async fn dry_run_resolves_downloads_verifies_and_stages_against_a_mocked_release() {
     let triple = target_triple();
-    let tarball_name = format!("super-stt-{triple}-beta.tar.gz");
+    let tarball_name = format!("super-voice-{triple}-beta.tar.gz");
 
     let dir = std::env::temp_dir().join(format!(
         "super-engine-installer-e2e-{}-{}",

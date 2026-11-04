@@ -357,7 +357,7 @@ impl SuperSTTDaemon {
     }
 
     /// Publish one preview transcript everywhere a preview goes: `/events`
-    /// subscribers holding `global_transcriptions`, the waiting `/transcribe`
+    /// subscribers holding `global_transcriptions`, the waiting `/stt/transcribe`
     /// SSE client, and — when write-mode and preview-typing are both on — the
     /// focused window.
     ///

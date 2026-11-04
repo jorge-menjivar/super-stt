@@ -7,7 +7,7 @@ use crate::state::LanguageResolution;
 
 /// The resolution blocks the daemon has answered for, keyed by
 /// `(source, model)` — the blocks behind
-/// `GET /pipeline/{stage}/model/{model}/language`.
+/// `GET /stt/pipeline/{stage}/model/{model}/language`.
 ///
 /// A single slot held one block while only the transcription card had a
 /// language control. Both pipeline stages have one now, and a stage-1 fetch
@@ -22,7 +22,7 @@ use crate::state::LanguageResolution;
 pub struct ModelLanguages {
     blocks: Vec<((u32, String, String), LanguageResolution)>,
     /// The tags each answered-for model can be pinned to — what
-    /// `GET /pipeline/{stage}/model/{model}/language/list` returns.
+    /// `GET /stt/pipeline/{stage}/model/{model}/language/list` returns.
     ///
     /// Held beside the blocks rather than inside them because the two arrive
     /// from different requests and have different lifetimes: the block changes

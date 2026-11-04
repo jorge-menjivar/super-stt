@@ -35,7 +35,7 @@ pub(crate) fn build_request(command: &str, data: Option<Value>) -> DaemonRequest
     }
 }
 
-/// Build a `transcribe` (pre-captured audio) request from a `POST /transcribe`
+/// Build a `transcribe` (pre-captured audio) request from a `POST /stt/transcribe`
 /// body that carries a top-level `audio_data` array. `audio_data` is *moved*
 /// out of the body so the (potentially large) sample buffer is never held
 /// twice. Returns a coded `400` [`DaemonResponse`] (boxed — the god-struct is
@@ -229,7 +229,7 @@ mod tests {
         );
     }
 
-    /// A pre-captured `POST /transcribe` body routes to the `transcribe`
+    /// A pre-captured `POST /stt/transcribe` body routes to the `transcribe`
     /// command with `audio_data` moved out and `sample_rate`/`language` read
     /// from the top level.
     #[test]

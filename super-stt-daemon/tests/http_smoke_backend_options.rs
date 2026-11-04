@@ -6,7 +6,7 @@
 //! 2. Unknown option: GET/POST to a `{name}` not declared → 404 `unknown_option`.
 //! 3. Unknown backend: GET on a source not installed → 404 `unknown_backend`.
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend (`fixture-openai/backend.toml`) is written into the
 //! isolated `XDG_DATA_HOME/super-stt/backends/` tree so the daemon discovers
@@ -27,7 +27,7 @@ const FIXTURE_SOURCE_ENC: &str = "github.com%2Fsuper-stt%2Fopenai";
 /// The manifest declares `base_url` as an option with a default value.
 fn seed_fixture_backend(data_home: &Path) {
     let backend_dir = data_home
-        .join("super-stt")
+        .join("super-voice")
         .join("backends")
         .join("fixture-openai");
     std::fs::create_dir_all(&backend_dir).expect("create fixture backend dir");
@@ -457,7 +457,7 @@ async fn backend_version_is_read_from_disk_per_request() {
     let manifest = guard
         .home()
         .data
-        .join("super-stt")
+        .join("super-voice")
         .join("backends")
         .join("fixture-openai")
         .join("backend.toml");
@@ -492,7 +492,7 @@ async fn backend_version_falls_back_to_the_scan_when_the_manifest_is_gone() {
     let manifest = guard
         .home()
         .data
-        .join("super-stt")
+        .join("super-voice")
         .join("backends")
         .join("fixture-openai")
         .join("backend.toml");

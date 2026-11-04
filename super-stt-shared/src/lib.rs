@@ -11,7 +11,7 @@ pub mod registry;
 pub mod utils;
 pub mod validation;
 
-pub use product::SUPER_STT;
+pub use product::SUPER_VOICE;
 pub use super_engine_protocol::sandbox;
 
 pub mod audio;

@@ -6,7 +6,7 @@
 //! 2. Scope denial: a `settings`-only token is rejected on secret endpoints.
 //! 3. Undeclared secret: POST to an unknown `{name}` → 404 `unknown_secret`.
 //!
-//! Uses `SUPER_STT_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
+//! Uses `SUPER_VOICE_AUTO_APPROVE=1` (no GUI) — hermetic, part of default CI.
 //!
 //! The fixture backend (`fixture-openai/backend.toml`) is written into the
 //! isolated `XDG_DATA_HOME/super-stt/backends/` tree so the daemon discovers
@@ -26,7 +26,7 @@ const FIXTURE_SOURCE_ENC: &str = "github.com%2Fsuper-stt%2Fopenai";
 /// The manifest declares `openai_api_key` as a required secret and one model.
 fn seed_fixture_backend(data_home: &Path) {
     let backend_dir = data_home
-        .join("super-stt")
+        .join("super-voice")
         .join("backends")
         .join("fixture-openai");
     std::fs::create_dir_all(&backend_dir).expect("create fixture backend dir");

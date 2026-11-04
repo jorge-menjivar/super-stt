@@ -18,7 +18,7 @@ overrides live at [`/backend/{backend_id}/models/{model}/settings/language`](../
 
 ```http
 POST /settings/language HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 Content-Type: application/json
 
@@ -46,7 +46,7 @@ Content-Type: application/json
 
 ```http
 GET /settings/language HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
@@ -69,7 +69,7 @@ Clear the global Primary Language (back to no preference).
 
 ```http
 DELETE /settings/language HTTP/1.1
-Host: stt.local
+Host: voice.local
 Authorization: Bearer stt_…64hex…
 ```
 
