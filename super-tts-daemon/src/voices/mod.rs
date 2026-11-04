@@ -166,13 +166,24 @@ impl VoiceLibrary {
     /// so nothing the user can see would ever delete it. Call this at startup,
     /// before anything can be creating a voice: run while one is, it would
     /// take that voice's clip as such a leftover.
+    ///
+    /// Only what the library itself creates is touched: a real directory (not
+    /// a symlink) named by a UUID. A backup folder, or anything else someone
+    /// put there, is left alone.
     pub fn sweep_incomplete(&self) -> usize {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return 0;
         };
         let mut swept = 0;
-        for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
-            if !path.is_dir() || path.join("voice.json").exists() {
+        for entry in entries.filter_map(Result::ok) {
+            // `file_type` does not follow a symlink, so a link is never a dir.
+            let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+            let is_voice = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| uuid::Uuid::parse_str(name).is_ok());
+            let path = entry.path();
+            if !is_dir || !is_voice || path.join("voice.json").exists() {
                 continue;
             }
             match std::fs::remove_dir_all(&path) {

@@ -260,12 +260,20 @@ fn a_voice_left_without_metadata_is_swept() {
     let kept = lib
         .create(&wav(24_000, 1.0), "Kept", None)
         .expect("a whole voice");
-    let orphan = lib.dir().join("unfinished");
+    let orphan = lib.dir().join("6f1c2a52-4f6e-4a8b-9d43-1b2f0c7e9a10");
     std::fs::create_dir_all(&orphan).unwrap();
     std::fs::write(orphan.join("clip.wav"), b"RIFF").unwrap();
+    // Not the library's: a folder of the user's, and a link to a directory.
+    let backup = lib.dir().join("backup");
+    std::fs::create_dir_all(&backup).unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let link = lib.dir().join("0b9c8e7d-2a41-4f3e-8c6b-5d7e9f1a2b3c");
+    std::os::unix::fs::symlink(elsewhere.path(), &link).unwrap();
 
     assert_eq!(lib.sweep_incomplete(), 1);
     assert!(!orphan.exists(), "the clip with no metadata is gone");
+    assert!(backup.exists(), "a folder the library did not make stays");
+    assert!(link.exists(), "a symlink is never swept");
     let listed: Vec<_> = lib.list().unwrap().into_iter().map(|v| v.id).collect();
     assert_eq!(listed, vec![kept.id], "the whole voice stays");
     assert_eq!(lib.sweep_incomplete(), 0);
