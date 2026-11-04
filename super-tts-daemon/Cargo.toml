@@ -25,7 +25,9 @@
     bytes = { version = "1.11.1", optional = true }
     chrono.workspace = true
     clap.workspace = true
-    cpal.workspace = true
+    # Not the workspace's cpal: playback needs 0.18, whose ALSA worker
+    # recovers from a POLLERR that 0.17's spun on. Capture is still on 0.17.
+    cpal = "0.18.2"
     dirs.workspace = true
     futures = "0.3"
     hex = "0.4.3"

@@ -9,6 +9,14 @@
     "super-stt-install",
     "super-stt-registry-types",
     "super-stt-shared",
+    "super-tts-app",
+    "super-tts-cli",
+    "super-tts-consent",
+    "super-tts-daemon",
+    "super-tts-indexer",
+    "super-tts-install",
+    "super-tts-registry-types",
+    "super-tts-shared",
   ]
   # The mock WASM backend fixtures build for wasm32-wasip2, not the host target
   # (the daemon's wasm_mock.rs / wasm_mock_realtime.rs load them) — keep them
@@ -16,6 +24,8 @@
   exclude         = [
     "super-stt-daemon/tests/fixtures/mock-wasm-backend",
     "super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend",
+    "super-tts-daemon/tests/fixtures/mock-wasm-backend",
+    "super-tts-daemon/tests/fixtures/mock-wasm-realtime-backend",
   ]
   # The indexer is a host binary, so it's a workspace member — `--workspace`
   # lints and tests it like everything else. But it's a CI-only tool with
@@ -29,6 +39,13 @@
     "super-stt-install",
     "super-stt-registry-types",
     "super-stt-shared",
+    "super-tts-app",
+    "super-tts-cli",
+    "super-tts-consent",
+    "super-tts-daemon",
+    "super-tts-install",
+    "super-tts-registry-types",
+    "super-tts-shared",
   ]
 
   [workspace.package]

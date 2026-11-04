@@ -31,7 +31,7 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap();
-        let text = std::fs::read_to_string(root.join("registry/registry.toml")).unwrap();
+        let text = std::fs::read_to_string(root.join("tts/registry/registry.toml")).unwrap();
         Registry::parse(&text, INDEXER.grandfathered).expect("registry.toml parses");
     }
 }

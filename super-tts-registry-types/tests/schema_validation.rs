@@ -98,7 +98,8 @@ fn accepts_registry_toml() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
-    let doc = toml_to_json(&std::fs::read_to_string(root.join("registry/registry.toml")).unwrap());
+    let doc =
+        toml_to_json(&std::fs::read_to_string(root.join("tts/registry/registry.toml")).unwrap());
     let errors: Vec<String> = v.iter_errors(&doc).map(|e| format!("{e}")).collect();
     assert!(
         errors.is_empty(),

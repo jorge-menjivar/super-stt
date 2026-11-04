@@ -12,25 +12,23 @@ use crate::config::DaemonConfig;
 use crate::daemon::types::SuperTTSDaemon;
 use anyhow::Result;
 use log::{error, info, warn};
+use super_engine_daemon::instance::InstanceLock;
 
 /// Spawn the HTTP listener that serves every external request the daemon
-/// answers. Failure to bind is fatal — there's no other transport.
+/// answers, on the socket `instance` locks. Failure to bind is fatal — there's
+/// no other transport.
 ///
 /// Returns the listener task's [`JoinHandle`] so `run` can race it
 /// against the shutdown signal: if the listener task exits before the
 /// shutdown signal fires, the daemon treats itself as unreachable and
 /// exits with a non-zero status.
-///
-/// The socket path is resolved by `get_http_socket_path`, which honors the
-/// `SUPER_TTS_HTTP_SOCKET` override (tests use this to bind a unique socket
-/// without overriding `$XDG_RUNTIME_DIR`, which would break the Wayland
-/// connection for spawned consent helpers). Clients resolve through the same
-/// helper, so daemon and clients always agree on the path.
-async fn spawn_http_listener(daemon: &SuperTTSDaemon) -> Result<tokio::task::JoinHandle<()>> {
-    let http_socket_path = super_tts_shared::validation::get_http_socket_path();
+async fn spawn_http_listener(
+    daemon: &SuperTTSDaemon,
+    instance: InstanceLock,
+) -> Result<tokio::task::JoinHandle<()>> {
     crate::daemon::http::start_http_server(
         std::sync::Arc::new(daemon.clone()),
-        http_socket_path,
+        instance,
         daemon.shutdown_tx.clone(),
     )
     .await
@@ -57,6 +55,24 @@ pub async fn run() -> Result<()> {
     } else {
         log::LevelFilter::Info
     });
+
+    // One daemon per socket, decided before anything another daemon could be
+    // using: a second daemon stops here, before it reads (or rewrites) the
+    // config, builds its state or sweeps backend units.
+    //
+    // The socket path is resolved by `get_http_socket_path`, which honors the
+    // `SUPER_TTS_HTTP_SOCKET` override (tests use this to bind a unique socket
+    // without overriding `$XDG_RUNTIME_DIR`, which would break the Wayland
+    // connection for spawned consent helpers). Clients resolve through the
+    // same helper, so daemon and clients always agree on the path.
+    let socket_path = super_tts_shared::validation::get_http_socket_path();
+    let instance = match InstanceLock::acquire(&socket_path) {
+        Ok(instance) => instance,
+        Err(e) => {
+            error!("Not starting: {e}");
+            return Err(e.into());
+        }
+    };
 
     // Load saved configuration
     let config = DaemonConfig::load();
@@ -96,7 +112,7 @@ pub async fn run() -> Result<()> {
     // first guarantees the supervisor sees every shutdown signal.
     let mut shutdown_rx = daemon.shutdown_tx.subscribe();
 
-    let listener_handle = match spawn_http_listener(&daemon).await {
+    let listener_handle = match spawn_http_listener(&daemon, instance).await {
         Ok(h) => h,
         Err(e) => {
             warn!("HTTP listener failed to start: {e}");

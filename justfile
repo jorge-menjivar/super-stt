@@ -178,6 +178,10 @@ check-features:
     # that hosted runners lack — unlike the WASM mock it can't run hermetically —
     # but compiling it keeps it from bit-rotting (audit 2 Tier 2 #13).
     RUSTFLAGS="-D warnings" cargo test -p super-stt-daemon --features test-fixtures --no-run --test subprocess_mock
+    RUSTFLAGS="-D warnings" cargo check -p super-tts-daemon --no-default-features --features subprocess-backends
+    RUSTFLAGS="-D warnings" cargo check -p super-tts-daemon --no-default-features --features wasm-backends
+    RUSTFLAGS="-D warnings" cargo check -p super-tts-daemon --no-default-features
+    RUSTFLAGS="-D warnings" cargo test -p super-tts-daemon --features test-fixtures --no-run --test subprocess_mock
 
 # Check formatting without modifying files
 fmt-check:
@@ -250,6 +254,7 @@ doctest-macos *args:
 # Verify the generated TOML schemas are current
 schema-check:
     cargo test -p super-stt-registry-types --features schema
+    cargo test -p super-tts-registry-types --features schema
 
 # Measure code coverage over the whole workspace (requires cargo-llvm-cov).
 # --remap-path-prefix keeps report paths relative, and tests/ is excluded so
@@ -708,12 +713,14 @@ build-consent: linux-only-gui
 # Requires: rustup target add wasm32-wasip2
 build-mock-wasm-backend:
     cargo build --manifest-path super-stt-daemon/tests/fixtures/mock-wasm-backend/Cargo.toml --target wasm32-wasip2 --release
+    cargo build --manifest-path super-tts-daemon/tests/fixtures/mock-wasm-backend/Cargo.toml --target wasm32-wasip2 --release
 
 # Build the generic mock REALTIME WASM backend fixture (wasm32-wasip2) that
 # tests/wasm_mock_realtime.rs loads to exercise the daemon's realtime
 # orchestration (ws-server.handle). Requires: rustup target add wasm32-wasip2
 build-mock-wasm-realtime-backend:
     cargo build --manifest-path super-stt-daemon/tests/fixtures/mock-wasm-realtime-backend/Cargo.toml --target wasm32-wasip2 --release
+    cargo build --manifest-path super-tts-daemon/tests/fixtures/mock-wasm-realtime-backend/Cargo.toml --target wasm32-wasip2 --release
 
 # Copy the canonical WIT (realtime.wit + deps) into every backend that bundles it.
 sync-wit:

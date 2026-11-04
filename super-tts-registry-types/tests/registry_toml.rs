@@ -8,7 +8,7 @@ fn parses_in_repo_registry_toml() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
-    let text = std::fs::read_to_string(root.join("registry/registry.toml")).unwrap();
+    let text = std::fs::read_to_string(root.join("tts/registry/registry.toml")).unwrap();
     let map: std::collections::BTreeMap<String, Entry> = toml::from_str(&text).unwrap();
     // Deliberately not asserting non-empty: the catalog is empty until the
     // first TTS backend is published (the inherited entries were ASR

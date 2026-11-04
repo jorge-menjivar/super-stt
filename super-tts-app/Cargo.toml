@@ -11,7 +11,9 @@
     anyhow.workspace = true
     # Microphone capture for cloned-voice reference clips. The app records; the
     # daemon still owns every output device.
-    cpal.workspace = true
+    # Not the workspace's cpal: playback needs 0.18, whose ALSA worker
+    # recovers from a POLLERR that 0.17's spun on. Capture is still on 0.17.
+    cpal = "0.18.2"
     dirs.workspace = true
     futures-util.workspace = true
     hound.workspace = true

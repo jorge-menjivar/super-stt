@@ -43,7 +43,7 @@ fn normalize(path: &str) -> String {
 /// Every path in the published document, `/v1` stripped and params normalized.
 fn documented() -> BTreeSet<String> {
     let spec =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/protocol/openapi.json");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tts/docs/protocol/openapi.json");
     let doc: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(&spec).unwrap_or_else(|e| panic!("read {}: {e}", spec.display())),
     )
@@ -278,7 +278,7 @@ fn success_body_keys(doc: &serde_json::Value, path: &str, method: &str) -> BTree
 #[test]
 fn every_response_key_the_client_reads_is_one_the_daemon_sends() {
     let spec =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/protocol/openapi.json");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tts/docs/protocol/openapi.json");
     let doc: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(&spec).unwrap_or_else(|e| panic!("read {}: {e}", spec.display())),
     )
