@@ -26,10 +26,7 @@ fn accepts_every_in_repo_backend_toml() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap();
-    let dirs = [
-        root.join("super-voice-daemon/tests/fixtures"),
-        root.join("super-tts-daemon/tests/fixtures"),
-    ];
+    let dirs = [root.join("super-voice-daemon/tests/fixtures")];
     let entries = dirs
         .iter()
         .flat_map(|dir| std::fs::read_dir(dir).expect("daemon test fixtures directory"));
@@ -56,9 +53,11 @@ fn accepts_every_in_repo_backend_toml() {
         checked += 1;
     }
 
+    // One manifest per feature: `dummy-backend.toml` and
+    // `dummy-tts-backend.toml`.
     assert!(
-        checked >= dirs.len(),
-        "found {checked} backend manifests under {dirs:?}, fewer than one a daemon — this test \
+        checked >= 2,
+        "found {checked} backend manifests under {dirs:?}, fewer than one a feature — this test \
          would pass while validating nothing"
     );
 }

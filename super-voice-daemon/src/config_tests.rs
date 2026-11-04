@@ -359,9 +359,9 @@ fn v0_1_3_full_daemon_config_loads_and_migrates() {
 
     // New fields materialize at their defaults.
     assert_eq!(cfg.transcription.preferred_source, "");
-    assert_eq!(cfg.transcription.backends_dir, None);
+    assert_eq!(cfg.backends_dir, None);
     assert_eq!(cfg.transcription.active_backend, None);
-    assert_eq!(cfg.transcription.primary_language, None);
+    assert_eq!(cfg.primary_language, None);
     assert!(cfg.backends.options.is_empty());
     assert!(cfg.backends.models.is_empty());
     assert!(
@@ -684,13 +684,11 @@ fn daemon_config_reads_notification_method() {
         r#"(
     device: (preferred_device: "cpu"),
     audio: (theme: "classic", volume: 100),
-    transcription: (preferred_model: "whisper", notification_method: "desktop"),
+    notification_method: "desktop",
+    transcription: (preferred_model: "whisper"),
 )"#,
     );
-    assert_eq!(
-        cfg.transcription.notification_method,
-        NotificationMethod::Desktop
-    );
+    assert_eq!(cfg.notification_method, NotificationMethod::Desktop);
 }
 
 /// A choice stored under the name a v0.2.x release wrote keeps its meaning,
@@ -698,6 +696,8 @@ fn daemon_config_reads_notification_method() {
 #[test]
 fn daemon_config_keeps_methods_stored_under_their_former_names() {
     let toml = r#"
+notification_method = "dbus"
+
 [device]
 preferred_device = "cpu"
 
@@ -708,15 +708,11 @@ volume = 100
 [transcription]
 preferred_model = "whisper"
 write_method = "wayland_protocol"
-notification_method = "dbus"
 "#;
     let (cfg, was_reset) = DaemonConfig::parse_toml(toml);
     assert!(!was_reset);
     assert_eq!(cfg.transcription.write_method, WriteMethod::BuiltIn);
-    assert_eq!(
-        cfg.transcription.notification_method,
-        NotificationMethod::Desktop
-    );
+    assert_eq!(cfg.notification_method, NotificationMethod::Desktop);
 
     let stored = written(&cfg);
     assert!(stored.contains(r#"write_method: "built_in""#), "{stored}");
@@ -726,10 +722,7 @@ notification_method = "dbus"
     );
     let back = from_ron(&stored);
     assert_eq!(back.transcription.write_method, WriteMethod::BuiltIn);
-    assert_eq!(
-        back.transcription.notification_method,
-        NotificationMethod::Desktop
-    );
+    assert_eq!(back.notification_method, NotificationMethod::Desktop);
 }
 
 /// Config-load resilience: an unknown stored value degrades to the default
@@ -748,10 +741,7 @@ fn daemon_bad_notification_method_falls_back_preserving_rest() {
     ),
 )"#,
     );
-    assert_eq!(
-        cfg.transcription.notification_method,
-        NotificationMethod::default()
-    );
+    assert_eq!(cfg.notification_method, NotificationMethod::default());
     assert_eq!(cfg.transcription.write_method, WriteMethod::Ydotool);
 }
 
@@ -770,10 +760,7 @@ volume = 100
 preferred_model = "whisper"
 "#;
     let cfg = from_toml(toml);
-    assert_eq!(
-        cfg.transcription.notification_method,
-        NotificationMethod::Auto
-    );
+    assert_eq!(cfg.notification_method, NotificationMethod::Auto);
 }
 
 #[test]

@@ -4,7 +4,7 @@
 //! Most settings are a plain `GET`/`POST` pair over the settings token, so these
 //! generate the boilerplate: `settings_getter!` reads a value out of the
 //! response, `settings_setter!` posts `{ key: value }`. Endpoints with richer
-//! shapes — anything under `/pipeline`, the backend catalog, the voice library —
+//! shapes — anything under `/tts/pipeline`, the backend catalog, the voice library —
 //! stay hand-written.
 //!
 //! They live here rather than in `settings/mod.rs`, where they started, because

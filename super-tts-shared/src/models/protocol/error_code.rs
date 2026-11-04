@@ -20,7 +20,7 @@ pub enum ErrorCode {
     /// was refused.
     ///
     /// No longer emitted: those mutations now stop the utterance and go ahead,
-    /// the way a new `POST /speak` always preempted the current one. Kept so a
+    /// the way a new `POST /tts/speak` always preempted the current one. Kept so a
     /// client still talking to an older daemon parses it as itself rather than
     /// as [`ErrorCode::Unknown`].
     SpeechInProgress,

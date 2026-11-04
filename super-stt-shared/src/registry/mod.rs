@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Wire types for `/registry/backend/list` and friends. All fields `snake_case`.
 //!
-//! They are `super_engine_spec::registry`'s, shared with Super TTS, with the
+//! They are `super_engine_spec::registry`'s, with the
 //! ones that carry model entries bound to Super STT's index fields. The
 //! uninstall reply is Super STT's own: it says which of its two pipeline
 //! stages the backend was filling.
@@ -23,6 +23,10 @@ pub type PreviewResponse = super_engine_spec::registry::PreviewResponse<Registry
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "a wire shape: each flag is one stage the uninstall emptied"
+)]
 pub struct UninstallResponse {
     pub uninstalled: bool,
     /// The backend was filling stage 1, which was emptied before the files
@@ -33,6 +37,9 @@ pub struct UninstallResponse {
     /// Absent from an older daemon's answer, which reads as `false`.
     #[serde(default)]
     pub was_post_processor: bool,
+    /// The backend was filling text to speech's stage, which was emptied
+    /// before the files went.
+    pub was_synthesis: bool,
 }
 
 pub use super_voice_registry_types::{is_safe_component, is_safe_relative_path};

@@ -193,7 +193,7 @@ impl SuperSTTDaemon {
         };
 
         let persist = self
-            .set_config_field(|c| c.transcription.notification_method = method)
+            .set_config_field(|c| c.notification_method = method)
             .await;
 
         info!("Notification method set to {method}");
@@ -207,7 +207,7 @@ impl SuperSTTDaemon {
     /// Handle get notification method command
     pub async fn handle_get_notification_method(&self) -> DaemonResponse {
         let config = self.config.read().await;
-        let method = config.transcription.notification_method;
+        let method = config.notification_method;
         DaemonResponse::success().with_notification_method(method.to_string())
     }
 
@@ -216,7 +216,7 @@ impl SuperSTTDaemon {
         let persist = self
             .set_config_field(|c| c.update.check_enabled = enabled)
             .await;
-        self.publish_settings_changed("update_check_enabled");
+        self.publish_shared_setting_changed("update_check_enabled");
         info!(
             "Update checks {}",
             if enabled { "enabled" } else { "disabled" }
@@ -249,7 +249,7 @@ impl SuperSTTDaemon {
             );
         };
         let persist = self.set_config_field(|c| c.update.beta_optin = optin).await;
-        self.publish_settings_changed("update_beta_optin");
+        self.publish_shared_setting_changed("update_beta_optin");
         info!("Update beta opt-in set to {optin}");
         Self::settings_saved(
             DaemonResponse::success().with_update_beta_optin(optin.to_string()),

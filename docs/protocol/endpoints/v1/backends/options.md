@@ -131,7 +131,8 @@ Authorization: Bearer stt_…64hex…
 
 Set the option override. Every stage currently running a model from that
 backend is handed the new value immediately and uses it from its next request —
-a transcription model and a post-processor alike; nothing is reloaded. A stage
+a transcription model, a post-processor and a speech model alike; nothing is
+reloaded. A stage
 that is not loaded picks the value up when it loads.
 
 Writing the value already stored is a no-op, reported as such in `message`.

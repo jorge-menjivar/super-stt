@@ -145,7 +145,7 @@ pub(super) fn backend_supports_gpu(backend: &crate::daemon::backends::BackendInf
 /// — genuinely no local device to pick, ever.
 ///
 /// The device *list* is the daemon's answer, from
-/// `GET /pipeline/{stage}/model/{model}/device/list`; this is not a second copy
+/// `GET /tts/pipeline/{stage}/model/{model}/device/list`; this is not a second copy
 /// of it. It exists because that list is empty for two different reasons: this
 /// one (nothing to pick, because there is nothing local to run), or a local
 /// model this specific install cannot run on *any* device — a GPU-only model

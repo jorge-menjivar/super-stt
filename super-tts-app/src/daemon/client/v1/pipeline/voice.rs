@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model/{model}/voice` — one model's voice.
+//! `/tts/pipeline/{stage}/model/{model}/voice` — one model's voice.
 //!
 //! Which voice the model speaks in when an utterance names none, and which it
 //! could be set to. Stored per `(source, model)` by the daemon, so it survives
@@ -12,7 +12,7 @@
 //!
 //! This is the model's *voice*, not its language: the voice decides who speaks,
 //! the language how the text is pronounced. A voice is still a per-utterance
-//! field on `POST /speak` as well, and one named there wins — that is what the
+//! field on `POST /tts/speak` as well, and one named there wins — that is what the
 //! Voices page's preview uses. This is the default it falls back to, and what
 //! every caller with no UI for choosing gets: a keyboard shortcut, the applet,
 //! the Speak button.
@@ -28,7 +28,7 @@ fn enc(s: &str) -> String {
 }
 
 fn voice_path(stage: u32, model: &str) -> String {
-    format!("/pipeline/{stage}/model/{}/voice", enc(model))
+    format!("/tts/pipeline/{stage}/model/{}/voice", enc(model))
 }
 
 /// Deserialize the resolution block at the boundary, so the views never poke
@@ -41,7 +41,7 @@ fn block(value: Option<serde_json::Value>) -> VoiceResolution {
 }
 
 /// Read how one model's voice resolves
-/// (HTTP `GET /pipeline/{stage}/model/{model}/voice`).
+/// (HTTP `GET /tts/pipeline/{stage}/model/{model}/voice`).
 ///
 /// Answers whether or not the model is loaded, which is how a card shows its
 /// voice before Load.
@@ -61,7 +61,7 @@ pub async fn get_model_voice(stage: u32, model: String) -> HttpResult<VoiceResol
 }
 
 /// Store the voice one model speaks in
-/// (HTTP `POST /pipeline/{stage}/model/{model}/voice`).
+/// (HTTP `POST /tts/pipeline/{stage}/model/{model}/voice`).
 ///
 /// A voice the model cannot resolve is refused rather than stored, so offer
 /// only what [`list_model_voices`] returns. Returns the resulting resolution,
@@ -92,7 +92,7 @@ pub async fn set_model_voice(
 }
 
 /// Drop the stored voice, returning the model to its `default_voice`
-/// (HTTP `DELETE /pipeline/{stage}/model/{model}/voice`).
+/// (HTTP `DELETE /tts/pipeline/{stage}/model/{model}/voice`).
 ///
 /// The returned resolution says what it fell back to — which for a model that
 /// declares no default is nothing at all, the state where speaking is refused
@@ -113,7 +113,7 @@ pub async fn clear_model_voice(stage: u32, model: String) -> HttpResult<VoiceRes
 }
 
 /// The voices `model` can be pinned to
-/// (HTTP `GET /pipeline/{stage}/model/{model}/voice/list`).
+/// (HTTP `GET /tts/pipeline/{stage}/model/{model}/voice/list`).
 ///
 /// The model's presets, then the stored cloned voices when it clones. Not the
 /// manifest's list: a cloning model declares no presets, so a picker built from
@@ -123,7 +123,7 @@ pub async fn list_model_voices(stage: u32, model: String) -> HttpResult<Vec<Voic
     with_settings_token(move |socket, token| {
         let model = model.clone();
         async move {
-            let path = format!("/pipeline/{stage}/model/{}/voice/list", enc(&model));
+            let path = format!("/tts/pipeline/{stage}/model/{}/voice/list", enc(&model));
             let resp = require_success(
                 transport::settings_get(socket, &token, &path).await?,
                 "list_model_voices",

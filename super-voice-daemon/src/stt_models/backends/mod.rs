@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Backend discovery: `super_engine_daemon::backends`, shared with Super TTS,
+//! Backend discovery: `super_engine_daemon::backends`,
 //! for Super STT's manifests.
 //!
 //! Models are served by out-of-tree backends installed under a backends
@@ -38,20 +38,34 @@ pub fn installed_version(dir: &Path) -> Option<String> {
 /// models of the other feature, which the other daemon serves. A backend with
 /// none of this daemon's is left out.
 pub fn discover(backends_dir: &Path) -> (Vec<DiscoveredBackend>, Vec<DiscoveredBackend>) {
-    let (live, superseded) = engine::discover::<Voice>(backends_dir);
-    let live = live
-        .into_iter()
-        .filter_map(|mut backend| {
+    let (live, superseded) = discover_all(backends_dir);
+    (speech_to_text(&live), superseded)
+}
+
+/// Every backend in `backends_dir`, with the models of every feature: the
+/// one serving each `source`, and the duplicates it supersedes.
+#[must_use]
+pub fn discover_all(backends_dir: &Path) -> (Vec<DiscoveredBackend>, Vec<DiscoveredBackend>) {
+    engine::discover::<Voice>(backends_dir)
+}
+
+/// Speech to text's backends among `all`: each with its transcription and
+/// post-processing models only, and none that has neither.
+#[must_use]
+pub fn speech_to_text(all: &[DiscoveredBackend]) -> Vec<DiscoveredBackend> {
+    all.iter()
+        .filter_map(|backend| {
+            let mut backend = backend.clone();
             backend
                 .models
                 .retain(|m| m.product.role.is_speech_to_text());
             (!backend.models.is_empty()).then_some(backend)
         })
-        .collect();
-    (live, superseded)
+        .collect()
 }
 
-/// The default backends search directory: `<data_dir>/super-stt/backends`.
+/// The default backends search directory: `<data_dir>/super-voice/backends`,
+/// one for every feature.
 #[must_use]
 pub fn default_backends_dir() -> PathBuf {
     engine::default_backends_dir(&super_stt_shared::SUPER_VOICE)

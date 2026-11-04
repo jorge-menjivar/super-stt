@@ -46,7 +46,8 @@ pub(crate) struct Ack {
 /// and the field that determines the HTTP status; `message` is prose for a
 /// human and may be reworded at any time.
 ///
-/// [`transport.md`]: https://github.com/jorge-menjivar/super-stt/blob/main/docs/protocol/transport.md
+/// [`transport.md`]:
+/// https://github.com/jorge-menjivar/super-stt/blob/main/docs/protocol/transport.md
 #[derive(Serialize, ToSchema)]
 pub(crate) struct ErrorEnvelope {
     /// Always `error`.
@@ -61,9 +62,9 @@ pub(crate) struct ErrorEnvelope {
     pub(crate) message: Option<String>,
 }
 
-/// The auth-failure envelope the guards answer with, shared with Super TTS.
+/// The auth-failure envelope the guards answer with.
 pub(crate) use super_engine_daemon::http::wire::ReasonEnvelope;
 
-/// The registry surface's error envelope, shared with Super TTS. See
+/// The registry surface's error envelope. See
 /// `super_engine_daemon::registry::endpoints::RegistryError`.
 pub(crate) use super_engine_daemon::registry::endpoints::RegistryError;

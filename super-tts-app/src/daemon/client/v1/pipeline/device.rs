@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}/model/{model}/device` — the device a model runs on.
+//! `/tts/pipeline/{stage}/model/{model}/device` — the device a model runs on.
 //!
 //! The preference is per model, not per daemon. That is the whole reason this
 //! replaced the global `/active_device`: a small preset-voice model runs fine
@@ -43,11 +43,11 @@ pub struct ModelDevice {
 }
 
 fn device_path(stage: u32, model: &str) -> String {
-    format!("/pipeline/{stage}/model/{}/device", enc(model))
+    format!("/tts/pipeline/{stage}/model/{}/device", enc(model))
 }
 
 /// Read a model's device preference, what it resolved to, and what this host
-/// can offer it (HTTP `GET /pipeline/{stage}/model/{model}/device`).
+/// can offer it (HTTP `GET /tts/pipeline/{stage}/model/{model}/device`).
 ///
 /// Everything a device control needs for its current value, in one request. It
 /// answers whether or not the model is loaded, which is how a card shows the
@@ -71,7 +71,7 @@ pub async fn get_model_device(stage: u32, model: String) -> HttpResult<ModelDevi
     .await
 }
 
-/// Set a model's device (HTTP `POST /pipeline/{stage}/model/{model}/device`).
+/// Set a model's device (HTTP `POST /tts/pipeline/{stage}/model/{model}/device`).
 ///
 /// `device` is the `cpu`/`gpu` preference. Reloads the model when it is the one
 /// its stage is running; otherwise only records the choice, so the next load
@@ -93,7 +93,7 @@ pub async fn set_model_device(stage: u32, model: String, device: String) -> Http
 }
 
 /// The devices a model can be loaded onto here
-/// (HTTP `GET /pipeline/{stage}/model/{model}/device/list`).
+/// (HTTP `GET /tts/pipeline/{stage}/model/{model}/device/list`).
 ///
 /// The daemon's answer, not a client derivation: the model's declared devices
 /// narrowed to the accelerators its installed asset ships and to what the host
@@ -104,7 +104,7 @@ pub async fn set_model_device(stage: u32, model: String, device: String) -> Http
 /// install cannot run on anything. A picker hides itself on an empty list
 /// rather than special-casing a status.
 pub async fn list_model_devices(stage: u32, model: String) -> HttpResult<Vec<String>> {
-    let path = format!("/pipeline/{stage}/model/{}/device/list", enc(&model));
+    let path = format!("/tts/pipeline/{stage}/model/{}/device/list", enc(&model));
     with_settings_token(move |socket, token| {
         let path = path.clone();
         async move {
@@ -119,7 +119,7 @@ pub async fn list_model_devices(stage: u32, model: String) -> HttpResult<Vec<Str
 }
 
 /// The devices the stage's selected backend can run models on here
-/// (HTTP `GET /pipeline/{stage}/device/list`) — the union of
+/// (HTTP `GET /tts/pipeline/{stage}/device/list`) — the union of
 /// [`list_model_devices`] over the models it serves in that stage's role.
 ///
 /// The broader answer, for a control shown before any model is picked. Once one
@@ -127,7 +127,7 @@ pub async fn list_model_devices(stage: u32, model: String) -> HttpResult<Vec<Str
 /// large model needs a GPU still offers `cpu` here because another of its
 /// models runs there.
 pub async fn list_stage_devices(stage: u32) -> HttpResult<Vec<String>> {
-    let path = format!("/pipeline/{stage}/device/list");
+    let path = format!("/tts/pipeline/{stage}/device/list");
     with_settings_token(move |socket, token| {
         let path = path.clone();
         async move {

@@ -21,13 +21,14 @@ const SETTINGS_APP_NAME: &str = "Super TTS Settings App";
 /// Topics the settings app subscribes to over `GET /events`.
 ///
 /// `speaking_state` drives the speaking badge (`playback_events`),
-/// `frequency_bands` drives the audio meter (`audio_visualization`), and
+/// `playback_frequency_bands` drives the audio meter (`audio_visualization`;
+/// `frequency_bands` is the microphone's), and
 /// `daemon_status_changed` / `download_progress` / `registry_install`
 /// drive the model-switch progress bar and Download-tab install cards
 /// (`daemon_status`).
 const SETTINGS_TOPICS: &[&str] = &[
     "speaking_state",
-    "frequency_bands",
+    "playback_frequency_bands",
     "daemon_status_changed",
     "download_progress",
     "registry_install",

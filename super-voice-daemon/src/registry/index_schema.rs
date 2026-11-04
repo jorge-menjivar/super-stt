@@ -3,7 +3,7 @@
 //! canonical `super-voice-registry-types::index` (shared with the indexer
 //! producer and the `/registry/backend/list` leaf types); the policy over it
 //! — the `min_client` soft-floor check and the unsafe-path backend filter —
-//! is `super_engine_daemon::registry::index`, shared with Super TTS.
+//! is `super_engine_daemon::registry::index`.
 
 pub use super_engine_daemon::registry::index::{
     MinClientStatus, check_min_client, retain_safe_backends,

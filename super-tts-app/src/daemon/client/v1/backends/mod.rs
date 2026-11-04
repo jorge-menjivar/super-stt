@@ -49,7 +49,7 @@ pub async fn list_backends() -> HttpResult<Vec<BackendInfo>> {
 /// would read as three more path segments and answer `404` on a backend that is
 /// installed.
 ///
-/// The response's `was_active` says whether the synthesis stage was emptied on
+/// The response's `was_synthesis` says whether the synthesis stage was emptied on
 /// the way out, which is how a caller knows to stop showing a model that is no
 /// longer loaded rather than waiting for a poll to contradict it.
 pub async fn uninstall(source: &str) -> HttpResult<UninstallResponse> {

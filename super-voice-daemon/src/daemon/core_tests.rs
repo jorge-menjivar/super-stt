@@ -311,7 +311,7 @@ async fn set_audio_theme_rejects_unknown_theme() {
 #[tokio::test]
 async fn set_notification_method_rejects_unknown_method() {
     let daemon = test_daemon().await;
-    let before = daemon.config.read().await.transcription.notification_method;
+    let before = daemon.config.read().await.notification_method;
 
     let resp = daemon
         .handle_set_notification_method("definitely-not-a-method".to_string())
@@ -322,10 +322,7 @@ async fn set_notification_method_rejects_unknown_method() {
     assert_eq!(resp.error_code, Some(ErrorCode::InvalidValue));
     assert_eq!(resp.error_code.map(ErrorCode::http_status), Some(400));
     // The rejected value must not have changed the persisted setting.
-    assert_eq!(
-        daemon.config.read().await.transcription.notification_method,
-        before
-    );
+    assert_eq!(daemon.config.read().await.notification_method, before);
 }
 
 /// A valid value round-trips through `set_notification_method` and
@@ -534,6 +531,72 @@ async fn an_online_model_loads_without_a_gate() {
     );
 }
 
+/// One backend list for both features. A backend serving only text to speech
+/// is in `GET /backend/list`, its model marked `synthesis`, and stays out of
+/// speech to text's stage list, which offers only what the stage can run.
+#[tokio::test]
+async fn the_catalog_lists_both_features_backends() {
+    use crate::daemon::test_fixtures::{install_backends, openai_backend};
+    use crate::stt_models::ModelDefinition;
+    use std::time::Duration;
+    use super_voice_registry_types::manifest::{Device, ModelRole, VoiceModel};
+
+    let model = |source: &str, name: &str, role| ModelDefinition {
+        name: name.to_string(),
+        source: source.to_string(),
+        is_multilingual: false,
+        primary_language: "en".to_string(),
+        supported_languages: vec!["en".to_string()],
+        estimated_vram_bytes: 0,
+        processing_interval: Duration::from_secs(1),
+        supported_devices: vec![Device::None],
+        realtime: false,
+        product: VoiceModel::new(role),
+        provider: None,
+    };
+    let stt = "github.com/x/whisper";
+    let tts = "github.com/x/kokoro";
+    let daemon = test_daemon().await;
+    install_backends(
+        &daemon,
+        vec![
+            openai_backend(
+                stt,
+                vec![model(stt, "whisper-1", ModelRole::Transcription)],
+                None,
+            ),
+            openai_backend(tts, vec![model(tts, "kokoro", ModelRole::Synthesis)], None),
+        ],
+    )
+    .await;
+
+    let all = daemon
+        .handle_list_backends()
+        .await
+        .backends
+        .expect("catalog");
+    let sources: Vec<&str> = all
+        .as_array()
+        .expect("a list")
+        .iter()
+        .map(|b| b["source"].as_str().expect("a source"))
+        .collect();
+    assert_eq!(sources, [stt, tts]);
+    assert_eq!(all[1]["models"][0]["role"], "synthesis");
+
+    let stage = daemon
+        .handle_list_stage_backends(false)
+        .await
+        .backends
+        .expect("stage catalog");
+    assert_eq!(
+        stage.as_array().map(Vec::len),
+        Some(1),
+        "stage 1 offers only what it can run: {stage}"
+    );
+    assert_eq!(stage[0]["source"], stt);
+}
+
 /// `handle_list_backends` builds the catalog JSON (models, secrets,
 /// options) from the discovered backends, and an in-memory config option
 /// override is reflected in an option's effective `value`.
@@ -569,7 +632,7 @@ async fn list_backends_catalog_and_option_override() {
         // effective value starts unset and only the override fills it in.
         None,
     );
-    *daemon.backends.write().await = vec![backend];
+    crate::daemon::test_fixtures::install_backends(&daemon, vec![backend]).await;
 
     let resp = daemon.handle_list_backends().await;
     assert_eq!(resp.status, "success");
@@ -628,7 +691,7 @@ async fn the_catalog_lists_an_options_bounds() {
     opt.min = Some(0.0);
     opt.max = Some(2.0);
     opt.step = Some(0.1);
-    *daemon.backends.write().await = vec![backend];
+    crate::daemon::test_fixtures::install_backends(&daemon, vec![backend]).await;
 
     let cat = daemon
         .handle_list_backends()
@@ -669,7 +732,7 @@ async fn wasm_backend_reports_no_installed_accel() {
         let source = "github.com/super-stt/openai";
         let mut backend = openai_backend(source, Vec::new(), None);
         backend.dir = dir.path().to_path_buf();
-        *daemon.backends.write().await = vec![backend];
+        crate::daemon::test_fixtures::install_backends(&daemon, vec![backend]).await;
 
         daemon
             .handle_list_backends()
@@ -1184,7 +1247,11 @@ async fn an_option_value_a_header_cannot_carry_is_refused() {
 
     let daemon = test_daemon().await;
     let source = "github.com/x/opts";
-    *daemon.backends.write().await = vec![backend_with_option(source, "style")];
+    crate::daemon::test_fixtures::install_backends(
+        &daemon,
+        vec![backend_with_option(source, "style")],
+    )
+    .await;
 
     for bad in ["two\nlines", "a\tb", "x".repeat(4001).as_str()] {
         let resp = daemon

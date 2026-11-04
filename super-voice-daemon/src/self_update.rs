@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Self-update checking, shared with Super TTS: `super_engine_daemon::self_update`.
+//! Self-update checking: `super_engine_daemon::self_update`.
 //! Contract: docs/protocol/endpoints/v1/update.md
 
 pub use super_engine_daemon::self_update::*;

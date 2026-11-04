@@ -160,8 +160,8 @@ async fn auth_request_real_helper_returns_working_token() {
         .await
         .expect("status should succeed with the new token");
     assert_eq!(status.status, "success");
-    assert!(status.current_model.is_some());
-    assert!(status.device.is_some());
+    assert!(status.stt.current_model.is_some());
+    assert_ne!(status.stt.device, "unknown");
 
     // 3. A bogus token should still be rejected even after a real
     //    one was minted, confirming token validation isn't blanket-

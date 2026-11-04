@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! What a model load reports as it provisions the model's files:
-//! `super_engine_daemon::download_progress`, shared with Super TTS. A Super
+//! `super_engine_daemon::download_progress`. A Super
 //! STT load is keyed by the pipeline stage it provisions, which a
 //! post-processor and a transcription model do independently.
 
@@ -15,10 +15,24 @@ pub use super_engine_daemon::download_progress::{Progress, status};
 /// client can put the progress on the card that started it: the model name
 /// alone does not say whose download it is, and both stages download through
 /// the same tracker.
-#[derive(Clone, Debug, Serialize)]
+///
+/// It also says the load is speech to text's: text to speech numbers its own
+/// stage from 1, and both report on the one `download_progress` topic.
+#[derive(Clone, Debug)]
 pub struct StageSlot {
     pub source: String,
     pub stage: u32,
+}
+
+impl Serialize for StageSlot {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut slot = serializer.serialize_struct("StageSlot", 3)?;
+        slot.serialize_field("feature", "stt")?;
+        slot.serialize_field("source", &self.source)?;
+        slot.serialize_field("stage", &self.stage)?;
+        slot.end()
+    }
 }
 
 impl engine::Slot for StageSlot {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Client half of `POST /v1/speak` and `POST /v1/speak/stop`: Super TTS's own
-//! endpoints, on the transport it shares with Super STT.
+//! Client half of `POST /v1/tts/speak` and `POST /v1/tts/speak/stop`: text to
+//! speech's own endpoints, on the daemon's one transport.
 //!
 //! Speaking is fire-and-forget by design: the daemon answers `202` as soon as
 //! the utterance is queued and keeps playing after the connection closes, so
@@ -20,7 +20,7 @@ use super_engine_client::http_client::transport;
 
 use crate::models::protocol::DaemonResponse;
 
-/// `POST /speak` — synthesize `text` with the active model and play it.
+/// `POST /tts/speak` — synthesize `text` with the active model and play it.
 ///
 /// Returns once the utterance is *queued*, not once it finishes: the response
 /// carries `utterance_id`, which is what correlates the playback events with
@@ -29,7 +29,7 @@ use crate::models::protocol::DaemonResponse;
 /// `text` is the whole request. How it is spoken — the voice, the language, the
 /// rate — is configuration, set through the settings endpoints and read by the
 /// daemon per utterance, not something a speaking client chooses. See
-/// `docs/protocol/endpoints/v1/speak.md`.
+/// `docs/protocol/endpoints/v1/tts/speak.md`.
 ///
 /// # Errors
 /// Returns an error if the daemon HTTP listener isn't reachable or the
@@ -38,13 +38,13 @@ pub async fn speak(socket_path: PathBuf, token: &str, text: &str) -> HttpResult<
     transport::post_json(
         socket_path,
         token,
-        "/speak",
+        "/tts/speak",
         &serde_json::json!({ "text": text }),
     )
     .await
 }
 
-/// `POST /speak/stop` — stop the current utterance and drop queued audio.
+/// `POST /tts/speak/stop` — stop the current utterance and drop queued audio.
 ///
 /// Succeeds whether or not anything was speaking, so a client cancelling on a
 /// keypress doesn't have to win a race to get a clean result.
@@ -53,5 +53,11 @@ pub async fn speak(socket_path: PathBuf, token: &str, text: &str) -> HttpResult<
 /// Returns an error if the daemon HTTP listener isn't reachable or the
 /// response can't be parsed.
 pub async fn speak_stop(socket_path: PathBuf, token: &str) -> HttpResult<DaemonResponse> {
-    transport::post_json(socket_path, token, "/speak/stop", &serde_json::json!({})).await
+    transport::post_json(
+        socket_path,
+        token,
+        "/tts/speak/stop",
+        &serde_json::json!({}),
+    )
+    .await
 }

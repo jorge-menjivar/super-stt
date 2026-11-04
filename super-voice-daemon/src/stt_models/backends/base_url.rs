@@ -14,7 +14,6 @@
 /// crate the daemon, the indexer, and the catalog synthesis all share.
 pub(crate) const OPTION_NAME: &str = super_voice_registry_types::manifest::BASE_URL_OPTION;
 
-/// Deriving the endpoint: `super_engine_daemon::wasm::base_url`, shared with
-/// Super TTS.
+/// Deriving the endpoint: `super_engine_daemon::wasm::base_url`.
 #[cfg(feature = "wasm-backends")]
 pub(crate) use super_engine_daemon::wasm::base_url::normalize;

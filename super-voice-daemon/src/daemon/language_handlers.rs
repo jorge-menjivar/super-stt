@@ -59,7 +59,7 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             log::warn!("Failed to persist config after primary_language change: {e}");
         }
-        self.publish_settings_changed("language");
+        self.publish_shared_setting_changed("language");
         DaemonResponse::success().with_language(serde_json::Value::String(language))
     }
 
@@ -71,7 +71,7 @@ impl SuperSTTDaemon {
         if let Err(e) = self.persist_config().await {
             log::warn!("Failed to persist config after primary_language clear: {e}");
         }
-        self.publish_settings_changed("language");
+        self.publish_shared_setting_changed("language");
         DaemonResponse::success().with_language(serde_json::Value::Null)
     }
 

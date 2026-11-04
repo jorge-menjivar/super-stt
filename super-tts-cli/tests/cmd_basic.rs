@@ -7,12 +7,12 @@
 //!
 //! - `ping`   → `GET  /v1/ping`       : liveness, prints the daemon's reply.
 //! - `status` → `GET  /v1/status`     : prints `Model:` / `Device:` / `State:`.
-//! - `speak`  → `POST /v1/speak`      : text from arguments or from stdin.
-//! - `stop`   → `POST /v1/speak/stop` : idempotent against an idle daemon.
+//! - `speak`  → `POST /v1/tts/speak`      : text from arguments or from stdin.
+//! - `stop`   → `POST /v1/tts/speak/stop` : idempotent against an idle daemon.
 //! - `logout` → local token file only    : forgets the cached session token.
 //!
 //! The CLI keeps its token in the test daemon's home, never the developer's
-//! state directory, and the daemon runs with `SUPER_TTS_AUTO_APPROVE=1` (it
+//! state directory, and the daemon runs with `SUPER_VOICE_AUTO_APPROVE=1` (it
 //! auto-approves `/auth/request`, so no consent popup is spawned).
 //!
 //! ```bash
@@ -23,7 +23,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use super_engine_test_daemon::TestDaemon;
-use super_tts_shared::product::SUPER_TTS;
+use super_tts_shared::product::SUPER_VOICE;
 
 const CLI_BIN: &str = env!("CARGO_BIN_EXE_super-tts-cli");
 
@@ -35,10 +35,10 @@ fn locate_daemon_bin() -> PathBuf {
         .parent()
         .expect("cli bin parent dir")
         .to_path_buf();
-    let candidate = dir.join("super-tts-daemon");
+    let candidate = dir.join("super-voice-daemon");
     assert!(
         candidate.exists(),
-        "expected the daemon binary at {} — run `cargo build -p super-tts-daemon` first",
+        "expected the daemon binary at {} — run `cargo build -p super-voice-daemon` first",
         candidate.display()
     );
     candidate
@@ -62,7 +62,7 @@ fn spawn_daemon() -> TestDaemon {
         .enable_all()
         .build()
         .expect("a runtime to wait on the daemon")
-        .block_on(TestDaemon::build(&SUPER_TTS, locate_daemon_bin(), "cli-basic").start())
+        .block_on(TestDaemon::build(&SUPER_VOICE, locate_daemon_bin(), "cli-basic").start())
 }
 
 /// Run the CLI binary against `daemon`, blocking until it exits. Its token is
@@ -73,8 +73,8 @@ fn run_cli(daemon: &TestDaemon, args: &[&str]) -> (i32, String, String) {
 
     let mut child = Command::new(CLI_BIN)
         .env("XDG_STATE_HOME", &daemon.home().state)
-        .env("SUPER_TTS_AUTO_APPROVE", "1")
-        .env("SUPER_TTS_MUTE_CUES", "1")
+        .env("SUPER_VOICE_AUTO_APPROVE", "1")
+        .env("SUPER_VOICE_MUTE_CUES", "1")
         .args(&full_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -135,7 +135,7 @@ fn status_reports_model_and_device() {
     );
 }
 
-/// `speak` reaches `POST /v1/speak` and surfaces the daemon's refusal when no
+/// `speak` reaches `POST /v1/tts/speak` and surfaces the daemon's refusal when no
 /// model is loaded — the routing is the subject, not the audio. A hermetic
 /// daemon has no backends, so this is the reachable end of the path.
 #[test]
@@ -162,8 +162,8 @@ fn speak_reads_text_from_stdin_when_no_arguments_are_given() {
 
     let mut child = Command::new(CLI_BIN)
         .env("XDG_STATE_HOME", &daemon.home().state)
-        .env("SUPER_TTS_AUTO_APPROVE", "1")
-        .env("SUPER_TTS_MUTE_CUES", "1")
+        .env("SUPER_VOICE_AUTO_APPROVE", "1")
+        .env("SUPER_VOICE_MUTE_CUES", "1")
         .args([
             "--socket",
             daemon.socket().to_str().expect("socket utf8"),
@@ -225,7 +225,7 @@ fn stop_is_idempotent_when_idle() {
 #[test]
 fn logout_clears_cached_token() {
     let state = tempfile::tempdir().expect("a state directory");
-    let token = state.path().join("super-tts/clients/super-tts-cli.json");
+    let token = state.path().join("super-voice/clients/super-tts-cli.json");
     std::fs::create_dir_all(token.parent().unwrap()).expect("create the clients directory");
     std::fs::write(&token, r#"{"token":"t","requested":[],"granted":[]}"#)
         .expect("plant a token file");

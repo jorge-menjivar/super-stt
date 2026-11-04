@@ -16,7 +16,7 @@ use crate::state::update::{RunPhase, UpdateState};
 use crate::ui::messages::{Message, UpdateMessage};
 
 const INSTALL_SH_URL: &str =
-    "https://raw.githubusercontent.com/jorge-menjivar/super-tts/main/install.sh";
+    "https://raw.githubusercontent.com/jorge-menjivar/super-stt/main/install.sh";
 
 /// A tag is a prerelease iff it carries a semver `-<identifier>` suffix
 /// (e.g. `v0.2.3-beta.1`) — the same rule `updater::run_update_stream` uses

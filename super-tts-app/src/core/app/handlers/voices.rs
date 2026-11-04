@@ -26,7 +26,7 @@ const PREVIEW_TEXT: &str = "This is how the cloned voice sounds when it reads a 
 
 /// Longest clip the daemon's library will store, mirrored here so the recorder
 /// stops itself at the same place rather than recording audio that would be
-/// refused on upload. Keep in step with `super-tts-daemon`'s
+/// refused on upload. Keep in step with `super-voice-daemon`'s
 /// `voices::MAX_CLIP_SECONDS`.
 const MAX_CLIP_SECONDS: f32 = 120.0;
 

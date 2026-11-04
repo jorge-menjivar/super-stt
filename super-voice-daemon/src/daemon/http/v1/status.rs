@@ -3,72 +3,58 @@
 //!
 //! Contract: `docs/protocol/endpoints/v1/status.md`.
 //!
-//! A summary for a client with the `status` scope alone: the loaded model, the
-//! device under it, and whether a recording is in flight. The per-stage detail
-//! behind it is `settings`-scoped, in [`super::pipeline`].
+//! A summary for a client with the `status` scope alone, one per feature: the
+//! loaded model, the device under it, and whether the feature is at work. The
+//! per-stage detail behind it is `settings`-scoped, under each feature's
+//! pipeline.
 
 use crate::daemon::http::internal::helpers::dispatch::{build_request, dispatch, narrowed};
 use crate::daemon::http::state::AppState;
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};
 use axum::extract::State;
 use axum::response::Response;
-use serde::Serialize;
-use utoipa::ToSchema;
-
-/// What `GET /status` reports.
-#[derive(Serialize, ToSchema)]
-pub(crate) struct DaemonStatus {
-    /// Always `success`.
-    #[schema(example = "success")]
-    status: &'static str,
-    /// The accelerator the loaded model actually runs on: `cpu`, `cuda`,
-    /// `rocm`, `metal`, `vulkan`, or `remote` for a model served over the
-    /// network. `unknown` when nothing is loaded.
-    #[schema(example = "cuda")]
-    device: String,
-    /// `false` while the initial model is still loading, or after a failed
-    /// switch.
-    model_loaded: bool,
-    /// The loaded model's name. Absent when `model_loaded` is `false`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schema(example = "whisper-tiny")]
-    current_model: Option<String>,
-    /// `true` while a daemon-mic cycle is active — capture *and* the
-    /// transcription and typing that follow it. A toggle hotkey reads this and
-    /// calls `POST /stt/transcribe/stop` when true, `POST /stt/transcribe` when false.
-    busy: bool,
-}
+use super_stt_shared::models::status::{FeatureStatus, VoiceStatus};
 
 #[utoipa::path(
     get,
     path = "/status",
     tag = "health",
-    summary = "Current model and device",
+    summary = "Each feature's model and device",
     description = "\
-A snapshot of what the daemon is running: which model is loaded, on which \
-accelerator, and whether a recording cycle is in flight.
+A snapshot of what the daemon is running, one part per feature: which model is \
+loaded, on which accelerator, and whether the feature is at work — a recording \
+cycle for `stt`, an utterance for `tts`.
 
 Subscriber introspection and other operator detail are not exposed here — see \
-`GET /stt/pipeline/1` and `GET /stt/pipeline/{stage}/model/{model}/device`, which need the \
-`settings` scope.",
+`GET /stt/pipeline/1` and `GET /tts/pipeline/1`, which need the `settings` scope.",
     security(("session_token" = ["status"])),
     responses(
-        (status = 200, description = "The daemon's current state.", body = DaemonStatus),
+        (status = 200, description = "The daemon's current state.", body = VoiceStatus),
         (status = 401, description = "Token unknown, expired, or its binary changed.", body = ReasonEnvelope),
         (status = 403, description = "The token lacks the `status` scope.", body = ErrorEnvelope),
         (status = 429, description = "Per-client rate limit hit; back off and retry.", body = ErrorEnvelope),
     ),
 )]
 pub(crate) async fn status(State(s): State<AppState>) -> Response {
-    let resp = dispatch(&s.daemon, build_request("status", None)).await;
-    narrowed(resp, |r| DaemonStatus {
-        status: "success",
-        // `handle_status` fills all three on every success; the fallbacks keep
-        // the endpoint answering its own shape rather than a partial one if a
-        // future command path ever forgets.
-        device: r.device.unwrap_or_else(|| "unknown".to_string()),
-        model_loaded: r.model_loaded.unwrap_or(false),
-        current_model: r.current_model,
-        busy: r.busy.unwrap_or(false),
+    let stt = dispatch(&s.daemon, build_request("status", None)).await;
+    let tts = s.daemon.tts.handle_status().await;
+    // Each `handle_status` fills all four on every success; the fallbacks keep
+    // the endpoint answering its own shape rather than a partial one if a
+    // future command path ever forgets.
+    let tts = FeatureStatus {
+        device: tts.device.unwrap_or_else(|| "unknown".to_string()),
+        model_loaded: tts.model_loaded.unwrap_or(false),
+        current_model: tts.current_model,
+        busy: tts.busy.unwrap_or(false),
+    };
+    narrowed(stt, |r| VoiceStatus {
+        status: "success".to_string(),
+        stt: FeatureStatus {
+            device: r.device.unwrap_or_else(|| "unknown".to_string()),
+            model_loaded: r.model_loaded.unwrap_or(false),
+            current_model: r.current_model,
+            busy: r.busy.unwrap_or(false),
+        },
+        tts,
     })
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! The Super Voice manifest rules, read through the shared parser.
 
-use super::{ModelRole, Product, SUPER_TTS, SUPER_VOICE, Voice, VoiceKind, VoiceManifestError};
+use super::{ModelRole, Product, SUPER_VOICE, Voice, VoiceKind, VoiceManifestError};
 use crate::index::IndexModel;
 use crate::manifest::{Manifest, ManifestError};
 
@@ -241,14 +241,11 @@ fn rejects_an_implausible_output_sample_rate() {
 }
 
 /// Super Voice's manifests name it by the slug its daemon goes by, so a
-/// manifest for the daemon is a manifest for the product. Until the
-/// text-to-speech daemon is part of it, that one keeps its own names and reads
-/// the same registry.
+/// manifest for the daemon is a manifest for the product.
 #[test]
 fn a_manifest_names_super_voice() {
     assert_eq!(Voice::SLUG, "super-voice");
     assert_eq!(SUPER_VOICE.slug, Voice::SLUG);
-    assert_eq!(SUPER_VOICE.index_url, SUPER_TTS.index_url, "one registry");
 }
 
 /// v1 requires `[backend].product` and `[backend].id`, and there is no older

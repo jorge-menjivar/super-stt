@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! `/events` — one Server-Sent Events stream carrying everything the daemon
-//! publishes. The stream itself is `super_engine_daemon::events::stream`,
-//! shared with Super TTS; what is Super STT's is the topic list, documented
-//! here.
+//! publishes. The stream itself is `super_engine_daemon::events::stream`; what
+//! is Super STT's is the topic list, documented here.
 
 use crate::daemon::http::state::{AppState, PeerInfo};
 use crate::daemon::http::wire::{ErrorEnvelope, ReasonEnvelope};

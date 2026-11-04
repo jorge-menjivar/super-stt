@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! `/pipeline/{stage}` — the backend filling one stage.
+//! `/tts/pipeline/{stage}` — the backend filling one stage.
 //!
 //! Only the backend. What it is running is [`super::model`], one level down the
 //! path. The pair is deliberate: a card's Select and its Load are separate
@@ -41,7 +41,7 @@ pub struct StageBackend {
     pub enabled: bool,
 }
 
-/// Wire envelope for `GET /pipeline/{stage}`.
+/// Wire envelope for `GET /tts/pipeline/{stage}`.
 ///
 /// Parsed here rather than off the shared `DaemonResponse`, which carries the
 /// whole pipeline under `pipeline` and has no field for one stage at all — so
@@ -59,10 +59,10 @@ struct StageEnvelope {
 /// The path a stage answers on. Its model answers one level down, in
 /// [`super::model`].
 fn stage_path(stage: u32) -> String {
-    format!("/pipeline/{stage}")
+    format!("/tts/pipeline/{stage}")
 }
 
-/// Read `stage`'s backend (HTTP `GET /pipeline/{stage}`).
+/// Read `stage`'s backend (HTTP `GET /tts/pipeline/{stage}`).
 pub async fn get_stage(stage: u32) -> HttpResult<StageBackend> {
     with_settings_token(move |socket, token| async move {
         let envelope =
@@ -77,7 +77,7 @@ pub async fn get_stage(stage: u32) -> HttpResult<StageBackend> {
     .await
 }
 
-/// Select the backend filling `stage` (HTTP `POST /pipeline/{stage}`).
+/// Select the backend filling `stage` (HTTP `POST /tts/pipeline/{stage}`).
 ///
 /// Records which backend fills the stage and unloads a foreign model — it does
 /// NOT load one, and cannot fail for the runtime reasons a load can. Pair with
@@ -100,10 +100,10 @@ pub async fn set_stage_backend(stage: u32, source: String) -> HttpResult<()> {
 }
 
 /// Empty `stage`, forgetting the model with it
-/// (HTTP `DELETE /pipeline/{stage}`).
+/// (HTTP `DELETE /tts/pipeline/{stage}`).
 ///
 /// This is a card's Deselect, and emptying stage 1 returns the daemon to idle —
-/// `POST /speak` answers `409 model_not_loaded` until something is chosen
+/// `POST /tts/speak` answers `409 model_not_loaded` until something is chosen
 /// again. [`super::model::unload_stage_model`] is the softer one that frees the
 /// device memory and keeps both the backend and the model it was pointed at.
 pub async fn clear_stage_backend(stage: u32) -> HttpResult<()> {

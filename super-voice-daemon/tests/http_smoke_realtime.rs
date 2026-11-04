@@ -156,7 +156,8 @@ async fn select_realtime_model(socket_path: &PathBuf, token: &str) {
         let (status, body) = send(socket_path, Method::GET, "/v1/status", token, None).await;
         if status.is_success() {
             let json: serde_json::Value = serde_json::from_slice(&body).expect("status json");
-            if json["model_loaded"] == true && json["current_model"] == REALTIME_MODEL {
+            if json["stt"]["model_loaded"] == true && json["stt"]["current_model"] == REALTIME_MODEL
+            {
                 return;
             }
         }

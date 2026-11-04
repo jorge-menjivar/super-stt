@@ -10,9 +10,6 @@
     "super-stt-shared",
     "super-tts-app",
     "super-tts-cli",
-    "super-tts-consent",
-    "super-tts-daemon",
-    "super-tts-install",
     "super-tts-shared",
     "super-voice-registry-types",
   ]
@@ -22,8 +19,8 @@
   exclude         = [
     "super-voice-daemon/tests/fixtures/mock-wasm-backend",
     "super-voice-daemon/tests/fixtures/mock-wasm-realtime-backend",
-    "super-tts-daemon/tests/fixtures/mock-wasm-backend",
-    "super-tts-daemon/tests/fixtures/mock-wasm-realtime-backend",
+    "super-voice-daemon/tests/fixtures/mock-wasm-tts-backend",
+    "super-voice-daemon/tests/fixtures/mock-wasm-realtime-tts-backend",
   ]
   # The indexer is a host binary, so it's a workspace member — `--workspace`
   # lints and tests it like everything else. But it's a CI-only tool with
@@ -38,9 +35,6 @@
     "super-stt-shared",
     "super-tts-app",
     "super-tts-cli",
-    "super-tts-consent",
-    "super-tts-daemon",
-    "super-tts-install",
     "super-tts-shared",
     "super-voice-registry-types",
   ]

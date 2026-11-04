@@ -38,7 +38,7 @@ fn preview_outcome(
             // daemon's sentence. The log keeps the token and status, which is
             // what made super-stt issue #423 diagnosable from a log alone.
             log::error!("preview failed: {e}");
-            ModelsPageMessage::AddPreviewFailed(e.user_message(&super_tts_shared::SUPER_TTS))
+            ModelsPageMessage::AddPreviewFailed(e.user_message(&super_tts_shared::SUPER_VOICE))
         }
     }))
 }

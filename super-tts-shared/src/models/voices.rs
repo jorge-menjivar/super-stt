@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! The `/v1/voice` cloned-voice library responses.
+//! The `/v1/tts/voice` cloned-voice library responses.
 //!
 //! A cloned voice is a reference recording plus the id that names it on
-//! `POST /speak`. The daemon serializes these shapes from its on-disk library;
+//! `POST /tts/speak`. The daemon serializes these shapes from its on-disk library;
 //! the settings UI deserializes them and renders one card per voice. Keeping
 //! the shape here, shared by both sides, is what keeps the wire contract from
 //! drifting — the same arrangement [`backends`](super::backends) uses.
@@ -22,9 +22,9 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct VoiceInfo {
-    /// The uuid half of the id, for building paths under `/voice`.
+    /// The uuid half of the id, for building paths under `/tts/voice`.
     pub id: String,
-    /// The full wire id, `voice:<uuid>` — what `POST /speak` takes as `voice`.
+    /// The full wire id, `voice:<uuid>` — what `POST /tts/speak` takes as `voice`.
     /// Sent rather than left to the client to assemble, so the prefix is
     /// defined in one place.
     pub voice_id: String,
@@ -74,7 +74,7 @@ pub struct VoiceModelSupport {
     pub needs_transcript: bool,
 }
 
-/// `GET /voice/list`.
+/// `GET /tts/voice/list`.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VoiceListResponse {
@@ -88,7 +88,7 @@ pub struct VoiceListResponse {
     pub model: Option<VoiceModelSupport>,
 }
 
-/// `POST /voice`, `GET /voice/{id}`, and `PATCH /voice/{id}`.
+/// `POST /tts/voice`, `GET /tts/voice/{id}`, and `PATCH /tts/voice/{id}`.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VoiceResponse {
@@ -98,7 +98,7 @@ pub struct VoiceResponse {
     pub voice: VoiceInfo,
 }
 
-/// `DELETE /voice/{id}`.
+/// `DELETE /tts/voice/{id}`.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VoiceDeletedResponse {

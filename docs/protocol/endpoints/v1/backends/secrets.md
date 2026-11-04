@@ -112,8 +112,8 @@ error).
 Store (or replace) the secret's value. The value travels **only** in the
 request body — never in the URL or query — so it does not land in logs or
 shell history. Every stage currently running a model from that backend is
-reloaded so the new value takes effect at once — a transcription model and a
-post-processor alike; anything not loaded picks it up on its next load. A
+reloaded so the new value takes effect at once — a transcription model, a
+post-processor and a speech model alike; anything not loaded picks it up on its next load. A
 reload that fails is reported in `message`, and the stage keeps running the old
 instance.
 

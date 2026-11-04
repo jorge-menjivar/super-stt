@@ -275,12 +275,7 @@ async fn assert_method_notifies(method: NotificationMethod, tag: &str) {
     let _api_base = GithubApiBaseGuard::set(&s.url());
 
     let mut daemon = test_daemon().await;
-    daemon
-        .config
-        .write()
-        .await
-        .transcription
-        .notification_method = method;
+    daemon.config.write().await.notification_method = method;
     let (notifier, sent) = Notifier::fake(false);
     daemon.notifier = std::sync::Arc::new(tokio::sync::Mutex::new(notifier));
 
@@ -329,12 +324,7 @@ async fn assert_method_does_not_notify_or_record(method: NotificationMethod, tag
     let _api_base = GithubApiBaseGuard::set(&s.url());
 
     let mut daemon = test_daemon().await;
-    daemon
-        .config
-        .write()
-        .await
-        .transcription
-        .notification_method = method;
+    daemon.config.write().await.notification_method = method;
     // `fail: false` — irrelevant here since Off/Typed never call
     // `notifier.send` at all, which is exactly what this test proves.
     let (notifier, sent) = Notifier::fake(false);

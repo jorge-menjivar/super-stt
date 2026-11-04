@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! HTTP server for the daemon protocol.
 //!
-//! The listeners and the auth layer are `super-engine-daemon`'s, shared with
-//! Super TTS; this names Super STT's router, secrets and consent dialog to
-//! them.
+//! The listeners and the auth layer are `super-engine-daemon`'s; this names
+//! Super STT's router, secrets and consent dialog to them.
 //!
 //! Binds `$XDG_RUNTIME_DIR/voice/super-voice-http.sock` (override via
 //! `SUPER_VOICE_HTTP_SOCKET`). All endpoints are served under the `/v1`

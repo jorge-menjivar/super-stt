@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Pipeline stage numbers, as `/pipeline/{stage}` spells them.
+//! Pipeline stage numbers, as `/tts/pipeline/{stage}` spells them.
 //!
 //! An utterance passes through ordered stages. Super TTS has one today —
 //! stage 1 turns text into audio — and addresses it by position anyway, so a
@@ -24,7 +24,7 @@ pub const fn default_stage() -> u32 {
 
 // --- The stage report -------------------------------------------------------
 //
-// `GET /pipeline` and `GET /pipeline/{stage}` answer with these. They would
+// `GET /tts/pipeline` and `GET /tts/pipeline/{stage}` answer with these. They would
 // otherwise be `serde_json::Value` on both ends: the daemon building each stage
 // with `json!` and the endpoint picking its stage back out of the array with
 // `.get("stage")`, so every field name exists only as a string literal at each
@@ -48,7 +48,7 @@ pub enum StageRole {
 /// it switched on.
 ///
 /// A stage reports its *backend*, not its model. The model is one level down,
-/// at `GET /pipeline/{stage}/model`, as [`StageModelReport`]. The split is what
+/// at `GET /tts/pipeline/{stage}/model`, as [`StageModelReport`]. The split is what
 /// keeps the two lifetimes apart: a backend selection is durable and cannot
 /// fail for runtime reasons, while a model load downloads, allocates, and can.
 /// Reporting them together is what lets a client confuse "no backend chosen"
@@ -80,7 +80,7 @@ pub struct StageReport {
 /// The model slot of one stage: what is selected, whether it is up, the device
 /// it runs on, and the load still in flight.
 ///
-/// Answers `GET /pipeline/{stage}/model`. `model` is the *selection* and
+/// Answers `GET /tts/pipeline/{stage}/model`. `model` is the *selection* and
 /// survives an unload; `loaded` says whether that selection is running right
 /// now. Keeping them distinct is what lets a card show "Kokoro, unloaded" and
 /// re-load it onto a different device as one choice rather than a
@@ -96,7 +96,7 @@ pub struct StageModelReport {
     pub loaded: bool,
     /// The accelerator the selection runs on; `null` when nothing is selected.
     ///
-    /// What it *could* run on is `GET /pipeline/{stage}/model/{model}/device/list`,
+    /// What it *could* run on is `GET /tts/pipeline/{stage}/model/{model}/device/list`,
     /// kept out of here deliberately: that list costs a host probe, and a card
     /// fills its picker from it once rather than on every poll of this.
     pub device: Option<StageModelDevice>,
@@ -228,7 +228,7 @@ mod tests {
         for key in ["model", "loaded", "device", "switch"] {
             assert!(
                 !object.contains_key(key),
-                "{key} belongs to /pipeline/{{stage}}/model, not to the stage"
+                "{key} belongs to /tts/pipeline/{{stage}}/model, not to the stage"
             );
         }
         // Sorted: key order depends on whether `serde_json/preserve_order` is
@@ -298,7 +298,7 @@ mod tests {
     /// nothing else.
     ///
     /// `available_devices` is deliberately not here: it costs a host probe, and
-    /// `GET /pipeline/{stage}/model/{model}/device/list` is the endpoint that
+    /// `GET /tts/pipeline/{stage}/model/{model}/device/list` is the endpoint that
     /// answers it. Adding it back would make every poll of a card's model
     /// re-detect the host's GPUs.
     #[test]

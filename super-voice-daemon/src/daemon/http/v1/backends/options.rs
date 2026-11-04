@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-use super::{decode_source, find_backend};
+use super::{decode_source, find_installed_backend};
 use crate::daemon::http::internal::helpers::dispatch::dispatch_command;
 use crate::daemon::http::state::AppState;
 use crate::daemon::http::v1::wire::{json_error, json_error_msg, ok};
@@ -135,7 +135,7 @@ declared in its manifest. Credentials are not options; those are secrets, at \
 )]
 async fn list_options(State(s): State<AppState>, Path(source): Path<String>) -> Response {
     let source = decode_source(&source);
-    let Some(b) = find_backend(&s, &source).await else {
+    let Some(b) = find_installed_backend(&s, &source).await else {
         return json_error(StatusCode::NOT_FOUND, "unknown_backend");
     };
     let cfg = s.daemon.config.read().await;
@@ -181,7 +181,7 @@ async fn get_option(
 }
 
 async fn get_option_inner(s: AppState, source: String, name: String) -> Response {
-    let Some(b) = find_backend(&s, &source).await else {
+    let Some(b) = find_installed_backend(&s, &source).await else {
         return json_error(StatusCode::NOT_FOUND, "unknown_backend");
     };
     let cfg = s.daemon.config.read().await;
@@ -382,7 +382,7 @@ async fn guard_not_a_choice(
     name: &str,
     value: &str,
 ) -> Option<Response> {
-    let backend = find_backend(s, source).await?;
+    let backend = find_installed_backend(s, source).await?;
     let opt = backend.options.iter().find(|o| o.name == name)?;
     let refusal = opt.permits_value(value).err()?;
     Some(json_error_msg(
@@ -395,7 +395,7 @@ async fn guard_not_a_choice(
 /// Returns an error `Response` when the backend or the named option is missing,
 /// `None` when the option is present and a write can proceed.
 async fn guard_missing(s: &AppState, source: &str, name: &str) -> Option<Response> {
-    match find_backend(s, source).await {
+    match find_installed_backend(s, source).await {
         None => Some(json_error(StatusCode::NOT_FOUND, "unknown_backend")),
         Some(b) if b.options.iter().any(|o| o.name == name) => None,
         Some(_) => Some(json_error(StatusCode::NOT_FOUND, "unknown_option")),

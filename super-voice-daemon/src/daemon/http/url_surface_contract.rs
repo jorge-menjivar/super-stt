@@ -78,6 +78,36 @@ const URL_SURFACE: &[(&str, &str)] = &[
     ("/v1/stt/transcribe", "post"),
     ("/v1/stt/transcribe/realtime", "get"),
     ("/v1/stt/transcribe/stop", "post"),
+    ("/v1/tts/pipeline", "get"),
+    ("/v1/tts/pipeline/{stage}", "delete,get,post"),
+    ("/v1/tts/pipeline/{stage}/backend/list", "get"),
+    ("/v1/tts/pipeline/{stage}/device/list", "get"),
+    ("/v1/tts/pipeline/{stage}/model", "delete,get,post"),
+    ("/v1/tts/pipeline/{stage}/model/cancel", "post"),
+    ("/v1/tts/pipeline/{stage}/model/list", "get"),
+    ("/v1/tts/pipeline/{stage}/model/reload", "post"),
+    ("/v1/tts/pipeline/{stage}/model/{model}/device", "get,post"),
+    ("/v1/tts/pipeline/{stage}/model/{model}/device/list", "get"),
+    (
+        "/v1/tts/pipeline/{stage}/model/{model}/language",
+        "delete,get,post",
+    ),
+    (
+        "/v1/tts/pipeline/{stage}/model/{model}/language/list",
+        "get",
+    ),
+    (
+        "/v1/tts/pipeline/{stage}/model/{model}/voice",
+        "delete,get,post",
+    ),
+    ("/v1/tts/pipeline/{stage}/model/{model}/voice/list", "get"),
+    ("/v1/tts/speak", "post"),
+    ("/v1/tts/speak/stop", "post"),
+    ("/v1/tts/speak/stream", "get"),
+    ("/v1/tts/voice", "post"),
+    ("/v1/tts/voice/list", "get"),
+    ("/v1/tts/voice/{id}", "delete,get,patch"),
+    ("/v1/tts/voice/{id}/audio", "get"),
     ("/v1/update", "get"),
     ("/v1/update/check", "post"),
 ];
@@ -223,11 +253,35 @@ fn the_settings_namespace_is_settings_scoped() {
     );
 }
 
+/// Every path of the voice library is guarded by the `voices` scope.
+///
+/// The library holds recordings of real people's voices — material a token
+/// that can merely change settings has no business reading or replacing. That
+/// is the entire reason `voices` is a scope of its own rather than another
+/// thing the `settings` token happens to unlock.
+#[test]
+fn the_voice_library_is_voices_scoped() {
+    let wrong: Vec<String> = super::v1::enforced_scopes()
+        .into_iter()
+        .filter(|(path, _)| path == "/v1/tts/voice" || path.starts_with("/v1/tts/voice/"))
+        .filter(|(_, scopes)| scopes.as_deref() != Some(&["voices"]))
+        .map(|(path, scopes)| format!("{path}: guarded by {scopes:?}"))
+        .collect();
+    assert!(
+        wrong.is_empty(),
+        "voice-library paths not behind the `voices` scope:\n  {}",
+        wrong.join("\n  ")
+    );
+}
+
 /// No path is served under two spellings.
 ///
 /// Registering a handler twice under different paths is silent: both answer,
 /// the document lists both, and clients split between them until one is
 /// removed. The `summary` is the cheapest per-operation identity available.
+/// Both features have a pipeline addressed alike, so a summary under
+/// `/v1/stt` and the same one under `/v1/tts` are two operations, one per
+/// feature: the identity is the feature and the summary.
 #[test]
 fn no_operation_is_served_at_two_paths() {
     let doc = document();
@@ -243,7 +297,11 @@ fn no_operation_is_served_at_two_paths() {
             let summary = op["summary"]
                 .as_str()
                 .expect("every operation has a summary");
-            if let Some(first) = seen.insert(summary.to_string(), path.clone())
+            let feature = ["stt", "tts"]
+                .into_iter()
+                .find(|f| path.starts_with(&format!("/v1/{f}/")))
+                .unwrap_or("");
+            if let Some(first) = seen.insert(format!("{feature} {summary}"), path.clone())
                 && &first != path
             {
                 dupes.push(format!("{summary:?}: {first} and {path}"));

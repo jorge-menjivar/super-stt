@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Resolve a locally-staged backend directory into an [`IndexBackend`] for the
 //! Import-from-dir install path: `super_engine_daemon::registry::local_dir`,
-//! shared with Super TTS, for Super STT's manifests.
+//! for Super STT's manifests.
 
 use std::path::Path;
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! A backend's `backend.toml`. The manifest types and parser are canonical in
 //! `super-stt-registry-types`; the runtime policy a daemon holds a manifest
-//! to at discovery is `super_engine_daemon::backends::validate_runtime`,
-//! shared with Super TTS. This module re-exports both.
+//! to at discovery is `super_engine_daemon::backends::validate_runtime`. This
+//! module re-exports both.
 
 pub use super_engine_daemon::backends::validate_runtime;
 pub use super_voice_registry_types::manifest::*;
