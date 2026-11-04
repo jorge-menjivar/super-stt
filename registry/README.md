@@ -1,7 +1,7 @@
-# Super STT Backend Registry
+# Super Voice Backend Registry
 
 This directory holds the source of truth for the backend catalog users
-browse in the Super STT app (**Library → Browse**). A scheduled GitHub
+browse in the Super Voice app (**Library → Browse**). A scheduled GitHub
 Action (every 6 hours) reads
 `registry.toml`, queries each entry's GitHub repo for its latest release,
 validates the release's `backend.toml` and assets, and publishes a single
@@ -18,18 +18,14 @@ End users do not interact with this directory.
    [SPDX identifier](https://spdx.org/licenses/) (OSI-approved or FSF Free/Libre) or the literal `other`.
    See `docs/protocol/backend/config.md`.
 
-   Declare the lowest [`contract`](../docs/protocol/backend/config.md#contract-generations)
-   generation whose fields your manifest uses — `v1` for a backend that only
-   transcribes, `v2` for one that declares a `post_processor` model. That is
-   the only compatibility statement you make: the indexer stamps each entry
-   with the Super STT release its generation needs, and a client that predates
-   it says so instead of installing something it cannot drive.
-
-   A client older than the generation *check itself* (0.2.3 and earlier) does
-   not have the stamp to read: it lists the entry as installable and refuses
-   later, when it parses the manifest it downloaded. The refusal is correct
-   either way — nothing is installed that cannot run — but only a client from
-   0.2.4 on can explain it up front.
+   Declare `product = "super-voice"` and the lowest
+   [`contract`](../docs/protocol/backend/config.md#contract-generations)
+   generation whose fields your manifest uses, which today is `v1`. Give each
+   model its [`role`](../docs/protocol/backend/config.md#model-roles):
+   `transcription`, `post_processor` or `synthesis`. The generation is the only
+   compatibility statement you make: the indexer stamps each entry with the
+   Super Voice release its generation needs, and a client that predates it
+   says so instead of installing something it cannot drive.
 2. Open a PR adding a new entry to `registry.toml` in **alphabetical order**:
 
    ```toml
