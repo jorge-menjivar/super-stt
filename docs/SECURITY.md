@@ -1,17 +1,17 @@
-# Super STT Security Model
+# Super Voice Security Model
 
 ## Overview
 
-Super STT implements a comprehensive defense-in-depth security model to protect against unauthorized access while maintaining usability. The system uses multiple security layers including Unix domain sockets with group-based access control, process authentication for keyboard access, and input validation throughout.
+Super Voice implements a comprehensive defense-in-depth security model to protect against unauthorized access while maintaining usability. The system uses multiple security layers including a Unix domain socket restricted to the user running the daemon, process authentication for access to the keyboard and the speakers, and input validation throughout.
 
 ## Security Architecture Summary
 
-Based on comprehensive security reviews completed in August 2025, Super STT demonstrates **excellent security posture** with:
+Based on comprehensive security reviews completed in August 2025, Super Voice demonstrates **excellent security posture** with:
 
-- ✅ **Process Authentication**: Robust authentication for keyboard injection operations
+- ✅ **Process Authentication**: Robust authentication for every privileged operation, keyboard injection and speech included
 - ✅ **Input Validation**: Comprehensive framework with DoS protection and attack detection
 - ✅ **Memory Safety**: Excellent use of Rust's safety guarantees
-- ✅ **Network Security**: Localhost-only UDP binding prevents remote attacks
+- ✅ **Network Security**: Nothing listens off this machine — a per-user Unix socket, and a TCP port bound to loopback only
 - ✅ **Resource Management**: Connection limits and rate limiting prevent abuse
 - ✅ **Path Security**: Comprehensive validation prevents directory traversal attacks
 - ✅ **Tamper-Resistant Install**: Binaries and the systemd user unit are installed root-owned in system paths; the daemon itself runs unprivileged in the user session
@@ -22,7 +22,7 @@ Based on comprehensive security reviews completed in August 2025, Super STT demo
 
 The daemon listens on a Unix domain socket at
 `<runtime dir>/voice/super-voice-http.sock`. Access is restricted to the user
-running the daemon — there is **no** shared `stt` group and no group membership
+running the daemon — there is **no** shared group and no group membership
 to configure. Two independent layers enforce this:
 
 1. **Per-user runtime directory.** The directory is created by the system with
@@ -50,7 +50,7 @@ to configure. Two independent layers enforce this:
 ### Authorization
 
 Reaching the socket is not the same as being authorized. Privileged operations
-(keyboard injection, settings, secrets) require a per-request session token
+(keyboard injection, speaking, the voice library, settings, secrets) require a per-request session token
 carrying user-approved scopes, minted through a one-time consent prompt and
 bound to the client's executable path. See
 [`protocol/auth.md`](protocol/auth.md) for the token and scope model.
@@ -80,32 +80,45 @@ ls -la "${XDG_RUNTIME_DIR:-$(getconf DARWIN_USER_TEMP_DIR)}/voice/super-voice-ht
 - **Output sanitization**: Backend transcription output is untrusted, so before it is typed the daemon strips non-whitespace control codes (ESC/BEL/NUL/backspace), Unicode bidi overrides, and zero-width characters — a terminal escape sequence or a bidi spoof in a transcript can't reach the focused window
 - **Limited scope**: Only types actual transcription results
 
-### 2. Network Isolation
-- **No inbound network surface**: The daemon listens only on a per-user Unix domain socket under the runtime directory's `stt/` — there is no TCP or UDP listener, so no host on the network can connect to it
+### 2. Audio Output Protection
+- **Consent-gated authorization**: Making the machine speak requires a consent-minted session token with the `speak` scope — so a client can only reach the speakers after the user approved it through the one-time consent prompt. See [Authorization](#authorization) and [`protocol/auth.md`](protocol/auth.md)
+- **Interruption is part of the grant**: one utterance plays at a time and the newest wins, so a `speak`-scoped client can cut off whatever else is being read aloud, and can silence it with `/tts/speak/stop`. The consent prompt says so in those words ("Interrupt or stop speech this or another app started") rather than leaving it to be discovered
+- **Untrusted backend audio**: a synthesis backend's framed response is checked as it arrives — its declared format, and the size caps under [Input Validation](#6-input-validation-and-dos-protection) — and a response that fails is refused rather than played
+
+### 3. Voice Library Privacy
+- **A scope of its own**: the cloned-voice library — recordings of the user's own voice — is reachable only with the `voices` scope. It is separate from `speak`, so an app that only talks never sees the recordings, and the consent prompt names it in those terms ("List, play back, and delete your saved voice recordings")
+- **Owner-only files**: each clip is written to `$XDG_DATA_HOME/super-voice/voices` with mode `0600`
+- **Stays on the machine**: a clip goes nowhere except to the loaded synthesis backend, which is local unless the user selected an online model. See [`protocol/scopes/voices.md`](protocol/scopes/voices.md)
+
+### 4. Network Isolation
+- **No network-facing listener**: The daemon listens on a per-user Unix domain socket under the runtime directory's `voice/`, and — for browser clients, on by default — on `127.0.0.1:7300`. It binds no other address and no UDP port, so no other host on the network can connect to it. A TCP client has no peer credentials, so it is identified by its origin instead; see [`protocol/auth.md` — TCP-bound clients](protocol/auth.md#tcp-bound-clients). `http.tcp` turns the TCP listener off
 - **Local visualization**: Audio-visualization frames are delivered as Server-Sent Events over that same Unix socket, not broadcast on the network
 - **Outbound only for backend installs**: The daemon reaches the network solely to fetch backends over HTTPS from the registry / GitHub — see [Daemon outbound network surface](#daemon-outbound-network-surface) below
 
-### 3. Consent &amp; Peer Identity
-- **Session tokens + scopes**: Every request other than `/auth/request` requires a `Bearer` session token; each token carries the user-approved scopes that gate what it may do (`transcribe`, `settings`, `secrets`, `status`, and the event-topic scopes — see [`protocol/auth.md`](protocol/auth.md) for the full catalog)
+### 5. Consent &amp; Peer Identity
+- **Session tokens + scopes**: Every request other than `/auth/request` requires a `Bearer` session token; each token carries the user-approved scopes that gate what it may do (`transcribe`, `speak`, `voices`, `settings`, `secrets`, `status`, and the event-topic scopes, `playback_events` among them — see [`protocol/auth.md`](protocol/auth.md) for the full catalog)
 - **One-time consent**: Tokens are minted only after a popup naming the requesting binary (resolved from the kernel's peer credentials) and the scopes it asks for, which the user approves or denies. The popup is the `super-voice-consent` helper on Linux and an `osascript` dialog on macOS, where the helper's Wayland layer-shell surface has no counterpart; both render the same scope descriptions, from `super_stt_shared::consent`
 - **Same-UID only**: A peer whose UID differs from the daemon's is rejected before any prompt
 - See [`protocol/auth.md`](protocol/auth.md) for the full token, scope, and consent contract
 
-### 4. Input Validation and DoS Protection
+### 6. Input Validation and DoS Protection
 - **Comprehensive validation**: All external inputs validated with strict limits
 - **Audio data protection**: Maximum 30 minutes of audio at 16kHz to prevent memory exhaustion
 - **Sample rate validation**: Must be between 8kHz and 96kHz
+- **Text length cap**: `POST /tts/speak` accepts at most 50 000 characters, and so does one `/tts/speak/stream` session in total. A model's `max_input_chars` bounds each request the daemon sends its backend; the daemon splits the text on sentence boundaries to stay under it
+- **Synthesis response caps**: a backend's framed audio response is bounded at 1 MiB per frame and 32 MiB per utterance, so a backend cannot exhaust memory by streaming without end
+- **Voice upload caps**: a cloned-voice recording is refused above 48 MiB, before it is read, or above 120 seconds; its label is capped at 128 characters
 - **JSON protection**: Size (1MB) and nesting depth (10 levels) limits prevent JSON bomb attacks
 - **Suspicious pattern detection**: Detects potential padding attacks in audio data
 - **Control character filtering**: Prevents injection of dangerous characters
 
-### 5. Resource Management and Rate Limiting
+### 7. Resource Management and Rate Limiting
 - **Connection limits**: At most 40 concurrent connections, in every build
 - **Rate limiting**: Per-client request limits with sliding window tracking: 600 requests a minute and 14,400 an hour, in every build. One daemon serves both features, so it leaves room for two apps, two CLIs and an applet
 - **Connection timeouts**: Automatic cleanup of inactive connections (3 minutes production, 10 minutes development)
 - **Memory protection**: Resource limits prevent memory exhaustion attacks
 
-### 6. Process Isolation
+### 8. Process Isolation
 - **User service**: Runs under user account, not root
 - **Per-user socket**: An owner-only runtime directory plus a same-UID peer check — no cross-user access, no shared group
 - **Socket permissions**: Enforced at filesystem level
@@ -126,8 +139,9 @@ After the registry work, the daemon process itself opens HTTPS to:
 - `objects.githubusercontent.com` and `github.com` — release asset
   downloads.
 
-No secrets cross these boundaries. Secrets are read at model load time
-only, not at install time.
+No secrets cross these boundaries. Secrets live in a file only the user can
+read (mode `0600`, in the daemon's state directory) and are read at model load
+time only, not at install time.
 
 The integrity story for installed assets is SHA-256 verification against the
 registry's index, computed by the indexer at index-build time. A compromised
@@ -148,7 +162,7 @@ just install-daemon
 The daemon is strictly per-user: its socket lives in the owner's runtime
 directory and every request is rejected unless the peer's UID matches
 the daemon's. Each user runs their own daemon instance — there is no shared
-access to configure and no `stt` group.
+access to configure and no shared group.
 
 ### For Development
 Debug builds automatically use relaxed security for development convenience:
@@ -164,15 +178,18 @@ cargo run --release --bin super-voice-daemon
 
 ### Protected Against
 - ✅ Unauthorized local users accessing the daemon (owner-only socket + same-UID peer check)
-- ✅ Remote network attacks (no inbound listener — Unix-socket only, no TCP/UDP port)
+- ✅ Remote network attacks (nothing listens off loopback — a per-user Unix socket, and a TCP port bound to `127.0.0.1` for browser clients)
 - ✅ Unauthorized keyboard injection (reachable only with a consent-minted `transcribe`-scope token; auto-typing itself is the per-request `write_mode` flag)
 - ✅ Arbitrary command injection via keyboard
+- ✅ Unauthorized use of the speakers (reachable only with a consent-minted `speak`-scope token)
+- ✅ Unauthorized access to the user's voice recordings (a separate `voices` scope; clips are owner-only files)
 - ✅ Privilege escalation (runs as an unprivileged user service)
 - ✅ Memory exhaustion attacks (comprehensive input validation)
 - ✅ Connection flooding attacks (rate limiting and connection limits)
 - ✅ JSON bomb attacks (size and depth validation)
 - ✅ Directory traversal attacks (path validation)
 - ✅ Audio data injection attacks (sample validation and pattern detection)
+- ✅ Malformed backend audio (frame-size, total-size, and format validation on every synthesis response)
 - ✅ Cross-user access (same-UID peer check; the consent prompt names the caller's exe)
 - ✅ Silent replacement of the daemon binary or unit file by user-level processes (both are root-owned in system paths; modifying them requires privilege escalation)
 
@@ -197,6 +214,7 @@ cached token (forcing the client to re-request consent on its next call) with:
 ```bash
 stt logout
 ```
+The text-to-speech CLI has the same command, `super-tts-cli logout`.
 Or stop the daemon (below) to drop all in-memory sessions.
 
 ### Emergency Shutdown
@@ -251,7 +269,7 @@ cargo audit
 ### Recommended Systemd Hardening
 ```ini
 [Unit]
-Description=Super STT Speech-to-Text Daemon
+Description=Super Voice daemon - speech to text and text to speech
 After=sound.target
 
 [Service]
@@ -285,7 +303,7 @@ WantedBy=default.target
 The security model follows standard Unix security practices:
 - Principle of least privilege
 - Defense in depth
-- Group-based access control
+- Per-user access control
 - Input validation and sanitization
 - Resource limits and rate limiting
 - Process authentication and authorization

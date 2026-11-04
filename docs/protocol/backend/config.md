@@ -125,18 +125,84 @@ its generation: a backend serving only `post_processor` models implements
 the daemon may *expect to find*; the models say what it will actually call.
 
 You never write a Super Voice version. The generation implies one, and the
-registry carries it: the indexer stamps each entry with the release that
-introduced its generation. A Super Voice that predates the generation cannot
-parse it, so it shows the backend in **Browse** as needing a newer Super
-Voice, naming the version — and does so whether or not "Show incompatible" is
-on, since that toggle is for hardware this machine cannot satisfy, not for
-something the user can fix by updating.
+registry carries it: the indexer stamps every index entry with `min_client`,
+the release that first understood that entry's generation (`0.3.0` for `v1`).
+It is **reported, never compared**. A daemon decides compatibility by whether
+it can parse the generation at all, so a prerelease of the release named there
+(`0.3.0-beta.1`, which semver orders *below* `0.3.0`) is not wrongly locked
+out. `min_client` is there so that a client meeting a backend it cannot
+install can name the version to update to, instead of showing only a failure
+to parse.
 
-When a later generation adds a field, the rule is enforced twice from one
-table: the parser refuses a manifest that declares a field newer than its
-generation, and the published `backend.schema.json` disallows the same field
-under the same generation, so an editor bound to the schema flags it before
-anything is released.
+A Super Voice that predates the generation cannot parse it, so it shows the
+backend in **Browse** as needing a newer Super Voice, naming the version — and
+does so whether or not "Show incompatible" is on, since that toggle is for
+hardware this machine cannot satisfy, not for something the user can fix by
+updating.
+
+The refusal itself needs no field. `contract` is a closed set on the reading
+side, so a build that predates a generation cannot parse a manifest declaring
+it, and says which ones it does know:
+
+```
+unknown contract `v2`; this build knows v1
+```
+
+It is the *absence* of knowledge that refuses. That is what makes every
+generation added in future gate itself against every Super Voice already
+released, this one included, with no `min_version` field anyone had to think
+to add first.
+
+Which generation introduced, or began requiring, each manifest field lives in
+one table (`CONTRACT_FIELDS`, in `super-voice-registry-types`). Its rows so far
+are `v1` requiring [`[backend].id`](#backend) and
+[`[backend].product`](#backend). Adding a field to a `v2` means adding a row.
+Both the manifest parser and the published `backend.schema.json` learn the
+rule from that row, so an editor bound to the schema flags exactly what the
+parser would refuse, before anything is released.
+
+A row expresses one of two rules:
+
+1. A field **added** in a generation may not be spelled under an older one:
+
+   ```
+   `[[models]].example_field` requires `contract = "v2"`, but this manifest declares
+   `contract = "v1"` — raise the contract to use the field, or remove the field to
+   stay on `v1`
+   ```
+
+   Both fixes are named because they are not equivalent. Raising the contract
+   is right for a manifest that means to use the field, but it also raises the
+   release floor for everyone installing the backend; an author who wrote the
+   field's *default* value out by hand wants the other fix. Spelling a newer
+   field with its default value still counts as declaring it: the rule is about
+   what the document says, not about what the parsed manifest ends up holding.
+2. A field a generation **requires** is the mirror image, for closing an
+   optionality that only survived for backward compatibility. `v1` is the
+   first generation, so its required fields can only be added:
+
+   ```
+   `contract = "v1"` requires `[backend].id`, which this manifest does not declare
+   — add it
+   ```
+
+   A later generation that requires a field also names the older one where it
+   is optional:
+
+   ```
+   `contract = "v2"` requires `[backend].example_field`, which this manifest does not
+   declare — add it, or drop to `contract = "v1"` where it is optional
+   ```
+
+These rules apply to a manifest being **admitted**: a registry install, a
+custom repo, an import from a directory, and the indexer itself. A backend
+already installed on this machine is parsed with them switched off. Their job
+is to stop a manifest getting in, and that one is already in. Enforcing them
+at discovery would make a backend that installed cleanly under an earlier
+build vanish from the catalog, taking its downloaded models out of reach, over
+a file the user did not write and cannot be expected to edit. The `product`
+rule below is not exempt: a backend built for another product cannot run here
+however it got onto disk.
 
 `product` keeps other products' backends out. Super Voice refuses a manifest
 that names any product but `super-voice`, the two it replaces included:
@@ -251,17 +317,8 @@ contract and not only a hint: `POST /backend/{id}/option/{name}` answers
 switch over the two values its type names — and the `default`, when there is
 one, has to be on the list. Both are refused at publication.
 
-`type` is also a contract. The daemon stores every value as text, and refuses
-a write whose text is not of the declared type with `400 invalid_value`:
-`integer` takes a 64-bit signed integer, `float` a finite number, and `bool`
-exactly `true` or `false`. `string`, the default, takes anything.
-
-A numeric option can declare `min` and `max`, both inclusive, and the daemon
-refuses a write outside them the same way. `step` is the increment a control
-moves in. The daemon does not enforce it, and the settings app does not use it
-yet.
-
-An option value is delivered as an `x-stt-option-<name>` request header, which
+An option value is delivered as an `x-stt-option-<name>` request header (or
+`x-tts-option-<name>` for a synthesis model), which
 sets the shape a value may take: at most 4000 characters, and no control
 characters. The daemon refuses a user's write of anything else with
 `400 invalid_value`, and a `default` that breaks the same rule is refused at
@@ -279,8 +336,72 @@ could not be undone from the settings UI.
 | `choices`     | array of `type` | no      | The values this option accepts. Renders a dropdown, and the daemon refuses to store anything else. Omit it for an open-ended option. Entries must be unique, and a `bool` must not declare any. |
 | `min`         | number         | no       | Lowest value accepted, inclusive. `integer` and `float` only. |
 | `max`         | number         | no       | Highest value accepted, inclusive. `integer` and `float` only. |
-| `step`        | number         | no       | The increment a control moves in. Not enforced. |
+| `step`        | number         | no       | The increment a control moves in. With `min` and `max`, renders a slider. Not enforced. See [ranges and sliders](#ranges-and-sliders). |
 | `required`    | bool           | no       | Whether a value must be set before the backend can load. Default `false`. |
+
+#### Types
+
+`type` is also a contract. The daemon stores every value as text, because an
+option request header is text, and `type` is the claim about what that text
+parses back to. The daemon keeps the claim: `POST /backend/{id}/option/{name}`
+answers `400 invalid_value` for a value that is not of the declared type,
+naming the type rather than listing choices. A `warm` typed into a `float` is
+a different mistake from a value that is merely off the dropdown.
+
+1. `string`, the default, takes anything. An option that declares no type is
+   free text and always was.
+2. `integer` takes what parses as a 64-bit signed integer.
+3. `float` takes what parses as a double, except the infinities and
+   not-a-number. They parse, but they are the values that turn an arithmetic
+   bug into a silent one.
+4. `bool` takes exactly `true` or `false`.
+
+A `float` is for a setting whose steps are not whole: a sampling temperature,
+a gain, a threshold. Declaring it `string` and parsing it in the backend is
+the same thing with the check moved to the far side of the wire, where the
+only way left to report the problem is to fail a request the user already
+made.
+
+The type binds the manifest's own values too. A `default` or a `choices` entry
+that is not of the declared type is refused at publication, since it names a
+value the daemon would then refuse to store.
+
+#### Ranges and sliders
+
+A numeric option can declare bounds. `min` and `max` are inclusive, and the
+daemon keeps them the way it keeps `choices`: a write outside them is
+`400 invalid_value`, naming the range.
+
+`step` is the increment the value moves in, and declaring all three is what
+makes the option a **slider** — the same shape-implies-control rule that makes
+a `choices` option a dropdown and a `bool` a switch. An option bounded at both
+ends with a declared grid has nothing left to type; one missing any of the
+three still does, and gets a field. The text-to-speech settings app renders
+such an option as a slider. The speech-to-text settings app does not use
+`step` yet.
+
+The grid belongs to the control, not to the contract. The daemon enforces
+`min` and `max` and ignores `step`, because a value between two notches is
+still one the option said it could take. Refusing it would make the option
+narrower than its own bounds say, and would turn every float that is not
+exactly representable into a bug report. A client that renders the slider is
+what keeps to the grid.
+
+The rules, all checked at publication:
+
+1. `min`, `max` and `step` are only for `integer` and `float`. A range over
+   strings is not a thing the manifest can mean.
+2. `min <= max`, and every bound is finite.
+3. `step` is greater than zero, no larger than the range it divides, and needs
+   both `min` and `max` — a slider with one end has nothing to slide between.
+4. A slider needs a `default`. It always shows a position, so it has to rest on
+   a value the backend named.
+5. An `integer` option's bounds are whole numbers, or its slider produces
+   values the option itself refuses.
+6. A `default` is inside the range.
+7. An option declares `choices` **or** a range, never both: a closed set is
+   already the values it accepts, and a client cannot render a dropdown and a
+   slider at once.
 
 #### `base_url` and egress
 
@@ -729,11 +850,82 @@ destination = "models/whisper-tiny/config.json"
 `destination` must be a relative path that stays inside the backend directory:
 absolute paths, `..` traversal, and backslashes are rejected.
 
-The published schema also lists `accel`, `cuda_major`, `cuda_sm`, `gfx`,
-`vulkan_api` and `optional` on a file, to ship one variant of a file per GPU.
-Synthesis models use them. A speech-to-text model that sets `accel` on a file
-is refused, because the daemon does not choose between variants for that
-feature yet.
+#### Per-architecture variants
+
+**Text to speech only.** A synthesis model's file entry may also carry a
+**host selector**, written in the same vocabulary
+[`[[assets.subprocess]]`](#assets) uses for a build. Entries sharing a
+`destination` are then variants of one file: the daemon scores each against
+the machine, downloads the best match, and leaves the rest alone. The backend
+reads a fixed path and never learns which variant it got.
+
+A speech-to-text model that sets `accel` on a file is refused, because the
+daemon does not choose between variants for that feature yet:
+
+```
+model `m`: file `cache/kernels.bin` names a host (`accel`), and speech to text does not pick between file variants yet
+```
+
+| Field        | Type             | Notes                                                                                      |
+|--------------|------------------|--------------------------------------------------------------------------------------------|
+| `accel`      | string or array  | Acceleration families this variant is for. Absent — the default — matches every host.        |
+| `cuda_major` | integer          | Matches a host whose installed CUDA runtime is at least this. Requires `cuda` in `accel`.    |
+| `cuda_sm`    | integer or array | Compute capabilities this variant covers, e.g. `90` or `[86, 89]`. Requires `cuda`.         |
+| `gfx`        | array of string  | AMD architecture targets, in `--offload-arch` spelling. Requires `rocm`.                     |
+| `vulkan_api` | string           | Minimum Vulkan API version, e.g. `1.3`. Requires `vulkan`.                                   |
+| `optional`   | bool             | Whether the model can load without this destination. Default `false`. Must agree across the variants of one destination. |
+
+`cuda_sm` is a list where an asset's is a single value, because the two answer
+different questions. A build that omits it is a fat binary with PTX behind it,
+so "any capability" is a true claim and enumerating is rarely useful. A file
+has no JIT to fall back on — kernels compiled for `sm_90` are inert on
+`sm_86` — but one file may still carry entries for several devices, which is
+exactly what a pre-warmed kernel cache is. Saying so once beats declaring the
+same URL and hash under each. The bare number and the list are the same field:
+`cuda_sm = 90` and `cuda_sm = [90]` mean the same thing, as `accel` already
+works.
+
+Every field of a file's selector is optional, which is the one place this
+vocabulary is looser than an asset's. An asset has to *run* on the host, so it
+must name `cuda_major` alongside `cuda` and a `gfx` target alongside `rocm`; a
+file is data whose meaning belongs to the backend, so `accel = "cuda"` on its
+own is a legitimate "for any CUDA host". Naming a narrower variant as well is
+how you get both.
+
+```toml
+# Kernels precompiled for one card, with a wildcard CUDA build behind it and
+# nothing at all for anyone else.
+[[models.files]]
+url         = "https://example.invalid/kernels-sm90.bin"
+destination = "cache/kernels.bin"
+accel       = "cuda"
+cuda_sm     = 90
+optional    = true
+
+[[models.files]]
+url         = "https://example.invalid/kernels-cuda.bin"
+destination = "cache/kernels.bin"
+accel       = "cuda"
+optional    = true
+```
+
+**How a variant is chosen.** Host capability decides, never the user's device
+preference — what is on disk must not change when the user toggles between
+CPU and GPU. Candidates are ranked by accel family first (a native runtime over
+Vulkan over `cpu` over an entry with no selector at all), then by that family's
+own discriminators, where an exact `cuda_sm` or `gfx` beats a variant that
+matched only the family. Ties go to the first declared, so declaration order is
+your preference order. It is the same ranking that picks a build, applied to
+the data beside it.
+
+**When nothing matches.** A destination whose variants all miss the host is a
+hole, and `optional` says which kind:
+
+1. Weights are load-bearing, so the default (`false`) fails the load, naming
+   what the host offered and what the variants wanted. That is better than a
+   backend erroring on a file it was never handed.
+2. A pre-warmed kernel cache is not: `optional = true` skips the destination,
+   and the model loads without it and rebuilds what it needs.
 
 ## Example: local backend (subprocess)
 

@@ -43,7 +43,7 @@ scope and asked for `daemon_status_changed` or `download_progress`.
 |-------------------------------------------------------------|------------|------------------------------------------------------------------------------------------------------|
 | [`/stt/pipeline/{stage}/model/list`](../endpoints/v1/pipeline/model-list.md) | GET | The models a stage can run: its backend's, carrying its role |
 | [`/settings/language`](../endpoints/v1/settings/language.md)                  | GET, POST, DELETE | Global Primary Language (BCP-47 tag / `auto` / unset)                          |
-| [`/settings/language/list`](../endpoints/v1/settings/language.md)             | GET        | The tags `POST /settings/language` accepts, plus `auto`                                     |
+| [`/settings/language/list`](../endpoints/v1/settings/language/list.md)        | GET        | The tags `POST /settings/language` accepts, plus `auto`                                     |
 | [`/settings/audio_theme`](../endpoints/v1/settings/audio_theme.md)            | POST, GET  | Set / read the audio cue theme                                                                        |
 | [`/settings/audio_theme/test`](../endpoints/v1/settings/audio_theme/test.md)  | POST       | Audition the current theme's start + stop cues                                                        |
 | [`/settings/audio_theme/list`](../endpoints/v1/settings/audio_theme/list.md)          | GET        | List available themes                                                                                  |
